@@ -1866,8 +1866,17 @@ impl<M: TextEngine + 'static> Driver<M> {
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(match &config.app {
             App::Js(bundle) => bundle.policy.access(),
-            // Native code is trusted: it reaches what the platform allows.
-            App::Rust(_) => Policy::default().access(),
+            // Native code is trusted: it reaches what the platform allows,
+            // the embedding app's streams too (an app's declaration is what
+            // grants them to TSX).
+            App::Rust(_) => {
+                let mut declared = Capabilities::all();
+                declared.streams = vec!["*".into()];
+                Access {
+                    declared,
+                    granted: None,
+                }
+            }
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
         core.set_content_culling(config.content_culling);

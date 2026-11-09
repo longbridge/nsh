@@ -1,0 +1,7 @@
+{
+  "name": "Stream",
+  "id": "com.longbridge.nsh.gallery.stream",
+  "capabilities": {
+    "streams": ["nsh/test-pattern"]
+  }
+}

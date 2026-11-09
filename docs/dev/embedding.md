@@ -64,6 +64,68 @@
   the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
   one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
+- **Live streams** (`<Video srcObject>`, `nsh`'s `HostStream`): the embedding app registers a stream by name and
+  the app's video names it with `HostStream.fromHost(name)`; the name crosses as `VideoProps::stream`
+  (`NativeProp::SrcObject`), the frames never pass through JS. The web page registers one with the player's
+  `registerStream(name, stream)` (`docs/dev/web.md` "Videos"). On iOS and macOS the registry is the surface's
+  `Components` (`register_stream(name) -> StreamHandle`, `nsh_platform_apple::stream`): Swift
+  `NshAppView.register(stream:)` (`nsh_app_register_stream`, `nsh_stream_push_pixel_buffer` / `nsh_stream_push_pcm`
+  / `nsh_stream_end` / `nsh_stream_free`), Rust `AppView::register_stream`, an app's crate through
+  `#[native_components]`. A name is one entry whether registered or asked for first, so a video attached before the
+  registration draws once it comes. The registry itself is the core's, toolkit-free and generic over the frame
+  type (`nsh_core::stream`: `Streams<F>::new(hop)`, `register`, `attach`, `StreamHandle<F>`, `Attached<F>`; the
+  entries by name, the newest frame waiting for one hop to the main thread, the sinks' `paused` / first-frame rule,
+  the end, the size check logged once, and no copy or hop while no video shows the stream); each backend's
+  `stream.rs` wraps it with its frame type and its hop (`DispatchQueue::main`, `UiThread::invoke`,
+  `glib::MainContext::invoke`, `rt::invoke`) and keeps its own `StreamHandle` / `Streams` types over it. Every
+  backend takes BGRA bytes (`push_bgra(width, height, stride, bytes)`, copied; Android `NshStream.pushBgra`), the
+  GPU buffers of its platform without a copy, and PCM audio (`push_pcm`; Android `pushPcm`):
+  - **Apple**: `push_pixel_buffer(CVPixelBufferRef)` (Swift `push(pixelBuffer:)`): any format
+    `AVSampleBufferDisplayLayer` takes (BGRA, the biplanar `420v` / `420f` of cameras and decoders), wrapped in one
+    `CMSampleBuffer` every video shares; bytes are copied into a `CVPixelBuffer`. Each video draws in an
+    `AVSampleBufferDisplayLayer` (`videoGravity` from `resize_mode`). Audio plays per video through an
+    `AVAudioEngine` + `AVAudioPlayerNode` (`nsh_platform_apple::stream_audio`; more than two channels folded into
+    stereo); on iOS the session follows the video's `audioSession` while it plays.
+  - **Android** (Java, its own registry: `NshView.registerStream(name)`, `Mounter.Stream`): `pushHardwareBuffer`
+    (RGBA_8888 / RGBX_8888, `USAGE_GPU_SAMPLED_IMAGE`) is wrapped with `Bitmap.wrapHardwareBuffer` and drawn without a
+    copy from API 29, read through `AHardwareBuffer_lock` and copied before that (`src/hardware_buffer.rs`, which needs
+    a CPU-read usage). Frames are drawn into every video naming the stream through a `Surface` of its own on the
+    video's `SurfaceTexture` with `lockHardwareCanvas`. Audio plays per video through an `AudioTrack` in streaming
+    mode (`StreamAudio.java`), under the video's audio focus. `VideoProps::stream` crosses as the 12th field of
+    `NativeProps::Video` (`encode.rs` ↔ `Mounter.java`).
+  - **Windows**: `push_d3d11_texture(&ID3D11Texture2D)` (`DXGI_FORMAT_B8G8R8A8_UNORM`): drawn without a copy when made
+    on `AppView::d3d11_device()` with `D3D11_BIND_SHADER_RESOURCE` (the video holds the texture it shows, so the host
+    draws into a ring of them), copied on the GPU from another device's shared texture (`D3D11_RESOURCE_MISC_SHARED`
+    or `..._KEYEDMUTEX`, key 0), read back through the CPU otherwise (logged once). Each video draws an
+    `ID2D1Bitmap1`; audio plays per video through an XAudio2 source voice.
+  - **Linux**: `push_dmabuf(DmabufFrame { width, height, fourcc, modifier, planes, release, .. })`: a
+    `gdk::DmabufTexture` (GTK 4.14) without a copy; the host keeps the descriptors open until `release` runs, exactly
+    once, on any thread (GTK freed the texture, a newer frame replaced it undrawn, no video wanted it, or GTK cannot
+    show the format, logged once per format). Bytes become a `gdk::MemoryTexture` in a `gtk::Picture`. Audio plays
+    per video through a GStreamer pipeline (`appsrc ! audioconvert ! audioresample ! volume ! <sink>`).
+  - **GPUI**: on macOS `push_pixel_buffer(&CVPixelBuffer)` paints full-range NV12 (`420f`) without a copy through
+    GPUI's surface shader (clipped to the view's rectangle, square-cornered, at full opacity) and copies `420v` and
+    `32BGRA` once into a `RenderImage`; on Windows and Linux the frames are BGRA bytes, since GPUI's renderers import
+    no external textures. Its sound plays with feature `video` through GStreamer (Linux) (`docs/dev/gpui.md`).
+  Audio is at most about 200 ms queued on every backend (newer samples dropped past it), and follows the video's
+  `paused`, `muted` and `volume`. Every
+  development host registers `nsh/test-pattern` (`nsh_dev::pattern`; Android's `DevActivity` pushes the same
+  frames from a thread, registered with `registerReservedStream`), which `examples/gallery/tests/stream.test.tsx` plays under `nsh test --target` on every
+  platform. Names under `nsh/` are NSH's own (`nsh_core::stream::RESERVED_PREFIX`), as native components' are:
+  `Streams::register`, which every platform's `register_stream` calls, refuses one with a warning and returns a
+  handle that plays nothing; NSH's development hosts register theirs with `Streams::register_reserved`
+  (`#[doc(hidden)]`). The app plays only the streams `capabilities.streams` grants (`docs/dev/sandbox.md`):
+  `HostStream.fromHost` throws `ERR_ACCESS_DENIED`, and the core turns an ungranted `srcObject` (a Rust component's
+  too) into none before it reaches the platform. Frames a backend makes from the host's GPU buffers without a copy
+  (an `IOSurface`-backed `CVPixelBuffer`, a D3D11 texture, a dmabuf) go through `StreamHandle::push` as its frame
+  type `F`: the registry never reads a frame, the sink takes the pixel size from it for `onLoad`, and `wanted()`,
+  newest-wins, `paused` and the end are the same as for `push_bgra`. Audio rides the same registration:
+  `StreamHandle::push_pcm(samples, channels, sample_rate)` (interleaved `f32` in -1 to 1, 1 to 8 channels, 8 to
+  192 kHz; a wrong format logged once per stream and dropped) goes from the pushing thread straight to every
+  `AudioOutput` attached to the name (`Streams::attach_audio(name, output) -> AudioAttachment`, one per video,
+  before or after the registration, detached on drop), with no hop and nothing dropped for newer samples, and costs
+  nothing while none is attached (`wants_audio()`); the output applies its video's `paused` and `muted` (drop) and
+  `volume` (scale) itself, set by the backend from the main thread, and hears `end()`.
 - **Native components** (`nsh`'s `nativeComponent`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`

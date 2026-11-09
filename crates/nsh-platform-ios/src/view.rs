@@ -138,6 +138,19 @@ impl AppView {
             .register(name, factory);
     }
 
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames to the handle, from
+    /// any thread. Applies to the videos naming it, now or later. Main
+    /// thread.
+    pub fn register_stream(&self, name: &str) -> crate::StreamHandle {
+        self.inner
+            .state
+            .borrow()
+            .options
+            .components
+            .register_stream(name)
+    }
+
     /// Hands `url`, one of the embedding app's URLs, to the running app as
     /// the system opening it would (`UrlScheme.on("open")`, `nsh`); before an
     /// app runs, the next one loaded gets it. On the main thread.

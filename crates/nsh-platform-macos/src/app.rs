@@ -426,6 +426,13 @@ impl AppView {
         self.surface.native.components().register(name, factory);
     }
 
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames to the handle, from
+    /// any thread. Applies to the videos naming it, now or later.
+    pub fn register_stream(&self, name: &str) -> crate::StreamHandle {
+        self.surface.native.components().register_stream(name)
+    }
+
     /// Shows (or hides) the performance monitor: a panel at the top right
     /// with the frame rate, what frames cost the main thread, what commits
     /// cost the engine thread (JS, layout), and the process' CPU, GPU and

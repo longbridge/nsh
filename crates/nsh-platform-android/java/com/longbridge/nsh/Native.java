@@ -96,6 +96,14 @@ final class Native {
     static native byte[] svg(byte[] bytes, int maxPx, float density, int[] size, float[] intrinsic);
 
     /**
+     * Copies the pixels of {@code buffer}, an RGBA_8888 or RGBX_8888 {@code HardwareBuffer} the CPU may read, into
+     * {@code pixels} as the {@code 0xAARRGGBB} ints {@code Bitmap.setPixels} takes (at least width × height of them):
+     * live stream frames before API 29, where no bitmap wraps a buffer. False when the buffer cannot be read (its
+     * format, its usage, a failed lock). Any thread.
+     */
+    static native boolean hardwareBufferPixels(android.hardware.HardwareBuffer buffer, int[] pixels);
+
+    /**
      * A host whose apps keep their data in {@code dataDir} and the images they download in {@code cacheDir} (null:
      * not on disk), each in a directory named by its id.
      */

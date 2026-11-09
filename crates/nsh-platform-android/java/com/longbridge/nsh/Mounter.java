@@ -707,6 +707,306 @@ final class Mounter {
     private final java.util.Set<String> missingComponents = new java.util.HashSet<>();
 
     /**
+     * The live streams the app registered ({@link NshView#registerStream})
+     * and the names videos asked for: one entry per name either way, so a
+     * video attached before the registration shows the stream once it comes.
+     */
+    private final java.util.Map<String, Stream> streams = new java.util.HashMap<>();
+    private final java.util.Set<String> missingStreams = new java.util.HashSet<>();
+    private final java.util.Set<String> refusedStreams = new java.util.HashSet<>();
+
+    /**
+     * One stream by name: its registration and the videos naming it. Each
+     * frame pushed ({@link NshStream#pushBgra}, {@link NshStream#pushHardwareBuffer})
+     * draws in every one of them; the sound pushed ({@link NshStream#pushPcm})
+     * goes from the pushing thread straight to each video's {@link StreamAudio}.
+     */
+    static final class Stream {
+        final String name;
+        /** The current registration; null until one, and after `end()` (read off the UI thread by the pushes). */
+        volatile NshStream handle;
+        /** The videos naming the stream, in order (UI thread). */
+        final java.util.List<VideoBox> videos = new java.util.ArrayList<>();
+        /** Their audio, read by `pushPcm` on the pushing thread without a lock. */
+        final java.util.concurrent.CopyOnWriteArrayList<StreamAudio> audio =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        /** The frames' size (the last frame drawn), 0 until known. */
+        int width, height;
+
+        /**
+         * The frames pushed, any thread: the newest waits in `pending` for
+         * the UI thread, which draws it and returns it to `free`; three
+         * bitmaps at most (one pending, one drawn, one filled). A frame of a
+         * {@code HardwareBuffer} wraps it and is not pooled: it is recycled
+         * (its reference to the buffer dropped) once drawn or replaced.
+         */
+        private final Object lock = new Object();
+        private android.graphics.Bitmap pending;
+        private final java.util.ArrayDeque<android.graphics.Bitmap> free = new java.util.ArrayDeque<>();
+        private boolean scheduled;
+        /** The frame's pixels as `setPixels` takes them, one per push (the pushing thread's). */
+        private final Object fill = new Object();
+        private int[] pixels = new int[0];
+        /** A wrong frame was reported, and wrong sound (once per stream each). */
+        private boolean warned, audioWarned;
+        /** How many videos name the stream (readable off the UI thread). */
+        private volatile int attached;
+        private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+
+        Stream(String name) {
+            this.name = name;
+        }
+
+        /** Logs `message` if it is the stream's first wrong frame. */
+        private void warnFrame(String message) {
+            synchronized (lock) {
+                if (warned) return;
+                warned = true;
+            }
+            android.util.Log.w("nsh", "stream `" + name + "`: " + message);
+        }
+
+        /** `NshStream.pushBgra`, any thread. */
+        void pushBgra(NshStream from, java.nio.ByteBuffer bytes, int width, int height, int stride) {
+            String wrong = null;
+            if (width <= 0 || height <= 0) wrong = "the size is empty";
+            else if (stride < width * 4L) wrong = "the stride is shorter than a row of BGRA pixels";
+            else if (bytes.remaining() < stride * (long) height) wrong = "the bytes are fewer than stride × height";
+            if (wrong != null) {
+                warnFrame("a frame of " + width + "×" + height + " with " + stride + " bytes per row and "
+                        + bytes.remaining() + " bytes shows nothing: " + wrong);
+                return;
+            }
+            // No video shows the stream, or the registration ended: the
+            // bytes are not even copied.
+            if (handle != from || attached == 0) return;
+            android.graphics.Bitmap bitmap = pooled(width, height);
+            // `setPixels` takes `0xAARRGGBB` ints, which the bytes B, G, R,
+            // A are when read as little-endian ints: no swizzle, one call
+            // for the frame.
+            synchronized (fill) {
+                if (pixels.length < width * height) pixels = new int[width * height];
+                java.nio.ByteBuffer src = bytes.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                int start = bytes.position();
+                for (int y = 0; y < height; y++) {
+                    src.position(start + y * stride);
+                    src.asIntBuffer().get(pixels, y * width, width);
+                }
+                bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+            }
+            offer(bitmap);
+        }
+
+        /**
+         * `NshStream.pushHardwareBuffer`, any thread. From API 29 the buffer
+         * is wrapped in a hardware bitmap, which the video's hardware canvas
+         * draws with no copy; before, its pixels are read on the CPU
+         * (`Native.hardwareBufferPixels`) into a pooled bitmap.
+         */
+        void pushHardwareBuffer(NshStream from, android.hardware.HardwareBuffer buffer) {
+            String wrong;
+            if (buffer == null) wrong = "a null buffer shows nothing";
+            else if (buffer.isClosed()) wrong = "a closed buffer shows nothing";
+            else {
+                wrong = StreamFormats.bufferProblem(buffer.getFormat(), buffer.getUsage(), buffer.getLayers(),
+                        buffer.getWidth(), buffer.getHeight(), Build.VERSION.SDK_INT);
+                if (wrong != null) {
+                    wrong = "a buffer of " + buffer.getWidth() + "×" + buffer.getHeight() + ", format "
+                            + buffer.getFormat() + ", usage 0x" + Long.toHexString(buffer.getUsage())
+                            + " shows nothing: " + wrong;
+                }
+            }
+            if (wrong != null) {
+                warnFrame(wrong);
+                return;
+            }
+            if (handle != from || attached == 0) return;
+            int width = buffer.getWidth(), height = buffer.getHeight();
+            android.graphics.Bitmap bitmap;
+            if (Build.VERSION.SDK_INT >= 29) {
+                bitmap = android.graphics.Bitmap.wrapHardwareBuffer(buffer,
+                        android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB));
+                if (bitmap == null) {
+                    warnFrame("a buffer of " + width + "×" + height + " shows nothing: the system cannot draw it");
+                    return;
+                }
+            } else {
+                bitmap = pooled(width, height);
+                synchronized (fill) {
+                    if (pixels.length < width * height) pixels = new int[width * height];
+                    if (!Native.hardwareBufferPixels(buffer, pixels)) {
+                        synchronized (lock) {
+                            free.addLast(bitmap);
+                        }
+                        warnFrame("a buffer of " + width + "×" + height + " shows nothing: it cannot be read on the CPU");
+                        return;
+                    }
+                    bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+                }
+            }
+            offer(bitmap);
+        }
+
+        /** `NshStream.pushPcm`, any thread: straight to each video's audio, no hop. */
+        void pushPcm(NshStream from, float[] samples, int channels, int sampleRate) {
+            String wrong = samples == null ? "no samples"
+                    : StreamFormats.pcmProblem(samples.length, channels, sampleRate);
+            if (wrong != null) {
+                synchronized (lock) {
+                    if (audioWarned) return;
+                    audioWarned = true;
+                }
+                android.util.Log.w("nsh", "stream `" + name + "`: sound of " + channels + " channels at "
+                        + sampleRate + " Hz plays nothing: " + wrong);
+                return;
+            }
+            if (handle != from || audio.isEmpty()) return;
+            for (StreamAudio a : audio) a.write(samples, channels, sampleRate);
+        }
+
+        /** A software bitmap of the size from the pool, or a new one. */
+        private android.graphics.Bitmap pooled(int width, int height) {
+            android.graphics.Bitmap bitmap;
+            synchronized (lock) {
+                bitmap = free.pollFirst();
+            }
+            if (bitmap != null && (bitmap.getWidth() != width || bitmap.getHeight() != height)) {
+                bitmap.recycle();
+                bitmap = null;
+            }
+            if (bitmap == null) {
+                bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888);
+            }
+            return bitmap;
+        }
+
+        /** Makes `bitmap` the pending frame (the newest wins) and wakes the UI thread once. */
+        private void offer(android.graphics.Bitmap bitmap) {
+            boolean schedule;
+            synchronized (lock) {
+                if (pending != null) retire(pending);
+                pending = bitmap;
+                schedule = !scheduled;
+                scheduled = true;
+            }
+            if (schedule) main.post(this::deliver);
+        }
+
+        /**
+         * A frame done with (drawn or replaced), under `lock`: a pooled one
+         * goes back to the pool; a hardware one is recycled, which drops its
+         * reference to the host's buffer (a canvas that drew it holds its own).
+         */
+        private void retire(android.graphics.Bitmap bitmap) {
+            if (bitmap.getConfig() == android.graphics.Bitmap.Config.HARDWARE) bitmap.recycle();
+            else free.addLast(bitmap);
+        }
+
+        /** Draws the pending frame in every video naming the stream (UI thread). */
+        private void deliver() {
+            android.graphics.Bitmap bitmap;
+            synchronized (lock) {
+                scheduled = false;
+                bitmap = pending;
+                pending = null;
+            }
+            if (bitmap == null) return;
+            if (handle != null) {
+                if (width != bitmap.getWidth() || height != bitmap.getHeight()) {
+                    width = bitmap.getWidth();
+                    height = bitmap.getHeight();
+                    for (VideoBox v : videos) v.streamSized();
+                }
+                for (VideoBox v : videos) v.streamDraw(bitmap);
+            }
+            synchronized (lock) {
+                retire(bitmap);
+            }
+        }
+
+        /** The registration changed: pending frames go, and the pool with them. */
+        void clearFrames() {
+            synchronized (lock) {
+                if (pending != null) pending.recycle();
+                pending = null;
+                for (android.graphics.Bitmap b : free) b.recycle();
+                free.clear();
+            }
+            synchronized (fill) {
+                pixels = new int[0];
+            }
+        }
+    }
+
+    private Stream stream(String name) {
+        Stream s = streams.get(name);
+        if (s == null) {
+            s = new Stream(name);
+            streams.put(name, s);
+        }
+        return s;
+    }
+
+    /** `NshView.registerStream`: replaces an earlier registration of `name`. */
+    NshStream registerStream(String name) {
+        Stream s = stream(name);
+        s.clearFrames();
+        s.handle = new NshStream(this, s);
+        s.width = 0;
+        s.height = 0;
+        missingStreams.remove(name);
+        for (VideoBox v : s.videos) v.streamRegistered();
+        return s.handle;
+    }
+
+    /**
+     * `NshView.registerStream` of a name under `nsh/`, NSH's own: refused,
+     * logged once per name. The stream returned is registered nowhere: no
+     * video shows it, its pushes cost nothing and `end` does nothing.
+     */
+    NshStream refuseStream(String name) {
+        if (refusedStreams.add(name)) {
+            android.util.Log.w("nsh", "stream `" + name + "` is not registered: names starting with `nsh/` are NSH's own");
+        }
+        return new NshStream(this, new Stream(name));
+    }
+
+    /** `NshStream.end`: nothing once another registration replaced `handle`. */
+    void endStream(NshStream handle) {
+        Stream s = handle.stream;
+        if (s.handle != handle) return;
+        s.clearFrames();
+        s.handle = null;
+        s.width = 0;
+        s.height = 0;
+        for (StreamAudio a : s.audio) a.end();
+        for (VideoBox v : s.videos) v.streamEnded();
+    }
+
+    /**
+     * Attaches `video`, and its `audio`, to stream `name`: the entry (a
+     * name nothing registered is logged once). Every video attached draws
+     * the stream's frames and plays its sound.
+     */
+    Stream attachStream(String name, VideoBox video, StreamAudio audio) {
+        Stream s = stream(name);
+        if (s.handle == null && missingStreams.add(name)) {
+            android.util.Log.w("nsh", "no stream is registered as `" + name + "`: the video shows nothing");
+        }
+        if (!s.videos.contains(video)) s.videos.add(video);
+        if (!s.audio.contains(audio)) s.audio.add(audio);
+        s.attached = s.videos.size();
+        return s;
+    }
+
+    /** `video` stops naming stream `s`: its audio no longer hears the pushes. */
+    void detachStream(Stream s, VideoBox video, StreamAudio audio) {
+        s.videos.remove(video);
+        s.audio.remove(audio);
+        s.attached = s.videos.size();
+    }
+
+    /**
      * The app stopped (the view was destroyed, or another app replaced it):
      * its native components hear {@link NshComponent#destroy} now, since no
      * {@code DELETE} follows for them. Those already deleted are not told
@@ -721,6 +1021,8 @@ final class Mounter {
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+            // Its videos stop drawing and playing their streams now too.
+            if (v instanceof VideoBox) ((VideoBox) v).detachStream();
         }
     }
 
@@ -2399,9 +2701,10 @@ final class Mounter {
                 boolean controls = b.getInt() != 0;
                 float interval = b.getFloat();
                 int audioSession = b.getInt();
+                String stream = optString(b, objects);
                 if (v instanceof VideoBox) {
                     ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval,
-                            audioSession);
+                            audioSession, stream);
                 }
                 break;
             }

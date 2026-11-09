@@ -9,7 +9,10 @@
 //! - `client` (feature `client`): the host side.
 //! - `server` (feature `server`): the CLI side, and [`SiteServer`]: a
 //!   static site as a CDN would serve it (`nsh package --target web --run`).
+//! - [`pattern`]: the test pattern the development hosts register as the
+//!   live stream `nsh/test-pattern`, so tests can play a stream anywhere.
 
+pub mod pattern;
 pub mod protocol;
 
 #[cfg(feature = "client")]

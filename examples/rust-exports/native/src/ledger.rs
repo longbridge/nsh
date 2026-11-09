@@ -1,5 +1,6 @@
 //! A module: functions of the three kinds, `Ledger.format(..)`,
-//! `Ledger.copy(..)`, `Ledger.fetchRate()`.
+//! `Ledger.copy(..)`, `Ledger.fetchRate()`; and `Ledger.stream()`, what
+//! the crate registered with the host.
 
 use std::time::Duration;
 
@@ -35,6 +36,13 @@ impl Ledger {
         let count = text.chars().count() as u32;
         cx.set_clipboard(text);
         count
+    }
+
+    /// The name of the live stream the crate registered with the host it
+    /// runs in (`stream.rs`, macOS and iOS), for `HostStream.fromHost`;
+    /// `null` where it registered none (the headless runner).
+    pub fn stream() -> Option<String> {
+        crate::stream::registered()
     }
 
     /// Today's interest rate, from a (pretend) round trip of 300 ms.

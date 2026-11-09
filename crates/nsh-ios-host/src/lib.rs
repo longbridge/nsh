@@ -86,12 +86,22 @@ pub fn main() {
         use nsh_dev::protocol::{DEFAULT_PORT, WS_PATH};
         AppSource::DevServer(format!("ws://127.0.0.1:{DEFAULT_PORT}{WS_PATH}"))
     });
+    // The test pattern every development host plays as `nsh/test-pattern`,
+    // so an app's tests can play a stream here (`nsh test --target ios`).
+    fn test_pattern(components: &nsh_platform_ios::Components) {
+        let pattern = components.register_reserved_stream(nsh_dev::pattern::NAME);
+        nsh_dev::pattern::start(move |bgra| {
+            use nsh_dev::pattern::{HEIGHT, STRIDE, WIDTH};
+            pattern.push_bgra(WIDTH, HEIGHT, STRIDE, bgra);
+        });
+    }
     run_app(
         source,
         AppOptions {
             trace,
             fps,
             asset_base,
+            setup: Some(test_pattern),
             // Its caches too (downloaded images): a test's app starts with none.
             cache: data_dir.as_ref().map_or_else(Default::default, |dir| {
                 nsh_engine::CacheOptions::at(nsh_engine::CacheLocation::Dir(dir.join("cache")))

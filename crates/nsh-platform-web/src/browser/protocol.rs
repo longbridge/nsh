@@ -371,6 +371,10 @@ impl<'js> HostInput for Js<'js> {
     fn node(&self) -> Option<NodeId> {
         self.0.node()
     }
+
+    fn class_instance(&self) -> Option<std::rc::Rc<dyn nsh_core::element::ClassInstance>> {
+        self.0.class_instance()
+    }
 }
 
 /// The op setting prop `name` to `value`: a style, a registered native

@@ -51,6 +51,7 @@ mod scroll;
 mod selectable_view;
 mod shader;
 mod stats;
+mod stream;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -88,4 +89,5 @@ pub use crate::{
     chrome::titlebar_options,
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    stream::StreamHandle,
 };

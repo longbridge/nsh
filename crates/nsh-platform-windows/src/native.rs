@@ -32,6 +32,9 @@
 //!   through their [`ComponentContext`].
 //!   Registries belong to one `AppView` (and the views made from the same
 //!   [`crate::AppOptions`]): no globals.
+//! - **Live streams**: [`crate::AppView::register_stream`] names a stream
+//!   the embedding app pushes BGRA frames to ([`crate::stream`]); a video
+//!   whose `srcObject` names it draws them instead of a source.
 //!
 //! Every control belongs to its surface ([`NativeState`]): stopping the app
 //! drops them, so media stops playing and web views close.
@@ -260,6 +263,8 @@ pub struct Components {
     factories: Rc<RefCell<FxHashMap<Arc<str>, ComponentFactory>>>,
     /// Names already reported as unknown.
     missing: Rc<RefCell<FxHashSet<Arc<str>>>>,
+    /// The live streams the embedding app registers (`<Video srcObject>`).
+    streams: crate::stream::Streams,
 }
 
 impl std::fmt::Debug for Components {
@@ -281,6 +286,27 @@ impl Components {
         }
         self.factories.borrow_mut().insert(name.into(), factory);
         self.missing.borrow_mut().remove(name);
+    }
+
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): the handle takes its frames and
+    /// audio, from any thread. The videos naming it, now or later, play
+    /// them. Names under `nsh/` are NSH's own: registering one logs a
+    /// warning and the handle plays nothing. UI thread.
+    pub fn register_stream(&self, name: &str) -> crate::stream::StreamHandle {
+        self.streams.register(name)
+    }
+
+    /// [`Self::register_stream`] for NSH's own names under `nsh/` (the
+    /// development host's `nsh/test-pattern`).
+    #[doc(hidden)]
+    pub fn register_reserved_stream(&self, name: &str) -> crate::stream::StreamHandle {
+        self.streams.register_reserved(name)
+    }
+
+    /// The streams, for the videos.
+    pub(crate) fn streams(&self) -> crate::stream::Streams {
+        self.streams.clone()
     }
 
     /// The factory registered as `name`; `None` (logged once per name) if

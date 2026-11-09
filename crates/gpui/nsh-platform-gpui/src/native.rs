@@ -236,6 +236,8 @@ pub struct Components {
     factories: Rc<RefCell<FxHashMap<Arc<str>, ComponentFactory>>>,
     /// Names already reported as unknown.
     missing: Rc<RefCell<FxHashSet<Arc<str>>>>,
+    /// The live streams the embedding app registers (`<Video srcObject>`).
+    streams: crate::stream::Streams,
 }
 
 impl std::fmt::Debug for Components {
@@ -247,6 +249,27 @@ impl std::fmt::Debug for Components {
 }
 
 impl Components {
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames to the handle, from
+    /// any thread. Applies to the videos naming it, now or later. Names
+    /// under `nsh/` are NSH's own: registering one logs a warning and the
+    /// handle plays nothing.
+    pub fn register_stream(&self, name: &str) -> crate::stream::StreamHandle {
+        self.streams.register(name)
+    }
+
+    /// [`Self::register_stream`] for NSH's own names (`nsh/…`), which it
+    /// refuses: the development host's test pattern, `nsh/test-pattern`.
+    #[doc(hidden)]
+    pub fn register_reserved_stream(&self, name: &str) -> crate::stream::StreamHandle {
+        self.streams.register_reserved(name)
+    }
+
+    /// The streams, for the videos.
+    pub(crate) fn streams(&self) -> crate::stream::Streams {
+        self.streams.clone()
+    }
+
     /// Registers `factory` under `name` (replacing an earlier one). Names
     /// under `nsh/` are NSH's own: registering one logs a warning and
     /// changes nothing.

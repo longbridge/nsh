@@ -704,12 +704,12 @@ impl UiThread {
         UiThread(DISPATCHER.with(Cell::get))
     }
 
-    /// Runs `f` on that thread (from any thread), in its message loop.
-    /// Dropped when it has no dispatcher or the post fails (the thread is
-    /// gone).
-    pub(crate) fn invoke(self, f: impl FnOnce() + Send + 'static) {
+    /// Runs `f` on that thread (from any thread), in its message loop:
+    /// whether it was posted. Dropped, and `false`, when the thread has no
+    /// dispatcher or the post fails (the thread is gone).
+    pub(crate) fn invoke(self, f: impl FnOnce() + Send + 'static) -> bool {
         if self.0 == 0 {
-            return;
+            return false;
         }
         let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(f));
         let raw = Box::into_raw(boxed);
@@ -725,8 +725,10 @@ impl UiThread {
             .is_err()
             {
                 drop(Box::from_raw(raw));
+                return false;
             }
         }
+        true
     }
 }
 

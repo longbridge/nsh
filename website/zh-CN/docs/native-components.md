@@ -307,6 +307,7 @@ app.register(component: "embed.badge") { context in Badge(context) }
 | API | 说明 |
 |---|---|
 | `NshAppView.register(component:_:)` | 以某个名称注册一个工厂 `(NshComponentContext) -> NshComponent`。此后每创建一个元素，它就生成一个组件。重复注册同一名称会替换工厂。 |
+| `NshAppView.register(stream:)` | 以某个名称注册一个[实时流](#实时流)，返回接收它的帧的 `NshStream`。 |
 | `protocol NshComponent` | `var view: UIView`（铺满容器）、`setProp(_:_:)`、`command(_:_:)`（可选：默认实现忽略命令）。隔离在 main actor 上。 |
 | `setProp(_ name: String, _ value: Any?)` | 值是 Foundation 的 JSON 对象：`String`、`NSNumber`、`[Any]`、`[String: Any]`、`NSNull`；prop 被移除时为 `nil`。 |
 | `NshComponentContext.emit(_:_:)` | 发出一个事件；数据必须是 `JSONSerialization` 能接受的值（或 `nil`）。线程安全。 |
@@ -644,6 +645,58 @@ nsh-platform-macos = { version = "0.3", default-features = false }
 ```
 
 宿主在创建每个视图时注册 crate 的组件，早于持有该视图的代码自己的注册：之后在视图上注册的同名组件（`AppView::register_component`）会替换 crate 的。
+
+## 实时流
+
+视频可以播放嵌入应用按名字注册的实时流，用法和原生组件一样：`<Video srcObject={HostStream.fromHost("call.remote")}>`
+（[实时流](../elements/video.md#实时流)）。应用注册流并推送帧，任何线程都可以；NSH 把帧画进视频，`objectFit`、`paused`
+和 `onLoad` 照常生效，声音按视频的 `muted` 和 `volume` 播放。每个平台都接受 BGRA 字节的帧（会被复制）和本平台的 GPU 缓冲区
+（不经过复制直接显示）；声音是 PCM。iOS 上帧是 `CVPixelBuffer`，摄像头、通话 SDK 和 ReplayKit 给出的正是它：
+
+```swift
+let stream = app.register(stream: "call.remote")   // NshStream
+// 在采集的队列上，每一帧：
+stream.push(pixelBuffer: pixelBuffer)
+// 还有它的声音：交错的 Float 采样。
+stream.push(pcm: samples, channels: 2, sampleRate: 48_000)
+// 通话结束：视频什么也不显示，直到这个名字再次被注册。
+stream.end()
+```
+
+macOS 上，以及两个平台上应用自己的 crate 里（[从应用的 crate 注册](#从应用的-crate-注册)），Rust 的写法相同：
+`app.register_stream("call.remote")` 或 `components.register_stream(..)` 返回一个 `StreamHandle`，它的 `push_pixel_buffer(buffer)`
+接受 `CVPixelBufferRef`，`push_pcm(samples, channels, sample_rate)` 接受交错的 `f32` 声音，`end()` 结束流（丢弃句柄也会结束）。
+
+Windows、Linux 和 GPUI 应用里，`app.register_stream("call.remote")`（或 `components.register_stream(..)`）返回该平台的
+`StreamHandle`，它的 `push_bgra(width, height, stride, bytes)` 接受一帧 BGRA 像素（每通道 8 位，每行 `stride` 字节），任何线程都可以调用，
+Apple 的句柄也一样。GPU 缓冲区是各平台自己的：Windows 上 `push_d3d11_texture(&texture)`（在 `app.d3d11_device()` 上创建的
+`DXGI_FORMAT_B8G8R8A8_UNORM` 纹理），Linux 上 `push_dmabuf(frame)`（描述符保持打开，直到这一帧的 `release` 被调用），macOS 上的 GPUI
+应用里 `push_pixel_buffer`。最新的一帧等待一次主线程调度，所以主线程慢时丢帧而不是排队。
+
+```rust
+let stream = app.register_stream("call.remote");   // StreamHandle
+// 在解码线程上，每一帧和它的声音：
+stream.push_bgra(1280, 720, 1280 * 4, &pixels);
+stream.push_pcm(&samples, 2, 48_000);
+stream.end();
+```
+
+Android 上一样，任意线程：`NshView.registerStream(name)`，然后用 `NshStream.pushBgra`；在 GPU 上渲染的来源（Camera2、MediaCodec、
+ExoPlayer、WebRTC 渲染器写入带 `USAGE_GPU_SAMPLED_IMAGE` 的 `ImageReader`）用 `NshStream.pushHardwareBuffer`，Android 10 起不经过复制直接显示；
+声音用 `NshStream.pushPcm(samples, channels, sampleRate)`：
+
+```java
+NshStream stream = view.registerStream("call.remote");
+stream.pushHardwareBuffer(image.getHardwareBuffer());   // 在 ImageReader 的线程上
+stream.pushPcm(samples, 2, 48_000);
+```
+
+每个视频最多排队约 200 毫秒的声音。每个平台上，没有注册的名字什么也不显示，日志记一次，和没有注册的组件一样；先引用名字、后注册的视频，
+在注册后开始显示；`end()` 让视频空白，直到这个名字再次被注册。
+
+每个开发宿主（`nsh run`、`nsh test --target`）都注册一个流 `nsh/test-pattern`：320×180、每秒 30 帧的测试图案，应用的测试不用自己的宿主
+就能在每个平台上播放一个流（[测试](./testing-and-trace.md)）。`nsh/` 下的名字归 NSH 所有，和原生组件一样；嵌入应用用自己的名字注册流。
+应用播放 `nsh.json` 中 [`capabilities.streams`](./sandbox-and-capabilities.md#streams) 授予的流。
 
 ## 规则与限制
 

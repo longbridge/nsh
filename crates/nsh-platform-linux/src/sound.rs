@@ -56,7 +56,7 @@ const MAX_VOICES: usize = 32;
 /// The outputs a mixer plays into, the first installed: the system's
 /// default, then PipeWire, PulseAudio and ALSA directly (`alsasink` is a
 /// base plug-in).
-const OUTPUTS: &[&str] = &["autoaudiosink", "pipewiresink", "pulsesink", "alsasink"];
+pub(crate) const OUTPUTS: &[&str] = &["autoaudiosink", "pipewiresink", "pulsesink", "alsasink"];
 
 /// A decoded sound: interleaved 32-bit float frames, little-endian, at
 /// [`RATE`]. Cloning shares the samples.
@@ -83,7 +83,7 @@ pub(crate) struct Decoded {
 }
 
 /// Initializes GStreamer once (GTK's media streams may have already).
-fn init() -> Result<(), String> {
+pub(crate) fn init() -> Result<(), String> {
     static INIT: OnceLock<Result<(), String>> = OnceLock::new();
     INIT.get_or_init(|| gst::init().map_err(|e| format!("GStreamer did not start: {e}")))
         .clone()
@@ -98,7 +98,7 @@ fn caps() -> gst::Caps {
         .build()
 }
 
-fn element(factory: &str) -> Result<gst::Element, String> {
+pub(crate) fn element(factory: &str) -> Result<gst::Element, String> {
     gst::ElementFactory::make(factory)
         .build()
         .map_err(|_| format!("the GStreamer element `{factory}` is not installed"))

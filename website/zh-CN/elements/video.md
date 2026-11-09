@@ -8,7 +8,7 @@ demo: el-video
 
 # Video
 
-视频视图用平台自带的播放器播放视频文件或视频流：iOS 和 Mac Catalyst 上是 AVPlayer，Android 上是 MediaPlayer。播放通过属性控制（`paused`、`muted`、`rate` 等），因此播放器会像其他视图一样跟随你的状态。Rust 用 `video(url)` 创建，TSX 用从 `nsh` 导入的 `<Video>`。
+视频视图用平台自带的播放器播放视频文件或视频流：iOS 和 Mac Catalyst 上是 AVPlayer，Android 上是 MediaPlayer。播放通过属性控制（`paused`、`muted`、`rate` 等），因此播放器会像其他视图一样跟随你的状态。Rust 用 `video()` 创建并用 `.src(url)` 指定来源，TSX 用从 `nsh` 导入的 `<Video>`。
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -20,7 +20,8 @@ fn player() -> impl IntoElement {
     view()
         .gap_3()
         .child(
-            video("https://example.com/clip.mp4")
+            video()
+                .src("https://example.com/clip.mp4")
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
@@ -80,7 +81,8 @@ function Player() {
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `src` | `video(url)` | `string` | | 视频的 URL（在 Rust 中也可以是资源的 `uri`：`video(CLIP.uri)`）。 |
+| `src` | `.src(url)` | `string` | | 视频的 URL（在 Rust 中也可以是资源的 `uri`：`video().src(CLIP.uri)`）。 |
+| `srcObject` | `.src_object(..)` | `HostStream \| null` | `null` | 代替 `src` 播放的实时流：见[实时流](#实时流)。 |
 | `paused` | `.paused(..)` | `boolean` | `false` | 暂停播放。 |
 | `muted` | `.muted(..)` | `boolean` | `false` | 静音。 |
 | `volume` | `.volume(..)` | `number` | `1` | 0..1。 |
@@ -106,7 +108,8 @@ function Player() {
 ```rust tabs
 let ratio = signal(16.0_f32 / 9.0);
 
-video(url)
+video()
+    .src(url)
     .w_full()
     .aspect_ratio(ratio)
     .on_load(move |info: &VideoInfo| {
@@ -125,9 +128,37 @@ const ratio = signal(16 / 9);
 |---|---|---|
 | `seek(seconds)` | `seek(seconds)` | 跳转到某个时间点。 |
 
+## 实时流
+
+`srcObject` 代替 `src` 播放一个实时流，与 DOM 的 `HTMLMediaElement.srcObject` 相同：通话的视频、摄像头。流归运行应用的页面所有，由它按名字注册；
+应用用 `HostStream.fromHost(name)`（Rust：`HostStream::from_host(name)`）指定它。流在浏览器中播放，不经过应用的代码。
+设置了 `srcObject` 时它优先于 `src`；设为 `null` 时再播放 `src`。实时流在 `onLoad` 中报告尺寸，`duration` 为 0，`seek` 不改变它。
+
+```tsx
+import { HostStream, Video } from "nsh";
+
+<Video srcObject={HostStream.fromHost("remote")} style={{ height: 220 }} />;
+```
+
+页面用 `player.registerStream(name, stream)` 注册流（它的 `web.host` 模块可以用拿到的 player 注册），传 `null` 则取消注册。
+没有注册的名字什么也不显示，和没有注册的[原生组件](../docs/native-components.md)一样，控制台会提示一次。前置摄像头的预览用视图自己的
+变换做镜像：`style={{ transform: [{ scaleX: -1 }] }}`（Rust：`.scale_x(-1.0)`）。
+
+每个平台都播放实时流：Web 页面注册流，iOS、macOS、Android、Windows、Linux 和 GPUI 应用里由嵌入应用注册并交出帧
+（[实时流](../docs/native-components.md#实时流)）。宿主可以用字节交出帧，也可以交出本平台的 GPU 缓冲区（`CVPixelBuffer`、`HardwareBuffer`、
+Direct3D 11 纹理、dmabuf），后者不经过复制直接显示；流的声音按视频的 `muted`、`volume` 和 `paused` 播放。
+
+应用播放 `nsh.json` 中 [`capabilities.streams`](../docs/sandbox-and-capabilities.md#streams) 按名字授予的流，`true` 表示全部；没有声明其他能力的应用也这样声明：
+
+```json
+"capabilities": { "streams": ["remote", "call.*"] }
+```
+
+用未授予的名字调用 `HostStream.fromHost` 会抛出 `code` 为 `"ERR_ACCESS_DENIED"`、`permission` 为 `"streams"` 的错误。在 Web 上，这包括页面用播放器注册的流；应用自己交给 `srcObject` 的浏览器 `MediaStream` 归应用自己所有。
+
 ## 能力声明
 
-应用声明了[能力](../docs/sandbox-and-capabilities.md)时，视频源从 `network` 允许的主机加载；指向其他主机的视频源显示为空视图，并触发 `onError`，其 `code` 为 `"ERR_ACCESS_DENIED"`。
+应用声明了[能力](../docs/sandbox-and-capabilities.md)时，视频源从 `network` 允许的主机加载；指向其他主机的视频源显示为空视图，并触发 `onError`，其 `code` 为 `"ERR_ACCESS_DENIED"`。实时流按名字从 [`streams`](../docs/sandbox-and-capabilities.md#streams) 授予。
 
 ## 平台说明
 

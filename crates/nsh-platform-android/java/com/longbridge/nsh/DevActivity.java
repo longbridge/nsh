@@ -46,6 +46,8 @@ public final class DevActivity extends Activity {
         // An app on its own, not a module embedded in another app: no limits.
         view.useStandaloneLimits();
         setContentView(view);
+        // A live stream the tests play (`<Video srcObject={HostStream.fromHost("nsh/test-pattern")}>`).
+        new TestPattern(view.registerReservedStream("nsh/test-pattern")).start();
         view.handleNotificationIntent(getIntent());
         // A recreated activity's intent was handed in already.
         if (state == null) view.handleUrlSchemeIntent(getIntent());
@@ -79,6 +81,58 @@ public final class DevActivity extends Activity {
                 android.system.Os.setenv(name, value, true);
             } catch (android.system.ErrnoException e) {
                 android.util.Log.w("nsh", "cannot set " + name + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The stream `nsh/test-pattern`, as every development host registers it
+     * (`nsh_dev::pattern`): a hue sweeping through the colors behind a white
+     * bar crossing left to right, {@link #WIDTH} by {@link #HEIGHT} pixels of
+     * BGRA pushed from a thread of its own at about 30 frames per second,
+     * for as long as the host runs.
+     */
+    static final class TestPattern extends Thread {
+        static final int WIDTH = 320, HEIGHT = 180, STRIDE = WIDTH * 4;
+        private static final int BAR = 8, STEP = 4, FRAME_MS = 33;
+        private final NshStream stream;
+
+        TestPattern(NshStream stream) {
+            super("nsh-test-pattern");
+            this.stream = stream;
+            setDaemon(true);
+        }
+
+        @Override
+        public void run() {
+            java.nio.ByteBuffer bgra = java.nio.ByteBuffer.allocate(STRIDE * HEIGHT);
+            for (int tick = 0; ; tick++) {
+                frame(tick, bgra.array());
+                bgra.clear();
+                stream.pushBgra(bgra, WIDTH, HEIGHT, STRIDE);
+                try {
+                    Thread.sleep(FRAME_MS);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }
+
+        /** Draws the pattern at `tick` into `bgra` (`STRIDE * HEIGHT` bytes). */
+        static void frame(int tick, byte[] bgra) {
+            int rgb = android.graphics.Color.HSVToColor(new float[] {tick % 360, 1, 1});
+            byte r = (byte) ((rgb >> 16) & 0xFF), g = (byte) ((rgb >> 8) & 0xFF), b = (byte) (rgb & 0xFF);
+            int bar = tick * STEP % WIDTH;
+            for (int y = 0; y < HEIGHT; y++) {
+                int row = y * STRIDE;
+                for (int x = 0; x < WIDTH; x++) {
+                    int i = row + x * 4;
+                    boolean white = Math.abs(x - bar) < BAR;
+                    bgra[i] = white ? (byte) 0xFF : b;
+                    bgra[i + 1] = white ? (byte) 0xFF : g;
+                    bgra[i + 2] = white ? (byte) 0xFF : r;
+                    bgra[i + 3] = (byte) 0xFF;
+                }
             }
         }
     }

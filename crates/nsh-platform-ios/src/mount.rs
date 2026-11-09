@@ -998,6 +998,7 @@ impl Mounter {
                         id,
                         self.control.clone(),
                         self.asset_base.clone(),
+                        self.components.streams(),
                     ))),
                     ViewKind::Scroll => {
                         let scroll = UIScrollView::new(self.mtm);

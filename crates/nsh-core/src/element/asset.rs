@@ -42,7 +42,7 @@ pub struct FontAsset {
 }
 
 /// Any other file of a crate (a video, a page): its URI for the elements
-/// that load URIs (`video(CLIP.uri)`).
+/// that load URIs (`video().src(CLIP.uri)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileAsset {
     /// `asset:/@<package>/<path>`.

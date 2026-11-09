@@ -477,6 +477,41 @@ impl AppView {
         self.surface.native.components().register(name, factory);
     }
 
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames to the handle, from
+    /// any thread. Applies to the videos naming it, now or later.
+    pub fn register_stream(&self, name: &str) -> crate::StreamHandle {
+        self.surface.native.components().register_stream(name)
+    }
+
+    /// The Direct3D 11 device this thread's views are drawn with (`None`
+    /// when it cannot be made): textures made on it reach a stream's videos
+    /// without a copy ([`crate::StreamHandle::push_d3d11_texture`]). Its
+    /// multithread protection is on, so the embedding app may use its
+    /// immediate context from another thread. After a device loss the views
+    /// draw with a new device: textures of the old one are copied through
+    /// the CPU until the app makes them on the new one (ask again). UI
+    /// thread.
+    pub fn d3d11_device(&self) -> Option<windows::Win32::Graphics::Direct3D11::ID3D11Device> {
+        use windows::{Win32::Graphics::Direct3D11::ID3D11Multithread, core::Interface};
+        let gfx = crate::gfx::get().ok()?;
+        // SAFETY: plain COM calls on the live device.
+        unsafe {
+            if let Ok(context) = gfx.d3d.GetImmediateContext()
+                && let Ok(mt) = context.cast::<ID3D11Multithread>()
+            {
+                let _ = mt.SetMultithreadProtected(true);
+            }
+        }
+        self.surface
+            .native
+            .components()
+            .streams()
+            .renderer()
+            .note(&gfx.d3d);
+        Some(gfx.d3d.clone())
+    }
+
     /// The embedding app's locale, which stands in for the user's: what
     /// `Intl` formats for by default and what `locale()` (`nsh/device`) and
     /// Rust components' `locale()` read, at once and for every app loaded

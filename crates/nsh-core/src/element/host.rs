@@ -654,12 +654,49 @@ pub fn web_view_html(html: impl IntoReactive<String>, base_url: Option<&str>) ->
     WebView(ElNode::new(Tag::WebView)).html(html, base_url)
 }
 
-/// A video playing the file or stream at `url` (a bound one plays the new
-/// one when it changes).
-pub fn video(url: impl IntoReactive<String>) -> Video {
-    Video(ElNode::new(Tag::Video)).bind_prop(url, |url: String| {
-        Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
-    })
+/// A video player: what it plays is [`Video::src`] (a file or stream at a
+/// URL) or [`Video::src_object`] (a live stream the embedding app
+/// registered); with neither it shows nothing.
+pub fn video() -> Video {
+    Video(ElNode::new(Tag::Video))
+}
+
+/// A live stream the embedding app registered by name (a call's video, a
+/// camera), which [`Video::src_object`] plays (TS: `HostStream`,
+/// `HostStream.fromHost(name)`). It holds only the name: the embedding
+/// app owns the stream.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct HostStream {
+    name: Arc<str>,
+}
+
+impl HostStream {
+    /// The stream the embedding app registered as `name`. A name nothing
+    /// registered shows nothing (logged once, as a native component's).
+    pub fn from_host(name: impl Into<Arc<str>>) -> Self {
+        Self { name: name.into() }
+    }
+
+    /// The name the embedding app registered the stream with.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn name_arc(&self) -> Arc<str> {
+        self.name.clone()
+    }
+
+    /// What a stream's name may be: 1 to 256 bytes.
+    pub(crate) fn checked(name: &str) -> Result<(), String> {
+        if name.is_empty() || name.len() > 256 {
+            return Err(format!(
+                "HostStream.fromHost: a name has 1 to 256 bytes (this one has {})",
+                name.len()
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// The embedder's native component registered as `name`.
@@ -1567,6 +1604,23 @@ impl WebView {
 }
 
 impl Video {
+    /// Plays the file or stream at `url` (TS: `src`; an asset's `uri` too:
+    /// `video().src(CLIP.uri)`); a bound one plays the new one when it
+    /// changes.
+    pub fn src(self, url: impl IntoReactive<String>) -> Self {
+        self.bind_prop(url, |url: String| {
+            Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
+        })
+    }
+
+    /// Plays `stream`, a live stream the embedding app registered, instead
+    /// of the URL (TS: `srcObject`); `None` plays the URL again.
+    pub fn src_object(self, stream: impl IntoReactive<Option<HostStream>>) -> Self {
+        self.bind_prop(stream, |stream: Option<HostStream>| {
+            Prop::Native(NativeProp::SrcObject(stream.map(|s| s.name)))
+        })
+    }
+
     /// Paused.
     pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
         self.bind_prop(paused, |paused: bool| {

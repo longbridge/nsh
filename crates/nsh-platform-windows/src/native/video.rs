@@ -22,6 +22,20 @@
 //! ending), `onError`. `controls` draws a control bar of nsh's own (play /
 //! pause, a scrubber, the time) that drives the engine directly, as the
 //! platforms' controls do.
+//!
+//! A live stream (`srcObject`, [`VideoProps::stream`]) plays instead of a
+//! source: no engine, the video attaches to the stream of that name in
+//! the surface's registry ([`crate::stream`]) and shows each frame the
+//! embedding app pushes, drawn through the same fit as the engine's
+//! texture: bytes are copied into a Direct2D bitmap (`CopyFromMemory`), a
+//! texture of the renderer's device is drawn as it is (a bitmap on its
+//! surface), and a shared texture is copied on the GPU into a texture of
+//! the video's own (holding its keyed mutex's key 0, if it has one, for
+//! the copy). The first frame's size is `onLoad` (duration 0), `paused`
+//! keeps the last frame, the stream's end blanks the picture. The
+//! stream's audio plays through an output of the video's own
+//! ([`crate::stream::StreamAudio`]) that follows its `paused`, `muted` and
+//! `volume`.
 
 use std::{
     cell::{Cell, RefCell},
@@ -36,8 +50,9 @@ use windows::{
         Graphics::{
             Direct2D::{
                 Common::{
-                    D2D1_ALPHA_MODE_IGNORE, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
-                    D2D1_PIXEL_FORMAT,
+                    D2D_SIZE_U, D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE,
+                    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_FIGURE_BEGIN_FILLED,
+                    D2D1_FIGURE_END_CLOSED, D2D1_PIXEL_FORMAT,
                 },
                 D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1, D2D1_DRAW_TEXT_OPTIONS_NONE,
                 D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_LINEAR, D2D1_ROUNDED_RECT, ID2D1Bitmap1,
@@ -53,7 +68,7 @@ use windows::{
             },
             Dxgi::{
                 Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC},
-                IDXGISurface,
+                IDXGIKeyedMutex, IDXGISurface,
             },
         },
         Media::MediaFoundation::{
@@ -79,6 +94,7 @@ use crate::{
     image::AssetBase,
     input::{Cursor, PointerKind},
     render::{DrawCx, rect_f},
+    stream::{Attached, AudioAttached, Pixels, StreamEvent, Streams},
     surface::Surface,
     view::{Hosted, ItemPointer},
     window::UiThread,
@@ -94,12 +110,19 @@ const TIME: f32 = 96.0;
 /// first frame) before the frame client stops (seconds).
 const FRAME_WAIT: f64 = 3.0;
 
-/// A video: its media engine and the picture its view shows.
+/// A video: its media engine (or the live stream it shows) and the picture
+/// its view shows.
 pub(crate) struct VideoItem {
     emitter: Emitter,
     key: u64,
     id: NodeId,
     engine: RefCell<Option<IMFMediaEngine>>,
+    /// The surface's live streams.
+    streams: Streams,
+    /// The stream it shows (`srcObject`) instead of a source.
+    stream: RefCell<Option<Attached>>,
+    /// The stream's audio, played while it shows the stream.
+    audio: RefCell<Option<AudioAttached>>,
     /// Bumped with every source opened (and when closed): notifications
     /// for another serial are stale.
     serial: Cell<u64>,
@@ -131,15 +154,34 @@ struct Status {
     playing: Cell<bool>,
 }
 
-/// A frame in a texture shared with Direct2D.
+/// A frame: the engine's, in a texture shared with Direct2D, or a
+/// stream's.
 struct Frame {
-    texture: ID3D11Texture2D,
+    /// Where the picture comes from.
+    source: Source,
+    /// The engine's target, the stream's texture drawn as it is, or the
+    /// video's own texture a stream's texture is copied into; `None` for
+    /// a stream's bytes.
+    texture: Option<ID3D11Texture2D>,
     bitmap: ID2D1Bitmap1,
     size: (u32, u32),
     /// The device generation they were made in.
     generation: u64,
     /// A frame was copied into it.
     filled: bool,
+}
+
+/// Where a [`Frame`]'s picture comes from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Source {
+    /// The engine, transferred into the frame's texture.
+    Engine,
+    /// A stream's bytes, copied into the bitmap.
+    Bytes,
+    /// A stream's texture, drawn as it is.
+    Texture,
+    /// A stream's texture, copied on the GPU into the frame's texture.
+    Copy,
 }
 
 impl VideoItem {
@@ -149,6 +191,9 @@ impl VideoItem {
             key: surface.key(),
             id,
             engine: RefCell::new(None),
+            streams: surface.native.components().streams(),
+            stream: RefCell::new(None),
+            audio: RefCell::new(None),
             serial: Cell::new(0),
             status: Status::default(),
             props: RefCell::new(None),
@@ -168,9 +213,31 @@ impl VideoItem {
         base: Option<&AssetBase>,
     ) {
         let old = self.props.borrow_mut().take();
-        let reopened = old.as_ref().is_none_or(|o| o.source != p.source);
-        if reopened {
-            self.open(surface, p.source.as_deref(), base);
+        if let Some(name) = &p.stream {
+            // A live stream plays instead of the URL: the engine goes, the
+            // frames the embedding app pushes are drawn.
+            let changed = self
+                .stream
+                .borrow()
+                .as_ref()
+                .is_none_or(|s| s.name() != &**name);
+            if changed {
+                self.close();
+                self.show_stream(surface, name, p);
+            }
+            if let Some(stream) = &*self.stream.borrow() {
+                stream.set_paused(p.paused);
+            }
+            if let Some(audio) = &*self.audio.borrow() {
+                audio.set(p.paused, p.muted, p.volume);
+            }
+        } else {
+            self.audio.borrow_mut().take();
+            let shown = self.stream.borrow_mut().take().is_some();
+            let reopened = shown || old.as_ref().is_none_or(|o| o.source != p.source);
+            if reopened {
+                self.open(surface, p.source.as_deref(), base);
+            }
         }
         *self.props.borrow_mut() = Some(p.clone());
         self.status.playing.set(!p.paused);
@@ -244,10 +311,247 @@ impl VideoItem {
         self.want_frame.set(Some(surface.clock() + FRAME_WAIT));
     }
 
-    /// Stops the engine and forgets the source (the last frame stays, for
-    /// a removal animation).
+    /// Shows stream `name`, fed by the surface's streams: its sink finds
+    /// the video again by surface key and node id on the UI thread, as the
+    /// engine's notifications do.
+    fn show_stream(&self, surface: &Rc<Surface>, name: &str, p: &VideoProps) {
+        self.emitter
+            .emit(EventKind::LoadStart, || EventPayload::None);
+        let (key, id) = (self.key, self.id);
+        let sink = Box::new(move |event: StreamEvent<'_>| {
+            let Some(surface) = Surface::by_key(key) else {
+                return;
+            };
+            let item = match surface.native.hosts.try_borrow() {
+                Ok(hosts) => match hosts.get(&id) {
+                    Some(super::Host::Video(item)) => Some(item.clone()),
+                    _ => None,
+                },
+                Err(_) => None,
+            };
+            if let Some(item) = item {
+                item.stream_event(&surface, event);
+            }
+        });
+        *self.stream.borrow_mut() = Some(self.streams.attach(name, sink));
+        *self.audio.borrow_mut() =
+            Some(self.streams.attach_audio(name, p.paused, p.muted, p.volume));
+        surface.invalidate();
+    }
+
+    /// A frame of the stream, or its end, on the UI thread.
+    fn stream_event(&self, surface: &Surface, event: StreamEvent<'_>) {
+        match event {
+            StreamEvent::Frame { frame, first } => {
+                if !self.show_frame(frame) {
+                    return;
+                }
+                self.status.loaded.set(true);
+                if first {
+                    let (w, h) = (frame.width as u32, frame.height as u32);
+                    self.natural.set((w, h));
+                    self.emitter
+                        .emit(EventKind::Load, || load_payload(0.0, w, h));
+                }
+            }
+            StreamEvent::Ended => {
+                *self.frame.borrow_mut() = None;
+                self.status.loaded.set(false);
+                self.natural.set((0, 0));
+            }
+        }
+        surface.invalidate();
+    }
+
+    /// Shows a stream's frame: its bytes copied into the bitmap, its
+    /// texture drawn or copied (each made again for a new size, texture or
+    /// device, or after the engine's texture).
+    fn show_frame(&self, frame: &crate::stream::Frame) -> bool {
+        let Ok(gfx) = gfx::get() else { return false };
+        // A device loss replaced the renderer's device: the pushing side
+        // compares textures' devices with the new one from now on.
+        self.streams.renderer().note(&gfx.d3d);
+        let size = (frame.width as u32, frame.height as u32);
+        match &frame.pixels {
+            Pixels::Bytes { stride, bytes } => self.show_bytes(&gfx, size, *stride, bytes),
+            Pixels::Texture(texture) => self.show_texture(&gfx, size, texture),
+            Pixels::Copy { texture, keyed } => self.copy_texture(&gfx, size, texture, *keyed),
+        }
+    }
+
+    /// Copies a stream's bytes into the bitmap.
+    fn show_bytes(&self, gfx: &gfx::Gfx, size: (u32, u32), stride: usize, bytes: &[u8]) -> bool {
+        let generation = gfx::generation();
+        let pitch = stride as u32;
+        let mut slot = self.frame.borrow_mut();
+        if let Some(f) = slot.as_mut()
+            && f.source == Source::Bytes
+            && f.size == size
+            && f.generation == generation
+        {
+            // SAFETY: `bytes` holds `height` rows of `stride` bytes, as the
+            // registry checked; the bitmap is as large as the frame.
+            return match unsafe { f.bitmap.CopyFromMemory(None, bytes.as_ptr().cast(), pitch) } {
+                Ok(()) => {
+                    f.filled = true;
+                    true
+                }
+                Err(err) => {
+                    log::debug!("video: stream frame not copied: {err}");
+                    false
+                }
+            };
+        }
+        let props = bitmap_properties(D2D1_ALPHA_MODE_PREMULTIPLIED);
+        let d2d_size = D2D_SIZE_U {
+            width: size.0,
+            height: size.1,
+        };
+        // SAFETY: as above, on the thread's device context.
+        match unsafe {
+            gfx.dc
+                .CreateBitmap(d2d_size, Some(bytes.as_ptr().cast()), pitch, &props)
+        } {
+            Ok(bitmap) => {
+                *slot = Some(Frame {
+                    source: Source::Bytes,
+                    texture: None,
+                    bitmap,
+                    size,
+                    generation,
+                    filled: true,
+                });
+                true
+            }
+            Err(err) => {
+                log::warn!("video: cannot make a bitmap of a stream's frame: {err}");
+                false
+            }
+        }
+    }
+
+    /// Draws a stream's texture of the renderer's device as it is: a bitmap
+    /// on its surface (kept while the same texture comes again).
+    fn show_texture(&self, gfx: &gfx::Gfx, size: (u32, u32), texture: &ID3D11Texture2D) -> bool {
+        let generation = gfx::generation();
+        let mut slot = self.frame.borrow_mut();
+        if let Some(f) = slot.as_mut()
+            && f.source == Source::Texture
+            && f.texture.as_ref() == Some(texture)
+            && f.generation == generation
+        {
+            f.filled = true;
+            return true;
+        }
+        let props = bitmap_properties(D2D1_ALPHA_MODE_PREMULTIPLIED);
+        // SAFETY: COM calls on live objects; the texture is of the
+        // context's device (the pushing side checked), one subresource.
+        let bitmap = unsafe {
+            texture
+                .cast::<IDXGISurface>()
+                .and_then(|surface| gfx.dc.CreateBitmapFromDxgiSurface(&surface, Some(&props)))
+        };
+        match bitmap {
+            Ok(bitmap) => {
+                *slot = Some(Frame {
+                    source: Source::Texture,
+                    texture: Some(texture.clone()),
+                    bitmap,
+                    size,
+                    generation,
+                    filled: true,
+                });
+                true
+            }
+            Err(err) => {
+                // A texture of a device lost since: the next ones come
+                // another way.
+                log::debug!("video: a stream's texture cannot be drawn: {err}");
+                false
+            }
+        }
+    }
+
+    /// Copies a stream's texture of the renderer's device into the video's
+    /// own on the GPU, holding its keyed mutex's key 0 if `keyed` (a frame
+    /// whose key is held elsewhere is skipped: the last one stays).
+    fn copy_texture(
+        &self,
+        gfx: &gfx::Gfx,
+        size: (u32, u32),
+        texture: &ID3D11Texture2D,
+        keyed: bool,
+    ) -> bool {
+        let generation = gfx::generation();
+        let mut slot = self.frame.borrow_mut();
+        if slot.as_ref().is_none_or(|f| {
+            f.source != Source::Copy || f.size != size || f.generation != generation
+        }) {
+            match make_frame(
+                gfx,
+                size,
+                generation,
+                D2D1_ALPHA_MODE_PREMULTIPLIED,
+                Source::Copy,
+            ) {
+                Ok(frame) => *slot = Some(frame),
+                Err(err) => {
+                    log::warn!("video: cannot make a texture for a stream's frames: {err}");
+                    return false;
+                }
+            }
+        }
+        let Some(frame) = slot.as_mut() else {
+            return false;
+        };
+        let Some(target) = &frame.texture else {
+            return false;
+        };
+        let mutex = if keyed {
+            match texture.cast::<IDXGIKeyedMutex>() {
+                Ok(mutex) if crate::stream::acquire(&mutex, 0) => Some(mutex),
+                Ok(_) => {
+                    log::debug!("video: a stream's texture is still drawn by the host: skipped");
+                    return false;
+                }
+                Err(err) => {
+                    log::debug!("video: a stream's texture has no keyed mutex: {err}");
+                    return false;
+                }
+            }
+        } else {
+            None
+        };
+        // SAFETY: COM calls on the live device's immediate context; both
+        // textures are of that device and BGRA, the target as large as the
+        // source's first subresource.
+        let copied = unsafe {
+            gfx.d3d.GetImmediateContext().map(|context| {
+                context.CopySubresourceRegion(target, 0, 0, 0, 0, texture, 0, None);
+            })
+        };
+        if let Some(mutex) = mutex {
+            // SAFETY: the key acquired above.
+            let _ = unsafe { mutex.ReleaseSync(0) };
+        }
+        match copied {
+            Ok(()) => {
+                frame.filled = true;
+                true
+            }
+            Err(err) => {
+                log::debug!("video: a stream's texture not copied: {err}");
+                false
+            }
+        }
+    }
+
+    /// Stops the engine, detaches from the stream and forgets the source
+    /// (the last frame stays, for a removal animation).
     pub(crate) fn close(&self) {
         self.serial.set(self.serial.get() + 1);
+        self.audio.borrow_mut().take();
+        self.stream.borrow_mut().take();
         if let Some(engine) = self.engine.borrow_mut().take() {
             // SAFETY: calls on a live engine; it is not used afterwards.
             unsafe {
@@ -442,11 +746,16 @@ impl VideoItem {
         let Ok(gfx) = gfx::get() else { return false };
         let generation = gfx::generation();
         let mut slot = self.frame.borrow_mut();
-        if slot
-            .as_ref()
-            .is_none_or(|f| f.size != (w, h) || f.generation != generation)
-        {
-            *slot = match make_frame(&gfx, (w, h), generation) {
+        if slot.as_ref().is_none_or(|f| {
+            f.source != Source::Engine || f.size != (w, h) || f.generation != generation
+        }) {
+            *slot = match make_frame(
+                &gfx,
+                (w, h),
+                generation,
+                D2D1_ALPHA_MODE_IGNORE,
+                Source::Engine,
+            ) {
                 Ok(frame) => Some(frame),
                 Err(err) => {
                     log::warn!("video: cannot make a frame texture: {err}");
@@ -455,6 +764,9 @@ impl VideoItem {
             };
         }
         let Some(frame) = slot.as_mut() else {
+            return false;
+        };
+        let Some(texture) = &frame.texture else {
             return false;
         };
         let rect = RECT {
@@ -471,7 +783,7 @@ impl VideoItem {
         };
         // SAFETY: the texture is a render target of the engine's device,
         // as large as `rect`.
-        match unsafe { engine.TransferVideoFrame(&frame.texture, None, &rect, Some(&black)) } {
+        match unsafe { engine.TransferVideoFrame(texture, None, &rect, Some(&black)) } {
             Ok(()) => {
                 frame.filled = true;
                 true
@@ -484,7 +796,11 @@ impl VideoItem {
     }
 
     fn controls(&self) -> bool {
-        self.props.borrow().as_ref().is_some_and(|p| p.controls)
+        // A stream has no timeline for the bar.
+        self.props
+            .borrow()
+            .as_ref()
+            .is_some_and(|p| p.controls && p.stream.is_none())
     }
 
     fn resize_mode(&self) -> ResizeMode {
@@ -891,8 +1207,29 @@ fn make_engine(key: u64, ui: UiThread, id: NodeId, serial: u64) -> Result<IMFMed
     }
 }
 
-/// A BGRA texture of `size` pixels and the Direct2D bitmap on it.
-fn make_frame(gfx: &gfx::Gfx, size: (u32, u32), generation: u64) -> Result<Frame> {
+/// The properties of a BGRA bitmap Direct2D draws.
+fn bitmap_properties(alpha: D2D1_ALPHA_MODE) -> D2D1_BITMAP_PROPERTIES1 {
+    D2D1_BITMAP_PROPERTIES1 {
+        pixelFormat: D2D1_PIXEL_FORMAT {
+            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            alphaMode: alpha,
+        },
+        dpiX: 96.0,
+        dpiY: 96.0,
+        bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+        colorContext: std::mem::ManuallyDrop::new(None),
+    }
+}
+
+/// A BGRA texture of `size` pixels and the Direct2D bitmap on it, for
+/// pictures from `source`.
+fn make_frame(
+    gfx: &gfx::Gfx,
+    size: (u32, u32),
+    generation: u64,
+    alpha: D2D1_ALPHA_MODE,
+    source: Source,
+) -> Result<Frame> {
     let desc = D3D11_TEXTURE2D_DESC {
         Width: size.0,
         Height: size.1,
@@ -916,21 +1253,12 @@ fn make_frame(gfx: &gfx::Gfx, size: (u32, u32), generation: u64) -> Result<Frame
             windows::core::Error::from_hresult(windows::Win32::Foundation::E_FAIL)
         })?;
         let surface: IDXGISurface = texture.cast()?;
-        let bitmap = gfx.dc.CreateBitmapFromDxgiSurface(
-            &surface,
-            Some(&D2D1_BITMAP_PROPERTIES1 {
-                pixelFormat: D2D1_PIXEL_FORMAT {
-                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
-                },
-                dpiX: 96.0,
-                dpiY: 96.0,
-                bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
-                colorContext: std::mem::ManuallyDrop::new(None),
-            }),
-        )?;
+        let bitmap = gfx
+            .dc
+            .CreateBitmapFromDxgiSurface(&surface, Some(&bitmap_properties(alpha)))?;
         Ok(Frame {
-            texture,
+            source,
+            texture: Some(texture),
             bitmap,
             size,
             generation,

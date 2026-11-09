@@ -29,7 +29,7 @@ runtime-shaders = ["gpui_platform/runtime_shaders"]
 webview = ["dep:wry", "dep:gtk", "dep:webkit2gtk"]
 # Videos (GStreamer 1.20+ with its base and good plug-ins; libav for most
 # codecs).
-video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
+video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-audio", "dep:gstreamer-video"]
 
 [dependencies]
 log.workspace = true
@@ -58,6 +58,7 @@ nsh-testing = { workspace = true, features = ["agent"], optional = true }
 wry = { workspace = true, optional = true }
 gstreamer = { workspace = true, optional = true }
 gstreamer-app = { workspace = true, optional = true }
+gstreamer-audio = { workspace = true, optional = true }
 gstreamer-video = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -80,6 +81,8 @@ raw-window-handle.workspace = true
 objc2.workspace = true
 objc2-app-kit.workspace = true
 objc2-foundation.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-video.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle.workspace = true

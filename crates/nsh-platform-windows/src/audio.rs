@@ -122,9 +122,10 @@ struct Decoded {
     format: Format,
 }
 
-/// The XAudio2 engine and its mastering voice (the output).
-struct Output {
-    xaudio: IXAudio2,
+/// The XAudio2 engine and its mastering voice (the output); also a
+/// stream's audio's ([`crate::stream`]).
+pub(crate) struct Output {
+    pub(crate) xaudio: IXAudio2,
     mastering: IXAudio2MasteringVoice,
 }
 
@@ -493,7 +494,7 @@ fn decode(
 }
 
 /// Makes the XAudio2 engine and its mastering voice on the default device.
-fn make_output() -> Result<Output> {
+pub(crate) fn make_output() -> Result<Output> {
     let mut xaudio: Option<IXAudio2> = None;
     // SAFETY: an out pointer to a local; 0x0A000000 is NTDDI_WIN10, the
     // version of the header the interface is declared by.

@@ -2,8 +2,9 @@
 // `Ledger` and the class `Account` all come from the app's crate
 // (`native/`, nsh.json "rust"), imported by its specifier. Their types are
 // generated from the Rust code into `.nsh/types/rust-exports/native.d.ts`.
-// On the desktops the crate also registers a native component, `Meter`.
-import { type JSX, mount, nativeComponent, Scroll, signal, Text, View } from "nsh";
+// On the desktops the crate also registers a native component, `Meter`,
+// and on macOS and iOS a live stream, which `<Video srcObject>` plays.
+import { type JSX, HostStream, mount, nativeComponent, Scroll, signal, Text, Video, View } from "nsh";
 import { Button as BaseButton } from "nsh/base";
 import { Account, Gauge, Ledger } from "rust-exports/native";
 
@@ -84,6 +85,10 @@ function App() {
   const spent = signal(25);
   const changes = signal(0);
 
+  // The stream: the crate registered it with this host, or not (headless).
+  const stream = Ledger.stream();
+  const frame = signal("waiting for frames");
+
   return (
     <View style={{ flex: 1, paddingTop: "env(safe-area-inset-top)", paddingRight: "env(safe-area-inset-right)", paddingBottom: "env(safe-area-inset-bottom)", paddingLeft: "env(safe-area-inset-left)" }}>
       <Scroll contentStyle={{ padding: 16, gap: 16 }}>
@@ -160,6 +165,16 @@ function App() {
         <Card title="Meter · a native component">
           <Meter value={spent() / 100} style={{ height: 8 }} />
           <Line muted>{`${spent()}% of the budget spent`}</Line>
+        </Card>
+
+        <Card title="Stream · a live stream">
+          <Video
+            srcObject={stream ? HostStream.fromHost(stream) : null}
+            muted
+            style={{ height: 120, borderRadius: 8, backgroundColor: "#111827" }}
+            onLoad={({ size }) => frame.set(`${size.width}×${size.height}`)}
+          />
+          <Line muted>{stream ? `Host stream ${stream}: ${frame()}` : "No host stream registered here"}</Line>
         </Card>
       </Scroll>
     </View>

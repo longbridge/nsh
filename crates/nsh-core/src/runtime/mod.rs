@@ -24,6 +24,7 @@ mod fps;
 mod fs;
 mod haptics;
 mod host;
+mod host_stream;
 mod image;
 mod net;
 mod notifications;
@@ -65,6 +66,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<speech::Speech>()
             .class::<audio::Sound>()
             .class::<audio::AudioPlayer>()
+            .class::<host_stream::HostStream>()
             .module::<notifications::Notifications>()
             .module::<url_scheme::UrlScheme>()
             .module::<webview::WebView>()
@@ -99,6 +101,14 @@ pub fn registries() -> &'static [Registry] {
             nsh, desktop, mobile, os, net, process, fs, websocket, updater,
         ]
     })
+}
+
+/// The name of the `HostStream` instance `instance` is
+/// ([`crate::js::host_values::src_object`]).
+pub(crate) fn host_stream_name(
+    instance: std::rc::Rc<dyn crate::element::ClassInstance>,
+) -> Option<std::sync::Arc<str>> {
+    host_stream::name_of(instance)
 }
 
 #[cfg(test)]

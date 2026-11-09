@@ -75,7 +75,7 @@ TSX 从 `nsh` 导入，Rust 从 `nsh_core::prelude` 导入。
 | `<Canvas>` | `canvas(painter)` | 回放 2D 绘制的视图 | [Canvas](./canvas.md) |
 | `<Shader>` | `shader(program)` | 由 WGSL 程序在 GPU 上绘制其区域的视图，绘制在子元素之下 | [Shader](./shader.md) |
 | `<WebView>` | `web_view(url)`、`web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
-| `<Video>` | `video(url)` | AVPlayerLayer / TextureView 上的 MediaPlayer | [Video](./video.md) |
+| `<Video>` | `video().src(url)` | AVPlayerLayer / TextureView 上的 MediaPlayer | [Video](./video.md) |
 | `<Overlay>` | `overlay()` | 窗口（或所在对话框）之上的视图，相对锚点放置 | [Overlay](./overlay.md) |
 | `<If>`、`<Each>` | `when(..)`、`each(..)`、`dynamic(..)` | 控制流：它们选出的元素 | [控制流](./control-flow.md) |
 | `<InputAccessoryView>`（`nsh/mobile`） | `input_accessory_view(id)` | iOS 上键盘上方的工具栏 | [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview) |

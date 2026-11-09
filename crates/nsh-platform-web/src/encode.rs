@@ -1377,6 +1377,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     .str(resize_mode(v.resize_mode))
                     .bool(v.controls)
                     .num(v.progress_interval_ms)
+                    .opt_str(v.stream.as_deref())
                     .end();
             }
         },

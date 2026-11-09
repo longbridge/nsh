@@ -326,7 +326,7 @@ impl<C: Class> Instance<C> {
     }
 
     /// `any` as an instance of `C` (`None`: another class's).
-    fn of(any: Rc<dyn ClassInstance>) -> Option<Self> {
+    pub(crate) fn of(any: Rc<dyn ClassInstance>) -> Option<Self> {
         let any: Rc<dyn Any> = any;
         any.downcast::<InstanceCell<C>>()
             .ok()

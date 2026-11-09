@@ -84,6 +84,19 @@ pub fn main() -> std::process::ExitCode {
         AppSource::DevServer(format!("ws://127.0.0.1:{DEFAULT_PORT}{WS_PATH}"))
     });
     options.title = "nsh".to_owned();
+    // The test pattern every development host registers, so an app's tests
+    // can play a live stream here too.
+    let stream = options
+        .components
+        .register_reserved_stream(nsh_dev::pattern::NAME);
+    nsh_dev::pattern::start(move |bgra| {
+        stream.push_bgra(
+            nsh_dev::pattern::WIDTH,
+            nsh_dev::pattern::HEIGHT,
+            nsh_dev::pattern::STRIDE,
+            bgra,
+        )
+    });
     run_app(source, options)
 }
 

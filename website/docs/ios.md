@@ -214,6 +214,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | Verifies the package at a URL off the main thread, then runs it. Throws why it was refused; the running app stays. |
 | `connectDevServer(_ url: URL) throws` | Development: loads from a `nsh dev` server and reloads on every change. Throws with `NativeShell.xcframework`, which has no development support. |
 | `register(component:_:)` | Registers a [native component](./native-components.md). |
+| `register(stream:) -> NshStream` | Registers a [live stream](./native-components.md#live-streams) for `<Video srcObject>`: push its frames to the `NshStream` as `CVPixelBuffer`s (`push(pixelBuffer:)`, shown without a copy, BGRA or the biplanar YUV a camera or decoder hands out) and its audio as PCM (`push(pcm:channels:sampleRate:)`, interleaved `Float`s, played with each video's `paused`, `muted` and `volume`). |
 | `params: [String: Any]` | The launch parameters of the apps loaded from now on: the app reads them at start as `host.params` ([`host`](../modules/nsh.md#host)). |
 | `send(_ name: String, _ data: Any? = nil)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. |
 | `handle(_ name: String, _ handler:)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the main thread: `{ data, reply in … }`, or an `async throws` function `{ data in … }` whose result answers the call. |

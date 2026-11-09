@@ -357,6 +357,13 @@ impl AppView {
         self.surface.native.components().register(name, factory);
     }
 
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames to the handle, from
+    /// any thread. Applies to the videos naming it, now or later.
+    pub fn register_stream(&self, name: &str) -> crate::StreamHandle {
+        self.surface.native.components().register_stream(name)
+    }
+
     /// The embedding app's locale, which stands in for the user's: what
     /// `Intl` formats for by default and what `locale()` (`nsh/device`) and
     /// Rust components' `locale()` read, at once and for every app loaded

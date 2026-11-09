@@ -536,7 +536,14 @@ pub(crate) const VIDEO_EXPORTS: &[Item] = &[(
 /// `Video`'s types.
 pub(crate) const VIDEO_TYPES: &str = r#"export interface VideoProps extends Omit<ViewProps, "children" | "ref">, VideoHostProps {
   ref?: VideoRef | ((node: VideoRef) => void);
-  src: string;
+  /** The video's URL; `srcObject` plays instead while it is set. */
+  src?: string;
+  /** A live stream to play instead of `src` (the DOM's `srcObject`): one
+   * the embedding app registered (`HostStream.fromHost(name)`). `null`
+   * plays `src` again. The stream stays its owner's: the video only shows
+   * it. A name nothing registered shows nothing, as an unregistered native
+   * component does. */
+  srcObject?: HostStream | null;
 }
 "#;
 

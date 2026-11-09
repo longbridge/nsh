@@ -21,6 +21,10 @@
 //!   taskbar) and its notifications'; `nsh run` and `nsh test` make one
 //!   from `nsh.json` `"icon"`.
 //!
+//! The host registers `nsh_dev::pattern`'s test pattern as the live stream
+//! `nsh/test-pattern`, so an app's tests can play a stream
+//! (`<Video srcObject={HostStream.fromHost("nsh/test-pattern")}>`).
+//!
 //! Without arguments it connects to the dev server on this machine.
 //!
 //! A library so that an app with Rust components of its own (`nsh.json`
@@ -95,6 +99,18 @@ pub fn main() -> std::process::ExitCode {
         AppSource::DevServer(format!("ws://127.0.0.1:{DEFAULT_PORT}{WS_PATH}"))
     });
     options.title = name.unwrap_or_else(|| "nsh".to_owned());
+    // The handle lives in the pattern's thread, for as long as the host.
+    let stream = options
+        .components
+        .register_reserved_stream(nsh_dev::pattern::NAME);
+    nsh_dev::pattern::start(move |bgra| {
+        stream.push_bgra(
+            nsh_dev::pattern::WIDTH,
+            nsh_dev::pattern::HEIGHT,
+            nsh_dev::pattern::STRIDE,
+            bgra,
+        )
+    });
     run_app(source, options)
 }
 

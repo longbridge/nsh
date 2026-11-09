@@ -20,7 +20,14 @@ See [Web view and video](../docs/web-view-and-video.md) for the guide and [`<Vid
 const Video: (props: VideoProps) => JSX.Element;
 
 interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
-  src: string;
+  src?: string;
+  srcObject?: HostStream | null;
+}
+
+/** A live stream the embedding app registered by name. */
+class HostStream {
+  static fromHost(name: string): HostStream;
+  readonly name: string;
 }
 ```
 
@@ -61,7 +68,8 @@ mount(Player);
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `src` | `string` | (required) | The video's URL. |
+| `src` | `string` | | The video's URL. |
+| `srcObject` | `HostStream \| null` | `null` | A live stream played instead of `src` ([Live streams](../elements/video.md#live-streams)). |
 | `paused` | `boolean` | `false` | Playback is paused. |
 | `muted` | `boolean` | `false` | No sound. |
 | `volume` | `number` | `1` | 0..1. |

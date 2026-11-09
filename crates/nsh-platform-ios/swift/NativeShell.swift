@@ -497,6 +497,62 @@ public final class NshComponentContext: @unchecked Sendable {
     }
 }
 
+/// A live stream the app registered (`NshAppView.register(stream:)`): where
+/// it pushes the frames and audio, from any thread. The videos whose `srcObject` is
+/// `HostStream.fromHost(name)` show them. Dropping it ends the stream.
+public final class NshStream: @unchecked Sendable {
+    private let handle: OpaquePointer
+
+    fileprivate init(_ handle: OpaquePointer) {
+        self.handle = handle
+    }
+
+    deinit {
+        nsh_stream_free(handle)
+    }
+
+    /// Shows `pixelBuffer` in the videos playing the stream without
+    /// copying its pixels: any format `AVSampleBufferDisplayLayer` takes
+    /// (BGRA, or the biplanar YUV cameras and decoders hand out). Do not
+    /// write to it afterwards. A frame that comes before the previous one
+    /// was drawn replaces it; while no video shows the stream nothing is
+    /// done.
+    public func push(pixelBuffer: CVPixelBuffer) {
+        nsh_stream_push_pixel_buffer(handle, pixelBuffer)
+    }
+
+    /// Plays `pcm` in the videos playing the stream: interleaved samples in
+    /// -1 to 1, `channels` per frame (1 to 8), `sampleRate` frames a second
+    /// (8000 to 192000). Push them in order, from one thread at a time;
+    /// each video applies its `paused`, `muted` and `volume`, and drops
+    /// what would wait more than about 200 ms.
+    public func push(pcm: UnsafeBufferPointer<Float>, channels: Int, sampleRate: Int) {
+        nsh_stream_push_pcm(
+            handle, pcm.baseAddress, pcm.count,
+            UInt16(clamping: channels), UInt32(clamping: sampleRate))
+    }
+
+    /// Plays `pcm` (as the buffer form).
+    public func push(pcm: [Float], channels: Int, sampleRate: Int) {
+        pcm.withUnsafeBufferPointer { push(pcm: $0, channels: channels, sampleRate: sampleRate) }
+    }
+
+    /// Ends the stream: the videos playing it show nothing from now on,
+    /// until the name is registered again.
+    public func end() {
+        nsh_stream_end(handle)
+    }
+}
+
+extension NshAppView {
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames (`CVPixelBuffer`s)
+    /// and audio (PCM) to what it returns. Applies to the videos naming it, now or later.
+    public func register(stream name: String) -> NshStream {
+        NshStream(nsh_app_register_stream(app, name)!)
+    }
+}
+
 /// Holds a registration's factory for the C callbacks.
 private final class ComponentFactoryBox {
     let make: @MainActor (NshComponentContext) -> NshComponent

@@ -33,65 +33,366 @@
 //!
 //! Without feature `video` (or when GStreamer cannot start), a video draws
 //! a neutral placeholder and reports `onError` for each source.
+//!
+//! A live stream (`srcObject`, `VideoProps::stream`) plays in both builds:
+//! the embedding app registers it by name and pushes BGRA frames
+//! ([`crate::stream`]), each a `RenderImage` made on the pushing thread,
+//! which the video's sink takes on the main thread into the same
+//! [`Picture`] the player paints, fit by `objectFit` like a decoded frame.
+//! A stream plays instead of the source (the pipeline goes while one
+//! shows): `onLoadStart` when the video attaches, `onLoad` with the first
+//! frame's size and a duration of 0, `paused` keeps the last frame, the
+//! end of the registration shows nothing. The state is [`Live`], shared
+//! by both items. A stream's frame is a `RenderImage` painted as above, or
+//! on macOS a full-range NV12 `CVPixelBuffer` the host pushed
+//! (`StreamHandle::push_pixel_buffer`), painted by GPUI's surface shader
+//! (`Window::paint_surface`) without a copy: clipped to the view's
+//! rectangle, but square-cornered and at full opacity (GPUI's surfaces
+//! take no corner radii or opacity).
+//!
+//! With feature `video`, each video showing a stream also plays its PCM
+//! audio ([`audio`]): an output attached while the stream shows, playing
+//! through GStreamer at the video's `volume`, dropping the samples while
+//! the video is paused or muted.
 
+#[cfg(feature = "video")]
+mod audio;
+
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+use gpui::RenderImage;
+use nsh_core::{EventKind, EventPayload, NodeId, PayloadValue, ResizeMode, VideoProps};
 #[cfg(not(feature = "video"))]
 pub(crate) use placeholder::VideoItem;
 #[cfg(feature = "video")]
 pub(crate) use player::VideoItem;
 
+use crate::{
+    native::{Emitter, Host},
+    render::DrawCx,
+    stream::{Attached, Frame, FrameContent, StreamEvent},
+    surface::Surface,
+};
+
+/// The picture a video shows: its frame, and whether it was painted (so it
+/// is in the sprite atlas), with the painted frames replaced since, to
+/// remove from the atlas at the next draw.
+#[derive(Default)]
+struct Picture {
+    frame: RefCell<Option<(Frame, bool)>>,
+    retired: RefCell<Vec<Arc<RenderImage>>>,
+}
+
+impl Picture {
+    /// Shows `frame` from the next draw on.
+    fn show(&self, frame: Frame) {
+        self.clear();
+        *self.frame.borrow_mut() = Some((frame, false));
+    }
+
+    /// The frame shown goes (removed from the atlas at the next draw).
+    fn clear(&self) {
+        if let Some((frame, painted)) = self.frame.borrow_mut().take()
+            && painted
+            && let Some(image) = frame.content.image()
+        {
+            self.retired.borrow_mut().push(image.clone());
+        }
+    }
+
+    /// The frame's size (pixels), if one shows.
+    #[cfg_attr(not(feature = "video"), allow(dead_code))]
+    fn size(&self) -> Option<(u32, u32)> {
+        self.frame
+            .borrow()
+            .as_ref()
+            .map(|(f, _)| (f.width, f.height))
+    }
+
+    /// The frames it painted leave the atlas with the next frame (the
+    /// item outlives its control while a removal animation shows its
+    /// last frame).
+    fn release(&self) {
+        let retired = std::mem::take(&mut *self.retired.borrow_mut());
+        let current = self
+            .frame
+            .borrow_mut()
+            .take()
+            .and_then(|(frame, _)| frame.content.image().cloned());
+        for image in retired.into_iter().chain(current).filter(unshared) {
+            crate::image::release_later(image);
+        }
+    }
+
+    /// Paints the frame fit by `mode` in a box of `size` (the caller clips
+    /// to it), after dropping the frames replaced since the last draw from
+    /// the atlas.
+    fn draw(&self, cx: &mut DrawCx<'_>, size: (f32, f32), mode: ResizeMode) {
+        let retired: Vec<_> = std::mem::take(&mut *self.retired.borrow_mut())
+            .into_iter()
+            .filter(unshared)
+            .collect();
+        if !retired.is_empty() {
+            cx.paint(|window, _| {
+                for image in retired {
+                    let _ = window.drop_image(image);
+                }
+            });
+        }
+        if cx.culled() {
+            return;
+        }
+        let (w, h) = size;
+        let mut slot = self.frame.borrow_mut();
+        let Some((frame, painted)) = &mut *slot else {
+            return;
+        };
+        let natural = (frame.width as f32, frame.height as f32);
+        let (x, y, fw, fh) = fit(mode, natural, size);
+        let boxed = cx.rect(0.0, 0.0, w, h);
+        let picture = cx.rect(x, y, fw, fh);
+        // GPUI rounds the sprite: the corners of the innermost rounded clip
+        // (the view's own or a parent's) it reaches.
+        match &frame.content {
+            FrameContent::Image(image) => {
+                let (bounds, corners) =
+                    cx.clip_rounded(boxed.intersect(&picture), gpui::Corners::default());
+                let image = image.clone();
+                cx.paint(|window, _| {
+                    let _ = window.paint_image(bounds, picture, corners, image, 0, false);
+                });
+            }
+            // The whole buffer stretched over the fit box; the clip (the
+            // caller's rectangle) cuts what lies outside the view.
+            #[cfg(target_os = "macos")]
+            FrameContent::Surface(buffer) => {
+                let buffer = buffer.retained();
+                cx.paint(|window, _| window.paint_surface(picture, buffer));
+            }
+        }
+        *painted = true;
+    }
+}
+
+/// Whether this picture is the image's last holder, so it may leave the
+/// atlas: a stream's frame is one image shared by every video showing it,
+/// and a paused video keeps painting one the others retired (it goes
+/// when that video retires it too).
+fn unshared(image: &Arc<RenderImage>) -> bool {
+    Arc::strong_count(image) == 1
+}
+
+/// A video's live stream (`srcObject`): the same with and without feature
+/// `video`.
+#[derive(Default)]
+struct Live {
+    /// The stream it shows, while `stream` names one.
+    attached: RefCell<Option<Attached>>,
+    /// Where the stream's audio plays while it shows, and its attachment
+    /// (dropped with the stream: the output stops).
+    #[cfg(feature = "video")]
+    audio: RefCell<Option<(nsh_core::stream::AudioAttachment, Arc<audio::Output>)>>,
+}
+
+impl Live {
+    /// A stream shows (the source path is off).
+    fn showing(&self) -> bool {
+        self.attached.borrow().is_some()
+    }
+
+    /// Applies `p.stream`: attaches to the stream it names when it is not
+    /// the one shown (`onLoadStart`; the frames come through the surface's
+    /// registry), pauses or resumes it, or detaches when it names none.
+    /// True while a stream shows.
+    fn apply(
+        &self,
+        surface: &Rc<Surface>,
+        id: NodeId,
+        emitter: &Emitter,
+        picture: &Picture,
+        p: &VideoProps,
+    ) -> bool {
+        let Some(name) = &p.stream else {
+            self.detach_audio();
+            if self.attached.borrow_mut().take().is_some() {
+                picture.clear();
+            }
+            return false;
+        };
+        let same = self
+            .attached
+            .borrow()
+            .as_ref()
+            .is_some_and(|a| **a.name() == **name);
+        if !same {
+            self.detach_audio();
+            self.attached.borrow_mut().take();
+            picture.clear();
+            emitter.emit(EventKind::LoadStart, || EventPayload::None);
+            // The sink runs on the main thread and finds the video again by
+            // surface key and node id: it holds nothing of the item.
+            let key = surface.key();
+            let sink = Box::new(move |event: StreamEvent<'_>| {
+                let Some(surface) = Surface::by_key(key) else {
+                    return;
+                };
+                // A frame landing while the hosts are mounted is dropped.
+                let hosts = match surface.native.hosts.try_borrow() {
+                    Ok(hosts) => hosts,
+                    Err(_) => return,
+                };
+                let item = match hosts.get(&id) {
+                    Some(Host::Video(item)) => item.clone(),
+                    _ => return,
+                };
+                drop(hosts);
+                item.stream_event(&surface, event);
+            });
+            let streams = surface.native.components().streams();
+            let attached = streams.attach(name, sink);
+            *self.attached.borrow_mut() = Some(attached);
+            #[cfg(feature = "video")]
+            {
+                let output = Arc::new(audio::Output::new());
+                let attachment = streams.attach_audio(name, output.clone());
+                *self.audio.borrow_mut() = Some((attachment, output));
+            }
+        }
+        if let Some(attached) = &*self.attached.borrow() {
+            attached.set_paused(p.paused);
+        }
+        #[cfg(feature = "video")]
+        if let Some((_, output)) = &*self.audio.borrow() {
+            output.set(p.paused, p.muted, p.volume);
+        }
+        true
+    }
+
+    /// The stream's audio stops playing here (its output goes).
+    fn detach_audio(&self) {
+        #[cfg(feature = "video")]
+        self.audio.borrow_mut().take();
+    }
+
+    /// A stream event, on the main thread: the frame shows (`onLoad` with
+    /// the first), or nothing after the end.
+    fn event(
+        &self,
+        surface: &Rc<Surface>,
+        emitter: &Emitter,
+        picture: &Picture,
+        event: StreamEvent<'_>,
+    ) {
+        match event {
+            StreamEvent::Frame { frame, first } => {
+                let size = (frame.width, frame.height);
+                picture.show(frame.clone());
+                if first {
+                    emitter.emit(EventKind::Load, || load_payload(0.0, size.0, size.1));
+                }
+            }
+            StreamEvent::Ended => picture.clear(),
+        }
+        surface.invalidate();
+    }
+
+    /// Stops hearing the stream (the picture stays; the audio stops).
+    fn detach(&self) {
+        self.detach_audio();
+        self.attached.borrow_mut().take();
+    }
+}
+
 #[cfg(not(feature = "video"))]
 mod placeholder {
     use std::{cell::RefCell, rc::Rc};
 
-    use nsh_core::{EventKind, NodeId, VideoProps};
+    use nsh_core::{EventKind, NodeId, ResizeMode, VideoProps};
 
+    use super::{Live, Picture};
     use crate::{
         image::AssetBase,
         native::{Emitter, error},
         render::DrawCx,
+        stream::StreamEvent,
         surface::Surface,
         view::Hosted,
     };
 
-    /// A video that cannot play.
+    /// A video that cannot play a source; a live stream it shows.
     pub(crate) struct VideoItem {
         emitter: Emitter,
+        id: NodeId,
         props: RefCell<Option<VideoProps>>,
+        picture: Picture,
+        live: Live,
     }
 
     impl VideoItem {
         pub(crate) fn new(surface: &Rc<Surface>, id: NodeId) -> Rc<Self> {
             Rc::new(VideoItem {
                 emitter: Emitter::new(surface, id),
+                id,
                 props: RefCell::new(None),
+                picture: Picture::default(),
+                live: Live::default(),
             })
         }
 
-        /// New props: each new source reports that it cannot play.
-        pub(crate) fn set(
-            &self,
-            _surface: &Rc<Surface>,
-            p: &VideoProps,
-            _base: Option<&AssetBase>,
-        ) {
+        /// New props: each new source reports that it cannot play; a
+        /// stream shows.
+        pub(crate) fn set(&self, surface: &Rc<Surface>, p: &VideoProps, _base: Option<&AssetBase>) {
             let old = self.props.borrow_mut().replace(p.clone());
-            if p.source.is_some() && old.is_none_or(|o| o.source != p.source) {
+            if self
+                .live
+                .apply(surface, self.id, &self.emitter, &self.picture, p)
+            {
+                surface.invalidate();
+                return;
+            }
+            if p.source.is_some() && old.is_none_or(|o| o.source != p.source || o.stream.is_some())
+            {
                 self.emitter.emit(EventKind::Error, || {
                     error("video playback is not available in this build".to_owned())
                 });
             }
+            surface.invalidate();
         }
 
         /// `seek(seconds)`.
         pub(crate) fn seek(&self, _seconds: f64) {}
 
-        /// The video's view was deleted.
-        pub(crate) fn close(&self) {}
+        /// The video's view was deleted: the stream stops drawing into it.
+        pub(crate) fn close(&self) {
+            self.live.detach();
+        }
+
+        /// An event of the stream it shows (main thread).
+        pub(crate) fn stream_event(&self, surface: &Rc<Surface>, event: StreamEvent<'_>) {
+            self.live
+                .event(surface, &self.emitter, &self.picture, event);
+        }
+    }
+
+    impl Drop for VideoItem {
+        fn drop(&mut self) {
+            self.picture.release();
+        }
     }
 
     impl Hosted for VideoItem {
         fn draw(&self, cx: &mut DrawCx<'_>, size: (f32, f32)) {
-            crate::native::placeholder(cx, size, "Video is not available");
+            if !self.live.showing() {
+                return crate::native::placeholder(cx, size, "Video is not available");
+            }
+            let mode = self
+                .props
+                .borrow()
+                .as_ref()
+                .map_or(ResizeMode::Contain, |p| p.resize_mode);
+            cx.push_clip_rect(0.0, 0.0, size.0, size.1);
+            self.picture.draw(cx, size, mode);
+            cx.pop();
         }
 
         fn hit(&self, _x: f32, _y: f32, _size: (f32, f32)) -> bool {
@@ -111,7 +412,7 @@ mod player {
         },
     };
 
-    use gpui::{RenderImage, px};
+    use gpui::px;
     use gstreamer as gst;
     use gstreamer::prelude::*;
     use gstreamer_app as gst_app;
@@ -119,12 +420,13 @@ mod player {
     use gstreamer_video::prelude::*;
     use nsh_core::{Color, EventKind, EventPayload, NodeId, PayloadValue, ResizeMode, VideoProps};
 
-    use super::{clock, finite, fit};
+    use super::{Live, Picture, clock, finite, load_payload};
     use crate::{
         image::AssetBase,
         input::{Cursor, PointerKind},
         native::{Emitter, Host, Location, error, locate},
         render::DrawCx,
+        stream::{Frame, StreamEvent},
         surface::Surface,
         view::{Hosted, ItemPointer},
     };
@@ -142,7 +444,7 @@ mod player {
     }
 
     /// Starts GStreamer once; false (logged once) when it cannot.
-    fn gst_ready() -> bool {
+    pub(super) fn gst_ready() -> bool {
         static READY: OnceLock<bool> = OnceLock::new();
         *READY.get_or_init(|| match gst::init() {
             Ok(()) => true,
@@ -151,12 +453,6 @@ mod player {
                 false
             }
         })
-    }
-
-    /// A decoded frame, ready to paint.
-    struct Frame {
-        image: Arc<RenderImage>,
-        size: (u32, u32),
     }
 
     /// What GStreamer's threads share with the main thread.
@@ -211,7 +507,8 @@ mod player {
         }
     }
 
-    /// A video: its pipeline and the picture its view shows.
+    /// A video: its pipeline (or the live stream it shows instead) and
+    /// the picture its view shows.
     pub(crate) struct VideoItem {
         emitter: Emitter,
         surface: Weak<Surface>,
@@ -222,11 +519,10 @@ mod player {
         serial: Cell<u64>,
         /// The props applied (`None` before the first).
         props: RefCell<Option<VideoProps>>,
-        /// The frame shown, and whether it was painted (so it is in the
-        /// sprite atlas).
-        frame: RefCell<Option<(Frame, bool)>>,
-        /// Painted frames replaced since, to remove from the atlas.
-        retired: RefCell<Vec<Arc<RenderImage>>>,
+        /// The picture shown: the pipeline's frames, or the stream's.
+        picture: Picture,
+        /// The live stream shown instead of the source, if any.
+        live: Live,
         /// Playing (not paused by the prop or the control bar).
         playing: Cell<bool>,
         /// The source reached its end (and does not loop).
@@ -256,8 +552,8 @@ mod player {
                 pipeline: RefCell::new(None),
                 serial: Cell::new(0),
                 props: RefCell::new(None),
-                frame: RefCell::new(None),
-                retired: RefCell::default(),
+                picture: Picture::default(),
+                live: Live::default(),
                 playing: Cell::new(false),
                 ended: Cell::new(false),
                 failed: Cell::new(false),
@@ -273,7 +569,19 @@ mod player {
         /// New props.
         pub(crate) fn set(&self, surface: &Rc<Surface>, p: &VideoProps, base: Option<&AssetBase>) {
             let old = self.props.borrow_mut().replace(p.clone());
-            if old.as_ref().is_none_or(|o| o.source != p.source) {
+            if self
+                .live
+                .apply(surface, self.id, &self.emitter, &self.picture, p)
+            {
+                // A live stream plays instead of the source: the pipeline
+                // goes, and is opened again when the source is back.
+                if self.pipeline.borrow().is_some() {
+                    self.close_source();
+                }
+            } else if old
+                .as_ref()
+                .is_none_or(|o| o.source != p.source || o.stream.is_some())
+            {
                 self.open(surface, p, base);
             } else if let Some(old) = &old {
                 if old.paused != p.paused {
@@ -291,9 +599,8 @@ mod player {
 
         /// Opens `p.source`, replacing the pipeline.
         fn open(&self, surface: &Rc<Surface>, p: &VideoProps, base: Option<&AssetBase>) {
-            self.serial.set(self.serial.get() + 1);
-            self.pipeline.borrow_mut().take();
-            self.retire_frame();
+            self.close_source();
+            self.picture.clear();
             self.ended.set(false);
             self.failed.set(false);
             self.loaded.set(false);
@@ -439,30 +746,24 @@ mod player {
             }
         }
 
-        /// The video's view was deleted: the pipeline stops.
+        /// The video's view was deleted: the pipeline stops, the stream
+        /// stops drawing into it (the picture stays for a removal
+        /// animation).
         pub(crate) fn close(&self) {
+            self.close_source();
+            self.live.detach();
+        }
+
+        /// Drops the pipeline; wakes for it are stale from now on.
+        fn close_source(&self) {
             self.serial.set(self.serial.get() + 1);
             self.pipeline.borrow_mut().take();
         }
 
-        /// The frames it painted leave the atlas with the next frame (the
-        /// item outlives its control while a removal animation shows its
-        /// last frame).
-        fn release(&self) {
-            let retired = std::mem::take(&mut *self.retired.borrow_mut());
-            let current = self.frame.borrow_mut().take().map(|(frame, _)| frame.image);
-            for image in retired.into_iter().chain(current) {
-                crate::image::release_later(image);
-            }
-        }
-
-        /// The frame shown goes (removed from the atlas at the next draw).
-        fn retire_frame(&self) {
-            if let Some((frame, painted)) = self.frame.borrow_mut().take()
-                && painted
-            {
-                self.retired.borrow_mut().push(frame.image);
-            }
+        /// An event of the stream it shows (main thread).
+        pub(crate) fn stream_event(&self, surface: &Rc<Surface>, event: StreamEvent<'_>) {
+            self.live
+                .event(surface, &self.emitter, &self.picture, event);
         }
 
         /// On the main thread after a wake: takes the new frame and handles
@@ -482,8 +783,7 @@ mod player {
                 (frame, pipeline.playbin.bus())
             };
             if let Some(frame) = frame {
-                self.retire_frame();
-                *self.frame.borrow_mut() = Some((frame, false));
+                self.picture.show(frame);
                 surface.invalidate();
                 self.try_load();
             }
@@ -576,7 +876,7 @@ mod player {
             if self.loaded.get() || !self.ready.get() {
                 return;
             }
-            let Some(size) = self.frame.borrow().as_ref().map(|(f, _)| f.size) else {
+            let Some(size) = self.picture.size() else {
                 return;
             };
             self.loaded.set(true);
@@ -624,10 +924,16 @@ mod player {
                 let Some(surface) = key.and_then(Surface::by_key) else {
                     return;
                 };
-                let item = match surface.native.hosts.borrow().get(&id) {
+                // A frame landing while the hosts are mounted is dropped.
+                let hosts = match surface.native.hosts.try_borrow() {
+                    Ok(hosts) => hosts,
+                    Err(_) => return,
+                };
+                let item = match hosts.get(&id) {
                     Some(Host::Video(item)) => item.clone(),
                     _ => return,
                 };
+                drop(hosts);
                 if !item.active() {
                     item.ticking.set(false);
                     return;
@@ -644,8 +950,9 @@ mod player {
             });
         }
 
+        /// The control bar shows (a live stream has no timeline for one).
         fn controls(&self) -> bool {
-            self.props.borrow().as_ref().is_some_and(|p| p.controls)
+            self.props.borrow().as_ref().is_some_and(|p| p.controls) && !self.live.showing()
         }
 
         fn resize_mode(&self) -> ResizeMode {
@@ -763,42 +1070,15 @@ mod player {
 
     impl Drop for VideoItem {
         fn drop(&mut self) {
-            self.release();
+            self.picture.release();
         }
     }
 
     impl Hosted for VideoItem {
         fn draw(&self, cx: &mut DrawCx<'_>, size: (f32, f32)) {
-            // Frames replaced since the last draw leave the atlas.
-            let retired = std::mem::take(&mut *self.retired.borrow_mut());
-            if !retired.is_empty() {
-                cx.paint(|window, _| {
-                    for image in retired {
-                        let _ = window.drop_image(image);
-                    }
-                });
-            }
             let (w, h) = size;
             cx.push_clip_rect(0.0, 0.0, w, h);
-            if !cx.culled() {
-                let mode = self.resize_mode();
-                let mut slot = self.frame.borrow_mut();
-                if let Some((frame, painted)) = &mut *slot {
-                    let natural = (frame.size.0 as f32, frame.size.1 as f32);
-                    let (x, y, fw, fh) = fit(mode, natural, size);
-                    let boxed = cx.rect(0.0, 0.0, w, h);
-                    let picture = cx.rect(x, y, fw, fh);
-                    // GPUI rounds the sprite: the corners of the innermost
-                    // rounded clip (the view's own or a parent's) it reaches.
-                    let (bounds, corners) =
-                        cx.clip_rounded(boxed.intersect(&picture), gpui::Corners::default());
-                    let image = frame.image.clone();
-                    cx.paint(|window, _| {
-                        let _ = window.paint_image(bounds, picture, corners, image, 0, false);
-                    });
-                    *painted = true;
-                }
-            }
+            self.picture.draw(cx, size, self.resize_mode());
             if self.controls() {
                 self.draw_bar(cx, size);
             }
@@ -912,19 +1192,7 @@ mod player {
         for y in 0..h as usize {
             pixels.extend_from_slice(data.get(y * stride..y * stride + row)?);
         }
-        let image = image::RgbaImage::from_raw(w, h, pixels)?;
-        Some(Frame {
-            image: Arc::new(RenderImage::new(vec![image::Frame::new(image)])),
-            size: (w, h),
-        })
-    }
-
-    fn load_payload(duration: f64, width: u32, height: u32) -> EventPayload {
-        EventPayload::Map(vec![
-            ("duration", PayloadValue::Number(finite(duration))),
-            ("width", PayloadValue::Number(width as f64)),
-            ("height", PayloadValue::Number(height as f64)),
-        ])
+        crate::stream::image_frame(w, h, pixels)
     }
 
     fn progress_payload(time: f64, duration: f64) -> EventPayload {
@@ -956,11 +1224,19 @@ mod player {
     }
 }
 
+/// `onLoad`'s payload: the duration (seconds; 0 for a live stream) and the
+/// picture's size (pixels).
+fn load_payload(duration: f64, width: u32, height: u32) -> EventPayload {
+    EventPayload::Map(vec![
+        ("duration", PayloadValue::Number(finite(duration))),
+        ("width", PayloadValue::Number(width as f64)),
+        ("height", PayloadValue::Number(height as f64)),
+    ])
+}
+
 /// Where a picture of `natural` size goes in a box of `size` (x, y, width,
 /// height).
-#[cfg(feature = "video")]
-fn fit(mode: nsh_core::ResizeMode, natural: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
-    use nsh_core::ResizeMode;
+fn fit(mode: ResizeMode, natural: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
     let (nw, nh) = natural;
     let (w, h) = size;
     if nw <= 0.0 || nh <= 0.0 || matches!(mode, ResizeMode::Stretch) {
@@ -996,15 +1272,12 @@ fn clock(seconds: f64) -> String {
 
 /// `x`, or 0 when it is not a finite number (live streams have no
 /// duration).
-#[cfg(feature = "video")]
 fn finite(x: f64) -> f64 {
     if x.is_finite() { x } else { 0.0 }
 }
 
-#[cfg(all(test, feature = "video"))]
+#[cfg(test)]
 mod tests {
-    use nsh_core::ResizeMode;
-
     use super::*;
 
     #[test]
@@ -1033,6 +1306,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "video")]
     #[test]
     fn formats_times() {
         assert_eq!(clock(0.0), "0:00");

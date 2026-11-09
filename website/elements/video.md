@@ -10,7 +10,7 @@ demo: el-video
 
 A video view plays a video file or stream with the platform's player: AVPlayer on iOS and Mac Catalyst, MediaPlayer on
 Android. Playback is controlled with props (`paused`, `muted`, `rate`, …), so the player follows your state like any
-other view. Rust makes one with `video(url)`, TSX with `<Video>` from `nsh`.
+other view. Rust makes one with `video()` and gives it a source with `.src(url)`, TSX with `<Video>` from `nsh`.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -22,7 +22,8 @@ fn player() -> impl IntoElement {
     view()
         .gap_3()
         .child(
-            video("https://example.com/clip.mp4")
+            video()
+                .src("https://example.com/clip.mp4")
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
@@ -83,7 +84,8 @@ A video takes the props of a [view](./view.md) (it has no children) plus:
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `src` | `video(url)` | `string` | | The video's URL (in Rust, an asset's `uri` too: `video(CLIP.uri)`). |
+| `src` | `.src(url)` | `string` | | The video's URL (in Rust, an asset's `uri` too: `video().src(CLIP.uri)`). |
+| `srcObject` | `.src_object(..)` | `HostStream \| null` | `null` | A live stream played instead of `src`: see [Live streams](#live-streams). |
 | `paused` | `.paused(..)` | `boolean` | `false` | Playback is paused. |
 | `muted` | `.muted(..)` | `boolean` | `false` | No sound. |
 | `volume` | `.volume(..)` | `number` | `1` | 0..1. |
@@ -110,7 +112,8 @@ an aspect ratio when you want the video's own proportions.
 ```rust tabs
 let ratio = signal(16.0_f32 / 9.0);
 
-video(url)
+video()
+    .src(url)
     .w_full()
     .aspect_ratio(ratio)
     .on_load(move |info: &VideoInfo| {
@@ -129,10 +132,48 @@ const ratio = signal(16 / 9);
 |---|---|---|
 | `seek(seconds)` | `seek(seconds)` | Jumps to a time. |
 
+## Live streams
+
+`srcObject` plays a live stream instead of `src`, as the DOM's `HTMLMediaElement.srcObject` does: a call's video, a
+camera. The page that runs the app owns the stream and registers it by name; the app names it with
+`HostStream.fromHost(name)` (Rust: `HostStream::from_host(name)`). The stream plays in the browser and never passes
+through the app's code. While `srcObject` is set it wins over `src`; `null` plays `src` again. A live stream reports
+its size in `onLoad`, with a `duration` of 0, and `seek` leaves it as it is.
+
+```tsx
+import { HostStream, Video } from "nsh";
+
+<Video srcObject={HostStream.fromHost("remote")} style={{ height: 220 }} />;
+```
+
+The page registers a stream with `player.registerStream(name, stream)` (its `web.host` module can, with the player it
+gets); `null` takes it away. A name nothing registered shows nothing, as a [native
+component](../docs/native-components.md) nothing registered does, and the console says so once. A front camera's
+preview is mirrored with the view's own transform: `style={{ transform: [{ scaleX: -1 }] }}` (Rust: `.scale_x(-1.0)`).
+
+Every platform plays streams: the web page registers one, and on iOS, macOS, Android, Windows, Linux and in GPUI
+apps the embedding app registers one and hands over its frames ([Live streams](../docs/native-components.md#live-streams)).
+The host hands over frames as bytes or as its platform's GPU buffers (a `CVPixelBuffer`, a `HardwareBuffer`, a
+Direct3D 11 texture, a dmabuf), shown without a copy, and the stream's sound, which plays with the video's `muted`,
+`volume` and `paused`.
+
+An app plays the streams its `nsh.json` grants by name in
+[`capabilities.streams`](../docs/sandbox-and-capabilities.md#streams), `true` for all of them, also when it declares no
+other capability:
+
+```json
+"capabilities": { "streams": ["remote", "call.*"] }
+```
+
+`HostStream.fromHost` with a name the capabilities do not grant throws an error with `code` `"ERR_ACCESS_DENIED"` and
+`permission` `"streams"`. On the web this covers the streams the page registers with its player; a browser
+`MediaStream` the app gives `srcObject` itself is the app's own.
+
 ## Capabilities
 
 When the app declares [capabilities](../docs/sandbox-and-capabilities.md), video sources load from the hosts `network`
-allows; a source on another host shows an empty view and reports `onError` with `code` `"ERR_ACCESS_DENIED"`.
+allows; a source on another host shows an empty view and reports `onError` with `code` `"ERR_ACCESS_DENIED"`. Live
+streams play by name from [`streams`](../docs/sandbox-and-capabilities.md#streams).
 
 ## Platform notes
 

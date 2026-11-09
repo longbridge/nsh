@@ -17,7 +17,12 @@ import java.util.Objects;
 /**
  * `<video>`: a {@code MediaPlayer} drawing into a {@code TextureView} (which,
  * unlike a SurfaceView, transforms, clips and animates like any view).
- * `controls` attaches the platform's {@code MediaController}.
+ * `controls` attaches the platform's {@code MediaController}. A live stream
+ * (`srcObject`, {@link NshStream}) plays instead of the source: its frames
+ * are drawn into the texture with a hardware canvas of its own surface
+ * (`paused` keeps the last one), and its sound plays in a
+ * {@link StreamAudio} by `paused`, `muted` and `volume`; `rate` and
+ * `controls` do not apply to it.
  */
 @SuppressLint("ViewConstructor")
 final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureListener,
@@ -27,6 +32,22 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
     private MediaPlayer player;
     private Surface surface;
     private String source;
+    /** The live stream it names (`srcObject`), and its entry and sound while attached. */
+    private String stream;
+    private Mounter.Stream attached;
+    private StreamAudio streamAudio;
+    /**
+     * The surface stream frames are drawn into, with a hardware canvas (a
+     * frame may be a {@code HardwareBuffer}, which only a hardware canvas
+     * draws): made at the first frame, released when the buffers change
+     * size (a hardware canvas takes the size the surface had when made) and
+     * when the stream detaches, which frees the texture's buffers for a
+     * player again.
+     */
+    private Surface frameSurface;
+    private final android.graphics.Rect frameBounds = new android.graphics.Rect();
+    /** Whether the stream's first frame was reported (`onLoad`). */
+    private boolean streamLoaded;
     private boolean prepared;
     private boolean paused, muted, repeat;
     private float volume = 1, rate = 1;
@@ -38,6 +59,8 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
     /** Audio focus while a `playback` video plays (`updateFocus`). */
     private AudioFocusRequest focusRequest;
     private boolean hasFocus;
+    /** The focus went to another app for a while as the stream's sound played: it comes back on GAIN. */
+    private boolean streamLost;
     private int videoWidth, videoHeight;
     private MediaController controller;
     private final Runnable progress = this::progress;
@@ -50,7 +73,7 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
     }
 
     void configure(String source, boolean paused, boolean muted, float volume, float rate, boolean repeat,
-            int resizeMode, boolean controls, float progressInterval, int audioSession) {
+            int resizeMode, boolean controls, float progressInterval, int audioSession, String stream) {
         this.paused = paused;
         this.muted = muted;
         this.volume = volume;
@@ -66,25 +89,170 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
                 abandonFocus();
                 focusRequest = null;
             }
+            if (streamAudio != null) streamAudio.setAttributes(streamAttributes());
         }
         if (resizeMode != this.resizeMode) {
             this.resizeMode = resizeMode;
             fit();
         }
-        if (controls && controller == null) {
+        if (controls && stream == null && controller == null) {
             controller = new MediaController(getContext());
             controller.setMediaPlayer(this);
             controller.setAnchorView(this);
-        } else if (!controls && controller != null) {
+        } else if ((!controls || stream != null) && controller != null) {
             controller.hide();
             controller = null;
         }
-        if (!Objects.equals(source, this.source) || reopen) {
-            this.source = source;
+        boolean streamChanged = !Objects.equals(stream, this.stream);
+        boolean sourceChanged = !Objects.equals(source, this.source);
+        this.stream = stream;
+        this.source = source;
+        if (stream != null) {
+            // A live stream plays instead of the URL: the player goes.
+            // Also after `destroyComponents` detached it, keeping `stream`.
+            if (streamChanged || streamAudio == null) {
+                detachStream();
+                release();
+                attachStream();
+            }
+            // The app plays it again by its props after another app took the focus.
+            streamLost = false;
+            streamAudio.setLost(false);
+            streamAudio.set(paused, muted, volume);
+            updateFocus();
+        } else if (streamChanged || sourceChanged || reopen) {
+            detachStream();
             open();
         } else {
             apply();
         }
+    }
+
+    // --- Live streams (`srcObject`) --------------------------------------------
+
+    /** Whether this video shows a stream. */
+    private boolean showing() {
+        return attached != null;
+    }
+
+    private void attachStream() {
+        streamAudio = new StreamAudio(streamAttributes(), () -> post(this::updateFocus));
+        streamAudio.set(paused, muted, volume);
+        attached = mounter.attachStream(stream, this, streamAudio);
+        if (mounter.wants(id, Native.LOAD_START)) mounter.event(id, Native.LOAD_START);
+        streamSized();
+    }
+
+    /** Whether a frame pushed now should draw: `paused` keeps the last one, but a video with none yet draws the first. */
+    private boolean streamWants() {
+        return !paused || !streamLoaded;
+    }
+
+    /**
+     * Draws a pushed frame into the texture (UI thread): the buffers are
+     * the frame's size (`streamSized`), so the canvas is too (the frame is
+     * scaled to it should they differ for a frame), and `fit` places it.
+     * The texture then reports the update (`onSurfaceTextureUpdated`: the
+     * first frame is `onLoad`).
+     */
+    void streamDraw(android.graphics.Bitmap frame) {
+        SurfaceTexture st = texture.getSurfaceTexture();
+        if (!showing() || !streamWants() || st == null) return;
+        if (frameSurface == null) frameSurface = new Surface(st);
+        android.graphics.Canvas c;
+        try {
+            c = frameSurface.lockHardwareCanvas();
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // The texture went between the check and the lock: the next
+            // frame finds it again, or none.
+            releaseFrameSurface();
+            return;
+        }
+        try {
+            c.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR);
+            frameBounds.set(0, 0, c.getWidth(), c.getHeight());
+            c.drawBitmap(frame, null, frameBounds, null);
+        } finally {
+            frameSurface.unlockCanvasAndPost(c);
+        }
+    }
+
+    private void releaseFrameSurface() {
+        if (frameSurface == null) return;
+        frameSurface.release();
+        frameSurface = null;
+    }
+
+    /** Stops showing the stream, if any: its frames stop drawing and its sound is released. */
+    void detachStream() {
+        if (attached == null) return;
+        mounter.detachStream(attached, this, streamAudio);
+        streamAudio.release();
+        streamAudio = null;
+        streamLost = false;
+        attached = null;
+        releaseFrameSurface();
+        updateFocus();
+        streamLoaded = false;
+        texture.setVisibility(VISIBLE);
+        videoWidth = 0;
+        videoHeight = 0;
+        // The buffers and the fit go back to the texture's own size (`fit`
+        // leaves the transform alone without a picture size).
+        SurfaceTexture st = texture.getSurfaceTexture();
+        if (st != null && texture.getWidth() > 0 && texture.getHeight() > 0) {
+            st.setDefaultBufferSize(texture.getWidth(), texture.getHeight());
+        }
+        texture.setTransform(null);
+    }
+
+    /** The stream's name was registered (again): the new registration's frames draw. */
+    void streamRegistered() {
+        streamLoaded = false;
+        texture.setVisibility(VISIBLE);
+        streamSized();
+    }
+
+    /**
+     * The stream ended: the texture hides, since its last frame stays in it
+     * until the stream draws again.
+     */
+    void streamEnded() {
+        streamLoaded = false;
+        texture.setVisibility(INVISIBLE);
+    }
+
+    /** The stream's size changed (a frame of another size): the buffers and the fit take it. */
+    void streamSized() {
+        if (!showing()) return;
+        videoWidth = attached.width;
+        videoHeight = attached.height;
+        streamBufferSize();
+        fit();
+    }
+
+    /**
+     * Sizes the texture's buffers to the stream's frames, so a `Canvas`
+     * locked on the surface is their size and the texture scales them by
+     * `fit`. The texture sets its buffers to its own size whenever it is
+     * resized, so this runs again after `onSurfaceTextureSizeChanged`.
+     */
+    private void streamBufferSize() {
+        SurfaceTexture st = texture.getSurfaceTexture();
+        if (st == null || !showing() || attached.width <= 0 || attached.height <= 0) return;
+        st.setDefaultBufferSize(attached.width, attached.height);
+        // A hardware canvas keeps the size its surface had: the next frame makes a new one.
+        releaseFrameSurface();
+    }
+
+    /** The stream's first frame reached the texture: `onLoad`, with no timeline. */
+    private void streamFrame() {
+        if (!showing() || streamLoaded) return;
+        streamLoaded = true;
+        int w = attached.width > 0 ? attached.width : texture.getWidth();
+        int h = attached.height > 0 ? attached.height : texture.getHeight();
+        mounter.eventMap(id, Native.LOAD, new String[] {"duration", "width", "height"},
+                new Object[] {0.0, (double) w, (double) h});
     }
 
     private void open() {
@@ -233,15 +401,28 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
                 .build();
     }
 
+    /** The attributes of a stream's sound: `audioSession`'s, or a movie's for `default` (an audio track needs some). */
+    private AudioAttributes streamAttributes() {
+        AudioAttributes attributes = audioAttributes();
+        if (attributes != null) return attributes;
+        return new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                .build();
+    }
+
     /**
      * Holds audio focus while a `playback` video plays, and only then: other
      * apps pause while it plays and resume once it pauses, ends or goes
      * (`AUDIOFOCUS_GAIN_TRANSIENT`). Speech pauses rather than ducks when
-     * another app takes the focus, and plays on when it comes back.
+     * another app takes the focus, and plays on when it comes back. A live
+     * stream's video plays while its sound does, and while it waits for the
+     * focus it lost for a while.
      */
     private void updateFocus() {
         MediaPlayer p = player;
-        boolean wanted = audioSession == 1 && p != null && prepared && p.isPlaying();
+        boolean stream = streamAudio != null && (streamAudio.sounding() || streamLost);
+        boolean wanted = audioSession == 1 && (stream || (p != null && prepared && p.isPlaying()));
         if (wanted == hasFocus) return;
         AudioManager manager = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
         if (manager == null) return;
@@ -261,6 +442,12 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
 
     private void focusChanged(int change) {
         MediaPlayer p = player;
+        if (streamAudio != null) {
+            // A stream's sound is dropped while the focus is away; for a
+            // while, the video keeps asking for it (`updateFocus`).
+            streamLost = change != AudioManager.AUDIOFOCUS_GAIN && change != AudioManager.AUDIOFOCUS_LOSS;
+            streamAudio.setLost(change != AudioManager.AUDIOFOCUS_GAIN);
+        }
         if (change == AudioManager.AUDIOFOCUS_GAIN) {
             hasFocus = true;
             if (p != null && prepared && !paused && !p.isPlaying()) p.start();
@@ -283,6 +470,7 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
 
     void destroy() {
         if (controller != null) controller.hide();
+        detachStream();
         release();
         abandonFocus();
         if (surface != null) {
@@ -297,17 +485,20 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
     public void onSurfaceTextureAvailable(SurfaceTexture st, int width, int height) {
         surface = new Surface(st);
         if (player != null) player.setSurface(surface);
+        streamBufferSize();
         fit();
     }
 
     @Override
     public void onSurfaceTextureSizeChanged(SurfaceTexture st, int width, int height) {
+        streamBufferSize();
         fit();
     }
 
     @Override
     public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
         if (player != null) player.setSurface(null);
+        releaseFrameSurface();
         if (surface != null) {
             surface.release();
             surface = null;
@@ -316,7 +507,9 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
     }
 
     @Override
-    public void onSurfaceTextureUpdated(SurfaceTexture st) {}
+    public void onSurfaceTextureUpdated(SurfaceTexture st) {
+        streamFrame();
+    }
 
     // --- MediaController.MediaPlayerControl ------------------------------------
     // The controller plays and pauses the player directly; JS learns about it

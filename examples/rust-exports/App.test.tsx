@@ -11,6 +11,13 @@ test("the module returns values at once and promises", async () => {
   await app.waitFor("Rate: 5%");
 });
 
+test("the live stream the crate registered plays in a video", async () => {
+  const app = await open("./App.tsx");
+  // The headless runner registers no stream: the video shows nothing.
+  if (app.shows("No host stream registered here")) return;
+  await app.waitFor("Host stream rust-exports.stream: 320×180");
+});
+
 test("the class keeps its state in Rust", async () => {
   const app = await open("./App.tsx");
   await app.press("Deposit $25");

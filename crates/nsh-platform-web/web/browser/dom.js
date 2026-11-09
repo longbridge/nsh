@@ -3,9 +3,23 @@
 const PLATFORM_PROPS = new Set(["ios", "android", "macos", "desktop", "web"]);
 
 export function createDom(invoke, values, reactive, live, wake) {
-  const handlers = new WeakMap(), owners = new WeakMap(), heldProps = new WeakMap();
-  let touches, measure, hot, platform;
+  const handlers = new WeakMap(), owners = new WeakMap(), heldProps = new WeakMap(), videos = new WeakSet(), streamed = new WeakSet();
+  let touches, measure, hot, platform, srcObjects;
   const prototype = Object.create(null);
+  // A video's `srcObject` that is the browser's own `MediaStream` (an NSH
+  // `HostStream` goes to the engine): the player plays it by view id. It
+  // lets go of it when the video's owner goes, not when the node is
+  // collected (`op_d`), so a stream stops showing with its view.
+  const videoStream = (node, stream) => {
+    if (!live()) throw new Error("the app was disposed");
+    const id = values.nodeIds.get(node);
+    if (stream && !streamed.has(node)) {
+      streamed.add(node);
+      const owner = owners.get(node);
+      if (owner) reactive.runWithOwner(owner, () => reactive.cleanup(() => live() && srcObjects?.(id, null)));
+    }
+    srcObjects?.(id, stream);
+  };
   for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "sendInput", "load", "seek"]) {
     prototype[name] = function (argument) { const id = values.nodeIds.get(this); if (id === undefined) throw new TypeError("nsh: not a node"); return call(314, [id, name, argument]); };
   }
@@ -58,6 +72,12 @@ export function createDom(invoke, values, reactive, live, wake) {
       return;
     }
     if (PLATFORM_PROPS.has(name)) { platformProps(node, name, value); return; }
+    if (name === "srcObject" && videos.has(node)) {
+      // One kind at a time: setting one clears the other.
+      const own = value != null && typeof value === "object" && !values.instances.has(value);
+      videoStream(node, own ? value : null);
+      if (own) value = null;
+    }
     call(303, [node, name, value]);
     hold(node, name, value);
   };
@@ -162,6 +182,7 @@ export function createDom(invoke, values, reactive, live, wake) {
     setTouches(value) { touches = value; },
     setPlatform(value) { platform = value; },
     setHot(value) { hot = value; },
+    setSrcObjects(value) { srcObjects = value; },
     rootProp: (name, value) => prop(root, name, value),
     listen(node, name, value) {
       let events = handlers.get(node);
@@ -169,7 +190,7 @@ export function createDom(invoke, values, reactive, live, wake) {
       if (typeof value === "function") events.set(name, value); else events.delete(name);
       call(309, [node, name, typeof value === "function"]);
     },
-    rt: { element: tag => call(300, [tag]), text: value => call(301, [String(value)]),
+    rt: { element: tag => { const node = call(300, [tag]); if (tag === "video") videos.add(node); return node; }, text: value => call(301, [String(value)]),
       prop, bindProp, insert, append, component, cond, each, merge, spread,
       metaUrl: path => new URL(path, document.baseURI).href,
       ref,

@@ -128,6 +128,15 @@ pub fn main() -> std::process::ExitCode {
         use nsh_dev::protocol::{DEFAULT_PORT, WS_PATH};
         AppSource::DevServer(format!("ws://127.0.0.1:{DEFAULT_PORT}{WS_PATH}"))
     });
+    // The test pattern every development host plays as `nsh/test-pattern`,
+    // so an app's tests can play a stream here (`nsh test --target macos`).
+    let pattern = options
+        .components
+        .register_reserved_stream(nsh_dev::pattern::NAME);
+    nsh_dev::pattern::start(move |bgra| {
+        use nsh_dev::pattern::{HEIGHT, STRIDE, WIDTH};
+        pattern.push_bgra(WIDTH, HEIGHT, STRIDE, bgra);
+    });
     run_app(source, options)
 }
 

@@ -238,6 +238,8 @@ shader::NavShaderSpec.duration                                   # time (millise
 shader::builtins(scale)                                          # pixels per point, a ratio
 shader::builtins(time)                                           # time
 shape::SMOOTHING                                                 # a corner smoothing factor
+stream::AudioOutput::write(samples)                              # PCM audio samples, -1..1
+stream::StreamHandle::push_pcm(samples)                          # PCM audio samples, -1..1
 style::Color::to_f64 ->                                          # color components
 style::LineHeight::Em.0                                          # a multiple of the element's font size
 style::LineHeight::Multiple.0                                    # a multiple of the font size

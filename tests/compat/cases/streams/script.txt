@@ -1,0 +1,14 @@
+# What a user does and sees (compat/apps.rs): each case after its tap.
+# props-media-video-stream
+tap id:case-props-media-video-stream
+expect Live compat-camera, empty TypeError, other ERR_ACCESS_DENIED
+prop id:live src https://example.com/fallback.mp4
+# A paused video of the stream reaches the platform as paused (which shows
+# the stream's first frame; headless nothing registers the stream).
+prop id:still paused true
+# Cleared and set again, the app runs on.
+tap id:swap
+expect Stopped compat-camera, empty TypeError, other ERR_ACCESS_DENIED
+tap id:swap
+expect Live compat-camera, empty TypeError, other ERR_ACCESS_DENIED
+covers [nsh] HostStream

@@ -151,6 +151,10 @@ pub struct VideoProps {
     pub controls: bool,
     /// Milliseconds between `onProgress` events.
     pub progress_interval_ms: f32,
+    /// The live stream it plays instead of `source`: the name the
+    /// embedding app registered it with
+    /// ([`HostStream`](crate::element::HostStream)).
+    pub stream: Option<Arc<str>>,
 }
 
 impl Default for VideoProps {
@@ -166,6 +170,7 @@ impl Default for VideoProps {
             resize_mode: ResizeMode::Contain,
             controls: false,
             progress_interval_ms: 250.0,
+            stream: None,
         }
     }
 }

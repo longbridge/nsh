@@ -69,7 +69,8 @@ fn Media() -> impl IntoElement {
             }),
         )
         .child(
-            video("https://example.com/clip.mp4")
+            video()
+                .src("https://example.com/clip.mp4")
                 .element_ref(&player)
                 .h(px(100.0))
                 .on_load(move |v: &VideoInfo| {
@@ -310,4 +311,51 @@ fn an_inline_page_follows_what_its_html_reads() {
     });
     seen.drain(&rx);
     assert_eq!(seen.html, ["<body class=light>", "<body class=dark>"]);
+}
+
+/// Videos given streams from Rust: one named, two with names that are not
+/// names (empty, too long), one cleared.
+#[component]
+fn Streams() -> impl IntoElement {
+    view()
+        .child(video().src_object(Some(HostStream::from_host("camera"))))
+        .child(video().src_object(Some(HostStream::from_host(""))))
+        .child(video().src_object(Some(HostStream::from_host("x".repeat(257)))))
+        .child(
+            video()
+                .src("https://example.com/a.mp4")
+                .src_object(None::<HostStream>),
+        )
+}
+
+#[test]
+fn a_videos_stream_from_rust_reaches_the_platform_by_name() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let _engine = Engine::start(
+        EngineConfig::new(Root::of::<Streams>()),
+        || ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .unwrap();
+    let mut videos: Vec<(NodeId, Option<String>)> = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while videos.len() < 4 && std::time::Instant::now() < deadline {
+        let Ok(batch) = rx.recv_timeout(Duration::from_millis(100)) else {
+            continue;
+        };
+        for item in batch.items {
+            if let MountItem::NativeProps {
+                id,
+                props: NativeProps::Video(v),
+            } = item
+            {
+                videos.retain(|(i, ..)| *i != id);
+                videos.push((id, v.stream.as_deref().map(str::to_owned)));
+            }
+        }
+    }
+    videos.sort_by_key(|(id, ..)| *id);
+    let seen: Vec<Option<String>> = videos.into_iter().map(|(_, s)| s).collect();
+    // A name of 1 to 256 bytes reaches the platform; others play nothing.
+    assert_eq!(seen, [Some("camera".to_owned()), None, None, None]);
 }

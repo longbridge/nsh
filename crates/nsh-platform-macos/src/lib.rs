@@ -69,6 +69,7 @@ pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{
     App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Limits, Root, perf,
 };
+pub use nsh_platform_apple::stream::{CVPixelBufferRef, StreamHandle};
 pub use objc2;
 pub use objc2_app_kit;
 pub use objc2_foundation;

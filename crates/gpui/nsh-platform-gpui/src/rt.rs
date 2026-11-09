@@ -69,13 +69,16 @@ pub(crate) fn init_test_app(cx: &mut App) -> impl Drop + use<> {
     Restore(APP.with(|a| a.borrow_mut().replace(cx.to_async())))
 }
 
-/// Runs `f` on the main thread, soon (in order with other calls).
-pub(crate) fn invoke(f: impl FnOnce() + Send + 'static) {
+/// Runs `f` on the main thread, soon (in order with other calls): whether
+/// it was queued (before the app's init, or after its queue closed, `f` is
+/// dropped and this is `false`).
+pub(crate) fn invoke(f: impl FnOnce() + Send + 'static) -> bool {
     match JOBS.get() {
-        Some(tx) => {
-            let _ = tx.unbounded_send(Box::new(f));
+        Some(tx) => tx.unbounded_send(Box::new(f)).is_ok(),
+        None => {
+            log::warn!("nsh-platform-gpui: invoke before init");
+            false
         }
-        None => log::warn!("nsh-platform-gpui: invoke before init"),
     }
 }
 

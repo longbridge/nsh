@@ -203,6 +203,7 @@ final class EmbedController: UIViewController {
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | 在主线程之外验证指定 URL 的包，然后运行它。被拒绝时抛出原因；正在运行的应用保持不变。 |
 | `connectDevServer(_ url: URL) throws` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用不含开发支持的 `NativeShell.xcframework` 时会抛出错误。 |
 | `register(component:_:)` | 注册一个[原生组件](./native-components.md)。 |
+| `register(stream:) -> NshStream` | 为 `<Video srcObject>` 注册一个[实时流](./native-components.md#实时流)：把它的帧以 `CVPixelBuffer` 推给 `NshStream`（`push(pixelBuffer:)`，不复制像素，BGRA 或相机、解码器给出的双平面 YUV 都可以），把音频以 PCM 推给它（`push(pcm:channels:sampleRate:)`，交错的 `Float`，每个视频按自己的 `paused`、`muted` 和 `volume` 播放）。 |
 | `params: [String: Any]` | 之后加载的应用的启动参数：应用在启动时以 `host.params` 读取（[`host`](../modules/nsh.md#host)）。 |
 | `send(_ name: String, _ data: Any? = nil)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。 |
 | `handle(_ name: String, _ handler:)` | 在主线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）：`{ data, reply in … }`，或一个 `async throws` 函数 `{ data in … }`，其结果即调用的回答。 |

@@ -198,6 +198,7 @@ again replaces the running app. The complete sample is
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
+| `registerStream(String name)` | Registers a [live stream](#live-streams) for `<Video srcObject>`: push its frames (BGRA bytes or `HardwareBuffer`s) and its PCM sound to the `NshStream` returned, from any thread. Names starting with `nsh/` are NSH's own. |
 | `setParams(Object params)` | The launch parameters of the apps loaded next (a `Map` or `JSONObject`): the app reads them at start as `host.params` ([`host`](../modules/nsh.md#host)). Returns `false` when they are not a JSON object. |
 | `send(String name, Object data)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. Any thread; returns `false` after `destroy()`. |
 | `handle(String name, HostHandler handler)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the UI thread; `null` removes the handler. The handler answers through its `NshHostReply`, once, from any thread. |
@@ -218,6 +219,55 @@ Each app keeps its storage under its own id with no setting: a signed package un
 nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
 nsh.loadAssetBundle("orders");
 ```
+
+## Live streams
+
+A video plays a live stream the host app registers, by name: `<Video srcObject={HostStream.fromHost("call.remote")}>`
+([Live streams](../elements/video.md#live-streams)). The host pushes the frames from any thread, as BGRA bytes (as
+the other platforms' SDKs take them) or as `HardwareBuffer`s: every video naming the stream draws the newest frame,
+fit by its `objectFit`, the first is `onLoad` (`duration` 0), `paused` keeps the last one.
+
+```java
+NshStream stream = nsh.registerStream("call.remote");
+// From the decoder's thread, for each frame: width × height pixels of BGRA, `stride` bytes per row (copied).
+stream.pushBgra(pixels, 1280, 720, 1280 * 4);
+// When the call ends: the videos show nothing until the name is registered again.
+stream.end();
+```
+
+A source that decodes or renders on the GPU (`MediaCodec` into an `ImageReader`, Camera2, a WebRTC renderer) pushes
+its `HardwareBuffer`s instead. On Android 10 (API 29) and later a buffer is drawn as it is, with no copy; on Android 8
+and 9 its pixels are read on the CPU and copied. A buffer is `RGBA_8888` or `RGBX_8888` with
+`USAGE_GPU_SAMPLED_IMAGE` (and `USAGE_CPU_READ_OFTEN` for Android 8 and 9). The stream holds the buffer while it may
+still draw it: close your own `HardwareBuffer` object after the push whenever you like, and with a pool of buffers
+keep at least three, so a buffer is written again only after two newer frames were pushed.
+
+```java
+ImageReader reader = ImageReader.newInstance(1280, 720, PixelFormat.RGBA_8888, 3,
+        HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE | HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
+reader.setOnImageAvailableListener(r -> {
+    try (Image image = r.acquireLatestImage()) {
+        if (image == null) return;
+        try (HardwareBuffer buffer = image.getHardwareBuffer()) { stream.pushHardwareBuffer(buffer); }
+    }
+}, decoderHandler);
+```
+
+The stream's sound is PCM: interleaved 32-bit floats in -1 to 1, 1 to 8 channels, 8 to 192 kHz, pushed from any
+thread as it comes. Each video showing the stream plays it in an `AudioTrack` of its own at its `volume`, drops it
+while `paused` or `muted`, and follows its `audioSession` (a `playback` video holds the audio focus while the sound
+plays). A track queues about 200 ms: the push never waits, and sound pushed faster than the device plays it is
+dropped. `end()` lets the queued sound play out.
+
+```java
+// From the audio thread, for each packet: 480 frames of stereo at 48 kHz (960 floats).
+stream.pushPcm(samples, 2, 48000);
+```
+
+Register the stream before loading the app, as native components are; a video that names the stream before the
+registration shows it once it comes, and a name nothing registered shows nothing, logged once. While no video shows
+the stream, a push costs nothing. Names starting with `nsh/` are NSH's own (the development host's test pattern,
+`nsh/test-pattern`). `rate` and `controls` do not apply to a stream.
 
 ## Talking to the app
 

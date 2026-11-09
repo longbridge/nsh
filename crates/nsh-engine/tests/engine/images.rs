@@ -34,6 +34,17 @@ fn start_with(
     pixel_ratio: f32,
     ui_sets: Vec<nsh_core::element::Registry>,
 ) -> (Engine, Receiver<MountBatch>) {
+    start_declaring(app, pixel_ratio, ui_sets, None)
+}
+
+/// [`start_with`] for an app declaring `declared` (`nsh.json`
+/// `capabilities`; `None`: no declaration).
+fn start_declaring(
+    app: &str,
+    pixel_ratio: f32,
+    ui_sets: Vec<nsh_core::element::Registry>,
+    declared: Option<nsh_core::access::Capabilities>,
+) -> (Engine, Receiver<MountBatch>) {
     static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nsh-variants-{}-{}",
@@ -64,7 +75,12 @@ fn start_with(
         },
         ui_sets,
         // SAFETY: compiled just now by this runtime.
-        ..EngineConfig::new(nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }))
+        ..EngineConfig::new(nsh_engine::App::Js(
+            unsafe { Bundle::bytecode(bytecode) }.with_policy(nsh_engine::Policy {
+                declared,
+                ..Default::default()
+            }),
+        ))
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -385,6 +401,115 @@ mount(() => (
             },
         ]
     );
+}
+
+/// Capabilities granting the streams `names`, and every host.
+fn streams(names: &[&str]) -> nsh_core::access::Capabilities {
+    nsh_core::access::Capabilities::from_json(&serde_json::json!({
+        "network": { "hosts": ["*"] },
+        "streams": names,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_videos_host_stream_reaches_the_platform_by_name() {
+    use nsh_core::NativeProps;
+    const APP: &str = r#"import { mount, HostStream, Text, Video, View, signal } from "nsh";
+
+const said = signal("");
+let denied = "none";
+try {
+  HostStream.fromHost("microphone");
+} catch (error) {
+  denied = `${error.code} ${error.permission} ${error.resource}`;
+}
+
+mount(() => (
+  <View>
+    <Video
+      src="https://example.com/a.mp4"
+      srcObject={HostStream.fromHost("camera")}
+      onError={({ message }) => said.set(`${said()} ${message}`)}
+    />
+    <Text>{`said:${said()} denied:${denied}`}</Text>
+  </View>
+));
+"#;
+    let (_engine, rx) = start_declaring(APP, 1.0, Vec::new(), Some(streams(&["camera"])));
+    let mut video = None;
+    let mut said = String::new();
+    for batch in sent(&rx) {
+        for item in batch.items {
+            match item {
+                MountItem::NativeProps {
+                    props: NativeProps::Video(v),
+                    ..
+                } => video = Some((v.source.clone(), v.stream.clone())),
+                MountItem::Text { text, .. } => said = text.text.to_string(),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        video,
+        Some((
+            Some("https://example.com/a.mp4".into()),
+            Some("camera".into())
+        ))
+    );
+    // A platform that plays no stream shows nothing for it and says nothing
+    // to the app, as for a native component it has not registered. A name
+    // the capabilities do not grant throws where the app asks for it.
+    assert_eq!(said, "said: denied:ERR_ACCESS_DENIED streams microphone");
+}
+
+/// A UI set's component playing streams from Rust, which
+/// `HostStream.fromHost`'s check never sees.
+mod stream_ui {
+    use nsh_core::{element::HostStream, prelude::*};
+
+    /// Videos of the streams `microphone` and `camera`.
+    #[component]
+    pub(crate) fn MicrophoneVideo() -> impl IntoElement {
+        view()
+            .child(video().src_object(Some(HostStream::from_host("microphone"))))
+            .child(video().src_object(Some(HostStream::from_host("camera"))))
+    }
+}
+
+#[test]
+fn a_stream_the_capabilities_do_not_grant_reaches_the_platform_as_none() {
+    use nsh_core::NativeProps;
+    const APP: &str = r#"import { mount, View } from "nsh";
+import { MicrophoneVideo } from "test/streams";
+
+mount(() => (
+  <View>
+    <MicrophoneVideo />
+  </View>
+));
+"#;
+    let mut set = nsh_core::element::Registry::ui_set("test/streams");
+    set.register::<stream_ui::MicrophoneVideo>();
+    let (_engine, rx) = start_declaring(APP, 1.0, vec![set], Some(streams(&["camera"])));
+    let mut videos: Vec<(NodeId, Option<String>)> = Vec::new();
+    for batch in sent(&rx) {
+        for item in batch.items {
+            if let MountItem::NativeProps {
+                id,
+                props: NativeProps::Video(v),
+            } = item
+            {
+                videos.retain(|(i, ..)| *i != id);
+                videos.push((id, v.stream.as_deref().map(str::to_owned)));
+            }
+        }
+    }
+    videos.sort_by_key(|(id, ..)| *id);
+    let seen: Vec<Option<String>> = videos.into_iter().map(|(_, s)| s).collect();
+    // The granted name reaches the platform; the other plays nothing.
+    assert_eq!(seen, [None, Some("camera".to_owned())]);
 }
 
 /// The image items of `batch` with their bytes: source URI and data.

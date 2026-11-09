@@ -190,6 +190,7 @@ export function createBrowserHost(player) {
         dom.setPlatform(env.api.platform);
         const gestures = createGestures(call, values, reactive, dom, active, requestPump);
         dom.setTouches(gestures);
+        dom.setSrcObjects((id, stream) => player.setVideoSrcObject(id, stream));
         dom.rt.setup = env.setup;
         const i18n = createI18n(reactive, call, env);
         dom.rt.i18n = i18n.setup;

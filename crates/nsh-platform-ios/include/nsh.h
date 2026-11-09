@@ -9,7 +9,9 @@
 #pragma once
 
 #import <UIKit/UIKit.h>
+#import <CoreVideo/CoreVideo.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -230,6 +232,36 @@ void nsh_component_set_size(const NshComponentContext *context, double width, do
 
 /// Frees a component's context.
 void nsh_component_context_free(NshComponentContext *_Nullable context);
+
+/// A live stream the app registered: where it pushes the frames.
+typedef struct NshStream NshStream;
+
+/// Registers live stream `name` (`HostStream.fromHost(name)` in JS, played
+/// by `<Video srcObject>`) and returns where to push its frames; free it
+/// with `nsh_stream_free`, which ends the stream. Main thread.
+NshStream *_Nullable nsh_app_register_stream(NshApp *app, const char *name);
+
+/// Shows `buffer` in the videos playing the stream without copying its
+/// pixels: any format AVSampleBufferDisplayLayer takes (32BGRA, 420v,
+/// 420f, ...). Retained while nsh shows it; do not write to it afterwards.
+/// The newest frame wins; nothing is done while no video shows the stream.
+/// Any thread.
+void nsh_stream_push_pixel_buffer(const NshStream *stream, CVPixelBufferRef _Nullable buffer);
+
+/// Plays `count` samples in the videos playing the stream: interleaved
+/// floats in -1 to 1, `channels` per frame (1 to 8), `sample_rate` frames a
+/// second (8000 to 192000), copied before it returns. Each video applies
+/// its `paused`, `muted` and `volume`, and drops what would wait more than
+/// about 200 ms. Any thread, one at a time, in order.
+void nsh_stream_push_pcm(const NshStream *stream, const float *_Nullable samples, size_t count,
+                         uint16_t channels, uint32_t sample_rate);
+
+/// Ends the stream: the videos playing it show nothing from now on. Any
+/// thread.
+void nsh_stream_end(const NshStream *stream);
+
+/// Frees a stream's handle, ending the stream.
+void nsh_stream_free(NshStream *_Nullable stream);
 
 /// The launch parameters of the apps `app` loads from now on (`host.params`,
 /// read when an app starts): a JSON object, or NULL for none. Returns why

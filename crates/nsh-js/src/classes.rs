@@ -188,7 +188,7 @@ impl Trace for ClassObject {
 impl Object for ClassObject {}
 
 /// The instance object `v` holds (any class's), if it is one.
-fn instance_of(cx: Ctx, v: Raw) -> Option<Rc<dyn ClassInstance>> {
+pub(crate) fn instance_of(cx: Ctx, v: Raw) -> Option<Rc<dyn ClassInstance>> {
     web::peek::<ClassObject, _>(cx, v, |o| o.instance.clone())
 }
 

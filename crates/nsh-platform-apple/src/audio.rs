@@ -279,7 +279,7 @@ fn read(path: &std::path::Path, max: Duration) -> Result<(Decoded, AudioEvent), 
 ///
 /// `error` must be null or an `NSError` the caller owns no reference to
 /// (an autoreleased out parameter).
-unsafe fn describe(error: *mut AnyObject, fallback: &str) -> String {
+pub(crate) unsafe fn describe(error: *mut AnyObject, fallback: &str) -> String {
     if error.is_null() {
         return fallback.to_owned();
     }
@@ -925,7 +925,7 @@ fn load(framework: &CStr) -> bool {
     loaded
 }
 
-fn av_foundation() -> bool {
+pub(crate) fn av_foundation() -> bool {
     static LOADED: OnceLock<bool> = OnceLock::new();
     *LOADED.get_or_init(|| load(c"/System/Library/Frameworks/AVFoundation.framework/AVFoundation"))
 }

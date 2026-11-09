@@ -908,7 +908,21 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 - **Videos** are `<video>`s: `onLoadStart`, `onLoad` (`loadedmetadata`), `onProgress` on a timer at
   `progressUpdateInterval` while playing, `onBuffer` (`waiting` / `playing` / `canplay`), `onEnd`, `onError`; a
   deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
-  gesture (a warning says so).
+  gesture (a warning says so). A live stream (`srcObject`) comes two ways. An NSH `HostStream` (a `#[class]`,
+  `runtime/host_stream.rs`) is decoded by the core into `NativeProp::SrcObject(name)`: the browser decoder reads the
+  instance through the running app's class table (`compat::Value::class_instance`), QuickJS through
+  `classes::instance_of`. It reaches `op_video` as the stream's name, which `registerStream(name, stream)` maps to the
+  page's `MediaStream` (`hostStreams`), when `capabilities.streams` grants the name (`HostStream.fromHost` throws
+  otherwise, and the core sends none; `docs/dev/sandbox.md`); a name nothing registered shows nothing (not `src` either) and is warned
+  about once per name (`missingStreams`), as `op_comp` does for a native component. A `MediaStream` of the
+  browser's own (`getUserMedia()`, an `RTCPeerConnection`'s track, a canvas's `captureStream()`; apps are typed
+  without the DOM, so TSX passes one `as never`) never reaches the engine: `browser/dom.js` hands it to the player by
+  view id (`setVideoSrcObject`, `srcObjects`) and sends the engine `null`. It wins over a registered one, as both win
+  over `src` (`videoStream`, `videoSource`). The player lets go of it when the video's owner is cleaned up (a cleanup
+  run under the node's owner, so an effect's rerun keeps it), when `srcObject` changes and when a run starts. Events
+  report a live stream's `Infinity` duration (and an unknown `NaN`) as 0 (`mediaDuration`), and `seek` leaves a
+  stream as it is. The core checks a stream's name (1 to 256 bytes); it tells no platform apart (every backend plays
+  them: `embedding.md` "Live streams").
 - **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
 - **The host** (`nsh`'s `host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
   `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;

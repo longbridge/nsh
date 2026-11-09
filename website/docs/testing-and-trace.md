@@ -488,6 +488,10 @@ once it does. `--web-host <module>` names another module. The app's `capabilitie
 the page. A call's timeout and the host's own timers run on the app's time, so a manual clock moves them
 (`app.clock.runFor`). In a browser (`--target web`) the development page runs `nsh.json`'s `web.host` for each app as a
 published page does; on the other platforms (`--target`) the apps have no host: `host.available()` is `false`.
+Every development host does register one live stream, `nsh/test-pattern` (a 320×180 test pattern at 30 frames a
+second), so a test can play a stream on any platform: `<Video srcObject={HostStream.fromHost("nsh/test-pattern")}>`
+loads with that size ([Live streams](./native-components.md#live-streams)) in an app whose `nsh.json` grants it
+(`"capabilities": { "streams": ["nsh/test-pattern"] }`); headless, nothing registers it and the video shows nothing.
 
 ```tsx
 // nsh.json: { "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }

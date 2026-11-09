@@ -53,6 +53,62 @@ test("platform props set the props of the web's and the desktop's objects and ig
   assert.deepEqual(props(), []);
 });
 
+test("a video's srcObject of the browser's own goes to the player, an NSH HostStream to the engine", () => {
+  const values = new Values();
+  const calls = [];
+  const invoke = (op, args) => { calls.push([op, args]); return op === 300 ? values.makeNode(args[0] === "video" ? 2 : 4) : undefined; };
+  // Cleanups run with the owner they were registered under.
+  const cleanups = [];
+  let current = "render";
+  const reactive = {
+    getOwner: () => current,
+    runWithOwner: (owner, fn) => { const was = current; current = owner; try { return fn(); } finally { current = was; } },
+    cleanup: (fn) => cleanups.push([current, fn]),
+  };
+  let alive = true;
+  const dom = createDom(invoke, values, reactive, () => alive, () => {});
+  dom.setPlatform({ os: "web", desktop: true });
+  const given = [];
+  dom.setSrcObjects((id, stream) => given.push([id, stream]));
+  const video = dom.rt.element("video");
+  const stream = { id: "browser" };
+  const handle = { name: "remote" };
+  values.instances.set(handle, 1);
+  const engine = () => calls.filter(([op, [, name]]) => op === 303 && name === "srcObject").map(([, [, , value]]) => value);
+
+  // The browser's own: to the player, the engine told none.
+  dom.rt.prop(video, "srcObject", stream);
+  assert.deepEqual(given, [[2, stream]]);
+  assert.deepEqual(engine(), [null]);
+
+  // An NSH HostStream: to the engine, the player's own cleared.
+  given.length = 0;
+  dom.rt.prop(video, "srcObject", handle);
+  assert.deepEqual(given, [[2, null]]);
+  assert.deepEqual(engine(), [null, handle]);
+
+  // Only a video's goes to the player.
+  given.length = 0;
+  const view = dom.rt.element("view");
+  dom.rt.prop(view, "srcObject", stream);
+  assert.deepEqual(given, []);
+
+  // The cleanup is the video's owner's (not the effect a reactive prop runs
+  // in, which reruns), registered once, and clears its stream.
+  current = "effect";
+  dom.rt.prop(video, "srcObject", stream);
+  dom.rt.prop(video, "srcObject", { id: "other" });
+  assert.equal(cleanups.length, 1);
+  assert.equal(cleanups[0][0], "render");
+  given.length = 0;
+  cleanups[0][1]();
+  assert.deepEqual(given, [[2, null]]);
+
+  // A disposed app sets no stream.
+  alive = false;
+  assert.throws(() => dom.rt.prop(video, "srcObject", stream), /disposed/);
+});
+
 test("browser web view refs forward sendInput to the command bridge", () => {
   const values = new Values();
   const calls = [];

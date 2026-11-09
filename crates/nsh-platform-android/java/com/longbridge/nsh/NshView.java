@@ -483,6 +483,35 @@ public class NshView extends FrameLayout {
     }
 
     /**
+     * Registers live stream {@code name} ({@code HostStream.fromHost(name)}
+     * in JS, a {@code Video}'s {@code srcObject}), replacing an earlier
+     * registration: push its frames ({@link NshStream#pushBgra},
+     * {@link NshStream#pushHardwareBuffer}) and its sound
+     * ({@link NshStream#pushPcm}) to the stream, from any thread, and every
+     * video naming it plays them. UI thread.
+     *
+     * Names starting with {@code nsh/} are NSH's own: registering one logs a
+     * warning (once per name) and returns a stream registered nowhere, whose
+     * pushes cost nothing and which no video shows.
+     *
+     * @param name the name JS uses
+     * @return the stream: where the frames and sound go, and how to end it
+     */
+    public NshStream registerStream(String name) {
+        if (name.startsWith("nsh/")) return mounter.refuseStream(name);
+        return mounter.registerStream(name);
+    }
+
+    /**
+     * {@link #registerStream} without the check of reserved names: NSH's
+     * own hosts register {@code nsh/} names with it (the development host's
+     * test pattern, {@code nsh/test-pattern}).
+     */
+    NshStream registerReservedStream(String name) {
+        return mounter.registerStream(name);
+    }
+
+    /**
      * The launch parameters of the apps loaded from now on: what the app
      * reads synchronously at start as {@code host.params} ({@code nsh/host}),
      * such as the conversation a notification opens. A running app keeps the

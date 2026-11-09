@@ -2929,6 +2929,18 @@ pub enum NativeProp {
         on = VIDEO
     )]
     AudioSession(crate::AudioSession),
+    /// `srcObject` (videos): the live stream it plays instead of `src`, by
+    /// the name the embedding app registered it with
+    /// ([`HostStream`](crate::element::HostStream)). Typed by hand in
+    /// `Video`'s props: its TS type is the `HostStream` class.
+    #[prop(
+        js = "srcObject",
+        with = crate::js::host_values::src_object,
+        reset = NativeProp::SrcObject(None),
+        internal,
+        on = VIDEO
+    )]
+    SrcObject(Option<Arc<str>>),
 }
 
 /// A mutation produced by the JS renderer.

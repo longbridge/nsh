@@ -94,6 +94,11 @@ pub(crate) fn get() -> Result<std::rc::Rc<Gfx>> {
     Ok(g)
 }
 
+/// The thread's devices if they were made, without making them.
+pub(crate) fn current() -> Option<std::rc::Rc<Gfx>> {
+    GFX.with(|g| g.borrow().clone())
+}
+
 /// The device was lost: drops it (the next [`get`] makes a new one) and
 /// invalidates device resources made so far.
 pub(crate) fn lost() {

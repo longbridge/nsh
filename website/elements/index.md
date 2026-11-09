@@ -88,7 +88,7 @@ Imported from `nsh` in TSX, from `nsh_core::prelude` in Rust.
 | `<Canvas>` | `canvas(painter)` | a view replaying a 2D drawing | [Canvas](./canvas.md) |
 | `<Shader>` | `shader(program)` | a view whose box a WGSL program draws on the GPU, under its children | [Shader](./shader.md) |
 | `<WebView>` | `web_view(url)`, `web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
-| `<Video>` | `video(url)` | AVPlayerLayer / MediaPlayer on a TextureView | [Video](./video.md) |
+| `<Video>` | `video().src(url)` | AVPlayerLayer / MediaPlayer on a TextureView | [Video](./video.md) |
 | `<Overlay>` | `overlay()` | a view on top of the window (or the dialog it is in), placed against an anchor | [Overlay](./overlay.md) |
 | `<If>`, `<Each>` | `when(..)`, `each(..)`, `dynamic(..)` | control flow: the elements they choose | [Control flow](./control-flow.md) |
 | `<InputAccessoryView>` (`nsh/mobile`) | `input_accessory_view(id)` | a bar over the keyboard on iOS | [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview) |

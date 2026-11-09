@@ -605,6 +605,15 @@ pub(crate) fn deceleration<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Sc
     }))
 }
 
+/// `srcObject` (videos): a `HostStream`'s name, `null` for none.
+pub(crate) fn src_object<I: HostInput>(input: &I, _: &mut HostCx) -> Option<crate::NativeProp> {
+    if input.is_nullish() {
+        return Some(crate::NativeProp::SrcObject(None));
+    }
+    let name = crate::runtime::host_stream_name(input.class_instance()?)?;
+    Some(crate::NativeProp::SrcObject(Some(name)))
+}
+
 /// `maintainVisibleContentPosition`: `{ autoscrollToBottomThreshold }`.
 pub(crate) fn visible_content<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::FollowEnd(

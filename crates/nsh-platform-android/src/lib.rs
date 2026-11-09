@@ -23,6 +23,7 @@ mod animation;
 #[cfg(feature = "dev")]
 mod dev;
 mod encode;
+mod hardware_buffer;
 mod host;
 mod java;
 mod keymap;

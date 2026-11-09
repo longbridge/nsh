@@ -40,7 +40,9 @@ crates/
                        pointer decisions (`input.rs`: what a pointer may start, presses, hover, hit areas, wheel latching),
                        navigation decisions (`navigation.rs`: stacks' screens, transitions' timing and motion, what going back
                        acts on), one view's transitions, layout animations and keyframes (`transition.rs`: curves,
-                       interpolation, timing), scroll views' state and physics (`scroll.rs`);
+                       interpolation, timing), scroll views' state and physics (`scroll.rs`), the registry of the
+                       live streams `<Video srcObject>` plays (`stream.rs`: names, the newest frame, the sinks'
+                       rules; the backends give the frame type and the hop to their main thread);
                        Rust components that run once (`element/`: signals, elements, bindings, typed styles, design tokens;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`element/class.rs`), JS's calls into
                        Rust and what comes back, typed (`element/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
@@ -544,8 +546,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 What apps call to build UI in Rust stays stable and strongly typed:
 
 - Element constructors take no content: `shader()`, then builder methods (`.source(program)`, `.uniform(..)`), so a
-  new input is a new method, never a changed signature. Existing constructors that take their content
-  (`canvas(painter)`, `video(url)`) are not a model for new ones.
+  new input is a new method, never a changed signature. An existing constructor that takes its content
+  (`canvas(painter)`) is not a model for new ones.
 - Names NSH defines (style properties, built-in values) are typed; names the app defines in its own code (a
   shader's uniforms, declared in its WGSL) are plain `&str`, as TSX's keys are, checked where they are defined.
 - Values are typed (`impl Into<UniformValue>`, `Hsla`, `Points`), not strings to parse.

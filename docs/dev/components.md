@@ -242,7 +242,7 @@ reasons: `reactive-components.md`.
 - **Elements** are `view()`, `text(..)` (its `.child(..)`ren are spans, as nested `<Text>`s: texts with styles and
   presses of their own, strings, inline views and images, regions; the core merges them into one paragraph),
   `image(..)`, the other host elements (`input()`, `scroll()`, `nsh_base`'s `nav_stack()` of `nav_page()`s and
-  `dialog()`, `canvas(painter)`, `svg(src)` (an SVG drawn as authored, from an `ImageSrc` as `image`'s or `ImageSrc::svg_markup(text)`: `docs/dev/canvas.md` "SVGs"), `web_view(url)` / `web_view_html(html, base_url)`, `video(url)`,
+  `dialog()`, `canvas(painter)`, `svg(src)` (an SVG drawn as authored, from an `ImageSrc` as `image`'s or `ImageSrc::svg_markup(text)`: `docs/dev/canvas.md` "SVGs"), `web_view(url)` / `web_view_html(html, base_url)`, `video()` (`.src(url)`, `.src_object(stream)`),
   `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty on Android), `native(name)` for the
   embedder's components; `element/host.rs`), strings (as texts) and other components, made as primitives are
   (`chip().label("New").on_press(move || ..)`, below). `.child(..)` (an element, or

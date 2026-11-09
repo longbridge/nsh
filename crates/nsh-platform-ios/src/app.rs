@@ -56,6 +56,12 @@ pub struct AppOptions {
     /// Logs the performance monitor's readings once a second
     /// ([`SurfaceOptions::fps`]).
     pub fps: bool,
+    /// Registers on the view's native components and live streams
+    /// ([`SurfaceOptions::components`]) before the app runs, as the
+    /// development host registers `nsh/test-pattern`
+    /// (`Components::register_stream`). A function, since the options wait
+    /// in a static for the scene to come (a registry is main-thread only).
+    pub setup: Option<fn(&crate::component::Components)>,
 }
 
 /// Whether `path` is inside the app's own bundle (which the system verifies
@@ -242,6 +248,13 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
                 .data_dir
                 .or_else(|| SurfaceOptions::default().data_dir),
             cache: options.cache,
+            components: {
+                let components = crate::component::Components::default();
+                if let Some(setup) = options.setup {
+                    setup(&components);
+                }
+                components
+            },
             // An app on its own (the development host, the release runner),
             // not a module embedded in another app.
             limits: nsh_engine::Limits::standalone(),

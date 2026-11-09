@@ -458,7 +458,8 @@ pub fn player() -> impl IntoElement {
         .p(px(16.0))
         .gap(px(12.0))
         .child(
-            video("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4")
+            video()
+                .src("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4")
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
@@ -525,7 +526,7 @@ mount(Player);
 
 Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. The ref has `seek(seconds)`.
 
-In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `object_fit(ResizeMode::Contain)` (the `objectFit` style), `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
+In Rust, `video()` makes the player and `.src(url)` gives it its source (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `object_fit(ResizeMode::Contain)` (the `objectFit` style), `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -553,7 +554,7 @@ With `controls`, the platform draws its own play button, scrubber and full-scree
 ```rust tabs
 view()
     .h(px(220.0))
-    .child(video(url).paused(paused).flex_1())
+    .child(video().src(url).paused(paused).flex_1())
     .child(
         view()
             .absolute()
@@ -582,6 +583,20 @@ view()
 ```
 
 Video sources are network requests: with declared capabilities, the video's host must be allowed under `network` in `nsh.json`, as for `fetch` and remote images. A refused source shows nothing, and the refusal is logged once with the key to add.
+
+### Live streams
+
+A video plays a live stream instead of a file with `srcObject`, as the DOM's `HTMLMediaElement.srcObject`: a call's
+video, a camera. The embedding page registers the stream by name and the app names it with
+`HostStream.fromHost(name)`; the frames stay with the page and never pass through the app's code. The app plays the
+streams `nsh.json` grants by name in [`capabilities.streams`](./sandbox-and-capabilities.md#streams). See [Live
+streams](../elements/video.md#live-streams).
+
+```tsx
+import { HostStream, Video } from "nsh";
+
+<Video srcObject={HostStream.fromHost("remote")} muted style={{ height: 220 }} />;
+```
 
 ## Related
 

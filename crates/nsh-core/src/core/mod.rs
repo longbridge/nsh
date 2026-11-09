@@ -5351,6 +5351,30 @@ impl<M: TextEngine> Core<M> {
                     // `disabled:` classes, on any element.
                     self.set_disabled(key, d);
                 }
+                // A stream's name is 1 to 256 bytes (Rust's
+                // `HostStream::from_host` takes any) and granted by
+                // `capabilities.streams` (checked here too, since Rust
+                // components skip `HostStream.fromHost`'s check): another
+                // plays nothing, logged once per name. A platform that does
+                // not play streams yet shows nothing for one, as it does for
+                // a native component it has not registered: the prop means
+                // the same everywhere.
+                let prop = match prop {
+                    NativeProp::SrcObject(Some(name)) => {
+                        match crate::element::HostStream::checked(&name) {
+                            Err(why) => {
+                                log::warn!(target: "js", "{why}");
+                                NativeProp::SrcObject(None)
+                            }
+                            Ok(()) if !self.access.allows_stream(&name) => {
+                                self.deny(stream_not_granted(&name));
+                                NativeProp::SrcObject(None)
+                            }
+                            Ok(()) => NativeProp::SrcObject(Some(name)),
+                        }
+                    }
+                    prop => prop,
+                };
                 let node = &mut self.nodes[key as usize];
                 // The platforms make a web view with its website data store
                 // and the URL schemes it serves, from its first props.
@@ -9404,6 +9428,12 @@ fn not_granted(what: &str, uri: &str, capability: &str) -> String {
     format!("{what} {uri} is not granted: {advice}")
 }
 
+/// Why a video plays nothing for stream `name`: what the app's
+/// capabilities do not grant ([`crate::access::Access::allows_stream`]).
+pub(crate) fn stream_not_granted(name: &str) -> String {
+    format!("the stream `{name}` is not granted: add it to `streams` in capabilities in nsh.json")
+}
+
 /// Applies one property to a control.
 fn apply_native(control: &mut NativeProps, prop: NativeProp) {
     use NativeProp as P;
@@ -9460,6 +9490,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::Video(p), P::Src(v)) => p.source = v,
         (NativeProps::Video(p), P::Paused(v)) => p.paused = v,
         (NativeProps::Video(p), P::Muted(v)) => p.muted = v,
+        (NativeProps::Video(p), P::SrcObject(v)) => p.stream = v,
         (NativeProps::Video(p), P::Volume(v)) => p.volume = v.clamp(0.0, 1.0),
         (NativeProps::Video(p), P::Rate(v)) => p.rate = v.max(0.0),
         (NativeProps::Video(p), P::Repeat(v)) => p.repeat = v,

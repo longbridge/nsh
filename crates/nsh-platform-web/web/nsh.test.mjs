@@ -1892,3 +1892,143 @@ test("a key event without `key` falls back to its physical key instead of throwi
   assert.equal(keyCode({}), -1);
   assert.equal(keyCode({ key: "a", code: "KeyA" }), 97);
 });
+
+/** A `<video>` element's media state: its `src` attribute, stream and playing. */
+function fakeVideo() {
+  const attributes = new Map();
+  return {
+    style: {},
+    srcObject: null,
+    paused: true,
+    plays: 0,
+    set src(value) { attributes.set("src", value); },
+    getAttribute: (name) => attributes.get(name) ?? null,
+    removeAttribute: (name) => attributes.delete(name),
+    play() { this.plays += 1; this.paused = false; return Promise.resolve(); },
+    pause() { this.paused = true; },
+  };
+}
+
+function videoPlayer() {
+  const { player } = fakePlayer();
+  Object.assign(player, { views: new Map(), srcObjects: new Map(), hostStreams: new Map(), asset: (src) => src });
+  return player;
+}
+
+// `op_video`'s fields after the id: src, paused, muted, volume, rate, repeat, fit, controls, progress
+// interval, the name of its `HostStream`.
+const videoOp = (id, src, paused = false, stream = null) =>
+  ["video", id, src, paused, true, 1, 1, false, "contain", false, 0, stream];
+
+test("a video's srcObject set before its element exists is applied by its props, and wins over src", () => {
+  const player = videoPlayer();
+  const stream = { id: "stream" };
+  player.setVideoSrcObject(2, stream);
+  const video = fakeVideo();
+  player.views.set(2, { _id: 2, _video: video, _events: new Set() });
+  player.op_video(videoOp(2, "movie.mp4"));
+  assert.equal(video.srcObject, stream);
+  assert.equal(video.getAttribute("src"), null);
+  assert.equal(video.plays, 1);
+});
+
+test("a video's srcObject replaces its src and, cleared, gives the src back", () => {
+  const player = videoPlayer();
+  const video = fakeVideo();
+  player.views.set(2, { _id: 2, _video: video, _events: new Set() });
+  player.op_video(videoOp(2, "movie.mp4", true));
+  assert.equal(video.getAttribute("src"), "movie.mp4");
+
+  const stream = { id: "stream" };
+  player.setVideoSrcObject(2, stream);
+  assert.equal(video.srcObject, stream);
+  assert.equal(video.getAttribute("src"), null);
+  // Paused by its `paused` prop, a stream does not start it.
+  assert.equal(video.plays, 0);
+
+  player.op_video(videoOp(2, "movie.mp4"));
+  assert.equal(video.getAttribute("src"), null);
+  assert.equal(video.plays, 1);
+
+  player.setVideoSrcObject(2, null);
+  assert.equal(video.srcObject, null);
+  assert.equal(video.getAttribute("src"), "movie.mp4");
+  assert.equal(player.srcObjects.size, 0);
+});
+
+test("a stream alone plays a video without a src", () => {
+  const player = videoPlayer();
+  const video = fakeVideo();
+  player.views.set(2, { _id: 2, _video: video, _events: new Set() });
+  player.op_video(videoOp(2, ""));
+  assert.equal(video.plays, 0);
+  player.setVideoSrcObject(2, { id: "stream" });
+  assert.equal(video.plays, 1);
+});
+
+test("a live stream's video reports a duration of 0, not Infinity", () => {
+  const player = videoPlayer();
+  const sent = [];
+  player.event = (id, name, payload) => sent.push([name, payload]);
+  const handlers = new Map();
+  const video = { ...fakeVideo(), duration: Infinity, videoWidth: 640, videoHeight: 360, currentTime: 3,
+    addEventListener: (name, fn) => handlers.set(name, fn) };
+  const el = { _id: 2, _video: video, _events: new Set(["onLoad"]) };
+  player.wireVideo(el, video);
+  handlers.get("loadedmetadata")();
+  assert.deepEqual(sent, [["onLoad", { duration: 0, width: 640, height: 360 }]]);
+});
+
+test("a video plays the stream the page registered under its HostStream's name", () => {
+  const player = videoPlayer();
+  const events = [];
+  player.event = (id, name, payload) => events.push([id, name, payload]);
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = message => warnings.push(message);
+  const video = fakeVideo();
+  const el = { _id: 2, _video: video, _events: new Set() };
+  player.views.set(2, el);
+  // Named before the page registered it: nothing shows, `src` neither; the
+  // app hears nothing, the console once.
+  player.op_video(videoOp(2, "movie.mp4", false, "remote"));
+  player.op_video(videoOp(2, "movie.mp4", false, "remote"));
+  console.warn = warn;
+  assert.equal(video.srcObject, null);
+  assert.equal(video.getAttribute("src"), null);
+  assert.equal(video.plays, 0);
+  assert.deepEqual(events, []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /"remote"/);
+  // Registered: it plays.
+  const stream = { id: "remote" };
+  player.registerStream("remote", stream);
+  assert.equal(video.srcObject, stream);
+  assert.equal(video.plays, 1);
+  // A stream of the browser's own, set on the video, wins.
+  const own = { id: "own" };
+  player.setVideoSrcObject(2, own);
+  assert.equal(video.srcObject, own);
+  player.setVideoSrcObject(2, null);
+  assert.equal(video.srcObject, stream);
+  // Taken away: nothing shows again.
+  player.registerStream("remote", null);
+  assert.equal(video.srcObject, null);
+  // No name: `src` plays.
+  player.op_video(videoOp(2, "movie.mp4"));
+  assert.equal(video.getAttribute("src"), "movie.mp4");
+  assert.throws(() => player.registerStream("", stream), TypeError);
+  // `nsh/` names are NSH's: refused, warned about once, never played.
+  const consoleWarn = console.warn;
+  const reserved = [];
+  console.warn = (m) => reserved.push(m);
+  try {
+    player.registerStream("nsh/test-pattern", stream);
+    player.registerStream("nsh/test-pattern", stream);
+  } finally {
+    console.warn = consoleWarn;
+  }
+  assert.equal(player.hostStreams.has("nsh/test-pattern"), false);
+  assert.equal(reserved.length, 1);
+  assert.throws(() => player.registerStream("x", "not a stream"), TypeError);
+});

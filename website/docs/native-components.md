@@ -321,6 +321,7 @@ app.register(component: "embed.badge") { context in Badge(context) }
 | API | Description |
 |---|---|
 | `NshAppView.register(component:_:)` | Registers a factory `(NshComponentContext) -> NshComponent` under a name. It makes one component per element created from then on. Registering a name again replaces the factory. |
+| `NshAppView.register(stream:)` | Registers a [live stream](#live-streams) under a name and returns the `NshStream` its frames go to. |
 | `protocol NshComponent` | `var view: UIView` (fills the container), `setProp(_:_:)`, `command(_:_:)` (optional: the default ignores commands). Main-actor isolated. |
 | `setProp(_ name: String, _ value: Any?)` | Values are Foundation JSON objects: `String`, `NSNumber`, `[Any]`, `[String: Any]`, `NSNull`; `nil` when the prop was removed. |
 | `NshComponentContext.emit(_:_:)` | Emits an event; the data must be something `JSONSerialization` accepts (or `nil`). Thread-safe. |
@@ -671,6 +672,67 @@ nsh-platform-macos = { version = "0.3", default-features = false }
 
 The host registers the crate's components when it makes each view, before the code holding the view registers its
 own: a name registered on the view after that (`AppView::register_component`) replaces the crate's.
+
+## Live streams
+
+A video plays a live stream the embedding app registers, by name, as it uses a native component: `<Video
+srcObject={HostStream.fromHost("call.remote")}>` ([Live streams](../elements/video.md#live-streams)). The app
+registers the stream and pushes its frames, from any thread; NSH draws them in the video, with its `objectFit`,
+`paused` and `onLoad`, and plays its sound with its `muted` and `volume`. Every platform takes the frames as BGRA
+bytes, which are copied, and as its own GPU buffers, which are shown without a copy; the sound is PCM. On iOS the
+frames are `CVPixelBuffer`s, as a camera, a call's SDK or ReplayKit hands them out:
+
+```swift
+let stream = app.register(stream: "call.remote")   // NshStream
+// From the capture's queue, for every frame:
+stream.push(pixelBuffer: pixelBuffer)
+// And its sound: interleaved Float samples.
+stream.push(pcm: samples, channels: 2, sampleRate: 48_000)
+// When the call ends: the videos show nothing until the name is registered again.
+stream.end()
+```
+
+On macOS, and from an app's own crate on both ([Registering from the app's crate](#registering-from-the-apps-crate)),
+the same in Rust: `app.register_stream("call.remote")` or `components.register_stream(..)` returns a `StreamHandle`,
+whose `push_pixel_buffer(buffer)` takes a `CVPixelBufferRef`, `push_pcm(samples, channels, sample_rate)` interleaved
+`f32` sound and `end()` ends the stream (dropping the handle does too).
+
+On Windows, Linux and in a GPUI app, `app.register_stream("call.remote")` (or `components.register_stream(..)`)
+returns the platform's `StreamHandle`, whose `push_bgra(width, height, stride, bytes)` takes a frame of BGRA pixels (8
+bits each, `stride` bytes a row) from any thread, as the Apple handles do too. The GPU buffers are the platform's:
+`push_d3d11_texture(&texture)` on Windows (a `DXGI_FORMAT_B8G8R8A8_UNORM` texture made on `app.d3d11_device()`),
+`push_dmabuf(frame)` on Linux (its descriptors stay open until the frame's `release` runs), `push_pixel_buffer` in a
+GPUI app on macOS. The newest frame waits for one main-thread turn, so a slow main thread drops frames rather than
+queueing them.
+
+```rust
+let stream = app.register_stream("call.remote");   // StreamHandle
+// From the decoder's thread, for every frame and its sound:
+stream.push_bgra(1280, 720, 1280 * 4, &pixels);
+stream.push_pcm(&samples, 2, 48_000);
+stream.end();
+```
+
+On Android the same, from any thread: `NshView.registerStream(name)`, then `NshStream.pushBgra`, or
+`NshStream.pushHardwareBuffer` for a source that renders on the GPU (Camera2, MediaCodec, ExoPlayer, a WebRTC renderer
+writing into an `ImageReader` with `USAGE_GPU_SAMPLED_IMAGE`), shown without a copy on Android 10 and later, and
+`NshStream.pushPcm(samples, channels, sampleRate)` for the sound:
+
+```java
+NshStream stream = view.registerStream("call.remote");
+stream.pushHardwareBuffer(image.getHardwareBuffer());   // from the ImageReader's thread
+stream.pushPcm(samples, 2, 48_000);
+```
+
+Each video keeps at most about 200 ms of sound queued. On every platform a name
+nothing registered shows nothing, logged once, as an unregistered component does; a video that names a stream before
+it is registered shows it once it is; `end()` blanks the videos until the name is registered again.
+
+Every development host (`nsh run`, `nsh test --target`) registers one stream, `nsh/test-pattern`, a 320×180 test
+pattern at 30 frames a second, so an app's tests can play a stream on every platform without a host of their own
+([Testing](./testing-and-trace.md)). Names under `nsh/` are NSH's own, as native components' are; the embedding app
+registers its streams under names of its own. The app plays the streams its `nsh.json` grants in
+[`capabilities.streams`](./sandbox-and-capabilities.md#streams).
 
 ## Rules and limits
 

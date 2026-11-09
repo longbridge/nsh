@@ -267,7 +267,8 @@ fn Player() -> impl IntoElement {
         .subtitle("AVPlayer / MediaPlayer")
         .right(Badge::new(move || status.get().0).tone(move || status.get().1))
         .child(frame(
-            video(FLOWER)
+            video()
+                .src(FLOWER)
                 .element_ref(&player)
                 .paused(move || !playing.get())
                 .muted(true)

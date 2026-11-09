@@ -188,6 +188,7 @@ setContentView(column);
 | `loadBundleFile(File file)` | 运行一个 `bundle.js` 文件；资源取自同目录下的 `assets/`。拒绝 `.nshc` 文件。 |
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
+| `registerStream(String name)` | 为 `<Video srcObject>` 注册一路[实时流](#实时流)：把它的帧（BGRA 字节或 `HardwareBuffer`）和 PCM 声音推给返回的 `NshStream`，任意线程。以 `nsh/` 开头的名称归 NSH 自己使用。 |
 | `setParams(Object params)` | 之后加载的应用的启动参数（`Map` 或 `JSONObject`）：应用在启动时以 `host.params` 读取（[`host`](../modules/nsh.md#host)）。不是 JSON 对象时返回 `false`。 |
 | `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用；`destroy()` 后返回 `false`。 |
 | `handle(String name, HostHandler handler)` | 在 UI 线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）；传 `null` 移除处理函数。处理函数通过它的 `NshHostReply` 在任意线程回答一次。 |
@@ -207,6 +208,47 @@ setContentView(column);
 nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
 nsh.loadAssetBundle("orders");
 ```
+
+## 实时流
+
+视频可以按名称播放宿主应用注册的实时流：`<Video srcObject={HostStream.fromHost("call.remote")}>`
+（[实时流](../elements/video.md#实时流)）。宿主在任意线程推帧，可以是 BGRA 字节（和其它平台的 SDK 一样），也可以是 `HardwareBuffer`：每个引用这路流的视频都绘制最新的一帧，按自己的
+`objectFit` 适配，第一帧触发 `onLoad`（`duration` 为 0），`paused` 保留最后一帧。
+
+```java
+NshStream stream = nsh.registerStream("call.remote");
+// 在解码线程上，每一帧：width × height 个 BGRA 像素，每行 `stride` 字节（会被复制）。
+stream.pushBgra(pixels, 1280, 720, 1280 * 4);
+// 通话结束时：视频不再显示任何内容，直到这个名称再次注册。
+stream.end();
+```
+
+在 GPU 上解码或渲染的来源（`MediaCodec` 输出到 `ImageReader`、Camera2、WebRTC 的渲染器）改为推送它的 `HardwareBuffer`。Android 10（API 29）及以上直接绘制缓冲区，不经过复制；Android 8 和 9
+在 CPU 上读取像素并复制。缓冲区的格式是 `RGBA_8888` 或 `RGBX_8888`，带 `USAGE_GPU_SAMPLED_IMAGE`（Android 8 和 9 还要带 `USAGE_CPU_READ_OFTEN`）。流在可能还要绘制缓冲区期间持有它：推送之后可以随时关闭自己的
+`HardwareBuffer` 对象；使用缓冲池时至少保留三个缓冲区，这样一个缓冲区要在之后又推送了两帧更新的帧之后才会被再次写入。
+
+```java
+ImageReader reader = ImageReader.newInstance(1280, 720, PixelFormat.RGBA_8888, 3,
+        HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE | HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
+reader.setOnImageAvailableListener(r -> {
+    try (Image image = r.acquireLatestImage()) {
+        if (image == null) return;
+        try (HardwareBuffer buffer = image.getHardwareBuffer()) { stream.pushHardwareBuffer(buffer); }
+    }
+}, decoderHandler);
+```
+
+流的声音是 PCM：交错排列的 32 位浮点数，取值 -1 到 1，1 到 8 个声道，8 到 192 kHz，到达时在任意线程推送。每个显示这路流的视频用自己的 `AudioTrack` 按自己的 `volume` 播放，
+`paused` 或 `muted` 时丢弃，并遵循自己的 `audioSession`（`playback` 的视频在声音播放期间持有音频焦点）。每个 track 最多排队约 200 ms：推送从不等待，推得比设备播放快的声音会被丢弃。
+`end()` 让已排队的声音播完。
+
+```java
+// 在音频线程上，每个数据包：48 kHz 立体声的 480 帧（960 个 float）。
+stream.pushPcm(samples, 2, 48000);
+```
+
+像原生组件一样，在加载应用之前注册流；在注册之前就引用了这路流的视频，会在流注册后开始显示；没有任何注册的名称不显示内容，并记录一次日志。没有视频显示这路流时，推送不产生任何开销。以
+`nsh/` 开头的名称归 NSH 自己使用（开发宿主的测试图案 `nsh/test-pattern`）。`rate` 和 `controls` 对实时流不生效。
 
 ## 与应用通信
 

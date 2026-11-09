@@ -102,6 +102,17 @@ impl<'a> Value<'a> {
     pub(super) fn node(&self) -> Option<u32> {
         self.0.node()
     }
+    /// The instance of a Rust class this value is, in the running app's
+    /// table.
+    pub(super) fn class_instance(
+        &self,
+    ) -> Option<std::rc::Rc<dyn nsh_core::element::ClassInstance>> {
+        use nsh_core::element::JsHost as _;
+        super::REACTIVE.with(|r| {
+            let runtime = r.borrow().clone()?;
+            runtime.bindings.instance(super::bindings::raw(self.0.0))
+        })
+    }
 }
 impl StringValue<'_> {
     pub(super) fn to_string(&self) -> Result<String> {

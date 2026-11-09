@@ -1,0 +1,10 @@
+{
+  "name": "API Streams",
+  "id": "com.example.api-streams",
+  "capabilities": {
+    "network": {
+      "hosts": ["example.com"]
+    },
+    "streams": ["compat-camera"]
+  }
+}

@@ -449,7 +449,8 @@ pub fn player() -> impl IntoElement {
         .p(px(16.0))
         .gap(px(12.0))
         .child(
-            video("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4")
+            video()
+                .src("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4")
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
@@ -516,7 +517,7 @@ mount(Player);
 
 播放由属性控制：用 signal 设置 `paused`、`muted`、`volume` 和 `rate`，播放器随之变化。ref 提供 `seek(seconds)`。
 
-在 Rust 中，`video(url)` 创建播放器（URL 可以是值、signal 或闭包），每个属性是一个蛇形命名的构建方法（`paused`、`repeat(true)`、`object_fit(ResizeMode::Contain)`，`progressUpdateInterval` 对应 `progress_interval`）；`on_load` 收到 `VideoInfo`（`duration`、`size`），`on_progress` 收到 `VideoProgress`（`current_time`、`duration`），`on_buffer` 收到 `bool`。
+在 Rust 中，`video()` 创建播放器，`.src(url)` 指定来源（URL 可以是值、signal 或闭包），每个属性是一个蛇形命名的构建方法（`paused`、`repeat(true)`、`object_fit(ResizeMode::Contain)`，`progressUpdateInterval` 对应 `progress_interval`）；`on_load` 收到 `VideoInfo`（`duration`、`size`），`on_progress` 收到 `VideoProgress`（`current_time`、`duration`），`on_buffer` 收到 `bool`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -544,7 +545,7 @@ mount(Player);
 ```rust tabs
 view()
     .h(px(220.0))
-    .child(video(url).paused(paused).flex_1())
+    .child(video().src(url).paused(paused).flex_1())
     .child(
         view()
             .absolute()
@@ -573,6 +574,18 @@ view()
 ```
 
 视频来源是网络请求：声明了能力时，视频所在的主机必须在 `nsh.json` 的 `network` 下得到允许，与 `fetch` 和远程图片相同。被拒绝的来源不显示任何内容，并且会记录一次日志，指出需要添加的键。
+
+### 实时流
+
+视频用 `srcObject` 代替文件播放实时流，与 DOM 的 `HTMLMediaElement.srcObject` 相同：通话的视频、摄像头。嵌入的页面按名字注册流，
+应用用 `HostStream.fromHost(name)` 指定它；画面留在页面里，不经过应用的代码。应用播放 `nsh.json` 中
+[`capabilities.streams`](./sandbox-and-capabilities.md#streams) 按名字授予的流。见[实时流](../elements/video.md#实时流)。
+
+```tsx
+import { HostStream, Video } from "nsh";
+
+<Video srcObject={HostStream.fromHost("remote")} muted style={{ height: 220 }} />;
+```
 
 ## 相关内容
 

@@ -111,6 +111,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "notifications": true,
     "audio": true,
     "host": ["getUserInfo", "bridge.*"],
+    "streams": ["camera", "call.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
   }
@@ -118,7 +119,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 ```
 
 **没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。原始 TCP socket 在每个应用中都按名称授予，即
-`network.sockets`；宿主的函数也一样，即 `host`。**有 `"capabilities"` 的应用
+`network.sockets`；宿主的函数也一样，即 `host`；宿主的实时流也一样，即 `streams`。**有 `"capabilities"` 的应用
 只能做其中列出的事**：其他一律拒绝。NSH 读不懂的键或值不授予任何权限，构建时会给出警告，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
 [签名包](./signed-packages.md#由更新版本的-nsh-签名的包)可能声明了旧运行时不认识的能力：旧运行时不会授予它们。
 
@@ -238,6 +239,17 @@ if (host.available()) {
 在嵌入了宿主的平台上 `host.available()` 为 true；在其他平台上 `host.call` 会以 `code`
 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` reject。
 
+### `streams`
+
+`streams` 列出嵌入 NSH 的宿主应用的实时流（通话的视频、摄像头），[视频](../elements/video.md#实时流)可以用
+`HostStream.fromHost(name)` 播放它们：确切的名字（`"camera"`），或以 `*` 结尾的前缀（`"call.*"` 匹配 `call.remote` 和
+`call.local`）。`"streams": true` 允许所有流。和宿主的函数一样，流在每个应用中都按名称授予，没有 `"capabilities"`
+的应用也一样。名字长度为 1 到 256 字节，与流的名字相同。在 Web 上，这包括页面用播放器注册的流（`player.registerStream`）；应用自己交给 `srcObject` 的浏览器 `MediaStream` 归应用自己所有。
+
+```json
+"capabilities": { "streams": ["camera", "call.*"] }
+```
+
 ### 被拒绝时的表现
 
 | 请求 | 结果 |
@@ -253,6 +265,7 @@ if (host.available()) {
 | 通知 | `Notifications` 的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；不会显示任何东西。 |
 | `openUrl` | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"openUrl"`，`resource` 为该 URL；不会打开任何东西。 |
 | 宿主调用 | `host.call` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"host"`，`resource` 为函数名（`host.post` 抛出同样的错误）；调用不会到达宿主。 |
+| 实时流 | `HostStream.fromHost` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"streams"`，`resource` 为流的名字；Rust 组件中使用该名字的视频不播放任何内容，拒绝只记录一次日志。 |
 | 文件（`fs/promises`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"fs"`，`resource` 为该路径；不会访问磁盘。 |
 | 进程（`process`） | `run` 被 reject，`spawn` 和 `exit` 抛出，错误为 `ERR_ACCESS_DENIED`，`permission` 为 `"process"`，`resource` 为该命令（`exit` 为 `"exit"`）；不会启动子进程。 |
 | TCP socket（`net.connect`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为 `"host:port"`；发生在任何 DNS 查询之前。 |

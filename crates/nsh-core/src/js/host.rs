@@ -51,6 +51,10 @@ pub trait HostInput: Sized {
     fn node(&self) -> Option<crate::NodeId> {
         None
     }
+    /// The instance of a class written in Rust this value is (`#[class]`).
+    fn class_instance(&self) -> Option<std::rc::Rc<dyn crate::element::ClassInstance>> {
+        None
+    }
     /// The native animation node this value is (`AnimatedNode.__av`).
     fn animated_node(&self) -> Option<crate::animation::NodeId> {
         self.field("__av")

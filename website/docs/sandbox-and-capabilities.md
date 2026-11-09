@@ -121,6 +121,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "notifications": true,
     "audio": true,
     "host": ["getUserInfo", "bridge.*"],
+    "streams": ["camera", "call.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
   }
@@ -128,8 +129,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
 ```
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
-restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, and the host's functions
-through `host`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. A key or value NSH
+restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, the host's functions
+through `host` and its live streams through `streams`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. A key or value NSH
 cannot read grants nothing: the build warns of it, so a typo shows up when you build instead of as a missing permission
 at runtime. A [signed
 package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
@@ -264,6 +265,19 @@ if (host.available()) {
 `host.available()` is true on platforms that embed a host; elsewhere `host.call` rejects with `code`
 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
 
+### `streams`
+
+`streams` lists the live streams of the app embedding NSH (a call's video, a camera) that a
+[video](../elements/video.md#live-streams) may play with `HostStream.fromHost(name)`: exact names (`"camera"`) or
+prefixes ending in `*` (`"call.*"` matches `call.remote` and `call.local`). `"streams": true` allows every stream. Like
+the host's functions, streams are granted by name in every app, also in an app without `"capabilities"`. Names are 1 to
+256 bytes, as a stream's. On the web this covers the streams the page registers with its player
+(`player.registerStream`); a browser `MediaStream` the app gives `srcObject` itself is the app's own.
+
+```json
+"capabilities": { "streams": ["camera", "call.*"] }
+```
+
 ### What a refusal looks like
 
 | Request | Result |
@@ -279,6 +293,7 @@ if (host.available()) {
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |
 | `openUrl` | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"openUrl"` and `resource` the URL; nothing opens. |
 | Host call | `host.call` rejects with `ERR_ACCESS_DENIED`, `permission` `"host"` and `resource` the function's name (`host.post` throws it); the call never reaches the host. |
+| Live stream | `HostStream.fromHost` throws `ERR_ACCESS_DENIED`, `permission` `"streams"` and `resource` the name; a Rust component's video given that name plays nothing, and the refusal is logged once. |
 | Files (`fs/promises`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"fs"` and `resource` the path; the disk is never touched. |
 | Processes (`process`) | `run` rejects, and `spawn` and `exit` throw, with `ERR_ACCESS_DENIED`, `permission` `"process"` and `resource` the command (`"exit"` for `exit`); no child starts. |
 | TCP socket (`net.connect`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` the `"host:port"`, before any DNS lookup. |

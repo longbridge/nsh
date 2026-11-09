@@ -22,7 +22,7 @@ The **host elements** are each backed by a native view. Rust makes them with the
 | `scroll()` | `<Scroll>` | `UIScrollView` / `ScrollView` | [Scroll](../elements/scroll.md) |
 | `input()` | `<Input>` | `UITextField` / `UITextView` / `EditText` | [Input](../elements/input.md) |
 | `virtual_list(count, row)` | `<List>` | A virtualized, recycling list | [List](../elements/list.md) |
-| `canvas(..)`, `web_view(url)`, `video(url)` | `<Canvas>`, `<WebView>`, `<Video>` | A drawing, a web page, a video player | [Elements](../elements/index.md) |
+| `canvas(..)`, `web_view(url)`, `video().src(url)` | `<Canvas>`, `<WebView>`, `<Video>` | A drawing, a web page, a video player | [Elements](../elements/index.md) |
 | `nsh_base::dialog()` | `<Dialog>` from `nsh/base` | A presented layer | [Elements](../elements/index.md) |
 | `when(..)`, `each(..)` | `<If>`, `<Each>` | Control flow, no view of its own | [Control flow](../elements/control-flow.md) |
 

@@ -51,7 +51,7 @@ use std::{
 use block2::RcBlock;
 use nsh_core::{
     Bounds, Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Points,
-    ResizeMode, Size, VideoProps, ViewKind, WebInput, WebKey, WebProps, WebSource, geometry::Point,
+    Size, VideoProps, ViewKind, WebInput, WebKey, WebProps, WebSource, geometry::Point,
 };
 use nsh_engine::{Access, App, EngineControl, Policy};
 use objc2::{
@@ -186,6 +186,8 @@ pub struct Components {
     factories: Rc<RefCell<FxHashMap<Arc<str>, ComponentFactory>>>,
     /// Names already reported as unknown.
     missing: Rc<RefCell<FxHashSet<Arc<str>>>>,
+    /// The live streams the embedding app registers (`<Video srcObject>`).
+    streams: nsh_platform_apple::stream::Streams,
 }
 
 impl std::fmt::Debug for Components {
@@ -207,6 +209,26 @@ impl Components {
         }
         self.factories.borrow_mut().insert(name.into(), factory);
         self.missing.borrow_mut().remove(name);
+    }
+
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): the handle takes its frames, from
+    /// any thread. The videos naming it, now or later, show them. Main
+    /// thread.
+    pub fn register_stream(&self, name: &str) -> nsh_platform_apple::stream::StreamHandle {
+        self.streams.register(name)
+    }
+
+    /// [`Self::register_stream`] for NSH's own names (`nsh/…`), which it
+    /// refuses: the development host's test pattern, `nsh/test-pattern`.
+    #[doc(hidden)]
+    pub fn register_reserved_stream(&self, name: &str) -> nsh_platform_apple::stream::StreamHandle {
+        self.streams.register_reserved(name)
+    }
+
+    /// The streams, for the videos.
+    fn streams(&self) -> nsh_platform_apple::stream::Streams {
+        self.streams.clone()
     }
 
     /// The factory registered as `name`; `None` (logged once per name) if
@@ -900,7 +922,9 @@ struct Status {
     buffering: Cell<bool>,
 }
 
-/// A video: its player and the view showing it.
+/// A video: its player and the view showing it, or the live stream it
+/// shows (`srcObject`) in an `AVSampleBufferDisplayLayer` fed by
+/// `nsh_platform_apple::stream`.
 struct VideoHost {
     emitter: Emitter,
     view: NshView,
@@ -916,6 +940,12 @@ struct VideoHost {
     /// The props applied (`None` before the first).
     props: Option<VideoProps>,
     repeat: Rc<Cell<bool>>,
+    /// The surface's live streams.
+    streams: nsh_platform_apple::stream::Streams,
+    /// The stream it shows (`srcObject`) and the display layer drawing it
+    /// (the layer of `shown`).
+    stream: Option<nsh_platform_apple::stream::Attached>,
+    stream_layer: Option<Retained<AnyObject>>,
 }
 
 impl VideoHost {
@@ -931,6 +961,9 @@ impl VideoHost {
             status: Rc::default(),
             props: None,
             repeat: Rc::default(),
+            streams: surface.native.components().streams(),
+            stream: None,
+            stream_layer: None,
         }
     }
 
@@ -941,43 +974,109 @@ impl VideoHost {
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
-        let reopened = first || p.source != old.source;
-        if reopened {
-            self.open(p.source.as_deref(), base);
-        }
-        if reopened || p.controls != old.controls {
-            self.show(p.controls);
-        }
-        if reopened || p.progress_interval_ms != old.progress_interval_ms {
-            self.observe(p.progress_interval_ms);
-        }
-        self.repeat.set(p.repeat);
-        if let Some(player) = &self.player {
-            // SAFETY: AVPlayer's documented API.
-            unsafe {
-                let _: () = msg_send![player, setMuted: Bool::new(p.muted)];
-                let _: () = msg_send![player, setVolume: p.volume.clamp(0.0, 1.0)];
-                if p.paused {
-                    let _: () = msg_send![player, pause];
-                } else {
-                    let _: () = msg_send![player, setRate: p.rate];
+        if let Some(name) = &p.stream {
+            // A live stream plays instead of the URL: the player goes, a
+            // display layer draws the frames the embedding app pushes.
+            if self.stream.as_ref().map(|s| &**s.name()) != Some(&**name) {
+                self.close();
+                self.show_stream(name);
+            }
+            if let Some(stream) = &self.stream {
+                stream.set_paused(p.paused);
+                stream.set_sound(p.muted, p.volume);
+            }
+        } else {
+            if self.stream.is_some() {
+                self.hide_stream();
+            }
+            let reopened = first || p.source != old.source || old.stream.is_some();
+            if reopened {
+                self.open(p.source.as_deref(), base);
+            }
+            if reopened || p.controls != old.controls {
+                self.show(p.controls);
+            }
+            if reopened || p.progress_interval_ms != old.progress_interval_ms {
+                self.observe(p.progress_interval_ms);
+            }
+            self.repeat.set(p.repeat);
+            if let Some(player) = &self.player {
+                // SAFETY: AVPlayer's documented API.
+                unsafe {
+                    let _: () = msg_send![player, setMuted: Bool::new(p.muted)];
+                    let _: () = msg_send![player, setVolume: p.volume.clamp(0.0, 1.0)];
+                    if p.paused {
+                        let _: () = msg_send![player, pause];
+                    } else {
+                        let _: () = msg_send![player, setRate: p.rate];
+                    }
                 }
             }
         }
-        let gravity = NSString::from_str(match p.resize_mode {
-            ResizeMode::Cover => "AVLayerVideoGravityResizeAspectFill",
-            ResizeMode::Stretch => "AVLayerVideoGravityResize",
-            _ => "AVLayerVideoGravityResizeAspect",
-        });
-        // SAFETY: AVPlayerLayer's / AVPlayerView's `videoGravity` setters.
+        let gravity = nsh_platform_apple::stream::gravity(p.resize_mode);
+        // SAFETY: the `videoGravity` setters of AVSampleBufferDisplayLayer,
+        // AVPlayerLayer and AVPlayerView (`shown`, when a player is shown
+        // with controls).
         unsafe {
-            if let Some(layer) = &self.layer {
+            if let Some(layer) = &self.stream_layer {
                 let _: () = msg_send![layer, setVideoGravity: &*gravity];
-            } else if let Some(shown) = &self.shown {
+            } else if let Some(layer) = &self.layer {
+                let _: () = msg_send![layer, setVideoGravity: &*gravity];
+            } else if let (Some(shown), Some(_)) = (&self.shown, &self.player) {
                 let _: () = msg_send![shown, setVideoGravity: &*gravity];
             }
         }
         self.props = Some(p.clone());
+    }
+
+    /// Shows stream `name` in a display layer fed by the surface's streams.
+    fn show_stream(&mut self, name: &str) {
+        self.hide_stream();
+        if let Some(old) = self.shown.take() {
+            self.view.remove_native(&old);
+        }
+        self.layer = None;
+        let Some(layer) = nsh_platform_apple::stream::display_layer() else {
+            return log::error!("cannot make an AVSampleBufferDisplayLayer");
+        };
+        let mtm = MainThreadMarker::new().expect("main thread");
+        // SAFETY: a layer-hosting view with the display layer as its layer,
+        // so it follows the view's size.
+        let shown: Retained<VideoLayerView> = unsafe {
+            let view: Retained<VideoLayerView> =
+                msg_send![VideoLayerView::alloc(mtm), initWithFrame: NSRect::ZERO];
+            let ca: &objc2_quartz_core::CALayer = &*(Retained::as_ptr(&layer) as *const _);
+            view.setLayer(Some(ca));
+            view.setWantsLayer(true);
+            view
+        };
+        let shown = Retained::into_super(shown);
+        crate::surface::quiet(|| fill(&self.view, &shown));
+        self.shown = Some(shown);
+        self.emitter
+            .emit(EventKind::LoadStart, || EventPayload::None);
+        let emitter = self.emitter.clone();
+        let on_size = Box::new(move |width: usize, height: usize| {
+            emitter.emit(EventKind::Load, || {
+                EventPayload::Map(vec![
+                    ("duration", PayloadValue::Number(0.0)),
+                    ("width", PayloadValue::Number(width as f64)),
+                    ("height", PayloadValue::Number(height as f64)),
+                ])
+            });
+        });
+        self.stream = Some(self.streams.attach(name, layer.clone(), on_size));
+        self.stream_layer = Some(layer);
+    }
+
+    /// Stops showing the stream, if any.
+    fn hide_stream(&mut self) {
+        self.stream = None;
+        if self.stream_layer.take().is_some()
+            && let Some(old) = self.shown.take()
+        {
+            self.view.remove_native(&old);
+        }
     }
 
     /// Opens `source` (or nothing).
@@ -1143,7 +1242,8 @@ impl VideoHost {
 impl Drop for VideoHost {
     fn drop(&mut self) {
         // The view keeps showing the last frame while a removal animation
-        // may still show it.
+        // may still show it; a stream stops drawing into it.
+        self.stream = None;
         self.close();
     }
 }

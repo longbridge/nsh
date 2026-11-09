@@ -21,6 +21,11 @@ nsh-platform-linux.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-platform-macos.workspace = true
 
+# The iOS backend, for the live stream the crate registers there
+# (`stream.rs`; it registers the stream on macOS too).
+[target.'cfg(target_os = "ios")'.dependencies]
+nsh-platform-ios.workspace = true
+
 [target.'cfg(target_os = "windows")'.dependencies]
 nsh-platform-windows.workspace = true
 

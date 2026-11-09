@@ -8,7 +8,11 @@
 //!
 //! - **Videos** play through GTK's media support (`gtk::MediaFile`, which
 //!   GTK backs with GStreamer): a `gtk::Picture` showing the stream, or a
-//!   `gtk::Video` with GTK's playback controls when `controls` is set.
+//!   `gtk::Video` with GTK's playback controls when `controls` is set. A
+//!   live stream the embedding app registered (`srcObject`,
+//!   [`AppView::register_stream`]) shows in a `gtk::Picture` as a texture
+//!   of each frame ([`crate::stream`]) and plays its audio through a
+//!   pipeline of the video's own ([`crate::stream_audio`]).
 //!   GTK streams have no playback rate, so `rate` is ignored (warned once);
 //!   a looping stream starts over without ending, so `onEnd` only comes
 //!   for videos that do not loop.
@@ -27,6 +31,7 @@
 //!   the views made from the same [`AppOptions`]): no globals.
 //!
 //! [`AppView::register_component`]: crate::AppView::register_component
+//! [`AppView::register_stream`]: crate::AppView::register_stream
 //! [`AppOptions`]: crate::AppOptions
 //! [`MountItem::Component`]: nsh_core::MountItem::Component
 
@@ -48,7 +53,13 @@ use nsh_core::{
 use nsh_engine::EngineControl;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{image::AssetBase, surface::Surface, view::NshView};
+use crate::{
+    image::AssetBase,
+    stream::{Attached, StreamEvent, StreamHandle, Streams},
+    stream_audio::StreamAudio,
+    surface::Surface,
+    view::NshView,
+};
 
 #[cfg(feature = "webview")]
 mod web;
@@ -158,6 +169,8 @@ pub struct Components {
     factories: Rc<RefCell<FxHashMap<Arc<str>, ComponentFactory>>>,
     /// Names already reported as unknown.
     missing: Rc<RefCell<FxHashSet<Arc<str>>>>,
+    /// The live streams the embedding app registers (`<Video srcObject>`).
+    streams: Streams,
 }
 
 impl std::fmt::Debug for Components {
@@ -192,6 +205,26 @@ impl Components {
             );
         }
         factory
+    }
+
+    /// Registers live stream `name` (`HostStream.fromHost(name)` in JS,
+    /// played by `<Video srcObject>`): push its frames to the handle, from
+    /// any thread. Applies to the videos naming it, now or later.
+    pub fn register_stream(&self, name: &str) -> StreamHandle {
+        self.streams.register(name)
+    }
+
+    /// [`Self::register_stream`] without the check of reserved names: NSH's
+    /// own hosts register `nsh/` names with it (the development hosts'
+    /// `nsh/test-pattern`). Not for embedding apps.
+    #[doc(hidden)]
+    pub fn register_reserved_stream(&self, name: &str) -> StreamHandle {
+        self.streams.register_reserved(name)
+    }
+
+    /// The streams, for the videos.
+    pub(crate) fn streams(&self) -> Streams {
+        self.streams.clone()
     }
 }
 
@@ -632,12 +665,19 @@ impl Status {
     }
 }
 
-/// A video: its stream and the widget showing it.
+/// A video: its stream and the widget showing it, or the live stream it
+/// shows (`srcObject`) in a `gtk::Picture` fed by [`crate::stream`].
 struct VideoHost {
     emitter: Emitter,
     /// A `Picture`, or a `Video` with controls.
     widget: Option<gtk::Widget>,
     stream: Option<gtk::MediaFile>,
+    /// The surface's live streams.
+    streams: Streams,
+    /// The live stream it shows (`srcObject`): its picture is `widget`.
+    live: Option<Attached>,
+    /// The live stream's audio, played while `live` shows the stream.
+    audio: Option<(Arc<StreamAudio>, nsh_core::stream::AudioAttachment)>,
     status: Rc<Status>,
     /// The props applied (`None` before the first).
     props: Option<VideoProps>,
@@ -675,6 +715,9 @@ impl VideoHost {
             },
             widget: None,
             stream: None,
+            streams: surface.native.components().streams(),
+            live: None,
+            audio: None,
             status: Rc::default(),
             props: None,
             progress: None,
@@ -686,12 +729,32 @@ impl VideoHost {
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
-        let reopened = first || p.source != old.source;
-        if reopened {
-            self.open(p.source.as_deref(), base);
-        }
-        if reopened || p.controls != old.controls {
-            self.show(view, p.controls);
+        if let Some(name) = &p.stream {
+            // A live stream plays instead of the URL: the player goes, a
+            // picture shows the frames the embedding app pushes.
+            if self.live.as_ref().map(|s| &**s.name()) != Some(&**name) {
+                self.show_stream(view, name);
+            }
+            if let Some(live) = &self.live {
+                live.set_paused(p.paused);
+            }
+            if let Some((audio, _)) = &self.audio {
+                audio.set_paused(p.paused);
+                audio.set_muted(p.muted);
+                audio.set_volume(p.volume);
+            }
+        } else {
+            let reopened = first || p.source != old.source || old.stream.is_some();
+            if reopened {
+                self.hide_stream();
+                self.open(p.source.as_deref(), base);
+            }
+            if reopened || p.controls != old.controls {
+                self.show(view, p.controls);
+            }
+            if reopened || p.progress_interval_ms != old.progress_interval_ms {
+                self.observe(p.progress_interval_ms);
+            }
         }
         if p.rate != 1.0 {
             static WARNED: AtomicBool = AtomicBool::new(false);
@@ -722,10 +785,75 @@ impl VideoHost {
                 video.set_loop(p.repeat);
             }
         }
-        if reopened || p.progress_interval_ms != old.progress_interval_ms {
-            self.observe(p.progress_interval_ms);
-        }
         self.props = Some(p.clone());
+    }
+
+    /// Shows stream `name` in a picture fed by the surface's streams: the
+    /// first frame's size is the load, the end clears the picture.
+    fn show_stream(&mut self, view: &NshView, name: &str) {
+        self.hide_stream();
+        self.close();
+        if let Some(id) = self.progress.take() {
+            id.remove();
+        }
+        if let Some(old) = self.widget.take() {
+            view.remove_native(&old);
+        }
+        self.status = Rc::default();
+        let picture = gtk::Picture::new();
+        picture.set_can_shrink(true);
+        // Touches go to the view (presses, gestures).
+        picture.set_can_target(false);
+        let widget: gtk::Widget = picture.clone().upcast();
+        fill(view, &widget);
+        self.widget = Some(widget);
+        self.emitter
+            .emit(EventKind::LoadStart, || EventPayload::None);
+        let (emitter, status) = (self.emitter.clone(), self.status.clone());
+        let picture = picture.downgrade();
+        let sink = Box::new(move |event: StreamEvent<'_>| {
+            let Some(picture) = picture.upgrade() else {
+                return;
+            };
+            match event {
+                StreamEvent::Frame { frame, first } => {
+                    // A dmabuf GTK refused shows nothing (logged): the
+                    // picture keeps what it showed.
+                    let Some(texture) = frame.texture() else {
+                        return;
+                    };
+                    picture.set_paintable(Some(&texture));
+                    status.loaded.set(true);
+                    if first {
+                        let (width, height) = (frame.width, frame.height);
+                        emitter.emit(EventKind::Load, || {
+                            EventPayload::Map(vec![
+                                ("duration", PayloadValue::Number(0.0)),
+                                ("width", PayloadValue::Number(width as f64)),
+                                ("height", PayloadValue::Number(height as f64)),
+                            ])
+                        });
+                    }
+                }
+                StreamEvent::Ended => {
+                    picture.set_paintable(None::<&gtk::gdk::Paintable>);
+                    status.loaded.set(false);
+                }
+            }
+        });
+        self.live = Some(self.streams.attach(name, sink));
+        // Its audio, from the pushing thread straight to the video's
+        // pipeline; the props are applied by `set`.
+        let audio = StreamAudio::new(name);
+        let attachment = self.streams.attach_audio(name, audio.clone());
+        self.audio = Some((audio, attachment));
+    }
+
+    /// Stops showing the live stream, if any (the picture keeps its last
+    /// frame until something else shows) and playing its audio.
+    fn hide_stream(&mut self) {
+        self.live = None;
+        self.audio = None;
     }
 
     /// Opens `source` (or nothing).

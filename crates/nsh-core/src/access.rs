@@ -17,6 +17,7 @@
 //!   "webview": { "hosts": ["*.example.com"], "input": true },
 //!   "statusBar": true,
 //!   "host": ["getUserInfo", "bridge.*"],
+//!   "streams": ["camera", "call.*"],
 //!   "openUrl": { "schemes": ["https", "mailto"] }
 //! }
 //! ```
@@ -39,11 +40,14 @@
 //! the functions of the embedding app `nsh/host` may call: names (1 to 128
 //! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
-//! host's events need no grant, the host sends them. An app without
+//! host's events need no grant, the host sends them. `streams` lists the
+//! live streams of the embedding app a video may play (`HostStream.fromHost`,
+//! `srcObject`): names (1 to 256 bytes, as a stream's), or prefixes of them
+//! ending in `*` (`true`: all of them). An app without
 //! `"capabilities"` (a standalone app, its developer's own) retains
 //! unrestricted HTTP, web views, the status bar, the clipboard, the picker,
-//! speech recognition and opening URLs; raw sockets, processes, the filesystem and the host's
-//! functions always require an explicit declaration.
+//! speech recognition and opening URLs; raw sockets, processes, the filesystem, the host's
+//! functions and its streams always require an explicit declaration.
 
 //! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
 //! other key narrows it and is optional: `methods` (any when left out),
@@ -396,6 +400,11 @@ pub struct Capabilities {
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
     pub host: Vec<String>,
+    /// The embedding app's live streams a video may play
+    /// (`HostStream.fromHost`, `srcObject`): names, or prefixes ending in
+    /// `*` (`"*"`: all); empty: none, also for apps without a declaration
+    /// ([`Capabilities::all`]).
+    pub streams: Vec<String>,
     /// The URLs the app may open outside it (`openUrl` of `nsh/device`);
     /// `None`: none.
     pub open_url: Option<OpenUrlGrant>,
@@ -560,8 +569,8 @@ fn read_url(url: &str) -> Result<UrlParts<'_>, Unread> {
 
 impl Capabilities {
     /// Legacy unrestricted APIs for apps without a declaration. Socket,
-    /// process, filesystem and host function grants stay empty and always
-    /// require explicit opt-in.
+    /// process, filesystem, host function and stream grants stay empty and
+    /// always require explicit opt-in.
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
@@ -580,7 +589,8 @@ impl Capabilities {
             open_url: Some(OpenUrlGrant::default()),
             // Every kind and level, but no overlays or capture protection.
             windows: Some(WindowsGrant::default()),
-            // The host's functions are never granted without a declaration.
+            // The host's functions and streams are never granted without a
+            // declaration.
             ..Self::default()
         }
     }
@@ -631,7 +641,7 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 13] = [
+        const KNOWN: [&str; 14] = [
             "windows",
             "network",
             "webview",
@@ -645,6 +655,7 @@ impl Capabilities {
             "process",
             "fs",
             "host",
+            "streams",
         ];
         let obj = object(value, "capabilities")?;
         for key in obj.keys().filter(|k| !KNOWN.contains(&k.as_str())) {
@@ -913,6 +924,27 @@ impl Capabilities {
                 }
             };
         }
+        if let Some(streams) = obj.get("streams") {
+            caps.streams = match streams {
+                Value::Bool(all) => {
+                    if *all {
+                        vec!["*".into()]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => {
+                    let names = strings(streams, "capabilities.streams")
+                        .map_err(|e| format!("{e} (or a boolean)"))?;
+                    if let Some(bad) = names.iter().find(|n| !valid_stream_grant(n)) {
+                        return Err(format!(
+                            "capabilities.streams: invalid stream `{bad}` (a name of 1 to 256 bytes, or a prefix of one ending in `*`)"
+                        ));
+                    }
+                    names
+                }
+            };
+        }
         if let Some(dropped) = dropped {
             dropped.append(&mut http_dropped);
         }
@@ -1031,6 +1063,9 @@ impl Capabilities {
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
         }
+        if !self.streams.is_empty() {
+            obj.insert("streams".into(), self.streams.clone().into());
+        }
         obj.insert(
             "openUrl".into(),
             match &self.open_url {
@@ -1068,6 +1103,49 @@ impl Capabilities {
         })
     }
 
+    fn allows_stream(&self, name: &str) -> bool {
+        self.streams.iter().any(|g| match g.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => g == name,
+        })
+    }
+
+    /// Whether it equals `all` in everything but `streams`, which only the
+    /// stream checks read: the others need not check what is unrestricted.
+    fn is_all_but_streams(&self, all: &Capabilities) -> bool {
+        let Capabilities {
+            process,
+            fs,
+            network,
+            webview,
+            webview_input,
+            status_bar,
+            clipboard,
+            picker,
+            speech,
+            notifications,
+            audio,
+            host,
+            streams: _,
+            open_url,
+            windows,
+        } = self;
+        *process == all.process
+            && *fs == all.fs
+            && *network == all.network
+            && *webview == all.webview
+            && *webview_input == all.webview_input
+            && *status_bar == all.status_bar
+            && *clipboard == all.clipboard
+            && *picker == all.picker
+            && *speech == all.speech
+            && *notifications == all.notifications
+            && *audio == all.audio
+            && *host == all.host
+            && *open_url == all.open_url
+            && *windows == all.windows
+    }
+
     fn allows_webview(&self, url: &UrlParts<'_>) -> bool {
         matches!(url.scheme.as_str(), "http" | "https")
             && self
@@ -1084,6 +1162,13 @@ impl Capabilities {
                 .as_ref()
                 .is_some_and(|hosts| hosts.iter().any(HostPattern::is_any))
     }
+}
+
+/// Whether `grant` may be a grant of `capabilities.streams`: a stream's name
+/// (1 to 256 bytes, as `HostStream.fromHost` takes), or a prefix of one
+/// ending in `*`.
+fn valid_stream_grant(grant: &str) -> bool {
+    (1..=256).contains(&grant.len())
 }
 
 /// What host function names (`nsh/host`) are made of, for messages.
@@ -1458,10 +1543,15 @@ impl Access {
     }
 
     /// True when nothing is restricted (no check needed, redirects may be
-    /// followed by the platform).
+    /// followed by the platform). Streams are checked on their own
+    /// ([`Self::allows_stream`]) and do not count.
     pub fn is_unrestricted(&self) -> bool {
         let all = Capabilities::all();
-        self.declared == all && self.granted.as_ref().is_none_or(|g| *g == all)
+        self.declared.is_all_but_streams(&all)
+            && self
+                .granted
+                .as_ref()
+                .is_none_or(|g| g.is_all_but_streams(&all))
     }
 
     /// Whether an exact command is declared and granted. These capabilities
@@ -1765,6 +1855,12 @@ impl Access {
     /// Whether `nsh/host` may call the embedding app's function `name`.
     pub fn allows_host(&self, name: &str) -> bool {
         self.each(|c| c.allows_host(name))
+    }
+
+    /// Whether a video may play the embedding app's live stream `name`
+    /// (`HostStream.fromHost`, `srcObject`).
+    pub fn allows_stream(&self, name: &str) -> bool {
+        self.each(|c| c.allows_stream(name))
     }
 
     /// Whether the app may open `url` outside it (`openUrl` of
@@ -2354,7 +2450,64 @@ mod tests {
         assert!(!access.allows_speech());
         assert!(!access.allows_audio());
         assert!(!access.allows_host("getUserInfo"));
+        assert!(!access.allows_stream("camera"));
         assert!(Access::all().is_unrestricted());
+    }
+
+    #[test]
+    fn streams_need_an_explicit_grant() {
+        // Undeclared, the other capabilities are all granted; the host's
+        // streams are not.
+        let all = Access::all();
+        assert!(all.allows_clipboard());
+        assert!(!all.allows_stream("camera"));
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let every = access(r#"{ "streams": true }"#);
+        assert!(every.allows_stream("camera") && every.allows_stream("call.remote"));
+        assert!(!access(r#"{ "streams": false }"#).allows_stream("camera"));
+        let listed = access(r#"{ "streams": ["camera", "call.*"] }"#);
+        assert!(listed.allows_stream("camera"));
+        assert!(listed.allows_stream("call.remote"));
+        assert!(!listed.allows_stream("camera2"));
+        assert!(!listed.allows_stream("call"));
+        assert!(Capabilities::from_json(&serde_json::json!({ "streams": [""] })).is_err());
+        assert!(
+            Capabilities::from_json(&serde_json::json!({ "streams": ["x".repeat(257)] })).is_err()
+        );
+        assert!(Capabilities::from_json(&serde_json::json!({ "streams": "camera" })).is_err());
+        // Read leniently, a wrong form drops only `streams`.
+        let (lenient, dropped) = Capabilities::from_json_lenient(
+            &serde_json::json!({ "streams": [""], "clipboard": true }),
+        )
+        .unwrap();
+        assert!(lenient.streams.is_empty() && lenient.clipboard);
+        assert_eq!(dropped.len(), 1);
+        assert!(dropped[0].starts_with("capabilities.streams"));
+        // The embedding app may grant less.
+        let narrowed = Access {
+            declared: caps(r#"{ "streams": true }"#),
+            granted: Some(caps(r#"{ "streams": ["call.*"] }"#)),
+        };
+        assert!(narrowed.allows_stream("call.remote") && !narrowed.allows_stream("camera"));
+        // Written and read back the same; nothing written when none.
+        let declared = caps(r#"{ "streams": ["camera", "call.*"] }"#);
+        assert_eq!(
+            Capabilities::from_json(&declared.to_json()).unwrap(),
+            declared
+        );
+        assert!(caps("{}").to_json().get("streams").is_none());
+        // Streams granted on top of everything leave the rest unrestricted.
+        let trusted = Access {
+            declared: Capabilities {
+                streams: vec!["*".into()],
+                ..Capabilities::all()
+            },
+            granted: None,
+        };
+        assert!(trusted.is_unrestricted() && trusted.allows_stream("camera"));
     }
 
     #[test]

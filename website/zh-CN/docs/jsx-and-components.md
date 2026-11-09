@@ -22,7 +22,7 @@ NSH 应用用元素和组件描述界面，可以用 Rust，也可以用 TSX。R
 | `scroll()` | `<Scroll>` | `UIScrollView` / `ScrollView` | [Scroll](../elements/scroll.md) |
 | `input()` | `<Input>` | `UITextField` / `UITextView` / `EditText` | [Input](../elements/input.md) |
 | `virtual_list(count, row)` | `<List>` | 虚拟化、可复用单元格的列表 | [List](../elements/list.md) |
-| `canvas(..)`、`web_view(url)`、`video(url)` | `<Canvas>`、`<WebView>`、`<Video>` | 绘图、网页、视频播放器 | [元素](../elements/index.md) |
+| `canvas(..)`、`web_view(url)`、`video().src(url)` | `<Canvas>`、`<WebView>`、`<Video>` | 绘图、网页、视频播放器 | [元素](../elements/index.md) |
 | `nsh_base::dialog()` | 来自 `nsh/base` 的 `<Dialog>` | 弹出层 | [元素](../elements/index.md) |
 | `when(..)`、`each(..)` | `<If>`、`<Each>` | 控制流，本身不产生视图 | [控制流](../elements/control-flow.md) |
 
