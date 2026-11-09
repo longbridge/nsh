@@ -1287,7 +1287,10 @@ pub fn try_apple_keys() -> Option<bool> {
 /// lives (TS: `keymap.bind`): `"mod+k"` (`mod` is Command on Apple
 /// platforms, Control elsewhere), `"shift+mod+l"`, `"escape"`, ... (the
 /// keystrokes of `nsh/keymap`). The handler gets the keystroke as written.
-/// Desktop platforms fire them; elsewhere they are kept but no key does.
+/// It belongs to the window bound in ([`super::desktop::current_window`])
+/// and fires only for keys pressed there; a key it does not take goes on
+/// as usual. Desktop platforms fire them; elsewhere they are kept but no
+/// key does.
 ///
 /// # Panics
 ///
@@ -1313,6 +1316,8 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     }
     let owner = Owner::current();
     let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
+    // It belongs to the window whose tree binds it (`current_window`).
+    let window = super::use_context::<super::desktop::WindowRef>().and_then(|w| w.dialog_root());
     let keys = executor().keys.clone();
     let id = keys.borrow_mut().add(
         |id| {
@@ -1321,6 +1326,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         },
         keystroke.into(),
         handler,
+        window,
     );
     let weak = Rc::downgrade(&keys);
     cleanup(move || {
