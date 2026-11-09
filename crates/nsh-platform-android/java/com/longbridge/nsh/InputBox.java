@@ -559,6 +559,93 @@ final class InputBox extends FrameLayout implements Node {
         }
     }
 
+    /** The edit menu a component drawing its own selection showed (`Command::ShowEditMenu`), while it shows. */
+    private android.view.ActionMode editMenu;
+    /** What it points at, in the root view (dp), and the actions' bits (cut 1, copy 2, paste 4, select all 16). */
+    private float menuX, menuY, menuWidth, menuHeight;
+    private int menuActions;
+
+    /**
+     * Shows the system's floating text toolbar over {@code x, y, width, height} in the root view, offering
+     * {@code actions}: Cut, Copy and Select all are reported (`onEditMenu`), Paste is the field's own paste.
+     */
+    void showEditMenu(float x, float y, float width, float height, int actions) {
+        menuX = x;
+        menuY = y;
+        menuWidth = width;
+        menuHeight = height;
+        menuActions = actions;
+        if (editMenu != null) {
+            editMenu.invalidate();
+            editMenu.invalidateContentRect();
+            return;
+        }
+        editMenu = edit.startActionMode(new android.view.ActionMode.Callback2() {
+            @Override
+            public boolean onCreateActionMode(android.view.ActionMode m, android.view.Menu menu) {
+                menu.add(android.view.Menu.NONE, android.R.id.cut, 0, android.R.string.cut);
+                menu.add(android.view.Menu.NONE, android.R.id.copy, 1, android.R.string.copy);
+                menu.add(android.view.Menu.NONE, android.R.id.paste, 2, android.R.string.paste);
+                menu.add(android.view.Menu.NONE, android.R.id.selectAll, 3, android.R.string.selectAll);
+                return true;
+            }
+
+            @Override
+            public boolean onPrepareActionMode(android.view.ActionMode m, android.view.Menu menu) {
+                android.content.ClipboardManager board = (android.content.ClipboardManager)
+                        getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                boolean pastes = board != null && board.hasPrimaryClip();
+                menu.findItem(android.R.id.cut).setVisible((menuActions & 1) != 0);
+                menu.findItem(android.R.id.copy).setVisible((menuActions & 2) != 0);
+                menu.findItem(android.R.id.paste).setVisible((menuActions & 4) != 0 && pastes);
+                menu.findItem(android.R.id.selectAll).setVisible((menuActions & 16) != 0);
+                return true;
+            }
+
+            @Override
+            public boolean onActionItemClicked(android.view.ActionMode m, android.view.MenuItem item) {
+                int itemId = item.getItemId();
+                String action = itemId == android.R.id.cut ? "cut"
+                        : itemId == android.R.id.copy ? "copy"
+                        : itemId == android.R.id.selectAll ? "selectAll" : null;
+                if (action != null) {
+                    mounter.event(id, Native.EDIT_MENU, action, 0, 0, 0);
+                } else if (itemId == android.R.id.paste) {
+                    edit.onTextContextMenuItem(android.R.id.paste);
+                } else {
+                    return false;
+                }
+                m.finish();
+                return true;
+            }
+
+            @Override
+            public void onDestroyActionMode(android.view.ActionMode m) {
+                if (editMenu == m) editMenu = null;
+            }
+
+            @Override
+            public void onGetContentRect(android.view.ActionMode m, View v, android.graphics.Rect out) {
+                // From the root view (the surface, or the window of the modal the field is in) to the field.
+                View root = v.getRootView() == mounter.host.getRootView() ? mounter.host : v.getRootView();
+                int[] rootAt = new int[2], at = new int[2];
+                root.getLocationOnScreen(rootAt);
+                v.getLocationOnScreen(at);
+                float d = mounter.density;
+                int left = Math.round(menuX * d) + rootAt[0] - at[0];
+                int top = Math.round(menuY * d) + rootAt[1] - at[1];
+                out.set(left, top, left + Math.round(menuWidth * d), top + Math.round(menuHeight * d));
+            }
+        }, android.view.ActionMode.TYPE_FLOATING);
+    }
+
+    /** Hides the menu {@link #showEditMenu} showed. */
+    void hideEditMenu() {
+        android.view.ActionMode m = editMenu;
+        editMenu = null;
+        if (m != null) m.finish();
+    }
+
     /** Selects {@code start..end} (clamped to the text). */
     void select(int start, int end) {
         int length = edit.length();

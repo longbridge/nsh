@@ -2232,6 +2232,15 @@ final class Mounter {
                 if (v instanceof InputBox) ((InputBox) v).select(start, end);
                 break;
             }
+            case 49: {
+                float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
+                int actions = b.getInt();
+                if (v instanceof InputBox) ((InputBox) v).showEditMenu(x, y, w, h, actions);
+                break;
+            }
+            case 50:
+                if (v instanceof InputBox) ((InputBox) v).hideEditMenu();
+                break;
             case 21: {
                 String name = string(objects, b.getInt());
                 String json = string(objects, b.getInt());

@@ -1275,6 +1275,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_event(
         EventKind::AccessibilityAction => {
             EventPayload::Map(vec![("actionName", PayloadValue::Str(read_text()))])
         }
+        EventKind::EditMenu => EventPayload::Map(vec![("action", PayloadValue::Str(read_text()))]),
         // Insets: x / y carry top / bottom, `count` packs left and right.
         EventKind::Insets => EventPayload::Map(vec![
             ("top", PayloadValue::Number(x as f64)),

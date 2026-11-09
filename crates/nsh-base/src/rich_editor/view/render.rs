@@ -55,6 +55,29 @@ pub(crate) fn part<E: Element>(el: E, rv: &Rv, part: Part) -> E {
         })
 }
 
+/// `el` with the classes and styles of each part of `list`, in order.
+pub(crate) fn parts<E: Element>(el: E, rv: &Rv, list: &'static [Part]) -> E {
+    let props = rv.props;
+    el.app_class(move || {
+        props.classes.with(|c| {
+            let joined: Vec<&str> = list
+                .iter()
+                .filter_map(|p| c.part(*p).map(|s| s.as_str()))
+                .collect();
+            (!joined.is_empty()).then(|| SharedString::from(joined.join(" ")))
+        })
+    })
+    .inline_style(move || {
+        props.styles.with(|s| {
+            Style::from_decls(
+                list.iter()
+                    .filter_map(|p| s.part(*p))
+                    .flat_map(|s| s.decls().iter().cloned()),
+            )
+        })
+    })
+}
+
 /// A box of the content, absolutely placed.
 fn rect(b: Bounds<Points>) -> View {
     view()
@@ -81,6 +104,9 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
         scroll()
             .element_ref(&rv.scroll)
             .flex_1()
+            // The editor's own taps keep its keyboard (Android's scroll
+            // views dismiss it on a tap otherwise).
+            .keyboard_taps(KeyboardTaps::Always)
             .on_scroll(move |e: &ScrollEvent| {
                 scroll_rv.scroll_y.set(e.offset.y);
                 scroll_rv.scrolled.set(e.offset.y);
@@ -96,6 +122,7 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
 fn content(rv: Rv) -> impl IntoElement {
     let desktop = is_desktop();
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
+    let (long, lift, armed, sweep) = (rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let over = rv.clone();
     let placed = rv.clone();
     let height = rv.content_height;
@@ -112,8 +139,12 @@ fn content(rv: Rv) -> impl IntoElement {
         Part::Content,
     )
     .on(EventKind::PressDown, move |p: &EventPayload| {
-        if let (true, EventPayload::Press(e)) = (desktop, p) {
-            down.press(e.position, e.page_position, e.modifiers, e.clicks.max(1));
+        match (desktop, p) {
+            (true, EventPayload::Press(e)) => {
+                down.press(e.position, e.page_position, e.modifiers, e.clicks.max(1))
+            }
+            (false, _) => down.touch_down(),
+            _ => {}
         }
     })
     // Where the pointer is, for drags the app starts from a page point.
@@ -127,25 +158,57 @@ fn content(rv: Rv) -> impl IntoElement {
             return;
         }
         if let EventPayload::Press(e) = p {
-            tap.press(e.position, e.page_position, e.modifiers, e.clicks.max(1));
+            tap.tap(e.position, e.page_position, e.modifiers, e.clicks.max(1));
         }
     })
-    // The mouse selects as it drags (a finger scrolls).
+    // A long press selects the word under the finger (touch screens; the
+    // mouse drags instead).
+    .when(!desktop, |v| {
+        v.on(EventKind::LongPress, move |p: &EventPayload| {
+            if let EventPayload::Press(e) = p {
+                long.long_press(e.position, e.page_position);
+            }
+        })
+        .on(EventKind::PressUp, move |_: &EventPayload| lift.touch_up())
+    })
+    // The mouse selects as it drags; a finger scrolls, unless a long press
+    // armed its sweep, which selects by words.
     .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
         if desktop {
             request.claim();
         }
     }))
-    .keep_touches(desktop)
-    .on_responder_move(move |e: &ResponderEvent| mov.drag_to(e.page))
-    .on_responder_release(move |_: &ResponderEvent| up.release())
-    .on_responder_terminate(move |_: &ResponderEvent| end.release())
+    .claim_touches(TouchClaim::on_move().ask(move |request: &ClaimRequest| {
+        if !desktop && armed.sweep_armed() {
+            request.claim();
+        }
+    }))
+    .keep_touches(true)
+    .on_responder_grant(move |_: &ResponderEvent| {
+        if !desktop {
+            sweep.begin_sweep();
+        }
+    })
+    .on_responder_move(move |e: &ResponderEvent| match desktop {
+        true => mov.drag_to(e.page),
+        false => mov.sweep_to(e.page),
+    })
+    .on_responder_release(move |_: &ResponderEvent| match desktop {
+        true => up.release(),
+        false => up.end_sweep(),
+    })
+    .on_responder_terminate(move |_: &ResponderEvent| match desktop {
+        true => end.release(),
+        false => end.end_sweep(),
+    })
     .child(selection_rects(rv.clone()))
     .child(blocks(rv.clone(), DOC))
     .child(table::controls(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
+    // The touch selection's handles take touches of their own.
+    .child(super::touch::handles(rv.clone()))
     .children(bubble_menu(rv))
 }
 
@@ -1405,6 +1468,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         rv.clone(),
         rv.clone(),
     );
+    let menu = rv.clone();
     let value = rv.sink_value;
     input()
         .element_ref(&rv.input)
@@ -1435,6 +1499,10 @@ fn sink(rv: Rv) -> impl IntoElement {
         })
         .on_key_press(move |k: &str| key.sink_key(k))
         .on_paste(move |p: &PasteEvent| paste.paste_event(p))
+        // The touch selection's edit menu, which the sink shows.
+        .on(EventKind::EditMenu, move |p: &EventPayload| {
+            menu.edit_menu_action(p)
+        })
         .on_focus(move || focus.focus_changed(true))
         .on_blur(move || blur.focus_changed(false))
 }

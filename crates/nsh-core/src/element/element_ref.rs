@@ -27,8 +27,8 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
-    geometry::{Percentage, Point, Points},
+    Command, EditMenuActions, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
+    geometry::{Bounds, Percentage, Point, Points},
 };
 
 /// An element of a view: made with [`super::element_ref`], put on
@@ -177,6 +177,19 @@ impl ElementRef {
     /// Selects `start..end` of an input (UTF-16 units; a caret when equal).
     pub fn set_selection(&self, start: u32, end: u32) {
         self.send(Command::SetSelection { start, end });
+    }
+
+    /// Shows the system's edit menu of a focused input over `bounds` (in
+    /// the root view), offering what `actions` allows
+    /// ([`Command::ShowEditMenu`]): the actions come back as
+    /// [`super::EventKind::EditMenu`], a paste as the input's `on_paste`.
+    pub fn show_edit_menu(&self, bounds: Bounds<Points>, actions: EditMenuActions) {
+        self.send(Command::ShowEditMenu { bounds, actions });
+    }
+
+    /// Hides the edit menu [`ElementRef::show_edit_menu`] showed.
+    pub fn hide_edit_menu(&self) {
+        self.send(Command::HideEditMenu);
     }
 
     /// Scrolls a scroll view to a content offset.

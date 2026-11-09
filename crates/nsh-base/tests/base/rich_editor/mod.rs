@@ -10,6 +10,7 @@ mod marks_clipboard_history;
 mod selection;
 mod structure;
 mod tiptap;
+mod touch;
 mod typing;
 mod view_features;
 
@@ -139,6 +140,11 @@ fn start(doc: Value) -> Headless {
 /// [`start`] on `os`; in a browser, on an Apple platform or not
 /// (`apple_keyboard`).
 fn start_on(doc: Value, os: Os, apple_keyboard: bool) -> Headless {
+    start_with(doc, os, apple_keyboard, Idiom::Desktop)
+}
+
+/// [`start_on`] in `idiom` (a phone: touch selection).
+fn start_with(doc: Value, os: Os, apple_keyboard: bool, idiom: Idiom) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         // Made in the engine, so its keymaps are the platform's the engine
@@ -149,7 +155,7 @@ fn start_on(doc: Value, os: Os, apple_keyboard: bool) -> Headless {
     };
     config.environment.os = os;
     config.environment.apple_keyboard = apple_keyboard;
-    config.environment.idiom = Idiom::Desktop;
+    config.environment.idiom = idiom;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ready").unwrap();
     app

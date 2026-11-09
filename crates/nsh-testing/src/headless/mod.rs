@@ -1747,7 +1747,8 @@ impl Headless {
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
         }
-        let payload = self.press_payload(id, None);
+        let inside = self.screen.press_point(&parsed, id);
+        let payload = self.press_payload(id, inside);
         self.send(id, EventKind::PressDown, payload.clone());
         self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
         self.send(id, EventKind::LongPress, payload.clone());
@@ -1809,17 +1810,24 @@ impl Headless {
     /// (`onChange`), no keys.
     pub fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
         let id = self.input_step(selector, format!("paste({selector})"))?;
+        self.paste_into(id, content);
+        self.done()
+    }
+
+    /// The user's paste of `content` into input `id`: it hears `onPaste`,
+    /// then its text goes in as `pasteBehavior` says.
+    pub(crate) fn paste_into(&mut self, id: NodeId, content: &nsh_core::PasteEvent) {
         self.send(
             id,
             EventKind::Paste,
             EventPayload::Paste(Box::new(content.clone())),
         );
         let Some(input) = self.screen.input_mut(id) else {
-            return self.done();
+            return;
         };
         if input.config.paste_behavior != nsh_core::PasteBehavior::Insert || content.text.is_empty()
         {
-            return self.done();
+            return;
         }
         let mut text = nsh_core::text_edit::pasted(&content.text, input.config.multiline);
         if let Some(max) = input.config.max_length {
@@ -1834,7 +1842,7 @@ impl Headless {
                 .collect();
         }
         if text.is_empty() {
-            return self.done();
+            return;
         }
         input.text.push_str(&text);
         input.count += 1;
@@ -1846,7 +1854,6 @@ impl Headless {
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
         self.report_selection(id);
-        self.done()
     }
 
     /// The step `submit(<selector>)`: the return key in the input

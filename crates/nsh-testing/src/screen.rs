@@ -157,6 +157,9 @@ pub struct Screen {
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
+    /// The edit menu an input showed (`Command::ShowEditMenu`), until it is
+    /// chosen from, closed or hidden.
+    edit_menu: Option<(NodeId, nsh_core::EditMenuActions)>,
     /// The window's size, when the driver knows it: what lies outside it
     /// (and no scroll view brings in) is not on screen.
     viewport: Option<Size<Points>>,
@@ -642,6 +645,10 @@ impl Screen {
                 }
                 _ => {}
             },
+            Command::ShowEditMenu { actions, .. } => self.edit_menu = Some((id, *actions)),
+            Command::HideEditMenu if self.edit_menu.is_some_and(|(shown, _)| shown == id) => {
+                self.edit_menu = None;
+            }
             Command::SetJsResponder { block } => {
                 self.js_block = *block;
                 self.js_grants.push(*block);
@@ -2043,6 +2050,17 @@ impl Screen {
     /// The open context menu was chosen from or closed.
     pub(crate) fn menu_closed(&mut self) {
         self.menu = None;
+    }
+
+    /// The edit menu an input shows over a selection it draws, and the
+    /// input, if one is open.
+    pub(crate) fn edit_menu(&self) -> Option<(NodeId, nsh_core::EditMenuActions)> {
+        self.edit_menu
+    }
+
+    /// The open edit menu was chosen from or closed.
+    pub(crate) fn edit_menu_closed(&mut self) {
+        self.edit_menu = None;
     }
 
     /// The view a right click on `id` asks for a context menu: it, or the

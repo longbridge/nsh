@@ -256,6 +256,7 @@ events! {
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
+    EditMenu = "onEditMenu" as "": "An action of the edit menu a [`Command::ShowEditMenu`] showed for an input was chosen (payload: `action`, an [`EditMenuAction::name`]); Paste is the input's paste (`onPaste`).",
 
 }
 
@@ -2066,6 +2067,75 @@ pub enum Command {
         /// Its arguments (any JSON value).
         args: crate::JsonValue,
     },
+    /// Show the system's edit menu over `bounds` (in the root view) for an
+    /// input that has the focus, the menu a component drawing its own text
+    /// selection (`RichEditor`'s on touch screens) offers: UIKit's
+    /// `UIEditMenuInteraction` on iOS, a floating `ActionMode` on Android.
+    /// Paste pastes into the input as the user's paste does (`onPaste`);
+    /// the other actions are reported as [`EventKind::EditMenu`]. Platforms
+    /// without such a menu ignore it.
+    ShowEditMenu {
+        /// What the menu points at, in the root view.
+        bounds: Bounds<Points>,
+        /// What it may offer.
+        actions: EditMenuActions,
+    },
+    /// Hide the edit menu [`Command::ShowEditMenu`] showed for an input.
+    HideEditMenu,
+}
+
+/// What an edit menu ([`Command::ShowEditMenu`]) may offer; each platform
+/// shows those its own text views' menus would (Android has no Select).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EditMenuActions {
+    /// Cut the selection.
+    pub cut: bool,
+    /// Copy the selection.
+    pub copy: bool,
+    /// Paste the clipboard, when it holds something to paste.
+    pub paste: bool,
+    /// Select the word at the caret.
+    pub select: bool,
+    /// Select everything.
+    pub select_all: bool,
+}
+
+/// An action chosen from an edit menu ([`EventKind::EditMenu`]'s `action`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EditMenuAction {
+    /// Cut the selection.
+    Cut,
+    /// Copy the selection.
+    Copy,
+    /// Select the word at the caret.
+    Select,
+    /// Select everything.
+    SelectAll,
+}
+
+impl EditMenuAction {
+    /// Its name in [`EventKind::EditMenu`]'s payload.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Cut => "cut",
+            Self::Copy => "copy",
+            Self::Select => "select",
+            Self::SelectAll => "selectAll",
+        }
+    }
+
+    /// Parses [`EditMenuAction::name`].
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "cut" => Self::Cut,
+            "copy" => Self::Copy,
+            "select" => Self::Select,
+            "selectAll" => Self::SelectAll,
+            _ => return None,
+        })
+    }
 }
 
 /// A haptic the device plays ([`Command::Haptic`], TS: `Haptics` of

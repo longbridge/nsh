@@ -631,6 +631,23 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.string(text);
                     }
                     Command::AccessibilityFocus => e.int(18),
+                    // `InputBox.showEditMenu`: the bounds in the root view,
+                    // then the actions' bits (cut 1, copy 2, paste 4,
+                    // select all 16; Android's menus have no Select).
+                    Command::ShowEditMenu { bounds, actions } => {
+                        e.int(49);
+                        e.float(bounds.origin.x.0);
+                        e.float(bounds.origin.y.0);
+                        e.float(bounds.size.width.0);
+                        e.float(bounds.size.height.0);
+                        e.int(
+                            i32::from(actions.cut)
+                                | i32::from(actions.copy) << 1
+                                | i32::from(actions.paste) << 2
+                                | i32::from(actions.select_all) << 4,
+                        );
+                    }
+                    Command::HideEditMenu => e.int(50),
                     // `Mounter.haptic` reads the haptic in this order.
                     // API levels of the constants it maps to: CONFIRM /
                     // REJECT from 30 (else VIRTUAL_KEY / LONG_PRESS),

@@ -1754,6 +1754,23 @@ impl Mounter {
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
+            (Command::ShowEditMenu { bounds, actions }, Native::Input(input)) => {
+                let view = input.editor_view();
+                let rect = CGRect::new(
+                    CGPoint::new(bounds.origin.x.0.into(), bounds.origin.y.0.into()),
+                    CGSize::new(bounds.size.width.0.into(), bounds.size.height.0.into()),
+                );
+                // The bounds are in the root view (the surface's, or the
+                // modal's the input is in).
+                let rect = match self.root_view_of(view) {
+                    Some(root) => view.convertRect_fromView(rect, Some(&root)),
+                    None => rect,
+                };
+                crate::input::show_edit_menu(view, rect, actions);
+            }
+            (Command::HideEditMenu, Native::Input(input)) => {
+                crate::input::hide_edit_menu(input.editor_view())
+            }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),

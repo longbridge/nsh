@@ -2,17 +2,21 @@
 //! inside a container view that carries the decoration (background,
 //! border, corners, shadow) like any other view.
 
-use std::{cell::Cell, ffi::CStr};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::CStr,
+};
 
 use nsh_core::{
-    AutoCapitalize, AutoFill, Bounds, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId,
-    Points, ReturnKeyType, SubmitBehavior, TextAlign,
+    AutoCapitalize, AutoFill, Bounds, Color, EditMenuAction, EditMenuActions, EventKind,
+    EventPayload, InputConfig, KeyboardAppearance, KeyboardType, NodeId, PayloadValue, Points,
+    ReturnKeyType, SubmitBehavior, TextAlign,
     geometry::{point, px, size},
 };
 use nsh_engine::EngineControl;
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
-    rc::Retained,
+    rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel},
     sel,
 };
@@ -54,6 +58,13 @@ pub(crate) struct InputIvars {
     /// The scrolling last reported (offset y, content width and height,
     /// viewport width and height): only changes are reported again.
     scroll_reported: Cell<Option<[CGFloat; 5]>>,
+    /// The edit menu a component that draws its own selection showed on
+    /// the input (`Command::ShowEditMenu`): what it offers and what it
+    /// points at, in the input. While set, the edit actions are the
+    /// component's.
+    edit_menu: Cell<Option<(EditMenuActions, CGRect)>>,
+    /// `UIEditMenuInteraction` (iOS 16), made on first use.
+    edit_interaction: RefCell<Option<Retained<AnyObject>>>,
 }
 
 impl Default for InputIvars {
@@ -74,6 +85,8 @@ impl Default for InputIvars {
             paste_inserts: Cell::new(true),
             scroll_replaced: Cell::new(false),
             scroll_reported: Cell::new(None),
+            edit_menu: Cell::new(None),
+            edit_interaction: RefCell::new(None),
         }
     }
 }
@@ -127,14 +140,60 @@ define_class!(
             }
         }
 
-        /// Paste is offered for images and files too while the app listens.
+        /// Paste is offered for images and files too while the app listens;
+        /// a component's edit menu offers what it asked for.
         #[unsafe(method(canPerformAction:withSender:))]
         fn can_perform(&self, action: Sel, sender: Option<&AnyObject>) -> Bool {
+            if let Some(offers) = edit_menu_offers(self.ivars(), action) {
+                return Bool::new(offers);
+            }
             if action == sel!(paste:) && can_paste_more(self.as_ref(), self.ivars()) {
                 return Bool::YES;
             }
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), canPerformAction: action, withSender: sender] }
+        }
+
+        #[unsafe(method(cut:))]
+        fn cut(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::Cut) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), cut: sender] };
+            }
+        }
+
+        #[unsafe(method(copy:))]
+        fn copy(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::Copy) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), copy: sender] };
+            }
+        }
+
+        #[unsafe(method(select:))]
+        fn select(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::Select) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), select: sender] };
+            }
+        }
+
+        #[unsafe(method(selectAll:))]
+        fn select_all(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::SelectAll) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), selectAll: sender] };
+            }
+        }
+
+        /// `UIEditMenuInteractionDelegate`: the menu keeps clear of what
+        /// the component selected.
+        #[unsafe(method(editMenuInteraction:targetRectForConfiguration:))]
+        fn edit_menu_target_rect(&self, _interaction: &AnyObject, _configuration: &AnyObject) -> CGRect {
+            self.ivars()
+                .edit_menu
+                .get()
+                .map_or(CGRect::ZERO, |(_, rect)| rect)
         }
 
         #[unsafe(method(deleteBackward))]
@@ -278,14 +337,60 @@ define_class!(
             }
         }
 
-        /// Paste is offered for images and files too while the app listens.
+        /// Paste is offered for images and files too while the app listens;
+        /// a component's edit menu offers what it asked for.
         #[unsafe(method(canPerformAction:withSender:))]
         fn can_perform(&self, action: Sel, sender: Option<&AnyObject>) -> Bool {
+            if let Some(offers) = edit_menu_offers(self.ivars(), action) {
+                return Bool::new(offers);
+            }
             if action == sel!(paste:) && can_paste_more(self.as_ref(), self.ivars()) {
                 return Bool::YES;
             }
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), canPerformAction: action, withSender: sender] }
+        }
+
+        #[unsafe(method(cut:))]
+        fn cut(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::Cut) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), cut: sender] };
+            }
+        }
+
+        #[unsafe(method(copy:))]
+        fn copy(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::Copy) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), copy: sender] };
+            }
+        }
+
+        #[unsafe(method(select:))]
+        fn select(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::Select) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), select: sender] };
+            }
+        }
+
+        #[unsafe(method(selectAll:))]
+        fn select_all(&self, sender: Option<&AnyObject>) {
+            if !edit_menu_chose(self.as_ref(), self.ivars(), EditMenuAction::SelectAll) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), selectAll: sender] };
+            }
+        }
+
+        /// `UIEditMenuInteractionDelegate`: the menu keeps clear of what
+        /// the component selected.
+        #[unsafe(method(editMenuInteraction:targetRectForConfiguration:))]
+        fn edit_menu_target_rect(&self, _interaction: &AnyObject, _configuration: &AnyObject) -> CGRect {
+            self.ivars()
+                .edit_menu
+                .get()
+                .map_or(CGRect::ZERO, |(_, rect)| rect)
         }
 
         /// The text's size changes after edits and layout without a
@@ -451,6 +556,127 @@ pub(crate) fn test_paste(
     // SAFETY: a plain getter; the test's pasteboard is not used again.
     objc2_ui_kit::UIPasteboard::removePasteboardWithName(&*unsafe { board.name() });
     Ok(())
+}
+
+/// The ivars of input view `view` (a field or a text area).
+fn ivars_of(view: &UIView) -> Option<&InputIvars> {
+    view.downcast_ref::<Field>()
+        .map(|f| f.ivars())
+        .or_else(|| view.downcast_ref::<Area>().map(|a| a.ivars()))
+}
+
+/// What a component's edit menu offers of `action`, while it shows one on
+/// the input: only what it asked for (Paste with something to paste), so
+/// UIKit's other actions for the input's own text stay out.
+fn edit_menu_offers(ivars: &InputIvars, action: Sel) -> Option<bool> {
+    let (actions, _) = ivars.edit_menu.get()?;
+    let board = || objc2_ui_kit::UIPasteboard::generalPasteboard();
+    Some(if action == sel!(cut:) {
+        actions.cut
+    } else if action == sel!(copy:) {
+        actions.copy
+    } else if action == sel!(paste:) {
+        // SAFETY: plain getters, which show no paste notice.
+        actions.paste && unsafe { board().hasStrings() || board().hasImages() || board().hasURLs() }
+    } else if action == sel!(select:) {
+        actions.select
+    } else if action == sel!(selectAll:) {
+        actions.select_all
+    } else {
+        false
+    })
+}
+
+/// Reports `action` of a component's edit menu (`onEditMenu`), if one
+/// shows on input `view`; whether it did.
+fn edit_menu_chose(view: &UIView, ivars: &InputIvars, action: EditMenuAction) -> bool {
+    if ivars.edit_menu.get().is_none() {
+        return false;
+    }
+    // SAFETY: both input classes have a `delegate`, set to the target.
+    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![view, delegate] };
+    if let Some(target) = delegate
+        .as_deref()
+        .and_then(|d| d.downcast_ref::<EventTarget>())
+    {
+        target.dispatch(
+            view.tag() as NodeId,
+            EventKind::EditMenu,
+            EventPayload::Map(vec![("action", PayloadValue::Str(action.name().into()))]),
+        );
+    }
+    true
+}
+
+/// Shows the system's edit menu on input `view` over `rect` (in the
+/// input), offering `actions` (`Command::ShowEditMenu`).
+// `UIMenuController` before iOS 16.
+#[allow(deprecated)]
+pub(crate) fn show_edit_menu(view: &UIView, rect: CGRect, actions: EditMenuActions) {
+    let Some(ivars) = ivars_of(view) else { return };
+    ivars.edit_menu.set(Some((actions, rect)));
+    if !view.isFirstResponder() && !view.becomeFirstResponder() {
+        return;
+    }
+    let interaction = AnyClass::get(c"UIEditMenuInteraction").map(|class| {
+        ivars
+            .edit_interaction
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                // SAFETY: `initWithDelegate:` is the interaction's
+                // initializer; the input implements the delegate method it
+                // answers and outlives the interaction (its view).
+                let interaction: Retained<AnyObject> = unsafe {
+                    let alloc: Allocated<AnyObject> = msg_send![class, alloc];
+                    msg_send![alloc, initWithDelegate: view]
+                };
+                // SAFETY: UIView's `addInteraction:` with a UIInteraction.
+                let _: () = unsafe { msg_send![view, addInteraction: &*interaction] };
+                interaction
+            })
+            .clone()
+    });
+    match (interaction, AnyClass::get(c"UIEditMenuConfiguration")) {
+        (Some(menu), Some(configuration)) => {
+            let source = CGPoint::new(rect.origin.x + rect.size.width / 2.0, rect.origin.y);
+            // SAFETY: UIEditMenuConfiguration's factory (a nil identifier)
+            // and the interaction's `presentEditMenuWithConfiguration:`.
+            unsafe {
+                let config: Retained<AnyObject> = msg_send![
+                    configuration,
+                    configurationWithIdentifier: Option::<&AnyObject>::None,
+                    sourcePoint: source
+                ];
+                // Above the selection where it fits, as a text view's menu
+                // (`UIEditMenuArrowDirectionDown`); the system picks
+                // another side where it does not.
+                let _: () = msg_send![&*config, setPreferredArrowDirection: 2isize];
+                let _: () = msg_send![&*menu, presentEditMenuWithConfiguration: &*config];
+            }
+        }
+        _ => {
+            let mtm = MainThreadMarker::from(view);
+            objc2_ui_kit::UIMenuController::sharedMenuController(mtm)
+                .showMenuFromView_rect(view, rect);
+        }
+    }
+}
+
+/// Hides the edit menu [`show_edit_menu`] showed on input `view`; the edit
+/// actions are the input's own again.
+#[allow(deprecated)]
+pub(crate) fn hide_edit_menu(view: &UIView) {
+    let Some(ivars) = ivars_of(view) else { return };
+    if ivars.edit_menu.take().is_none() {
+        return;
+    }
+    if let Some(menu) = ivars.edit_interaction.borrow().as_ref() {
+        // SAFETY: UIEditMenuInteraction's `dismissMenu`.
+        let _: () = unsafe { msg_send![&**menu, dismissMenu] };
+    } else if AnyClass::get(c"UIEditMenuInteraction").is_none() {
+        let mtm = MainThreadMarker::from(view);
+        objc2_ui_kit::UIMenuController::sharedMenuController(mtm).hideMenuFromView(view);
+    }
 }
 
 /// Whether input `view` offers Paste for what UIKit's own paste would not:
