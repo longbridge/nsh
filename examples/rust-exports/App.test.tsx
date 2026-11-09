@@ -25,6 +25,8 @@ test("the class keeps its state in Rust", async () => {
 
 test("open's modules stand in for the crate's module", async () => {
   const calls: unknown[][] = [];
+  // Faking runs headless only: on a real platform (`--target`) `open`
+  // rejects `modules`, and the crate's own module answers instead.
   const app = await open("./App.tsx", {
     modules: {
       "rust-exports/native": {
@@ -37,7 +39,11 @@ test("open's modules stand in for the crate's module", async () => {
         },
       },
     },
+  }).catch((e: Error & { code?: string }) => {
+    if (e.code === "ERR_NSH_TEST_UNSUPPORTED") return null;
+    throw e;
   });
+  if (!app) return;
   expect(app.shows("Formatted at once: $9.99")).toBe(true);
   await app.press("Fetch rate");
   await app.waitFor("Rate: 25%");
