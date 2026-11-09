@@ -814,6 +814,20 @@ fn svg_safety_text_only_in_a_clip_path_asks_for_fonts() {
 }
 
 #[test]
+fn svg_safety_resource_chains_do_not_overflow_the_stack() {
+    // Resources can link to each other, and usvg converts the linked one.
+    // The chain is flat XML, so only a depth carried through the resource
+    // walk stops it.
+    let chain: String = (1..5_000)
+        .map(|i| format!(r##"<clipPath id="c{i}" clip-path="url(#c{})"/>"##, i - 1))
+        .collect();
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><clipPath id="c0"><text x="0" y="9">SALE</text></clipPath>{chain}</defs><rect width="10" height="10" clip-path="url(#c4999)"/></svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooManyNodes));
+}
+
+#[test]
 fn svg_safety_use_chains_do_not_overflow_the_stack() {
     // usvg refuses a chain deeper than 1024 elements; the walk must stop at
     // the same depth instead of recursing through all 50 000 links.

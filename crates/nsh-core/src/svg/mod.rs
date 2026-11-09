@@ -75,7 +75,9 @@ pub const MAX_BYTES: usize = 16 << 20;
 pub const MAX_TEXT_CHARS: usize = 64 * 1024;
 
 /// The deepest nesting usvg parses: its `parse_xml_node` refuses a document
-/// past this depth, and the text walk stops at the same depth.
+/// past this depth, and the text walk stops at the same depth. A resource
+/// edge counts four levels: a chain of clip paths or masks is flat XML but
+/// recurses through several of the walk's frames, so it must stop sooner.
 const MAX_DEPTH: u32 = 1024;
 
 /// The xlink namespace: `<use>` and `<tref>` take `xlink:href` over `href`.
@@ -850,7 +852,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
         if resource.kind.cached(resource.node) && !self.counted.insert(id) {
             return Ok(Expansion::default());
         }
-        let body = self.resource_body(id, resource, depth, visiting)?;
+        let body = self.resource_body(id, resource, depth + 4, visiting)?;
         let multiplier = if kind == ResourceKind::Marker {
             marker_multiplier(user, property, self.shapes, self.vertices)
         } else {
@@ -881,7 +883,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
             && let Some(linked) = self.resources.get(link).copied()
             && linked.kind == resource.kind
         {
-            body.add(self.resource_body(link, linked, depth + 2, visiting)?)?;
+            body.add(self.resource_body(link, linked, depth + 4, visiting)?)?;
         }
         // A clip path can name another clip path in `clip-path`, and a mask
         // another mask in `mask`; usvg converts the linked resource too.
