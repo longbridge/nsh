@@ -1,6 +1,6 @@
 ---
 title: nsh/web
-description: Web 上应用所在页面的 API：Head（文档的标题、描述和元数据，供搜索引擎和链接预览使用），以及 isAvailable。
+description: Web 上应用所在页面的 API：Head（文档的标题、描述和元数据，供搜索引擎和链接预览使用）。
 order: 12.6
 ---
 
@@ -9,12 +9,11 @@ order: 12.6
 `nsh/web` 提供 Web 上应用所在页面的能力：[`Head`](#head)，即文档的标题、描述和元数据，供搜索引擎收录、链接预览展示。该模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在手机和桌面上，`Head` 不渲染任何内容。
 
 ```tsx
-import { Head, isAvailable } from "nsh/web";
+import { Head } from "nsh/web";
 ```
 
 | 导出 | 类型 | 说明 |
 |---|---|---|
-| `isAvailable` | `boolean` | 在浏览器中为 `true`，此时应用是站点的一个页面。 |
 | `Head` | `(props: HeadProps) => JSX.Element` | 在挂载期间设置页面的 `<head>`。 |
 
 ## Head

@@ -74,5 +74,5 @@ export function createWebPage(reactive, player) {
     return null;
   }
 
-  return { exports: { isAvailable: true, Head } };
+  return { exports: { Head } };
 }

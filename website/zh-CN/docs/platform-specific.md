@@ -187,7 +187,7 @@ Rust 应用用 `nsh_core::element::desktop` 绘制自己的标题栏（[用 Rust
 
 ### nsh/web
 
-在浏览器中，应用是站点的一个页面。`nsh/web` 的 `Head` 在挂载期间设置页面的标题、描述、规范 URL 和元数据，供搜索引擎和链接预览使用；`isAvailable` 在浏览器中为 `true`。在其他平台上 `Head` 不渲染任何内容。见 [nsh/web](../modules/nsh-web.md) 和 [Web](./web.md#搜索引擎)。
+在浏览器中，应用是站点的一个页面。`nsh/web` 的 `Head` 在挂载期间设置页面的标题、描述、规范 URL 和元数据，供搜索引擎和链接预览使用。在其他平台上 `Head` 不渲染任何内容。见 [nsh/web](../modules/nsh-web.md) 和 [Web](./web.md#搜索引擎)。
 
 ### 状态栏
 

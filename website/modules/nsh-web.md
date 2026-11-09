@@ -1,6 +1,6 @@
 ---
 title: nsh/web
-description: "The page around an app on the web: Head, the document's title, description and metadata for search engines and link previews, and isAvailable."
+description: "The page around an app on the web: Head, the document's title, description and metadata for search engines and link previews."
 order: 12.6
 ---
 
@@ -11,12 +11,11 @@ metadata, which search engines index and link previews show. The module can be i
 bundle runs everywhere: on the phones and the desktops `Head` renders nothing.
 
 ```tsx
-import { Head, isAvailable } from "nsh/web";
+import { Head } from "nsh/web";
 ```
 
 | Export | Type | Description |
 |---|---|---|
-| `isAvailable` | `boolean` | `true` in browsers, where the app is a page of a site. |
 | `Head` | `(props: HeadProps) => JSX.Element` | Sets the page's `<head>` while it is mounted. |
 
 ## Head

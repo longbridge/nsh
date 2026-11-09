@@ -2,7 +2,7 @@
 //! title, description and metadata for search engines and link previews.
 //! The browser runtime serves the module itself (`web/browser/page.js` in
 //! `nsh-platform-web`); here, on the native hosts, there is no page, so
-//! `isAvailable` is false and `Head` renders and sets nothing.
+//! `Head` renders and sets nothing.
 
 use std::ffi::c_int;
 
@@ -23,24 +23,14 @@ unsafe extern "C" fn head(
     qjs::JS_NULL
 }
 
-pub(crate) const EXPORTS: &[Item] = &[
-    (
-        "isAvailable",
-        Export::Value(|_| qjs::JS_FALSE),
-        Ts::value(
-            "True on the web, where the app is a page of a site.",
-            "boolean",
-        ),
+pub(crate) const EXPORTS: &[Item] = &[(
+    "Head",
+    Export::Function(head, 1),
+    Ts::function(
+        "The page's `<head>` while it is mounted: its title, description, canonical URL,\nlanguage, metadata and structured data, which search engines index and link\npreviews show. Several may be mounted (the app's, each page's of a stack): the\nlast mounted wins for what it sets, the ones before it for the rest, so a\npage pushed over another titles the document until it is popped. It renders\nnothing; native hosts have no page and ignore it.",
+        &["(props: HeadProps): JSX.Element"],
     ),
-    (
-        "Head",
-        Export::Function(head, 1),
-        Ts::function(
-            "The page's `<head>` while it is mounted: its title, description, canonical URL,\nlanguage, metadata and structured data, which search engines index and link\npreviews show. Several may be mounted (the app's, each page's of a stack): the\nlast mounted wins for what it sets, the ones before it for the rest, so a\npage pushed over another titles the document until it is popped. It renders\nnothing; native hosts have no page and ignore it.",
-            &["(props: HeadProps): JSX.Element"],
-        ),
-    ),
-];
+)];
 
 pub(crate) const TYPES: &str = r#"/** One `<meta>` of the page: `name` (`"robots"`, `"twitter:card"`) or `property`
  * (Open Graph's `"og:image"`) with its `content`. */

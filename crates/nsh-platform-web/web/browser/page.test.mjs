@@ -57,7 +57,6 @@ test("a later head wins for what it sets, the ones before it for the rest", asyn
   globalThis.document = fakeDocument();
   const reactive = fakeReactive();
   const { exports } = createWebPage(reactive, {});
-  assert.equal(exports.isAvailable, true);
   reactive.own(() => exports.Head({ title: "Notes", description: "All notes", lang: "en", canonical: "/" }));
   const page = reactive.own(() => exports.Head({
     title: "Q3 earnings", canonical: "/notes/q3", meta: [{ property: "og:type", content: "article" }],

@@ -38,7 +38,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/base` | `Button`, `Input`; `TextView`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `AlertDialog` | [nsh/base](./nsh-base.md) |
 | `nsh/mobile` | `isAvailable`, `TabBar` (the system's tab bar, iOS and Android), `InputAccessoryView` (iOS), `BackHandler` (Android) | [nsh/mobile](./nsh-mobile.md) |
 | `nsh/desktop` | `isAvailable`, `Window` (title, title bar, maximize, full screen), `titleBar`, `Menu` (application menu, context menus) | [nsh/desktop](./nsh-desktop.md) |
-| `nsh/web` | `isAvailable`, `Head` (the page's title, description and metadata, for search engines and link previews) | [nsh/web](./nsh-web.md) |
+| `nsh/web` | `Head` (the page's title, description and metadata, for search engines and link previews) | [nsh/web](./nsh-web.md) |
 | `nsh/i18n` | `t`, `setLocale`, `availableLocales` (the app's translations and the language it shows) | [nsh/i18n](./nsh-i18n.md) |
 | `nsh/updater` | `checkForUpdate`, `downloadUpdate`, `installAndRestart` (a packaged app updates itself) | [nsh/updater](./nsh-updater.md) |
 | Standard modules | `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib` | [Standard modules](./standard-modules.md) |
