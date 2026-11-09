@@ -1103,7 +1103,10 @@ pub fn valid_host_name(name: &str) -> bool {
 fn valid_command(command: &str) -> bool {
     !command.is_empty()
         && !command.contains(['\0', '*'])
-        && (Path::new(command).is_absolute()
+        // `absolute`, not `Path::is_absolute`: in the browser that is false for
+        // every path, so `/bin/sh` refused the whole manifest and the app never
+        // started there.
+        && (absolute(Path::new(command))
             // A bare name has no drive (`C:git` is relative to the host's
             // directory on drive C).
             || (!command.contains(['/', '\\', ':']) && command != "." && command != ".."))
@@ -1227,7 +1230,7 @@ impl std::fmt::Display for FileRefusal {
 }
 
 fn resolved_path(path: &Path) -> Result<PathBuf, String> {
-    if !path.is_absolute() || path.components().any(|p| matches!(p, Component::ParentDir)) {
+    if !absolute(path) || path.components().any(|p| matches!(p, Component::ParentDir)) {
         return Err("filesystem paths must be absolute and contain no parent traversal".into());
     }
     let mut cursor = path;
@@ -1590,10 +1593,12 @@ impl Access {
 
     /// Whether a media URL (image, video, canvas image) may be loaded.
     /// Relative and `asset:` URIs are the app's own files; `data:` URIs and
-    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has.
+    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has; a
+    /// `file:` URL is a file path, as an absolute path is.
     pub fn allows_media(&self, uri: &str) -> bool {
         if !uri.contains("://")
             || uri.starts_with("asset:")
+            || uri.starts_with("file:")
             || uri.starts_with("data:")
             || uri.starts_with("blob:")
         {
@@ -1946,6 +1951,23 @@ mod tests {
         }
         assert!(!super::valid_command("C:git"));
         assert!(super::valid_command("git"));
+    }
+
+    #[test]
+    fn a_manifest_with_absolute_commands_and_roots_parses() {
+        // The manifest of an app that also runs in a browser: there `Path::is_absolute`
+        // is false for every path, so these are checked with `absolute` (`has_root`).
+        let declared = caps(
+            r#"{"process":{"execute":["/bin/sh","/usr/bin/open","git"]},"fs":{"read":["/Applications"]}}"#,
+        );
+        assert_eq!(
+            declared.process.execute,
+            ["/bin/sh", "/usr/bin/open", "git"]
+        );
+        if !cfg!(windows) {
+            assert!(super::valid_command("/bin/sh"));
+            assert!(super::absolute(Path::new("/Applications")));
+        }
     }
 
     #[test]
@@ -2322,6 +2344,9 @@ mod tests {
         assert!(!access.allows_media("https://example.com/a.png"));
         assert!(access.allows_media("asset:/logo.png"));
         assert!(access.allows_media("logo.png"));
+        assert!(access.allows_media("/home/a/logo.png"));
+        assert!(access.allows_media("file:///home/a/logo.png"));
+        assert!(access.allows_media("data:image/png;base64,iVBORw0KGgo="));
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());

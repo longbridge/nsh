@@ -67,6 +67,8 @@ objc2-core-text.workspace = true
 objc2-foundation.workspace = true
 objc2-image-io.workspace = true
 objc2-io-kit.workspace = true
+# Shader frames on IOSurfaces (`shader::display_frame`).
+objc2-io-surface.workspace = true
 objc2-quartz-core.workspace = true
 rustc-hash.workspace = true
 serde_json.workspace = true

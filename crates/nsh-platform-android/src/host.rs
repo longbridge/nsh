@@ -200,6 +200,7 @@ impl Host {
             app,
             viewport,
             trace: self.trace,
+            content_culling: true,
             network: Some(crate::net::network()),
             websocket: None,
             refuse_connections: None,

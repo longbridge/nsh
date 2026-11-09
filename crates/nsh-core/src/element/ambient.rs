@@ -527,6 +527,12 @@ pub fn announce_for_accessibility(message: impl Into<String>) {
     act(super::services::announce(message.into()));
 }
 
+/// The device plays `haptic` (TS: `Haptics` of `nsh/mobile`): iOS and
+/// Android; elsewhere nothing happens.
+pub fn haptic(haptic: crate::Haptic) {
+    act(super::services::haptic(haptic));
+}
+
 /// Runs `f` with the app's storage (`nsh/storage`, [`crate::storage::Storage`]):
 /// the one the engine was given, or one in memory when it was given none.
 pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R {
@@ -1223,14 +1229,23 @@ pub fn after_answer(f: impl FnOnce() + 'static) {
 }
 
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
-/// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
-/// that should also run on the web uses the engine's services instead
-/// ([`fetch`], [`timer`]).
+/// its result; `tokio::task::spawn_blocking`), starting at once, whether
+/// called from a task, a render, an effect or a handler. Not in
+/// WebAssembly: code that should also run on the web uses the engine's
+/// services instead ([`fetch`], [`timer`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn blocking<R: Send + 'static>(
     f: impl FnOnce() -> R + Send + 'static,
 ) -> tokio::task::JoinHandle<R> {
-    tokio::task::spawn_blocking(f)
+    // Tasks are polled in the runtime's context; outside a task the
+    // surface's runtime is the one they would be.
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => runtime.spawn_blocking(f),
+        Err(_) => match executor().runtime() {
+            Some(runtime) => runtime.spawn_blocking(f),
+            None => tokio::task::spawn_blocking(f),
+        },
+    }
 }
 
 /// Runs `future` on the runtime's threads (in a task: await its result;
@@ -1577,7 +1592,7 @@ pub fn fps_enabled() -> bool {
 }
 
 /// Turns the platform's performance monitor on or off (TS:
-/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::perf`
+/// `setFpsEnabled`): the macOS panel, the other platforms' `nsh::fps`
 /// log lines, as `--fps` and `NSH_FPS=1` do at launch. Platforms without a
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {

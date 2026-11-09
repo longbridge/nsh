@@ -739,6 +739,7 @@ impl RootView {
             app,
             viewport,
             trace: self.ivars().options.trace,
+            content_culling: true,
             network: Some(crate::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -893,7 +894,7 @@ pub struct SurfaceOptions {
     /// every app the surface runs.
     pub host: nsh_engine::HostChannel,
     /// Logs the performance monitor's readings once a second (target
-    /// `nsh::perf`): frame rate, frame and commit costs, CPU, memory.
+    /// `nsh::fps`): frame rate, frame and commit costs, CPU, memory.
     pub fps: bool,
 }
 

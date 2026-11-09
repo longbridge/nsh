@@ -638,6 +638,18 @@ impl Host {
         });
     }
 
+    /// Whether `<Each>` leaves the rows the core may cull unrendered, as
+    /// placeholders, until the core asks for them (`content_culling`);
+    /// off by default. Set before evaluating the bundle.
+    pub fn set_lazy_rows(&self, lazy: bool) {
+        self.cx.with(|cx| {
+            // SAFETY: the state of this host's context.
+            unsafe { &(*crate::state::state(cx.as_raw().as_ptr())).dom }
+                .lazy_rows
+                .set(lazy);
+        });
+    }
+
     /// Asks a `List` to render items into cells: `(slot, item index)`
     /// pairs.
     pub fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
@@ -1165,6 +1177,15 @@ impl Host {
             .borrow()
             .as_ref()
             .map_or(0, |rt| self.scheduler.ready(rt.memory_usage()).obj_count)
+    }
+
+    /// The JS heap's size in bytes and its live objects (diagnostics: a
+    /// walk of the heap, so not for every frame).
+    pub fn heap_usage(&self) -> (u64, u64) {
+        self.rt.borrow().as_ref().map_or((0, 0), |rt| {
+            let m = self.scheduler.ready(rt.memory_usage());
+            (m.malloc_size.max(0) as u64, m.obj_count.max(0) as u64)
+        })
     }
 
     /// Runs the cycle collector. Call when idle so released nodes are

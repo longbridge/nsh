@@ -87,6 +87,7 @@ fn app_config(
         ),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,
@@ -1273,6 +1274,58 @@ fn the_clipboard_round_trips_through_the_platform() {
 
 /// Every clipboard function, as each settles: `ok` or the error's class,
 /// `code`, `permission` and `resource`.
+const HAPTICS: &str = r#"import { mount, signal, Text } from "nsh";
+import { Haptics } from "nsh/mobile";
+
+const refused = signal("none");
+setTimeout(() => {
+  Haptics.selection();
+  Haptics.impact();
+  Haptics.impact("rigid");
+  Haptics.notification("error");
+  Haptics.notification();
+  try {
+    Haptics.notification("loud" as never);
+  } catch (e) {
+    refused.set((e as Error).name);
+  }
+}, 0);
+
+mount(() => <Text>{`refused ${refused()}`}</Text>);
+"#;
+
+/// `Haptics` of `nsh/mobile` asks the platform for each haptic, in order
+/// (a notification without a kind is a success); a name it does not know
+/// throws.
+#[test]
+fn haptics_reach_the_platform() {
+    let (_engine, rx) = start(HAPTICS);
+    let mut played = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Haptic(haptic),
+            } = item
+            {
+                played.push(*haptic);
+            }
+        }
+        shows(batch, "refused TypeError")
+    });
+    use nsh_core::{Haptic, HapticImpact, HapticNotification};
+    assert_eq!(
+        played,
+        [
+            Haptic::Selection,
+            Haptic::Impact(HapticImpact::Medium),
+            Haptic::Impact(HapticImpact::Rigid),
+            Haptic::Notification(HapticNotification::Error),
+            Haptic::Notification(HapticNotification::Success),
+        ]
+    );
+}
+
 const CLIPBOARD_DENIED: &str = r#"import { mount, signal, Text } from "nsh";
 import { Clipboard } from "nsh";
 

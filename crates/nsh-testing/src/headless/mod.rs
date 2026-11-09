@@ -188,6 +188,8 @@ where
         wanted: wanted.clone(),
     };
     let engine = Engine::start_with(config, text_engine, sink, |control| {
+        // Steps reach every view of a page, below its fold too.
+        control.set_content_culling(false);
         if !displays.is_empty() {
             control.set_displays(displays);
         }
@@ -1586,12 +1588,23 @@ impl Headless {
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
         // A real finger lands where the view is drawn: a view drawn over it
-        // there takes the press, so the step fails as the user would.
+        // there takes the press, so the step fails as the user would. The
+        // finger goes on the part of the view that is visible — a view
+        // across a scroll view's fold is pressed on the half left visible,
+        // its laid-out center lying below the fold, on the bar under it; a
+        // view nothing of which is on screen (a target scrolled out of
+        // view) keeps its laid-out center, which a press still reaches as
+        // before.
         if let Some(target) = self.screen.bounds_in_root(id) {
             let point = self
                 .screen
                 .press_point(&parsed, id)
                 .map_or(target.center(), |p| target.origin + p);
+            let point = match self.screen.visible_bounds_in_root(id) {
+                Some(visible) if visible.contains(&point) => point,
+                Some(visible) => visible.center(),
+                None => point,
+            };
             if let Some(cover) = self.screen.covering(id, point) {
                 return Err(format!(
                     "{}; {}",

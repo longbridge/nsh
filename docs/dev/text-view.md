@@ -117,7 +117,8 @@ last: the app's `renderCodeBlock` (TS and Rust: the whole block is the app's), t
 (`provide_context`, Rust: `tree-sitter`, a theme of its own, ...), the built-in one.
 
 The built-in highlighter (`highlight.rs`, on the tokens, palette and syntaxes of `syntax.rs`, which the `Editor` shares; `nsh-base`'s feature `highlight`, on by default) is syntect 5 with pure-Rust
-regexes (`regex-fancy`, so it builds for WebAssembly; no Oniguruma) and two-face's syntaxes (bat's set: syntect's own
+regexes on the web (`regex-fancy`; no C there) and Oniguruma's on the native runtimes (`regex-onig`: its regexes
+compile about 20 times faster and match 3 to 4 times faster; syntect takes it when both are on), and two-face's syntaxes (bat's set: syntect's own
 plus TypeScript / TSX, TOML, Dockerfile, ...). A block's language is found by extension or name, case-insensitive
 (`ts`, `tsx`, `rs`, `py`, `sh`, `yml`, `md`, `Rust`, ...) plus the other names fences use (`jsx`, `shell`, `golang`,
 `c++`, `csharp`, `jsonc`, ...); no language, `text` or one syntect does not know leaves the block plain.
@@ -149,9 +150,10 @@ palette, so the site's code looks as an app's does. These colors are the one loo
 typography and the `Editor`'s look, which colors its text with the same tokens (`crate::syntax`, `editor.md`); an app
 with its own palette provides its own `CodeHighlighter`.
 
-Cost (release, x86-64, 500 lines of real files): a fresh block takes 22 ms in Rust, 139 ms in TSX (TypeScript's
-grammar is the heaviest), 2-3x that for the first block of a language, which compiles its regexes; loading the
-syntaxes takes tens of milliseconds more. So the engine thread parses only what is cheap:
+Cost (release, x86-64, 500 lines of real files, Oniguruma): a fresh block takes 7 ms in Rust, 32 ms in TSX
+(TypeScript's grammar is the heaviest), 4 / 6 ms in Python, about 1.5x that for the first block of a language, which
+compiles its regexes (with fancy-regex: 22 and 139 ms, 2-3x for the first block); loading the syntaxes takes about a
+millisecond more. So the engine thread parses only what is cheap:
 
 - The last 64 blocks are kept (one cache for the process, behind a mutex) with the parser's state at the start of their
   last line: a block shown again costs a few µs, and a block that grew (an AI reply streaming its code) is parsed only
@@ -227,7 +229,8 @@ with a `─` rule under h1 only (`terminal_heading`); a quote is `▎` in the ac
 formulas are bands as wide as their longest line plus a Cell each side (`terminal_band`), a code block under its
 language label; an alert is one band across the body text's width, its icon and text a Cell in, and keeps a `│` in its
 tint where the terminal draws no bands; tables fit the view by narrowing their widest column, never below
-`MIN_COLUMN` Cells (`fit_columns`, recomputed from the table's laid-out width), their cells wrapping; tasks show
+`MIN_COLUMN` Cells (`fit_columns`, cached in one `computed` from the table's laid-out width, with cells and rules
+borrowing its column widths through `Memo::with`), their cells wrapping; tasks show
 `☐` / `☑`. The tests are `nsh-base`'s `tests/base/terminal.rs`.
 
 ## Accessibility

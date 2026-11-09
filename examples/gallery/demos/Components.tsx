@@ -8,7 +8,7 @@ import { safeArea } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { TitleBar } from "../TitleBar";
-import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, isDark, mono, PageHeader, Press, radius, Row, Segmented, tints, Toggle, type Tone, toneColor, toneTint } from "../ui";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, mono, PageHeader, Press, radius, Row, Segmented, tints, Toggle, type Tone, toneColor, toneTint } from "../ui";
 
 // One device pixel, in points (reading it in a binding follows the screen).
 const hairline = () => 1 / pixelRatio();
@@ -91,7 +91,6 @@ function LayoutAnimations() {
                 borderRadius: 14,
                 borderCurve: "continuous",
                 backgroundColor: toneTint(tileTones[n() % tileTones.length]),
-                boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 #ffffff",
                 alignItems: "center",
                 justifyContent: "center",
               }}
@@ -118,11 +117,11 @@ function PressableSheet() {
         onPress={() => sheet.set(true)}
         role="button"
         style={{ boxShadow: finish.accent.boxShadow }}
-        class="h-12 flex-row items-center justify-center gap-2 rounded-[12px] bg-[#c8f26d] transition active:scale-[0.97] active:bg-[#a9d14f]"
+        class="h-12 flex-row items-center justify-center gap-2 rounded-[12px] bg-primary transition motion-reduce:transition-none active:scale-[0.97] active:opacity-85 focus:outline-2 focus:outline-ring"
       >
         <Text style={{ fontSize: 15, fontWeight: "600", color: colors.onAccent }}>Open a sheet</Text>
       </View>
-      <Caption label="Scales and darkens while pressed" note="active:scale-[0.97]" />
+      <Caption label="Scales and dims while pressed" note="active:scale-[0.97]" />
       <Sheet
         open={sheet()}
         onOpenChange={({ open }) => sheet.set(open)}
@@ -314,7 +313,7 @@ function ModalOptions() {
         onOpenChange={({ open }) => visible.set(open)}
         style={{ flex: 1 }}
       >
-        <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
           <TitleBar />
           <View
             style={{

@@ -705,7 +705,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 let udid = crate::run::simulator(None)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
-                crate::run::simctl(&["launch", "--terminate-running-process", &udid, &id])?;
+                crate::run::simctl_with_env(
+                    &["launch", "--terminate-running-process", &udid, &id],
+                    &crate::run::simctl_app_env(config),
+                )?;
                 step.done(format!("launched {id} in the simulator"));
             }
         }

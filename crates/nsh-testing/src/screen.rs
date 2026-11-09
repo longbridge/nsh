@@ -451,7 +451,10 @@ impl Screen {
             MountItem::ModalConfig { id, config } => {
                 self.nodes.entry(*id).or_default().close_on_escape = config.close_on_escape;
             }
-            MountItem::Frame { id, frame } => self.nodes.entry(*id).or_default().frame = *frame,
+            MountItem::Frame { id, frame } => {
+                self.nodes.entry(*id).or_default().frame = *frame;
+                self.pull_back(*id);
+            }
             MountItem::ViewStyle { id, style } => {
                 let view = self.nodes.entry(*id).or_default();
                 view.hidden = style.hidden;
@@ -529,6 +532,7 @@ impl Screen {
                 if let Some(scroll) = self.scroll_mut(*id) {
                     scroll.content = Some(*size);
                 }
+                self.pull_back(*id);
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 // Not clamped: the core knows its content.
@@ -1973,6 +1977,33 @@ impl Screen {
         Some(Bounds::new(origin, view.frame.size))
     }
 
+    /// View `id`'s bounds in the root's points, clipped to the boxes of
+    /// the views around it that clip (a scroll view's viewport, `overflow:
+    /// hidden`): where a finger can land on it. `None` when nothing of it
+    /// is visible (a view scrolled out of view).
+    pub(crate) fn visible_bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
+        let mut visible = self.bounds_in_root(id)?;
+        let mut at = self.nodes.get(&id).and_then(|v| v.parent);
+        while let Some(parent) = at {
+            let Some(p) = self.nodes.get(&parent) else {
+                break;
+            };
+            if (p.scroll.is_some() || (p.clips && parent != ROOT))
+                && let Some(box_) = self.bounds_in_root(parent)
+            {
+                visible = visible.intersect(&box_);
+            }
+            // A modal is its own placement ([`Screen::bounds_in_root`]):
+            // what is above it holds where it is in the tree, not where it
+            // shows.
+            if p.kind == Some(ViewKind::Modal) {
+                break;
+            }
+            at = p.parent;
+        }
+        (!visible.is_empty()).then_some(visible)
+    }
+
     /// The views of `chain` (innermost first) that hovering matters to:
     /// their `hover:` styles or hover events (`input::hoverable`).
     #[cfg(not(target_arch = "wasm32"))]
@@ -2199,6 +2230,27 @@ impl Screen {
         }
     }
 
+    /// Scroll view `id`'s content or viewport changed: an offset past the
+    /// new end comes back to it and is reported, as the platforms' scroll
+    /// views do (UIKit adjusts the offset as the content size changes, the
+    /// desktops clamp what they report), so the rows that remain show. A
+    /// pull past the start is the finger's and stays.
+    fn pull_back(&mut self, id: NodeId) {
+        let end = self.scroll_end(id);
+        let Some(scroll) = self.scroll_mut(id) else {
+            return;
+        };
+        let at = if scroll.horizontal {
+            &mut scroll.x
+        } else {
+            &mut scroll.y
+        };
+        if *at > end {
+            *at = end;
+            self.scrolled.push(id);
+        }
+    }
+
     /// The scroll views a command moved since the last call.
     pub(crate) fn take_scrolled(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut self.scrolled)
@@ -2411,6 +2463,48 @@ mod tests {
     }
 
     #[test]
+    fn an_offset_past_the_content_comes_back_to_its_end_and_is_reported() {
+        let mut screen = Screen::default();
+        let content = |height: f32| MountItem::ScrollContent {
+            id: 2,
+            size: Size::new(Points(390.0), Points(height)),
+        };
+        let by = |dy: f32| MountItem::ScrollBy {
+            id: 2,
+            dx: Points::ZERO,
+            dy: Points(dy),
+        };
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Scroll),
+            frame(2, 0.0, 0.0, 390.0, 800.0),
+            content(56.0),
+            insert(1, 2),
+        ]));
+        // Rows arrive above the one row: the core keeps it in place with a
+        // scroll it sends before the new content size, and the view goes
+        // as far as that size lets it.
+        screen.apply(&batch(vec![by(1176.0), content(1232.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(432.0));
+        assert_eq!(screen.take_scrolled(), [2]);
+        // The content shrinks to a row again: the offset follows, so the
+        // row shows.
+        screen.apply(&batch(vec![content(56.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points::ZERO);
+        assert_eq!(screen.take_scrolled(), [2]);
+        // So does a viewport growing past the content's end.
+        screen.apply(&batch(vec![by(432.0), content(1232.0)]));
+        assert!(screen.take_scrolled().is_empty());
+        screen.apply(&batch(vec![frame(2, 0.0, 0.0, 390.0, 1000.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(232.0));
+        assert_eq!(screen.take_scrolled(), [2]);
+        // A pull past the start is the finger's: content changes leave it.
+        screen.scroll_mut(2).unwrap().y = Points(-40.0);
+        screen.apply(&batch(vec![content(2000.0)]));
+        assert_eq!(screen.scroll(2).unwrap().y, Points(-40.0));
+        assert!(screen.take_scrolled().is_empty());
+    }
+
+    #[test]
     fn layout_nodes_hold_only_the_top_screen_of_a_stack() {
         let mut screen = Screen::default();
         screen.apply(&batch(vec![
@@ -2542,6 +2636,53 @@ mod tests {
         );
         screen.apply(&batch(vec![style(2, |s| s.hidden = true)]));
         assert_eq!(shown(&screen), "");
+    }
+
+    #[test]
+    fn visible_bounds_stop_at_the_views_around_that_clip() {
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::Scroll),
+            create(6, ViewKind::View),
+            create(8, ViewKind::View),
+            create(10, ViewKind::View),
+            create(12, ViewKind::View),
+            frame(2, 0.0, 0.0, 390.0, 844.0),
+            frame(4, 0.0, 0.0, 390.0, 744.0),
+            frame(6, 0.0, 724.0, 120.0, 60.0),
+            frame(8, 0.0, 744.0, 390.0, 100.0),
+            frame(10, 0.0, 700.0, 390.0, 80.0),
+            frame(12, 0.0, 60.0, 120.0, 60.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(2, 8),
+            insert(2, 10),
+            insert(4, 6),
+            insert(10, 12),
+        ]));
+        let at = |screen: &Screen, id: NodeId| {
+            screen
+                .visible_bounds_in_root(id)
+                .map(|b| (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0))
+        };
+        // A button across the fold: of its frame 724..784 the top 20
+        // points are visible, its center lying below the fold, on the bar
+        // under the scroll view.
+        assert_eq!(at(&screen, 6), Some((0.0, 724.0, 120.0, 20.0)));
+        // Scrolled into view, all of it is visible; scrolled past, nothing
+        // of it is.
+        screen.scroll_mut(4).unwrap().y = Points(60.0);
+        assert_eq!(at(&screen, 6), Some((0.0, 664.0, 120.0, 60.0)));
+        screen.scroll_mut(4).unwrap().y = Points(800.0);
+        assert_eq!(at(&screen, 6), None);
+        screen.scroll_mut(4).unwrap().y = Points(0.0);
+        // `overflow: hidden` clips as a scroll view's fold does: of the
+        // view at 760..820 its box leaves 760..780.
+        screen.apply(&batch(vec![style(10, |s| s.overflow_hidden = true)]));
+        assert_eq!(at(&screen, 12), Some((0.0, 760.0, 120.0, 20.0)));
+        screen.apply(&batch(vec![style(10, |s| s.overflow_hidden = false)]));
+        assert_eq!(at(&screen, 12), Some((0.0, 760.0, 120.0, 60.0)));
     }
 
     #[test]

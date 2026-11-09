@@ -267,6 +267,13 @@ tap id:tab-rename
 frame id:tab-bar 0 784 390 60
 covers [nsh/mobile] isAvailable
 covers [nsh/mobile] TabBar
+# mod-haptics
+tap id:case-mod-haptics
+# every call goes through; a name Haptics does not know throws.
+expect Haptics: not called
+tap id:play
+expect Haptics: done, loud refused: TypeError
+covers [nsh/mobile] Haptics
 # mod-storage
 tap id:case-mod-storage
 # a key set twice keeps its last value, and a missing key reads null.

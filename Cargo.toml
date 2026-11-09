@@ -137,8 +137,9 @@ imara-diff = "0.2"
 markdown = "1.0.0"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3.0"
-# Syntax highlighting of TextView code blocks (`nsh-base` feature `highlight`): pure-Rust
-# regexes, so it builds for WebAssembly; two-face carries the syntaxes (bat's set), which
+# Syntax highlighting of TextView code blocks and the Editor (`nsh-base` feature
+# `highlight`): pure-Rust regexes, so it builds for WebAssembly (the native runtimes add
+# Oniguruma's, `nsh-base`'s `regex-onig`); two-face carries the syntaxes (bat's set), which
 # the web runtime reads from the page's copy of two-face's dump instead (`dump-load`).
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
@@ -309,6 +310,10 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UIAccessibilityCustomAction",
   "UIAccessibilityIdentification",
   "UIEvent",
+  "UIFeedbackGenerator",
+  "UIImpactFeedbackGenerator",
+  "UINotificationFeedbackGenerator",
+  "UISelectionFeedbackGenerator",
   "UIGestureRecognizerSubclass",
   "UIPinchGestureRecognizer",
   "UIRotationGestureRecognizer",
@@ -374,6 +379,27 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
 ] }
 # The macOS performance monitor's per-process GPU time (the IO registry).
 objc2-io-kit = { version = "0.3.2", default-features = false, features = ["std", "libc"] }
+# Shader frames on Apple platforms: IOSurfaces the GPU renders into and Core
+# Animation shows as they are (nsh-engine `shader`).
+objc2-io-surface = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "libc",
+  "objc2",
+  "objc2-core-foundation",
+  "IOSurfaceRef",
+  "IOSurfaceTypes",
+  "IOSurfaceBase",
+] }
+objc2-metal = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "objc2-io-surface",
+  "MTLAllocation",
+  "MTLDevice",
+  "MTLPixelFormat",
+  "MTLResource",
+  "MTLTexture",
+  "MTLTypes",
+] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
   "std",
   "CFArray",
@@ -525,6 +551,16 @@ opt-level = 3
 [profile.dev.package.syntect]
 opt-level = 3
 [profile.dev.package.fancy-regex]
+opt-level = 3
+# The native runtimes' regexes (syntect's `regex-onig`): C, built with the
+# package's opt-level.
+[profile.dev.package.onig_sys]
+opt-level = 3
+[profile.dev.package.onig]
+opt-level = 3
+# Deserializes the syntaxes (bincode's generic code, built in two-face):
+# unoptimized, the editor's first colors wait 25 ms more.
+[profile.dev.package.two-face]
 opt-level = 3
 # What fancy-regex runs its regexes with (also `regex`'s).
 [profile.dev.package.regex-automata]

@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { DiffView, type DiffViewRef } from "nsh/base";
-import { button, buttonText, desktop, DiffHunkActions, Log, Panel, Segmented, size, Split, ui, wide, sectionSurface } from "./palette";
+import { button, buttonText, desktop, DiffHunkActions, Log, Panel, Segmented, Split, ui, wide, sectionSurface } from "./palette";
 
 const OLD = `fn greet(name: &str) -> String {
     format!("Hello, {}", name)

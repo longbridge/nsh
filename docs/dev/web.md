@@ -43,11 +43,11 @@ Callbacks escaping a stopped run become inert; pending module and host calls rej
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
 CORS, secure-context and permission rules; the browser knows no `asset:` scheme, so `fetch` of the app's files
 (`asset:/`) goes through the engine's network in every session, which reads them as on the other platforms
-(`web/browser/testing.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
+(`web/browser/fetch.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
 Buffer and POSIX path use pinned vendored implementations with licenses in `third_party/`. Mobile-only APIs
 retain their off-platform behavior. In a test session on a manual clock (`nsh test --target web`), timers,
 `Date`, `performance.now()`, animation frames and `fetch` go through the engine instead, so the test's clock and
-routes control them (`web/browser/testing.js`).
+routes control them (`web/browser/testing.js`, `web/browser/fetch.js`).
 
 ### Hot module replacement
 
@@ -854,6 +854,10 @@ between them); the core bounds their travel by the list's end. A cell's animated
 `stickyHeaderOffset` or sticky `top`) comes as the animator's `sticky-offset` output for the cell each frame
 (`op_a`): it is kept on the cell (`_stickyOffset`) and added to the track's inset. Views clip with `overflow: clip`, which, unlike
 `hidden`, makes no scroll container, so `position: sticky` reaches the scroll view through the list.
+
+Pixel-mode wheel events follow the device's deltas directly, including its inertia. Line- and page-mode wheels
+and keyboard commands glide on animation frames. Changing from a glide to direct input continues from the sampled
+position, so an unfinished target cannot cause a catch-up jump.
 
 A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
 as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,

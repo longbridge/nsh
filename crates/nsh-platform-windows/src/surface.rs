@@ -409,7 +409,7 @@ impl Surface {
     }
 
     /// Measures the surface's frames and commits from now on; one
-    /// `nsh::perf` line a second ([`crate::fps`]). The ticker then runs on
+    /// `nsh::fps` line a second ([`crate::fps`]). The ticker then runs on
     /// every refresh.
     pub(crate) fn enable_fps(self: &Rc<Self>) {
         if self.fps.borrow().is_some() {

@@ -686,6 +686,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         app,
         viewport: Size::new(Points(width), Points(height)),
         trace: false,
+        content_culling: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
         websocket: Some(std::sync::Arc::new(websocket::BrowserWebSocket)),
         refuse_connections: None,

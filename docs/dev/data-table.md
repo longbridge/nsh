@@ -48,8 +48,11 @@ Platforms keep scroll offsets and content sizes in 32-bit floats, so ten million
 content. Past `MAX_EXTENT` the scroll view gets a bounded extent and the table maps its offset to the content's
 (`Axis`, `Anchor` in the table's code), so what is drawn is exact at any size, the scroll bar still spans the content
 and offsets the table scrolls to (`scrollToRow`, revealing the selection) land on the row. The columns work the same
-way on the horizontal axis. On touch devices drags move the content one to one; on the desktops dragging the bar
-reaches the whole content.
+way on the horizontal axis. On touch devices drags move the content one to one. Web desktop wheels and keys also
+follow a local anchor, so a small input is independent of the table's size. Explicit web desktop drags span the
+full content from the point where they start; releasing the drag restores local following without moving the rows.
+At rest the invisible hit layer recenters to where its scrollbar represents the content. On the desktops dragging
+the bar reaches the whole content.
 
 In a terminal a body row is one Cell, whatever `rowHeight` is (`terminal::row_height`): rows on another step
 would land on the Cell grid unevenly. So is a title row, whatever `headerHeight` is: the titles stand apart by their

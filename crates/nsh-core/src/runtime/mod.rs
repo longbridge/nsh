@@ -22,6 +22,7 @@ mod device;
 mod fonts;
 mod fps;
 mod fs;
+mod haptics;
 mod host;
 mod image;
 mod net;
@@ -75,7 +76,8 @@ pub fn registries() -> &'static [Registry] {
         let mut mobile = Registry::runtime("nsh/mobile");
         mobile
             .register::<crate::mobile::TabBar>()
-            .module::<android::BackHandler>();
+            .module::<android::BackHandler>()
+            .module::<haptics::Haptics>();
         let mut os = Registry::runtime("os");
         os.module::<os::Os>();
         let mut process = Registry::runtime("process");

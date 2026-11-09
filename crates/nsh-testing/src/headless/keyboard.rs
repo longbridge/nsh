@@ -183,17 +183,20 @@ impl Headless {
 
     /// Moves the keyboard focus to `to` (an input or a view), telling
     /// the view it leaves and the one it reaches.
+    ///
+    /// The view it reaches reports its `focus:` state before the one it
+    /// leaves: the engine may commit between the two messages, and the
+    /// core takes a view's focus as the focus whatever came before but
+    /// a blur of a view that no longer has it as nothing, so the move is
+    /// one change of `focus-within` however the commits fall (a blur
+    /// first could leave the views both chains share for a commit).
     pub(super) fn move_focus(&mut self, to: Option<NodeId>) {
         let from = self.screen.focused().or(self.screen.key_focus());
         if from == to {
             return;
         }
-        if let Some(old) = from {
-            self.screen.set_focused(None);
-            self.screen.set_key_focus(None);
-            self.set_focused_state(old, false);
-            self.send(old, EventKind::Blur, EventPayload::None);
-        }
+        self.screen.set_focused(None);
+        self.screen.set_key_focus(None);
         if let Some(new) = to {
             if self.screen.input(new).is_some() {
                 self.screen.set_focused(Some(new));
@@ -201,6 +204,12 @@ impl Headless {
                 self.screen.set_key_focus(Some(new));
             }
             self.set_focused_state(new, true);
+        }
+        if let Some(old) = from {
+            self.set_focused_state(old, false);
+            self.send(old, EventKind::Blur, EventPayload::None);
+        }
+        if let Some(new) = to {
             self.send(new, EventKind::Focus, EventPayload::None);
         }
     }
@@ -213,18 +222,22 @@ impl Headless {
     pub(super) fn focus_calls(&mut self, batch: &MountBatch, focused: Option<NodeId>) {
         let now = self.screen.focused();
         if now != focused {
+            // As in `move_focus`: the view the focus reaches reports first.
+            let key = now.and_then(|_| self.screen.key_focus());
+            if let Some(new) = now {
+                self.set_focused_state(new, true);
+            }
             if let Some(old) = focused {
                 self.set_focused_state(old, false);
                 self.send(old, EventKind::Blur, EventPayload::None);
             }
             if let Some(new) = now {
                 // The pressable that had the keyboard focus loses it.
-                if let Some(key) = self.screen.key_focus() {
+                if let Some(key) = key {
                     self.screen.set_key_focus(None);
                     self.set_focused_state(key, false);
                     self.send(key, EventKind::Blur, EventPayload::None);
                 }
-                self.set_focused_state(new, true);
                 self.send(new, EventKind::Focus, EventPayload::None);
             }
         }

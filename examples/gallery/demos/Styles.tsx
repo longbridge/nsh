@@ -173,6 +173,21 @@ function Borders() {
             <View style={{ width: 112, height: 28, borderRadius: 8, borderWidth: 3, borderColor: colors.warn, borderStyle: "dotted" }} />
           </View>
         </Tile>
+        <Tile label="Single-side dashes" code="border-t · border-l · border-dashed">
+          <View style={{ width: 112, height: 76, gap: 12 }}>
+            <View class="h-px w-full border-t border-dashed" style={{ borderColor: colors.info }} />
+            <View class="flex-1 border-l-2 border-dashed" style={{ borderColor: colors.info }} />
+          </View>
+        </Tile>
+        <Tile label="Unequal sides" note="4 · 2 · 3 · 1 pt, clockwise">
+          <View style={{ ...box(), borderRadius: 16, borderStyle: "dashed", borderColor: colors.info, borderTopWidth: 4, borderRightWidth: 2, borderBottomWidth: 3, borderLeftWidth: 1 }} />
+        </Tile>
+        <Tile label="Single-side dots" code="border-b-4 · border-dotted">
+          <View class="border-b-4 border-dotted" style={{ ...box(), borderColor: colors.warn }} />
+        </Tile>
+        <Tile label="Colored dashes" note="One color per side">
+          <View style={{ ...box(), borderRadius: 16, borderWidth: 3, borderStyle: "dashed", borderTopColor: colors.danger, borderRightColor: colors.up, borderBottomColor: colors.info, borderLeftColor: colors.warn }} />
+        </Tile>
       </Grid>
     </Card>
   );
