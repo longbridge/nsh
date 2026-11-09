@@ -3056,6 +3056,18 @@ impl<M: TextEngine> Core<M> {
         host: NodeId,
         inst: &mut Instance,
     ) -> (Vec<Expanded>, Option<usize>) {
+        // Kept rows update through their item bindings. In the same order,
+        // matching would only move these elements into the output unchanged.
+        if old.len() == new.len()
+            && old.iter().zip(&new).all(|(previous, (owner, el))| {
+                owner.is_none()
+                    && matches!(&el.kind, ElKind::Keep)
+                    && el.key.is_some()
+                    && el.key == previous.key
+            })
+        {
+            return (old, None);
+        }
         // `children_each`: one wrapper per JS child, keyed by it; in a view,
         // a region following them.
         let new = if new

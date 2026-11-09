@@ -292,6 +292,9 @@ reasons: `reactive-components.md`.
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
   can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
   the host itself (no view of its own); a region as the root goes in the host view.
+  The core reuses retained `each` rows in the same key order while their item bindings update the content
+  (`core/components.rs`). Region placement checks the actual child order before moving nodes
+  (`core/views.rs`), after updating anchors and slots.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; `.fill_style_from_view(initial)`, `.stroke_style_from_view(initial)`,
