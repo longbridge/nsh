@@ -191,7 +191,7 @@ pub(crate) use self::{
     animated::LiveNode,
     back::BackListener,
     builder::{ElKind, PlaceFn},
-    component::{AnyInstance, caught},
+    component::{AnyInstance, caught, panic_message},
     task::{
         Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
         NotificationAction, SpeechAction,

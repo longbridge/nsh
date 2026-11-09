@@ -1105,6 +1105,13 @@ public class NshView extends FrameLayout {
         });
     }
 
+    /** The app's functions for the UI thread wait in Rust: run them after the batches before. */
+    void runMainThreadTasks() {
+        main.post(() -> {
+            if (handle != 0) Native.runMainThreadTasks(handle);
+        });
+    }
+
     void reportError(String message) {
         android.util.Log.e("nsh", message);
         main.post(() -> {

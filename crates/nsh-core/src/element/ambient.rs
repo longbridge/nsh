@@ -1074,6 +1074,23 @@ pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T
     Spawned(task)
 }
 
+/// Runs `f` on the platform's main thread (the UI thread), for APIs that
+/// only work there (AppKit's status items, UIKit): after the commit of this
+/// turn, after its views are mounted. Await the result on the engine
+/// thread; dropping it does not stop `f`. Without a main thread of its own
+/// (headless tests, the web, where the engine runs on the page's thread)
+/// `f` runs on the engine thread, at the end of the commit; elsewhere it
+/// runs later, while the engine goes on, so only the awaited result tells
+/// that `f` ran. A function that is not `async` calls
+/// [`ModuleCx::run_on_main_thread`](super::ModuleCx::run_on_main_thread).
+pub fn run_on_main_thread<R: Send + 'static>(
+    f: impl FnOnce() -> R + Send + 'static,
+) -> crate::main_thread::OnMainThread<R> {
+    let (task, result) = crate::main_thread::task(f);
+    act(Action::MainThread(task));
+    result
+}
+
 /// A future polled under `owner` ([`Owner::scope`]).
 struct Owned<F> {
     owner: Owner,

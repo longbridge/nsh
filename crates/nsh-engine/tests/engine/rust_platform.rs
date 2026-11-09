@@ -267,6 +267,66 @@ fn tasks_wait_for_display_frames() {
     assert_eq!(frames.load(Ordering::SeqCst), 3);
 }
 
+/// Runs the app's functions for the main thread on a thread of its own,
+/// after the batches before them, as a platform's UI thread does.
+struct MainThreadSink {
+    batches: Sender<MountBatch>,
+    main: Sender<nsh_engine::MainThreadTask>,
+}
+
+impl MountSink for MainThreadSink {
+    fn submit(&self, batch: MountBatch) {
+        let _ = self.batches.send(batch);
+    }
+
+    fn run_on_main_thread(&self, task: nsh_engine::MainThreadTask) {
+        let _ = self.main.send(task);
+    }
+}
+
+/// Asks the main thread for its name, and for a function that panics.
+#[component]
+fn OnMain() -> impl IntoElement {
+    let shown = signal(String::from("asking"));
+    spawn(async move {
+        let name = run_on_main_thread(|| std::thread::current().name().map(str::to_owned))
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let failed = run_on_main_thread(|| -> u8 { panic!("no AppKit here") }).await;
+        shown.set(format!("{name} {}", failed.is_err()));
+    });
+    text(move || shown.get())
+}
+
+#[test]
+fn functions_run_on_the_platforms_main_thread_and_answer_the_engine() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let (main_tx, main_rx) = crossbeam_channel::unbounded::<nsh_engine::MainThreadTask>();
+    std::thread::Builder::new()
+        .name("ui".into())
+        .spawn(move || {
+            for task in main_rx {
+                task.run();
+            }
+        })
+        .unwrap();
+    let sink = MainThreadSink {
+        batches: tx,
+        main: main_tx,
+    };
+    let engine = Engine::start(
+        config(App::Rust(Root::of::<OnMain>())),
+        || ApproxTextEngine,
+        sink,
+    )
+    .unwrap();
+    let (texts, ..) = until(&rx, "ui true");
+    assert_eq!(texts.last().map(String::as_str), Some("ui true"));
+    drop(engine);
+}
+
 /// A Rust app's root, laid out in the surface's direction.
 #[component]
 fn Direction() -> impl IntoElement {
