@@ -205,7 +205,8 @@ nsh package --target macos --run
 ```
 
 Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/assets/…`, `nsh/app.json` (the window
-title, the app's appearance and its activation policy) and a TSX app's `nsh/bundle.nshc` in `Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
+title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
+`Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
 later; to distribute it, sign it with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
 
 ## Linux
@@ -214,9 +215,9 @@ later; to distribute it, sign it with a Developer ID and notarize it. See [macOS
 nsh package --target linux --run
 ```
 
-Writes `.nsh/out/<Name>/` (the executable `<Name>`, `nsh/assets/…`, `nsh/app.json` with the window title and the
-application id, a TSX app's `nsh/bundle.nshc`, `<id>.desktop` and the icon `<id>.png`) and the same as
-`.nsh/out/<Name>.tar.gz`. Package on
+Writes `.nsh/out/<Name>/` (the executable `<Name>`, `nsh/assets/…`, `nsh/app.json` with the window title, the
+application id and nsh.json's window options, a TSX app's `nsh/bundle.nshc`, `<id>.desktop` and the icon
+`<id>.png`) and the same as `.nsh/out/<Name>.tar.gz`. Package on
 Linux: the runner is built for the machine it is built on. GTK 4 (4.14 or later), Pango and WebKitGTK 6.0 (for web
 views) must be installed where the app runs. Installing it and the desktop entry: [Linux](./linux.md#packaging).
 
@@ -227,8 +228,9 @@ nsh package --target windows --run
 ```
 
 Writes `.nsh\out\<Name>\` (the executable `<Name>.exe` with the app's icon, `nsh\assets\…`, `nsh\app.json` with the
-window title, the app id, the version and the appearance, and a TSX app's `nsh\bundle.nshc`) and the same as
-`.nsh\out\<Name>.zip`. A TSX app needs no tools; a Rust app's runner is built with Visual Studio Build Tools. Package on Windows: the runner is built for the machine it is built on, and only Windows can
+window title, the app id, the version, the appearance and nsh.json's window options, and a TSX app's `nsh\bundle.nshc`)
+and the same as `.nsh\out\<Name>.zip`. A TSX app needs no tools; a Rust app's runner is built with Visual Studio Build
+Tools. Package on Windows: the runner is built for the machine it is built on, and only Windows can
 embed the icon. The app runs from wherever its directory is copied. `nsh package` also writes the Inno Setup script
 `.nsh\out\<Name>.iss` and, when Inno Setup 6 is installed, compiles it to `.nsh\out\<Name>-setup.exe`: a per-user
 installer (no administrator rights) with a Start menu shortcut, an Installed apps entry, and in-place upgrades. See

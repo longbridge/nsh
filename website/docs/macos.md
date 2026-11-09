@@ -105,7 +105,7 @@ Writes an app bundle:
   MacOS/<Name>               the executable: a Rust app's own runner, built with its crate; nsh's release runner for TSX
   Resources/nsh/bundle.nshc  a TSX app, compiled
   Resources/nsh/assets/…     the assets it imports (a Rust crate's `assets!()` too)
-  Resources/nsh/app.json     the window title, the app's appearance and its activation policy
+  Resources/nsh/app.json     the window title, the app's appearance, its activation policy and nsh.json's window options
   Resources/AppIcon.icns     the icon, when nsh.json names one (converted with sips)
 ```
 

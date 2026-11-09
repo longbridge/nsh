@@ -88,7 +88,7 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
   MacOS/<Name>               可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
   Resources/nsh/bundle.nshc  编译后的 TSX 应用
   Resources/nsh/assets/…     应用导入的资源（也包括 Rust crate 的 `assets!()`）
-  Resources/nsh/app.json     窗口标题、应用的外观和激活策略
+  Resources/nsh/app.json     窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置
   Resources/AppIcon.icns     图标（nsh.json 指定了图标时，用 sips 转换）
 ```
 

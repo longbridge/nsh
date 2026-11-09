@@ -183,8 +183,8 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
 nsh package --target macos --run
 ```
 
-写出 `.nsh/out/<Name>.app`：可执行文件位于 `Contents/MacOS/`，`nsh/assets/…`、`nsh/app.json`（窗口标题、应用的外观和激活策略）以及 TSX 应用的
-`nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上；要分发它，请用 Developer ID 签名并进行公证。见
+写出 `.nsh/out/<Name>.app`：可执行文件位于 `Contents/MacOS/`，`nsh/assets/…`、`nsh/app.json`（窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置）以及
+TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上；要分发它，请用 Developer ID 签名并进行公证。见
 [macOS](./macos.md#打包)。
 
 ## Linux
@@ -193,7 +193,8 @@ nsh package --target macos --run
 nsh package --target linux --run
 ```
 
-写出 `.nsh/out/<Name>/`（可执行文件 `<Name>`、`nsh/assets/…`、包含窗口标题和应用 id 的 `nsh/app.json`、TSX 应用的 `nsh/bundle.nshc`、
+写出 `.nsh/out/<Name>/`（可执行文件 `<Name>`、`nsh/assets/…`、
+包含窗口标题、应用 id 和 nsh.json 中窗口设置的 `nsh/app.json`、TSX 应用的 `nsh/bundle.nshc`、
 `<id>.desktop` 和图标 `<id>.png`），以及同样内容的 `.nsh/out/<Name>.tar.gz`。请在 Linux 上打包：运行器是为构建它的机器构建的。运行应用的机器上必须装有
 GTK 4（4.14 及以上）、Pango 和 WebKitGTK 6.0（用于 Web 视图）。如何安装应用及其桌面条目：见 [Linux](./linux.md#打包)。
 
@@ -203,7 +204,7 @@ GTK 4（4.14 及以上）、Pango 和 WebKitGTK 6.0（用于 Web 视图）。如
 nsh package --target windows --run
 ```
 
-写出 `.nsh\out\<Name>\`（带应用图标的可执行文件 `<Name>.exe`、`nsh\assets\…`、包含窗口标题、应用 id、版本和外观的 `nsh\app.json`，以及
+写出 `.nsh\out\<Name>\`（带应用图标的可执行文件 `<Name>.exe`、`nsh\assets\…`、包含窗口标题、应用 id、版本、外观和 nsh.json 中窗口设置的 `nsh\app.json`，以及
 TSX 应用的 `nsh\bundle.nshc`），以及同样内容的 `.nsh\out\<Name>.zip`。TSX 应用不需要任何工具；Rust 应用的 runner 用 Visual Studio
 Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机器构建的，而且只有
 Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6
