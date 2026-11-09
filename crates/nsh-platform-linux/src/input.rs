@@ -380,6 +380,17 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
     }
 }
 
+/// Presses a control without a pointer, after its input path admitted it.
+/// Keyboard and accessibility activation share the same payload and order.
+pub(crate) fn activate(surface: &Surface, view: &NshView) {
+    let events = view.state().events;
+    for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+        if events.contains(kind) {
+            surface.event(view.id(), kind, EventPayload::None);
+        }
+    }
+}
+
 /// The view's events changed (mouse handlers have it hovered, from the
 /// next mouse move).
 pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
