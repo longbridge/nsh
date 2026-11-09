@@ -157,5 +157,5 @@ const state = signal("加载中");
 
 - 缓存键包含解码尺寸和模糊半径：同一 URL 以两种尺寸显示会解码两次，但只下载一次。
 - iOS 以关键帧动画播放动态图片（最多 600 帧）；着色的动态图片显示第一帧。
-- Android 从 API 28 起播放动态图片（`AnimatedImageDrawable`），这些图片直接播放，不经缓存和模糊。
+- Android 从 API 28 起播放动态图片（`AnimatedImageDrawable`），GIF 从 API 26 起播放，这些图片直接播放，不经缓存和模糊。
 - 在 Android 上边框绘制在图片之上，与 iOS 一致。

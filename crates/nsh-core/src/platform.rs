@@ -228,6 +228,12 @@ pub struct Environment {
     pub screen_reader: bool,
     /// The operating system.
     pub os: Os,
+    /// The platform's name where it is not the OS's: a platform built
+    /// outside NSH, on NSH's engine (`docs/dev/platforms.md`), names itself
+    /// here (`Some("miniprogram")`) and reports the OS it runs on in
+    /// [`Environment::os`]. Lower case, none of [`Os`]'s names. `None` on
+    /// NSH's own platforms ([`Environment::platform_name`]).
+    pub platform: Option<&'static str>,
     /// The OS version: major and minor (iOS, desktops), Android's API level
     /// and 0.
     pub os_version: (u16, u16),
@@ -290,6 +296,13 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// The platform's name (TS: `platform.name`): [`Environment::platform`]
+    /// on a platform built outside NSH (`"miniprogram"`), else the OS's
+    /// (`"ios"`, `"web"`, ...).
+    pub fn platform_name(&self) -> &'static str {
+        self.platform.unwrap_or(self.os.name())
+    }
+
     /// Desktop behavior applies: a desktop OS, a browser in the desktop
     /// idiom or a terminal ([`Idiom::desktop_on`]: `desktop={{…}}` props,
     /// `platform.select({ desktop })`, `platform.desktop`, `platform.idiom`
@@ -320,6 +333,7 @@ impl Default for Environment {
             pixel_ratio: 1.0,
             screen_reader: false,
             os: Os::default(),
+            platform: None,
             os_version: (0, 0),
             idiom: Idiom::Phone,
             apple_keyboard: false,

@@ -1345,17 +1345,24 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    chain.set_background(crate::system::window_background(surface));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize the swap chain: {err}");
         *swap = None;
         return false;
     }
-    // A window that is resized draws now (never stretched pixels); the
-    // others wait until the compositor has room, so that no window's
-    // present holds the thread up for another's vblank. The damage stays.
-    if !resized && !chain.ready() {
+    // A window that is resized draws now, once its frame in flight is shown:
+    // a resize's frames presented faster than the display shows them would
+    // queue up, and the window would trail the pointer by all of them. That
+    // wait holds the thread up for a vblank at most, the one exception: the
+    // others wait until the compositor has room, so that no window's present
+    // holds the thread up for another's vblank. The damage stays.
+    let ready = if resized {
+        chain.wait_ready()
+    } else {
+        chain.ready()
+    };
+    if !ready {
         return true;
     }
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
@@ -1668,17 +1675,20 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    // Its own background (its scheme, see-through or not).
-    chain.set_background(crate::app_window::background(surface, root.id()));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize a window's swap chain: {err}");
         *swap = None;
         return false;
     }
-    // As the main window's ([`frame`]): resized, it draws now; otherwise it
-    // waits until its swap chain has room.
-    if !resized && !chain.ready() {
+    // As the main window's ([`frame`]): resized, it draws once its frame in
+    // flight is shown; otherwise it waits until its swap chain has room.
+    let ready = if resized {
+        chain.wait_ready()
+    } else {
+        chain.ready()
+    };
+    if !ready {
         return true;
     }
     if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {
