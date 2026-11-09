@@ -170,6 +170,10 @@ Things that were found the hard way. Read the section of the area you change bef
   idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control unless the
   app draws its own indicator (`refreshIndicator`), which `UIRefreshControl` cannot give way to: then it takes the Mac idiom's way,
   without the spinner (`Mounter::sync_refresh`, on the events and on each behavior).
+- **A `UIRefreshControl`'s superview is not always its scroll view**: under a large title iOS 26 moves it into an untagged
+  container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
+  pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
+  deleted or replaced view reports nothing, even where a new view took its id.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
