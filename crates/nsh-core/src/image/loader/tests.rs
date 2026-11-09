@@ -430,6 +430,45 @@ fn encoded_bytes_are_kept_least_recently_used_out() {
 }
 
 #[test]
+fn a_new_encoded_limit_drops_what_no_longer_fits() {
+    let mut l3 = Encoded::new(100);
+    for key in ["a", "b", "c", "d"] {
+        l3.insert(key, vec![0; 20].into());
+    }
+    assert!(l3.get("a").is_some(), "a is now the most recently used");
+    // 40 bytes: the two most recently used stay, and an entry over a
+    // quarter of the new limit (10) goes however recent.
+    l3.set_limit(40);
+    assert!(
+        l3.get("b").is_none()
+            && l3.get("c").is_none()
+            && l3.get("a").is_none()
+            && l3.get("d").is_none()
+    );
+    assert_eq!(l3.used, 0);
+    // Five of 10 bytes (each within a quarter of 40): one too many, and
+    // the least recently used goes.
+    l3.set_limit(100);
+    for key in ["e", "f", "g", "h", "i"] {
+        l3.insert(key, vec![0; 10].into());
+    }
+    assert!(l3.get("e").is_some(), "e is now the most recently used");
+    l3.set_limit(40);
+    assert!(l3.get("f").is_none(), "the least recently used went");
+    assert!(
+        l3.get("e").is_some()
+            && l3.get("g").is_some()
+            && l3.get("h").is_some()
+            && l3.get("i").is_some()
+    );
+    assert_eq!(l3.used, 40);
+    l3.set_limit(0);
+    assert_eq!(l3.used, 0);
+    l3.insert("j", vec![0; 1].into());
+    assert!(l3.get("j").is_none(), "0 keeps none");
+}
+
+#[test]
 fn asset_directories_take_the_first_that_has_the_file() {
     let root = std::env::temp_dir().join(format!("nsh-asset-dirs-{}", std::process::id()));
     let (app, host) = (root.join("app"), root.join("host"));

@@ -156,7 +156,10 @@ An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and
 
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
-`https://api.example.com@evil.io/` is checked as `evil.io`.
+`https://api.example.com@evil.io/` is checked as `evil.io`. A URL that platforms read as different hosts or paths is
+granted only by `*` in `hosts` (or a `*` rule with no port or path): one with a backslash before its query (write
+`%5C`), a control character, or a host with percent-encoding or a character hosts cannot contain (a space, `<`, `>`,
+`^`, `|`, or `[` / `]` outside an IPv6 address).
 
 A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss://` as `https://`, so the hosts and
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
@@ -175,7 +178,8 @@ paths.
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
 `about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
-allows them without allowing any remote page.
+allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
+web views, so the base URL needs the grant a page there would: its host in `hosts`.
 
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
@@ -229,11 +233,9 @@ for every kind but overlays, or an object that narrows it:
 | `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
 | `max` | `number` | How many windows of its own may be open at once. Missing: any number. |
 | `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
-| `contentProtected` | `boolean` | Windows left out of screenshots and screen sharing. Never granted unless declared, also for an app without `"capabilities"`. |
 
-`overlay` and `contentProtected` are separate because a transparent, click-through window above every other can pass
-for the system's own UI, and a protected one hides what it shows from the user's recordings. The main window needs no
-grant.
+`overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
+The main window needs no grant.
 
 ### Storage
 

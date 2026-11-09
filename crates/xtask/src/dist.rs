@@ -9,6 +9,7 @@
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
+//! dist/nsh/runtime/tui/nsh-tui-host[.exe]                     development host (the terminal, `nsh run --target tui`)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so (stripped),
 //!                                                              symbols/<abi>/libnsh.so (with symbols)
 //! dist/nsh/runtime/web/{nsh-browser.wasm,nsh-dev.wasm,nsh.js,browser/}  the web runtimes (published apps' to link from, the dev host's)
@@ -23,8 +24,8 @@
 //! GTK 4, Pango and, for web views, WebKitGTK 6.0 must be installed;
 //! without WebKitGTK's development files it is built with placeholders for
 //! web views and needs only GTK); the Windows runtime likewise, on
-//! Windows only (where the CLI is `bin/nsh.exe`). The GPUI development host
-//! is built for this machine on each of the three. The web runtime is built
+//! Windows only (where the CLI is `bin/nsh.exe`). The GPUI and terminal
+//! development hosts are built for this machine on each of the three. The web runtime is built
 //! everywhere: it needs a clang that targets wasm32 and `llvm-ar`
 //! (`docs/dev/web.md`).
 
@@ -54,7 +55,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
 
     // The CLI for this machine.
     cargo(&["build", "--release", "-p", "nsh-cli"], "nsh")?;
-    copy(
+    copy_executable(
         &release.join("release").join(exe("nsh")),
         &out.join("bin").join(exe("nsh")),
     )?;
@@ -66,7 +67,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             ("nsh-macos-app", "the release runner for macOS"),
         ] {
             cargo(&["build", "--release", "-p", package], what)?;
-            copy(
+            copy_executable(
                 &release.join("release").join(package),
                 &out.join("runtime/macos").join(package),
             )?;
@@ -101,7 +102,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
                 }
             }
             cargo(&args, what)?;
-            copy(
+            copy_executable(
                 &release.join("release").join(package),
                 &out.join("runtime/linux").join(package),
             )?;
@@ -113,7 +114,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             ("nsh-windows-app", "the release runner for Windows"),
         ] {
             cargo(&["build", "--release", "-p", package], what)?;
-            copy(
+            copy_executable(
                 &release.join("release").join(exe(package)),
                 &out.join("runtime/windows").join(exe(package)),
             )?;
@@ -125,7 +126,14 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
         let package = "nsh-gpui-host";
         // The GPUI backend is a workspace of its own (`crates/gpui`), built
-        // into the same `target/`.
+        // into the same `target/`; huacnlee/cargo ignores `--target-dir`
+        // and puts it in the GPUI workspace's own `target/`. The host is
+        // taken from whichever of the two the build wrote.
+        let built = [release.clone(), root.join("crates/gpui/target")]
+            .map(|dir| dir.join("release").join(exe(package)));
+        for file in &built {
+            remove(file)?;
+        }
         cargo(
             &[
                 "build",
@@ -139,9 +147,21 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             ],
             "the development host for GPUI",
         )?;
-        copy(
+        let host = built
+            .iter()
+            .find(|file| file.exists())
+            .context("the GPUI build wrote no development host")?;
+        copy_executable(host, &out.join("runtime/gpui").join(exe(package)))?;
+
+        // The terminal's development host (`nsh run --target tui`).
+        let package = "nsh-tui-host";
+        cargo(
+            &["build", "--release", "-p", package],
+            "the development host for the terminal",
+        )?;
+        copy_executable(
             &release.join("release").join(exe(package)),
-            &out.join("runtime/gpui").join(exe(package)),
+            &out.join("runtime/tui").join(exe(package)),
         )?;
     }
 
@@ -347,7 +367,7 @@ fn ios_runtimes(release: &Path, out: &Path) -> anyhow::Result<()> {
             ],
             &format!("the release runner for {triple}"),
         )?;
-        copy(
+        copy_executable(
             &release.join(triple).join("release/nsh-ios-app"),
             &out.join("runtime/ios").join(dir).join("nsh-ios-app"),
         )?;
@@ -364,7 +384,7 @@ fn ios_runtimes(release: &Path, out: &Path) -> anyhow::Result<()> {
             ],
             &format!("the development host for {triple}"),
         )?;
-        copy(
+        copy_executable(
             &release.join(triple).join("release/nsh-ios-host"),
             &out.join("runtime/ios").join(dir).join("nsh-ios-host"),
         )?;
@@ -510,6 +530,40 @@ fn package_dir(root: &Path, name: &str) -> anyhow::Result<std::path::PathBuf> {
         .to_path_buf())
 }
 
+/// Removes `file` if it is there, so that a build that writes it again
+/// shows where it went.
+pub(crate) fn remove(file: &Path) -> anyhow::Result<()> {
+    match fs::remove_file(file) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e).with_context(|| format!("remove {}", file.display()))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Copies the executable `from` to `to` without its symbol table: a sixth
+/// or so of each executable, which nothing that runs it reads (panics name
+/// no functions). Stripped after the build, not by the release profile's
+/// `strip`, which would build everything again apart from the builds a
+/// checkout keeps for profiling. Windows' executables keep their symbols in
+/// PDB files, which the distribution leaves out.
+fn copy_executable(from: &Path, to: &Path) -> anyhow::Result<()> {
+    copy(from, to)?;
+    if cfg!(target_os = "macos") {
+        term::run(Command::new("strip").arg(to))?;
+        // Stripping invalidates the linker's ad-hoc signature, without
+        // which Apple silicon refuses to run the file.
+        term::run(
+            Command::new("codesign")
+                .args(["--force", "--sign", "-"])
+                .arg(to),
+        )?;
+    } else if cfg!(target_os = "linux") {
+        term::run(Command::new("strip").arg("--strip-all").arg(to))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir)?;
@@ -600,5 +654,33 @@ mod tests {
         // runtime/web.
         let error = web_runtimes_plan(true, false, cc).unwrap_err().to_string();
         assert!(error.contains("/opt/llvm/bin/clang"), "{error}");
+    }
+
+    /// A stripped executable (this test's own) is smaller and still runs:
+    /// on macOS, signed again.
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn a_stripped_executable_still_runs() {
+        let dir = std::env::temp_dir().join(format!("nsh-strip-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let exe = std::env::current_exe().unwrap();
+        let stripped = dir.join("stripped");
+        super::copy_executable(&exe, &stripped).unwrap();
+        let size = |p: &std::path::Path| fs::metadata(p).unwrap().len();
+        assert!(
+            size(&stripped) < size(&exe),
+            "{} >= {}",
+            size(&stripped),
+            size(&exe)
+        );
+        let output = std::process::Command::new(&stripped)
+            .args(["--list", "--format", "terse"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("a_stripped_executable_still_runs")
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

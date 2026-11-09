@@ -168,6 +168,7 @@ expect Image size: Error ERR_ACCESS_DENIED network "https://example.com/a.png"
 expect Image prefetch: Error ERR_ACCESS_DENIED network "https://example.com/b.png"
 expect Fetch: TypeError ERR_ACCESS_DENIED network "https://example.com/data"
 expect WebSocket: Error ERR_ACCESS_DENIED network "ws://example.com/feed"
+expect WebSocket credentials: Error ERR_ACCESS_DENIED network "ws://example.com/feed"
 expect Global WebSocket: error,1006,false
 covers [nsh] Clipboard
 covers [nsh] Picker
@@ -180,3 +181,27 @@ expect Input available: false
 tap id:send
 expect Sent input
 covers [nsh] WebView
+# material-composition
+tap id:case-material-composition
+expect Material composition
+prop id:material-surface macos.backdrop material=hudWindow blending=behindWindow state=followsWindowActiveState
+style id:material-surface glassTintColor #ff000080
+style id:material-surface glassEffect regular
+style id:material-surface mixBlendMode color
+tap id:material-restyle
+prop id:material-surface macos.backdrop material=hudWindow blending=behindWindow state=followsWindowActiveState
+style id:material-surface glassTintColor #ff000080
+tap id:material-change
+prop id:material-surface macos.backdrop material=sidebar state=inactive
+tap id:material-clear
+noprop id:material-surface macos.backdrop
+style id:material-surface backdropFilter blur(10)
+style id:material-surface glassEffect regular
+tap id:tint-change
+style id:material-surface glassTintColor #00ff0040
+tap id:tint-clear
+nostyle id:material-surface glassTintColor
+style id:material-surface glassEffect regular
+covers [props] macos
+covers [props] macos.backdrop
+covers [styles] glassTintColor

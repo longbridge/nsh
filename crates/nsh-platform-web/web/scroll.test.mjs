@@ -242,7 +242,7 @@ test('scroll commands win over a wheel or key glide', (t) => {
     for (const [command, end] of commands) {
       const { p, el } = scroller();
       if (key) p.scrollKey({ key: 'PageDown', shiftKey: false }, el);
-      else p.wheel(wheel(el, 900));
+      else p.wheel({ ...wheel(el, 22.5), deltaMode: 1 });
       runFrames(2);
       assert.ok(el._glide && el.scrollTop > 0, 'gliding');
       p.op_cmd(command);
@@ -258,7 +258,7 @@ test('scroll commands win over a wheel or key glide', (t) => {
 test('a glide moves with the content the core keeps in place', (t) => {
   t.mock.method(performance, 'now', () => clock);
   const { p, el } = scroller();
-  p.wheel(wheel(el, 900));
+  p.wheel({ ...wheel(el, 22.5), deltaMode: 1 });
   runFrames(2);
   const at = el.scrollTop;
   p.op_sb(['sb', 1, 0, 100]);
@@ -359,7 +359,7 @@ test('a glide whose frames stop ends where it was going, once', (t) => {
   el._events.add('onScrollEnd');
   p.event = (id, name, e) => ends.push(e.y);
   p.call = () => {};
-  p.wheel(wheel(el, 900));
+  p.wheel({ ...wheel(el, 22.5), deltaMode: 1 });
   runFrames(2);
   assert.ok(el._glide && el.scrollTop < 900, 'gliding');
   // No more frames (a hidden tab): its frame stays queued.
@@ -374,4 +374,35 @@ test('a glide whose frames stop ends where it was going, once', (t) => {
   frames.clear();
   t.mock.timers.tick(1000);
   assert.deepEqual(ends, [900]);
+});
+
+test('a glide interrupted by direct input continues from its displayed position', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  p.scrollSmoothly(el, 0, 900, true);
+  runFrames(2);
+  const at = el.scrollTop;
+  p.scrollSmoothly(el, 0, 0.25, false);
+  assert.equal(el.scrollTop, at + 0.25, 'no accumulated destination is applied');
+  runFrames();
+  assert.equal(el.scrollTop, at + 0.25, 'cancelled frames cannot catch up');
+  t.mock.timers.tick(200);
+  assert.equal(el._driven, 0);
+});
+
+test('pixel-mode inertia crosses 40 without starting or cancelling a glide', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  let total = 0;
+  for (const d of [120, 80, 40, 39, 20, 5, 1, 0.25]) {
+    p.wheel(wheel(el, d));
+    total += d;
+    assert.equal(el.scrollTop, total);
+    assert.equal(el._glide.frame, 0, 'the device already supplies inertia');
+    runFrames(2);
+  }
+  t.mock.timers.tick(200);
+  assert.equal(el._driven, 0);
 });

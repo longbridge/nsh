@@ -493,6 +493,9 @@ struct Slot {
     tracked: u16,
     /// Current interaction states.
     states: u16,
+    /// A style was applied before: a view's first style does not transition
+    /// from the defaults, as in `nsh_core`'s `transition::restyle`.
+    styled: bool,
 }
 
 impl Slot {
@@ -541,6 +544,7 @@ impl Slot {
             image_shown: false,
             tracked: 0,
             states: 0,
+            styled: false,
         }
     }
 }
@@ -1752,6 +1756,7 @@ impl Mounter {
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
+            (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
@@ -2376,11 +2381,14 @@ impl Mounter {
         let keyframes_changed = s.style.animation != style.animation;
         let blend_changed = s.style.blend_mode != style.blend_mode;
         let cursor_changed = s.style.cursor != style.cursor;
-        // Transitions apply to changes of a view already on screen.
+        // Transitions apply to changes of a view already on screen, not to
+        // its first style: there is nothing to transition from (`nsh_core`'s
+        // `transition::restyle` and Android's mounter skip it the same way).
         let transition = style
             .transition
-            .filter(|t| t.duration > 0.0 && view.window().is_some());
+            .filter(|t| t.duration > 0.0 && s.styled && view.window().is_some());
         s.style = style;
+        s.styled = true;
         view.setHidden(s.style.hidden);
         match transition {
             Some(t) => {

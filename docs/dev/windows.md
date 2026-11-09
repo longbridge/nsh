@@ -229,7 +229,7 @@ keeps the apps' data there (`nsh test` gives each app a fresh one). Timers are W
 ## Performance: `--fps`
 
 `nsh-windows-host --fps` (`nsh run --target windows --fps`, `nsh test --target windows --fps`; `AppOptions::fps`, `NSH_FPS=1`, the app's `setFpsEnabled`)
-logs one `nsh::perf` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`), in the Linux and macOS
+logs one `nsh::fps` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`), in the Linux and macOS
 backends' shape: frames shown over the compositor's rate (`DwmGetCompositionTimingInfo`), the main thread's time per
 shown frame and its phases (`tick`: the ticker's animations and frame callbacks; `drain`: batches applied as they
 arrived; `paint`: Direct2D drawing the tree, of which `canvas` is the canvases' recording and replay; `present`:
@@ -348,9 +348,8 @@ carries its own content: a UI Automation tree of its own views on
 `WM_GETOBJECT`, its popups and dialogs inside its root, its web views in its own
 composition and the windows of native components as its children. The app's
 keymap, menu shortcuts and the mouse's back button work in whichever window has
-the input. Windows has no per-window control offset, workspaces, edited
-indicator, represented file or tab groups; those attributes are accepted and
-have no effect there.
+the input. Windows has no per-window control offset or workspaces; those
+attributes are accepted and have no effect there.
 
 ### Transparent windows
 

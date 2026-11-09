@@ -99,7 +99,8 @@ step, the details only when something fails. Every command prints through it:
 - Log lines (`logger.rs`): the library crates and the devices log through `log`; normally warnings and errors are shown
   without targets (a device's after its name: `warn iOS Simulator: …`), `js` lines and a device's lines from other
   crates (the app's Rust code) plainly (with the device's name when several are connected), `nsh::perf` as `perf …`;
-  NSH's own info lines (a device's "loading build 3") are not shown: the CLI's steps say what happens. The dev server
+  NSH's own info lines (a device's "loading build 3") and the performance monitor's line a second (`--fps`, `nsh::fps`)
+  are not shown: the CLI's steps say what happens. The dev server
   reports hosts connecting and leaving (`nsh_dev::ClientEvent`) rather than logging it, so the CLI prints
   `• Mac Catalyst connected, build 1`, and a host that cannot run the app as one `warn` line
   (`warn Android Emulator: its host has no gallery/native (it was built for another app): nsh run examples/gallery-rs
@@ -124,8 +125,9 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
 - Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
-  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` binds to loopback, with
-  `--target ios`, `android` or `web` and in `nsh dev` to every address, for other machines (`dev::Listen`).
+  8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` and `nsh dev` bind to
+  loopback, with `--target ios`, `android` or `web` and `nsh dev --server-only` to every address, for other machines
+  (`dev::Listen`, `run::Target::uses_network`).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to
@@ -150,6 +152,13 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   (`nsh package --target web --run`) answers it with `index.html` the same way.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
+- What the dev server serves to others (`crates/nsh-dev/src/server.rs`): `/assets/<path>` is the files a build
+  imported and the UI sets' crates ship (`DevServer::serve_files`, by name, any type), and from the app's directory only
+  media files (images, fonts, audio, video by extension) outside hidden directories, `.nsh`, `node_modules` and
+  `target`, also after following links (`asset_in_root`); sources, `nsh.json`, `.env`, JSON and other files return
+  404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
+  `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
+  browser, even on loopback or under a name rebound to this machine, gets 403.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK
@@ -252,6 +261,15 @@ the app on an engine (`ApproxTextEngine`, a channel as the mount sink, 60 Hz fra
 applied to a model of the native views (`headless::Screen`, `headless/screen.rs`), and steps taken on what they show.
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
+
+Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide) unless the test starts the app
+with `Headless::start_with_text_engine`, which takes a function that makes a platform's engine on the engine's thread
+(`CoreTextEngine` on macOS, `DWriteTextEngine` on Windows) so text measures as it does on screen. `Screen::layout_nodes`
+returns the views that are on screen in tree order as layout placed them (`LayoutNode`: kind, `testID`, parent,
+bounds in the root's points with transforms left aside, hidden, clips, a scroll view's `LayoutScroll` (axis, content
+size), a text view's `LayoutText` (its `AttributedText` and the box it was laid out in, in the root's points too)),
+for checks of the layout itself: what overflows its parent, is cut by a view that clips, or is too wide for its text.
+Both are Rust API of `nsh-testing` for `cargo test`; the TSX `nsh/test` module has no counterpart yet.
 
 The steps name views with selectors (`headless/selector.rs`, Playwright's manner): `id:<testID>`,
 `label:<accessibilityLabel>`, `text:<text>` (an input's text or, while it is empty, its placeholder too), `role:<role>`
@@ -549,6 +567,10 @@ for a Command key the window's own key equivalents, and for any key the main men
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
 key window, which the app has none of: an item with a target (the app's own menu items) to its target, any other down
 the window's responder chain from its first responder; a Command key nothing took goes to the application, as before.
+Presses go to the app's views as in the key window: AppKit gives a left press in a window that is not key only to a
+view that accepts the first mouse, and a hidden title bar's toolbar view, over the content's top, does not, so the
+host's window (`NshWindow`) hands a press the title bar would only take to make the window key to the content's view
+under it, with its drags and release.
 An item is not checked for being enabled (AppKit validates against the key window's responders:
 with none every item reads as disabled): the app's disabled items have an action nothing answers. The macOS host's
 checks of this are `crates/nsh-platform-macos/tests/host`
@@ -569,7 +591,9 @@ the gesture; it lands at the scroll view's middle, and after a gesture that move
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
 it has the most room, then a quarter of the way from the other; between gestures it waits only for the view to stop
 moving, `Agent::stopped`, and once it is in view for the app to settle, so a page that is never quiet, a ticking
-timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`, where
+the view is drawn: its transforms included, a thumb centered with `translate(-50%)` pressed on its middle, as the
+platform's hit testing finds it; macOS maps through the views' layer transforms, which AppKit's conversions leave out; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span; a press of a view inside the one that takes it, a cell's
 text in a row, lands on the match's middle, `Scene::match_inside`, as headless) and acts there with synthesized input
@@ -674,8 +698,12 @@ offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`)
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
 feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (a booted one, else the newest
 iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the simulator shares the Mac's network
-and files). Touches are IOHID digitizer events handed to UIKit (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's
-and BackBoardServices' functions looked up at run time, `synth.rs`), so UIKit makes the `UITouch`es and runs hit
+and files). As `nsh run --target ios` and `nsh package --target ios-simulator --run` do, it passes the app the variables
+of its environment that the app's `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads
+them as on the desktops, whose hosts are the CLI's children; the paths the simulator sets for its apps (`HOME`,
+`TMPDIR`, `PATH`, ...) keep the simulator's values. Touches are IOHID digitizer events handed to UIKit
+(`-[UIApplication _enqueueHIDEvent:]`, with IOKit's and BackBoardServices' functions looked up at run time,
+`synth.rs`), so UIKit makes the `UITouch`es and runs hit
 testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept
 inside the scroll view that rests (still reporting where it is) before it lifts, so it ends without a fling; a tap
 that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
@@ -690,7 +718,14 @@ The system's appearance is the simulator's: the CLI switches it (`simctl ui appe
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
-(`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
+(`dataDir`, emptied as it starts). As `nsh run --target android` does for a TSX app, it passes the variables of its
+environment that the app's `capabilities.process.env` declares as `nsh.env.<name>` string extras
+(`run::android_app_env`; values quoted for the device's shell, which `adb shell` hands the command line), and
+`DevActivity` sets them in its process's environment before the engine starts, so `process.env` reads them as on the
+desktops; the paths Android sets for each app process (`PATH`, `HOME`, `TMPDIR`, `ANDROID_*`, `LD_*`, ...) keep the
+device's values. Only the development host applies these extras: a packaged app's `AppActivity` (Rust roots'
+`nsh run`, `nsh package --target android --run`) is exported, so it runs with the device's environment. The agent's
+calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
 each on the UI thread: `MotionEvent`s dispatched to the topmost window's views (the system alert's, else the
 topmost `<modal>`'s dialog window, else the activity's) as a finger's, with drags that rest before they lift as on
 iOS; typing as a keyboard's `KeyEvent`s to the view focused in that window (`KeyCharacterMap`; what no key types is
@@ -845,12 +880,13 @@ program that describes them, builds the hosts and runners with them, and does ev
   directory does (`nsh init` ignores it), or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
   CI jobs share), and Cargo resolves and keeps the workspace's own `Cargo.lock`. Every crate those workspaces depend on
   is published by `release-crate.yml`, the hosts and runners included; the binaries are named after the app
-  (`nsh-app-<package>-describe`; with several crates all their packages, `nsh-app-charts-storage-test`), and so are
-  the libraries (the web runtime's, the Android `cdylib`s: `libnsh_app_charts_android.so`, installed as `libnsh.so`),
-  so apps sharing a target directory never take each other's. Generated workspaces optimize `quickjs-jit-sys`,
-  `taffy`, `objc2` and `objc2-encode` at level 3 in debug builds, matching NSH's own workspace, so hot reload hosts
-  keep interpreter, layout and Objective-C bridge performance while application Rust code retains debug settings.
-  Objective-C signature checks stay enabled: their encoding parser needs optimization too, since every native
+  (`nsh-app-<package>-describe`; with several crates the first one's package and the first 8 hex digits of the SHA-256
+  of all their packages, sorted, `nsh-app-charts-ef5aa537-test`, so the names stay short for Windows' 260-character
+  paths), and so are the libraries (the web runtime's, the Android `cdylib`s: `libnsh_app_charts_android.so`,
+  installed as `libnsh.so`), so apps sharing a target directory never take each other's. Generated workspaces optimize
+  `quickjs-jit-sys`, `taffy`, `objc2` and `objc2-encode` at level 3 in debug builds, matching NSH's own workspace, so
+  hot reload hosts keep interpreter, layout and Objective-C bridge performance while application Rust code retains debug
+  settings. Objective-C signature checks stay enabled: their encoding parser needs optimization too, since every native
   message checks its signature in debug builds.
 - Before a command on the app (`build`, `test`, `dev`, `run`, `package`, `publish`, `check`) `nsh` builds `describe`
   ("building the Rust crate …": Cargo decides whether the app's Rust code changed) and runs it when the program is
@@ -926,13 +962,23 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). On macOS it runs the hosts
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). GPUI builds run in
+`crates/gpui`, their own workspace, and the CLI resolves their output through `cargo metadata`'s
+`target_directory`, honoring Cargo's configuration and `CARGO_TARGET_DIR` (or that Cargo implementation's own
+output policy), rather than assuming the main workspace's `target`. On macOS it runs the hosts
 built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
 (`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
 to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug
 host on every `nsh run`. The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
+
+In an installed distribution, a runtime other than this machine's own is a component (`crates/nsh-cli/src/component.rs`):
+when the runtime is missing, `runtime.rs` asks `component::ensure` to download the component's archive from the
+CLI's own release (`v<version>`, or `nightly`), check its `.sha256` and its record (`components/<name>.json`, the
+version and commit it was built at, which must be the CLI's), and move its paths into place; `nsh component
+list|add|remove` does the same by hand, and `nsh update` adds the installed components again after replacing the
+directory. A checkout's build never downloads: it builds its runtimes with cargo.
 
 The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
 is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
@@ -943,12 +989,27 @@ are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon: the iOS, Mac Catalyst and macOS
 runtimes and the iOS SDK), Linux and Windows (x86_64), each with the GPUI development host of its OS and the Android runtime, checks that the packaged CLI
 makes and bundles a new app, and archives `dist/nsh` as one directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on
-Windows), plus the embedding SDKs alone (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), each with a `.sha256`. Asset
+Windows) with the CLI and that machine's runtime only. The embedding SDKs are archives of their own
+(`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack` moves every other runtime into its
+component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and `nsh-web.tar.gz` from Linux's build,
+`nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`, `nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
+`xtask dist` strips the executables it copies (`copy_executable`: about a sixth of each), after the build rather
+than with the profile's `strip`, so the release builds a checkout keeps for profiling stay as they are. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
 workflow by hand without a tag builds the archives only (the run's artifacts): a dry run before tagging, and how to
-check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`). Pull
+check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`).
+
+Every night (18:00 UTC) the same workflow builds the latest `main` and publishes it as the release `nightly`, a
+prerelease never marked latest, so `releases/latest` and the package managers keep the stable release. A night
+whose `main` the nightly already has builds nothing (the `plan` job compares the commits). There is one `nightly`
+tag: each build deletes the previous nightly release and its tag and creates them again at the new commit (moving
+the tag through the refs API would need the `workflows` permission when the commits change workflows), so tags do
+not pile up. Running the workflow by hand with *nightly* publishes one at once. `install.sh --nightly` installs
+it; the CLI keeps the workspace version, and `-V` shows the commit and `nightly`: the dist job builds with
+`NSH_CHANNEL=nightly`, which the CLI's build script stamps in, and the nightly release carries `nsh-release.json`
+(`{ version, commit }`). Pull
 requests and the merge queue never run it: its three builds are CI's longest and held the runners the queue waited for. The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
@@ -970,6 +1031,14 @@ How users get it (`website/docs/installation.md`):
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
+- `install.sh --nightly` installs the `nightly` release the same way (`NSH_VERSION=nightly` does too).
+- `nsh update [stable|nightly]` (`crates/nsh-cli/src/self_update.rs`) replaces the installed
+  distribution in place: the directory holding `bin/nsh` with a `runtime/` beside it, never a checkout's build or
+  what Homebrew, Scoop or mise installed (it names their command). It stays on the channel stamped at build time
+  unless one is named (as `rustup update nightly`); the stable channel reads the latest tag from the redirect of `releases/latest`, the
+  nightly one compares `nsh-release.json`'s commit with its own (neither is an API call, so no rate limit). The
+  archive is checked against its `.sha256` and swapped by `nsh_updater::install::Installation::directory`, the
+  machinery packaged apps update with (on Windows, entry by entry, descending into `bin` past the running exe).
 - `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
   Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
   are preserved and rejected. The checkout stays available for on-demand native runtime builds.
@@ -977,7 +1046,8 @@ How users get it (`website/docs/installation.md`):
   `.github/packages/nsh.rb` with the archives' checksums and pushes it to `longbridge/homebrew-tap` as
   `Formula/nsh.rb`. It validates the tag and checksum sidecars, downloads and verifies both archives, then installs
   and tests the formula on Apple silicon before updating the tap. The formula supports Apple-silicon macOS and
-  x86_64 Linux, keeps the whole distribution in `libexec`, and tests web packaging through the installed symlink.
+  x86_64 Linux, keeps the whole distribution in `libexec` (components are added there when needed), and tests a
+  release build and `nsh component list` through the installed symlink.
   Pull requests and pushes to `main` that change the package files run these checks without writing to the tap.
 - Scoop: the release job fills in `.github/packages/nsh.json` and attaches it as `nsh.json`; Scoop installs from
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.

@@ -54,7 +54,9 @@ A package runs as the installed app: the shipped app's id (a package of another 
 trusted paths and update configuration (`Bundle::updater_config`: `nsh/updater` reads the shipped
 `nsh-updater.json`, never the package's), and its own declared capabilities granted at most what the shipped app
 declares (`Policy::granted`). Its assets are its own (extracted to `updates/packages/<id>/<sha256>/assets`; the other
-packages' are removed at launch). `runningPackage()` is `Bundle::package`.
+packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shellInfo()` is the installed app
+(its shell): the shipped `nsh-updater.json`'s `version` and `build` (what `nsh package` also wrote as the iOS
+`CFBundleShortVersionString` / `CFBundleVersion`), the runtime's crate version, and `UpdaterHost::runs_packages`.
 
 ## Decisions
 

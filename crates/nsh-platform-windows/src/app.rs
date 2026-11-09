@@ -119,7 +119,7 @@ pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
     /// Logs the performance monitor's readings once a second (target
-    /// `nsh::perf`): frame rate, frame phases, commits, CPU, memory.
+    /// `nsh::fps`): frame rate, frame phases, commits, CPU, memory.
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.
@@ -325,7 +325,14 @@ impl AppView {
     /// Shows a top-level view's window (in the mode nsh.json `window`
     /// opens it in).
     pub fn show(&self) {
+        // Composite the window only once its background is drawn: DWM
+        // otherwise shows and animates the default light client surface,
+        // which flashes white on a dark appearance until the first frame.
+        crate::window::set_cloaked(self.hwnd, true);
+        crate::window::fill_background(&self.surface, self.hwnd);
+        self.surface.paint();
         crate::window::show(self.hwnd);
+        crate::window::set_cloaked(self.hwnd, false);
         if let Some(mode) = self.opening_mode.take() {
             crate::window_state::set_mode(self.hwnd, mode);
         }
@@ -425,6 +432,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
+            content_culling: true,
             network: Some(nsh_engine::net::network()),
             websocket: None,
             refuse_connections: None,

@@ -68,6 +68,9 @@ pub(crate) struct Host {
     access: Mutex<Arc<nsh_engine::Access>>,
     /// The embedding app's theme overrides (`NshView.setThemeOverrides`).
     host_tokens: Mutex<Option<nsh_engine::Tokens>>,
+    /// Font files the embedding app registers (`NshView.registerFont`),
+    /// applied to the running app and to every app loaded later.
+    fonts: Mutex<Vec<Vec<u8>>>,
     /// The bytes of the in-memory images (`data:` URIs, blobs) the app
     /// shows, by URI, for `Images.java` (`Native.imageBytes`).
     inline_images: Mutex<nsh_core::image::InlineImages>,
@@ -132,6 +135,21 @@ impl Host {
         }
     }
 
+    /// Registers a font file (TrueType, OpenType, WOFF or WOFF2) for the
+    /// running app and every app loaded later. The family name is the one
+    /// in the file.
+    fn register_font(&self, data: Vec<u8>) -> Result<(), String> {
+        nsh_core::font_family(&data)?;
+        let mut fonts = self.fonts.lock().expect("fonts");
+        if !nsh_core::keep_font(&mut fonts, &data) {
+            return Ok(());
+        }
+        if let Some(control) = self.control() {
+            control.register_font(data);
+        }
+        Ok(())
+    }
+
     /// Runs `app`, replacing the running app.
     pub(crate) fn load(self: &Arc<Self>, app: impl Into<App>) {
         let mut app = app.into();
@@ -178,6 +196,7 @@ impl Host {
             app,
             viewport,
             trace: self.trace,
+            content_culling: true,
             network: Some(crate::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -213,9 +232,13 @@ impl Host {
         }
         // The embedding app's theme overrides are in the first frame.
         let tokens = self.host_tokens.lock().expect("tokens").clone();
-        let setup = |control: &EngineControl| {
+        let fonts = self.fonts.lock().expect("fonts").clone();
+        let setup = move |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
+            }
+            for font in fonts {
+                control.register_font(font);
             }
         };
         match Engine::start_with(
@@ -575,6 +598,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         host_tokens: Mutex::new(None),
+        fonts: Mutex::new(Vec::new()),
         inline_images: Mutex::default(),
         cache: Mutex::default(),
         system_cache_dir: cache_dir,
@@ -859,6 +883,34 @@ extern "system" fn Java_com_longbridge_nsh_Native_setThemeOverrides<'local>(
             host.set_host_tokens(tokens);
             JString::from(JObject::null())
         }
+        Err(err) => env
+            .new_string(err)
+            .unwrap_or_else(|_| JString::from(JObject::null())),
+    }
+}
+
+/// Registers a font file (TrueType, OpenType, WOFF or WOFF2) for the
+/// running app and every app loaded later. Returns why it is not a font
+/// (nothing is registered), or null.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_registerFont<'local>(
+    env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    bytes: JByteArray<'local>,
+) -> JString<'local> {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let data = match env.convert_byte_array(&bytes) {
+        Ok(data) => data,
+        Err(err) => {
+            return env
+                .new_string(err.to_string())
+                .unwrap_or_else(|_| JString::from(JObject::null()));
+        }
+    };
+    match host.register_font(data) {
+        Ok(()) => JString::from(JObject::null()),
         Err(err) => env
             .new_string(err)
             .unwrap_or_else(|_| JString::from(JObject::null())),

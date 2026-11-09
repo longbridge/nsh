@@ -51,6 +51,7 @@ fn config(app: App) -> EngineConfig {
         app,
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,
@@ -202,6 +203,26 @@ fn the_fonts_ui_sets_ship_are_registered_before_the_first_render() {
         *fonts.lock().unwrap(),
         [b"asset:/@app/fonts/Script.ttf".to_vec()]
     );
+}
+
+/// A font the embedding app registers is in place before the first render.
+#[test]
+fn a_font_the_host_registers_is_registered_before_the_first_render() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let fonts = Arc::new(Mutex::new(Vec::new()));
+    let registered = fonts.clone();
+    let _engine = Engine::start_with(
+        config(App::Rust(Root::of::<Label>())),
+        move || Fonts(ApproxTextEngine, registered),
+        FrameSink {
+            batches: tx,
+            frames: Arc::default(),
+        },
+        |control| control.register_font(b"host-font".to_vec()),
+    )
+    .unwrap();
+    until(&rx, "ready");
+    assert_eq!(*fonts.lock().unwrap(), [b"host-font".to_vec()]);
 }
 
 /// Counts display frames while a task awaits them.

@@ -62,7 +62,8 @@ screen stays yours; `--display <n>` picks another): each app a test opens gets a
 test asks for even on a display shorter than it, and
 the steps click, type and scroll with the system's input at the views their selectors name
 ([Testing](./testing-and-trace.md#on-a-real-platform)). The apps run in the background: their windows show while the
-keyboard stays with the app you type in (`--foreground` lets them become the active app).
+keyboard stays with the app you type in (`--foreground` lets them become the active app), and clicks reach the app's
+views as they do in the active window, under a hidden title bar too.
 
 ### Performance monitor
 
@@ -84,7 +85,7 @@ the panel however the app is opened. Add this key through `nsh.json`'s `macos.in
 | `CPU` / `GPU` / `MEM` | The process: CPU (100% is one core), its GPU share, its memory footprint (Activity Monitor's figure). |
 
 The bars below are the last 120 frames' main-thread time against one refresh (the line): green within half of it, amber
-within it, red over. While the panel shows, the readings are also logged once a second (target `nsh::perf`, in the
+within it, red over. While the panel shows, the readings are also logged once a second (target `nsh::fps`, in the
 Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`; milliseconds as mean/p50/p95/max), which
 `nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds; the monitor costs nothing
 while it is off.
@@ -169,6 +170,15 @@ The app's own code quits the same way with `nsh_core::element::desktop::quit()` 
 exited `run_app`'s runner starts the app again with the same arguments: inside an `.app` bundle through Launch Services
 (`open -n`), as when the user opens it.
 
+`AppOptions { transparent: true, ..Default::default() }` opens `run_app`'s window nonopaque with a clear
+background, so what the app leaves unpainted shows what is behind the window (a HUD panel, a
+[`macos={{ backdrop }}`](./styling.md#filters-and-blending) with `behindWindow`). This option defaults to `false`.
+For a custom Rust host it supplies an initial default: explicit main-window attributes and later window updates
+take precedence. Standard hosts leave this option false but can request transparency through their window
+configuration. A view's `behindWindow` material never makes the window transparent by itself.
+An embedded `AppView` does not change the window it is put in: make your own `NSWindow` nonopaque with a clear
+`backgroundColor` for the same look.
+
 
 `AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:
 its banners, presses and badge. It is off by default, so an embedded app's notifications are `unavailable` and your
@@ -241,7 +251,13 @@ what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escap
 Not supported, or different:
 
 - **Zooming scroll views** (`zoomTo`, the zoom props).
-- **`mixBlendMode`**, and `brightness()` above 1.
+- **`brightness()`** above 1 is not drawn. **`mixBlendMode`** and **backdrops** are drawn by Core Animation:
+  `mixBlendMode` as the view layer's compositing filter, `macos={{ backdrop: { material, blending, state } }}` as an
+  `NSVisualEffectView` below the view (any AppKit material and state, whether or not a `backdropFilter` is set), and
+  `glassTintColor` as `glassEffect`'s tint on macOS 26; before macOS 26 the blur stands in for glass. These are
+  compositor effects: the test agent's composited screenshots show them, but its in-process fallback cannot.
+  A `behindWindow` material shows the desktop only through a see-through window, requested by window attributes
+  or a custom host's `AppOptions::transparent`; the view's blending never enables transparency itself.
 - **Inputs**: content types and autofill, keyboard types, autocapitalization, letter spacing; input accessory views
   are never shown (there is no software keyboard) and `keyboardShouldPersistTaps` is ignored.
 - **`WebView`'s `scrollable={false}`** keeps the mouse wheel and the trackpad from scrolling the page: they scroll

@@ -217,6 +217,12 @@ const fn covers_every_part(names: &[&str]) -> bool {
 
 base_parts!(
     core => nsh_part_core,
+    menu => nsh_part_menu,
+    overlays => nsh_part_overlays,
+    select => nsh_part_select,
+    command => nsh_part_command,
+    combobox => nsh_part_combobox,
+    toast => nsh_part_toast,
     pickers => nsh_part_pickers,
     color_picker => nsh_part_color_picker,
     carousel => nsh_part_carousel,
@@ -250,6 +256,12 @@ fn base_set() -> Registry {
     use nsh_base::parts::{self, Part};
     nsh_base::registry_of([
         parts::core as Part,
+        parts::menu,
+        parts::overlays,
+        parts::select,
+        parts::command,
+        parts::combobox,
+        parts::toast,
         parts::pickers,
         parts::color_picker,
         parts::carousel,
@@ -672,6 +684,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         app,
         viewport: Size::new(Points(width), Points(height)),
         trace: false,
+        content_culling: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
         websocket: Some(std::sync::Arc::new(websocket::BrowserWebSocket)),
         refuse_connections: None,

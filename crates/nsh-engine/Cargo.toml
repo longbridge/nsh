@@ -29,7 +29,7 @@ browser = []
 net = ["dep:ureq"]
 # `shader`: the native backends' shader renderer (`shader`), on wgpu. Without
 # it `shader` has the same API and finds no GPU, so shader views draw nothing.
-shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader"]
+shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader", "dep:objc2", "dep:objc2-metal", "dep:objc2-core-foundation"]
 
 [dependencies]
 rustc-hash.workspace = true
@@ -51,6 +51,14 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 # A packaged app's update configuration (`updates`).
 nsh-updater.workspace = true
 
+# Apple: shader frames on IOSurfaces (`shader`; the type is in the API with
+# or without it).
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2-io-surface.workspace = true
+objc2 = { workspace = true, optional = true }
+objc2-metal = { workspace = true, optional = true }
+objc2-core-foundation = { workspace = true, optional = true }
+
 # Thread priority (Apple), process CPU and memory (`perf`).
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -60,6 +68,8 @@ libc.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
+# The shader tests compile the apps' WGSL (nsh-core `shader`).
+nsh-core = { workspace = true, features = ["shader"] }
 # The typed API check reads the crate's public API.
 syn = { workspace = true, features = ["visit"] }
 nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor", "term"] }
@@ -67,6 +77,8 @@ nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-
 tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-js.workspace = true
+# The language data an app ships (`locale_and_font_scale_follow_the_environment`).
+nsh-i18n.workspace = true
 crossbeam-channel.workspace = true
 # A WebSocket server for `tests/engine/websocket.rs`.
 tokio-tungstenite.workspace = true

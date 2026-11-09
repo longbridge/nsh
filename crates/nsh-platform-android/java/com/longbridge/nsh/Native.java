@@ -140,6 +140,9 @@ final class Native {
      */
     static native String setThemeOverrides(long handle, String json);
 
+    /** Registers a font file; returns an error, or null. */
+    static native String registerFont(long handle, byte[] data);
+
     /** Whether the running app's web views may navigate to {@code url}. */
     static native boolean allowsWebview(long handle, String url);
 

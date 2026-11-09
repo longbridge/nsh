@@ -1,12 +1,12 @@
 import { batch, cleanup, computed, context, effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
-import { button, buttonText, focusRing, tint, ui, wide } from "./palette";
+import { button, buttonText, focusRing, tint, ui, wide, sectionSurface } from "./palette";
 
 /** The accent's palette key: a key, not a colour, so it follows the theme. */
 type Swatch = "accent" | "info" | "up" | "violet";
 const Accent = context(signal<Swatch>("accent"));
 
 /** A button filled with a palette colour instead of a surface. */
-const filled = (color: () => string) => () => ({ backgroundImage: "none", backgroundColor: color(), borderColor: "rgba(0,0,0,0)", boxShadow: "none" });
+const filled = (color: () => string) => () => ({ backgroundImage: "none", backgroundColor: color(), borderColor: "transparent", boxShadow: "none" });
 
 /** A stopwatch: the effect starts a timer and its cleanup stops it. */
 function Stopwatch() {
@@ -35,7 +35,7 @@ function Stopwatch() {
 
 function Section(props: { title: string; children: any }) {
   return (
-    <View style={{ ...ui().card, borderRadius: 16, padding: 14, gap: 10 }}>
+    <View style={{ ...sectionSurface({ padded: true }), gap: 10 }}>
       <Text style={{ fontSize: 13, fontWeight: "600", color: ui().muted }}>{props.title}</Text>
       {props.children}
     </View>

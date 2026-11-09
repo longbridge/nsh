@@ -114,7 +114,8 @@
   and after), the way it draws an animated `color`, so no frame typesets the text again; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
   and hands each bound view its `AnimValues`.
 - **Mobile backends**: style transitions are the platform's (Core Animation on iOS, `ValueAnimator`s in
-  `Mounter.java` on Android). A text's color follows the same rules as on the desktops and is drawn the same way,
+  `Mounter.java` on Android), and a view's first style does not transition (the desktops' `transition::restyle` skips it,
+  iOS waits for a view it has styled before, Android for one with a style to transition from). A text's color follows the same rules as on the desktops and is drawn the same way,
   over the laid-out lines in an in-between color, as an animated `color` is: iOS steps a `transition::TextColor` per
   text (`transition::recolor` decides) on a display link that runs only while one moves (`interaction.rs`
   `TextColors`); on Android the `TEXT` item carries the text's one color (`uniform_color`) and `TextBox.recolor`

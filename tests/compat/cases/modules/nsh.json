@@ -1,5 +1,6 @@
 {
   "name": "API Modules",
   "id": "com.example.api-modules",
-  "schemes": ["compat"]
+  "schemes": ["compat"],
+  "locales": ["de", "zh-CN"]
 }

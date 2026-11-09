@@ -243,6 +243,13 @@ pub(crate) fn install_on(surface: &Rc<Surface>, root: &NshView, window: Option<&
     let window = window.map(|w| w.downgrade());
     legacy.connect_event(move |_, event| match weak.upgrade() {
         Some(surface) => {
+            if surface.testing() && real_pointer(event.event_type()) {
+                // Under `nsh test --target linux` the agent's pointer
+                // (`simulate`) is the only one: the user's, moving over the
+                // window or resting on it, never changes what a test hovers
+                // or presses, and hosted widgets do not see it either.
+                return glib::Propagation::Stop;
+            }
             *surface.input.window_root.borrow_mut() = window.as_ref().and_then(|w| w.upgrade());
             handle(&surface, event)
         }
@@ -254,13 +261,36 @@ pub(crate) fn install_on(surface: &Rc<Surface>, root: &NshView, window: Option<&
     let motion = gtk::EventControllerMotion::new();
     let weak = Rc::downgrade(surface);
     motion.connect_leave(move |_| {
-        if let Some(surface) = weak.upgrade() {
+        // The real pointer leaving says nothing of the agent's.
+        if let Some(surface) = weak.upgrade().filter(|s| !s.testing()) {
             // Where the mouse was last: GTK's leave carries no position.
             let (x, y) = surface.input.last.get().unwrap_or_default();
             set_hovered(&surface, Vec::new(), x, y);
         }
     });
     root.add_controller(motion);
+}
+
+/// Whether events of type `ty` come from a real pointing device (mouse,
+/// touchpad, touchscreen), which a test ignores ([`Surface::testing`]).
+fn real_pointer(ty: gdk::EventType) -> bool {
+    use gdk::EventType as T;
+    matches!(
+        ty,
+        T::ButtonPress
+            | T::ButtonRelease
+            | T::MotionNotify
+            | T::EnterNotify
+            | T::LeaveNotify
+            | T::TouchBegin
+            | T::TouchUpdate
+            | T::TouchEnd
+            | T::TouchCancel
+            | T::Scroll
+            | T::TouchpadSwipe
+            | T::TouchpadPinch
+            | T::TouchpadHold
+    )
 }
 
 /// The app stopped: forgets its pointers, hovered views and gestures.
@@ -908,6 +938,15 @@ pub(crate) fn hold(keys: gdk::ModifierType, down: bool) {
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
     let held = HELD.with(std::cell::Cell::get);
+    // Where the agent's pointer is, as real events record theirs
+    // (a key scroll under it, a leave).
+    let (Simulated::Down(x, y)
+    | Simulated::Up(x, y)
+    | Simulated::Move(x, y)
+    | Simulated::Wheel(x, y, ..)
+    | Simulated::Hover(x, y)
+    | Simulated::ContextMenu(x, y)) = action;
+    surface.input.last.set(Some((x, y)));
     match action {
         Simulated::Down(x, y) => {
             // Simulated drags carry no state: the button held is recorded.
@@ -2419,6 +2458,25 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tests_ignore_the_real_pointer_only() {
+        use gdk::EventType as T;
+        for ty in [
+            T::MotionNotify,
+            T::ButtonPress,
+            T::ButtonRelease,
+            T::Scroll,
+            T::TouchBegin,
+            T::LeaveNotify,
+        ] {
+            assert!(real_pointer(ty), "{ty:?}");
+        }
+        // Keys and grabs still reach the app.
+        for ty in [T::KeyPress, T::KeyRelease, T::GrabBroken, T::FocusChange] {
+            assert!(!real_pointer(ty), "{ty:?}");
+        }
+    }
 
     #[test]
     fn cursors() {

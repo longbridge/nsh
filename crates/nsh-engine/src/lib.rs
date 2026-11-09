@@ -25,6 +25,8 @@ mod script;
 #[cfg_attr(not(feature = "shader"), path = "shader_off.rs")]
 pub mod shader;
 mod shader_frame;
+#[cfg(all(feature = "shader", target_vendor = "apple"))]
+mod shader_surfaces;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(feature = "js-core")]
@@ -51,7 +53,7 @@ use crossbeam_channel::{Receiver, Sender};
 pub use local_storage::local_storage_prefix;
 use nsh_core::{
     ApplyError, Core, EdgeInsets, EventKind, EventPayload, ListBind, MountBatch, NodeId, Op,
-    PayloadValue, TextEngine, element::JsEvent, time::Instant,
+    PayloadValue, TextEngine, element::JsEvent, platform::content_type, time::Instant,
 };
 pub use nsh_core::{
     JsonValue,
@@ -802,6 +804,10 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         Some(version)
     }
 
+    fn runs_packages(&self) -> bool {
+        cfg!(all(feature = "js-core", not(target_arch = "wasm32")))
+    }
+
     #[cfg(all(feature = "js-core", not(target_arch = "wasm32")))]
     fn verify_package(
         &self,
@@ -900,6 +906,10 @@ pub struct EngineConfig {
     pub viewport: Size<Points>,
     /// Log per-commit timings (target `nsh::perf`, level info).
     pub trace: bool,
+    /// Scroll views make the native views of their content only near
+    /// their viewport (the platforms' apps); off, they make all of it
+    /// (tests, which read whole pages). [`EngineConfig::new`]: off.
+    pub content_culling: bool,
     /// The HTTP stack behind `fetch`; without one, requests fail.
     pub network: Option<Arc<dyn Network>>,
     /// The host transport for WebSockets, including the browser WebSocket API.
@@ -1087,6 +1097,7 @@ impl EngineConfig {
             app: app.into(),
             viewport: Size::new(Points(390.0), Points(844.0)),
             trace: false,
+            content_culling: false,
             network: None,
             websocket: None,
             refuse_connections: None,
@@ -1168,6 +1179,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("app", &self.app)
             .field("viewport", &self.viewport)
             .field("trace", &self.trace)
+            .field("content_culling", &self.content_culling)
             .field("network", &self.network.is_some())
             .field("assets", &self.assets.is_some())
             .field("environment", &self.environment)
@@ -1201,6 +1213,7 @@ enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
     Kept(Vec<NodeId>),
+    ContentCulling(bool),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
@@ -1234,6 +1247,9 @@ enum Message {
     Perf(Option<Arc<perf::PerfMonitor>>),
     /// The embedding app's design tokens.
     Tokens(Option<Box<Tokens>>),
+    /// A font file the embedding app registers (TrueType, OpenType, WOFF or
+    /// WOFF2), before the first frame and whenever it registers another.
+    HostFont(Vec<u8>),
     /// The embedding app's event (`nsh/host`'s `host.on`): its name and
     /// data.
     HostEvent(String, nsh_core::JsonValue),
@@ -1310,6 +1326,14 @@ impl EngineControl {
     /// the last call's; none releases them.
     pub fn keep_rendered(&self, nodes: Vec<NodeId>) {
         let _ = self.tx.send(Message::Kept(nodes));
+    }
+
+    /// Whether scroll views make the native views of their content as it
+    /// comes near their viewport (the default), or all of it
+    /// (`Core::set_content_culling`): a test driver's, whose steps reach
+    /// every view of a page.
+    pub fn set_content_culling(&self, enabled: bool) {
+        let _ = self.tx.send(Message::ContentCulling(enabled));
     }
 
     /// Reports how far a multiline input's text scrolled: its offset, the
@@ -1456,6 +1480,14 @@ impl EngineControl {
     /// [`Engine::start_with`]'s `setup`, they are in the first frame.
     pub fn set_tokens(&self, tokens: Option<Tokens>) {
         let _ = self.tx.send(Message::Tokens(tokens.map(Box::new)));
+    }
+
+    /// Registers a font file the embedding app ships (TrueType, OpenType,
+    /// WOFF or WOFF2) so every app this engine runs can name its family.
+    /// Sent from [`Engine::start_with`]'s `setup`, it is registered before
+    /// the first frame; sent later, text measured already is measured again.
+    pub fn register_font(&self, data: Vec<u8>) {
+        let _ = self.tx.send(Message::HostFont(data));
     }
 }
 
@@ -1825,6 +1857,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
         // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
@@ -1887,6 +1920,9 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(appearance) = root.appearance_ref() {
                 core.set_appearance(appearance);
             }
+            if let Some(translations) = root.translations_ref() {
+                core.set_translations(translations.clone());
+            }
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");
@@ -1938,6 +1974,11 @@ impl<M: TextEngine + 'static> Driver<M> {
         while let Ok(message) = rx.try_recv() {
             match message {
                 Message::Tokens(tokens) => core.set_host_tokens(tokens.map(|t| *t)),
+                Message::HostFont(data) => {
+                    if let Err(err) = core.register_font(&data) {
+                        log::error!("font failed: {err}");
+                    }
+                }
                 Message::Displays(list) => {
                     core.set_displays(list.clone());
                     displays = list;
@@ -1972,6 +2013,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             events_handled: 0,
             events_reported: 0,
             pinned: config.pinned,
+            environment: config.environment,
+            app_locale: None,
             host: config.host.clone(),
             url_opens: Vec::new(),
             net: Net {
@@ -2031,6 +2074,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             let _ = system_tx.send(Message::Wake);
                         }),
                         host: Rc::new(host_bridge),
+                        lazy_rows: config.content_culling,
                     }
                 };
                 #[cfg(not(any(
@@ -2381,6 +2425,17 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(start) = start {
                 log::info!(target: "nsh::perf", "gc: {}µs", start.elapsed().as_micros());
             }
+            // What the app holds, for the performance monitor: read here,
+            // when the heap was just walked and nothing waits.
+            if let Some(monitor) = &self.state.perf {
+                let (js_heap, js_objects) = script.heap_usage();
+                monitor.set_memory(perf::MemorySample {
+                    js_heap,
+                    js_objects,
+                    nodes: self.state.core.node_count() as u64,
+                    node_ids: self.state.core.node_id_room() as u64,
+                });
+            }
             self.last_gc = Instant::now();
             self.state.committed_since_gc = false;
             if let Some(batch) = self.state.commit(Some(script)) {
@@ -2421,6 +2476,10 @@ struct State<M: TextEngine> {
     /// What the environment keeps whatever the platform reports
     /// ([`EngineConfig::pinned`]).
     pinned: EnvironmentPins,
+    /// The environment given last, before the app's language is applied.
+    environment: Environment,
+    /// The language the app shows in whatever the user's (`setLocale`).
+    app_locale: Option<nsh_core::platform::Locale>,
     /// A display frame was requested and has not begun yet.
     frame_requested: bool,
     ops: Vec<Op>,
@@ -2513,7 +2572,8 @@ impl FetchTask for AssetTask {
     fn cancel(self: Box<Self>) {}
 }
 
-/// Whether `url` names a bundled file (`asset:/…`).
+/// Whether `url` names a bundled file (`asset:/…`, the scheme in any case,
+/// as URL schemes are).
 fn is_asset(url: &str) -> bool {
     url.get(..6)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("asset:"))
@@ -2540,41 +2600,22 @@ fn is_inside_assets(url: &str) -> bool {
     })
 }
 
-/// The media type a bundled file's response carries, from its extension:
-/// the dev server's (`nsh-dev`'s `content_type`), so a file read from the
-/// app's files and one downloaded from where a web app serves them answer
-/// with the same type.
-fn asset_type(url: &str) -> &'static str {
-    let name = url.rsplit('/').next().unwrap_or_default();
-    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-    match extension.as_deref() {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js" | "mjs") => "text/javascript; charset=utf-8",
-        Some("json" | "map") => "application/json",
-        Some("webmanifest") => "application/manifest+json",
-        Some("wasm") => "application/wasm",
-        Some("css") => "text/css; charset=utf-8",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("avif") => "image/avif",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("heic") => "image/heic",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("mp4" | "m4v") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("mov") => "video/quicktime",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("wav") => "audio/wav",
-        _ => "application/octet-stream",
-    }
+/// `url` (an `asset:/` URL) as its response answers at it, and as the
+/// rest of the engine reads it: the scheme in lower case, as URL parsers
+/// write it (schemes are case-insensitive, and JS's `fetch` parses the URL
+/// before the engine sees it), without the fragment, which no request
+/// sends and no response carries.
+fn asset_response_url(url: &str) -> String {
+    let rest = url.get(6..).unwrap_or_default();
+    format!("asset:{}", rest.split('#').next().unwrap_or_default())
+}
+
+/// The bundled file a request reads, by the URL [`asset_response_url`]
+/// wrote: its path alone, as hosts read it. A query is no part of a file's
+/// name, so `asset:/a.json?v=2` reads `asset:/a.json` on every host, as a
+/// web server serves it.
+fn asset_file(url: &str) -> &str {
+    url.split('?').next().unwrap_or_default()
 }
 
 /// A request in flight.
@@ -2584,8 +2625,9 @@ struct Inflight {
     hop: u64,
     /// Requests whose redirects the engine follows (to check each hop).
     followed: Option<access::Followed>,
-    /// The bundled file (`asset:/…`) a download is of: a status other than
-    /// a success fails it, as a file the host does not have does.
+    /// The `asset:/` URL a download of a bundled file answers at
+    /// ([`asset_response_url`]): a status other than a success fails it, as
+    /// a file the host does not have does.
     asset: Option<String>,
 }
 
@@ -2696,7 +2738,9 @@ impl Net {
     /// the host's assets: read on the runtime's blocking pool, which reports
     /// with [`Message::AssetRead`] (in WebAssembly, which has no threads,
     /// here).
-    fn asset(&mut self, who: Requester, request: HttpRequest) {
+    fn asset(&mut self, who: Requester, mut request: HttpRequest) {
+        request.url = asset_response_url(&request.url);
+        let file = asset_file(&request.url).to_owned();
         self.hops += 1;
         let hop = self.hops;
         self.inflight.insert(
@@ -2710,7 +2754,7 @@ impl Net {
         );
         // Failed here, before any host reads the file or serves it
         // ([`Assets::url`]): a request no host may answer reaches none.
-        let refused = if !is_inside_assets(&request.url) {
+        let refused = if !is_inside_assets(&file) {
             Some(format!(
                 "{}: bundled files are named by a path inside the app's files",
                 request.url
@@ -2740,13 +2784,13 @@ impl Net {
             let tx = self.tx.clone();
             // The read reports itself; nothing awaits its handle.
             drop(self.runtime.spawn_blocking(move || {
-                let bytes = assets.read(&request.url);
+                let bytes = assets.read(&file);
                 let _ = tx.send(Message::AssetRead(who, hop, request, bytes));
             }));
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let bytes = assets.read(&request.url);
+            let bytes = assets.read(&file);
             self.asset_read(who, hop, request, bytes);
         }
     }
@@ -2775,7 +2819,7 @@ impl Net {
                         ("content-length".to_owned(), bytes.len().to_string()),
                         (
                             "content-type".to_owned(),
-                            asset_type(&request.url).to_owned(),
+                            content_type(asset_file(&request.url)).to_owned(),
                         ),
                     ],
                     url: request.url.clone(),
@@ -2788,18 +2832,20 @@ impl Net {
                 events.push(FetchEvent::End);
                 events
             }
-            Err(error) => match self.assets.as_ref().and_then(|a| a.url(&request.url)) {
-                Some(url) => {
-                    self.inflight.remove(&who);
-                    let uri = request.url.clone();
-                    self.start(who, HttpRequest { url, ..request }, None);
-                    if let Some(download) = self.inflight.get_mut(&who) {
-                        download.asset = Some(uri);
+            Err(error) => {
+                match (self.assets.as_ref()).and_then(|a| a.url(asset_file(&request.url))) {
+                    Some(url) => {
+                        self.inflight.remove(&who);
+                        let uri = request.url.clone();
+                        self.start(who, HttpRequest { url, ..request }, None);
+                        if let Some(download) = self.inflight.get_mut(&who) {
+                            download.asset = Some(uri);
+                        }
+                        return;
                     }
-                    return;
+                    None => vec![FetchEvent::Failed(error)],
                 }
-                None => vec![FetchEvent::Failed(error)],
-            },
+            }
         };
         for event in events {
             let _ = self.tx.send(Message::Fetch(who, hop, event));
@@ -2841,8 +2887,8 @@ impl Net {
                         .iter()
                         .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
                     {
-                        head.headers
-                            .push(("content-type".to_owned(), asset_type(uri).to_owned()));
+                        let file_type = content_type(asset_file(uri)).to_owned();
+                        head.headers.push(("content-type".to_owned(), file_type));
                     }
                 }
                 let Some(followed) = &mut inflight.followed else {
@@ -3156,6 +3202,7 @@ impl<M: TextEngine> State<M> {
                 }
             }
             drop(ops);
+            release_spare_ops(&mut self.ops);
             if let Some(batch) = self.core.commit() {
                 commits += 1;
                 match &mut merged {
@@ -3179,6 +3226,16 @@ impl<M: TextEngine> State<M> {
                 }
                 _ => false,
             };
+            // A language the app asked for reaches the core and JS, whose
+            // views follow it in another round.
+            let relocale = match self.core.take_locale_request() {
+                Some(locale) => {
+                    self.app_locale = locale;
+                    apply_environment(script, self, self.environment);
+                    true
+                }
+                None => false,
+            };
             let more_paced = script.is_some() && paced.left() && self.core.has_paced_list_binds();
             // What waited for the app's answer to the events just taken runs
             // in the next round, once JS has handled them, and shows in this
@@ -3188,6 +3245,7 @@ impl<M: TextEngine> State<M> {
                 && self.events.is_empty()
                 && !posted
                 && !retheme
+                && !relocale
                 && !more_paced
                 && !urls
                 && !answers
@@ -3341,6 +3399,14 @@ fn apply_environment<M: TextEngine>(
     state: &mut State<M>,
     env: Environment,
 ) {
+    state.environment = env;
+    let mut env = env;
+    // The app's language (`set_locale`) over the platform's, as an
+    // embedding app's own is.
+    if let Some(locale) = state.app_locale {
+        env.locale = locale;
+        env.locale_settings.languages = env.locale_settings.languages.preferring(locale);
+    }
     state.core.set_font_scale(env.font_scale);
     state.core.set_class_environment(class_environment(&env));
     state.core.set_safe_area(insets(&env));
@@ -3432,6 +3498,12 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Kept(nodes) => state.core.set_kept(&nodes),
+        Message::ContentCulling(enabled) => {
+            state.core.set_content_culling(enabled);
+            if let Some(script) = script {
+                script.set_lazy_rows(enabled);
+            }
+        }
         Message::InputScroll(id, offset, content, viewport) => {
             state.core.set_input_scroll(id, offset, content, viewport);
         }
@@ -3523,6 +3595,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.core.set_host_tokens(tokens.map(|t| *t));
             if let Some(script) = script {
                 script.set_theme_tokens(state.core.theme_tokens());
+            }
+        }
+        Message::HostFont(data) => {
+            if let Err(err) = state.core.register_font(&data) {
+                log::error!("font failed: {err}");
             }
         }
         // A Rust app has no `nsh/host`: what the host sends it goes.
@@ -3629,8 +3706,33 @@ fn sets_whole(item: &nsh_core::MountItem) -> Option<(u8, nsh_core::NodeId)> {
     })
 }
 
+/// The most ops an emptied op buffer keeps room for.
+const RETAINED_OPS: usize = 16 * 1024;
+
+/// Gives back what a large commit (a screen made at once, a long list
+/// bound) grew the emptied op buffer to: it and the runtime's take turns
+/// ([`Script::take_ops`] swaps them), and each would otherwise hold the
+/// largest commit's capacity for the life of the app.
+fn release_spare_ops(ops: &mut Vec<Op>) {
+    debug_assert!(ops.is_empty());
+    if ops.capacity() > RETAINED_OPS {
+        ops.shrink_to(RETAINED_OPS);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_emptied_op_buffer_gives_back_what_a_large_commit_grew() {
+        let mut ops: Vec<super::Op> = Vec::with_capacity(super::RETAINED_OPS * 8);
+        super::release_spare_ops(&mut ops);
+        assert!(ops.capacity() <= super::RETAINED_OPS);
+        // A buffer of ordinary commits keeps its room.
+        let mut ops: Vec<super::Op> = Vec::with_capacity(1024);
+        super::release_spare_ops(&mut ops);
+        assert_eq!(ops.capacity(), 1024);
+    }
+
     #[test]
     fn moves_settle_and_changes_of_mode_do_not() {
         use nsh_core::{

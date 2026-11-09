@@ -190,6 +190,23 @@ covers [props] List.header
 covers [props] List.footer
 covers [props] List.empty
 covers [props] List.separator
+# core-list-anchor
+tap id:case-core-list-anchor
+expect Row 1
+absent Row new 1
+# A list at its start shows the rows that arrive above its first one: it
+# stays at its start, where they are (no scroll keeps the first row in
+# place).
+tap id:prepend-rows
+expect Row new 1
+noprop scroll:text:"Row 1" contentOffset
+# One loading pages at its start keeps its rows in place: the page it
+# prepends lies above them, 120 points up (shown, it would ask for the
+# next at once).
+expect Page 1
+tap id:prepend-page
+expect Page new 1
+prop scroll:text:"Page 1" contentOffset y=120
 # core-reactive
 tap id:case-core-reactive
 expect Sum: 3

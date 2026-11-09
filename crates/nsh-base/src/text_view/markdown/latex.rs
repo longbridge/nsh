@@ -173,9 +173,14 @@ fn inline(text: &str, out: &mut String) {
     let bytes = text.as_bytes();
     let mut copied = 0;
     let mut i = 0;
+    let mut span_index = 0;
     while i < bytes.len() {
-        if let Some(&(_, e)) = code.iter().find(|&&(s, _)| s == i) {
-            i = e;
+        while code.get(span_index).is_some_and(|&(start, _)| start < i) {
+            span_index += 1;
+        }
+        if let Some(&(_, end)) = code.get(span_index).filter(|&&(start, _)| start == i) {
+            i = end;
+            span_index += 1;
             continue;
         }
         if open_code.is_some_and(|(s, _)| i >= s) {
@@ -251,6 +256,18 @@ mod tests {
         check("escaped \\\\(x\\\\)", "escaped \\\\(x\\\\)");
         check("costs \\($5\\)", "costs \\($5\\)");
         check("plain (x) and [y]", "plain (x) and [y]");
+    }
+
+    #[test]
+    fn code_after_formulas_is_preserved() {
+        check(
+            r"\(a `one` + `two`\) `\(code\)` and \(x\)",
+            r"$$a `one` + `two`$$ `\(code\)` and $$x$$",
+        );
+        check(
+            r"\[a `one` = `two`\] ``\[code ` literal\]`` and \(x\)",
+            r"$$a `one` = `two`$$ ``\[code ` literal\]`` and $$x$$",
+        );
     }
 
     #[test]

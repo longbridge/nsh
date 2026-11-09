@@ -25,9 +25,10 @@
 //!   same limits; the loader keeps the policy around it.
 //! - **Failures** are remembered for [`FAILURE_TTL`]: a broken URL in a list
 //!   is not fetched again for every row.
-//! - **L3**: the last bytes read ([`ENCODED_BYTES`]) stay, so a decode at
-//!   another size, an SVG parsed again or `Image.getSize` reads nothing
-//!   again. An entry over a quarter of it is not kept.
+//! - **L3**: the last bytes read ([`ENCODED_BYTES`] by default, an app's
+//!   own with [`Loader::set_encoded_limit`]) stay, so a decode at another
+//!   size, an SVG parsed again or `Image.getSize` reads nothing again. An
+//!   entry over a quarter of it is not kept.
 //!
 //! [`Images`] adds the decoded images (L4, [`super::memory`]) on top.
 //!
@@ -69,7 +70,8 @@ pub const MAX_REDIRECTS: usize = 20;
 /// How long a failed read is remembered.
 pub const FAILURE_TTL: Duration = Duration::from_secs(30);
 
-/// The encoded bytes kept in memory (L3).
+/// The encoded bytes kept in memory (L3) by default; an app sets its own
+/// with [`Loader::set_encoded_limit`].
 pub const ENCODED_BYTES: usize = if cfg!(any(target_os = "ios", target_os = "android")) {
     16 << 20
 } else {
@@ -813,6 +815,20 @@ impl Loader {
         lock(&self.encoded).insert(key, bytes.clone());
     }
 
+    /// The most L3's encoded bytes take, in bytes.
+    pub fn encoded_limit(&self) -> usize {
+        lock(&self.encoded).limit
+    }
+
+    /// Sets the most L3's encoded bytes take ([`ENCODED_BYTES`] by
+    /// default), dropping the least recently used that no longer fit. An app
+    /// whose images are on disk anyway (the disk cache keeps downloads) can
+    /// keep less; 0 keeps none, so a decode at another size reads the disk
+    /// again.
+    pub fn set_encoded_limit(&self, limit: usize) {
+        lock(&self.encoded).set_limit(limit);
+    }
+
     /// Why `key` failed, if it did in the last [`FAILURE_TTL`].
     fn failed(&self, key: &str) -> Option<String> {
         let mut failures = lock(&self.failures);
@@ -1104,6 +1120,28 @@ impl Encoded {
             self.used -= old.len();
         }
         self.used += size;
+        self.evict();
+    }
+
+    fn set_limit(&mut self, limit: usize) {
+        self.limit = limit;
+        // What a new limit no longer takes in: over a quarter of it.
+        let big: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, (b, _))| b.len() > limit / 4)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in big {
+            if let Some((bytes, _)) = self.entries.remove(&key) {
+                self.used -= bytes.len();
+            }
+        }
+        self.evict();
+    }
+
+    /// Drops the least recently used until what is kept fits.
+    fn evict(&mut self) {
         // A few hundred entries at most: a scan for the oldest beats an
         // ordered index kept up to date on every hit.
         while self.used > self.limit {

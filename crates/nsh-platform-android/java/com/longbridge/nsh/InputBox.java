@@ -28,6 +28,16 @@ final class InputBox extends FrameLayout implements Node {
     final Mounter mounter;
     final int id;
     final Decor decor = new Decor();
+
+    /** An outer box shadow draws outside the bounds, and compositing the
+     * view at alpha < 1 into the bounds-clipped offscreen buffer would cut
+     * it; such a view reports no overlapping rendering, so the alpha
+     * applies per draw op and the shadow fades with the content. */
+    @Override
+    public boolean hasOverlappingRendering() {
+        return !decor.hasOuterShadows();
+    }
+
     final EditText edit;
     /** Edits reported to the engine. */
     int count;
@@ -385,6 +395,13 @@ final class InputBox extends FrameLayout implements Node {
 
     /** Return submitted: `onSubmitEditing`, then unfocuses for `blurAndSubmit`. */
     private void submit() {
+        // Submitting ends the composition: what was composed stays and is
+        // sent, and a value JS sets in reply (clearing the box after a send)
+        // applies at once rather than waiting for an end the keyboard may
+        // never report (a dictation panel, or return committed as "\n").
+        Editable text = edit.getText();
+        if (text != null) BaseInputConnection.removeComposingSpans(text);
+        syncComposition();
         mounter.event(id, Native.SUBMIT_EDITING, edit.getText().toString(), count, 0, 0);
         if (submit == SUBMIT_AND_BLUR) blur();
     }

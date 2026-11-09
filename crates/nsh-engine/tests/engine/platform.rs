@@ -1,7 +1,7 @@
 //! The OS the platform reports decides `platform` and which platform-only
-//! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`)
-//! apply; on the web, the idiom decides between mobile and desktop, and
-//! the terminal idiom behaves as a desktop. `platform.desktop`, the
+//! props (`ios={{…}}`, `android={{…}}`, `macos={{…}}`, `desktop={{…}}`,
+//! `web={{…}}`) apply; on the web, the idiom decides between mobile and
+//! desktop, and the terminal idiom behaves as a desktop. `platform.desktop`, the
 //! `desktop` idiom, `select`'s `desktop` and `desktop={{…}}` all follow the
 //! one definition of desktop (`Environment::desktop`), whatever idiom the
 //! platform set.
@@ -30,16 +30,16 @@ mount(
 );
 "#;
 
-/// The first frame's texts and accessibility labels and hints on `os`.
-fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
+/// The first frame of `app` on `os`.
+fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> {
     let dir = std::env::temp_dir().join(format!(
-        "nsh-platform-{}-{}-{idiom:?}",
+        "nsh-platform-{}-{tag}-{}-{idiom:?}",
         std::process::id(),
         os.name()
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
-    std::fs::write(&entry, APP).unwrap();
+    std::fs::write(&entry, app).unwrap();
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
@@ -52,6 +52,7 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         app: nsh_engine::App::Js(Bundle::source(bundle.code)),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,
@@ -80,12 +81,16 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         windows: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
-    let batch = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("first frame");
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("first frame")
+        .items
+}
+
+/// The first frame's texts and accessibility labels and hints on `os`.
+fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
     let mut texts = Vec::new();
     let mut labels = Vec::new();
-    for item in &batch.items {
+    for item in first_frame_of(APP, "platform", os, idiom) {
         match item {
             MountItem::Text { text, .. } => texts.push(text.text.clone()),
             MountItem::ViewProps { props, .. } => {
@@ -363,6 +368,51 @@ fn js_turns_the_performance_monitor_on_and_follows_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn the_performance_monitor_reads_what_the_app_holds_when_idle() {
+    let dir = std::env::temp_dir().join(format!("nsh-fps-memory-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(
+        &entry,
+        r#"import { mount, Text, View } from "nsh";
+mount(() => <View>{Array.from({ length: 50 }, (_, i) => <Text>{`row ${i}`}</Text>)}</View>);
+"#,
+    )
+    .unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)));
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    let monitor = std::sync::Arc::new(nsh_engine::perf::PerfMonitor::new());
+    engine.control().set_perf_monitor(Some(monitor.clone()));
+    assert_eq!(
+        monitor.snapshot().memory,
+        None,
+        "nothing read before a collection"
+    );
+    // The engine reads it after its first idle collection, a second in.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let memory = loop {
+        while rx.try_recv().is_ok() {}
+        if let Some(m) = monitor.snapshot().memory {
+            break m;
+        }
+        assert!(std::time::Instant::now() < deadline, "never read");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(memory.js_heap > 0 && memory.js_objects > 0, "{memory:?}");
+    assert!(memory.nodes > 50, "{memory:?}");
+    assert!(memory.node_ids >= memory.nodes, "{memory:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 const WINDOWS_APP: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Window, currentWindow, titleBar, type WindowRef } from "nsh/desktop";
 
@@ -604,5 +654,175 @@ fn js_popovers_in_a_window_are_placed_in_it() {
     assert!(
         inserted.iter().filter(|(p, _)| *p == window).count() >= 2,
         "{inserted:?}"
+    );
+}
+
+const WINDOW_LATE_DIALOG_APP: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+import { Window } from "nsh/desktop";
+
+const shown = signal(false);
+const asked = signal(false);
+
+mount(() => {
+  setTimeout(() => shown.set(true), 50);
+  setTimeout(() => asked.set(true), 200);
+  return (
+    <View>
+      <Window id="settings" open={shown()} onOpenChange={(e) => shown.set(e.open)}>
+        <View>
+          <Text>in window</Text>
+          <If when={asked()}>
+            <Dialog open onOpenChange={(e) => asked.set(e.open)}>
+              <Text>late dialog</Text>
+            </Dialog>
+          </If>
+        </View>
+      </Window>
+    </View>
+  );
+});
+"#;
+
+/// A dialog that mounts in a window of the app's own once it is open gets
+/// its config, which names that window, before its insertion: platforms
+/// present a dialog when it is inserted, over the window its config names.
+#[test]
+fn js_dialogs_mounted_in_an_open_window_name_it_before_they_show() {
+    use nsh_core::{Command, NodeId, desktop::DesktopCommand};
+    let dir = std::env::temp_dir().join(format!("nsh-window-late-dialog-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, WINDOW_LATE_DIALOG_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        environment: Environment {
+            os: Os::MacOs,
+            idiom: Idiom::Desktop,
+            ..Environment::default()
+        },
+        ui_sets: vec![nsh_base::registry()],
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let _engine = Engine::start_with(config, || ApproxTextEngine, ChannelSink(tx), |_| {}).unwrap();
+    let mut window: Option<NodeId> = None;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id,
+                command: Command::Desktop(command),
+            } = item
+                && matches!(**command, DesktopCommand::OpenWindow(_))
+            {
+                window = Some(*id);
+            }
+        }
+        let Some(text) = batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id, text, .. } if &*text.text == "late dialog" => Some(*id),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let window = window.expect("the window opens before its dialog");
+        // The dialog's root: the modal its text is in.
+        let parent_of = |child: NodeId| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+        };
+        let modal = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::Modal,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the dialog's root");
+        let mut node = text;
+        while node != modal {
+            node = parent_of(node).expect("the text is in the dialog");
+        }
+        let position = |wanted: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(wanted);
+        let config = position(&|i| matches!(i, MountItem::ModalConfig { id, .. } if *id == modal))
+            .expect("the dialog's config");
+        let inserted =
+            position(&|i| matches!(i, MountItem::Insert { child, .. } if *child == modal))
+                .expect("the dialog's insertion");
+        assert!(config < inserted, "{:?}", batch.items);
+        let MountItem::ModalConfig { config, .. } = &batch.items[config] else {
+            unreachable!()
+        };
+        assert_eq!(config.window, window);
+        return;
+    }
+    panic!("the dialog never showed");
+}
+
+const MATERIAL_APP: &str = r##"import { mount, View } from "nsh";
+
+mount(
+  () => (
+    <View
+      macos={{ backdrop: { material: "sidebar", blending: "behindWindow", state: "inactive" } }}
+      style={{ backdropFilter: "blur(20px)", glassEffect: "regular", glassTintColor: "#ff0000" }}
+    >
+      <View macos={{ backdrop: { material: "popover" } }} />
+    </View>
+  ),
+);
+"##;
+
+#[test]
+fn macos_props_apply_on_macos_through_the_mount() {
+    use nsh_core::{
+        Color, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState,
+    };
+    let styles = |os| {
+        first_frame_of(MATERIAL_APP, "macos-props", os, Idiom::Desktop)
+            .into_iter()
+            .filter_map(|item| match item {
+                MountItem::ViewStyle { style, .. } => Some(*style),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let macos = styles(Os::MacOs);
+    let mut backdrop = MacOsBackdrop::default();
+    backdrop.material = MacOsBackdropMaterial::Sidebar;
+    backdrop.blending = MacOsBackdropBlending::BehindWindow;
+    backdrop.state = MacOsBackdropState::Inactive;
+    let backdrops = macos
+        .iter()
+        .filter_map(|style| style.macos_backdrop)
+        .collect::<Vec<_>>();
+    // The JS values, in the API's camel case, reach the platform.
+    assert!(backdrops.contains(&backdrop));
+    // Fields left out (blending and state here) keep their defaults.
+    assert!(backdrops.contains(&MacOsBackdrop::default()));
+    assert_eq!(
+        macos.iter().find_map(|style| style.glass_tint_color),
+        Some(Color(0xff00_00ff))
+    );
+    // Another platform ignores `macos={{…}}`; the style itself is the same.
+    let linux = styles(Os::Linux);
+    assert!(linux.iter().all(|style| style.macos_backdrop.is_none()));
+    assert_eq!(
+        linux.iter().find_map(|style| style.glass_tint_color),
+        Some(Color(0xff00_00ff))
     );
 }

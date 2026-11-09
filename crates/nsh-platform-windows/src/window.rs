@@ -28,12 +28,13 @@ use std::{
 use nsh_core::{NodeId, ROOT_ID};
 use windows::{
     Win32::{
-        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::{
-            Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
+            Dwm::{DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmFlush, DwmSetWindowAttribute},
             Gdi::{
-                BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST,
-                MONITORINFO, MonitorFromWindow, PAINTSTRUCT, ScreenToClient, UpdateWindow,
+                BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC,
+                GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+                MonitorFromWindow, PAINTSTRUCT, ReleaseDC, ScreenToClient, UpdateWindow,
                 ValidateRect,
             },
         },
@@ -645,6 +646,34 @@ pub(crate) fn wake(hwnd: isize) {
     }
 }
 
+/// Fills the window's client area with its background before the first
+/// frame. Windows composites and animates a window that has not painted yet
+/// with its default light surface, which flashes white on a dark appearance;
+/// its swap chain does not cover that surface until the first present.
+pub(crate) fn fill_background(surface: &Surface, hwnd: HWND) {
+    if surface.transparent() {
+        return;
+    }
+    // `Color` is 0xRRGGBBAA; a GDI color is 0x00BBGGRR.
+    let color = crate::system::window_background(surface).0;
+    let brush = unsafe {
+        CreateSolidBrush(COLORREF(
+            ((color >> 24) & 0xff) | ((color >> 8) & 0xff00) | ((color & 0xff00) << 8),
+        ))
+    };
+    // SAFETY: GDI calls on a window of this thread; the brush is freed here.
+    unsafe {
+        let dc = GetDC(Some(hwnd));
+        if !dc.is_invalid() {
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let _ = FillRect(dc, &rect, brush);
+            let _ = ReleaseDC(Some(hwnd), dc);
+        }
+        let _ = DeleteObject(brush.into());
+    }
+}
+
 /// Asks for `WM_PAINT`.
 pub(crate) fn invalidate(hwnd: HWND) {
     if !hwnd.is_invalid() {
@@ -709,6 +738,22 @@ unsafe extern "system" fn dispatch_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
+/// Keeps the window out of DWM's composition (cloaked) while its first
+/// background is prepared. A window shown without this is composited and
+/// animated with its default light client surface before the app paints.
+pub(crate) fn set_cloaked(hwnd: HWND, cloaked: bool) {
+    let value: i32 = cloaked.into();
+    // SAFETY: a BOOL-sized attribute value.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK,
+            &value as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
+}
+
 /// Darkens (or not) a top-level window's title bar.
 pub(crate) fn set_dark_title_bar(hwnd: HWND, dark: bool) {
     let value: i32 = dark.into();
@@ -748,9 +793,28 @@ pub(crate) fn modifiers() -> Modifiers {
     }
 }
 
+/// The [`WindowData`] of `hwnd`, when it is one of this process's windows
+/// of [`CLASS`]: callers pass windows they did not make too (the foreground
+/// window, which may be another app's), whose `GWLP_USERDATA` is theirs,
+/// not a `WindowData`.
 fn data(hwnd: HWND) -> Option<&'static WindowData> {
-    // SAFETY: the pointer was stored by `WM_NCCREATE` and is freed only in
-    // `WM_NCDESTROY`, after which the slot is cleared.
+    use windows::Win32::{
+        System::Threading::GetCurrentProcessId,
+        UI::WindowsAndMessaging::{GCLP_WNDPROC, GetClassLongPtrW, GetWindowThreadProcessId},
+    };
+    let mut process = 0;
+    // SAFETY: plain queries; an out value for the process id.
+    let ours = unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut process)) != 0
+            && process == GetCurrentProcessId()
+            && GetClassLongPtrW(hwnd, GCLP_WNDPROC) == window_proc as *const () as usize
+    };
+    if !ours {
+        return None;
+    }
+    // SAFETY: a window of `CLASS` in this process: the pointer was stored by
+    // `WM_NCCREATE` and is freed only in `WM_NCDESTROY`, after which the
+    // slot is cleared.
     unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WindowData).as_ref() }
 }
 
@@ -1265,16 +1329,6 @@ fn window_api(
                 info.ptMaxTrackSize = POINT { x, y };
             }
             Some(Some(LRESULT(0)))
-        }
-        WM_SIZING => {
-            if let Some(ratio) = shell.attrs().aspect_ratio {
-                // SAFETY: `lparam` is the dragged rectangle, writable.
-                let rect = unsafe { &mut *(lparam.0 as *mut RECT) };
-                let (l, t, r, b) = frame_extents(hwnd);
-                crate::shell::keep_aspect(rect, wparam.0 as u32, ratio, (l + r, t + b));
-                return Some(Some(LRESULT(1)));
-            }
-            None
         }
         WM_SYSCOMMAND => {
             let command = (wparam.0 & 0xFFF0) as u32;
@@ -1837,5 +1891,56 @@ mod tests {
         assert_eq!(held_buttons(WPARAM(0x10)), 0b100);
         assert_eq!(held_buttons(WPARAM(0x20)), 0b1000);
         assert_eq!(held_buttons(WPARAM(0x40)), 0b1_0000);
+    }
+
+    unsafe extern "system" fn plain_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        // SAFETY: default handling.
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    /// A window the app did not make (the foreground window can be another
+    /// app's) keeps what it likes in `GWLP_USERDATA`: it is never read as a
+    /// `WindowData`, which crashed the test agent's typing on Windows on Arm.
+    #[test]
+    fn a_window_of_another_class_has_no_window_data() {
+        // SAFETY: a class registered and a window made on this thread, never
+        // shown, destroyed at the end; its user data is set and never read.
+        unsafe {
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(plain_proc),
+                hInstance: instance(),
+                lpszClassName: w!("NshTestForeign"),
+                ..Default::default()
+            };
+            RegisterClassExW(&class);
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("NshTestForeign"),
+                w!(""),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                100,
+                100,
+                None,
+                None,
+                Some(instance()),
+                None,
+            )
+            .unwrap();
+            // An address nothing is mapped at, as another app's pointer is.
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0x0000_7FFF_FFFF_0000);
+            assert!(surface_of(hwnd).is_none());
+            assert_eq!(app_window_root(hwnd), None);
+            assert!(shell(hwnd).is_none());
+            DestroyWindow(hwnd).unwrap();
+        }
+        assert!(surface_of(HWND::default()).is_none());
     }
 }

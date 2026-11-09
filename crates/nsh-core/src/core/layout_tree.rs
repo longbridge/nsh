@@ -693,6 +693,10 @@ where
             && !measured.iter().any(|(asked, _)| *asked == inputs)
         {
             if measured.len() < MEASURED {
+                // A layout asks most leaves twice (a measuring pass, then
+                // the final one): room for that, then for one more at a
+                // time, not the four a growing `Vec` starts with.
+                measured.reserve_exact(if measured.is_empty() { 2 } else { 1 });
                 measured.push((inputs, output.clone()));
             } else {
                 n.measured = None;

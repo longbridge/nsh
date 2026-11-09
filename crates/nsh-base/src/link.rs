@@ -69,8 +69,10 @@ pub enum LinkEvent {
 /// A link: content that goes somewhere when pressed (a page, a site, a
 /// route of the app). It owns its behavior (presses, keyboard activation
 /// with Return or Space, a stop of the keyboard focus, the disabled state,
-/// the link role for screen readers) and leaves its look to the app: no
-/// color, underline, cursor or label of its own. `href` is where it goes,
+/// the link role for screen readers, the pointing hand over it while it is
+/// enabled, as a web `<a href>` has) and leaves its look to the app: no
+/// color, underline or label of its own; a `cursor-*` class of the app's
+/// replaces the hand. `href` is where it goes,
 /// data rather than text; `openWith` says who opens it (the system, or the
 /// app's `onOpen`). The app's `class` and `style` style it, its states with
 /// `hover:`, `active:`, `focus:` and `disabled:` classes or `hoverStyle`,
@@ -79,11 +81,14 @@ pub enum LinkEvent {
 /// view's does. Inside a `<Text>` it is an inline box of the paragraph, as
 /// every view there is: it stays on one line (`align-text-bottom` sits its
 /// text on the paragraph's baseline). In a `Toolbar`, it is one of the
-/// toolbar's items, as a `Button` there is.
+/// toolbar's items, as a `Button` there is. A terminal draws the text
+/// inside an enabled link as a hyperlink to `href`, which the terminal
+/// opens on its own (a Cmd- or Ctrl-click), outside `openWith`.
 #[component]
 pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
     let (view, disabled) = bar_item(view(), None, props.disabled);
     view.disabled(disabled)
+        .style_when(move || !disabled.get(), |s| s.cursor(Cursor::Pointer))
         .role(AccessibilityRole::Link)
         .optional_label(props.accessibility_label)
         .accessibility_state(move || AccessibilityState {
@@ -91,6 +96,15 @@ pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
             ..AccessibilityState::default()
         })
         .hit_slop(props.hit_slop)
+        // Where it goes, for a platform that links its text (a terminal's
+        // hyperlink); a disabled link goes nowhere.
+        .__link_href(Prop::bind(move || {
+            if disabled.get() {
+                None
+            } else {
+                props.href.get()
+            }
+        }))
         .on_press(move |_: &()| {
             if let Some(href) = props.href.get_untracked() {
                 cx.emit(LinkEvent::Open(href.clone()));

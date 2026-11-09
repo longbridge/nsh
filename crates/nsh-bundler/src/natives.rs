@@ -78,6 +78,10 @@ pub struct NativeUse {
     /// `element`, and the import is gone), or `transitionShader`, a page's
     /// or a dialog's prop, as a key or a string.
     pub shader: bool,
+    /// It may give a view a scroll bar theme of its own: it spells
+    /// `scrollbar` as a key, a member or a string (`<ScrollView
+    /// scrollbar={theme}>`). `nsh/base`'s core part draws such bars.
+    pub scrollbar_theme: bool,
 }
 
 impl NativeUse {
@@ -107,6 +111,7 @@ impl NativeUse {
         self.global_crypto |= other.global_crypto;
         self.computed_import |= other.computed_import;
         self.shader |= other.shader;
+        self.scrollbar_theme |= other.scrollbar_theme;
     }
 
     fn import(&mut self, specifier: &str) -> &mut Imported {
@@ -141,6 +146,9 @@ impl<F> Finder<'_, F> {
         if SHADER_TAGS.contains(&value) || value == "transitionShader" {
             self.uses.shader = true;
         }
+        if value == "scrollbar" {
+            self.uses.scrollbar_theme = true;
+        }
     }
 
     /// A name spelled in the code: one of `crypto`'s globals may be reached
@@ -155,6 +163,19 @@ impl<F> Finder<'_, F> {
 /// Whether `expression` is the global object, by one of its names.
 fn is_global_object(expression: &Expression<'_>) -> bool {
     matches!(expression, Expression::Identifier(object) if GLOBAL_OBJECTS.contains(&object.name.as_str()))
+}
+
+/// The specifier an `import()` names in its code: a string, or a template
+/// with no interpolation (`` import(`nsh/desktop`) ``, as the minifier writes
+/// `import("nsh/desktop")`). `None` for one computed when it runs.
+fn specifier(source: &Expression<'_>) -> Option<String> {
+    match source {
+        Expression::StringLiteral(s) => Some(s.value.to_string()),
+        Expression::TemplateLiteral(t) if t.expressions.is_empty() => {
+            t.quasis.iter().map(|q| q.value.cooked.as_deref()).collect()
+        }
+        _ => None,
+    }
 }
 
 /// Whether a computed key is a name the code spells (a string or a number),
@@ -206,13 +227,13 @@ impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
     }
 
     fn visit_import_expression(&mut self, it: &ImportExpression<'a>) {
-        match &it.source {
-            Expression::StringLiteral(source) => {
-                if (self.is_native)(source.value.as_str()) {
-                    *self.uses.import(source.value.as_str()) = Imported::All;
+        match specifier(&it.source) {
+            Some(source) => {
+                if (self.is_native)(&source) {
+                    *self.uses.import(&source) = Imported::All;
                 }
             }
-            _ => self.uses.computed_import = true,
+            None => self.uses.computed_import = true,
         }
         walk::walk_import_expression(self, it);
     }
@@ -228,6 +249,9 @@ impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
         self.spelled(it.name.as_str());
         if it.name == "transitionShader" {
             self.uses.shader = true;
+        }
+        if it.name == "scrollbar" {
+            self.uses.scrollbar_theme = true;
         }
     }
 
@@ -380,6 +404,14 @@ mod tests {
     }
 
     #[test]
+    fn a_scrollbar_key_counts_as_a_scrollbar_theme() {
+        assert!(uses("_$c(ScrollView, { scrollbar: theme });").scrollbar_theme);
+        assert!(uses("_$setProp(el, \"scrollbar\", theme);").scrollbar_theme);
+        assert!(uses("view.scrollbar = theme;").scrollbar_theme);
+        assert!(!uses("const bar = view;").scrollbar_theme);
+    }
+
+    #[test]
     fn what_may_be_the_global_crypto_counts() {
         for code in [
             "crypto.randomUUID();",
@@ -439,5 +471,14 @@ mod tests {
     fn an_import_of_a_computed_specifier_may_be_any_module() {
         assert!(uses("import(name);").computed_import);
         assert!(!uses(r#"import("./Screen.js");"#).computed_import);
+        assert!(uses("import(`./${name}.js`);").computed_import);
+    }
+
+    #[test]
+    fn an_import_of_a_template_with_no_interpolation_names_its_module() {
+        // The minifier writes `import("nsh/desktop")` with backticks.
+        let found = uses("import(`nsh/desktop`).then((m) => m.Window);");
+        assert!(!found.computed_import);
+        assert_eq!(found.imports.get("nsh/desktop"), Some(&Imported::All));
     }
 }

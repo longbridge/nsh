@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player };`)}`
+const { Player, keyCode } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -22,6 +22,11 @@ function fakePlayer(options = {}) {
   Object.assign(player, {
     // What the constructor sets that these paths read.
     options: { idiom: "phone", ...options },
+    baseURL: "https://example.test/app/",
+    assetBase: "https://example.test/app/",
+    assets: options.assets,
+    data: options.data,
+    inlineImages: new Map(),
     hostEvents: [],
     fileOperations: new Map(),
     requests: new Map(),
@@ -677,6 +682,17 @@ test("the runtime's data comes from the URL the page names and reaches the engin
   );
   assert.deepEqual(fetched, ["https://example.test/nsh-syntaxes.0123456789.bin"]);
   assert.deepEqual(handed, [["syntaxes", [1, 2, 3], 1]]);
+});
+
+test("relative URLs are the page's as the player started", () => {
+  const { player } = fakePlayer({ assets: { "logo.png": "https://cdn.test/logo.0123456789.png" } });
+  // The address has moved to another directory since (`history.pushState`).
+  assert.equal(player.asset("photos/a.jpg"), "https://example.test/app/photos/a.jpg");
+  assert.equal(player.asset("/photos/a.jpg"), "https://example.test/photos/a.jpg");
+  assert.equal(player.asset("https://photos.test/a.jpg"), "https://photos.test/a.jpg");
+  assert.equal(player.asset("blob:https://example.test/1"), "blob:https://example.test/1");
+  assert.equal(player.asset("asset:/logo.png"), "https://cdn.test/logo.0123456789.png");
+  assert.equal(player.asset("asset:/icons/x.png"), "https://example.test/app/icons/x.png");
 });
 
 test("data that does not load reaches the engine as none", async () => {
@@ -1606,4 +1622,11 @@ test("a view laid out at no size draws nothing of its own, its border overlay in
   // What the class takes away: the border overlay, the outline and the shadow.
   assert.match(source, /\.nsh-empty > \.nsh-border \{ display: none; \}/);
   assert.match(source, /\.nsh-v\.nsh-empty \{ outline: none; box-shadow: none; \}/);
+});
+
+test("a key event without `key` falls back to its physical key instead of throwing", () => {
+  assert.equal(keyCode({ code: "KeyA" }), 97);
+  assert.equal(keyCode({ key: null, code: "Digit3" }), 51);
+  assert.equal(keyCode({}), -1);
+  assert.equal(keyCode({ key: "a", code: "KeyA" }), 97);
 });

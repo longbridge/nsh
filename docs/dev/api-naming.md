@@ -159,8 +159,8 @@ go elsewhere under these rules rather than into them.
   system feature (a system gesture, a system material) goes in that platform's object; when several platforms have
   it, each object carries it under one name (WebView's `allowsBackForwardNavigationGestures` in `ios={{…}}` and
   `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
-  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `DesktopProps`, an element's own extending them),
-  so a key no platform has fails the type check.
+  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `MacOSProps`, `DesktopProps`, an element's own
+  extending them), so a key no platform has fails the type check.
 - **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux), the web in the desktop idiom or
   a terminal (`Idiom::desktop_on`, `Environment::desktop()`); everything else is mobile, Mac Catalyst included (it
   runs the iOS backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`,
@@ -300,6 +300,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
 | (new) wry's `WebViewBuilder::with_incognito(bool)` (the web views of GPUI Kit's `gpui-webview`) | `incognito` (`false`), Rust `.incognito(bool)` | States | wry's name, which Tauri's and other web view APIs share: a state of the web view, read when it is made (Rust takes a value, not a signal). A boolean, not a storage mode: a named persistent store would be a prop of its own, which `incognito` composes with |
+| (new) wry's `WebViewBuilder::with_asynchronous_custom_protocol(name, handler)`, WebKit's `setURLSchemeHandler:forURLScheme:` | Rust `.url_scheme(scheme, handler)`; `WebResourceRequest` (`url()`, `method()`, `is_cancelled()`, `respond(WebResource)`, `fail()`), `WebResource { mime_type, bytes }` | Where names come from | WebKit's and RFC 3986's word, "scheme" (wry's "protocol" is the same thing); the request is answered once, from any thread, as wry's responder is. Rust only for now: the bytes are the app's Rust data |
 | **NavPage** | | | |
 | `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |
@@ -309,8 +310,10 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
 | `Window.setTitleBar(style, height?)` | `WindowRef.set({ titleBar: { style, height? } })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object; 2026-11-06: an attribute of `set` |
-| `Window.setTitle`, `setTitleBar`, `setLevel`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setBounds`, `setSkipTaskbar`, `orderFront`, `close` (static, the main window only) | the methods of `WindowRef` (`currentWindow()`, `Window.get("main")`, any window of the app's own) | Where names come from | 2026-11-06: one handle type for every window. Rust: `WindowHandle`'s methods; `set_title`, `set_title_bar`, `set_level`, `set_skip_taskbar`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `order_front`, `close_window` are gone |
+| `Window.setTitle`, `setTitleBar`, `setLevel`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setBounds`, `setSkipTaskbar`, `orderFront`, `close` (static, the main window only) | the methods of `WindowRef` (`currentWindow()`, `Window.get("main")`, any window of the app's own) | Where names come from | 2026-11-06: one handle type for every window. Rust: `WindowRef`'s methods; `set_title`, `set_title_bar`, `set_level`, `set_skip_taskbar`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_window_bounds`, `order_front`, `close_window` are gone |
 | `Window.setTitle(t)`, `setTitleBar(o)`, `setLevel(l)` | `set({ title, titleBar, level })` | Shapes that can grow | One `set(partial)` for every attribute, no per-attribute setters |
+| Rust `WindowHandle`, `window().handle(slot)` | `WindowRef` (one name in Rust and TS); `open_window(window()...) -> Option<WindowRef>` | Where names come from | 2026-11-07: GPUI's `WindowHandle` is another type in the same process; Rust opens windows imperatively as GPUI's `cx.open_window` and TS's `Window.open` do |
+| `aspectRatio`, `colorScheme`, `contentProtected`, `edited`, `representedFile`, `tabGroup` (window attributes), `capabilities.windows.contentProtected` | removed | Speculative configuration | 2026-11-07: single-platform or without a use case yet; the app's `setColorScheme` covers every window. Added back when an app needs one |
 | `Window.toggleMaximize()`, `toggleFullScreen()` | `setMode("maximized" \| "fullScreen" \| "normal")`, `minimize()`, `restore()` | States | Intents, not toggles; minimized is apart from the mode |
 | `Window.setFrame(frame)` | `WindowRef.setBounds({ origin?, size?, animated? })` | Where names come from | It moves and sizes the window's bounds |
 | `Window.setBounds(bounds)` | `WindowRef.setPlacement(placement)` | Where names come from | It restores a saved placement (Win32's `WINDOWPLACEMENT`) |
@@ -329,7 +332,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
 | `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
-| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations, when NSH has them, come from rust-i18n |
+| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations come from rust-i18n: `nsh/i18n`'s `t`, `setLocale`, `availableLocales` (Rust `t!`, `set_locale`, `available_locales`) |
 | `OS` (type) | unchanged | | `platform.os`'s type |
 | **`nsh`: accessibility** | | | |
 | `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |
@@ -452,7 +455,7 @@ and `Input`'s React Native names follow the rules as well.
 | Tiptap's `Link` extension (`RichEditor`'s class, was `Link`) | `RichLink` (its extension name stays `"link"`) | `RichImage`, `RichTable`, `RichTextStyle` (`rich-editor.md`) | `Link` is `gpui-base`'s component; the editor's class takes the `Rich` prefix its others take where a name is taken (decided by the user, 2026-10-28) |
 | `Link::tab_index`, `tab_stop` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
 | a link inside text (`gpui-base`'s `Link` is a `div`) | an inline box of the paragraph (`verticalAlign`, `align-text-bottom`) | `text.md` "Inline attachments" | Every view inside a `<Text>` is one: it keeps its states, focus and role, and stays on one line. A link that wraps with the paragraph's lines is a nested `<Text role="link" onPress>` span (`TextView`'s links), which is no stop of the keyboard focus |
-| HTML's `<a href>` on the web | (left out) | | The web renders a `Link` as `role="link"` on its element; a real `<a href>` (a middle click, "Copy link address") needs `href` carried to the platform as a host prop and the web runtime making an anchor whose default navigation it cancels |
+| HTML's `<a href>` on the web | (left out) | | The web renders a `Link` as `role="link"` on its element; a real `<a href>` (a middle click, "Copy link address") needs the web runtime making an anchor from the view's `href` (the host prop `Href`, `ViewProps::href`, which the link sets while enabled and a terminal draws as an OSC 8 hyperlink) whose default navigation it cancels |
 | (new) | `hitSlop: number \| Partial<Edges>`; Rust `.hit_slop(..)` | the host prop `hitSlop` (every view's), passed to the link's view; `Button`'s `hitSlop` | Neither `gpui-base`'s nor `gpui-component`'s `Link` has one, as with `Button`: GPUI hit-tests a pointer against the bounds, which a mouse needs. A finger needs more around a small target (an icon, a short word), so it is the host prop's name, type and meaning, with no new concept |
 | **HoverCard** (`nsh/base`) | | | |
 | `HoverCard::new(id)`, `trigger`, `content(\|state, ..\|)` / `gpui-component`'s children | `HoverCard`, slot `trigger`, children (made on each opening) | `base/src/hover_card.rs:37-72`; `component/src/hover_card.rs:65-93`, `:129` | The content builder's `HoverCardState` gives it `is_open`, which the app has as `open` / `onOpenChange` |

@@ -220,7 +220,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 
 ## Frame statistics: `--fps`
 
-`nsh-gpui-host --fps` (`AppOptions::fps`, `NSH_FPS=1`, `AppView::set_fps_monitor` for embedders, the app's `setFpsEnabled`) logs one `nsh::perf` line a
+`nsh-gpui-host --fps` (`AppOptions::fps`, `NSH_FPS=1`, `AppView::set_fps_monitor` for embedders, the app's `setFpsEnabled`) logs one `nsh::fps` line a
 second (`stats.rs`): `fps 145 active 0/145 gap … tick … paint … canvas 0.04 paths 26.0 raf 145 notifies 0`. Frames
 drawn and how many of them GPUI counted active (unfocused windows run at 30 fps unless `inactive_frame_interval` is
 `None`), the gaps between frames, the animation tick (prepaint) and the tree's paint (milliseconds as
@@ -250,7 +250,7 @@ per thread, `/proc/<pid>/task/*/status`, an app showing static text, `nsh-gpui-h
 
 A frame costs more than its main-thread wakeup: under lavapipe each one wakes the four `llvmpipe` threads and the
 renderer's (about 30 wakeups a frame), so an app that changes once a second wakes about 35 times a second, and a
-blinking caret about 65. Check an app's idle cost with `--fps` (no `nsh::perf` line while nothing is drawn) and the
+blinking caret about 65. Check an app's idle cost with `--fps` (no `nsh::fps` line while nothing is drawn) and the
 per-thread counts above.
 
 ## Checking a change: `nsh test --target gpui`

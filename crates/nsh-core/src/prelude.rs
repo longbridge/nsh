@@ -62,6 +62,9 @@ pub use crate::element::{
     FontAsset,
     FontWeight,
     GestureEvent,
+    Haptic,
+    HapticImpact,
+    HapticNotification,
     HintReason,
     Hsla,
     // The network.
@@ -96,6 +99,10 @@ pub use crate::element::{
     ListLayout,
     ListViewport,
     Listener,
+    MacOsBackdrop,
+    MacOsBackdropBlending,
+    MacOsBackdropMaterial,
+    MacOsBackdropState,
     Measurement,
     Method,
     Methods,
@@ -238,7 +245,7 @@ pub use crate::element::{
     batch, can_pick_screen_color, catch_error, cleanup, clipboard_files, clipboard_has_image,
     clipboard_has_string, clipboard_image, clipboard_string, close_notification, color, component,
     component_ref, computed, dark, dismiss_keyboard, dynamic, each, effect, element_ref,
-    engine_context, fetch, font_scale, fps_enabled, global, idiom, image_size, is_catalyst,
+    engine_context, fetch, font_scale, fps_enabled, global, haptic, idiom, image_size, is_catalyst,
     is_desktop, key_label, keyboard_duration, keyboard_height, keystroke_label, lifecycle, locale,
     locale_settings, measure_text, motion, move_to_trash, next_frame, next_notification_press,
     next_url_scheme_open, notification_permission, on_back_press, on_key, on_key_with, open_path,
@@ -253,3 +260,8 @@ pub use crate::element::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};
+/// Translations ([`crate::i18n`]).
+pub use crate::{
+    i18n::{available_locales, set_locale},
+    t,
+};
