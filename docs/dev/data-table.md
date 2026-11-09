@@ -34,6 +34,13 @@ The table is a body, a hit layer over it and a header (`view.rs`), from the bott
   the body above, a striped, hovered or selected row would cover the bar;
 - the *header* above them is interactive: group labels, titles, resize handles and the drop line of a column being moved.
 
+A press on a cell `renderCell` draws is passed on into it first (`Dt::press_with`): the cell's view, registered by
+row and column (`CustomCells`), gets `ElementRef::press_at` with the press, and the core presses the innermost view of
+the app's there that hears presses, with the commit's layout (`Core::press_target`). Only when none takes it does the
+press select and report `onRowPress`. That view gets `onPress`, not hover or press states: the pointer stays on the hit
+layer. Headless tests press a view that takes no pointer (the body's) where it is, through the hit layer, as a pointer
+would (`Screen::routed_press`).
+
 The fixed-column separator sits above each row background and below its cells, so app-supplied cell borders
 remain visible at the fixed boundary.
 

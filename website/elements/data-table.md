@@ -254,6 +254,10 @@ The app looks up its own data by `row`. `renderHeaderCell` draws a title across 
 />
 ```
 
+A view with `onPress` in a cell (a copy button) gets the presses on it, and the table then neither selects the row nor
+reports `onRowPress`; a press elsewhere in the cell selects as usual. Such a view gets `onPress`, without hover or
+pressed styles.
+
 `fontFamily` and `fontSize` (default `14`) set the font of the cells, which the table also measures texts in to fit
 columns.
 

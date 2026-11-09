@@ -2849,6 +2849,18 @@ impl<M: TextEngine> Core<M> {
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
         }
+        // Presses a component passes on, onto this commit's layout.
+        for (id, press, answer) in std::mem::take(&mut self.components.presses) {
+            let target = self.press_target(id, press.page_position);
+            if let Some((node, position)) = target {
+                self.events.push(crate::element::JsEvent::Event(
+                    node,
+                    EventKind::Press,
+                    EventPayload::Press(crate::PressEvent { position, ..press }),
+                ));
+            }
+            answer.borrow_mut().deliver(target.is_some());
+        }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
         for (id, mut command) in std::mem::take(&mut self.commands) {

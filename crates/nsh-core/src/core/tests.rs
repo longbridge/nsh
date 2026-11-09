@@ -14676,6 +14676,123 @@ fn measures_in_root_coordinates() {
     assert_eq!(c.measure(1000), None);
 }
 
+/// A press passed on into an element (`ElementRef::press_at`) goes to the
+/// innermost view under it that hears presses, in a subtree that takes no
+/// pointer itself, and skips views that take none.
+#[test]
+fn presses_passed_on_reach_the_innermost_pressable_view() {
+    use crate::props::PointerEvents;
+    let mut c = core();
+    let listen = |id| Op::Listen {
+        id,
+        event: EventKind::Press,
+        enabled: true,
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            style_op(
+                2,
+                &[
+                    ("marginTop", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(200.0)),
+                    ("height", StyleValue::Number(50.0)),
+                    ("flexDirection", StyleValue::Str("row")),
+                ],
+            ),
+            style_op(
+                6,
+                &[
+                    ("marginLeft", StyleValue::Number(50.0)),
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ),
+            style_op(
+                8,
+                &[
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 8,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            listen(4),
+            listen(6),
+            listen(8),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    c.commit().unwrap();
+    // On 6 (at 50..70 in 4, which is at 40 in the root).
+    assert_eq!(
+        c.press_target(2, point(px(55.0), px(45.0))),
+        Some((6, point(px(5.0), px(5.0))))
+    );
+    // On 8, which takes no pointer: 4 under it.
+    assert_eq!(
+        c.press_target(2, point(px(75.0), px(45.0))),
+        Some((4, point(px(75.0), px(5.0))))
+    );
+    // Past every view that hears presses.
+    assert_eq!(c.press_target(2, point(px(10.0), px(120.0))), None);
+    // The commit passes it on as the platforms report a press.
+    c.components.presses.push((
+        2,
+        crate::PressEvent {
+            page_position: point(px(55.0), px(45.0)),
+            clicks: 2,
+            ..Default::default()
+        },
+        crate::element::Answer::<bool>::new().1,
+    ));
+    c.commit();
+    let pressed: Vec<_> = js_events(&mut c)
+        .into_iter()
+        .filter(|(_, kind, _)| *kind == EventKind::Press)
+        .collect();
+    assert!(matches!(
+        &pressed[..],
+        [(6, _, EventPayload::Press(p))] if p.position == point(px(5.0), px(5.0)) && p.clicks == 2
+    ));
+}
+
 /// `desktop={{ windowDrag }}` reaches the platform in the view's props, and
 /// clearing it sends them again.
 #[test]

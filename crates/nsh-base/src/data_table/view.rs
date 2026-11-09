@@ -31,7 +31,7 @@ use nsh_core::{
 use super::{
     DataTableAlign, DataTableCell, DataTableHeaderCell, DataTablePart, DataTableProps,
     DataTableSortDirection,
-    controller::{Dt, MOVE_SLOP, PressRegion, SORT_WIDTH},
+    controller::{CustomCell, Dt, MOVE_SLOP, PressRegion, SORT_WIDTH},
     selection::Selection,
 };
 use crate::HandleEdge;
@@ -315,7 +315,7 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                 .h(move || Length::from(px(strip_dt.geo().y.extent() as f32)))
                                 .on(EventKind::Press, move |p: &EventPayload| {
                                     if let EventPayload::Press(e) = p {
-                                        press.press_with(e.position, e.clicks, e.modifiers);
+                                        press.press_with(e);
                                     }
                                 })
                                 // Tab stops at the table here, as at gpui-component's
@@ -937,8 +937,25 @@ fn cell(
     let width_dt = dt.clone();
     let height_dt = dt.clone();
     let col_dt = dt.clone();
+    // A cell the app draws gets the presses on its own pressable views,
+    // passed on by the hit layer over the body.
+    let view_ref = custom.then(|| {
+        let view_ref = element_ref();
+        let key = dt.custom_cells.borrow_mut().add(CustomCell {
+            view: view_ref,
+            row,
+            def,
+        });
+        let cells = dt.custom_cells.clone();
+        cleanup(move || cells.borrow_mut().remove(key));
+        view_ref
+    });
     let el = column_parts(
         view()
+            .map(move |v| match &view_ref {
+                Some(r) => v.element_ref(r),
+                None => v,
+            })
             .role(AccessibilityRole::Cell)
             .accessibility_state(move || AccessibilityState {
                 selected: flags.get().selected || flags.get().column_selected,

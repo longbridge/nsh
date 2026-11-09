@@ -5,6 +5,7 @@
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
 use nsh_core::{
+    PressEvent,
     element::{ElementRef, Os},
     keymap::{Modifiers, When},
     prelude::*,
@@ -127,6 +128,45 @@ pub(crate) struct Dt {
     /// The column whose handle was last pressed without a drag, and when:
     /// a second press within `DOUBLE_PRESS` fits the column.
     handle_tap: Rc<RefCell<Option<(usize, nsh_core::time::Instant)>>>,
+    /// The cells `renderCell` draws, which the hit layer passes presses
+    /// on to ([`Dt::press_with`]).
+    pub(crate) custom_cells: Rc<RefCell<CustomCells>>,
+}
+
+/// A cell `renderCell` draws: its view, and the row and column it shows
+/// now (its view is reused for others as the table scrolls).
+#[derive(Clone, Copy)]
+pub(crate) struct CustomCell {
+    pub(crate) view: ElementRef,
+    pub(crate) row: Memo<Option<usize>>,
+    pub(crate) def: Memo<Option<usize>>,
+}
+
+/// The cells `renderCell` draws, by a key of their own.
+#[derive(Default)]
+pub(crate) struct CustomCells {
+    cells: Vec<(u64, CustomCell)>,
+    next: u64,
+}
+
+impl CustomCells {
+    pub(crate) fn add(&mut self, cell: CustomCell) -> u64 {
+        self.next += 1;
+        self.cells.push((self.next, cell));
+        self.next
+    }
+
+    pub(crate) fn remove(&mut self, key: u64) {
+        self.cells.retain(|(k, _)| *k != key);
+    }
+
+    /// The view of the cell showing `row` of column `def`.
+    fn showing(&self, row: usize, def: usize) -> Option<ElementRef> {
+        self.cells.iter().find_map(|(_, c)| {
+            (c.row.get_untracked() == Some(row) && c.def.get_untracked() == Some(def))
+                .then_some(c.view)
+        })
+    }
 }
 
 fn spec_of(column: &DataTableColumn) -> Spec {
@@ -184,6 +224,7 @@ impl Dt {
             cols_window: RowWindow::following(1),
             resizing: Rc::default(),
             handle_tap: Rc::default(),
+            custom_cells: Rc::default(),
         };
         dt.sync_columns();
         dt.sync_selection();
@@ -976,16 +1017,33 @@ impl Dt {
         }
     }
 
-    /// A press (or tap) of the body at `position` with the modifier keys
-    /// held; `clicks` counts the presses in a row.
-    pub(crate) fn press_with(&self, position: Point<Points>, clicks: u32, modifiers: Modifiers) {
-        let hit = self.target_at(position);
-        self.press_hit(hit, clicks, modifiers);
+    /// A press (or tap) of the body, at `press.position` in the hit layer's
+    /// content. On a cell `renderCell` draws, a view of the app's there
+    /// that hears presses takes it (the body under the hit layer takes no
+    /// pointer); else it presses the row or cell.
+    pub(crate) fn press_with(&self, press: &PressEvent) {
+        let hit = self.target_at(press.position);
+        let (clicks, modifiers) = (press.clicks, press.modifiers);
+        let cell = match (hit.row, hit.column) {
+            (Some(row), Some(def)) if !hit.header => self.custom_cells.borrow().showing(row, def),
+            _ => None,
+        };
+        let Some(cell) = cell else {
+            self.press_hit(hit, clicks, modifiers);
+            return;
+        };
+        let taken = cell.press_at(*press);
+        let dt = self.clone();
+        spawn(async move {
+            if !taken.await {
+                dt.press_hit(hit, clicks, modifiers);
+            }
+        });
     }
 
     /// A press of a made row, the views that show the cells (a platform's
-    /// pointer reaches the hit layer instead; assistive technologies and
-    /// tests press what they see). `x` is in the row, whose left is where
+    /// pointer reaches the hit layer instead, as headless tests' presses
+    /// do; assistive technologies press what they see). `x` is in the row, whose left is where
     /// the region's cells start from: for the scrolling columns, the first
     /// of the chunk they are placed from (`origin`).
     pub(crate) fn press_row_with(

@@ -225,6 +225,8 @@ const columns: DataTableColumn[] = [
 />
 ```
 
+单元格里带 `onPress` 的视图（例如复制按钮）会收到按在它上面的按下，这时表格不会选中该行，也不会触发 `onRowPress`；按在单元格其他位置照常选中行。这类视图只收到 `onPress`，不显示悬停和按下状态的样式。
+
 `fontFamily` 和 `fontSize`（默认 `14`）设置单元格的字体，表格也用它来测量文字以适配列宽。
 
 <a id="the-ref"></a>
