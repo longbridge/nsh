@@ -11,8 +11,8 @@ use std::{
 
 use anyhow::{Context as _, bail};
 
-/// Minimum Android version (API 28, Android 9), as the runtime is built.
-pub(crate) const MIN_SDK: u32 = 28;
+/// Minimum Android version (API 26, Android 8.0), as the runtime is built.
+pub(crate) const MIN_SDK: u32 = 26;
 /// The Android version apps target unless `nsh.json` `android.targetSdk`
 /// names another (API 35, Android 15: what Google Play requires).
 pub(crate) const DEFAULT_TARGET_SDK: u32 = 35;

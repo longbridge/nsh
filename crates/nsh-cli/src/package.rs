@@ -162,7 +162,9 @@ impl AndroidConfig {
         use crate::android::{DEFAULT_TARGET_SDK, MIN_SDK};
         let level = self.target_sdk.unwrap_or(DEFAULT_TARGET_SDK);
         if level < MIN_SDK {
-            bail!("nsh.json android.targetSdk {level} is below the minimum, {MIN_SDK} (Android 9)");
+            bail!(
+                "nsh.json android.targetSdk {level} is below the minimum, {MIN_SDK} (Android 8.0)"
+            );
         }
         Ok(level)
     }
@@ -293,6 +295,11 @@ pub(crate) struct WebConfig {
     /// (`/apps/counter/sports/football`). Without it the page's URLs are
     /// relative to the page.
     pub(crate) base: Option<String>,
+    /// Whether pushed pages and open dialogs are entries of the browser's
+    /// history (`createPlayer`'s `history`), on the packaged page and the
+    /// dev server's; by default only where the app is the whole page, not
+    /// in an iframe.
+    pub(crate) history: Option<bool>,
 }
 
 /// Options of `nsh package`.

@@ -10,6 +10,16 @@ prop id:link accessibilityLabel In a browser
 prop id:link elevation 0
 prop id:link backdropMaterial ultraThin
 covers [props] web
+# props-view-web-element
+tap id:case-props-view-web-element
+expect Notes
+# The element each is in a document where `role` cannot say it; the
+# heading's is its role.
+prop id:article web.element article
+prop id:date web.element time
+prop id:paragraph web.element p
+prop id:heading role header
+covers [props] web.element
 # props-text-scaling
 tap id:case-props-text-scaling
 # twice the default.

@@ -17,9 +17,12 @@ pub(crate) type KeyHandler = Rc<dyn Fn(&str)>;
 pub(crate) const FIRST_ID: u32 = 1 << 31;
 
 /// A view's binding: what the platform matches, the keystroke as written
-/// (what the handler gets) and the handler.
+/// (what the handler gets), the handler and the window it was bound in.
 pub(crate) struct ViewKey {
     pub(crate) binding: KeyBinding,
+    /// The dialog root of the window of the app's own whose tree bound
+    /// it; `None` for the main window's.
+    pub(crate) window: Option<super::ElementRef>,
     pub(crate) text: Rc<str>,
     pub(crate) handler: KeyHandler,
 }
@@ -31,6 +34,9 @@ pub(crate) struct ViewKeys {
     pub(crate) list: Vec<ViewKey>,
     /// The list changed since the core last made the table.
     pub(crate) changed: bool,
+    /// The last table left out a binding whose window was not mounted
+    /// yet: the core makes it again once it is.
+    pub(crate) unplaced: bool,
 }
 
 impl ViewKeys {
@@ -40,6 +46,7 @@ impl ViewKeys {
         make: impl FnOnce(u32) -> KeyBinding,
         text: Rc<str>,
         handler: KeyHandler,
+        window: Option<super::ElementRef>,
     ) -> u32 {
         let id = FIRST_ID + self.next;
         self.next += 1;
@@ -47,6 +54,7 @@ impl ViewKeys {
             binding: make(id),
             text,
             handler,
+            window,
         });
         self.changed = true;
         id
@@ -58,6 +66,32 @@ impl ViewKeys {
         let i = self.list.iter().position(|k| k.binding.id == id)?;
         self.changed = true;
         Some(self.list.remove(i))
+    }
+
+    /// The bindings as the platform matches them, each in its window's
+    /// root node; those of a window not mounted yet are left out (and
+    /// [`Self::unplaced`] set).
+    pub(crate) fn bindings(&mut self) -> Vec<KeyBinding> {
+        let mut unplaced = false;
+        let bindings = self
+            .list
+            .iter()
+            .filter_map(|k| {
+                let window = match k.window {
+                    None => crate::ROOT_ID,
+                    Some(element) => match element.node() {
+                        Some(node) => node,
+                        None => {
+                            unplaced = true;
+                            return None;
+                        }
+                    },
+                };
+                Some(k.binding.in_window(window))
+            })
+            .collect();
+        self.unplaced = unplaced;
+        bindings
     }
 
     /// Binding `id`'s keystroke as written and its handler.

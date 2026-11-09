@@ -859,6 +859,7 @@ fn platform(cx: *mut JsContext) -> JsValue {
     object(
         cx,
         &[
+            (c"name", string(cx, e.platform_name())),
             (c"os", string(cx, e.os.name())),
             (c"version", string(cx, &os_version(&e))),
             (c"idiom", string(cx, idiom(&e))),
@@ -1036,6 +1037,11 @@ export interface LocaleSettings {
 }
 
 export interface PlatformInfo {
+  /** The platform the app runs on: the OS's name on NSH's own platforms
+   * (`"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"`, `"web"`), or
+   * the name of a platform built outside NSH (`"miniprogram"`), whose OS is
+   * `os`: handle a name you do not know. */
+  readonly name: OS | (string & {});
   /** The operating system (`"ios"`, `"android"`, `"macos"`, `"windows"`,
    * `"linux"`, `"web"`). */
   readonly os: OS;
