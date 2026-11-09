@@ -22167,6 +22167,46 @@ fn overlays_in_a_modal_show_in_it() {
 }
 
 #[test]
+fn an_anchored_overlay_lands_on_whole_device_pixels() {
+    use StyleValue::Number;
+    for ratio in [1.0, 2.0, 3.0] {
+        let mut c = core();
+        at_ratio(&mut c, ratio);
+        add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(480.0))]);
+        add(&mut c, 10, Tag::Overlay, 2, &[]);
+        add(
+            &mut c,
+            12,
+            Tag::View,
+            10,
+            &[("width", Number(120.0)), ("height", Number(60.0))],
+        );
+        // A pointer between pixels, as a context menu opens at.
+        apply(
+            &mut c,
+            vec![overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                    px(100.38),
+                    px(50.71),
+                ))),
+            )],
+        );
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 10).expect("overlay frame");
+        for v in [frame.origin.x.0, frame.origin.y.0] {
+            let pixels = v * ratio;
+            assert!(
+                (pixels - pixels.round()).abs() < 1.0e-3,
+                "{v} is not on a device pixel at {ratio}"
+            );
+        }
+        // Still centred on the pointer (100.38 - 120 / 2), within a pixel.
+        assert!((frame.origin.x.0 - 40.38).abs() <= 1.0 / ratio);
+    }
+}
+
+#[test]
 fn overlays_with_a_cover_lay_that_view_over_the_anchor() {
     use StyleValue::Number;
     let mut c = core();
