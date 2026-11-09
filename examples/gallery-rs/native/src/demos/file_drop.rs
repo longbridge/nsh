@@ -10,6 +10,7 @@ use crate::ui::{colors, radius};
 pub(crate) fn FileDrop() -> impl IntoElement {
     let hovering = signal(false);
     let offered = signal(0usize);
+    let images = signal(false);
     let files = signal(Vec::<String>::new());
     view()
         .flex_1()
@@ -38,6 +39,7 @@ pub(crate) fn FileDrop() -> impl IntoElement {
                 })
                 .on_file_drag_enter(move |event: &FileDragEvent| {
                     offered.set(event.uris.len());
+                    images.set(event.mime_types.iter().all(|t| t.starts_with("image/")));
                     hovering.set(true);
                 })
                 .on_file_drag_leave(move || hovering.set(false))
@@ -55,6 +57,10 @@ pub(crate) fn FileDrop() -> impl IntoElement {
                 )
                 .child(
                     text(move || match (hovering.get(), offered.get()) {
+                        (true, 1) if images.get() => "Release to attach 1 image".to_string(),
+                        (true, n) if n > 1 && images.get() => {
+                            format!("Release to attach {n} images")
+                        }
                         (true, 1) => "Release to attach 1 item".to_string(),
                         (true, n) if n > 1 => format!("Release to attach {n} items"),
                         (true, _) => "Release to attach".to_string(),
