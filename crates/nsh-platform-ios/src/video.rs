@@ -293,6 +293,11 @@ impl VideoHost {
         }
         self.repeat.set(p.repeat);
         if let Some(player) = &self.player {
+            // Played from the end, a video starts over: a seek the app
+            // makes in the same turn arrives after these props.
+            if !p.paused && self.props.paused && at_end(player) {
+                seek_exactly(player, 0.0);
+            }
             // SAFETY: AVPlayer's documented API.
             unsafe {
                 let _: () = msg_send![player, setMuted: Bool::new(p.muted)];
@@ -513,14 +518,37 @@ impl VideoHost {
     }
 
     pub(crate) fn seek(&self, seconds: f64) {
-        if let Some(player) = &self.player {
-            let zero = CMTime::from_seconds(0.0);
+        let Some(player) = &self.player else { return };
+        seek_exactly(player, seconds);
+        // The player pauses itself at the end; a video the app has not
+        // paused plays on from where it was sought.
+        if !self.props.paused {
             // SAFETY: AVPlayer's documented API.
-            let _: () = unsafe {
-                msg_send![player, seekToTime: CMTime::from_seconds(seconds), toleranceBefore: zero, toleranceAfter: zero]
-            };
+            unsafe {
+                let rate: f32 = msg_send![player, rate];
+                if rate == 0.0 {
+                    let _: () = msg_send![player, setRate: self.props.rate];
+                }
+            }
         }
     }
+}
+
+/// Seeks `player` to `seconds`, to the frame.
+fn seek_exactly(player: &AnyObject, seconds: f64) {
+    let zero = CMTime::from_seconds(0.0);
+    // SAFETY: AVPlayer's documented API.
+    let _: () = unsafe {
+        msg_send![player, seekToTime: CMTime::from_seconds(seconds.max(0.0)), toleranceBefore: zero, toleranceAfter: zero]
+    };
+}
+
+/// Whether `player` stands at the end of its item.
+fn at_end(player: &AnyObject) -> bool {
+    let duration = item_duration(player);
+    // SAFETY: AVPlayer's documented getter.
+    let now: CMTime = unsafe { msg_send![player, currentTime] };
+    duration.is_finite() && duration > 0.0 && now.seconds() >= duration - 0.001
 }
 
 impl Drop for VideoHost {
