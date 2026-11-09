@@ -307,7 +307,7 @@ report it:
   (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
   500 ms count up (`clicks` 2 is a double press), as the platforms count them;
 - `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
-  `delayLongPress` (500 ms) `LongPress` and `PressOut`;
+  `delayLongPress` (500 ms) `LongPress` and `PressOut`, at the match's center as `press` does;
 - `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
 - `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
   `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line

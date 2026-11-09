@@ -157,6 +157,9 @@ pub struct Screen {
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
+    /// The edit menu an input opened (`Command::OpenEditMenu`) and what it
+    /// offers, until it is chosen from or closed.
+    edit_menu: Option<(NodeId, Vec<nsh_core::EditAction>)>,
     /// The application menu the app set (`Menu.setApplicationMenu`), whose
     /// shortcuts the keyboard chooses.
     app_menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
@@ -649,6 +652,12 @@ impl Screen {
                 }
                 _ => {}
             },
+            Command::OpenEditMenu { actions, .. } => self.edit_menu = Some((id, actions.clone())),
+            Command::CloseEditMenu
+                if self.edit_menu.as_ref().is_some_and(|(open, _)| *open == id) =>
+            {
+                self.edit_menu = None;
+            }
             Command::SetJsResponder { block } => {
                 self.js_block = *block;
                 self.js_grants.push(*block);
@@ -2107,6 +2116,19 @@ impl Screen {
     /// The open context menu was chosen from or closed.
     pub(crate) fn menu_closed(&mut self) {
         self.menu = None;
+    }
+
+    /// The edit menu an input opened over a selection it draws: the input
+    /// and what the menu offers, if one is open.
+    pub(crate) fn edit_menu(&self) -> Option<(NodeId, &[nsh_core::EditAction])> {
+        self.edit_menu
+            .as_ref()
+            .map(|(id, actions)| (*id, actions.as_slice()))
+    }
+
+    /// The open edit menu was chosen from or closed.
+    pub(crate) fn edit_menu_closed(&mut self) {
+        self.edit_menu = None;
     }
 
     /// The view a right click on `id` asks for a context menu: it, or the
