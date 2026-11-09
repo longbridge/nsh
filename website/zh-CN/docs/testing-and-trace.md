@@ -165,6 +165,7 @@ describe("the cart", () => {
 | `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。使用 `--target` 时，应用以目标平台运行：桌面平台的 `platform` 可用于任何桌面目标和 web，且总以桌面形态运行（在浏览器中无论宽度都是桌面形态，`platform.os` 仍是 `"web"`），`"ios"` 和 `"android"` 只用于各自的目标。 |
 | `clock` | 系统时钟 | 手动时钟，它的时间只随测试推进：`{}`，或者用 `{ time }` 从某个 `Date`（或自 Unix 纪元起的毫秒数）开始。见[控制时间](#控制时间)。 |
 | `host` | 无 | 由测试扮演的宿主应用：`{ params, handlers }`。见[扮演宿主应用](#扮演宿主应用)。 |
+| `modules` | 无 | 按模块标识替换应用导入的原生模块的导出：见[替换原生模块](#替换原生模块)。仅限 headless 运行。 |
 | `url` | 无 | 启动应用的链接：应用认领了它的 scheme（`nsh.json` 的 `schemes`）时，`UrlScheme.on("open")` 会像从系统那里一样收到它（[UrlScheme](../modules/nsh.md#urlscheme)）。仅限 headless 运行。 |
 
 ### 扮演宿主应用
@@ -191,6 +192,36 @@ expect(app.shows("Conversation c-43")).toBe(true);
 ```
 
 `app.host.send(name, data)` 发送一个事件，然后等待应用空闲。`app.host.calls()` 和 `app.host.posts()` 按顺序列出处理函数收到的调用和投递：`name` 和 `data`。
+
+### 替换原生模块
+
+`modules` 用替身替换应用导入的原生模块的导出：应用自己 crate 的（`#[native_module]` UI 集）、`nsh/base` 的或运行时的。键先是模块标识，再是导出名（`"save"`）或某个导出的成员（`"Keychain.get"`）。应用的导入拿到的是替身；模块的其他导出保持原样，Rust 代码直接调用模块时仍运行模块本身。
+
+替身是一个值或一个函数，应用的代码拿到什么取决于替身的种类，与真实导出的返回方式无关：
+
+| 替身 | 应用拿到的 |
+|---|---|
+| 值 | 直接拿到这个值：本是函数的导出变成同步返回该值的函数，其他导出就是这个值。 |
+| 函数 | 每次调用都拿到一个 promise，同步导出也是如此：函数收到调用的参数，promise 兑现为函数的返回值（或它返回的 promise 兑现的值），函数抛出的错误让 promise reject。 |
+
+应用同步调用的函数，用值做替身就保持同步；应用 await 的函数，用函数做替身。
+
+```tsx
+const saved: unknown[][] = [];
+const app = await open("./App.tsx", {
+  modules: {
+    "my-app/native": {
+      "Keychain.get": async (key) => (key === "token" ? "t-1" : null),
+      "Keychain.set": async (...args) => void saved.push(args),
+      "Keychain.available": true,
+    },
+  },
+});
+await app.press("Sign out");
+expect(saved).toEqual([["token", null]]);
+```
+
+参数和回答以 JSON 值传递。替换只在 headless 运行：使用 `--target` 时，`modules` 会以 `ERR_NSH_TEST_UNSUPPORTED` reject。
 
 应用打开的 URL（[`openUrl`](../modules/nsh.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）会被记录下来，并以“已打开”回报给应用，本机上不会真正打开任何东西。`app.openedUrls()` 列出它们：
 
@@ -411,7 +442,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `ERR_NSH_TEST_COVERED` | `press` 指向的视图上面盖着另一个视图，手指按在那里会按到它（盖住按钮的浮层、滚到底栏下面的行）。 |
 | `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
 | `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
-| `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`、`url`。消息会指出是哪一个。 |
+| `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`、`modules`、`url`。消息会指出是哪一个。 |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -528,7 +559,7 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
 粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。
 `host.handlers` 在 headless 运行，由测试回答应用的调用。`open` 会按目标检查它的选项：iOS 和 Android 上的 `width` 与
-`height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers` 以及 `url` 会以
+`height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）、`host.handlers`、`modules` 以及 `url` 会以
 `ERR_NSH_TEST_UNSUPPORTED` reject，这样测试要么按写的那样运行，要么说明它需要什么。桌面平台的 `platform`（例如用 `"macos"` 获得桌面的鼠标和按键）
 可以在任何桌面目标和 web 上运行，应用以该目标的平台运行，且总是桌面形态：在浏览器中页面无论宽度都以桌面形态启动；
 不给 `platform`（或给 `"web"`）时，页面像浏览器一样自己判断形态（宽度至少 600 点时为桌面）。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；

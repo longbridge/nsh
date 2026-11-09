@@ -175,6 +175,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
+| `modules` | none | Stand-ins for exports of the native modules the app imports, by specifier: see [Faking native modules](#faking-native-modules). Headless runs only. |
 | `url` | none | The link that launched the app: `UrlScheme.on("open")` gets it when the app claims its scheme (`nsh.json` `schemes`), as from the system ([UrlScheme](../modules/nsh.md#urlscheme)). Headless runs only. |
 
 ### Playing the host app
@@ -206,6 +207,42 @@ expect(app.shows("Conversation c-43")).toBe(true);
 
 `app.host.send(name, data)` sends an event, then waits until the app is quiet. `app.host.calls()` and
 `app.host.posts()` list what the handlers got, in order: `name` and `data`.
+
+### Faking native modules
+
+`modules` puts stand-ins in the place of exports of the native modules the app imports: its own crate's (a
+`#[native_module]` UI set), `nsh/base`'s or the runtime's. Keys are the module's specifier, then an export (`"save"`)
+or a member of one (`"Keychain.get"`). The app's imports get the stand-ins; the module's other exports stay as they
+are, and Rust code calling the module directly runs the module.
+
+A stand-in is a value or a function, and what the app's code gets back follows the kind of stand-in, whatever the
+real export returns:
+
+| Stand-in | What the app gets |
+|---|---|
+| A value | The value at once: an export that is a function becomes a synchronous function returning it, any other export becomes the value. |
+| A function | A promise from every call, synchronous exports included: the function gets the call's arguments, the promise resolves to what it returns (or to what its promise resolves to), and what it throws rejects the promise. |
+
+A function the app calls synchronously keeps its synchronous shape when its stand-in is a value; give a function
+stand-in to the functions the app awaits.
+
+```tsx
+const saved: unknown[][] = [];
+const app = await open("./App.tsx", {
+  modules: {
+    "my-app/native": {
+      "Keychain.get": async (key) => (key === "token" ? "t-1" : null),
+      "Keychain.set": async (...args) => void saved.push(args),
+      "Keychain.available": true,
+    },
+  },
+});
+await app.press("Sign out");
+expect(saved).toEqual([["token", null]]);
+```
+
+Arguments and answers cross as JSON values. Faking runs headless only: with `--target`, `modules` rejects
+with `ERR_NSH_TEST_UNSUPPORTED`.
 
 The URLs the app opens ([`openUrl`](../modules/nsh.md#openurl), a `TextView`'s links with `links="open"`) are
 recorded and reported to the app as opened, and nothing opens on this machine. `app.openedUrls()` lists them:
@@ -442,7 +479,7 @@ a test matches the code:
 | `ERR_NSH_TEST_COVERED` | Another view is drawn over the one `press` names and would take a finger there (an overlay over a button, a bar over a row scrolled under it). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
-| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `url`. The message names it. |
+| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`, `modules`, `url`. The message names it. |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -579,7 +616,7 @@ as it was; a text input's own copy and paste use the system's. `host.params` rea
 events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
 headless, where the test answers the app's calls. `open` checks its options against the target: `width` and
 `height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
-the other phone's on iOS or Android), `host.handlers` and `url` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
+the other phone's on iOS or Android), `host.handlers`, `modules` and `url` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
 is written or says what it needs. A desktop's `platform` (`"macos"` for a desktop's mouse and keys) runs on every
 desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does

@@ -33,7 +33,7 @@ use std::{
 use nsh_core::{
     JsonValue,
     element::{IntoThrown, JsError},
-    host_channel::{HostBridge, HostInbox, MAX_PENDING_CALLS, check_name},
+    host_channel::{HostBridge, HostInbox, MAX_PENDING_CALLS, ModuleFake, check_name},
 };
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
@@ -255,6 +255,18 @@ fn start_call(cx: Ctx, args: Args<'_>) -> R<V> {
         })
         .flatten();
     let data = to_json(cx, args.get(1))?;
+    begin_call(cx, name, data, timeout, deadline)
+}
+
+/// Starts call `name` with `data`, waiting `timeout` milliseconds (0: as
+/// long as it takes) until `deadline`: its promise.
+fn begin_call(
+    cx: Ctx,
+    name: String,
+    data: JsonValue,
+    timeout: f64,
+    deadline: Option<nsh_core::time::Instant>,
+) -> R<V> {
     let state = channel(cx);
     if state.calls.borrow().len() >= MAX_PENDING_CALLS {
         return Err(throw(cx, nsh_core::host_channel::too_many_calls(&name)));
@@ -287,6 +299,41 @@ fn start_call(cx: Ctx, args: Args<'_>) -> R<V> {
         }
     }
     Ok(promise)
+}
+
+/// The stand-ins `nsh test` gives exports of native module `specifier`
+/// (`open`'s `modules`), by export or `Export.member`: none elsewhere.
+pub(crate) fn module_fakes(cx: Ctx, specifier: &str) -> Vec<(String, ModuleFake)> {
+    bridge(cx)
+        .map(|b| b.module_fakes(specifier))
+        .unwrap_or_default()
+}
+
+/// The stand-in `fake` makes for `real` (an export or a member of one): a
+/// value, or a function when `real` is one or the test answers its calls.
+/// A call crosses with its arguments as a JSON array, as a `host.call`
+/// does but for the capabilities (the test plays the module, not the
+/// embedding app) and with no time limit.
+pub(crate) fn stand_in(cx: Ctx, real: Raw, fake: &ModuleFake) -> R<V> {
+    match fake {
+        ModuleFake::Value(json) if js::is_function(cx, real) => {
+            let json = json.clone();
+            closure(cx, Vec::new(), move |cx, _, _| Ok(from_json(cx, &json)))
+        }
+        ModuleFake::Value(json) => Ok(from_json(cx, json)),
+        ModuleFake::Call(name) => {
+            let name = name.clone();
+            closure(cx, Vec::new(), move |cx, _, args| {
+                let data: R<Vec<JsonValue>> =
+                    (0..args.len()).map(|i| to_json(cx, args.get(i))).collect();
+                match data {
+                    Ok(data) => begin_call(cx, name.clone(), JsonValue::Array(data), 0.0, None),
+                    Err(Throw) => js::rejected_with_exception(cx),
+                }
+            })
+        }
+        _ => Ok(V::undefined()),
+    }
 }
 
 /// Native SDK calls and posts obey the same names and grants as the
@@ -489,7 +536,10 @@ export interface Host {
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use nsh_core::{JsonValue, Op, host_channel::HostBridge};
+    use nsh_core::{
+        JsonValue, Op,
+        host_channel::{HostBridge, ModuleFake},
+    };
     use serde_json::json;
 
     use crate::Host;
@@ -499,6 +549,8 @@ mod tests {
     struct Bridge {
         calls: RefCell<Vec<(u64, String, JsonValue)>>,
         posts: RefCell<Vec<(String, JsonValue)>>,
+        /// The stand-ins of `nsh`'s exports.
+        fakes: Vec<(String, ModuleFake)>,
     }
 
     impl HostBridge for Bridge {
@@ -516,6 +568,13 @@ mod tests {
 
         fn post(&self, name: &str, data: JsonValue) {
             self.posts.borrow_mut().push((name.into(), data));
+        }
+
+        fn module_fakes(&self, specifier: &str) -> Vec<(String, ModuleFake)> {
+            match specifier {
+                "nsh" => self.fakes.clone(),
+                _ => Vec::new(),
+            }
         }
     }
 
@@ -603,6 +662,40 @@ host.post("seen", "home");
             ["save ERR_NSH_HOST_ERROR disk full", "profile Ada"]
         );
         assert_eq!(pending_calls(&host), 0);
+    }
+
+    #[test]
+    fn module_fakes_stand_in_for_exports_and_members() {
+        let host = Host::new().unwrap();
+        // No `host` capability: the stand-ins are the test's, not the
+        // embedding app's.
+        let bridge = Rc::new(Bridge {
+            fakes: vec![
+                ("batch".into(), ModuleFake::Value(json!(42))),
+                ("Image.prefetch".into(), ModuleFake::Value(json!("ready"))),
+                ("Image.getSize".into(), ModuleFake::Call("size".into())),
+                ("nothing".into(), ModuleFake::Value(json!(0))),
+            ],
+            ..Bridge::default()
+        });
+        host.set_host_bridge(bridge.clone());
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ batch, Image }} from "nsh";
+report("batch " + batch(() => 1));
+report("prefetch " + Image.prefetch("a.png"));
+Image.getSize("b.png", {{ at: 2 }}).then((s) => report("size " + s.width));
+"#
+        ))
+        .unwrap();
+        host.run_jobs();
+        assert_eq!(reported(&host), ["batch 42", "prefetch ready"]);
+        let calls = bridge.calls.borrow().clone();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, "size");
+        assert_eq!(calls[0].2, json!(["b.png", { "at": 2 }]));
+        host.host_reply(calls[0].0, Ok(json!({ "width": 64 })));
+        assert_eq!(reported(&host), ["size 64"]);
     }
 
     #[test]

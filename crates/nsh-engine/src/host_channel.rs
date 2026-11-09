@@ -29,7 +29,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nsh_core::host_channel::HostBridge;
 use nsh_core::{
     JsonValue,
-    host_channel::{HostInbox, check_name},
+    host_channel::{HostInbox, ModuleFake, check_name},
 };
 
 use crate::Message;
@@ -79,6 +79,9 @@ struct Inner {
     next_engine: u64,
     /// Events sent while no app ran, for the next one.
     pending: HostInbox,
+    /// The stand-ins for native modules' exports: specifier, export (or
+    /// `Export.member`), stand-in.
+    module_fakes: Vec<(String, String, ModuleFake)>,
 }
 
 impl std::fmt::Debug for HostChannel {
@@ -172,6 +175,25 @@ impl HostChannel {
         self.lock().handlers.remove(name);
     }
 
+    /// Puts `fake` in the place of export `path` of native module
+    /// `specifier` (`"Keychain"`, or a member of an export,
+    /// `"Keychain.get"`) in the apps started from now on, as `nsh test`'s
+    /// `open` does for the app a test opens: their imports of the module
+    /// get the stand-in. A [`ModuleFake::Call`] is answered by this
+    /// channel's handler of its name. `nsh test`'s hook, not part of the
+    /// embedding API.
+    #[doc(hidden)]
+    pub fn fake_module_export(
+        &self,
+        specifier: impl Into<String>,
+        path: impl Into<String>,
+        fake: ModuleFake,
+    ) {
+        self.lock()
+            .module_fakes
+            .push((specifier.into(), path.into(), fake));
+    }
+
     #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
     fn handler(&self, name: &str) -> Option<Handler> {
         self.lock().handlers.get(name).cloned()
@@ -243,11 +265,14 @@ impl HostChannel {
     }
 
     /// The bridge an app's `nsh/host` reaches this channel through, from
-    /// the engine whose queue is `tx`: its parameters as they are now.
+    /// the engine whose queue is `tx`: its parameters and module stand-ins
+    /// as they are now.
     #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
     pub(crate) fn bridge(&self, tx: Sender<Message>) -> EngineBridge {
+        let inner = self.lock();
         EngineBridge {
-            params: JsonValue::Object(self.params()),
+            params: JsonValue::Object(inner.params.clone()),
+            module_fakes: inner.module_fakes.clone(),
             channel: self.clone(),
             tx,
         }
@@ -297,6 +322,8 @@ impl Drop for HostAttachment {
 #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
 pub(crate) struct EngineBridge {
     params: JsonValue,
+    // A copy, so making a module's exports takes no lock.
+    module_fakes: Vec<(String, String, ModuleFake)>,
     channel: HostChannel,
     tx: Sender<Message>,
 }
@@ -341,6 +368,14 @@ impl HostBridge for EngineBridge {
         };
         Self::run(&handler, call);
         Ok(())
+    }
+
+    fn module_fakes(&self, specifier: &str) -> Vec<(String, ModuleFake)> {
+        self.module_fakes
+            .iter()
+            .filter(|(s, _, _)| s == specifier)
+            .map(|(_, path, fake)| (path.clone(), fake.clone()))
+            .collect()
     }
 
     fn post(&self, name: &str, data: JsonValue) {

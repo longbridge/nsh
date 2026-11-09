@@ -24,6 +24,7 @@ use std::{
 use nsh_core::{
     decl,
     element::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry, description::SetDescription},
+    host_channel::ModuleFake,
 };
 use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
@@ -1136,8 +1137,19 @@ unsafe extern "C" fn init(cx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_int
             Made::Default(spec) if spec.flat => Some(spec.clone()),
             _ => None,
         });
+        let fakes = crate::host_channel::module_fakes(cx, &name);
+        if !fakes.is_empty() {
+            let names: Vec<&str> = exports.iter().map(|(n, _)| n.as_str()).collect();
+            warn_unknown_fakes(&name, &names, &fakes);
+            if let Some(spec) = &default_spec
+                && fake_members(cx, table.object(cx, &name, spec), "", &fakes).is_err()
+            {
+                return -1;
+            }
+        }
         for (export, made) in exports {
             let value = make(cx, table, &name, default_spec.as_ref(), &export, made);
+            let value = with_fakes(cx, &export, value, &fakes);
             if qjs::JS_IsException(value) {
                 return -1;
             }
@@ -1197,6 +1209,80 @@ fn make(
     }
 }
 
+/// `value` (owned), export `export`, with the stand-ins `fakes` give it or
+/// its members (owned; an exception when making one threw).
+fn with_fakes(
+    cx: *mut JsContext,
+    export: &str,
+    value: JsValue,
+    fakes: &[(String, ModuleFake)],
+) -> JsValue {
+    // SAFETY: inline tag check.
+    if fakes.is_empty() || unsafe { qjs::JS_IsException(value) } {
+        return value;
+    }
+    let mut value = crate::web::js::V::own(cx, value);
+    if let Some((_, fake)) = fakes.iter().find(|(path, _)| path == export) {
+        match crate::host_channel::stand_in(cx, value.raw(), fake) {
+            Ok(fake) => value = fake,
+            Err(_) => return qjs::JS_EXCEPTION,
+        }
+    }
+    let prefix = format!("{export}.");
+    // SAFETY: a new reference for the members' object, freed by its owner.
+    let object = unsafe { qjs::JS_DupValue(cx, value.raw()) };
+    match fake_members(cx, object, &prefix, fakes) {
+        Ok(()) => value.take(),
+        Err(_) => qjs::JS_EXCEPTION,
+    }
+}
+
+/// Puts the stand-ins of `fakes` whose path is `prefix` and a member's name
+/// on `object` (owned, freed here), as data properties.
+fn fake_members(
+    cx: *mut JsContext,
+    object: JsValue,
+    prefix: &str,
+    fakes: &[(String, ModuleFake)],
+) -> crate::web::js::R<()> {
+    use crate::web::js;
+    let object = js::V::own(cx, object);
+    // SAFETY: inline tag check.
+    if unsafe { !qjs::JS_IsObject(object.raw()) } {
+        return Ok(());
+    }
+    for (path, fake) in fakes {
+        let Some(member) = path.strip_prefix(prefix) else {
+            continue;
+        };
+        if member.is_empty() || member.contains('.') {
+            continue;
+        }
+        let real = js::get(cx, object.raw(), member)?;
+        // The default object takes stand-ins of its own members only.
+        if prefix.is_empty() && js::is_undefined(real.raw()) {
+            continue;
+        }
+        let fake = crate::host_channel::stand_in(cx, real.raw(), fake)?;
+        js::define(cx, object.raw(), member, fake, true)?;
+    }
+    Ok(())
+}
+
+/// Warns of the stand-ins of `fakes` that name no export of module
+/// `specifier` (whose exports are `names`): a test's typo.
+fn warn_unknown_fakes(specifier: &str, names: &[&str], fakes: &[(String, ModuleFake)]) {
+    for (path, _) in fakes {
+        let export = path.split_once('.').map_or(path.as_str(), |(e, _)| e);
+        if !names.contains(&export) {
+            log::warn!(
+                target: "js",
+                "nsh/test: `{specifier}` has no export `{export}` for open's `modules` to fake"
+            );
+        }
+    }
+}
+
 /// The value of nsh's own export `export` (owned).
 fn make_own(cx: *mut JsContext, export: &str, e: Export) -> JsValue {
     match e {
@@ -1220,11 +1306,17 @@ pub(crate) fn host_module(cx: *mut JsContext, specifier: &str) -> Option<JsValue
         Made::Default(spec) if spec.flat => Some(spec.clone()),
         _ => None,
     });
+    let fakes = crate::host_channel::module_fakes(cx, specifier);
+    if !fakes.is_empty() {
+        let names: Vec<&str> = exports.iter().map(|(n, _)| n.as_str()).collect();
+        warn_unknown_fakes(specifier, &names, &fakes);
+    }
     // SAFETY: a new object taking each new value; freed when one throws.
     unsafe {
         let object = qjs::JS_NewObject(cx);
         for (export, made) in exports {
             let value = make(cx, table, specifier, default_spec.as_ref(), &export, made);
+            let value = with_fakes(cx, &export, value, &fakes);
             if qjs::JS_IsException(value) {
                 qjs::JS_FreeValue(cx, object);
                 return Some(value);
