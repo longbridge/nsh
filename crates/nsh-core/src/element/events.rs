@@ -356,6 +356,14 @@ pub(crate) fn data(p: &EventPayload) -> Option<Cow<'_, str>> {
     string(p, "data").map(Cow::Borrowed)
 }
 
+/// An error's message when its `code` says the platform has no such
+/// feature (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`).
+pub(crate) fn unavailable(p: &EventPayload) -> Option<Cow<'_, str>> {
+    (string(p, "code") == Some(crate::element::codes::UNAVAILABLE))
+        .then(|| message(p))
+        .flatten()
+}
+
 pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     Some(Cow::Owned(Selection {
         start: number(p, "start") as u32,

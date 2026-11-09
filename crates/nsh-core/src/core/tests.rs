@@ -8139,6 +8139,47 @@ fn the_id_table_follows_the_nodes_alive_not_every_id_made() {
 }
 
 #[test]
+fn web_views_fail_at_once_where_the_platform_shows_none() {
+    let made = |web_views: bool| {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_views,
+            ..Default::default()
+        });
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::WebView,
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        js_events(&mut c)
+    };
+    // Where web views show, nothing to report.
+    assert_eq!(made(true), []);
+    let events = made(false);
+    let [(2, EventKind::Error, EventPayload::Map(fields))] = &events[..] else {
+        panic!("expected the web view's error: {events:?}");
+    };
+    assert!(fields.contains(&(
+        "code",
+        crate::PayloadValue::Str("ERR_FEATURE_UNAVAILABLE_ON_PLATFORM".into())
+    )));
+}
+
+#[test]
 fn refused_urls_fail_and_send_nothing() {
     let mut c = core();
     c.set_access(Arc::new(crate::access::Access {
@@ -13206,6 +13247,93 @@ mod components {
         );
         assert_eq!(web_input_available_with(true, None), "web input false");
         assert_eq!(web_input_available_with(false, None), "web input false");
+    }
+
+    /// Shows whether a web view shows a page here.
+    #[component]
+    fn WebViewCheck() -> impl IntoElement {
+        let available = signal(String::from("asking"));
+        spawn(async move {
+            available.set(format!("web views {}", web_view_available().await));
+        });
+        text(move || available.get())
+    }
+
+    /// What [`WebViewCheck`] shows on a platform that does (`platform`) or
+    /// does not show web views, with the capabilities `declared` (`None`:
+    /// none declared).
+    fn web_view_available_with(platform: bool, declared: Option<serde_json::Value>) -> String {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_views: platform,
+            ..Default::default()
+        });
+        if let Some(declared) = declared {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&declared).unwrap(),
+                granted: None,
+            }));
+        }
+        c.mount_root(&crate::element::Root::new::<WebViewCheck>(|| ()));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("web views")));
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn web_views_are_available_where_the_platform_shows_them_and_the_app_holds_the_grant() {
+        assert_eq!(web_view_available_with(true, None), "web views true");
+        assert_eq!(web_view_available_with(false, None), "web views false");
+        let hosts = || Some(serde_json::json!({ "webview": { "hosts": [] } }));
+        assert_eq!(web_view_available_with(true, hosts()), "web views true");
+        assert_eq!(web_view_available_with(false, hosts()), "web views false");
+        // Capabilities without `webview`: not granted.
+        assert_eq!(
+            web_view_available_with(true, Some(serde_json::json!({}))),
+            "web views false"
+        );
+    }
+
+    /// A web view that says when the platform shows none.
+    #[component]
+    fn UnavailableWeb() -> impl IntoElement {
+        let heard = signal(String::from("waiting"));
+        view().child(text(move || heard.get())).child(
+            web_view("https://example.com/")
+                .on_unavailable(move |message: &str| heard.set(format!("unavailable: {message}"))),
+        )
+    }
+
+    /// What [`UnavailableWeb`] shows once the core's events reached it,
+    /// on a platform that does (`platform`) or does not show web views.
+    fn unavailable_web_with(platform: bool) -> Vec<String> {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_views: platform,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<UnavailableWeb>(|| ()));
+        let mut shown = texts(&c.commit().unwrap());
+        let mut events = Vec::new();
+        c.take_events(&mut events);
+        for event in events {
+            if let crate::element::JsEvent::Event(id, kind, payload) = event {
+                c.component_event(id, kind, &payload);
+            }
+        }
+        if let Some(batch) = c.commit() {
+            shown.extend(texts(&batch));
+        }
+        shown
+    }
+
+    #[test]
+    fn a_web_view_where_the_platform_shows_none_fails_at_once() {
+        let shown = unavailable_web_with(false);
+        assert!(
+            shown.last().unwrap().starts_with("unavailable: "),
+            "{shown:?}"
+        );
+        assert_eq!(unavailable_web_with(true), ["waiting"]);
     }
 
     /// Recognizes "a b" as the user speaks; stopping it gives "a b c".

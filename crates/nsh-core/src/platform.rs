@@ -293,6 +293,13 @@ pub struct Environment {
     /// ([`crate::Command::SendInput`], macOS); without it, the command
     /// does nothing.
     pub web_input: bool,
+    /// The platform shows web views (TS: `WebView.available()`). `true` by
+    /// default; a platform that knows from the start that it shows none
+    /// (built without a web engine, the system's failed to load) sets
+    /// `false`, and every web view then reports `onError` with `code`
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
+    /// when a web view starts reports that error itself.
+    pub web_views: bool,
 }
 
 impl Environment {
@@ -349,6 +356,7 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
+            web_views: true,
         }
     }
 }

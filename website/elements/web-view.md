@@ -80,13 +80,17 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | A page started loading. |
 | `onLoad` | `.on_load` | `WebViewNavigation` | A page finished loading. |
-| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant. |
+| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant, and `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` where the platform shows no web view (Rust: also `.on_unavailable`, the message). |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
 | `onDownload` | | `WebViewDownload` | A download started, finished or failed (macOS). |
 
 `WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`; in Rust `WebNavigation` with `url`, `title`,
 `loading`, `can_go_back` and `can_go_forward`.
+
+`WebView.available()` (Rust `web_view_available()`) resolves whether a web view shows a page here: `false` where the
+platform has no web engine or the app's capabilities do not grant `webview` ([When there is no web
+engine](../docs/web-view-and-video.md#when-there-is-no-web-engine)).
 
 `WebViewDownload` is `{ state, id, url, filename, path, bytes?, message? }`: `state` is `"started"`, `"finished"`
 (with the file's `bytes`) or `"failed"` (with its `message`). With an `onDownload` listener, what the page downloads
