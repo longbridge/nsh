@@ -3033,9 +3033,8 @@ mod tests {
 
 #[cfg(test)]
 mod perf {
-    use std::time::Instant;
-
     use super::*;
+    use std::time::Instant;
 
     /// `cargo test -p nsh-core --release perf -- --ignored --nocapture`
     #[test]

@@ -28,6 +28,7 @@ use super::{
 };
 use crate::{
     input,
+    link_hint::{HintAt, link_hint},
     rich_editor::{
         model::{DomOutputSpec, Mark, Node, utf16_len},
         state::{Decoration, DecorationKind},
@@ -1087,6 +1088,23 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
                     return view.create(mark, &t);
                 }
                 let style_marks = marks.clone();
+                // The built-in link mark's destination, shown while the
+                // pointer rests on it, as `TextView`'s links show theirs (a
+                // terminal links the text itself). Hover only: the span
+                // takes no presses, so the editor's touches still place the
+                // caret, select and open the link (`handleClickLink`). An
+                // app's `MarkView` of a mark here renders the piece itself,
+                // above, and owns its hint.
+                let hint = (!crate::terminal::is_terminal())
+                    .then(|| link_destination(&marks))
+                    .flatten()
+                    .map(|(href, title)| {
+                        link_hint(
+                            move || Some(href.clone()),
+                            move || title.clone(),
+                            HintAt::Pointer,
+                        )
+                    });
                 text(t)
                     .app_class(move || {
                         props.classes.with(|c| {
@@ -1107,6 +1125,7 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
                             parts::merge(&list)
                         })
                     })
+                    .when_some(hint, |t, hint| t.child(hint))
                     .into_element()
             }
             Piece::Leaf { node, offset, text } => leaf(rv, node, start + offset, text),
@@ -1119,6 +1138,20 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
             Piece::Filler => text("\u{200B}").into_element(),
         })
         .collect()
+}
+
+/// The destination and title of the built-in link mark (`link`, Tiptap's
+/// `Link`) among `marks`, when it has a destination.
+fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString>)> {
+    let link = marks.iter().find(|m| m.ty().name() == "link")?;
+    let attr = |name: &str| {
+        link.attrs()
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| SharedString::from(s.to_owned()))
+    };
+    Some((attr("href")?, attr("title")))
 }
 
 /// An inline leaf: its one-character text (a line break), its node view,

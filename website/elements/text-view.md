@@ -371,6 +371,14 @@ text_view().markdown(doc).links(TextViewLinks::Open)
 <TextView markdown={doc} links="open" />
 ```
 
+On the desktops and the web in the desktop idiom, the pointer resting on a link shows where it goes, below the
+pointer: the link's title, when it has one (`[docs](https://example.com/docs "The guide")`, an HTML link's `title`),
+over its destination in the theme's `muted-foreground`, on one line. A URL shows as it is parsed, its scheme, host and
+port always whole (an international host in its ASCII form, so a look-alike letter shows as what it is), a long path
+cut in the middle; a path or an anchor of the document (`#…`) shows as written. An image in a link shows the link's
+destination and title the same way, below the image. It is the same check as a
+[Link's](./link.md#where-it-goes).
+
 ## Render functions
 
 Render functions put the app's own content into the document. Each one takes the value of a part and returns its content (JSX in TSX, an element in Rust); a

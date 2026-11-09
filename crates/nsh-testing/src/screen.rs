@@ -244,7 +244,8 @@ struct View {
     canvas_node: bool,
 }
 
-/// A span of a text view's text that takes presses ([`nsh_core::TextLink`]).
+/// A link of a text view's text ([`nsh_core::TextLink`]): a span that takes
+/// presses, or one a hint watches (the pointer only).
 #[derive(Debug, Clone)]
 struct Span {
     /// The text view showing it.
@@ -860,7 +861,8 @@ impl Screen {
 
     /// The views of [`Screen::attached`] (below the root, of a stack only
     /// its top screen, spans of text aside), in tree order, as layout
-    /// placed them.
+    /// placed them. Each one's [`LayoutNode::parent`] is the root or a view
+    /// before it in the list.
     pub fn layout_nodes(&self) -> Vec<LayoutNode> {
         let mut out = Vec::new();
         // A view, the view it is in, the origin of that view's content in
@@ -877,6 +879,12 @@ impl Screen {
                 None if id == ROOT => &root,
                 None => continue,
             };
+            // A view the core never created is not on screen, nor is what
+            // it holds: leaving out the whole subtree keeps every node's
+            // parent in the list.
+            if id != ROOT && view.kind.is_none() {
+                continue;
+            }
             let hidden = hidden || view.hidden;
             let origin = if view.kind == Some(ViewKind::Modal) {
                 Point::default()
@@ -1633,6 +1641,51 @@ impl Screen {
             Some(text) => format!("`{}`", text.trim()),
             None => format!("`view:{id}`"),
         }
+    }
+
+    /// Where a press on `target` at `at` (in its window's root) goes when
+    /// `target` takes no pointer (it or a view around it has
+    /// `pointerEvents: none`): the view around what a pointer there reaches
+    /// that hears presses, and the point in it. `None` for a target that
+    /// takes a pointer, or when the press would reach it all the same.
+    pub(crate) fn routed_press(
+        &self,
+        target: NodeId,
+        at: Point<Points>,
+    ) -> Option<(NodeId, Point<Points>)> {
+        if self.receives_pointer(target) {
+            return None;
+        }
+        let hit = self.hit_pointer(at, self.window_of(target));
+        let to = self.up_to(hit, |v| v.events.contains(EventKind::Press))?;
+        if to == target {
+            return None;
+        }
+        let origin = self.bounds_in_root(to)?.origin;
+        Some((
+            to,
+            nsh_core::geometry::point(at.x - origin.x, at.y - origin.y),
+        ))
+    }
+
+    /// Whether a pointer can reach `id`: neither it nor a view around it
+    /// has `pointerEvents: none` or is hidden, and no view around it takes
+    /// touches only for itself (`box-only`).
+    fn receives_pointer(&self, id: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(current) = at {
+            let Some(view) = self.nodes.get(&current) else {
+                break;
+            };
+            if view.pointer_events == PointerEvents::None
+                || view.hidden
+                || (current != id && view.pointer_events == PointerEvents::BoxOnly)
+            {
+                return false;
+            }
+            at = view.parent;
+        }
+        true
     }
 
     /// The view a pointer at `at` (in the root of `window`, a window's
@@ -2524,6 +2577,30 @@ mod tests {
         screen.apply(&batch(vec![content(2000.0)]));
         assert_eq!(screen.scroll(2).unwrap().y, Points(-40.0));
         assert!(screen.take_scrolled().is_empty());
+    }
+
+    #[test]
+    fn layout_nodes_leave_out_what_is_in_a_view_never_created() {
+        let mut screen = Screen::default();
+        // 2 is inserted without being created: what it holds is not on
+        // screen either, and no node names it as its parent.
+        screen.apply(&batch(vec![
+            create(4, ViewKind::View),
+            create(6, ViewKind::View),
+            frame(4, 0.0, 0.0, 100.0, 20.0),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(1, 6),
+        ]));
+        let nodes = screen.layout_nodes();
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        assert_eq!(ids, [6]);
+        assert!(
+            nodes
+                .iter()
+                .all(|n| n.parent == ROOT || ids.contains(&n.parent))
+        );
     }
 
     #[test]

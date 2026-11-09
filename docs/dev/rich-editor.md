@@ -343,6 +343,10 @@ commands of the built-in registry (`register_commands` of each module): `setLink
   skipped), `handleClickLink` (`handle_click`: Mod or a read-only editor opens the link through `LinkOptions::open`,
   NSH's `open_url` by default, so the embedding app's URL handler sees it first) and `handlePasteLink`
   (`handle_paste`: a URL pasted over a selection links it; `transform_pasted`: URLs in pasted text are linked).
+  Text with the built-in `link` mark shows its `href` (under its `title`) while the pointer rests on it, on the
+  desktops outside a terminal (`render.rs` `spans`: `link_hint` in the span; hover only, the span takes no press, so
+  the caret, the selection and `handleClickLink` are as without; `elements.md` "A link's hint"). A piece an app's
+  `MarkView` renders is the app's element, and its hint the app's.
   `find_links` is the detector: URLs with a protocol, host names whose top-level domain is a known one (every
   two-letter country code and a list of generic ones), e-mail addresses; trailing punctuation and unbalanced
   closing brackets stay outside, as linkify's. `is_allowed_uri` is Tiptap's expression; `should_auto_link` is

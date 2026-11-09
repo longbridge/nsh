@@ -203,6 +203,7 @@ final class EmbedController: UIViewController {
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | 在主线程之外验证指定 URL 的包，然后运行它。被拒绝时抛出原因；正在运行的应用保持不变。 |
 | `connectDevServer(_ url: URL) throws` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用不含开发支持的 `NativeShell.xcframework` 时会抛出错误。 |
 | `register(component:_:)` | 注册一个[原生组件](./native-components.md)。 |
+| `watchScroll(_ nativeID: String, _ watcher: NshScrollWatcher?)` | 在主线程、滚动的同一帧跟随并驱动应用中带该 `nativeID` 的 `<Scroll>`（[跟随滚动视图](#跟随滚动视图)）；传 `nil` 停止。 |
 | `params: [String: Any]` | 之后加载的应用的启动参数：应用在启动时以 `host.params` 读取（[`host`](../modules/nsh.md#host)）。 |
 | `send(_ name: String, _ data: Any? = nil)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。 |
 | `handle(_ name: String, _ handler:)` | 在主线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）：`{ data, reply in … }`，或一个 `async throws` 函数 `{ data in … }`，其结果即调用的回答。 |
@@ -255,6 +256,44 @@ app.send("conversation.open", ["id": tapped.conversationID])
 ```
 
 处理函数在主线程运行；调用在应用中等待回答，不会阻塞任何一方。未回答就被释放的 reply 会让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadBundle` 之前、重新加载期间）发送的事件交给下一个应用，因此应用启动期间点开的通知照样能送到。
+## 跟随滚动视图
+
+宿主的原生界面有时要逐帧跟着应用的内容移动：页面下方一个由内容末尾拉起的面板，或随内容收起的页头。把 `onScroll` 经 JS
+转给宿主会晚一帧，所以宿主按 `nativeID` 监听应用的 `<Scroll>`，拿到它的 `NshScrollHandle`。一切都在主线程、滚动的同一帧里进行，
+不经过 JS。Android 上的 API 与此相同，单位按各平台习惯。
+
+给 `<Scroll>` 设置 `nativeID`（供原生代码识别视图；`testID` 仍只用于测试）：
+
+```tsx
+<Scroll nativeID="page">…</Scroll>
+```
+
+```swift
+final class Sheet: NshScrollWatcher {
+    func onAttached(_ handle: NshScrollHandle) {      // 已存在时立即回调；重新加载后再次回调
+        handle.onScroll { [weak self] scrollX, scrollY, dx, dy in self?.follow(handle) }
+        handle.onContentSizeChange { [weak self] contentWidth, contentHeight in self?.follow(handle) }
+    }
+
+    func onDetached() { reset() }                      // 被删除、nativeID 改变或应用停止
+}
+
+app.watchScroll("page", sheet)
+```
+
+| `NshScrollHandle` | |
+|---|---|
+| `scrollX`、`scrollY` | 从内容起点算起的偏移（不计 inset），单位 pt。 |
+| `contentWidth`、`contentHeight` | 内容尺寸（至少为视口尺寸），单位 pt。 |
+| `viewportWidth`、`viewportHeight` | inset 以内的可见尺寸，单位 pt。 |
+| `contentView` | 应用内容所在的视图：应用中视图的位置都相对于它。 |
+| `scrollBy(dx:dy:animated:)` | 立即或以 UIKit 动画滚动，按内容范围夹取，与用户滚动一样：应用的 `onScroll` 会收到。 |
+| `stopScrolling()` | 让惯性滚动或动画滚动停在当前位置；静止时什么也不做。 |
+| `onScroll(_:)`、`onContentSizeChange(_:)` | 每次偏移变化回调 `(scrollX, scrollY, dx, dy)`；内容未经滚动变大或变小时回调 `(contentWidth, contentHeight)`。各自返回一个停止函数。 |
+| `isAlive` | 滚动视图是否仍在且仍是该 `nativeID`；不在之后，读取返回 0，其余操作不起作用。 |
+
+同一 `nativeID` 有多个滚动视图时，监听最新的那个。视图会一直持有 watcher，直到被替换或移除（传 `nil`）。桌面和 Web 应用不做嵌入，没有这套 API。
+
 ## 主题覆盖
 
 嵌入在多个品牌宿主应用中的同一个应用会采用各个宿主的品牌：宿主给出其品牌要改的 token，格式与 `nsh.json` 的 `"theme"` 相同的主题文件（shadcn/ui 的 `cssVars`，值按 CSS 的写法）。它们覆盖应用的同名 token，应用的其他 token 保持不变。在 `dark` 下给出 token 的深色模式值（只在 `light` 或 `theme` 下设置的 token 在两种模式下都是这个颜色）：

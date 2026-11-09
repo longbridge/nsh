@@ -603,6 +603,12 @@ Things that were found the hard way. Read the section of the area you change bef
   The picture lags the last `CATransaction` commit by a frame or two: flush and wait (50 ms) before taking it.
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
+- `NSApplication.activate()` only asks since macOS 14, and macOS turns it down after a click on the app's status item
+  (macOS 27.2, a user's clicks over Screen Sharing): asked from the item's action at once, 100 ms later, or as
+  `focus()` does after a JS round trip, the app stayed inactive and the keyboard with the app in front, in a plain
+  AppKit accessory app and in an NSH one (an NSH regular app did the same under synthetic input).
+  `activateIgnoringOtherApps:YES` (deprecated in macOS 14) activated it, as Tauri, winit, Qt's `raise()` and GPUI call
+  it to focus a window; `focus()` uses it, `show()` and new windows ask (`window::activation`).
 - While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
   occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
   keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and

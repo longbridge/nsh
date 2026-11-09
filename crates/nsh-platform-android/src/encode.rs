@@ -737,6 +737,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
+                    | Command::CancelPress
                     | Command::ScrollToIndex { .. }
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
@@ -1360,6 +1361,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         e.opt_string(action.label.as_deref());
     }
     e.opt_string(p.test_id.as_deref());
+    e.opt_string(p.native_id.as_deref());
     e.float(p.long_press_delay.unwrap_or(-1.0));
     match p.ripple {
         Some(r) => {
