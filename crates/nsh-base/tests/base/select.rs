@@ -100,6 +100,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .default_open(props.default_open)
         .search_placeholder("Search")
         .search_accessibility_label("Search food")
+        .search_test_id("food-search")
         .accessibility_label("Food")
         .trigger(
             view()
@@ -798,6 +799,19 @@ fn screen_readers_hear_the_search_field_by_its_label() {
     assert_eq!(app.screen().count("label:Search food"), Ok(1));
     app.type_text("label:Search food", "cel").unwrap();
     app.see_row(">Celery");
+}
+
+#[test]
+fn ui_tests_find_the_search_field_by_its_test_id() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        ..props(fruits())
+    });
+    app.open_list();
+    assert_eq!(app.screen().count("id:food-search"), Ok(1));
+    app.type_text("id:food-search", "cel").unwrap();
+    app.see_row(">Celery");
+    assert!(!app.shows("Apple"));
 }
 
 #[test]

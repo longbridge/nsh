@@ -170,6 +170,10 @@ Things that were found the hard way. Read the section of the area you change bef
   idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control unless the
   app draws its own indicator (`refreshIndicator`), which `UIRefreshControl` cannot give way to: then it takes the Mac idiom's way,
   without the spinner (`Mounter::sync_refresh`, on the events and on each behavior).
+- **A `UIRefreshControl`'s superview is not always its scroll view**: under a large title iOS 26 moves it into an untagged
+  container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
+  pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
+  deleted or replaced view reports nothing, even where a new view took its id.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -655,6 +659,16 @@ Things that were found the hard way. Read the section of the area you change bef
   (`GetUserDefaultLocaleName`) and ignores `LANG` / `LC_*`, as Windows programs do.
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and
   `name:stream` writes an NTFS alternate data stream. `nsh-package` refuses paths with `:`, as with `\` or `..`.
+- **Sizing or showing a window can paint it before the call returns**: `SetWindowPos` sends `WM_SIZE` when the size
+  changes, where NSH's windows draw at once (for a resize not to show stale pixels), and `window::show` calls
+  `UpdateWindow`, which paints what is invalid. A desktop command runs in the middle of `Surface::apply`, before the
+  batch's animated values are written (`Surface::write_animations`, once the batches are applied), so
+  `Surface::apply` writes them before each one. Without that, a window growing to its content (`sizeToContent`) as
+  it opened drew a view entering with a motion as its style is while hidden, then at the motion's start, and showed
+  the first frame while the second waited for room in its swap chain: the content flashed. Only the views' values
+  are written early: registered components' animated props (`set_animated_number`, `set_animated_color`) still reach
+  them after the batches (`native::component_animated`), so a component that draws in its view
+  (`NativeComponent::draw`) draws such a frame without the values its batch set.
 
 ## Web, browsers
 

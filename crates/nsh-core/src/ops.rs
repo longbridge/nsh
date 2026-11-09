@@ -256,6 +256,7 @@ events! {
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
+    EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
 
 }
 
@@ -2118,6 +2119,38 @@ pub enum Command {
         /// Its arguments (any JSON value).
         args: crate::JsonValue,
     },
+    /// Open the system's edit menu over `bounds` (in the root view) on an
+    /// input that has the focus: the menu of a component that draws its
+    /// own text selection (`RichEditor`'s on touch screens). UIKit's
+    /// `UIEditMenuInteraction` on iOS, a floating `ActionMode` on Android;
+    /// platforms without such a menu ignore it. It offers `actions`, in the
+    /// platform's order: Paste pastes into the input as the user's paste
+    /// does (`onPaste`), the others are reported as
+    /// [`EventKind::EditAction`]. The menu closes when an action is chosen.
+    OpenEditMenu {
+        /// What the menu points at, in the root view.
+        bounds: Bounds<Points>,
+        /// The actions it offers; those that cannot apply are left out,
+        /// not disabled.
+        actions: Vec<EditAction>,
+    },
+    /// Close the edit menu [`Command::OpenEditMenu`] opened on an input.
+    CloseEditMenu,
+}
+
+/// An editing action of an edit menu ([`Command::OpenEditMenu`],
+/// [`EventKind::EditAction`]): gpui-base's input actions of the same names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+#[non_exhaustive]
+pub enum EditAction {
+    /// Cut the selection.
+    Cut,
+    /// Copy the selection.
+    Copy,
+    /// Paste the clipboard (the input's own paste).
+    Paste,
+    /// Select everything.
+    SelectAll,
 }
 
 /// A haptic the device plays ([`Command::Haptic`], TS: `Haptics` of

@@ -1,4 +1,4 @@
-import { effect, type JSX, Scroll, signal, Text, UrlScheme, View } from "nsh";
+import { effect, type JSX, List, Scroll, signal, Text, UrlScheme, View } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { BackHandler } from "nsh/mobile";
 import { platform } from "nsh";
@@ -50,10 +50,11 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
   );
 }
 
-/** The body of a pushed screen: what it shows, then where its safe area is. */
-function Page(props: { intro: string; children?: JSX.Element }) {
+/** The body of a pushed screen: what it shows, then where its safe area is;
+ * pulled down, `refresh`'s. */
+function Page(props: { intro: string; refresh?: Refresh; children?: JSX.Element }) {
   return (
-    <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
+    <Scroll style={{ flex: 1, backgroundColor: colors.background }} refreshing={props.refresh?.refreshing()} onRefresh={props.refresh?.start}>
       <View style={{ padding: 16, paddingBottom: 40, gap: 16 }}>
         <Appear>
           <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, paddingHorizontal: 4 }}>{props.intro}</Text>
@@ -71,32 +72,80 @@ function Page(props: { intro: string; children?: JSX.Element }) {
   );
 }
 
-function LargeTitle() {
+/** A pull to refresh that takes a second, and how many it has done. */
+interface Refresh {
+  refreshing: () => boolean;
+  count: () => number;
+  start: () => void;
+}
+
+function createRefresh(): Refresh {
+  const refreshing = signal(false);
+  const count = signal(0);
+  const start = () => {
+    refreshing.set(true);
+    setTimeout(() => {
+      count.update((n) => n + 1);
+      refreshing.set(false);
+    }, 1000);
+  };
+  return { refreshing, count, start };
+}
+
+const largeTitleIntro = (refresh: Refresh) =>
+  `iOS: the title shrinks into the bar as the content scrolls. Pull down to refresh${refresh.count() ? ` (refreshed ${refresh.count()}×)` : ""}.`;
+
+/** A row of the large title pages: its number and where it starts. */
+function OffsetRow(props: { n: number; inset?: number }) {
   return (
-    <NavPage title="Large title" {...header} headerLargeTitle header={<PageHeader title="Large title" />}>
-      <Page intro="iOS: the title shrinks into the bar as the content scrolls.">
+    <View
+      style={{
+        height: 48,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: props.inset ?? 10,
+        borderTopWidth: props.n === 1 ? 0 : 1,
+        borderTopColor: colors.line,
+      }}
+    >
+      <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>Row {props.n}</Text>
+      <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{`${props.n * 48} pt`}</Text>
+    </View>
+  );
+}
+
+function LargeTitle() {
+  const refresh = createRefresh();
+  return (
+    <NavPage title="Large title" {...header} headerLargeTitle headerTransparent header={<PageHeader title="Large title" />}>
+      <Page intro={largeTitleIntro(refresh)} refresh={refresh}>
         <Card flush>
           <Inset padding={0} gap={0}>
-            <Each of={Array.from({ length: 20 }, (_, i) => i + 1)}>
-              {(i) => (
-                <View
-                  style={{
-                    height: 48,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    paddingHorizontal: 10,
-                    borderTopWidth: i() === 1 ? 0 : 1,
-                    borderTopColor: colors.line,
-                  }}
-                >
-                  <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>Row {i()}</Text>
-                  <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{`${i() * 48} pt`}</Text>
-                </View>
-              )}
-            </Each>
+            <Each of={Array.from({ length: 20 }, (_, i) => i + 1)}>{(i) => <OffsetRow n={i()} />}</Each>
           </Inset>
         </Card>
       </Page>
+    </NavPage>
+  );
+}
+
+/** A large title over a virtualized list, refreshed by a pull. */
+function LargeTitleList() {
+  const refresh = createRefresh();
+  const rows = Array.from({ length: 200 }, (_, i) => i + 1);
+  return (
+    <NavPage title="Large title list" {...header} headerLargeTitle headerTransparent header={<PageHeader title="Large title list" />}>
+      <List
+        each={rows}
+        estimatedItemSize={48}
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentStyle={{ paddingBottom: 40 }}
+        refreshing={refresh.refreshing()}
+        onRefresh={refresh.start}
+        header={<Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}>{largeTitleIntro(refresh)}</Text>}
+      >
+        {(i) => <OffsetRow n={i()} inset={20} />}
+      </List>
     </NavPage>
   );
 }
@@ -470,6 +519,7 @@ export function Navigation() {
           <Card title="Pages" subtitle="Page options, pushed with nav.push" flush>
             <View>
               <LinkRow first icon="text" title="Large title" note="headerLargeTitle" onPress={push(LargeTitle)} />
+              <LinkRow icon="lists" title="Large title list" note="headerLargeTitle, List" onPress={push(LargeTitleList)} />
               <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />

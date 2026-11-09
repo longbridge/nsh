@@ -16,7 +16,8 @@
 //!
 //! AppKit keeps a zoomed window's frame from before the zoom to itself, so
 //! the watch keeps the last frame it saw windowed: a maximized or full
-//! screen window's placement.
+//! screen window's placement. The frames a zoom animates through are not
+//! windowed ones ([`will_zoom`]).
 
 use std::{
     cell::{Cell, RefCell},
@@ -76,6 +77,9 @@ pub(crate) struct Watch {
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
     /// Its frame when last seen windowed (Cocoa coordinates).
     windowed: Cell<Option<NSRect>>,
+    /// A zoom is under way ([`will_zoom`]): the frames AppKit animates
+    /// through are not windowed ones.
+    zooming: Cell<bool>,
     /// A placement asked for while the window was in full screen: applied
     /// once it has left it.
     after_full_screen: Cell<Option<WindowPlacement>>,
@@ -127,6 +131,7 @@ pub(crate) fn observe(surface: &Surface, target: Target, watch: &Watch, window: 
     }
     watch.stop();
     watch.windowed.set(None);
+    watch.zooming.set(false);
     let Some(window) = window else {
         return;
     };
@@ -263,7 +268,9 @@ pub(crate) fn read_window(watch: &Watch, window: &NSWindow) -> WindowState {
     // A minimized window is not hidden: it is `minimized` alone.
     let hidden =
         !minimized && (NSApplication::sharedApplication(mtm).isHidden() || !window.isVisible());
-    if !full && !zoomed && !minimized {
+    if full || zoomed || minimized {
+        watch.zooming.set(false);
+    } else if !watch.zooming.get() {
         watch.windowed.set(Some(frame));
     }
     let bounds = to_bounds(frame, primary);
@@ -348,6 +355,20 @@ pub(crate) fn set_placement(watch: &Watch, window: &NSWindow, placement: WindowP
             window.zoom(None);
         }
     }
+}
+
+/// `window` is about to zoom or leave its zoom (its delegate's
+/// `windowShouldZoom:toFrame:`, which every `zoom:` asks: the zoom button,
+/// the Window menu, a double click on the title bar, [`set_mode`]). AppKit
+/// animates the frame, and the moves on the way are reported while the
+/// window is not zoomed yet: zooming in keeps the frame it has now as its
+/// windowed frame, until it is zoomed.
+pub(crate) fn will_zoom(watch: &Watch, window: &NSWindow) {
+    if window.isZoomed() || crate::chrome::full_screen(window) {
+        return;
+    }
+    watch.windowed.set(Some(window.frame()));
+    watch.zooming.set(true);
 }
 
 /// `WindowRef.setMode`: puts the window in `mode`, keeping its windowed
