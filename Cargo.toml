@@ -136,7 +136,7 @@ getrandom = "0.3"
 slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
-ureq = "3.1"
+ureq = { version = "3.1", features = ["platform-verifier"] }
 ring = "0.17"
 regex = "1"
 # The text of `nsh-base`'s `Editor`: a rope, and its grapheme and word boundaries.
@@ -247,6 +247,9 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 # rustls 0.23 fails every wss:// handshake with "Could not automatically determine the process-level CryptoProvider".
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
+# System trust store for the WebSocket client (and ureq's `platform-verifier`): corporate and newly
+# issued roots work without NSH shipping them. Android keeps webpki-roots (needs a JNI init).
+rustls-platform-verifier = "0.7"
 
 rolldown = "=1.2.13"
 rolldown_common = "=1.2.13"
