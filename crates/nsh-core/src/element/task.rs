@@ -79,6 +79,8 @@ pub(crate) enum Action {
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Runs a function on the platform's main thread, after the commit.
+    MainThread(crate::main_thread::MainThreadTask),
     /// Registers a font (TrueType, OpenType, WOFF or WOFF2 data); its family
     /// name, or why it is no font, resolves the slot.
     RegisterFont(Vec<u8>, AnswerSlot<Result<String, String>>),

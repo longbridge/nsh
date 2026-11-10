@@ -238,5 +238,5 @@ jobs:
           run examples/gallery/tests/environment.test.tsx --filter appearance
           # Apps with Rust crates, in hosts built with them: a TSX app and a
           # Rust app (its root).
-          run examples/rust-exports
+          run examples/rust-exports/App.test.tsx
           run examples/gallery-rs/App.test.tsx

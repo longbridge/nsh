@@ -1453,6 +1453,7 @@ impl AppView {
                 Message::Frame => self.surface.request_frame(),
                 Message::Resized(size) => self.surface.laid_out = size,
                 Message::Focused(moved) => self.keyboard.caught_up(moved),
+                Message::Run(task) => task.run(),
                 #[cfg(feature = "dev")]
                 Message::Reload => {
                     if let Some(mut dev) = self.dev.take() {

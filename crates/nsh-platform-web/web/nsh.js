@@ -7645,7 +7645,9 @@ class Player {
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
-    if (out === null) return;
+    // Nothing selectable selected, or hidden characters only: the
+    // clipboard keeps what it has.
+    if (!out) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", out);
   }

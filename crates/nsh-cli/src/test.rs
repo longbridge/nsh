@@ -197,6 +197,7 @@ pub(crate) fn test(
             }
         }
     }
+    crate::test_web::close();
     if let Some(report) = junit {
         std::fs::write(report, tally.junit(start.elapsed()))
             .with_context(|| format!("write {}", ui::path(report)))?;

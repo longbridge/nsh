@@ -27,7 +27,9 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
-use nsh_engine::{AppError, Engine, EngineConfig, EngineControl, Environment, MountSink};
+use nsh_engine::{
+    AppError, Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink,
+};
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -44,6 +46,9 @@ enum Message {
     Frame,
     HotUpdateFailed,
     Handled(u64),
+    /// A function the app runs on the main thread
+    /// ([`MountSink::run_on_main_thread`]), after the batches before it.
+    Run(MainThreadTask),
 }
 
 thread_local! {
@@ -95,6 +100,10 @@ impl MountSink for Sink {
 
     fn handled(&self, events: u64) {
         self.send(Message::Handled(events));
+    }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
     }
 }
 
@@ -679,6 +688,7 @@ impl Surface {
                     self.events_handled.set(events);
                     crate::text_input::engine_caught_up(self);
                 }
+                Message::Run(task) => task.run(),
             }
         }
         if applied {

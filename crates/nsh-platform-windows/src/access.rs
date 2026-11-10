@@ -442,7 +442,7 @@ pub(crate) fn name_of(view: &NshView) -> Option<String> {
     }
     if let Some(t) = &s.text {
         // Hidden runs are not read.
-        return Some(t.text.shown_text().into_owned());
+        return Some(t.text.visible_text().into_owned());
     }
     let grouping = match part(&s) {
         Part::Element(c) => groups(&s, c),
@@ -478,7 +478,7 @@ fn content_name(view: &NshView, out: &mut String) {
                     .label
                     .as_deref()
                     .map(std::borrow::Cow::Borrowed)
-                    .or_else(|| s.text.as_ref().map(|t| t.text.shown_text())),
+                    .or_else(|| s.text.as_ref().map(|t| t.text.visible_text())),
             };
             match own {
                 Some(text) => {
@@ -539,7 +539,7 @@ fn spec_of(s: &ViewState) -> Spec {
         name: a
             .label
             .clone()
-            .or_else(|| s.text.as_ref().map(|t| Arc::from(&*t.text.shown_text()))),
+            .or_else(|| s.text.as_ref().map(|t| Arc::from(&*t.text.visible_text()))),
         help: help_of(a, control),
         disabled: a.state.disabled,
         selected: a.state.selected,
@@ -659,10 +659,10 @@ fn update(surface: &Rc<Surface>, view: &NshView) -> bool {
             let old = s.access.text.replace(drawn.text.clone());
             if let Some(old) = old
                 && !Arc::ptr_eq(&old, &drawn.text)
-                && old.shown_text() != drawn.text.shown_text()
+                && old.visible_text() != drawn.text.visible_text()
             {
                 text_changed = true;
-                text = Some(drawn.text.shown_text().into_owned());
+                text = Some(drawn.text.visible_text().into_owned());
             }
         }
         if s.access.spec.as_deref() == Some(&spec) && !text_changed {
