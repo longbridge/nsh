@@ -142,7 +142,7 @@ image(move || user.with(|u| u.avatar_url.clone()))
 - **A background color** shows while the image loads, or use a placeholder (below).
 - Downloads are shared: several views showing the same URL download it once, also when they decode it at different sizes. A download nobody waits for any more is cancelled.
 - Decoded images are cached in memory (the cache is purged under memory pressure), keyed by URL, decode size and blur radius.
-- When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`; a refused image fails with its error event.
+- When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`; a refused image fails with its error event. A local file (an absolute path or a `file:` URL, as `onFileDrop`, the clipboard and `import.meta.url` give on the desktops) needs an `fs.read` root that holds it, and loads only on the desktops.
 
 ### Kept on disk
 

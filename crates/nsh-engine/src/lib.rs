@@ -426,7 +426,10 @@ impl Bundle {
         self
     }
 
-    /// Sets the URL relative request URLs resolve against.
+    /// Sets the URL relative request URLs resolve against: the page's, for
+    /// an app on a web page. A base marks a page: with one, a media source
+    /// `/x` is the page's path, not a local file under `capabilities.fs`
+    /// ([`nsh_core::access::Access::media_url`]), so a native host sets none.
     pub fn with_base_url(mut self, url: impl Into<Arc<str>>) -> Self {
         self.base_url = Some(url.into());
         self
@@ -1071,8 +1074,8 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
         .filter(|path| path.is_dir())
 }
 
-/// Native hosts choose these anchors before any application JavaScript runs.
-#[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
+/// Native hosts choose these anchors before any application JavaScript runs
+/// (the VM's `fs/promises` and the core's media files read under them).
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     let mut paths = bundle.system_paths.clone();
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
@@ -1941,6 +1944,26 @@ impl<M: TextEngine + 'static> Driver<M> {
             core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
+        if let App::Js(bundle) = &config.app {
+            // What `//` media sources resolve against, as `fetch`'s URLs do.
+            core.set_base_url(bundle.base_url.clone());
+        }
+        // The roots local media files are read under, as `fs/promises`
+        // reads files (where it has a file system: the desktops).
+        let media_files = Arc::new(match &config.app {
+            App::Js(bundle) => nsh_core::access::MediaFiles::new(
+                &access,
+                config
+                    .data_dir
+                    .as_ref()
+                    .map(|root| root.join(app_dir_name(config.app.app_id())))
+                    .as_deref(),
+                &bundle_system_paths(bundle),
+                nsh_core::access::native_files(config.environment.os),
+            ),
+            _ => nsh_core::access::MediaFiles::default(),
+        });
+        core.set_media_files(media_files.clone());
         #[cfg(not(target_arch = "wasm32"))]
         core.set_image_context(nsh_core::image::loader::Context {
             asset_base: config.assets.as_ref().and_then(|a| a.base()),
@@ -1948,6 +1971,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                 Arc::new(move |uri: &str| assets.read(uri)) as nsh_core::image::loader::ReadAsset
             }),
             access: access.clone(),
+            media_files,
             // The same cache as the platform's ([`Engine::image_cache`]).
             disk: config.cache.open_images(config.app.app_id()),
             // The platform's, if it set one ([`nsh_core::image::loader::set_transport`]).
@@ -2664,27 +2688,6 @@ fn is_asset(url: &str) -> bool {
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("asset:"))
 }
 
-/// Whether the bundled file `url` names stays inside the app's files
-/// whichever way a host maps `asset:/<path>` to its asset directory: the
-/// path is relative, and no segment is empty, `.` or `..` (encoded or not)
-/// or holds a backslash, a NUL or a colon (a Windows drive). Hosts join the
-/// path to their directory as it comes, so they never see one that
-/// escapes it.
-fn is_inside_assets(url: &str) -> bool {
-    let Some(path) = url.get(6..).and_then(|rest| rest.strip_prefix('/')) else {
-        return false;
-    };
-    path.split('/').all(|segment| {
-        let segment = segment.to_ascii_lowercase();
-        let named = !matches!(segment.replace("%2e", ".").as_str(), "" | "." | "..");
-        let plain = !segment.contains(['\\', '\0', ':'])
-            && !["%2f", "%5c", "%00", "%3a"]
-                .iter()
-                .any(|encoded| segment.contains(encoded));
-        named && plain
-    })
-}
-
 /// `url` (an `asset:/` URL) as its response answers at it, and as the
 /// rest of the engine reads it: the scheme in lower case, as URL parsers
 /// write it (schemes are case-insensitive, and JS's `fetch` parses the URL
@@ -2777,14 +2780,22 @@ impl Net {
 
     /// Makes `who`'s request, if the app may (else why not). Bundled files
     /// are the app's own: their requests need no capability.
-    fn request(&mut self, who: Requester, request: HttpRequest) -> Result<(), access::Refused> {
+    fn request(&mut self, who: Requester, mut request: HttpRequest) -> Result<(), access::Refused> {
         if is_asset(&request.url) {
             self.asset(who, request);
-        } else if self.access.is_unrestricted() {
+            return Ok(());
+        }
+        if self.access.is_unrestricted() {
             self.start(who, request, None);
-        } else if !self.access.allows_http(&request.method, &request.url) {
-            return Err(access::refused(&request.method, &request.url));
-        } else if request.follow_redirects {
+            return Ok(());
+        }
+        // The request goes out with the URL the check granted: Rust's and
+        // `registerFont`'s URLs come as written, `fetch`'s already parsed.
+        match self.access.http_url(&request.method, &request.url) {
+            Some(url) => request.url = url.into_owned(),
+            None => return Err(access::refused(&request.method, &request.url)),
+        }
+        if request.follow_redirects {
             let hop = access::hop(&request);
             let followed = access::Followed { request, hops: 0 };
             self.start(who, hop, Some(followed));
@@ -2839,7 +2850,7 @@ impl Net {
         );
         // Failed here, before any host reads the file or serves it
         // ([`Assets::url`]): a request no host may answer reaches none.
-        let refused = if !is_inside_assets(&file) {
+        let refused = if !nsh_core::access::is_inside_assets(&file) {
             Some(format!(
                 "{}: bundled files are named by a path inside the app's files",
                 request.url

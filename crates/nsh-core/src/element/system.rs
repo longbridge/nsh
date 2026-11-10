@@ -62,6 +62,9 @@ pub struct System {
     /// [`Core::app_url_cell`](crate::Core::app_url_cell)).
     #[doc(hidden)]
     pub app_url: crate::url_scheme::AppUrlCell,
+    /// What `//` media sources resolve against, the page's URL on the web
+    /// ([`Access::media_url`]); `None`: such a source names no URL.
+    pub base_url: Option<Arc<str>>,
 }
 
 /// What a host refuses the app's connections with
@@ -91,6 +94,7 @@ impl System {
             refuse_connections: None,
             updater: None,
             app_url: Default::default(),
+            base_url: None,
         }
     }
 
@@ -132,6 +136,12 @@ impl System {
     #[doc(hidden)]
     pub fn with_app_url(mut self, app_url: crate::url_scheme::AppUrlCell) -> Self {
         self.app_url = app_url;
+        self
+    }
+
+    /// What `//` media sources resolve against ([`System::base_url`]).
+    pub fn with_base_url(mut self, base_url: Option<Arc<str>>) -> Self {
+        self.base_url = base_url;
         self
     }
 
