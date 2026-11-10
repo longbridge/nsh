@@ -1,7 +1,8 @@
 # Runtime capability plugins (proposal)
 
 Status: proposed, for discussion in [#1576](https://github.com/longbridge/nsh/issues/1576).
-The contracts below describe a direction; they are not available APIs.
+This draft includes a startup-composition prototype and a working user-plugin example. The broader service
+contract below remains a proposal.
 
 ## Purpose
 
@@ -17,6 +18,52 @@ their state and releases their work when it stops.
 This proposal builds on the existing registry model. It covers composition and ownership of capabilities;
 [#1258](https://github.com/longbridge/nsh/issues/1258) covers the vocabulary and types of app-owned themes.
 The theme service must accommodate that work rather than define another theme format.
+
+## Try the prototype
+
+[`examples/rust-exports/Workspace.tsx`](../../examples/rust-exports/Workspace.tsx) selects an Ocean or Orchid
+workspace palette and restores the theme in `nsh.json`. The app's
+[`WorkspaceTheme`](../../examples/rust-exports/native/src/workspace.rs) is a Rust plugin with its own per-engine
+selection state. It declares `nsh.theme` as a dependency, receives that engine's official `ThemePlugin` during
+startup, and releases its dependency on stop. Its generated `Workspace` module exposes the selection to TSX.
+
+```rust
+registry.plugin::<WorkspaceTheme>().module::<Workspace>();
+```
+
+```tsx
+import { Workspace } from "rust-exports/native";
+import { token } from "nsh";
+
+Workspace.select("ocean");
+const accent = token("workspace-accent"); // the new value in this call
+Workspace.select("built");
+```
+
+Build the CLI and run the example or its test from the checkout:
+
+```sh
+cargo build -p nsh-cli
+./target/debug/nsh run examples/rust-exports/Workspace.tsx
+./target/debug/nsh run examples/rust-exports/Workspace.tsx --target web
+./target/debug/nsh test examples/rust-exports/Workspace.test.tsx --trace
+cargo test -p rust-exports-native --test rust_exports workspace::
+```
+
+The prototype adds `Plugin`, `PluginDependency`, `Registry::plugin` and `System::plugin`. Registries carry
+immutable definitions; the VM creates instances in dependency order, rejects invalid compositions, rolls back
+failed initialization and stops instances in reverse order. The default `nsh` registry registers the official
+theme plugin. Its generated `setTheme` export and the user plugin use the same theme implementation and runtime
+publication hook on QuickJS and the browser.
+
+This first slice binds dependencies to plugin IDs, exact contract versions and concrete Rust types. The
+independent service/provider selection described below, automatic platform and permission requirement metadata,
+and the JS/TS lifecycle helper still need design. Composition is fixed at startup; changing it requires a new
+engine. The existing app and host checks remain in force at their service boundaries.
+
+The example's tests check immediate reads, rendered colors, both appearances and reset, and exercise two
+engines with independent selections. Core tests cover dependency errors and rollback; native and actual-Wasm
+tests exercise the shared theme service, notification counts and disposal.
 
 ## Existing extension points
 
