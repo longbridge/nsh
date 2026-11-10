@@ -237,6 +237,7 @@ events! {
     FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
+    MouseUp = "onMouseUp": "A mouse button was released over the view or a view inside it (payload: [`EventPayload::MouseButton`]: which button, where, and the modifiers). The primary button's release also reports `onPressUp`.",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
     CompositionChange = "onCompositionChange": "An input method's composition in an input started, changed or ended (payload: `composing`, `text`: the text being composed, empty once it ends; after the `onChangeText` of the committed text).",
     PressOutside = "onPressOutside": "A press went down outside an overlay, its anchor and the overlays inside it (payload: `pageX`, `pageY`; raised by the core).",
@@ -432,6 +433,40 @@ impl MouseEvent {
             page_position,
             modifiers,
             pressed_button,
+        }
+    }
+}
+
+/// Where a mouse button was released over a view ([`EventKind::MouseUp`]),
+/// in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct MouseButtonEvent {
+    /// Position in the view, its transforms undone.
+    pub position: Point<Points>,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal), as touches' `page`.
+    pub page_position: Point<Points>,
+    /// The modifier keys held.
+    pub modifiers: crate::keymap::Modifiers,
+    /// The button that was released.
+    pub button: MouseButton,
+}
+
+impl MouseButtonEvent {
+    /// A mouse button released at `position` in the view and
+    /// `page_position` in its root view, with `modifiers` held.
+    pub fn new(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        modifiers: crate::keymap::Modifiers,
+        button: MouseButton,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            modifiers,
+            button,
         }
     }
 }
@@ -922,6 +957,8 @@ pub enum EventPayload {
     /// The mouse over a view (`onMouseEnter`, `onMouseMove`,
     /// `onMouseLeave`).
     Mouse(MouseEvent),
+    /// A mouse button released over a view (`onMouseUp`).
+    MouseButton(MouseButtonEvent),
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
     /// A wheel over a view (`onWheel`).

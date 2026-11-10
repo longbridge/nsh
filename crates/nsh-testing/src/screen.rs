@@ -2193,6 +2193,12 @@ impl Screen {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
     }
 
+    /// The view that hears a mouse button released on `id`: it, or the
+    /// nearest around it listening to `onMouseUp`.
+    pub(crate) fn mouse_up_target(&self, id: NodeId) -> Option<NodeId> {
+        self.up_to(id, |v| v.events.contains(EventKind::MouseUp))
+    }
+
     /// The app's keyboard shortcuts (`nsh/keymap`).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn keymap(&self) -> Option<&nsh_core::keymap::Keymap> {

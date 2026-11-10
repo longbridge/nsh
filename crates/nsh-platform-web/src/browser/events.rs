@@ -128,6 +128,12 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                 ("modifiers", modifiers(&w.modifiers)?),
             ])?
         }
+        EventPayload::MouseButton(e) => object([
+            ("position", point(e.position)?),
+            ("pagePosition", point(e.page_position)?),
+            ("modifiers", modifiers(&e.modifiers)?),
+            ("button", Value::string(e.button.name())?),
+        ])?,
         EventPayload::ContextMenu(p) => object([
             ("position", point(p.position)?),
             ("pagePosition", point(p.page_position)?),

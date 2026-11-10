@@ -23726,6 +23726,48 @@ fn mouse_moves_reach_rust_listeners_with_their_positions_modifiers_and_buttons()
 }
 
 #[test]
+fn mouse_ups_reach_rust_listeners_with_their_positions_and_button() {
+    use crate::prelude::*;
+    #[component]
+    fn Release() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_mouse_up(move |e: &MouseButtonEvent| {
+                at.set(format!(
+                    "{} {} {} {} {:?}",
+                    e.position.x.0,
+                    e.position.y.0,
+                    e.page_position.x.0,
+                    e.page_position.y.0,
+                    e.button
+                ))
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Release>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::MouseUp) => Some(*id),
+            _ => None,
+        })
+        .expect("the listening view mounts MouseUp in its event mask");
+    let event = crate::MouseButtonEvent::new(
+        point(px(6.0), px(7.0)),
+        point(px(16.0), px(27.0)),
+        crate::keymap::Modifiers::default(),
+        crate::MouseButton::Right,
+    );
+    assert!(c.component_event(host, EventKind::MouseUp, &EventPayload::MouseButton(event)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "6 7 16 27 Right")));
+}
+
+#[test]
 fn context_menus_reach_rust_listeners_with_their_positions() {
     use crate::prelude::*;
     #[component]

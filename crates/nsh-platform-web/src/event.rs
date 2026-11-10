@@ -76,6 +76,23 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
                 modifiers,
             ))
         }
+        // `{ position, pagePosition, modifiers, button }`, as handlers get
+        // it.
+        EventKind::MouseUp => {
+            let (position, page_position, modifiers) = pointer_at(&value);
+            EventPayload::MouseButton(nsh_core::MouseButtonEvent::new(
+                position,
+                page_position,
+                modifiers,
+                // A keyboard or scripted release names no button; the
+                // primary one is the release that `onPressUp` pairs with.
+                value
+                    .get("button")
+                    .and_then(|v| v.as_str())
+                    .and_then(mouse_button)
+                    .unwrap_or(nsh_core::MouseButton::Left),
+            ))
+        }
         EventKind::ContextMenu
         | EventKind::Press
         | EventKind::LongPress

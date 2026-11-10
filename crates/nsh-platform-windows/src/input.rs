@@ -922,8 +922,14 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             motion(surface, key, x, y, time);
         }
         PointerKind::Up => {
-            if mouse && event.button != 0 {
-                return;
+            if mouse {
+                surface.input.last.set(Some((x, y)));
+                if let Some(released) = released_button(event.button) {
+                    mouse_up(surface, x, y, event.modifiers, released);
+                }
+                if event.button != 0 {
+                    return;
+                }
             }
             up(surface, key, Some((x, y)), time, false);
         }
@@ -2297,6 +2303,45 @@ fn mouse_moved(
         };
         let payload = mouse_payload(&view, (x, y), modifiers, button);
         surface.event(id, EventKind::MouseMove, payload);
+    }
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released. A real release only: a cancelled press is
+/// not one.
+fn mouse_up(surface: &Surface, x: f32, y: f32, modifiers: Modifiers, button: MouseButton) {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(&view, x, y);
+        let payload = EventPayload::MouseButton(nsh_core::MouseButtonEvent::new(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            modifiers.core(),
+            button,
+        ));
+        surface.event(id, EventKind::MouseUp, payload);
+    }
+}
+
+/// The `MouseButton` of [`PointerEvent::button`] (its index).
+fn released_button(button: u8) -> Option<MouseButton> {
+    match button {
+        0 => Some(MouseButton::Left),
+        1 => Some(MouseButton::Right),
+        2 => Some(MouseButton::Middle),
+        3 => Some(MouseButton::Back),
+        4 => Some(MouseButton::Forward),
+        _ => None,
     }
 }
 

@@ -58,6 +58,8 @@ const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 /** The DOM's `buttons` bits, in the order a held button is named by. */
 const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
+/** The DOM's `button` numbers, in the order a released button is named by. */
+const MOUSE_BUTTON_NAMES = ["left", "middle", "right", "back", "forward"];
 /** The keys whose press or release is reported as a mouse move. */
 const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
@@ -7477,6 +7479,23 @@ class Player {
     }
   }
 
+  /**
+   * `onMouseUp` of the views under the mouse and the views they are in
+   * (inside out), with the button released. A `pointercancel` releases
+   * nothing.
+   */
+  mouseUp(e) {
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    if (!target || !this.root.contains(target)) return;
+    for (const el of this.ancestors(this.viewOf(target))) {
+      if (!el._events?.has("onMouseUp")) continue;
+      const payload = this.mouseEvent(el, e);
+      if (!payload) continue;
+      payload.button = MOUSE_BUTTON_NAMES[e.button] ?? "left";
+      this.event(el._id, "onMouseUp", payload);
+    }
+  }
+
   installInput() {
     const root = this.root;
     // What the user gives input with, told before it acts (the capture
@@ -8458,7 +8477,12 @@ class Player {
   }
 
   pointerUp(e, cancelled) {
-    if (e.pointerType === "mouse") this.hoverButtons = e.buttons;
+    if (e.pointerType === "mouse") {
+      this.hoverButtons = e.buttons;
+      // Before the press's end, as the desktops report it, and for every
+      // button: a secondary click tracks no pointer down (`pointerDown`).
+      if (!cancelled) this.mouseUp(e);
+    }
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     if (p.mode === "bar") {

@@ -789,6 +789,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::LeftMouseUp => {
             input.last.set(Some((x, y)));
+            mouse_up(surface, x, y, Mouse::of(event), MouseButton::Left);
             up(surface, x, y, time);
             update_cursor(surface, x, y);
             let control = input.window_control.borrow_mut().take();
@@ -797,6 +798,16 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                     .is_some_and(|hit| chain(&hit.view).contains(&view))
             {
                 crate::window::control(surface, control, event);
+            }
+        }
+        NSEventType::RightMouseUp => {
+            input.last.set(Some((x, y)));
+            mouse_up(surface, x, y, Mouse::of(event), MouseButton::Right);
+        }
+        NSEventType::OtherMouseUp => {
+            input.last.set(Some((x, y)));
+            if let Some(button) = other_button(event.buttonNumber()) {
+                mouse_up(surface, x, y, Mouse::of(event), button);
             }
         }
         NSEventType::MouseMoved | NSEventType::MouseEntered => {
@@ -2526,6 +2537,32 @@ fn mouse_moved(surface: &Surface, x: f32, y: f32, mouse: Mouse) {
     watch_flags(surface);
     for v in &listeners {
         mouse_event(surface, v, EventKind::MouseMove, x, y, mouse);
+    }
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(surface: &Surface, x: f32, y: f32, mouse: Mouse, button: MouseButton) {
+    let Some(hit) = pick(&event_root(surface), x, y) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(surface, &view, x, y);
+        let event = nsh_core::MouseButtonEvent::new(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            mouse.modifiers,
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::MouseButton(event));
     }
 }
 

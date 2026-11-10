@@ -1295,6 +1295,12 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             obj.set("deltaMode", e.delta.mode_name())?;
             obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
         }
+        EventPayload::MouseButton(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
+            obj.set("button", e.button.name())?;
+        }
         EventPayload::ContextMenu(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
             obj.set("pagePosition", point_object(cx, e.page_position)?)?;
@@ -2192,6 +2198,43 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::Mouse(none)).unwrap();
             let pressed: Value = value.as_object().unwrap().get("pressedButton").unwrap();
             assert!(pressed.is_null());
+        });
+    }
+
+    #[test]
+    fn mouse_button_payload_has_its_button() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::MouseButtonEvent::new(
+            point(px(5.0), px(6.5)),
+            point(px(50.0), px(60.5)),
+            nsh_core::keymap::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            nsh_core::MouseButton::Right,
+        );
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::MouseButton(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            let flag = |k: &str| {
+                let m: rquickjs::Object = obj.get("modifiers").unwrap();
+                m.get::<_, bool>(k).unwrap()
+            };
+            assert_eq!(
+                (
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
+                ),
+                (5.0, 6.5, 50.0, 60.5)
+            );
+            assert!(flag("shift"));
+            assert_eq!(obj.get::<_, String>("button").unwrap(), "right");
         });
     }
 

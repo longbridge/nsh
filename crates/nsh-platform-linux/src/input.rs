@@ -698,6 +698,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
+            mouse_up(surface, x, y, event.modifier_state(), MouseButton::Left);
             let pending = surface.input.window_press.borrow_mut().take();
             if let Some(press) = pending {
                 let same_view = pick(&event_root(surface), press.x, press.y)
@@ -731,6 +732,11 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
                         crate::window::control(&surface, &window, control);
                     }
                 });
+            }
+        }
+        T::ButtonRelease => {
+            if let Some(button) = button().and_then(mouse_button) {
+                mouse_up(surface, x, y, event.modifier_state(), button);
             }
         }
         T::MotionNotify => {
@@ -2281,6 +2287,32 @@ fn mouse_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
     let hovered = surface.input.hovered.borrow().clone();
     for view in &hovered {
         mouse_event(surface, view, EventKind::MouseMove, x, y, state);
+    }
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType, button: MouseButton) {
+    let Some(hit) = pick(&event_root(surface), x, y) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let s = view.state();
+            if !s.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(surface, &view, x, y);
+        let event = nsh_core::MouseButtonEvent::new(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            modifiers(state),
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::MouseButton(event));
     }
 }
 
