@@ -507,7 +507,7 @@ impl Screen {
                 {
                     let view = self.nodes.entry(*id).or_default();
                     // What the user sees: hidden runs are not.
-                    view.text = Some(text.shown_text().into_owned());
+                    view.text = Some(text.visible_text().into_owned());
                     view.attributed = Some(Arc::clone(text));
                     view.text_content = *content;
                 }
@@ -786,8 +786,10 @@ impl Screen {
                     .filter(|t| &*t.test_id == want)
                     .map(|t| (t.start < t.end).then_some(t.start))
                     .collect(),
+                // Hidden characters (`visibility: "hidden"`) are not seen.
                 Matcher::Text(want) => char_starts(&text.text, want)
                     .into_iter()
+                    .filter(|&at| !text.hidden_at(at))
                     .map(Some)
                     .collect(),
                 Matcher::Any(want) => {
@@ -800,6 +802,7 @@ impl Screen {
                     if ids.is_empty() {
                         char_starts(&text.text, &TextMatch::Exact(want.trim().to_owned()))
                             .into_iter()
+                            .filter(|&at| !text.hidden_at(at))
                             .map(Some)
                             .collect()
                     } else {

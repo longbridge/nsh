@@ -119,8 +119,8 @@ text("Run ")
 ### Hidden spans
 
 `visibility: "hidden"` on a span hides its characters where they stand: the text lays out as when they show, nothing
-of them is drawn, and copies and screen readers leave them out. Showing the span again draws it without moving
-anything, so a paragraph that is still being written can reveal its last words one at a time
+of them (or of views and images inside it) is drawn, and copies and screen readers leave them out. Showing the span
+again draws it without moving anything, so a paragraph that is still being written can reveal its last words one at a time
 ([Text element](../elements/text.md#hidden-spans)):
 
 ```rust tabs

@@ -116,7 +116,7 @@ text("先运行 ")
 
 ### 隐藏的 Span
 
-Span 上的 `visibility: "hidden"` 让它的字符原地隐藏：文字的排版与显示时相同，字符不绘制，复制和屏幕阅读器也会略过它们。重新显示时只重绘、不移动任何内容，所以仍在生成的段落可以逐个显示末尾的词（[Text 元素](../elements/text.md#隐藏片段)）：
+Span 上的 `visibility: "hidden"` 让它的字符原地隐藏：文字的排版与显示时相同，字符（以及其中的视图和图片）不绘制，复制和屏幕阅读器也会略过它们。重新显示时只重绘、不移动任何内容，所以仍在生成的段落可以逐个显示末尾的词（[Text 元素](../elements/text.md#隐藏片段)）：
 
 ```rust tabs
 text("Loading ").child(text("the next words").invisible())

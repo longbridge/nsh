@@ -1227,12 +1227,12 @@ fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
     assert_eq!(visible.links.len(), 1);
     assert_eq!(text.uniform_color(), None);
     // Copies and screen readers leave them out.
-    assert_eq!(text.shown_text(), "a  d");
+    assert_eq!(text.visible_text(), "a  d");
     assert_eq!(text.copied_text(0..6), "a  d");
     assert_eq!(text.copied_text(2..4), "");
     assert_eq!(text.copied_text(1..5), "  ");
     assert_eq!(visible.copied_text(1..5), " bc ");
-    assert_eq!(visible.shown_text(), "a bc d");
+    assert_eq!(visible.visible_text(), "a bc d");
 
     // Shown again: drawn again, without measuring or moving anything.
     apply(
@@ -1255,6 +1255,137 @@ fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
 }
 
 #[test]
+fn attachments_of_hidden_spans_are_hidden_with_them() {
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let size = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(20.0)),
+                ("height", StyleValue::Number(10.0)),
+            ],
+        )
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "ab".into(),
+            },
+            // A hidden span holding a view, and a span inside it holding
+            // an image.
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("visibility", StyleValue::Str("hidden"))]),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            size(6),
+            Op::Listen {
+                id: 6,
+                event: EventKind::Press,
+                enabled: true,
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::Text,
+            },
+            Op::Create {
+                id: 10,
+                tag: Tag::Image,
+            },
+            size(10),
+            // A view of the block itself stays.
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            size(12),
+            insert(8, 10),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 3),
+            insert(2, 4),
+            insert(2, 12),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(true), Some(true)));
+    assert_eq!(hidden_in(&batch, 10), (Some(true), Some(true)));
+    assert_eq!(hidden_in(&batch, 12), (None, None));
+    // They keep their place (laid out as when shown); a hidden view takes
+    // no presses.
+    assert!(frame_of(&batch, 6).is_some());
+    assert!(frame_of(&batch, 10).is_some());
+
+    // Shown again with the span.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("visibility", StyleValue::Str("visible"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(false), Some(false)));
+    assert_eq!(hidden_in(&batch, 10), (Some(false), Some(false)));
+
+    // Hidden again, then moved out of the text into a plain view: shown
+    // there.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("visibility", StyleValue::Str("hidden"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(true), Some(true)));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 14,
+                tag: Tag::View,
+            },
+            insert(ROOT_ID, 14),
+            Op::Remove {
+                parent: 4,
+                child: 6,
+            },
+            insert(14, 6),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(false), Some(false)));
+}
+
+#[test]
+fn visible_ranges_leave_hidden_runs_out() {
+    let plain = ResolvedTextStyle::default();
+    let mut t = AttributedText::default();
+    t.push("ab", plain);
+    t.push("cd", plain.hide());
+    t.push("ef", plain);
+    t.push("g", plain.hide());
+    assert_eq!(t.visible_ranges(0..7), vec![0..2, 4..6]);
+    assert_eq!(t.visible_ranges(1..5), vec![1..2, 4..5]);
+    assert_eq!(t.visible_ranges(2..4), Vec::<std::ops::Range<u32>>::new());
+    assert!(t.hidden_at(2) && t.hidden_at(6) && !t.hidden_at(4));
+    let mut shown = AttributedText::default();
+    shown.push("abc", plain);
+    assert_eq!(shown.visible_ranges(1..3), vec![1..3]);
+}
+
+#[test]
 fn copied_text_skips_hidden_runs_and_attachments() {
     let plain = ResolvedTextStyle::default();
     let mut t = AttributedText::default();
@@ -1265,7 +1396,7 @@ fn copied_text_skips_hidden_runs_and_attachments() {
     // a 😀(2) b c ￼ d 😀(2) e: 10 UTF-16 units.
     assert_eq!(t.len_utf16(), 10);
     assert_eq!(t.copied_text(0..10), "a\u{1F600}d\u{1F600}e");
-    assert_eq!(t.shown_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
+    assert_eq!(t.visible_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
     assert_eq!(t.copied_text(1..4), "\u{1F600}");
     assert_eq!(t.copied_text(3..7), "d");
     // A range past the end is clamped; one inside a surrogate pair starts
