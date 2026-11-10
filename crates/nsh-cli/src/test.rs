@@ -323,7 +323,9 @@ impl Tally {
                             text.push_str(stack);
                         }
                         if let Some(screen) = &failure.screen {
-                            let texts = screen_texts(screen, screen_limit());
+                            // The report is read by tools: it is cut even
+                            // with `-v`, which is for the terminal.
+                            let texts = screen_texts(screen, Some(SCREEN_TEXT_LIMIT));
                             text.push_str(&format!("\non screen: {texts}"));
                         }
                         let message = failure.message.lines().next().unwrap_or_default();

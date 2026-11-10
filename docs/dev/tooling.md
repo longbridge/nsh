@@ -366,7 +366,7 @@ A step first applies the batches that came since the last one (they belong to it
 for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
 waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
-time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (cut to `nsh_testing::SCREEN_TEXT_LIMIT` characters), when it cannot be taken, and when the app threw meanwhile
+time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output), when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
 failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
 edits than were typed is dropped. `headless::StubNetwork` (routes by `"<METHOD> <URL>"`, `*` matching any text, others
@@ -514,11 +514,13 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   through `JsHost::invoke`). `rejects.toMatchObject` compares what was thrown as `Exception::thrown` holds it (its own
   properties with its `name` and `message`), made a JS value again. Failure messages show values as `values::show`
   writes them (compact JSON, with `undefined`, `NaN`, dates, maps, typed arrays and classes as JS would write them),
-  cut to `nsh_testing::SCREEN_TEXT_LIMIT` characters so a long value cannot flood the message.
+  bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters (around the first difference when two values are
+  shown) so a long value cannot flood the message.
 
 `crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
 `target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen,
-cut to `nsh_testing::SCREEN_TEXT_LIMIT` characters with the rest counted; `-v` shows them all),
+bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output with the rest counted; `-v` shows the
+terminal's all, the JUnit report is always cut),
 writes a JUnit XML report with `--junit` (`Tally::junit`) and fails when any test failed. Given a directory of an
 app with Rust crates, it first runs `cargo test --no-fail-fast` for each crate in that directory, in the crate's own
 directory (`test::cargo_test`), and parses libtest's output (`cargo_test_results`: the test targets by their

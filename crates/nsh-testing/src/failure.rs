@@ -120,48 +120,115 @@ pub(crate) fn web_only(what: &str) -> String {
 pub const SCREEN_TEXT_LIMIT: usize = 4096;
 
 /// The texts on screen for a failure, as quoted strings joined by `, `
-/// (`"Todos", "0 items left"`), cut to `limit` characters with
-/// `… <n> more characters` after what is left, or all of them when
-/// `limit` is `None`. A cut text keeps its beginning and an ellipsis, so
-/// a long document cannot flood an error.
+/// (`"Todos", "0 items left"`), bounded to `limit` characters of rendered
+/// output — quotes, separators and escapes included — with `… (<n> more
+/// characters)` after what is left, or all of them when `limit` is `None`.
+/// A cut text keeps its beginning and an ellipsis, so a long document or
+/// many short texts cannot flood an error.
 pub fn screen_texts<S: AsRef<str>>(texts: &[S], limit: Option<usize>) -> String {
-    let total: usize = texts.iter().map(|t| t.as_ref().chars().count()).sum();
-    let budget = limit.unwrap_or(total);
+    let quoted: Vec<String> = texts.iter().map(|t| format!("{:?}", t.as_ref())).collect();
+    let Some(limit) = limit else {
+        return quoted.join(", ");
+    };
+    let rendered: usize = quoted.iter().map(|q| q.chars().count()).sum::<usize>()
+        + quoted.len().saturating_sub(1) * 2;
+    if rendered <= limit {
+        return quoted.join(", ");
+    }
+
+    // Room for the suffix saying what is left, when there is room for one.
+    let reserve = if limit >= 256 { 64 } else { 0 };
+    let budget = limit - reserve;
     let mut out = String::new();
     let mut used = 0usize;
-    let mut cut = false;
-    for text in texts {
-        let text = text.as_ref();
-        let room = budget.saturating_sub(used);
-        if room == 0 {
-            cut = true;
-            break;
-        }
-        let length = text.chars().count();
-        if length > room {
-            let preview: String = text.chars().take(room).collect();
-            if !out.is_empty() {
+    let mut shown_chars = 0usize;
+    let mut shown_texts = 0usize;
+    let mut partial = false;
+    for (i, quote) in quoted.iter().enumerate() {
+        let sep = if out.is_empty() { 0 } else { 2 };
+        let room = budget.saturating_sub(used + sep);
+        let length = quote.chars().count();
+        if length <= room {
+            if sep > 0 {
                 out.push_str(", ");
             }
-            out.push_str(&format!("{:?}", format!("{preview}…")));
-            used += room;
-            cut = true;
-            break;
+            out.push_str(quote);
+            used += sep + length;
+            shown_chars += texts[i].as_ref().chars().count();
+            shown_texts += 1;
+            continue;
         }
-        if !out.is_empty() {
-            out.push_str(", ");
+        let text = texts[i].as_ref();
+        let take = longest_prefix(text, room);
+        if take > 0 {
+            let preview: String = text.chars().take(take).collect();
+            let preview = format!("{:?}", format!("{preview}…"));
+            let length = preview.chars().count();
+            if length <= room {
+                if sep > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&preview);
+                used += sep + length;
+                shown_chars += take;
+                partial = true;
+            }
         }
-        out.push_str(&format!("{text:?}"));
-        used += length;
+        break;
     }
-    if cut {
-        let hidden = total.saturating_sub(used);
-        if !out.is_empty() {
-            out.push_str(", ");
+    let hidden_chars = texts
+        .iter()
+        .map(|t| t.as_ref().chars().count())
+        .sum::<usize>()
+        - shown_chars;
+    let hidden_texts = texts.len() - shown_texts - usize::from(partial);
+    let left = more(hidden_chars, hidden_texts);
+    if !left.is_empty() {
+        let suffix = format!("… ({left})");
+        let sep = if out.is_empty() { 0 } else { 2 };
+        if used + sep + suffix.chars().count() <= limit {
+            if sep > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&suffix);
         }
-        out.push_str(&format!("… {hidden} more characters"));
     }
     out
+}
+
+/// The longest prefix of `text` whose quoted form with an ellipsis fits in
+/// `room` characters; 0 when not even `"…"` does.
+fn longest_prefix(text: &str, room: usize) -> usize {
+    let fits = |take: usize| {
+        let prefix: String = text.chars().take(take).collect();
+        format!("{:?}", format!("{prefix}…")).chars().count() <= room
+    };
+    if !fits(0) {
+        return 0;
+    }
+    let (mut lo, mut hi) = (0usize, text.chars().count());
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// `3 more characters, 2 more texts`: what a cut leaves out; empty when
+/// nothing does.
+pub(crate) fn more(chars: usize, texts: usize) -> String {
+    match (chars, texts) {
+        (0, 0) => String::new(),
+        (0, 1) => "1 more text".into(),
+        (0, n) => format!("{n} more texts"),
+        (c, 0) => format!("{c} more characters"),
+        (c, 1) => format!("{c} more characters, 1 more text"),
+        (c, n) => format!("{c} more characters, {n} more texts"),
+    }
 }
 
 /// The `code` of a step's failure `message`, made by this module's
@@ -266,29 +333,62 @@ mod screen_tests {
         );
         assert_eq!(screen_texts::<&str>(&[], Some(SCREEN_TEXT_LIMIT)), "");
         assert_eq!(screen_texts(&["a"], None), r#""a""#);
+        assert_eq!(screen_texts(&[""], None), r#""""#);
+    }
+
+    #[test]
+    fn many_empty_texts_are_bounded() {
+        let texts = vec![""; 200_000];
+        let shown = screen_texts(&texts, Some(SCREEN_TEXT_LIMIT));
+        assert!(
+            shown.chars().count() <= SCREEN_TEXT_LIMIT,
+            "{} characters",
+            shown.chars().count()
+        );
+        assert!(shown.starts_with("\"\""), "{shown}");
+        assert!(shown.contains("more texts"), "{shown}");
+        assert!(!shown.contains("more characters"), "{shown}");
     }
 
     #[test]
     fn a_long_text_is_cut_with_what_is_left_said() {
-        let long = "x".repeat(100);
-        let shown = screen_texts(&[long.as_str()], Some(10));
-        assert!(shown.starts_with(r#""xxxxxxxxxx…""#), "{shown}");
-        assert!(shown.ends_with("… 90 more characters"), "{shown}");
+        let text = "x".repeat(300);
+        let shown = screen_texts(&[text.as_str()], Some(256));
+        // 256 - 64 (suffix room) = 192 characters for the preview: its
+        // quotes and ellipsis leave 189 x's.
+        let expected = format!("\"{}…\", … (111 more characters)", "x".repeat(189));
+        assert_eq!(shown, expected);
+        assert!(shown.chars().count() <= 256);
     }
 
     #[test]
     fn the_rest_of_the_screen_is_counted() {
-        let texts = ["a".repeat(8), "b".repeat(100)];
-        let shown = screen_texts(&texts, Some(10));
-        assert!(shown.starts_with(r#""aaaaaaaa", "bb…""#), "{shown}");
-        assert!(shown.ends_with("… 98 more characters"), "{shown}");
+        let texts = ["a".repeat(8), "b".repeat(300)];
+        let shown = screen_texts(&texts, Some(256));
+        assert!(shown.starts_with(r#""aaaaaaaa""#), "{shown}");
+        assert!(shown.contains("more characters"), "{shown}");
+        assert!(shown.chars().count() <= 256, "{shown}");
+    }
+
+    #[test]
+    fn the_suffix_appears_only_when_something_is_hidden() {
+        assert_eq!(screen_texts(&["aaaa"], Some(4)), "\"a…\"");
+        let shown = screen_texts(&["aaaa", ""], Some(4));
+        assert_eq!(shown, "\"a…\"");
+        assert!(!shown.contains("0 more"), "{shown}");
     }
 
     #[test]
     fn cutting_keeps_characters_whole() {
-        let text = "é".repeat(20);
-        let shown = screen_texts(&[text.as_str()], Some(5));
-        assert!(shown.starts_with('"'), "{shown}");
-        assert!(shown.ends_with("… 15 more characters"), "{shown}");
+        let text = "é".repeat(10_000);
+        let shown = screen_texts(&[text.as_str()], Some(SCREEN_TEXT_LIMIT));
+        assert!(
+            shown.chars().count() <= SCREEN_TEXT_LIMIT,
+            "{} characters",
+            shown.chars().count()
+        );
+        assert!(shown.starts_with("\"é"), "{shown}");
+        assert!(shown.ends_with("more characters)"), "{shown}");
+        assert!(!shown.contains('\u{FFFD}'), "a character was split");
     }
 }
