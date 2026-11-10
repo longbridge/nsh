@@ -8564,9 +8564,12 @@ impl<M: TextEngine> Core<M> {
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
         list.offset += anchor;
+        // A splice above the viewport already moved the offset, to keep
+        // the visible rows in place: like measurements, that says nothing
+        // about where the user is.
+        let spliced = list.take_splice_anchor();
+        anchor += spliced;
         let kept = anchor;
-        // A splice above the viewport already moved the offset.
-        anchor += list.take_splice_anchor();
         // Inverted lists keep their distance from the end instead;
         // `maintainVisibleContentPosition` follows the end near it.
         anchor += list.anchor_end(kept);
