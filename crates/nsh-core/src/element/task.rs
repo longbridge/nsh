@@ -120,6 +120,10 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The next later launch of the app
+    /// ([`crate::single_instance::SecondInstance`]) resolves the slot, those
+    /// that came before first.
+    NextSecondInstance(AnswerSlot<crate::single_instance::SecondInstance>),
     /// The next address move the app did not make
     /// ([`crate::url_scheme::AppUrlChange`]) resolves the slot.
     NextAppUrlChange(AnswerSlot<crate::url_scheme::AppUrlChange>),
