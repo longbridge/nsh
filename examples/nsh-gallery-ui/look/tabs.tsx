@@ -72,10 +72,12 @@ export function segmentedLook(o?: SegmentedLookOptions) {
         padding: inset,
         borderRadius: pointer ? 9 : 10,
         borderCurve: "continuous",
-        backgroundColor: colors.track,
+        // Sunk like the pill bar's, not the switch's track: in dark the track is
+        // raised as the thumb is, which would hide the thumb.
+        backgroundColor: colors.inset,
         boxShadow: finish.track.boxShadow,
         borderWidth: 1,
-        borderColor: finish.track.borderColor,
+        borderColor: colors.border,
       };
     },
     /** The thumb as `Tabs`' indicator, which the core springs to the selected tab. */
