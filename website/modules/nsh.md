@@ -1091,6 +1091,25 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### shadersAvailable
+
+```ts
+const shadersAvailable: Accessor<boolean>;
+```
+
+Whether the platform draws shader views (`Shader`, `ShaderEffect`, `ShaderTransition`, `ScreenEffect`,
+`ScreenTransition`), reactive. It is `true` on iOS, Android, macOS, Windows, Linux, GPUI, the web and in headless tests,
+and `false` in a terminal and in apps built with the `shader` feature turned off. It starts `true` and turns `false`
+for good when the first shader mounts on a machine whose GPU NSH cannot open (a browser without WebGL 2), so show the
+shader while it holds and the app's own drawing otherwise ([Shader](../elements/shader.md#whether-shaders-draw)).
+Rust: `shaders_available() -> bool`.
+
+```tsx
+<If when={shadersAvailable()} else={<Image src={backdrop} style={{ flex: 1 }} />}>
+  <Shader source={BACKDROP} style={{ flex: 1 }} />
+</If>
+```
+
 ### platform
 
 ```ts

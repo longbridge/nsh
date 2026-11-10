@@ -16,6 +16,15 @@ use nsh_core::{
 
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
+/// This build has no renderer: a platform reports `Environment::shaders`
+/// `false` from the start.
+pub const LINKED: bool = false;
+
+/// No renderer ever looks for a GPU here.
+pub(crate) fn no_gpu() -> bool {
+    false
+}
+
 /// Never made: this build has no renderer.
 pub struct Renderer {
     format: PixelFormat,

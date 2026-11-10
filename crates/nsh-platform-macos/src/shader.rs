@@ -353,8 +353,10 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         if layer.is_none() && state.shader.is_none() {
             return;
         }
-        if layer.is_some() {
-            surface.shaders.renderer();
+        if layer.is_some() && surface.shaders.renderer().is_none() {
+            // No GPU: the app hears it (`shadersAvailable()`); the engine
+            // takes the first report only.
+            surface.control(nsh_engine::EngineControl::shaders_unavailable);
         }
         let shader = state
             .shader

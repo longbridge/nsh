@@ -13883,6 +13883,29 @@ mod components {
         assert_eq!(unavailable_web_with(true), ["waiting"]);
     }
 
+    /// Shows whether the platform draws shader views, and picks a branch
+    /// by it as an app picks a shader or its own drawing.
+    #[component]
+    fn ShaderCheck() -> impl IntoElement {
+        view()
+            .child(text(move || format!("shaders {}", shaders_available())))
+            .child(when(shaders_available, || text("shader")).otherwise(|| text("canvas")))
+    }
+
+    #[test]
+    fn shaders_available_follows_what_the_platform_reports() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ShaderCheck>(|| ()));
+        // The default environment, as headless runs have it.
+        assert_eq!(texts(&c.commit().unwrap()), ["shaders true", "shader"]);
+        // The platform found no GPU: what read it shows the change.
+        c.set_environment(crate::element::Environment {
+            shaders: false,
+            ..Default::default()
+        });
+        assert_eq!(texts(&c.commit().unwrap()), ["shaders false", "canvas"]);
+    }
+
     /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
     #[derive(Default)]
     struct TestSpeech {

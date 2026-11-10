@@ -5200,6 +5200,7 @@
 			screenReader: false,
 			host: false,
 			lifecycle: "active",
+			shaders: true,
 			localeSettings: {
 				languages: ["en-US"],
 				timeZone: "UTC",
@@ -5242,6 +5243,7 @@
 			localeSettings: () => fields.localeSettings(),
 			lifecycle: () => fields.lifecycle(),
 			platform,
+			shadersAvailable: () => fields.shaders(),
 			fpsEnabled: () => false
 		};
 		const accessibility = {
