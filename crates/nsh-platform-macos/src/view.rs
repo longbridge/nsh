@@ -1920,6 +1920,9 @@ impl NshView {
             self.size_container();
             crate::native::resized(self);
             self.place_natives();
+            if self.kind() == ViewKind::Input {
+                crate::text_input::resized(self);
+            }
             let resized = self
                 .ivars()
                 .content
