@@ -4,9 +4,10 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
-Structural Tailwind sibling positions (2026-11-09, Linux x86_64, Ryzen 9 7950X, against
-`f0f0d107`; dev/test profile with `nsh-core` at `opt-level=3`, `FakeEngine`). Five alternating
-before / after rounds pinned to CPU 0, medians of operation application plus layout/commit:
+Sibling position classes (`core/classes.rs`, 2026-11-09, Linux x86_64, Ryzen 9 7950X, against
+`f0f0d107`; dev/test profile with `nsh-core` at `opt-level=3`, `FakeEngine`). The ignored
+`bench_positional_mount` times operation application and layout/commit, excluding operation
+construction and validation. Five alternating runs per version on one CPU, medians:
 
 | Siblings / classes | Before (ms) | After (ms) |
 |---|---|---|
@@ -14,36 +15,26 @@ before / after rounds pinned to CPU 0, medians of operation application plus lay
 | 1,000, `odd:` | 817.66 | 166.26 |
 | 1,000, `first:` + `last:` | 800.68 | 168.67 |
 
-Operation construction and result validation are outside the timer. Order, final colors and frames,
-and the complete mount batch match in every sample; 1,000 rows keep 3,001 ops / 4,004 items /
-1,002 nodes. The ordinary-class control, 25 mounts per process with the first five discarded
-equally, takes 2.01 → 1.99 ms (five alternating process pairs, medians of process medians).
-`positions_changed` shares the element count and sibling ordinal across its immediate restyling
-pass (`core/classes.rs`), removing the repeated position queries. Mounting still performs
-quadratically many complete restyles. These measurements exclude QuickJS and native shaping,
-mounting and drawing. Reproduce with `cargo test -p nsh-core --lib --features declarations
---config profile.dev.package.nsh-core.opt-level=3 bench_positional_mount -- --ignored --nocapture
---test-threads=1`; `NSH_POSITION_SIZES` and `NSH_POSITION_VARIANTS` select the cases.
+`positions_changed` counts the element siblings once and carries their ordinal through the immediate
+restyling pass. Mounting rows that all read their position still performs quadratically many restyles.
+Order, colors, frames and complete mount batches match; 1,000 rows keep 3,001 ops / 4,004 items /
+1,002 nodes. Ordinary classes take 2.01 → 1.99 ms (five alternating process pairs, medians of process
+medians; 25 mounts per process, the first five discarded). These Core timings exclude QuickJS and
+native text shaping, mounting and drawing.
 
-The separate JS-driven `nsh test examples/bench/PositionalClasses.tsx --trace` control uses the
-same baseline, CPU and Core optimization, with the other crates at their dev defaults. Three
-alternating rounds, medians of initial commit times, changing the entry's `COUNT`, `CLASSES`
-and `EACH` constants between scenarios:
+Headless `nsh test examples/bench/PositionalClasses.tsx --trace` (same baseline and Core optimization,
+other crates at their dev defaults, three alternating runs per version on one CPU): initial commit
+medians for 500 eager rows with `odd:` / `first:` + `last:` are 1291.92 / 1284.82 → 205.49 / 204.47 ms;
+500 rows through Each with `odd:` take 1274.47 → 204.70 ms. All three keep 1,504 ops / 2,005 items /
+502 nodes. At 300 eager `odd:` rows, 317.56 → 74.73 ms, keeping 904 / 1,205 / 302. Every ordered
+trace batch matches. The entry's `COUNT`, `CLASSES` and `EACH` select these workloads; baseline
+structural mounts at 1,000 rows exceed the driver's five-second first-render deadline, while the
+Rust benchmark above covers complete 1,000-row batches. Commit times exclude script evaluation
+and native input, mounting and drawing.
 
-| Siblings / creation / classes | Before (ms) | After (ms) | Ops / items / nodes |
-|---|---|---|---|
-| 300, eager, `odd:` | 317.56 | 74.73 | 904 / 1,205 / 302 |
-| 500, eager, `odd:` | 1,291.92 | 205.49 | 1,504 / 2,005 / 502 |
-| 500, eager, `first:` + `last:` | 1,284.82 | 204.47 | 1,504 / 2,005 / 502 |
-| 500, Each, `odd:` | 1,274.47 | 204.70 | 1,504 / 2,005 / 502 |
-
-Every ordered trace batch matches, including ordinary-class controls at 300, 500 and 1,000
-rows. Ordinary 1,000-row commits take 12.45 → 12.83 ms; the counter's initial / press counts
-stay at 56 / 50 / 21 and 10 / 7 / 24, with summed commit medians 539 → 530 µs. These short
-controls establish unchanged work and do not establish a speedup. Baseline structural mounts
-at 1,000 rows exceed the test driver's five-second first-render deadline, so the paired CLI
-traces use 300 / 500 rows; the Rust measurements above cover complete 1,000-row batches.
-CLI commit times exclude script evaluation and native input, mounting and drawing.
+The ordinary-class trace control at 1,000 rows takes 12.45 → 12.83 ms. The counter keeps
+56 ops / 50 items / 21 nodes initially and 10 / 7 / 24 after `+1`, summed commit medians
+539 → 530 µs. These short controls establish unchanged work counts rather than a speedup.
 
 Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
 `nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
