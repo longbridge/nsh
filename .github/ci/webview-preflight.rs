@@ -96,6 +96,7 @@ fn Smoke() -> impl IntoElement {
     let url = std::env::var("SMOKE_URL").expect("SMOKE_URL");
     let output = PathBuf::from(std::env::var("SMOKE_OUTPUT").expect("SMOKE_OUTPUT"));
     let primary = element_ref();
+    let primary_source = signal(url.clone());
     let shared = element_ref();
     let private = element_ref();
     let messages = signal(Vec::<String>::new());
@@ -240,6 +241,27 @@ fn Smoke() -> impl IntoElement {
             std::fs::write(output.join("unfiltered.png"), &png).map_err(|e| e.to_string())?;
             println!("PASS failed filter replacement retention and clearing");
 
+            #[cfg(target_os = "macos")]
+            {
+                let folder = output.join("local-page");
+                std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+                std::fs::write(folder.join("style.css"), "body{margin:0;background:rgb(20,40,60)}.marker{position:absolute;left:20px;top:20px;width:80px;height:60px;background:rgb(0,200,80)}.ad{position:absolute;left:140px;top:20px;width:80px;height:60px;background:rgb(240,20,20)}").map_err(|e| e.to_string())?;
+                let file = folder.join("index.html");
+                std::fs::write(&file, "<!doctype html><link rel=\"stylesheet\" href=\"style.css\"><div class=\"marker\"></div><div class=\"ad\"></div><script>window.onload=()=>window.nsh.postMessage('file-ready')</script>").map_err(|e| e.to_string())?;
+                filters.set(valid_rules());
+                primary_source.set(format!("file://{}", file.display()));
+                until("filtered local file page", || messages.get().iter().any(|s| s == "file-ready")).await?;
+                let png = primary.capture_page().await?;
+                let shot = image::load_from_memory(&png).map_err(|e| e.to_string())?.into_rgba8();
+                require(pixel_matches(&shot, 50, 50, [0, 200, 80]), "local sibling stylesheet was not loaded")?;
+                require(pixel_matches(&shot, 160, 50, [20, 40, 60]), "local file loaded without its content filter")?;
+                std::fs::write(output.join("filtered-local-file.png"), png).map_err(|e| e.to_string())?;
+                let before_ready = messages.get().iter().filter(|s| s.as_str() == "ready").count();
+                primary_source.set(run_url.clone());
+                until("return from local file", || messages.get().iter().filter(|s| s.as_str() == "ready").count() > before_ready).await?;
+                println!("PASS local file, sibling resources and deferred content filtering");
+            }
+
             let before_pending = pending.get().len();
             start_download(&primary, &run_url, "/slow-download?mode=teardown")?;
             until("download pending before teardown", || pending.get().len() > before_pending).await?;
@@ -270,13 +292,12 @@ fn Smoke() -> impl IntoElement {
         }
     });
 
-    let primary_url = url.clone();
     view().flex_1().child(text(move || status.get())).child(
         view().flex_row().children([
             when(
                 move || mounted.get(),
                 move || {
-                    web_view(primary_url.clone())
+                    web_view(primary_source)
                         .element_ref(&primary)
                         .w(px(320.0))
                         .h(px(240.0))
