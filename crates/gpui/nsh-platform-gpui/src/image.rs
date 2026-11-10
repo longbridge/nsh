@@ -17,7 +17,7 @@
 //! that grows past its bucket loads the next one. SVG images (sniffed from
 //! their bytes) are drawn by [`nsh_core::svg`] at the bucket's size and
 //! then handled as bitmaps; their size is their intrinsic size in points.
-//! Canvases draw bitmaps only ([`load_bitmap`]).
+//! Canvases draw them as their rasterized bitmap ([`load_bitmap`]).
 //!
 //! A decoded entry's picture on the main thread ([`Image`]) counts what it
 //! adds in its entry ([`nsh_core::image::MemoryCache::add_cost`]): its
@@ -1123,8 +1123,8 @@ fn fetch(
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the main thread, at its natural size; `done` runs on
 /// the main thread with the image (every frame of an animation: frame 0
-/// is the first). Canvases draw bitmaps: an SVG is an image that failed
-/// to load.
+/// is the first). An SVG is rasterized by the shared SVG renderer and
+/// handed over as its bitmap.
 ///
 /// A cached image is handed over before this returns: callers must not
 /// hold a borrow of view state that `done` takes.
@@ -1133,14 +1133,8 @@ pub(crate) fn load_bitmap(
     uri: &str,
     done: impl FnOnce(Result<Rc<Texture>, String>) + 'static,
 ) {
-    let name = uri.to_owned();
     let done = move |result: Result<(Picture, Lease), String>| {
-        done(result.and_then(|(p, _)| match p.natural {
-            Natural::Vector(_) => Err(format!(
-                "{name} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-            )),
-            Natural::Pixels(..) => Ok(p.texture.clone()),
-        }));
+        done(result.map(|(p, _)| p.texture.clone()))
     };
     let source = ImageSource {
         uri: uri.into(),
@@ -2408,15 +2402,14 @@ mod tests {
     }
 
     #[test]
-    fn svg_draws_no_text_or_embedded_images() {
-        // GPUI's own resvg / usvg enable text and raster images: an SVG
-        // still draws neither (no fonts loaded, the resolver resolves
-        // nothing).
-        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><text x="0" y="9" font-size="10" fill="#f00">NSH</text><image width="20" height="10" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="/></svg>"##;
+    fn svg_draws_embedded_raster_images() {
+        // nsh-core's loader decodes inline raster data (text needs a system
+        // font, which a test machine may not have).
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><image width="20" height="10" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="/></svg>"##;
         let decoded = decoded(svg, 20).unwrap();
         assert_eq!(decoded.size(), (20, 10));
         let bytes = decoded.image.as_bytes(0).unwrap();
-        assert!(bytes.iter().all(|&b| b == 0), "nothing drawn");
+        assert!(bytes.iter().any(|&b| b != 0), "the embedded image draws");
     }
 
     #[test]

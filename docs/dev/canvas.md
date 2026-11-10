@@ -17,9 +17,10 @@
   for its transform, current path and line style and tests the flattened path; after `draw` returned a kept context
   answers from everything it drew, so press handlers can hit-test the shapes; strokes take joins as round and ignore
   dashes; animated values count as 0, since JS does not see their current values), linear / radial / conic
-  gradients, `drawImage` (all three forms, images by URI or asset: native canvases draw bitmaps, loaded through their
-  platform's image module, whose canvas loads fail an SVG with a warning naming it, as bytes no decoder reads fail;
-  the web's draws what the browser draws). Any number argument and colors may be animated values
+  gradients, `drawImage` (all three forms, images by URI or asset: native canvases load them through their
+  platform's image module, which rasterizes an SVG with `nsh_core::svg` and hands its bitmap to the canvas, as bytes no
+  decoder reads fail; draw an SVG into an explicit destination rectangle, its raster is sized in the loader's own
+  pixels; the web's draws what the browser draws). Any number argument and colors may be animated values
   (`createAnimatedValue`, `interpolate`, ...): those become slots bound like style values (`AnimationProp::CanvasArg`) and the
   platform redraws on its own while they animate, without JS (only what they change on iOS and macOS: "Partial
   redraws" below). Deriving a node again (`interpolate`, `mul`, ... in a `draw`

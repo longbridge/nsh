@@ -1589,6 +1589,7 @@ mod tests {
                 minify: false,
                 split: false,
                 ui_sets: Vec::new(),
+                ..Default::default()
             })
             .unwrap()
         };
