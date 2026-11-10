@@ -4906,6 +4906,121 @@ fn screens_fill_their_stack_below_the_header() {
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 320.0, 480.0)));
 }
 
+/// Without a native header, a screen's `header` slot is as wide as the
+/// screen whatever it holds: a long one-line title shrinks instead of
+/// pushing the header, and the button after it, past the window's edge.
+#[test]
+fn a_drawn_header_is_as_wide_as_the_screen() {
+    let mut c = core();
+    c.set_header_heights(crate::NO_NATIVE_HEADER.0, crate::NO_NATIVE_HEADER.1);
+    let square = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(44.0)),
+                ("height", StyleValue::Number(44.0)),
+                ("flexShrink", StyleValue::Number(0.0)),
+            ],
+        )
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Stack,
+        },
+        style_op(2, &[("flex", StyleValue::Number(1.0))]),
+        Op::Create {
+            id: 3,
+            tag: Tag::Screen,
+        },
+        Op::Create {
+            id: 4,
+            tag: Tag::HeaderItem,
+        },
+        Op::SetProp {
+            id: 4,
+            prop: Prop::HeaderSlot(crate::HeaderSlot::Header),
+        },
+        Op::Create {
+            id: 6,
+            tag: Tag::View,
+        },
+        style_op(6, &[("flexDirection", StyleValue::Str("row"))]),
+        Op::Create {
+            id: 8,
+            tag: Tag::View,
+        },
+        square(8),
+        Op::Create {
+            id: 10,
+            tag: Tag::View,
+        },
+        style_op(
+            10,
+            &[
+                ("flex", StyleValue::Number(1.0)),
+                ("minWidth", StyleValue::Number(0.0)),
+            ],
+        ),
+        Op::Create {
+            id: 12,
+            tag: Tag::Text,
+        },
+        style_op(12, &[("numberOfLines", StyleValue::Number(1.0))]),
+        Op::CreateText {
+            id: 13,
+            text: "a title far too long to fit on one line of the header".repeat(2),
+        },
+        Op::Create {
+            id: 14,
+            tag: Tag::View,
+        },
+        square(14),
+        Op::Create {
+            id: 16,
+            tag: Tag::View,
+        },
+        style_op(16, &[("flex", StyleValue::Number(1.0))]),
+    ];
+    ops.extend([
+        insert(12, 13),
+        insert(10, 12),
+        insert(6, 8),
+        insert(6, 10),
+        insert(6, 14),
+        insert(4, 6),
+        insert(3, 4),
+        insert(3, 16),
+        insert(2, 3),
+        insert(ROOT_ID, 2),
+    ]);
+    apply(&mut c, ops);
+    let mut frames = std::collections::HashMap::new();
+    for width in [320.0, 360.0, 600.0] {
+        c.set_viewport(size_pt(width, 480.0));
+        let batch = c.commit().unwrap();
+        for item in &batch.items {
+            if let MountItem::Frame { id, frame } = item {
+                frames.insert(*id, *frame);
+            }
+        }
+        let header = frames[&4];
+        assert_eq!(header.size.width, px(width), "the header at {width}");
+        let right = frames[&14];
+        assert_eq!(
+            right.origin.x + right.size.width,
+            px(width),
+            "the button after the title at {width}"
+        );
+        assert_eq!(frames[&10].size.width, px(width - 88.0));
+    }
+}
+
 #[test]
 fn a_screen_keeps_the_bottom_bar_unless_it_says_otherwise() {
     let mut c = core();
