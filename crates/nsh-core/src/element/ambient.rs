@@ -835,6 +835,19 @@ pub fn next_url_scheme_open() -> Answer<String> {
     answer
 }
 
+/// The next address the app moves to without making the move itself (TS:
+/// `UrlScheme.on("change", ...)`): on the web, the browser's back or
+/// forward to an entry the app's pages do not account for, or an address
+/// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
+/// it already. Moves while nothing listened since the app started are not
+/// kept; once something listened, at most
+/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextAppUrlChange(slot));
+    answer
+}
+
 /// The app's address (TS: `UrlScheme.url()`): on the web the page's, on
 /// the native platforms the last link that opened the app; what
 /// [`set_app_url`] set after it; `None` when there is none
@@ -852,6 +865,19 @@ pub fn app_url() -> Answer<Option<String>> {
 /// TS's `TypeError`; on the web a URL is resolved against the page's base,
 /// as TS's is, and one of another origin than the page's is an error.
 pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
+    set_app_url_with(url, crate::url_scheme::HistoryBehavior::Replace)
+}
+
+/// [`set_app_url`], saying how the address meets the history (TS:
+/// `UrlScheme.setUrl(url, { history })`): on the web
+/// [`HistoryBehavior::Push`](crate::url_scheme::HistoryBehavior::Push)
+/// makes it an entry of its own after the current one, so the browser's
+/// back goes back to the address before it; the native platforms keep it
+/// for [`app_url`] either way.
+pub fn set_app_url_with(
+    url: impl Into<String>,
+    history: crate::url_scheme::HistoryBehavior,
+) -> Result<(), String> {
     let mut url = url.into();
     crate::url_scheme::check_address(&url)?;
     // Where the app is the page (the web), as TS's `setUrl` there.
@@ -860,14 +886,14 @@ pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
     {
         url = crate::url_scheme::resolve_on_page(&url, &base)?;
     }
-    act(Action::SetAppUrl(url));
+    act(Action::SetAppUrl(url, history));
     Ok(())
 }
 
 /// `UrlScheme.setUrl`'s part in the core: the address again, in order with
 /// what came since the VM wrote it, and the web's history entry.
-pub(crate) fn set_app_url_from_js(url: String) {
-    act(Action::SetAppUrl(url));
+pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::HistoryBehavior) {
+    act(Action::SetAppUrl(url, history));
 }
 
 /// Whether a web view's ref gives its page trusted input here (TS:

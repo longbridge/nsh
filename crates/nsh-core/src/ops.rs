@@ -1881,6 +1881,11 @@ pub enum Command {
     /// the web replaces the current history entry's, the native platforms
     /// keep none ([`crate::url_scheme`]).
     SetAppUrl(String),
+    /// The app's address as an entry of its own after the current one
+    /// (`UrlScheme.setUrl(url, { history: "push" })`, `set_app_url_with`; on
+    /// the root): the web pushes one unless the same turn pushed a page's
+    /// or it is the address shown; the native platforms keep none.
+    PushAppUrl(String),
     /// What the back button does when none of the app's listeners took
     /// it: the innermost stack pops (or asks, with `popOnBack` false); with
     /// none, the app leaves on Android (on the root).
