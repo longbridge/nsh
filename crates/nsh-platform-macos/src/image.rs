@@ -764,12 +764,10 @@ fn from_rgba((width, height, rgba): (u32, u32, &[u8])) -> Result<Picture, String
             *c = ((u16::from(*c) * a + 127) / 255) as u8;
         }
     }
-    let raster = nsh_core::svg::Raster {
-        width,
-        height,
-        pixels,
-        size: Default::default(),
-    };
+    let mut raster = nsh_core::svg::Raster::default();
+    raster.width = width;
+    raster.height = height;
+    raster.pixels = pixels;
     let image = rgba_image(&raster).ok_or("cannot make a CGImage")?;
     Ok(Picture {
         frames: Arc::new([image]),
