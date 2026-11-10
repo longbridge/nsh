@@ -366,6 +366,8 @@ nsh check                 # cargo check --all-targets for each crate, then tsc o
 
 See `examples/rust-exports/native/tests/rust_exports/`. Dev-dependencies: `nsh-core` with `declarations`, `nsh-engine`, and `nsh-testing` with `bundle`.
 
+To test TSX without the crate's side effects (a keychain, a device), give `open` stand-ins for the exports it imports: `open("./App.tsx", { modules: { "rust-exports/native": { "Ledger.format": "$9.99", "Ledger.fetchRate": async () => 0.25 } } })`. A value replaces the export (a function's stand-in returns it at once). A function answers each call with its arguments, and the app's call returns a promise of the answer. Headless runs only.
+
 Test on a platform (`nsh test --target macos`) only what needs real input or a native component. Headless runs have no platform views, so a `#[native_components]` view is empty there.
 
 ## Signed packages
