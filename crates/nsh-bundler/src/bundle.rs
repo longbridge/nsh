@@ -203,10 +203,15 @@ pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
     // What it cannot claim is left out (the CLI's `read_config` warns of
     // it).
-    Ok(config
+    let mut schemes = config
         .get("schemes")
         .map(nsh_core::url_scheme::schemes_from_json)
-        .unwrap_or_default())
+        .unwrap_or_default();
+    // The files it opens come as `file:` URLs (`nsh_core::file_type`).
+    if nsh_core::file_type::declares_file_types(&config) {
+        schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
+    }
+    Ok(schemes)
 }
 
 /// The `"window"` of the `nsh.json` in `dir`, the main window's launch

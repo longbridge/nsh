@@ -611,7 +611,7 @@ fn root_config(
             Some(v.to_string())
         }
     };
-    let url_schemes = match config.get("schemes") {
+    let mut url_schemes = match config.get("schemes") {
         None => Vec::new(),
         Some(v) => {
             let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(v);
@@ -623,6 +623,10 @@ fn root_config(
             schemes
         }
     };
+    // The files it opens come as `file:` URLs (`nsh_core::file_type`).
+    if nsh_core::file_type::declares_file_types(config) {
+        url_schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
+    }
     let window = match config.get("window") {
         None => None,
         Some(v) => {

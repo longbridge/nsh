@@ -205,6 +205,13 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// The file types the app opens (`"fileTypes"`: `[{ "name": "Video",
+    /// "extensions": ["mp4"] }]`), which packages declare to the system;
+    /// the app hears the files as `file://` URLs through
+    /// `UrlScheme.on("open", ...)` (`nsh_core::file_type`). [`read_config`]
+    /// checks them ([`AppConfig::file_types`]).
+    #[serde(default)]
+    pub(crate) file_types: Option<serde_json::Value>,
     /// The main window's launch-time options (`"window"`, checked by
     /// [`read_config`]): written into `app.json` and the dev server's app
     /// info, where the runners read them before the app's code runs.
@@ -290,6 +297,30 @@ impl AppConfig {
         nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
     }
 
+    /// The file types the app opens (`"fileTypes"`), checked; those it
+    /// cannot take are left out ([`read_config`] warns of them).
+    pub(crate) fn file_types(&self) -> Vec<nsh_core::file_type::FileType> {
+        self.file_types
+            .as_ref()
+            .map(nsh_core::file_type::file_types_from_json)
+            .unwrap_or_default()
+    }
+
+    /// Adds the file types to a package's `app.json` `info`, where the
+    /// runner reads them (the core then lets the files' `file:` URLs
+    /// through).
+    pub(crate) fn add_file_types_to_app_json(&self, info: &mut serde_json::Value) {
+        if let Some(types) = self.file_types_json() {
+            info["fileTypes"] = types;
+        }
+    }
+
+    /// The checked file types as JSON, for `app.json`; `None` without any.
+    pub(crate) fn file_types_json(&self) -> Option<serde_json::Value> {
+        let types = self.file_types();
+        (!types.is_empty()).then(|| types.iter().map(|t| t.to_json()).collect())
+    }
+
     /// Adds what the system shows when the app first asks for the
     /// microphone and speech recognition, which it requires (it ends an app
     /// that asks without them), when the app may recognize speech.
@@ -352,6 +383,7 @@ pub(crate) fn desktop_app_json(
     if config.single_instance {
         info["singleInstance"] = true.into();
     }
+    config.add_file_types_to_app_json(&mut info);
     info
 }
 
@@ -383,6 +415,41 @@ pub(crate) fn note_hidden_main_window(entry: &Path) {
             "the main window starts hidden (nsh.json window.defaultVisible: false) until the app shows it",
         );
     }
+}
+
+/// Declares the file types the app opens in an Apple `Info.plist`
+/// (`CFBundleDocumentTypes`), so the system lists the app in Open With and
+/// hands it the files (`application:openURLs:`).
+fn document_types(info: &mut plist::Dictionary, types: &[nsh_core::file_type::FileType]) {
+    use plist::Value;
+    if types.is_empty() {
+        return;
+    }
+    let strings =
+        |items: &[String]| Value::Array(items.iter().cloned().map(Value::String).collect());
+    let list = types
+        .iter()
+        .map(|t| {
+            let mut d = plist::Dictionary::new();
+            d.insert("CFBundleTypeName".into(), Value::String(t.name.clone()));
+            d.insert(
+                "CFBundleTypeRole".into(),
+                Value::String(t.role.apple().into()),
+            );
+            if !t.extensions.is_empty() {
+                d.insert("CFBundleTypeExtensions".into(), strings(&t.extensions));
+            }
+            if !t.mime_types.is_empty() {
+                d.insert("CFBundleTypeMIMETypes".into(), strings(&t.mime_types));
+            }
+            if !t.content_types.is_empty() {
+                d.insert("LSItemContentTypes".into(), strings(&t.content_types));
+            }
+            d.insert("LSHandlerRank".into(), Value::String("Alternate".into()));
+            Value::Dictionary(d)
+        })
+        .collect();
+    info.insert("CFBundleDocumentTypes".into(), Value::Array(list));
 }
 
 /// Declares the URL schemes the app claims in an Apple `Info.plist`
@@ -478,6 +545,10 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         nsh_core::url_scheme::schemes_from_json_lenient(&serde_json::json!(config.schemes));
     config.schemes = schemes;
     ignored.extend(schemes_ignored);
+    if let Some(types) = &config.file_types {
+        let (_, types_ignored) = nsh_core::file_type::file_types_from_json_lenient(types);
+        ignored.extend(types_ignored);
+    }
     // The bundler warns of another value.
     if !matches!(
         config.appearance.as_deref(),
@@ -794,7 +865,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     fs::write(
         resources.join("app.json"),
         app_json(
-            serde_json::json!({ "id": id, "name": name }),
+            {
+                let mut info = serde_json::json!({ "id": id, "name": name });
+                config.add_file_types_to_app_json(&mut info);
+                info
+            },
             &schemes,
             config.window.as_ref(),
         ),
@@ -819,6 +894,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
+    document_types(&mut info, &config.file_types());
     if let Some(icon) = &config.icon {
         let partial = compile_icon(icon, &app, sdk)?;
         for (key, value) in partial {
@@ -1093,7 +1169,14 @@ fn package_linux(
     }
     fs::write(
         dir.join(format!("{id}.desktop")),
-        desktop_entry(name, id, executable, config.icon.is_some(), &config.schemes),
+        desktop_entry(
+            name,
+            id,
+            executable,
+            config.icon.is_some(),
+            &config.schemes,
+            &file_mime_types(&config.file_types()),
+        ),
     )?;
     let archive = options.out.join(format!("{name}.tar.gz"));
     let _ = fs::remove_file(&archive);
@@ -1181,6 +1264,7 @@ fn package_macos(
         info["appearance"] = appearance.as_str().into();
     }
     config.macos.add_to_app_json(&mut info);
+    config.add_file_types_to_app_json(&mut info);
     let schemes = config.url_schemes();
     fs::write(
         nsh.join("app.json"),
@@ -1195,6 +1279,7 @@ fn package_macos(
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
     url_types(&mut plist, id, &schemes);
+    document_types(&mut plist, &config.file_types());
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
@@ -1458,32 +1543,48 @@ fn macos_info_plist(
 /// `NSView`'s, new in macOS 14).
 const MACOS_MINIMUM: &str = "14.0";
 
+/// The MIME types of `types`, each once, for a Linux desktop entry.
+pub(crate) fn file_mime_types(types: &[nsh_core::file_type::FileType]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for mime in types.iter().flat_map(|t| &t.mime_types) {
+        if !out.contains(mime) {
+            out.push(mime.clone());
+        }
+    }
+    out
+}
+
 /// The app's desktop entry. Desktops match windows to it by the file's
 /// name and `StartupWMClass`, which GTK sets from the application id.
 /// `Exec` names the executable on the `PATH` (install the package
 /// directory, or a link to the executable, there).
 /// `schemes` are the URL schemes it opens (`MimeType=x-scheme-handler/…`):
-/// the URL is `Exec`'s `%u`.
+/// the URL is `Exec`'s `%u`. `mime_types` are those of the files it opens
+/// (nsh.json `fileTypes`), which make it `%U`: the files' URLs, several.
 pub(crate) fn desktop_entry(
     name: &str,
     id: &str,
     executable: &str,
     icon: bool,
     schemes: &[String],
+    mime_types: &[String],
 ) -> String {
     let icon = if icon {
         format!("Icon={id}\n")
     } else {
         String::new()
     };
-    let (url, mime) = if schemes.is_empty() {
+    let types: String = schemes
+        .iter()
+        .map(|s| format!("x-scheme-handler/{s};"))
+        .chain(mime_types.iter().map(|m| format!("{m};")))
+        .collect();
+    let (url, mime) = if types.is_empty() {
         ("", String::new())
-    } else {
-        let types: String = schemes
-            .iter()
-            .map(|s| format!("x-scheme-handler/{s};"))
-            .collect();
+    } else if mime_types.is_empty() {
         (" %u", format!("MimeType={types}\n"))
+    } else {
+        (" %U", format!("MimeType={types}\n"))
     };
     format!(
         "[Desktop Entry]\nType=Application\nName={name}\nExec={executable}{url}\n{icon}StartupWMClass={id}\nTerminal=false\nCategories=Utility;\n{mime}"
@@ -2377,19 +2478,69 @@ mod tests {
     #[test]
     fn desktop_entries_match_windows_by_the_app_id() {
         assert_eq!(
-            desktop_entry("Counter", "com.example.counter", "Counter", true, &[]),
+            desktop_entry("Counter", "com.example.counter", "Counter", true, &[], &[]),
             "[Desktop Entry]\nType=Application\nName=Counter\nExec=Counter\n\
              Icon=com.example.counter\nStartupWMClass=com.example.counter\nTerminal=false\n\
              Categories=Utility;\n"
         );
-        assert!(!desktop_entry("A", "com.example.a", "A", false, &[]).contains("Icon="));
+        assert!(!desktop_entry("A", "com.example.a", "A", false, &[], &[]).contains("Icon="));
     }
 
     #[test]
     fn desktop_entries_open_the_apps_schemes() {
-        let entry = desktop_entry("A", "com.example.a", "A", false, &["a".into(), "b2".into()]);
+        let entry = desktop_entry(
+            "A",
+            "com.example.a",
+            "A",
+            false,
+            &["a".into(), "b2".into()],
+            &[],
+        );
         assert!(entry.contains("Exec=A %u\n"));
         assert!(entry.contains("MimeType=x-scheme-handler/a;x-scheme-handler/b2;\n"));
+    }
+
+    #[test]
+    fn apps_declare_the_file_types_they_open() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{ "fileTypes": [
+                { "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] },
+                { "name": "Notes", "extensions": ["note"], "role": "editor" },
+                { "name": "Broken" }
+            ] }"#,
+        )
+        .unwrap();
+        // Linux: the desktop entry lists their MIME types and takes files.
+        let entry = desktop_entry(
+            "A",
+            "com.a",
+            "A",
+            false,
+            &["a".into()],
+            &file_mime_types(&config.file_types()),
+        );
+        assert!(entry.contains("Exec=A %U\n"));
+        assert!(entry.contains("MimeType=x-scheme-handler/a;video/mp4;\n"));
+        // Apple: `CFBundleDocumentTypes`.
+        let mut info = plist::Dictionary::new();
+        document_types(&mut info, &config.file_types());
+        let types = info["CFBundleDocumentTypes"].as_array().unwrap();
+        assert_eq!(types.len(), 2);
+        let video = types[0].as_dictionary().unwrap();
+        assert_eq!(video["CFBundleTypeName"].as_string(), Some("Video"));
+        assert_eq!(video["CFBundleTypeRole"].as_string(), Some("Viewer"));
+        assert_eq!(
+            video["CFBundleTypeExtensions"].as_array().unwrap()[0].as_string(),
+            Some("mp4")
+        );
+        let notes = types[1].as_dictionary().unwrap();
+        assert_eq!(notes["CFBundleTypeRole"].as_string(), Some("Editor"));
+        // The runners read them from `app.json`.
+        let app = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(app["fileTypes"].as_array().unwrap().len(), 2);
+        assert!(nsh_core::file_type::declares_file_types(&app));
+        let none = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(none.get("fileTypes").is_none());
     }
 
     // `ditto` is macOS's.

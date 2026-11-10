@@ -1985,6 +1985,50 @@ scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小�
 嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
 `NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
 
+### 应用打开的文件
+
+打开文档的应用（播放器、编辑器）在 nsh.json 的 `fileTypes` 中列出文件类型。`nsh package` 把它们声明给系统，应用就会出现在
+「打开方式」中，并打开用户双击的文件。每个文件以 `file://` URL 送到 `UrlScheme.on("open")`，包括启动应用的那个文件，
+与 AppKit 的 `application:openURLs:` 同样对待文件和链接：
+
+```json
+{
+  "fileTypes": [
+    { "name": "Video", "extensions": ["mp4", "mov"], "mimeTypes": ["video/mp4", "video/quicktime"], "contentTypes": ["public.movie"] }
+  ]
+}
+```
+
+```tsx
+import { UrlScheme } from "nsh";
+
+UrlScheme.on("open", ({ url }) => {
+  const link = new URL(url);
+  if (link.protocol === "file:") play(decodeURIComponent(link.pathname));
+});
+```
+
+| 键 | 说明 |
+| --- | --- |
+| `name` | 系统对这种文件的称呼（`"Video"`），必填。 |
+| `extensions` | 扩展名，不带点（`["mp4", "mov"]`）。 |
+| `mimeTypes` | MIME 类型（`["video/mp4"]`）：Linux 按它们列出应用。 |
+| `contentTypes` | 统一类型标识符（`["public.movie"]`）：iOS 按它们列出应用。 |
+| `role` | `"viewer"`（默认）或 `"editor"`。 |
+
+每种类型要给出 `extensions` 或 `contentTypes`。Rust 代码像链接一样从 `next_url_scheme_open()` 得到文件（用
+`url::Url::to_file_path` 转成路径）。只有声明了文件类型的应用，NSH 才放行 `file:` URL。
+
+| 平台 | 应用如何打开文件 |
+| --- | --- |
+| macOS | `Info.plist` 中的 `CFBundleDocumentTypes`；Launch Services 打开应用，或把文件交给正在运行的应用 |
+| iOS、Mac Catalyst | `Info.plist` 中的 `CFBundleDocumentTypes`（按 `contentTypes`）；系统把文件的副本交给应用 |
+| Windows | 应用每次启动时写在 `HKEY_CURRENT_USER\\Software\\Classes` 下：每种类型一个 ProgID，列在各扩展名的 `OpenWithProgids` 中。带文件的第二次启动把文件交给正在运行的应用 |
+| Linux | 桌面条目的 `MimeType`，`Exec … %U`；应用只运行一份，第二次启动把文件交给正在运行的应用 |
+| Android、Web | 不声明；它们的包不包含 `fileTypes` |
+
+开启 [`singleInstance`](nsh-desktop.md#单实例) 时，第二次启动还会以原样的参数报告 `secondInstance`。
+
 ### UrlScheme.url
 
 `url()` 是应用的地址，`setUrl(url)` 设置它，应用借此在每个平台上给自己的页面分配地址：
