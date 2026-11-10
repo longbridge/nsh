@@ -277,14 +277,24 @@ interface Theme {
     light?: Record<string, string | number>;
     dark?: Record<string, string | number>;
   };
+  components?: Record<string, ComponentLooks>;
+}
+
+interface ComponentLooks {
+  base?: string;
+  variants?: Record<string, string>;
+  sizes?: Record<string, string>;
+  defaults?: { variant?: string; size?: string };
 }
 ```
 
 Makes `theme` the app's theme while it runs, in place of `"theme"` in `nsh.json`: a theme of the same format, over
 shadcn/ui's tokens as the one in `nsh.json` is. It applies at once: `token()` reads the new tokens right after the call,
 and the classes naming tokens, `nsh/base` and Rust components' `theme()` follow with the next frame, in both
-appearances. An embedding app's [theme overrides](../docs/tailwind.md#theme-tokens) still win over it. `null` gives
-back the theme the app was built with.
+appearances. An embedding app's [theme overrides](../docs/tailwind.md#theme-tokens) still win over it. A theme with
+`components` brings its [component looks](../docs/tailwind.md#component-styles) in place of the app's; one without
+keeps the app's own, so a theme that only changes colors changes no look. `null` gives back the theme the app was
+built with, and its looks.
 
 The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz` or `lab()`, a `var()`
 that names no color, or a value that is no color in one appearance where the other's is), `setTheme` throws a

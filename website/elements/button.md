@@ -99,7 +99,7 @@ styles do not express. A disabled button reports none of them.
 ## Styling
 
 The look of a button is your app's: the app decides what a primary or a ghost button is, and declares it once, in
-its Rust theme code (`set_component_style("button", ..)`) or in `nsh.json` `"components"`. A declaration has a base
+its Rust theme code (`set_component_style("button", ..)`) or in its theme file's `"components"`, beside the tokens. A declaration has a base
 look, looks per named variant and size, their states, and the defaults a button that names none takes. Pages then
 name what they want with `variant` and `size`:
 
@@ -142,7 +142,7 @@ fn actions(save: impl Fn() + 'static, cancel: impl Fn() + 'static) -> impl IntoE
 ```
 
 ```tsx tabs
-// nsh.json
+// The theme file (nsh.json "theme"), beside its "cssVars":
 // "components": {
 //   "button": {
 //     "base": "items-center justify-center rounded-lg",

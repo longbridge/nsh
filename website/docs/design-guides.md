@@ -56,7 +56,7 @@ RGBA or HSLA values belong in the token definitions; when a role is missing, add
 named after a role such as `warning` communicates more than a palette name such as `amber-500`.
 
 Declare the app's component styles before composing pages: the looks of the controls that take `variant` and `size`
-(`Button`), once per control, in the app's Rust theme code or in `nsh.json` `"components"`. Style the other `nsh/base`
+(`Button`), once per control, in the app's Rust theme code or in the theme file's `"components"`, beside its tokens. Style the other `nsh/base`
 controls the app needs, with their parts, once in its own shared components from the same tokens. Together they
 cover buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback, with coherent variants,
 sizes, density and hover, pressed, focus, selected, disabled, loading and validation states. Pages name the declared

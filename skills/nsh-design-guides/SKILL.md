@@ -21,7 +21,7 @@ component styles before screens. For an existing app, inspect and extend those
 foundations first. Theme colors in presentation code must come from tokens; raw
 color values belong in theme definitions. Declare the looks of the controls
 that take `variant` and `size` (`Button`) once, by variant and size with their
-states (the app's Rust theme code or `nsh.json` `"components"`), style the other
+states (the app's Rust theme code or the theme file's `"components"`), style the other
 `nsh/base` controls once in app-owned shared components, then compose pages by
 naming them; a page needing a new look adds a variant to the declaration. This is
 the layer corresponding to [`gpui-component`](https://gpui-kit.com/component) above [`gpui-base`](https://gpui-kit.com/base). Plan for the app's

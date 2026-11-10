@@ -213,7 +213,7 @@ The Tailwind theme shapes your classes. Typed methods keep Tailwind's default sc
 
 ## Theme tokens
 
-The app's theme (`"theme"` in `nsh.json`) holds its design tokens: shadcn/ui's colors (`background`, `foreground`, `primary`, `muted-foreground`, `border`, `ring`, `chart-1`, `sidebar`, ...), its `radius`, its fonts `font-sans` and `font-mono`, and any token the app adds. Classes name them as Tailwind names the variables of a CSS `@theme`, Rust components read them with `theme()` from `nsh_base`, and TSX reads them with `token()` from `nsh`, so a TSX screen and the Rust components follow the same theme:
+The app's theme (`"theme"` in `nsh.json`) holds its design tokens: shadcn/ui's colors (`background`, `foreground`, `primary`, `muted-foreground`, `border`, `ring`, `chart-1`, `sidebar`, ...), its `radius`, its fonts `font-sans` and `font-mono`, and any token the app adds. Classes name them as Tailwind names the variables of a CSS `@theme`, Rust components read them with `theme()` from `nsh_base`, and TSX reads them with `token()` from `nsh`, so a TSX screen and the Rust components follow the same theme. The tokens are the theme file's `"cssVars"`; beside them the same file holds the app's component looks, `"components"` ([Component styles](#component-styles)), so one file is the app's whole design system:
 
 ```rust tabs
 use nsh_base::theme;
@@ -261,7 +261,7 @@ A token's name is its CSS variable's without `--`, as the theme file writes it: 
 - **Both appearances.** A token has the light and the dark value of the theme: `bg-primary`, `theme().primary` and `token("primary")` switch with the appearance by themselves, with no `dark:` class. A color the theme sets in one appearance only is used in both.
 - **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token when the Tailwind theme has no color `primary`.
 - **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens, the Rust bindings reading `theme()` and the TSX code reading `token()` are updated, the classes and bindings natively. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's). A host that only adds its brand gives theme overrides, the tokens its brand changes in the same file format ([iOS](./ios.md#theme-overrides), [Android](./android.md#theme-overrides), `AppView::set_theme_overrides` on the desktops).
-- **The app can set another theme.** [`setTheme(theme)`](../modules/nsh.md#settheme) from `nsh` makes a theme in the same format the app's in place of its `"theme"`, while it runs, on every platform and in `nsh test`; `setTheme(null)` gives the app's own back. `token()` reads the new tokens at once. The theme is read whole: a value NSH cannot read throws a `TypeError` naming it, and the theme shown stays. Build it from the app's own theme file so every token the classes name keeps a value. A Rust app sets the tokens of an `nsh_base::Theme` with `set_tokens(theme.into())`.
+- **The app can set another theme.** [`setTheme(theme)`](../modules/nsh.md#settheme) from `nsh` makes a theme in the same format the app's in place of its `"theme"`, while it runs, on every platform and in `nsh test`; `setTheme(null)` gives the app's own back. `token()` reads the new tokens at once. A theme with `"components"` brings its component looks too; one without keeps the app's own. The theme is read whole: a value NSH cannot read throws a `TypeError` naming it, and the theme shown stays. Build it from the app's own theme file so every token the classes name keeps a value. A Rust app sets the tokens of an `nsh_base::Theme` with `set_tokens(theme.into())`.
 - **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app or a theme set while the app runs provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.
 
 Classes naming tokens are resolved once per theme, like any other class: drawing them costs what a palette color does.
@@ -291,8 +291,8 @@ The names are typed: NSH writes the app's tokens into `.nsh/types/nsh/tokens.d.t
 ## Component styles
 
 An app declares the looks of the `nsh/base` controls that take `variant` and `size` (`Button`) once, and every page
-names them: `"components"` in `nsh.json` holds, per component, a base look, looks per named variant and size, and the variant and size a control that names
-none takes. Each look is a class string, with its states as variants (`hover:`, `active:`, `focus:`, `disabled:`, `selected:`).
+names them. They are part of the app's theme: `"components"` in the theme file, beside its `"cssVars"`, holds, per component, a base look, looks per named variant and size, and the variant and size a control that names
+none takes. One file is then the app's design system, its tokens and its component looks together: a coding agent reads one file before writing UI, a copy of it carries the whole style, and switching the theme can switch the looks. Each look is a class string, with its states as variants (`hover:`, `active:`, `focus:`, `disabled:`, `selected:`).
 In Rust the same declaration is typed, `set_component_style` with the style methods; a page in either language picks
 a look with `variant` and `size`:
 
@@ -322,16 +322,22 @@ button().variant("ghost").with_size("sm").child(text("Later"))
 ```
 
 ```tsx tabs
-// nsh.json
-// "components": {
-//   "button": {
-//     "base": "flex-row items-center gap-2 rounded-(--radius)",
-//     "variants": {
-//       "primary": "bg-primary text-primary-foreground hover:bg-primary/90",
-//       "ghost": "hover:bg-accent"
-//     },
-//     "sizes": { "sm": "h-8 px-2", "md": "h-9 px-3" },
-//     "defaults": { "variant": "primary", "size": "md" }
+// theme.json (nsh.json: "theme": "theme.json")
+// {
+//   "cssVars": {
+//     "light": { "primary": "#4f46e5" },
+//     "dark": { "primary": "#818cf8" }
+//   },
+//   "components": {
+//     "button": {
+//       "base": "flex-row items-center gap-2 rounded-(--radius)",
+//       "variants": {
+//         "primary": "bg-primary text-primary-foreground hover:bg-primary/90",
+//         "ghost": "hover:bg-accent"
+//       },
+//       "sizes": { "sm": "h-8 px-2", "md": "h-9 px-3" },
+//       "defaults": { "variant": "primary", "size": "md" }
+//     }
 //   }
 // }
 
@@ -347,13 +353,19 @@ button().variant("ghost").with_size("sm").child(text("Later"))
   own `class`, `style` and state styles at the use site. "Later wins" holds within one kind of rule, so a declared
   `hover:` look still shows over a plain `bg-*` at the use site; the use site changes a state with the same variant
   (`hover:bg-*`).
-- **Rust and `nsh.json` together.** For one name, the typed look and the classes both apply, the typed one first;
-  `nsh.json`'s `"defaults"` decide when both set them. Rust apps read `"components"` from their `nsh.json` too.
-- **Before the first render.** `nsh.json`'s declarations apply before the first frame. Rust declares in the root
+- **Rust and the theme together.** For one name, the typed look and the classes both apply, the typed one first;
+  the theme's `"defaults"` decide when both set them. Rust apps read `"components"` from the theme their `nsh.json`
+  names too.
+- **Before the first render.** The theme's declarations apply before the first frame. Rust declares in the root
   component, before the controls are built.
-- **Checked like other classes.** A class NSH does not know, or a token the app's `"theme"` lacks, is a warning when
-  building and is left out (``nsh.json: components: button.variants.primary: unknown class `bg-acme`, ignored``). A
+- **Checked like other classes.** A class NSH does not know, or a token the theme lacks, is a warning when
+  building and is left out (``theme: components: button.variants.primary: unknown class `bg-acme`, ignored``). A
   `variant` or `size` the declaration lacks applies nothing and logs a warning once.
+- **Themes set while the app runs.** [`setTheme(theme)`](../modules/nsh.md#settheme) with `"components"` replaces
+  the app's class looks with the theme's; a theme without `"components"` keeps the app's own, so a theme that only
+  changes colors changes no look, and `setTheme(null)` gives back the app's theme and its looks.
+- **Hosts tune tokens.** An embedding app's theme overrides change tokens only, never the component looks. A look
+  that a host may tune names a token, which the host then overrides: `"sm": "h-(--control-sm) px-3"`, with `control-sm` in the theme's `cssVars` (`"theme": { "control-sm": "32px" }`).
 
 ## The class check
 

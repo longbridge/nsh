@@ -24,7 +24,8 @@ Rust 组件、嵌入 NSH 的原生应用），以及在 `nsh/base` 之上构建�
 1. 明确应用支持的 Desktop、Mobile、Web、TUI 目标，以及各自的输入、导航和密度要求。
 2. 在主题文件（`nsh.json` 的 `"theme"`）中定义语义颜色角色与浅色、深色值，并确定组件使用的字体、间距、圆角和尺寸尺度。
 3. 声明组件样式：接受 `variant` 和 `size` 的控件（`Button`）的外观，每个控件声明一次，按变体（variant）和尺寸（size）划分，
-   并包含交互状态，写在应用的 Rust 主题代码中（`set_component_style`），或写在 `nsh.json` 的 `"components"` 中。其他 `nsh/base`
+   并包含交互状态，写在应用的 Rust 主题代码中（`set_component_style`），或写在主题文件 `"cssVars"` 旁边的 `"components"` 中，让一个文件
+   保存完整的设计系统。其他 `nsh/base`
    控件连同部件和状态，在应用自己的共享组件中统一设置一次样式；某个模式需要多个控件时，也在那里组合。在支持的目标上验证有代表性
    的组合，再铺开到页面。
 4. 页面通过指名变体和尺寸（Rust 中 `.variant("primary")`，TSX 中 `variant="primary"`）以及使用共享组件来组合。页面不重新设置
@@ -66,7 +67,7 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-// nsh.json 声明按钮：
+// 主题文件（nsh.json 的 "theme"）在 "cssVars" 旁边声明按钮：
 // "components": {
 //   "button": {
 //     "base": "flex-row items-center justify-center gap-2 rounded-md",

@@ -213,7 +213,7 @@ Tailwind 主题影响你的类名。类型化方法保持 Tailwind 的默认刻�
 
 ## 主题 token
 
-应用的主题（`nsh.json` 中的 `"theme"`）保存它的设计令牌：shadcn/ui 的颜色（`background`、`foreground`、`primary`、`muted-foreground`、`border`、`ring`、`chart-1`、`sidebar` 等）、`radius`、字体 `font-sans` 和 `font-mono`，以及应用自己添加的令牌。类名像 Tailwind 引用 CSS `@theme` 变量那样引用它们，Rust 组件用 `nsh_base` 的 `theme()` 读取，TSX 用 `nsh` 的 `token()` 读取，所以 TSX 页面和 Rust 组件使用同一套主题：
+应用的主题（`nsh.json` 中的 `"theme"`）保存它的设计令牌：shadcn/ui 的颜色（`background`、`foreground`、`primary`、`muted-foreground`、`border`、`ring`、`chart-1`、`sidebar` 等）、`radius`、字体 `font-sans` 和 `font-mono`，以及应用自己添加的令牌。类名像 Tailwind 引用 CSS `@theme` 变量那样引用它们，Rust 组件用 `nsh_base` 的 `theme()` 读取，TSX 用 `nsh` 的 `token()` 读取，所以 TSX 页面和 Rust 组件使用同一套主题。这些 token 是主题文件的 `"cssVars"`；同一个文件在它旁边还保存应用的组件外观 `"components"`（[组件样式](#组件样式)），所以一个文件就是应用完整的设计系统：
 
 ```rust tabs
 use nsh_base::theme;
@@ -261,7 +261,7 @@ token 的名称就是主题文件中 CSS 变量去掉 `--` 后的名称：`muted
 - **两种外观。** token 带有主题的浅色值和深色值：`bg-primary`、`theme().primary` 和 `token("primary")` 都会随外观自动切换，不需要 `dark:` 类。只在一种外观里设置的颜色在两种外观下都使用该值。
 - **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 是主题 token。
 - **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类、读取 `theme()` 的 Rust 绑定和读取 `token()` 的 TSX 代码都会更新，其中类和绑定在原生侧更新。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。只想加上自己品牌的宿主给出主题覆盖，即用同样的文件格式写出其品牌要改的 token（[iOS](./ios.md#主题覆盖)、[Android](./android.md#主题覆盖)，桌面端为 `AppView::set_theme_overrides`）。
-- **应用可以换一个主题。** `nsh` 的 [`setTheme(theme)`](../modules/nsh.md#settheme) 在应用运行时把一个同样格式的主题设为应用的主题，取代它的 `"theme"`，在每个平台和 `nsh test` 里都一样；`setTheme(null)` 恢复应用自己的主题。`token()` 立即读到新的 token。主题要整个读得懂：有读不懂的值时抛出列出该值的 `TypeError`，正在显示的主题保持不变。请从应用自己的主题文件出发构造新主题，这样类名引用的每个 token 都还有值。Rust 应用用 `set_tokens(theme.into())` 设置一个 `nsh_base::Theme` 的 token。
+- **应用可以换一个主题。** `nsh` 的 [`setTheme(theme)`](../modules/nsh.md#settheme) 在应用运行时把一个同样格式的主题设为应用的主题，取代它的 `"theme"`，在每个平台和 `nsh test` 里都一样；`setTheme(null)` 恢复应用自己的主题。`token()` 立即读到新的 token。带有 `"components"` 的主题同时带来它的组件外观；没有的则保留应用自己的外观。主题要整个读得懂：有读不懂的值时抛出列出该值的 `TypeError`，正在显示的主题保持不变。请从应用自己的主题文件出发构造新主题，这样类名引用的每个 token 都还有值。Rust 应用用 `set_tokens(theme.into())` 设置一个 `nsh_base::Theme` 的 token。
 - **与其他类名一样检查。** 既不是默认主题、也不是应用 `"theme"` 中 token 的名称，在构建时会报告为未知类（`unknown class 'bg-chart-up'`）。要使用只有宿主或运行时设置的主题提供的 token，在应用的 `"theme"` 里也给它一个值：应用单独运行时显示这个值。
 
 引用 token 的类和其他类一样，每套主题只解析一次：绘制时的开销与调色板颜色相同。
@@ -290,8 +290,10 @@ import { Canvas, token } from "nsh";
 
 ## 组件样式
 
-应用把接受 `variant` 和 `size` 的 `nsh/base` 控件（`Button`）的外观声明一次，每个页面按名称使用：`nsh.json` 中的 `"components"` 为每个组件保存一个基础外观、按名称
-区分的各变体和尺寸的外观，以及控件没有指名时使用的变体和尺寸。每个外观是一串类名，状态写成变体（`hover:`、`active:`、
+应用把接受 `variant` 和 `size` 的 `nsh/base` 控件（`Button`）的外观声明一次，每个页面按名称使用。它们属于应用的主题：主题文件中
+`"cssVars"` 旁边的 `"components"` 为每个组件保存一个基础外观、按名称区分的各变体和尺寸的外观，以及控件没有指名时使用的变体和
+尺寸。这样一个文件就是应用的设计系统，token 和组件外观放在一起：编码智能体写 UI 之前读一个文件即可，复制这个文件就带走了全部
+风格，切换主题也能切换外观。每个外观是一串类名，状态写成变体（`hover:`、`active:`、
 `focus:`、`disabled:`、`selected:`）。在 Rust 中，同样的声明是类型化的：用样式方法调用 `set_component_style`；两种语言的页面都用
 `variant` 和 `size` 选取外观：
 
@@ -321,16 +323,22 @@ button().variant("ghost").with_size("sm").child(text("Later"))
 ```
 
 ```tsx tabs
-// nsh.json
-// "components": {
-//   "button": {
-//     "base": "flex-row items-center gap-2 rounded-(--radius)",
-//     "variants": {
-//       "primary": "bg-primary text-primary-foreground hover:bg-primary/90",
-//       "ghost": "hover:bg-accent"
-//     },
-//     "sizes": { "sm": "h-8 px-2", "md": "h-9 px-3" },
-//     "defaults": { "variant": "primary", "size": "md" }
+// theme.json（nsh.json: "theme": "theme.json"）
+// {
+//   "cssVars": {
+//     "light": { "primary": "#4f46e5" },
+//     "dark": { "primary": "#818cf8" }
+//   },
+//   "components": {
+//     "button": {
+//       "base": "flex-row items-center gap-2 rounded-(--radius)",
+//       "variants": {
+//         "primary": "bg-primary text-primary-foreground hover:bg-primary/90",
+//         "ghost": "hover:bg-accent"
+//       },
+//       "sizes": { "sm": "h-8 px-2", "md": "h-9 px-3" },
+//       "defaults": { "variant": "primary", "size": "md" }
+//     }
 //   }
 // }
 
@@ -344,12 +352,16 @@ button().variant("ghost").with_size("sm").child(text("Later"))
 - **顺序。** 在控件上，先应用基础外观，再应用变体的，然后是尺寸的，最后是使用处控件自己的 `class`、`style` 和状态样式。
   “后者优先”只在同一类规则之间成立，所以声明中的 `hover:` 外观仍会盖过使用处的普通 `bg-*`；使用处要改变某个状态，就写同一个
   变体（`hover:bg-*`）。
-- **Rust 与 `nsh.json` 一起生效。** 同一个名称的类型化外观和类名都会应用，类型化的在前；两边都设置默认值时，以 `nsh.json`
-  的 `"defaults"` 为准。Rust 应用同样读取它的 `nsh.json` 中的 `"components"`。
-- **在首次渲染之前。** `nsh.json` 中的声明在第一帧之前生效。Rust 在根组件中、控件构建之前声明。
-- **像其他类名一样检查。** NSH 不认识的类名，或应用的 `"theme"` 中没有的 token，构建时给出警告并被去掉
-  （``nsh.json: components: button.variants.primary: unknown class `bg-acme`, ignored``）。声明中没有的 `variant` 或 `size`
+- **Rust 与主题一起生效。** 同一个名称的类型化外观和类名都会应用，类型化的在前；两边都设置默认值时，以主题的 `"defaults"`
+  为准。Rust 应用同样从它的 `nsh.json` 指定的主题中读取 `"components"`。
+- **在首次渲染之前。** 主题中的声明在第一帧之前生效。Rust 在根组件中、控件构建之前声明。
+- **像其他类名一样检查。** NSH 不认识的类名，或主题中没有的 token，构建时给出警告并被去掉
+  （``theme: components: button.variants.primary: unknown class `bg-acme`, ignored``）。声明中没有的 `variant` 或 `size`
   不应用任何外观，并记录一次警告。
+- **运行时设置的主题。** 带有 `"components"` 的 [`setTheme(theme)`](../modules/nsh.md#settheme) 用主题的外观取代应用的类名
+  外观；没有 `"components"` 的主题保留应用自己的外观，所以只改颜色的主题不改变任何外观，`setTheme(null)` 恢复应用的主题及其外观。
+- **宿主调整 token。** 嵌入应用的主题覆盖只改变 token，从不改变组件外观。宿主可以调整的外观要引用一个 token，再由宿主覆盖它：
+  `"sm": "h-(--control-sm) px-3"`，并在主题的 `cssVars` 里定义 `control-sm`（`"theme": { "control-sm": "32px" }`）。
 
 ## 类名检查
 

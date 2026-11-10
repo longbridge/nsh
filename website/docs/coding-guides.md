@@ -29,7 +29,8 @@ Use this development order:
    with the typography, spacing, radius and size scales the components use.
 3. Declare the component styles: the looks of the controls that take `variant` and `size` (`Button`), once per
    control, by variant and size, with their interaction states, in the app's Rust theme code
-   (`set_component_style`) or in `nsh.json` `"components"`. Style the other `nsh/base` controls, parts and states
+   (`set_component_style`) or in the theme file's `"components"`, beside its `"cssVars"`, so one file holds the
+   whole design system. Style the other `nsh/base` controls, parts and states
    included, once in the app's own shared components, and compose controls there where a pattern needs more than
    one. Verify a representative composition on the supported targets before replicating it across pages.
 4. Compose pages by naming variants and sizes (`.variant("primary")` in Rust, `variant="primary"` in TSX) and by
@@ -73,7 +74,7 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-// nsh.json declares the buttons:
+// The theme file (nsh.json "theme") declares the buttons beside its "cssVars":
 // "components": {
 //   "button": {
 //     "base": "flex-row items-center justify-center gap-2 rounded-md",

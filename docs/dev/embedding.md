@@ -255,7 +255,9 @@
   `IllegalArgumentException`, C returns it) that changes nothing. The tokens go to the engine as host tokens
   (`EngineControl::set_tokens`, `Core::set_host_tokens`): they win over the app's tokens of the same names in both
   appearances, the app's others stay (`Tokens::over`), and classes naming the changed tokens (`bg-primary`,
-  `rounded-(--radius)`) are resolved again at once, as are Rust components reading `theme()`. Each platform keeps
+  `rounded-(--radius)`) are resolved again at once, as are Rust components reading `theme()`. Overrides change tokens
+  only, never the app's component looks (its theme's `"components"`): what a host may tune is a token, which the looks
+  can reference (`"sm": "h-(--control-sm) px-3"`). Each platform keeps
   them on its surface and starts every engine with them (`Engine::start_with`), so they are in the first frame of
   every app loaded later, a development reload included; `None` / `nil` / `null` gives the app its own theme back. A
   token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as

@@ -95,7 +95,7 @@ button()
 ## 样式
 
 按钮的外观属于你的应用：什么是主按钮、什么是幽灵按钮，由应用决定，并且只声明一次：写在应用的 Rust 主题代码中
-（`set_component_style("button", ..)`），或写在 `nsh.json` 的 `"components"` 中。一份声明包含基础外观、按名称区分的各变体和
+（`set_component_style("button", ..)`），或写在主题文件中 token 旁边的 `"components"` 中。一份声明包含基础外观、按名称区分的各变体和
 尺寸的外观及其状态，以及没有指名的按钮使用的默认值。之后页面用 `variant` 和 `size` 指名想要的外观：
 
 ```rust tabs
@@ -137,7 +137,7 @@ fn actions(save: impl Fn() + 'static, cancel: impl Fn() + 'static) -> impl IntoE
 ```
 
 ```tsx tabs
-// nsh.json
+// 主题文件（nsh.json 的 "theme"），在 "cssVars" 旁边：
 // "components": {
 //   "button": {
 //     "base": "items-center justify-center rounded-lg",

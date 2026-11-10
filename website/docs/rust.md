@@ -536,7 +536,7 @@ when the system switches appearance, a binding such as `.bg(move || theme().prim
 render.
 
 On the theme, the crate declares its controls' looks once, as component styles: `set_component_style("button", ..)`
-in the root component (or `"components"` in `nsh.json`) gives each variant and size its typed styles and states, and
+in the root component (or `"components"` in the theme file, beside its `"cssVars"`) gives each variant and size its typed styles and states, and
 pages name them, `button().variant("primary").with_size("sm")`, in Rust and TSX alike
 ([Component styles](./tailwind.md#component-styles)).
 

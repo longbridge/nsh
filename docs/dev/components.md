@@ -774,7 +774,8 @@ value written as a color that is none (`#zz`, `lab()`, a `var()` that names no c
 is one that is no color in one appearance where the other's is a color (that color is both's): `nsh build` warns of
 them, the core logs them, `setTheme` refuses the file for them. An
 app sets its own in `nsh.json`: `"theme": "brand.json"` (relative to `nsh.json`) or the same JSON inline, over the
-default. Names the theme adds (`surface`, `up`, `radius-card`) are the app's own tokens, as the variables of a
+default. Beside `cssVars` a theme file holds the app's component looks, `"components"` ("Component styles"), so one
+file is the app's design system. Names the theme adds (`surface`, `up`, `radius-card`) are the app's own tokens, as the variables of a
 Tailwind 4 `@theme` are (`Theme::color` / `number` / `font`, `set_color` / `set_number` / `set_font`): classes name
 them (`bg-surface`, `bg-up/30`, `rounded-(--radius-card)`; `styles.md`) and TS reads them with `token()` of `nsh`
 (`nsh-js` `env.rs`: reactive, a color as `#rrggbbaa` in the appearance shown, a number, a font family), typed by
@@ -807,14 +808,27 @@ and `size`; Rust's setter of the size is `with_size`, beside `Styled::size`, as 
 (`element/component_styles.rs`) is a per-surface global signal holding two maps by component name: typed looks
 (`set_component_style("button", ComponentStyle::new().base(..).variant("primary", ..).size("sm", ..))`, the app's
 Rust code, `Styled` closures that may declare states with `.hover(..)` / `.active(..)` / `.focus(..)` /
-`.focus_within(..)` / `.disabled_style(..)` and `Styled`'s `.selected(..)`) and class looks (nsh.json `"components"`, read by
-`set_component_classes`: a TSX app's bundle sends them to the root as `componentStyles` before the first render, a
-Rust app's root carries them, `Root::components_json`, which the engine sets with `Core::set_component_styles`; the
-bundler and the CLI take out unknown classes with a warning, the core leaves out what it cannot read).
+`.focus_within(..)` / `.disabled_style(..)` and `Styled`'s `.selected(..)`) and class looks (the theme's
+`"components"`, beside its `cssVars`, read by `set_component_classes`: a TSX app's bundle sends them to the root as
+`componentStyles` before the first render, a Rust app's root carries them, `Root::components_json`, which the CLI
+generates from the theme `nsh.json` names; the engine sets them with `Core::set_component_styles`; the bundler and
+the CLI check the classes against the theme's tokens and take out unknown ones with a warning
+(``theme: components: button.variants.primary: unknown class `bg-acme`, ignored``, a Rust app's prefixed
+`nsh.json: `), the core leaves out what it cannot read). The looks are theme data rather than a key of `nsh.json` of
+their own: one file holds the app's tokens and component looks, so an agent reads one file before writing UI and a
+copy of it carries the whole style, a theme switch can switch the looks too, and in a theme `"components"` cannot be
+read as registering components.
 `set_component_style` replaces one component's typed looks and `set_component_classes` every class look, never the
-other map, so Rust and nsh.json looks of one name apply together: the typed closures, then the classes, Rust's
-string before nsh.json's (at equal rank the later wins); the defaults (`defaults.variant` / `size`) are nsh.json's
+other map, so Rust and theme looks of one name apply together: the typed closures, then the classes, Rust's
+string before the theme's (at equal rank the later wins); the defaults (`defaults.variant` / `size`) are the theme's
 when it has them.
+
+A theme `setTheme` gives may hold `components` too. `Core::set_ui_theme` applies a theme's `components` in place of
+the class looks; a theme without them gives back the app's own, which `Core::set_component_styles` stores, so a
+colors-only `setTheme` changes no component looks, and `setTheme(null)` gives back the app's theme and its looks. The
+app's own theme reaches `uiTheme` without its `components` (they come checked, as `componentStyles`). An embedding
+app's theme overrides (`Core::set_host_tokens`, the platforms' `set_theme_overrides`) change tokens only, never
+component looks: what a host may tune is a `cssVars` token, which looks can reference (`"sm": "h-(--control-sm) px-3"`).
 
 A component applies them with `Element::declared_style(component, variant, size)` on its root (`builder.rs`): the
 base look, then the variant's (the default variant when the page picks none), then the size's. On the root the order
@@ -823,7 +837,7 @@ is the component's own styles, then the declared typed looks (one bound style pa
 declares applies nothing and is warned of once per surface.
 
 - **Cost.** A component with no declaration when its element is built gets no binding at all, so an app that
-  declares nothing sends exactly what it sent before. Declarations therefore come before the first render (nsh.json,
+  declares nothing sends exactly what it sent before. Declarations therefore come before the first render (the theme,
   or the Rust root component's body). A declared component has two bindings; each subscribes to the whole store
   (one signal per surface). The store keeps one merged `Rc<ComponentStyle>` per component, rebuilt on a write, so a
   run shares it instead of copying its maps, and the class binding reuses its last string while the look, variant and

@@ -106,8 +106,9 @@ module:
 - The app's expressions keep their spans, so the source map points at the app.
 - The entry's prologue gives the renderer the app's themes (`setup`: the Tailwind theme and the components' `uiTheme`,
   the appearance, the status bar's default, `nsh.json` `"statusBar"`, and, as a sixth argument after the app's
-  information, the looks of `nsh-base`'s components, `nsh.json` `"components"` with the classes the bundler does not
-  know taken out (the root's internal `componentStyles`), before anything renders). Before any other
+  information, the looks of `nsh-base`'s components, the theme's `"components"` with the classes the bundler does not
+  know taken out (the root's internal `componentStyles`; the theme handed as `uiTheme` goes without them), before
+  anything renders). Before any other
   import, the entry imports `virtual:nsh-app`, whose `setup(null, null, null, null, app)` hands over what `appInfo()`
   reports (`nsh.json`'s id, name, version and build, the package's `--version` and `--build`, and whether the build is
   a development one), so a module reads it at its top level; a runtime that predates the fifth argument ignores it. A font import
