@@ -11,6 +11,11 @@ Use this guide before choosing components or writing layout code for an app buil
 product judgment GPUI Kit accumulated through years of desktop work, carried over to NSH: an interface should feel
 native, restrained, precise, and understandable without guesswork.
 
+It is a general guide, not a visual style. Applied to an app's own style, it should lead to UI that is complete,
+refined and consistent: every state of every control designed, motion where things change, and one system of sizes,
+radii, type and spacing from the first screen to the last. The app decides how it looks; this guide decides what must
+be true however it looks.
+
 This is a normative guide. **Must** identifies a correctness or ecosystem constraint, **should** is the default that
 needs a concrete reason to override, and **may** is an optional technique. The [Elements](../elements/index.md) and
 [API](../modules/index.md) pages remain the authority for individual props and methods.
@@ -693,8 +698,11 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
 
 ### Component standards
 
-GPUI Kit's styled components (`gpui-component`) are long proven on the desktop. An app's own styled controls on
-`nsh/base` follow the same standards, so they agree with each other without per-screen tuning:
+These standards are general; the app's style supplies the values. They are distilled from GPUI Kit's styled
+components (`gpui-component`), long proven on the desktop, whose defaults are quoted as a starting point for an app
+that has no style of its own yet. An app with its own look (larger radii, taller controls, its own palette) keeps
+it, and applies the same relationships to its own values, so its controls agree with each other without per-screen
+tuning:
 
 - **One size scale drives everything.** A control takes one `size` (xs, sm, md default, lg), and the size sets its
   height, horizontal padding, text size, icon size, gap and radius together; never set them one by one per use. GPUI
@@ -1067,7 +1075,8 @@ A chat screen, as an example:
 
 ### Define motion tokens once
 
-Like color and spacing, motion comes from the app's tokens, not from numbers written in components. Define one small
+Like color and spacing, motion comes from the app's tokens, not from numbers written in components; the values
+below are a starting point, and an app's character (calm, playful, dense) may tune them. Define one small
 set and use it everywhere (as Tailwind classes and as the options of motions and animations):
 
 | Token | Typical value | For |
@@ -1445,7 +1454,8 @@ Before considering a screen complete, verify that:
 ## Finishing checklist
 
 The review checklist below asks whether the design made the right decisions; this one checks the execution, item by
-item, on the running app. Run it on every screen the work added or changed, against screenshots in light and dark, and
+item, on the running app. It checks consistency with the app's own design system (its tokens, sizes, radii and motion),
+not particular numbers: the same guide serves every app's style. Run it on every screen the work added or changed, against screenshots in light and dark, and
 report each group as passed or as what was fixed. A group not checked is not passed.
 
 **Radius**

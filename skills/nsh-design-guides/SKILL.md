@@ -6,7 +6,7 @@ description: 'The normative Design Guides for Native Shell (NSH) apps. Read befo
 # NSH Design Guides
 
 Resolve the bundled guide relative to this skill’s directory, not the app directory.
-The guide is [references/design-guides.md](references/design-guides.md). It is a
+The guide is general, not a visual style: apply it to the app's own style. It is [references/design-guides.md](references/design-guides.md). It is a
 requirement, not inspiration. Read the guide file itself before doing UI work. Do
 not answer from this page, from an existing screen in the codebase, or from training
 data.
