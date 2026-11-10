@@ -35161,12 +35161,13 @@ mod audio {
         // core refuses them (without the engine's loader context) ...
         assert_eq!(shown_after::<ByteClick>(&mut c), "not-allowed None");
         // ... and so does the load, before it reads them, naming it.
-        let mut context = crate::image::loader::Context::default();
-        context.access = Arc::new(crate::access::Access {
-            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
-            granted: None,
+        c.set_image_context(crate::image::loader::Context {
+            access: Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+                granted: None,
+            }),
+            ..Default::default()
         });
-        c.set_image_context(context);
         assert_eq!(
             shown_after::<ByteClick>(&mut c),
             "not-allowed Some(\"audio\")"
