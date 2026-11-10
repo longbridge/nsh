@@ -99,3 +99,33 @@ fn nested_values_are_left_out() {
     );
     assert_eq!(fields.len(), 1);
 }
+
+#[test]
+fn wheels_reach_the_core_with_their_unit() {
+    let sent = |mode: &str| {
+        payload(
+            EventKind::Wheel,
+            json!({
+                "position": { "x": 1, "y": 2 },
+                "pagePosition": { "x": 11, "y": 12 },
+                "delta": { "x": 0, "y": -3 },
+                "deltaMode": mode,
+                "modifiers": { "control": true, "alt": false, "shift": false, "platform": false },
+            }),
+        )
+    };
+    let EventPayload::Wheel(lines) = sent("lines") else {
+        panic!("onWheel carries a wheel");
+    };
+    assert_eq!(
+        lines.delta,
+        nsh_core::WheelDelta::Lines(nsh_core::geometry::point(0.0, -3.0))
+    );
+    assert!(lines.modifiers.ctrl);
+    assert_eq!(lines.page_position.x.0, 11.0);
+    let EventPayload::Wheel(points) = sent("points") else {
+        panic!("onWheel carries a wheel");
+    };
+    assert!(points.delta.precise());
+    assert_eq!(points.delta.xy(), (0.0, -3.0));
+}

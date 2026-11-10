@@ -13,6 +13,7 @@ use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
     MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
+    WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1479,6 +1480,20 @@ pub trait Interactive: Element {
         self.on(
             EventKind::MouseMove,
             events::typed(listener.into_listener(), events::mouse),
+        )
+    }
+
+    /// A mouse wheel or touchpad scrolled over it (or an element inside
+    /// it): by how much ([`WheelEvent::delta`], lines or points), where and
+    /// with which modifier keys. The nearest element that listens hears it;
+    /// when it is nearer than any scroll view under the pointer it takes
+    /// the wheel and nothing scrolls natively (a canvas zooming on
+    /// Control + wheel and panning otherwise); a scroll view listening, or
+    /// an element around one, only observes it.
+    fn on_wheel<M>(self, listener: impl IntoListener<WheelEvent, M>) -> Self {
+        self.on(
+            EventKind::Wheel,
+            events::typed(listener.into_listener(), events::wheel),
         )
     }
 

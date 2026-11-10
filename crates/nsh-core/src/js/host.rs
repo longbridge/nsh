@@ -535,6 +535,19 @@ export interface MouseEvent {
   pressedButton: MouseButton | null;
 }
 
+/** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
+export interface WheelEvent {
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+  /** How far it scrolled, in `deltaMode` units: positive `y` scrolls down (toward the end), positive `x` right, as the DOM's `deltaX` / `deltaY`. */
+  delta: Point;
+  /** `"points"`: a precise device (a touchpad); `"lines"`: mouse wheel notches. */
+  deltaMode: "points" | "lines";
+  modifiers: Modifiers;
+}
+
 /** A mouse button (GPUI's `MouseButton`). */
 export type MouseButton = "left" | "right" | "middle" | "back" | "forward";
 
@@ -663,6 +676,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::ALL,
         "(e: MouseEvent) => void",
         "The mouse moved over the view (or a view inside it), with or without a button down (`e.pressedButton`), or a modifier key changed while it rests there with none down; at most once per frame.",
+    ),
+    (
+        EventKind::Wheel,
+        on::ALL,
+        "(e: WheelEvent) => void",
+        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.ctrl` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
     ),
     (
         EventKind::ContextMenu,

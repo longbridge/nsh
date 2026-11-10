@@ -2636,6 +2636,51 @@ fn gesture_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option
     })
 }
 
+/// A wheel by `(dx, dy)` (`precise`: points, else lines) at `(x, y)`
+/// (root coordinates): the nearest view around the one under it that
+/// listens to `onWheel` hears it ([`input::wheel_listener`]). Returns
+/// whether that view takes the wheel, so nothing scrolls natively; a
+/// hosted AppKit view under the pointer (a web page, a text view) keeps
+/// it.
+fn wheel_event(
+    surface: &Surface,
+    x: f32,
+    y: f32,
+    precise: bool,
+    dx: f32,
+    dy: f32,
+    flags: NSEventModifierFlags,
+) -> bool {
+    if dx == 0.0 && dy == 0.0 {
+        return false;
+    }
+    let Some(hit) = pick(&event_root(surface), x, y) else {
+        return false;
+    };
+    let Some((view, takes)) = input::wheel_listener(
+        chain(&hit.view),
+        |v| v.state().events.contains(EventKind::Wheel),
+        |v| v.kind() == ViewKind::Scroll,
+    ) else {
+        return false;
+    };
+    let delta = if precise {
+        nsh_core::WheelDelta::Points(point(Points(dx), Points(dy)))
+    } else {
+        nsh_core::WheelDelta::Lines(point(dx, dy))
+    };
+    let (location_x, location_y) = local(surface, &view, x, y);
+    let event = nsh_core::WheelEvent::new(
+        point(Points(location_x), Points(location_y)),
+        point(Points(x), Points(y)),
+        delta,
+        modifiers(flags),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(event));
+    takes && !hit.native
+}
+
 /// Whether `event` belongs to a scroll this surface does not take, so its
 /// view passes it up the responder chain: the app is embedded in another
 /// view's content ([`embedded`]) and no scroll view of it that can move
@@ -2705,6 +2750,15 @@ fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
     );
     let phase = event.phase();
     let momentum = event.momentumPhase();
+    // A view listening to `onWheel` nearer than the scroll views under the
+    // pointer takes the wheel, Control + wheel and momentum included (a
+    // canvas zooming or panning); a gesture going on still ends.
+    if wheel_event(surface, x, y, precise, dx, dy, event.modifierFlags()) {
+        if phase.contains(NSEventPhase::Ended) || phase.contains(NSEventPhase::Cancelled) {
+            gesture_event(surface, phase, x, y, 0.0, 0.0, time);
+        }
+        return;
+    }
     if !momentum.is_empty() {
         return momentum_event(surface, momentum, dx, dy, time);
     }

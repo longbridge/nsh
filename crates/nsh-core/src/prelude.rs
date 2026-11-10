@@ -193,6 +193,8 @@ pub use crate::element::{
     VirtualList,
     WebNavigation,
     WebView,
+    WheelDelta,
+    WheelEvent,
     WritingDirection,
     asset,
     assets,

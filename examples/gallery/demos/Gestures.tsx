@@ -472,6 +472,28 @@ function Hover() {
   );
 }
 
+/** A wheel over a canvas: Control + wheel zooms, the wheel pans, and the page around does not scroll (desktops, web). */
+function WheelPad() {
+  const zoom = signal(1);
+  const pan = signal({ x: 0, y: 0 });
+  return (
+    <Card icon="gestures" title="Wheel" subtitle="Control + wheel zooms, the wheel pans" right={<Badge label={`${Math.round(zoom() * 100)}%`} tone="neutral" />}>
+      <View
+        testID="wheel-pad"
+        onWheel={(e) => {
+          const unit = e.deltaMode === "lines" ? 16 : 1;
+          if (e.modifiers.control) zoom.update((z) => Math.min(4, Math.max(0.25, z * (1 - (e.delta.y * unit) / 200))));
+          else pan.update((p) => ({ x: p.x - e.delta.x * unit, y: p.y - e.delta.y * unit }));
+        }}
+        style={{ ...stage(), height: 120, overflow: "hidden", alignItems: "center", justifyContent: "center" }}
+      >
+        <View style={{ width: 48, height: 48, borderRadius: 10, backgroundColor: colors.accent, transform: [{ translateX: pan().x }, { translateY: pan().y }, { scale: zoom() }] }} />
+      </View>
+      <Api label="Wheel over a view" api="onWheel" />
+    </Card>
+  );
+}
+
 /** Elements labelled for VoiceOver / TalkBack. */
 function Accessibility() {
   const last = signal("");
@@ -507,5 +529,5 @@ function Accessibility() {
 }
 
 export function Gestures() {
-  return <DemoPage cards={[Transformable, Ball, Hover, TouchPad, PressEvents, HitSlop, PointerEvents, Accessibility]} />;
+  return <DemoPage cards={[Transformable, Ball, Hover, WheelPad, TouchPad, PressEvents, HitSlop, PointerEvents, Accessibility]} />;
 }

@@ -22484,6 +22484,51 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
         MountItem::Text { text, .. } if text.text == "4 5 14 25")));
 }
 
+#[test]
+fn wheels_reach_rust_listeners_with_their_delta() {
+    use crate::prelude::*;
+    #[component]
+    fn Canvas() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_wheel(move |e: &WheelEvent| {
+                let (dx, dy) = e.delta.xy();
+                at.set(format!(
+                    "{} {} {dx} {dy} {} {}",
+                    e.position.x.0,
+                    e.page_position.y.0,
+                    e.delta.precise(),
+                    e.modifiers.ctrl
+                ))
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Canvas>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::Wheel) => Some(*id),
+            _ => None,
+        })
+        .expect("the listening view mounts Wheel in its event mask");
+    let event = crate::WheelEvent::new(
+        point(px(4.0), px(5.0)),
+        point(px(14.0), px(25.0)),
+        crate::WheelDelta::Lines(point(0.0, -2.0)),
+        crate::keymap::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    );
+    assert!(c.component_event(host, EventKind::Wheel, &EventPayload::Wheel(event)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "4 25 0 -2 false true")));
+}
+
 /// A container `2` with `style` and empty children `4`, `6`, ... with
 /// theirs, laid out at the root; the children's frames.
 fn grid_frames(

@@ -6,7 +6,7 @@ use std::{borrow::Cow, sync::Arc};
 use super::builder::Listener;
 use crate::{
     Bounds, ContextMenuEvent, EventPayload, JsonValue, MouseEvent, PayloadValue, Point, Points,
-    PressEvent, Size, TouchEvent,
+    PressEvent, Size, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
 };
 
@@ -583,6 +583,13 @@ pub(crate) fn mouse(p: &EventPayload) -> Option<Cow<'_, MouseEvent>> {
 pub(crate) fn context_menu(p: &EventPayload) -> Option<Cow<'_, ContextMenuEvent>> {
     match p {
         EventPayload::ContextMenu(e) => Some(Cow::Borrowed(e)),
+        _ => None,
+    }
+}
+
+pub(crate) fn wheel(p: &EventPayload) -> Option<Cow<'_, WheelEvent>> {
+    match p {
+        EventPayload::Wheel(e) => Some(Cow::Borrowed(e)),
         _ => None,
     }
 }
