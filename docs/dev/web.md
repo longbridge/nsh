@@ -803,12 +803,14 @@ browsers' touches into what phones report:
   load's entries (`nshIndex`), and the player mirrors each entry's depth (`historyIndex`, `historyDepths`), so a back
   of the app's own goes to the newest earlier entry at most as deep (`entryAtDepth`) and a `popstate` knows which way
   the user went. The root's `onUrlScheme` event with `change: "back" | "forward" | "address"` (`url_scheme::CHANGE`,
-  `AppUrlChangeCause`; another cause is the address alone, quietly) sets the address and queues an `AppUrlChange` for
+  `AppUrlChangeReason`; another reason is the address alone, quietly) sets the address and queues an `AppUrlChange` for
   `next_app_url_change()`, at most 16, and only once something listened (`hears_changes`: before it the address has
   them); the TS module posts each to the listeners there are and keeps none. The player sends it for a traversal
-  between entries of one depth (`tellAddress(cause)`), for a `#fragment` the user typed (a state-less entry of the
+  between entries of one depth (`tellAddress(reason)`), for a `#fragment` the user typed (a state-less entry of the
   page whose address is not the one shown: it gets this session's state at the depth shown and the next index, and the
-  app's pages stay; before, it sent the app back to its start), and for a back that popped pages when the entry's
+  app's pages stay; before, it sent the app back to its start. Where the browser has the Navigation API, a state-less
+  entry before the app's first (`historyBase`, `beforeFirstEntry`) is the page's own, from before the player, and a
+  back onto it is a back past the first entry), and for a back that popped pages when the entry's
   address is not the one the app showed and the app set none as it answered: the player waits until the pages it
   popped are dismissed (`dismissing`, `goBack`) and the app had a turn after their `onDismiss`, at most
   `POP_ANSWER_MS` (1.5 s; a page's `onDismiss` follows its slide, `settlePop`). A forward to a depth the stack lost

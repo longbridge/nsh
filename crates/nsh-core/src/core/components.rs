@@ -5141,7 +5141,7 @@ impl<M: TextEngine> Core<M> {
         url: String,
         page: bool,
         quiet: bool,
-        change: Option<crate::url_scheme::AppUrlChangeCause>,
+        change: Option<crate::url_scheme::AppUrlChangeReason>,
     ) {
         let links = &mut self.components.url_schemes;
         let checked = if page {
@@ -5158,11 +5158,11 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let links = &mut self.components.url_schemes;
-        if let Some(cause) = change {
+        if let Some(reason) = change {
             if !links.hears_changes {
                 return;
             }
-            let change = crate::url_scheme::AppUrlChange { url, cause };
+            let change = crate::url_scheme::AppUrlChange { url, reason };
             if let Some(answer) = links.next_change.take() {
                 answer.borrow_mut().deliver(change);
                 return;
@@ -6101,17 +6101,17 @@ impl<M: TextEngine> Core<M> {
                 let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
                 let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
                 // An address move the app did not make (the web's back or
-                // forward), by its cause; one of a newer platform's causes
+                // forward), by its reason; one of a newer platform's reasons
                 // is still the address, quietly.
                 let change = entries.iter().find_map(|(k, v)| match v {
                     crate::PayloadValue::Str(s) if *k == crate::url_scheme::CHANGE => {
-                        Some(crate::url_scheme::AppUrlChangeCause::parse(s))
+                        Some(crate::url_scheme::AppUrlChangeReason::parse(s))
                     }
                     _ => None,
                 });
                 let (quiet, change) = match change {
                     Some(None) => (true, None),
-                    Some(cause) => (quiet, cause),
+                    Some(reason) => (quiet, reason),
                     None => (quiet, None),
                 };
                 // The page's base URL (the web), which Rust's `set_app_url`
