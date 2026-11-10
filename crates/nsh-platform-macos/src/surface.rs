@@ -198,6 +198,8 @@ pub(crate) struct Surface {
     pub(crate) root: NshView,
     /// Views by node id, and what mounting needs between items.
     pub(crate) mounter: RefCell<Mounter>,
+    /// Views of big batches waiting out of sight ([`crate::pace`]).
+    pacer: RefCell<crate::pace::Pacer>,
     /// The native animation graph.
     pub(crate) anim: RefCell<UiAnimation>,
     /// Stacks, screens and modals.
@@ -354,6 +356,7 @@ impl Surface {
             mtm,
             root: root.clone(),
             mounter: RefCell::new(Mounter::new(root.clone())),
+            pacer: RefCell::default(),
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
             windows: RefCell::default(),
@@ -508,6 +511,7 @@ impl Surface {
         crate::global_shortcut::release(self.key);
         self.js_frame.set(false);
         self.queued.borrow_mut().clear();
+        self.pacer.borrow_mut().clear();
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
         #[cfg(feature = "dev")]
@@ -760,8 +764,15 @@ impl Surface {
         for (_, at) in self.frame_callbacks.borrow_mut().iter_mut() {
             *at = Some(now);
         }
+        // Waiting views the batch names go in first, as the core sent
+        // them; what it makes out of sight in quantity waits in turn.
+        let plan = self.split(batch);
+        let mut waits = plan.as_ref().map(|p| p.waits.iter());
         crate::access::prepare(batch);
         for item in &batch.items {
+            if waits.as_mut().and_then(Iterator::next) == Some(&true) {
+                continue;
+            }
             self.anim.borrow_mut().apply(item);
             if !matches!(
                 item,
@@ -771,10 +782,70 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        if let Some(plan) = plan {
+            let mut pacer = self.pacer.borrow_mut();
+            for tree in plan.trees {
+                pacer.push(tree);
+            }
+            drop(pacer);
+            // What shows goes in with the rest of the batch.
+            self.pace(None);
+        }
         crate::window::batch_applied(self);
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
+        }
+    }
+
+    /// Applies the waiting trees `batch` names, and splits off it what
+    /// may wait ([`crate::pace::plan`]).
+    fn split(self: &Rc<Self>, batch: &MountBatch) -> Option<crate::pace::Plan> {
+        let named = self.pacer.borrow().named_by(&batch.items);
+        if !named.is_empty() {
+            let mut pacer = self.pacer.borrow_mut();
+            crate::pace::flush(&mut pacer, &named, |items| self.apply_waiting(&items));
+            drop(pacer);
+            self.mounter.borrow_mut().end_batch(self);
+        }
+        let mounter = self.mounter.borrow();
+        crate::pace::plan(&batch.items, |id| mounter.views.contains_key(&id))
+    }
+
+    /// Applies views of the waiting trees: those in view whole, and with a
+    /// `budget` more of the rest ([`crate::pace::run`]).
+    fn pace(self: &Rc<Self>, budget: Option<std::time::Duration>) {
+        let Ok(mut pacer) = self.pacer.try_borrow_mut() else {
+            return;
+        };
+        if pacer.is_empty() || self.mounter.try_borrow_mut().is_err() {
+            return;
+        }
+        let mut applied = false;
+        crate::pace::run(
+            &mut pacer,
+            budget,
+            |tree| self.mounter.borrow().tree_shows(tree),
+            |id| self.mounter.borrow().views.contains_key(&id),
+            |items| {
+                applied = true;
+                self.apply_waiting(&items);
+            },
+        );
+        drop(pacer);
+        if applied {
+            self.mounter.borrow_mut().end_batch(self);
+            self.write_animations();
+        }
+    }
+
+    /// Applies one waiting view's items.
+    fn apply_waiting(self: &Rc<Self>, items: &[MountItem]) {
+        for item in items {
+            self.anim.borrow_mut().apply(item);
+            if !matches!(item, MountItem::AnimationBindings { .. }) {
+                self.mounter.borrow_mut().apply(self, item);
+            }
         }
     }
 
@@ -878,6 +949,7 @@ impl Surface {
             || !self.queued.borrow().is_empty()
             || self.anim.borrow().animating()
             || !self.frame_callbacks.borrow().is_empty()
+            || self.pacer.try_borrow().is_ok_and(|p| !p.is_empty())
     }
 
     /// Runs the display link while animations run or JS wants a frame (or
@@ -1119,6 +1191,7 @@ impl Surface {
     }
 
     fn tick(self: &Rc<Self>, now: f64) {
+        let start = std::time::Instant::now();
         let applied = self.apply_queued(FRAME_BATCHES);
         if self.anim.borrow().animating() {
             self.anim.borrow_mut().tick(now);
@@ -1147,6 +1220,9 @@ impl Surface {
         // only a move can show a view put off. A transform counts only
         // when its subtree has deferred drawing or placement, so an
         // endless animation elsewhere does not force a pass every frame.
+        // Waiting views: the scroll may have brought some in; the rest of
+        // the frame's budget goes to more of them.
+        self.pace(Some(crate::pace::BUDGET.saturating_sub(start.elapsed())));
         if applied || crate::sight::moves() != self.revisited.get() {
             self.revisit();
         }
@@ -1196,6 +1272,12 @@ impl Surface {
     /// Draws views whose drawing changed out of sight and that show now
     /// ([`Mounter::draw_when_shown`]); after anything that moves views.
     pub(crate) fn revisit(&self) {
+        // Views moved: waiting trees they bring into view go in now.
+        if self.pacer.try_borrow().is_ok_and(|p| !p.is_empty())
+            && let Some(surface) = find(self.key)
+        {
+            surface.pace(None);
+        }
         // Taken before the pass: a move during it is revisited next frame.
         let moves = crate::sight::moves();
         if let Ok(mounter) = self.mounter.try_borrow() {

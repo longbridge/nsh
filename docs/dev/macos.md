@@ -110,6 +110,14 @@ belong to the app, which owns retention and its storage budget.
   demo's pulsing sparklines redrew all 22 rows at 120 Hz). A canvas in sight redraws only the area its changed values
   cover (`NshView::redraw_rect`: `setNeedsDisplayInRect:` on the content layer; `docs/dev/canvas.md`, "Partial
   redraws").
+- **A batch that makes hundreds of views out of sight is spread over frames** (`pace.rs`): a list row mounting out of
+  sight (overscan, a long reply) came as one batch of 400 and more views, and its creation and the Core Animation
+  commit sending their layers to the render server took one frame of 90 ms. Of a batch making 64 views or more, the
+  trees made under views that exist already wait unless they show once the rest is applied (`Mounter::tree_shows`:
+  their parent's visible content, `sight.rs`); waiting trees come a level at a time, each view whole, within 4 ms and
+  32 views a frame, those within a scroll view's size of showing first. A tree a scroll brings in comes at once, and a
+  later batch naming a view of a waiting tree applies that tree first, so views change in the order the core sent.
+  Nothing waits in a batch that animates its layout, nor a tree that anything else in the batch names.
 - **Trackpad scrolls are shown in step with the display** (`scroll.rs`, `Resampled`): gesture and momentum events
   are resampled to the display's frames. Mouse wheels (no phases) still move at once. Anything else that moves the
   view (a drag, an animated scroll, a spring back) first shows where the events got to (`settle`).

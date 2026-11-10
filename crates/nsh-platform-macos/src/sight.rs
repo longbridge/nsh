@@ -149,6 +149,15 @@ fn within(r: Span) -> Sight {
     }
 }
 
+/// `sight` grown by `margin` on every side: what a scroll of up to
+/// `margin` may bring in ([`crate::pace`]'s trees near showing).
+pub(crate) fn grown(sight: Sight, (mx, my): (f32, f32)) -> Sight {
+    match sight {
+        Sight::Within(r) => Sight::Within((r.0 - mx, r.1 - my, r.2 + mx, r.3 + my)),
+        other => other,
+    }
+}
+
 /// Whether any of `rect` (in the content space `sight` is of) can be seen.
 pub(crate) fn admits(sight: Sight, rect: Span) -> bool {
     match sight {
@@ -236,6 +245,13 @@ impl<N> Sights<N> {
                 }
             },
         }
+    }
+
+    /// What can be seen of `node`'s content space (the space its
+    /// children's frames are in): what a child there shows of
+    /// ([`admits`]), one not made yet included ([`crate::pace`]).
+    pub(crate) fn content<T: Tree<Node = N>>(&mut self, tree: &T, node: N) -> Sight {
+        self.sight(tree, node)
     }
 
     /// What can be seen of `node`'s content space: walks up only to the
