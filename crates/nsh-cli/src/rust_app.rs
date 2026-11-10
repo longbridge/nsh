@@ -581,7 +581,7 @@ fn root_config(
     };
     if let Some(theme) = &theme {
         let json = fs::read_to_string(theme)?;
-        let (_, ignored) = nsh_base::Theme::from_json_with_diagnostics(&json)
+        let (_, ignored) = nsh_base::Theme::from_json_lenient(&json)
             .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
         for what in ignored {
             crate::ui::warn(format_args!(

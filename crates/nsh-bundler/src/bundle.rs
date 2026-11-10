@@ -413,7 +413,7 @@ fn tailwind_setup(
         setup.json = Some(json);
     }
     if let Some(json) = theme_json(dir, &config)? {
-        let (theme, ignored) = nsh_base::Theme::from_json_with_diagnostics(&json)
+        let (theme, ignored) = nsh_base::Theme::from_json_lenient(&json)
             .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?;
         warn_ignored("theme", &ignored);
         tokens = theme.into_tokens();

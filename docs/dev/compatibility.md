@@ -65,7 +65,7 @@ good, whatever the version number says. Between releases, and before the first c
    tailwind color of a newer syntax), is a warning and is left out entry by entry, never an error, at build time
    and at run time alike, and the rest applies: `nsh-cli`'s `package::parse_config` (unknown keys through
    `serde_ignored`, values through `serde_path_to_error`, removed and read again), the
-   `nsh_base::Theme::from_json_with_diagnostics`, `from_json_lenient` of `tailwind::Theme` and `StatusBarSetting`,
+   `from_json_lenient` of `tailwind::Theme`, `nsh_base::Theme` and `StatusBarSetting`,
    `url_scheme::schemes_from_json_lenient`, the bundler's `resolve`, `Capabilities::from_json_lenient` (a capability or `http` grant it cannot read is not granted, so
    nothing left out widens access). Only text that is no JSON object, a file `nsh.json` names that is missing,
    NSH's own `Info.plist` keys and an Android `targetSdk` below the minimum are errors.
