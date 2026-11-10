@@ -63,7 +63,7 @@ use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLe
 use crate::surface::{Surface, quiet};
 
 /// Scroll position and extent of a [`ViewKind::Scroll`] view.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ScrollState {
     /// Current offset (points; content coordinates of the viewport's top
     /// left).
@@ -92,6 +92,25 @@ pub(crate) struct ScrollState {
     pub(crate) mirrored: bool,
     /// Gestures, glides and the indicator ([`crate::scroll`]).
     pub(crate) live: crate::scroll::Live,
+}
+
+impl Default for ScrollState {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            content: (0.0, 0.0),
+            // Unzoomed: a zoom of 0 would scale the content away.
+            zoom: 1.0,
+            horizontal: false,
+            indicator: false,
+            behavior: Default::default(),
+            applied: 0,
+            sticky: Vec::new(),
+            mirrored: false,
+            live: Default::default(),
+        }
+    }
 }
 
 impl ScrollState {
@@ -182,12 +201,7 @@ impl ViewState {
             states: 0,
             shift: (0.0, 0.0),
             fade: 1.0,
-            scroll: matches!(kind, ViewKind::Scroll).then(|| {
-                Box::new(ScrollState {
-                    zoom: 1.0,
-                    ..Default::default()
-                })
-            }),
+            scroll: matches!(kind, ViewKind::Scroll).then(Box::default),
             text: None,
             image: None,
             canvas: None,
@@ -2308,5 +2322,14 @@ mod tests {
         let inside = scripted(&wheel, scripted_type);
         assert_eq!(inside, Some(NSEventType::ScrollWheel));
         assert_eq!(scripted_type(), None);
+    }
+
+    #[test]
+    fn a_default_scroll_state_is_unzoomed() {
+        let s = ScrollState {
+            content: (200.0, 300.0),
+            ..Default::default()
+        };
+        assert_eq!(s.max((100.0, 100.0)), (100.0, 200.0));
     }
 }

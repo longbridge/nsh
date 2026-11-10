@@ -2612,10 +2612,7 @@ mod tests {
 
     #[test]
     fn wheels_move_zoomed_content_both_ways_and_other_views_along_their_axis() {
-        let mut s = ScrollState {
-            zoom: 1.0,
-            ..ScrollState::default()
-        };
+        let mut s = ScrollState::default();
         assert_eq!(wheel_delta(&s, 3.0, 5.0), Offset::new(0.0, 5.0));
         s.horizontal = true;
         assert_eq!(wheel_delta(&s, 3.0, 5.0), Offset::new(3.0, 0.0));
