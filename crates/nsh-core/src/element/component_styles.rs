@@ -151,34 +151,44 @@ impl ComponentStyle {
             && self.default_size.is_none()
     }
 
-    /// `self` (typed looks) and `classes` (class looks) as one: each look
-    /// has the typed part of the first and the classes of the second.
-    fn merged(&self, classes: &Self) -> Self {
+    /// `self` (the app's Rust declaration) and `json` (nsh.json's) as one.
+    /// Per name both apply: the typed closures, then the classes, Rust's
+    /// string followed by the JSON's (the later wins at equal rank). The
+    /// JSON's defaults win when it has them.
+    fn merged(&self, json: &Self) -> Self {
+        fn join(rust: &Look, json: &Look) -> Look {
+            let classes = match (&rust.classes, &json.classes) {
+                (Some(r), Some(j)) => Some(format!("{r} {j}").into()),
+                (r, j) => r.clone().or_else(|| j.clone()),
+            };
+            Look {
+                typed: rust.typed.clone().or_else(|| json.typed.clone()),
+                classes,
+            }
+        }
         fn zip(
-            typed: &BTreeMap<String, Look>,
-            classes: &BTreeMap<String, Look>,
+            rust: &BTreeMap<String, Look>,
+            json: &BTreeMap<String, Look>,
         ) -> BTreeMap<String, Look> {
-            let mut out = typed.clone();
-            for (name, look) in classes {
-                out.entry(name.clone()).or_default().classes = look.classes.clone();
+            let mut out = rust.clone();
+            for (name, look) in json {
+                let merged = join(&out.get(name).cloned().unwrap_or_default(), look);
+                out.insert(name.clone(), merged);
             }
             out
         }
         Self {
-            base: Look {
-                typed: self.base.typed.clone(),
-                classes: classes.base.classes.clone(),
-            },
-            variants: zip(&self.variants, &classes.variants),
-            sizes: zip(&self.sizes, &classes.sizes),
-            default_variant: self
+            base: join(&self.base, &json.base),
+            variants: zip(&self.variants, &json.variants),
+            sizes: zip(&self.sizes, &json.sizes),
+            default_variant: json
                 .default_variant
                 .clone()
-                .or_else(|| classes.default_variant.clone()),
-            default_size: self
+                .or_else(|| self.default_variant.clone()),
+            default_size: json
                 .default_size
                 .clone()
-                .or_else(|| classes.default_size.clone()),
+                .or_else(|| self.default_size.clone()),
         }
     }
 }
@@ -206,8 +216,8 @@ pub(crate) fn component_style_of(component: &str) -> Option<ComponentStyle> {
         match (store.typed.get(component), store.classes.get(component)) {
             (None, None) => None,
             (Some(typed), None) => Some(typed.clone()),
-            (None, Some(classes)) => Some(classes.clone()),
-            (Some(typed), Some(classes)) => Some(typed.merged(classes)),
+            (None, Some(json)) => Some(json.clone()),
+            (Some(rust), Some(json)) => Some(rust.merged(json)),
         }
     })
 }
@@ -216,7 +226,8 @@ pub(crate) fn component_style_of(component: &str) -> Option<ComponentStyle> {
 /// nsh.json: an object by component name, each with `base` (classes),
 /// `variants` and `sizes` (objects of classes by name) and `defaults`
 /// (`variant`, `size`). Lenient: what does not fit is left out and named in
-/// the warnings returned.
+/// the warnings returned. A malformed top level (not JSON, not an object)
+/// clears all class looks and returns a warning.
 pub(crate) fn set_component_classes(json: &str) -> Vec<String> {
     let mut warnings = Vec::new();
     let mut classes = BTreeMap::new();
@@ -404,6 +415,55 @@ mod tests {
             assert!(warnings[0].contains("sise"));
             let (_, classes) = component_style_of("button").unwrap().resolve(None, None);
             assert_eq!(classes.as_deref(), Some("a b"));
+        });
+    }
+
+    #[test]
+    fn rust_and_json_looks_of_one_name_both_apply() {
+        run(|| {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            set_component_style(
+                "button",
+                ComponentStyle::new()
+                    .variant("primary", tagged(&log, "variant"))
+                    .variant_classes("primary", "rust"),
+            );
+            set_component_classes(r#"{"button":{"variants":{"primary":"json"}}}"#);
+            let (typed, classes) = component_style_of("button")
+                .unwrap()
+                .resolve(Some("primary"), None);
+            assert_eq!(applied(typed, &log), ["variant"]);
+            assert_eq!(classes.as_deref(), Some("rust json"));
+        });
+    }
+
+    #[test]
+    fn json_defaults_win_over_rust_defaults() {
+        run(|| {
+            set_component_style(
+                "button",
+                ComponentStyle::new()
+                    .variant_classes("a", "ra")
+                    .variant_classes("b", "rb")
+                    .default_variant("a"),
+            );
+            set_component_classes(
+                r#"{"button":{"variants":{"b":"jb"},"defaults":{"variant":"b"}}}"#,
+            );
+            let (_, classes) = component_style_of("button").unwrap().resolve(None, None);
+            assert_eq!(classes.as_deref(), Some("rb jb"));
+        });
+    }
+
+    #[test]
+    fn a_component_with_json_keeps_rust_base_classes() {
+        run(|| {
+            set_component_style("button", ComponentStyle::new().base_classes("rust"));
+            set_component_classes(r#"{"button":{"sizes":{"lg":"big"}}}"#);
+            let (_, classes) = component_style_of("button")
+                .unwrap()
+                .resolve(None, Some("lg"));
+            assert_eq!(classes.as_deref(), Some("rust big"));
         });
     }
 }
