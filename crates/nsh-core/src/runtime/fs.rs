@@ -547,11 +547,7 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
     } else {
         &access.declared.fs.read
     };
-    let available = cfg!(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )) && sys.os.is_desktop();
+    let available = crate::access::native_files(sys.os);
     let available = available || (cfg!(target_arch = "wasm32") && sys.filesystem.is_some());
     if !roots.is_empty() && !available {
         return Err(

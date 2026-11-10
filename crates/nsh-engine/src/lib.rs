@@ -1909,11 +1909,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     .map(|root| root.join(app_dir_name(config.app.app_id())))
                     .as_deref(),
                 &bundle_system_paths(bundle),
-                cfg!(any(
-                    target_os = "linux",
-                    target_os = "macos",
-                    target_os = "windows"
-                )) && config.environment.os.is_desktop(),
+                nsh_core::access::native_files(config.environment.os),
             ),
             _ => nsh_core::access::MediaFiles::default(),
         });

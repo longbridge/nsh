@@ -389,6 +389,17 @@ pub(crate) fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -
     inside(path, canonical).or_else(|| inside(path, expanded))
 }
 
+/// Whether apps have the native file system here that `capabilities.fs`
+/// grants (`fs/promises`, local media files): on the desktops (macOS,
+/// Windows, Linux), never on iOS, Android or the web.
+pub fn native_files(os: crate::platform::Os) -> bool {
+    cfg!(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )) && os.is_desktop()
+}
+
 /// The `capabilities.fs.read` roots local media files are read under, as
 /// `fs/promises` reads files: the app's declared roots and the host's grant
 /// (which narrows them), their anchors (`${dataDir}`, `${pluginDir}`,

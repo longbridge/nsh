@@ -163,18 +163,23 @@ impl crate::element::Local for Files {}
 /// `Command::ImageInfo` it sends (against the same base): why not when it
 /// may not.
 fn granted(sys: &System, url: &str) -> Result<(), JsError> {
-    let files = sys.locals.get::<Files>();
-    let files = files.0.get_or_init(|| {
-        let available = cfg!(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "windows"
-        )) && sys.os.is_desktop();
-        crate::access::MediaFiles::new(&sys.access, sys.data_dir.as_deref(), &sys.paths, available)
+    // An app without capabilities reads local files unchecked: no roots to
+    // resolve (`media_url` answers it before it looks at them).
+    let files = (!sys.access.is_unrestricted()).then(|| sys.locals.get::<Files>());
+    let files = files.as_ref().map(|files| {
+        files.0.get_or_init(|| {
+            let available = crate::access::native_files(sys.os);
+            crate::access::MediaFiles::new(
+                &sys.access,
+                sys.data_dir.as_deref(),
+                &sys.paths,
+                available,
+            )
+        })
     });
     if sys
         .access
-        .media_url(url, sys.base_url.as_deref(), Some(files))
+        .media_url(url, sys.base_url.as_deref(), files)
         .is_some()
     {
         return Ok(());
