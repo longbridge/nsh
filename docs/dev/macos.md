@@ -243,7 +243,10 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   root, so Option+Left moves the caret and Cmd+[ does nothing there.
 - **Input method compositions** (`text_input.rs` `Ctx::composition_changed`): the editing view's marked text is
   followed after each change, selection change and unmark, and reported as `onCompositionChange` (as it starts and
-  changes, and as it ends, after the `onChangeText` of the committed text; leaving the field ends it too). A value
+  changes, and as it ends, after the `onChangeText` of the committed text). Leaving the field commits it, as a browser's
+  blur does: as the editor resigns (a text view's `resignFirstResponder`, a field's `textShouldEndEditing:`), the input
+  method's session is dropped (`discardMarkedText`) and the marked text inserted as its commit would be
+  (`commit_marked`), so the change comes before the end. A value
   from JS that arrives during a composition is held and applied when the composition ends, if JS has seen every edit
   by then, so the input method's session continues undisturbed.
 - **At the root** (`view.rs` `keyDown:` → `input::key`): the selected text's Cmd+A / Cmd+C / Escape (`text.rs`;
