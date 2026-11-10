@@ -237,7 +237,8 @@ pub use crate::element::{
 };
 /// Sound ([`crate::audio`]).
 pub use crate::element::{
-    AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+    AudioFailure, AudioPlayer, PlayerState, Sound, SoundSource, audio_available, audio_player,
+    load_sound,
 };
 pub use crate::element::{
     Delay, Each, If, IntoElements, IntoReactive, KeyOptions, Memo, Owner, Prop, Reactive,

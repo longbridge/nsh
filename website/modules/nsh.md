@@ -2284,7 +2284,7 @@ import { AudioPlayer, Sound } from "nsh";
 ```ts
 declare class Sound {
   static available(): Promise<boolean>;
-  static load(src: string): Promise<Sound>;
+  static load(src: string | Uint8Array): Promise<Sound>;
   play(options?: { volume?: number; rate?: number }): void;
   stop(): void;
   readonly duration: number;
@@ -2330,8 +2330,10 @@ type AudioErrorCode =
 
 Loads a sound from an imported audio file (`import click from "./sounds/click.wav"`: the import is the file's
 `asset:/` URL, and the file ships with the app), a `file:` URL, a `data:` URI or an `http(s)` URL
-the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
-components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
+the app's `network` capability grants, or from a sound file's bytes (a `Uint8Array` the app made or downloaded; in
+Rust also bytes it embeds, `load_sound(include_bytes!("tick.wav"))`), and decodes it into memory. The bytes' format
+(WAV, AAC, MP3, ...) is read from the bytes themselves. A source the engine loaded already is shared, and so are equal
+bytes: two components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
 component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
 of decoded audio at once; past them `load` rejects with `code` `"ERR_NSH_QUOTA_EXCEEDED"`. Longer audio is an
 `AudioPlayer`'s.
