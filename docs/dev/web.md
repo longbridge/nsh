@@ -720,10 +720,13 @@ browsers' touches into what phones report:
   stop is blurred), so Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
   `screenOrder`): where the browser takes
   `reading-flow` (Chromium), it is read in the order it is on screen (`orderReading`: `reading-order` on its children,
-  the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`:focus-visible`), and
+  the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`focus-visible:` while it shows, as the browser's `:focus-visible`), and
   they are all that shows it: as the desktop backends, the runtime draws no ring of its own; a popped page gives the focus back to what had it when the page was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
-  text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
+  text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. A touch moves
+  the focus as the browser does (a tap outside a field closes the keyboard), unless its press made the app focus a field
+  (an editor's text): the mouse events the browser makes of the touch then leave the focus in the field (`mouseDown`,
+  `pressFocus`), so the keyboard stays open. The views under the newest
   `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
@@ -926,7 +929,9 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
   `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user. An image read
   is the first image item as a `data:` URI the player encodes itself; the core measures it against
-  `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it).
+  `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it). An image written goes on the
+  clipboard as a PNG, the image format browsers write: another format is decoded and encoded again (pitfalls.md
+  "Web, browsers"). A write that fails is a console warning; `writeImage` has resolved already.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
   runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `placeholder` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden

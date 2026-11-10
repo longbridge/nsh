@@ -104,7 +104,7 @@ function Channel(props: { space: ColorSpace; channel: ColorChannel; label: strin
         accessibilityLabel={`${props.name} value`}
         style={fieldStyle}
         class="text-[13px] font-mono text-right text-foreground"
-        focusStyle={focusRing()}
+        focusVisibleStyle={focusRing()}
       />
     </View>
   );
@@ -210,7 +210,7 @@ export function ColorPickerDemo() {
                       }
                 }
                 class="text-[13px] font-mono text-foreground"
-                focusStyle={focusRing()}
+                focusVisibleStyle={focusRing()}
               />
               {/* The system's eyedropper (macOS, browsers with one); hidden where there is none. */}
               <ColorEyeDropper

@@ -548,7 +548,7 @@ fn card(selected: Signal<bool>) -> impl IntoElement {
         // Native states: no binding, nothing runs.
         .hover(|s| s.bg(move || theme().accent))
         .active(|s| s.opacity(0.7))
-        .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
         .disabled_style(|s| s.opacity(0.5))
         .dark(|s| s.border_2())
         // App state.
