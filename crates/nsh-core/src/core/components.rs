@@ -4906,6 +4906,10 @@ impl<M: TextEngine> Core<M> {
             }
             return false;
         }
+        // A secondary click is a press for the overlays it is outside of.
+        if let EventPayload::ContextMenu(event) = payload {
+            self.overlay_context_menu(id, event);
+        }
         // Hints follow the pointer on their anchors, whoever else listens.
         if matches!(kind, EventKind::MouseEnter | EventKind::MouseLeave) {
             let at = match payload {
