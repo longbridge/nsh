@@ -105,7 +105,45 @@ impl OpenState {
 /// (after it went: a sheet's motion, a popup's exit), whoever opened or
 /// closed it. `shown` is tracked; its
 /// first value only counts when it is shown.
+///
+/// All there is rendered: `open` waits for the commit after the one that
+/// made the content, whose refs then name its views, so the app's
+/// `focus()` in `onOpen` reaches them. A popup gone before then neither
+/// opens nor closes.
 pub(crate) fn lifecycle(
+    shown: impl Fn() -> bool + 'static,
+    open: impl Fn() + 'static,
+    close: impl Fn() + 'static,
+) {
+    let open = Rc::new(open);
+    // A newer flip ends an opening still waiting.
+    let generation = stored(0u64);
+    let opened = stored(false);
+    flips(
+        shown,
+        move || {
+            let current = generation.get().wrapping_add(1);
+            generation.replace(current);
+            let open = open.clone();
+            after_answer(move || {
+                if generation.get() == current {
+                    opened.replace(true);
+                    untracked(|| open());
+                }
+            });
+        },
+        move || {
+            generation.replace(generation.get().wrapping_add(1));
+            if opened.replace(false) {
+                close();
+            }
+        },
+    );
+}
+
+/// `open` as `shown` turns true and `close` as it turns false, in the
+/// change itself; its first value only counts when it is true.
+fn flips(
     shown: impl Fn() -> bool + 'static,
     open: impl Fn() + 'static,
     close: impl Fn() + 'static,

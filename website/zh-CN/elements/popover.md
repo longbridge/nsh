@@ -78,6 +78,30 @@ const open = signal(false);
 
 `closeOnEscape={false}` 让它在 Escape 和返回键时保持打开（`onCancel` 仍会收到它们，可以先询问用户）；`closeOnPressOutside={false}` 让它在外部按压时保持打开。
 
+<a id="keyboard-focus"></a>
+
+## 键盘焦点
+
+弹出框打开时不移动键盘焦点。要让弹出框像一个小的非模态对话框那样接住焦点，就在 `onOpen` 中聚焦它的内容：`onOpen` 在内容渲染之后才触发，此时内容里的 ref 已经指向各自的视图。给这个视图加上 `focusable`（或一个按压处理函数），它才能持有焦点。焦点在弹出框内时，弹出框因 Escape 或被应用关闭，焦点会在桌面平台上回到触发元素；外部按压则让焦点留在按压所在的位置。
+
+```rust tabs
+let panel = element_ref();
+
+popover()
+    .on_open(move || panel.focus())
+    .trigger(text("Filters"))
+    .child(view().element_ref(&panel).focusable(true).child(filter_form()))
+```
+
+```tsx tabs
+let panel!: ViewRef;
+<Popover onOpen={() => panel.focus()} trigger={<Text>Filters</Text>}>
+  <View ref={panel} focusable>
+    <FilterForm />
+  </View>
+</Popover>;
+```
+
 <a id="phones-and-desktops"></a>
 
 ## 手机与桌面
@@ -136,7 +160,7 @@ const open = signal(false);
 | 事件 | Rust | 说明 |
 |---|---|---|
 | `onOpenChange` | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因：`"triggerPress"`、`"pressOutside"` 或 `"cancel"`。 |
-| `onOpen` | `.on_open(\|\| ..)` | 它已显示。 |
+| `onOpen` | `.on_open(\|\| ..)` | 它已显示，内容已渲染：其中的 ref 已指向各自的视图。 |
 | `onClose` | `.on_close(\|\| ..)` | 它已消失（在离开过渡之后），应用关闭它时也会触发。 |
 | `onCancel` | `.on_cancel(\|\| ..)` | 用户尝试关闭它（Escape 或返回键、外部按压），无论它是否关闭。 |
 | `onPosition` | `.on_position(\|e\| ..)` | 弹出层已放置：`placement`（它所在的一侧）、`bounds`（它的框）、`available`（那一侧的空间）。 |
