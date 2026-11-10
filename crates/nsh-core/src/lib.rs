@@ -56,6 +56,7 @@ pub mod scroll;
 pub mod selection;
 pub mod shader;
 pub mod shape;
+pub mod single_instance;
 pub mod speech;
 pub mod storage;
 mod style;

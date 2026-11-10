@@ -55,8 +55,9 @@ use crate::{
     Command, EventKind, EventPayload,
     desktop::{
         self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuRole,
-        Shortcut, WindowAttributes, WindowCloseCause, WindowEvent, WindowFrame, WindowKind,
-        WindowMode, WindowOptions, WindowPlacement, WindowPosition, WindowRequest, WindowState,
+        Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes, WindowCloseCause,
+        WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions, WindowPlacement,
+        WindowPosition, WindowRequest, WindowState,
     },
     geometry::{Bounds, Edges, Point, Points, Size},
     keymap::When,
@@ -1287,6 +1288,8 @@ pub struct TrayClickEvent {
 pub struct Tray {
     icon: Option<ImageSrc>,
     tooltip: String,
+    title: Vec<TrayTitleRun>,
+    title_placement: TrayTitlePlacement,
     menu: Vec<MenuItem>,
     on_click: Option<TrayClick>,
 }
@@ -1316,6 +1319,29 @@ impl Tray {
         self
     }
 
+    /// Text beside the icon, in runs each of its own color: what the app
+    /// keeps in sight (a price, a count). macOS's menu bar shows it in its
+    /// font; Linux's panels that show AppIndicator labels show its text
+    /// right of the icon; Windows' notification area shows the icon alone.
+    ///
+    /// ```ignore
+    /// tray().title([
+    ///     TrayTitleRun::new("AAPL 228.00 "),
+    ///     TrayTitleRun::new("+1.33%").color(rgb(0xd92d20)),
+    /// ])
+    /// ```
+    pub fn title(mut self, runs: impl IntoIterator<Item = TrayTitleRun>) -> Self {
+        self.title = runs.into_iter().collect();
+        self
+    }
+
+    /// Which side of the icon the title shows on (macOS; Linux's panels
+    /// draw it right of the icon).
+    pub fn title_placement(mut self, placement: TrayTitlePlacement) -> Self {
+        self.title_placement = placement;
+        self
+    }
+
     /// Its menu, opened by a secondary click (and a primary one without
     /// [`Tray::on_click`]).
     pub fn menu(mut self, items: impl IntoIterator<Item = MenuItem>) -> Self {
@@ -1335,6 +1361,8 @@ impl fmt::Debug for Tray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Tray")
             .field("tooltip", &self.tooltip)
+            .field("title", &self.title)
+            .field("title_placement", &self.title_placement)
             .field("menu", &self.menu)
             .field("on_click", &self.on_click.is_some())
             .finish_non_exhaustive()
@@ -1385,9 +1413,10 @@ pub fn set_tray(tray: impl Into<Option<Tray>>) {
     let command = desktop::Tray {
         icon: tray.icon.as_ref().and_then(ImageSrc::menu_icon),
         tooltip: tray.tooltip,
+        title: tray.title,
+        title_placement: tray.title_placement,
         menu: items.into(),
         click: click.as_ref().map_or(0, |(id, _)| *id),
-        ..Default::default()
     };
     let generation = {
         let mut m = menus.borrow_mut();

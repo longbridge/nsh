@@ -613,6 +613,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           }}
           // The track at the trailing edge, after the label; the icon leads.
           {...listRow({ first: props.first, disabled: () => props.disabled, style: { flexDirection: "row-reverse" } })}
+          trackClass={look.trackClass}
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
         >
@@ -685,7 +686,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             last.set(`${props.name}: ${checked ? "on" : "off"}`);
           }}
           {...choiceTileLook(() => has(props.name), { disabled: () => held(props.name), style: { width: "48%", flex: undefined, gap: 2 } })}
-          trackStyle={{ ...look.trackStyle, position: "absolute", top: 12, right: 12 }}
+          trackClass={look.trackClass}
+          trackStyle={{ ...look.trackStyle, position: "absolute", top: 12, end: 12 }}
           thumbStyle={look.thumbStyle}
         >
           <View style={{ width: 32, height: 32, marginBottom: 8, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1, ...choiceWell(), transform: [{ scale: pop }] }}>
@@ -2281,7 +2283,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                     last.set(`Keep originals: ${on ? "on" : "off"}`);
                   }}
                   {...listRow({ start: size.gap, style: { flexDirection: "row-reverse" } })}
-                  trackStyle={look.trackStyle}
+                  trackClass={look.trackClass}
+          trackStyle={look.trackStyle}
                   thumbStyle={look.thumbStyle}
                 >
                   <RowDivider show />

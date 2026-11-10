@@ -860,6 +860,19 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
+/// The next later launch of the app (TS: `Application.on("secondInstance",
+/// ...)`): with `nsh.json` `"singleInstance": true`, a second launch on
+/// Windows or Linux hands the running instance its arguments and working
+/// directory and exits; those that came before anything listened first
+/// ([`crate::single_instance`]). The main window is already brought
+/// forward. Never on macOS (Launch Services activates the running app
+/// instead), iOS, Android or the web. To await in a task.
+pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextSecondInstance(slot));
+    answer
+}
+
 /// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
 /// URL of a scheme the app claims (`nsh.json` `schemes`), those
 /// that came before anything listened first, the one that launched the app

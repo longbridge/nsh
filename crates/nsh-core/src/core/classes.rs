@@ -242,7 +242,10 @@ impl<M: TextEngine> Core<M> {
     /// losing it yet, and a view losing it that is not the focus changes
     /// nothing. The chain is worked out in the next commit round, once for
     /// all the reports before it, so a move reported as a blur then a
-    /// focus leaves the views both chains share as they were. The root
+    /// focus leaves the views both chains share as they were; a blur no
+    /// focus follows in that round waits for the next display frame
+    /// (`blur_held`), so the focus arriving in a later message is still
+    /// the same move. The root
     /// view taking it (macOS's first responder when no view has it) is no
     /// focus.
     fn focus_reported(&mut self, key: Key, focused: bool) {
@@ -250,8 +253,10 @@ impl<M: TextEngine> Core<M> {
         if focused {
             self.focus = (key != self.root).then_some((key, id));
             self.focus_visible = self.focus_shows(key);
+            self.blur_held = false;
         } else if self.focus == Some((key, id)) {
             self.focus = None;
+            self.blur_held = true;
         } else {
             return;
         }
@@ -327,6 +332,7 @@ impl<M: TextEngine> Core<M> {
     /// is in, as in a React portal.
     pub(super) fn update_focus_within(&mut self) {
         self.focus_moved = false;
+        self.blur_held = false;
         let focus = self
             .focus
             .filter(|&(k, id)| self.nodes.get(k as usize).is_some_and(|n| n.id == id));

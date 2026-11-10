@@ -7723,6 +7723,8 @@ fn focus_within_follows_a_focus_nothing_tracks() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
     assert!(c.has_focus_within(4) && c.has_focus_within(6) && c.has_focus_within(ROOT_ID));
     c.set_states(6, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
     assert!(!c.has_focus_within(2) && !c.has_focus_within(ROOT_ID));
@@ -7768,6 +7770,8 @@ fn focus_within_follows_an_input_without_focus_classes() {
     // Only the frame changes: the input reads no state.
     assert!(view_style_of(&batch, 4).is_none(), "{:?}", batch.items);
     c.set_states(4, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
@@ -7884,6 +7888,42 @@ fn a_focus_moving_inside_keeps_focus_within_in_either_order() {
 }
 
 #[test]
+fn a_blur_waits_for_the_frame_before_the_focus_leaves() {
+    use crate::tailwind::state::FOCUSED;
+    // Regression (#1188): a move reported as a blur then a focus in two
+    // messages, with a commit between them (AppKit resigns the first
+    // responder before the next one becomes it), left the frame for one
+    // commit and came back.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 2, ""),
+        ],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    c.commit();
+    c.set_states(4, 0);
+    assert!(c.commit().is_none(), "the blur waits for the frame");
+    assert!(c.wants_frame());
+    assert!(c.has_focus_within(2));
+    c.set_states(6, FOCUSED);
+    assert!(c.commit().is_none(), "one move inside, nothing sent");
+    assert!(c.has_focus_within(2) && c.has_focus_within(6) && !c.has_focus_within(4));
+    assert!(!c.wants_frame());
+    // A blur no focus follows lets go at the frame.
+    c.set_states(6, 0);
+    assert!(c.commit().is_none());
+    c.run_frame(crate::time::now());
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!c.has_focus_within(2) && !c.wants_frame());
+}
+
+#[test]
 fn an_overlays_content_is_within_the_view_it_is_in() {
     use crate::tailwind::state::FOCUSED;
     // Regression: a popup's trigger (4) and the popup (an overlay in the
@@ -7995,6 +8035,8 @@ fn a_focus_within_style_applies_while_the_focus_is_inside() {
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.8);
     c.set_states(4, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
@@ -8035,6 +8077,8 @@ fn focus_moved_after_a_pointer_does_not_show_until_a_key() {
     assert!(focus_visible(&c, 2));
     // Leaving takes both states off.
     c.set_states(2, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
     assert!(!focus_visible(&c, 2));
@@ -13759,6 +13803,50 @@ mod components {
         assert_eq!(shown.last().unwrap(), "heard end not-allowed");
     }
 
+    /// Shows the later launches of the app it hears.
+    #[component]
+    fn Relaunched() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            loop {
+                let launch = next_second_instance().await;
+                let line = format!("{} in {}", launch.args.join(","), launch.cwd);
+                shown.set(format!("{} [{line}]", untracked(|| shown.get())));
+            }
+        });
+        view().child(text(move || format!("launches{}", shown.get())))
+    }
+
+    #[test]
+    fn later_launches_wait_for_the_app_and_come_in_order() {
+        use crate::single_instance::SecondInstance;
+        let mut c = core();
+        let launch = |c: &mut Core<FakeEngine>, args: &[&str]| {
+            let args = args.iter().map(|a| a.to_string()).collect();
+            c.component_event(
+                crate::ROOT_ID,
+                EventKind::SecondInstance,
+                &SecondInstance::new(args, "/home/u").to_payload(),
+            );
+        };
+        // Before the app listens: kept for it.
+        launch(&mut c, &["a.txt"]);
+        c.mount_root(&crate::element::Root::new::<Relaunched>(|| ()));
+        c.commit();
+        launch(&mut c, &["--new", "b.txt"]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("b.txt")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "launches [a.txt in /home/u] [--new,b.txt in /home/u]"
+        );
+        // Not a launch: dropped.
+        assert!(!c.component_event(
+            crate::ROOT_ID,
+            EventKind::SecondInstance,
+            &EventPayload::None
+        ));
+    }
+
     /// Asks for the permission, shows a notification and sets the badge when
     /// its button is pressed; shows the answers and the presses.
     #[component]
@@ -14771,6 +14859,7 @@ mod touch {
                 page: point(px(x), px(100.0)),
                 location: point(px(x - 10.0), px(5.0)),
                 changed: true,
+                pointer_type: crate::PointerType::Touch,
             }],
         }))
     }
@@ -22122,6 +22211,11 @@ mod rust_menus {
         crate::element::desktop::set_tray(
             crate::element::desktop::tray()
                 .tooltip("Player")
+                .title([
+                    crate::desktop::TrayTitleRun::new("Now "),
+                    crate::desktop::TrayTitleRun::new("playing").color(crate::color::rgb(0xd92d20)),
+                ])
+                .title_placement(crate::desktop::TrayTitlePlacement::Left)
                 .menu([MenuItem::new("Pause").on_select(move || log.set("pause".into()))])
                 .on_click(move |e| log.set(format!("click {}", e.bounds.is_some()))),
         );
@@ -22154,6 +22248,17 @@ mod rust_menus {
             })
             .expect("the tray");
         assert_eq!(tray.tooltip, "Player");
+        assert_eq!(
+            tray.title,
+            [
+                crate::desktop::TrayTitleRun::new("Now "),
+                crate::desktop::TrayTitleRun::new("playing").color(crate::color::rgb(0xd92d20)),
+            ]
+        );
+        assert_eq!(
+            tray.title_placement,
+            crate::desktop::TrayTitlePlacement::Left
+        );
         assert!(tray.click >= 1 << 31);
         let Item::Action(pause) = &tray.menu[0] else {
             panic!("an action: {:?}", tray.menu);
@@ -24352,6 +24457,7 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             page: point(px(5.0), px(6.0)),
             location: point(px(5.0), px(6.0)),
             changed: true,
+            pointer_type: crate::PointerType::Touch,
         }],
         activated: None,
     }))

@@ -2172,7 +2172,9 @@ class Player {
     child._removing = false;
     child._leftWith = null;
     const host = parent._layer ?? parent;
-    host.insertBefore(child, before && before.parentNode === host ? before : null);
+    // Appended children stay under a border drawn over them.
+    const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
+    host.insertBefore(child, before && before.parentNode === host ? before : last);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
@@ -2321,7 +2323,18 @@ class Player {
       el._border.className = `nsh-border ${this.styleClass(border)}`;
       el._border._cornerClass = null;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
-      el.append(el._border);
+      // As on iOS and macOS: a view that does not clip has its border under
+      // its child views (a label on an outlined field covers it), over its
+      // own fills (a shader, text runs); a clipping one (a rounded card with
+      // a full-bleed image) has it over its children, as a layer border.
+      const overflow = CLASSES.rules.get(el._class)?.style.overflow;
+      el._borderOver = !!(overflow && overflow !== "visible") || el.classList.contains("nsh-scroll") || el.classList.contains("nsh-clip");
+      let next = null;
+      if (!el._borderOver) {
+        next = el.firstChild;
+        while (next && (next === el._border || next._kind === undefined)) next = next.nextSibling;
+      }
+      if (el._border.nextSibling !== next || el._border.parentNode !== el) el.insertBefore(el._border, next);
     } else if (el._border) {
       el._border.remove();
       el._border = null;
@@ -8171,6 +8184,7 @@ class Player {
         x: p.x - left,
         y: p.y - top,
         changed: id === changedId,
+        pointerType: p.pointerType,
       });
     }
     if (!points.length) return;
@@ -8226,6 +8240,7 @@ class Player {
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const p = {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
+      pointerType: e.pointerType,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : this.linkPress(e.target, target) ?? chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       // What presses report: the modifier keys at the press and its clicks.

@@ -526,6 +526,16 @@ struct UrlScheme {
     address: crate::url_scheme::AppUrlCell,
 }
 
+/// Later launches of the app ([`crate::single_instance`]).
+#[derive(Default)]
+struct SecondInstances {
+    /// Launches no listener took yet, at most
+    /// [`crate::single_instance::MAX_PENDING`].
+    pending: std::collections::VecDeque<crate::single_instance::SecondInstance>,
+    /// The listener waiting for a launch.
+    next: Option<AnswerSlot<crate::single_instance::SecondInstance>>,
+}
+
 /// The speech recognition session running ([`crate::speech`]).
 struct SpeechSession {
     id: u32,
@@ -617,6 +627,7 @@ pub(super) struct Components {
     notifications: Notifications,
     /// The links that open the app ([`crate::url_scheme`]).
     url_schemes: UrlScheme,
+    second_instances: SecondInstances,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -751,6 +762,7 @@ impl Default for Components {
             audio: FxHashMap::default(),
             notifications: Notifications::default(),
             url_schemes: UrlScheme::default(),
+            second_instances: SecondInstances::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             web_evaluations: Default::default(),
@@ -5662,6 +5674,13 @@ impl<M: TextEngine> Core<M> {
                     None => links.next = Some(answer),
                 }
             }
+            Action::NextSecondInstance(answer) => {
+                let launches = &mut self.components.second_instances;
+                match launches.pending.pop_front() {
+                    Some(launch) => answer.borrow_mut().deliver(launch),
+                    None => launches.next = Some(answer),
+                }
+            }
             Action::NextAppUrlChange(answer) => {
                 let links = &mut self.components.url_schemes;
                 links.hears_changes = true;
@@ -6145,6 +6164,22 @@ impl<M: TextEngine> Core<M> {
             }
             EventKind::Notification if id == crate::ROOT_ID => {
                 self.notification_event(payload);
+                true
+            }
+            EventKind::SecondInstance if id == crate::ROOT_ID => {
+                let Some(launch) = crate::single_instance::SecondInstance::from_payload(payload)
+                else {
+                    return false;
+                };
+                let launches = &mut self.components.second_instances;
+                if let Some(answer) = launches.next.take() {
+                    answer.borrow_mut().deliver(launch);
+                } else {
+                    if launches.pending.len() == crate::single_instance::MAX_PENDING {
+                        launches.pending.pop_front();
+                    }
+                    launches.pending.push_back(launch);
+                }
                 true
             }
             EventKind::UrlScheme if id == crate::ROOT_ID => {

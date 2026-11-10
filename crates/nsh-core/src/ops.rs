@@ -254,6 +254,7 @@ events! {
     Download = "onDownload": "A web view's download started, finished or failed (payload: `state`, `id`, `url`, `filename`, `path`; `bytes` once finished, `message` when it failed).",
     Notification = "onNotification": "The platform answered a [`Command::Notification`], or the user pressed a notification (root only; payload: the fields of [`crate::notifications::NotificationEvent`]).",
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
+    SecondInstance = "onSecondInstance": "A later launch of the app handed the running instance its command line (root only; desktops, nsh.json `singleInstance`; payload: [`EventPayload::Json`], [`crate::single_instance::SecondInstance::to_json`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
     EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
@@ -394,6 +395,10 @@ pub struct TouchPoint {
     /// This finger is one the event is about (it went down, moved or
     /// lifted).
     pub changed: bool,
+    /// What the pointer is: a finger, a pen, or the mouse, which desktops
+    /// also report as a touch (what a held finger does, such as opening a
+    /// context menu, a held mouse button does not).
+    pub pointer_type: PointerType,
 }
 
 /// Where the mouse is over a view ([`EventKind::MouseEnter`],

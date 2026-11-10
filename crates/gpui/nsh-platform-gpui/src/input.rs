@@ -1261,6 +1261,7 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::text::key(surface, &event)
         || crate::selectable_view::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
+        || crate::key_focus::key(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
             crate::scroll::key(surface, &event, x, y)
@@ -1560,6 +1561,7 @@ fn down(
     let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    crate::key_focus::pointer_down(surface, &hit.view);
     let touch = key != Key::Mouse;
     let mut item = None;
     if let Some(native) = hit.item.take() {
@@ -1945,6 +1947,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: nsh_core::geometry::point(Points(p.x), Points(p.y)),
                     location: nsh_core::geometry::point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()
