@@ -840,6 +840,7 @@ pub(crate) fn install_android_host(
                 target_sdk: android::DEFAULT_TARGET_SDK,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
+                cleartext: true,
                 notifications: true,
                 schemes: &[],
                 rust: false,

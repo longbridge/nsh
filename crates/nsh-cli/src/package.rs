@@ -155,6 +155,11 @@ pub(crate) struct AndroidConfig {
     ///
     /// [`android::DEFAULT_TARGET_SDK`]: crate::android::DEFAULT_TARGET_SDK
     pub(crate) target_sdk: Option<u32>,
+    /// The app may make plain HTTP requests
+    /// (`android:usesCleartextTraffic`): servers on a local network without
+    /// TLS. Off by default, as Android has it from API 28 on.
+    #[serde(default)]
+    pub(crate) uses_cleartext_traffic: bool,
 }
 
 impl AndroidConfig {
@@ -871,6 +876,7 @@ fn package_android(
             target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            cleartext: config.android.uses_cleartext_traffic,
             notifications: config.notifications(),
             schemes: &config.schemes,
             rust: built.rust_root,
@@ -1550,6 +1556,23 @@ mod tests {
             36
         );
         assert!(target(serde_json::json!({ "android": { "targetSdk": 21 } })).is_err());
+    }
+
+    #[test]
+    fn android_cleartext_traffic_is_off_unless_asked_for() {
+        let cleartext = |json: serde_json::Value| {
+            serde_json::from_value::<AppConfig>(json)
+                .unwrap()
+                .android
+                .uses_cleartext_traffic
+        };
+        assert!(!cleartext(serde_json::json!({})));
+        assert!(!cleartext(
+            serde_json::json!({ "android": { "targetSdk": 36 } })
+        ));
+        assert!(cleartext(
+            serde_json::json!({ "android": { "usesCleartextTraffic": true } })
+        ));
     }
 
     #[test]
