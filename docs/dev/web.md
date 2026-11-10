@@ -234,6 +234,13 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
+What an app uses is `Bundle::native_use` (`natives.rs`, `native-pipeline.md`). A namespace import read only by
+names the code spells (`import * as base from "nsh/base"; base.EmojiPicker`, the way an app reads an export
+older shells lack without failing to link) counts those names: the runtime links their parts, and the page's
+`nativeExports` declares them, so the host's facade for the module exports them and the namespace has them.
+A namespace used any other way, including as a method call's receiver (`base.method()`), keeps every gate
+and the full catalog (`web::whole_because` says why).
+
 Each part of `nsh/base` (`nsh_base::parts::ALL`) reaches the runtime through its gate, `nsh_part_<name>`, which
 `base_parts!` in `crates/nsh-platform-web/src/lib.rs` exports and `nsh.js` calls at instantiation; a part without
 one is never registered, so an app importing its exports fails to link in the browser ("does not provide an export
