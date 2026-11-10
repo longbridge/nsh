@@ -6111,6 +6111,30 @@ fn the_apps_appearance_wins_over_the_systems() {
 }
 
 #[test]
+fn pointer_and_terminal_restyle_natively() {
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "bg-white pointer-fine:bg-black terminal:bg-red-500",
+    );
+    let background = |batch: &MountBatch| view_style_of(batch, 2).map(|s| s.background_color);
+    assert_eq!(background(&c.commit().unwrap()), Some(Color(0xffff_ffff)));
+    c.set_class_environment(crate::tailwind::ClassEnvironment {
+        pointer: crate::tailwind::Pointer::Fine,
+        ..Default::default()
+    });
+    assert_eq!(background(&c.commit().unwrap()), Some(Color(0x0000_00ff)));
+    c.set_class_environment(crate::tailwind::ClassEnvironment {
+        pointer: crate::tailwind::Pointer::Fine,
+        terminal: true,
+        ..Default::default()
+    });
+    let red = background(&c.commit().unwrap()).unwrap();
+    assert_ne!(red, Color(0x0000_00ff));
+}
+
+#[test]
 fn dark_mode_and_breakpoints_restyle_natively() {
     let mut c = core();
     view_with_classes(&mut c, 2, "bg-white dark:bg-black p-2 md:p-8");

@@ -100,6 +100,8 @@ Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中�
 | `min-[600px]:`、`max-[600px]:` | 任意断点 | 同上 |
 | `portrait:`、`landscape:` | 窗口方向 | `window().width > window().height` |
 | `ios:`、`android:`、`web:` | 平台 | `.when(os() == Os::Ios, \|v\| ..)` |
+| `terminal:` | 在终端中绘制 | `.when(idiom() == Idiom::Terminal, \|v\| ..)` |
+| `pointer-fine:`、`pointer-coarse:` | 主要指针是鼠标或触控板（桌面、桌面浏览器、终端）/ 手指 | `.when(is_desktop(), \|v\| ..)` |
 | `rtl:`、`ltr:` | [布局方向](./layout.md#从右到左) | 视图的 `.direction(LayoutDirection::..)` |
 | `motion-safe:`、`motion-reduce:` | 用户的“减弱动态效果”设置 | `reduce_motion()` |
 

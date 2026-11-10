@@ -100,6 +100,8 @@ Rust components (`nsh/base`'s and those of an app's own crate) accept `class` an
 | `min-[600px]:`, `max-[600px]:` | Arbitrary breakpoints | The same |
 | `portrait:`, `landscape:` | The window's orientation | `window().width > window().height` |
 | `ios:`, `android:`, `web:` | The platform | `.when(os() == Os::Ios, \|v\| ..)` |
+| `terminal:` | Drawn in a terminal | `.when(idiom() == Idiom::Terminal, \|v\| ..)` |
+| `pointer-fine:`, `pointer-coarse:` | The primary pointer is a mouse or trackpad (the desktops, a desktop browser, a terminal) / a finger | `.when(is_desktop(), \|v\| ..)` |
 | `rtl:`, `ltr:` | The [layout direction](./layout.md#right-to-left) | `.direction(LayoutDirection::..)` on a view |
 | `motion-safe:`, `motion-reduce:` | The user's reduce motion setting | `reduce_motion()` |
 

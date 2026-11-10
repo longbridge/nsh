@@ -38,7 +38,7 @@
   `pointerEvents`' `box-none` / `box-only` (React Native's, for the view alone), `textOverflow`'s `ellipsis-start` /
   `ellipsis-middle` (where a clamped text is cut), `textAlign`'s `auto` (React Native's: the text's natural side, by its
   direction); variants past Tailwind's: `selected:` (`accessibilityState.selected`, `selectedStyle`), `ios:` /
-  `android:` / `web:` (the platform). A new one joins this list.
+  `android:` / `web:` (the platform), `terminal:` (drawn in a terminal, `Idiom::Terminal`). A new one joins this list.
 - **CSS's meanings**: inline styles mean what classes mean: a style key is the CSS property of its name (or of the form
   "Forms past CSS's" gives it). Every view, however it is styled, keeps
   React Native's defaults for what nothing sets (a column while no display is set, `flexShrink: 0`,
@@ -58,7 +58,8 @@
   keep React Native's column; `block` /
   `flow-root` use Taffy's block layout, and so do `inline` / `inline-block`: a browser blockifies inline boxes in flex
   and grid containers, which every NSH parent but a block is (there is no inline formatting context). Variants: `dark:`, `sm:`…`2xl:` / `max-*:` / `min-[..]:`, `portrait:` /
-  `landscape:`, `ios:` / `android:` / `web:`, `rtl:` / `ltr:`, `motion-safe:` / `motion-reduce:`, `active:` / `hover:` /
+  `landscape:`, `ios:` / `android:` / `web:`, `terminal:`, `pointer-fine:` / `pointer-coarse:` (CSS's `pointer` media
+  feature: fine on the desktops, a desktop browser and a terminal (`Environment::desktop()`), coarse on touch), `rtl:` / `ltr:`, `motion-safe:` / `motion-reduce:`, `active:` / `hover:` /
   `focus:` / `focus-within:` (text inputs always report their focus, so the views around one read it) / `disabled:` / `enabled:` / `selected:` (`accessibilityState.selected`, a `Button`'s
   `selected`) / `checked:` (`accessibilityState.checked`, not mixed) / `indeterminate:` (`accessibilityState.checked`
   mixed, CSS's `:indeterminate`) / `aria-expanded:` (`accessibilityState.expanded`: a `Popover`'s or `Menu`'s trigger

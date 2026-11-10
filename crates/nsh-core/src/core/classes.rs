@@ -196,6 +196,11 @@ impl<M: TextEngine> Core<M> {
         }
         let changed = (if env.dark != self.class_env.dark { deps::DARK } else { 0 })
             | (if env.reduce_motion != self.class_env.reduce_motion { deps::MOTION } else { 0 })
+            | (if env.pointer != self.class_env.pointer || env.terminal != self.class_env.terminal {
+                deps::DEVICE
+            } else {
+                0
+            })
             // `ios:` / `android:` never change at run time, but a new
             // platform must reach classes resolved before it was known.
             | (if env.platform != self.class_env.platform { u16::MAX } else { 0 });
