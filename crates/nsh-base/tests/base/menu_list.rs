@@ -210,3 +210,74 @@ fn home_and_end_reach_the_items_around_the_list() {
     choose(Root::of::<Models>(), &["end"], "space", "After");
     choose(Root::of::<Models>(), &["end", "home"], "space", "Before");
 }
+
+/// Panics whose message says a prop outlived its owner, on any thread
+/// (the engine's: an event's handler panicking is caught there).
+static DISPOSED_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Before, a list whose rows are never made (0 high) while `show`
+/// holds, After; `x` hides the list.
+#[component]
+fn HiddenList() -> impl IntoElement {
+    let chose = signal(String::from("none"));
+    let show = signal(true);
+    on_key("x", move |_| show.set(false));
+    view()
+        .pt(px(40.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("open")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("Open")),
+                )
+                .child(item(chose, "Before"))
+                .child(when(show, move || {
+                    menu_list()
+                        .count(signal(ROWS))
+                        .render_item(move |e: &MenuListEntry| {
+                            let index = e.index;
+                            menu_item()
+                                .on_select(move || chose.set(format!("Row {index}")))
+                                .child(view().h(px(30.0)).child(text(format!("Row {index}"))))
+                        })
+                        .w(px(200.0))
+                        .h(px(0.0))
+                }))
+                .child(item(chose, "After")),
+        )
+        .child(text(move || format!("chose:{}", chose.get())))
+}
+
+#[test]
+fn a_list_removed_while_the_keys_wait_for_its_row_is_forgotten() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.to_string().contains("after its owner was disposed") {
+            DISPOSED_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        previous(info);
+    }));
+    let mut app = start(Root::of::<HiddenList>());
+    app.press("id:open").unwrap();
+    app.wait_for("Before").unwrap();
+    // Up, Up: After, then the list's last row, which it never makes, so
+    // the keys wait for it.
+    app.press_key("up").unwrap();
+    app.press_key("up").unwrap();
+    app.press_key("x").unwrap();
+    app.wait(std::time::Duration::from_millis(200)).unwrap();
+    // The items left are walked as before: Down from nothing focused is
+    // Before.
+    app.press_key("down").unwrap();
+    app.press_key("space").unwrap();
+    app.wait_for("text:chose:Before").unwrap();
+    assert_eq!(
+        DISPOSED_READS.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "a prop of the list was read after the list went"
+    );
+}

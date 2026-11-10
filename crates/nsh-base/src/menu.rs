@@ -450,10 +450,13 @@ impl Items {
                 return;
             };
             let walk = self.walk(p.level);
-            // The rows may have gone meanwhile: the keys start again.
-            let place = (p.index < p.rows.len())
-                .then(|| walk.place_of_row(&p.rows, p.index))
-                .flatten();
+            // The list, or its rows, may have gone meanwhile: the keys
+            // start again. Its count is read only while the list is still
+            // among the level's items, since a list gone has its props
+            // disposed.
+            let place = walk
+                .place_of_row(&p.rows, p.index)
+                .filter(|_| p.index < p.rows.len());
             let Some(place) = place else {
                 drop(pending);
                 self.pending.replace(None);
@@ -578,6 +581,14 @@ impl Items {
     fn add_rows(&self, rows: Rc<Rows>) {
         let key = self.next.get() + 1;
         self.next.set(key);
+        // A row the keys are waiting for goes with its list.
+        let (pending, gone) = (self.pending.clone(), rows.clone());
+        cleanup(move || {
+            let waits = matches!(&*pending.borrow(), Some(p) if Rc::ptr_eq(&p.rows, &gone));
+            if waits {
+                pending.replace(None);
+            }
+        });
         self.push(Entry {
             key,
             node: rows.list,
@@ -624,8 +635,16 @@ impl Items {
     /// Up and End to the last. A list's rows count one by one, made or
     /// not.
     fn step_in(&self, level: u32, key: Option<u64>, step: ItemStep) {
-        self.pending.replace(None);
-        let place = key.and_then(|key| self.walk(level).place_of(key));
+        // A row the keys are still waiting for counts as reached, so keys
+        // pressed faster than the list makes rows each move on one.
+        let waiting = self.pending.take().filter(|p| p.level == level);
+        let walk = self.walk(level);
+        let place = waiting
+            .and_then(|p| {
+                walk.place_of_row(&p.rows, p.index)
+                    .filter(|_| p.index < p.rows.len())
+            })
+            .or_else(|| key.and_then(|key| walk.place_of(key)));
         let (from, dir) = match (step, place) {
             (ItemStep::First, _) => (Start::Outside, Dir::Forward),
             (ItemStep::Last, _) => (Start::Outside, Dir::Backward),
@@ -1561,7 +1580,9 @@ pub struct MenuListProps {
 /// of the list, made or not, scrolling to a row before focusing it and
 /// passing over disabled ones, and go on to the items before and after the
 /// list (a submenu's trigger too). Bound its height with a style (`h`,
-/// `max_h`); `render_item` draws each row from its index.
+/// `max_h`); `render_item` draws each row from its index. A row's
+/// `Submenu` closes with its row when the list scrolls the row away and
+/// reuses its cell.
 #[component]
 pub fn MenuList(props: MenuListProps, cx: Scope<NoEvent>) -> impl IntoElement {
     let _ = cx;
