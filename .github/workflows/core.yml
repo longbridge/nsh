@@ -7,11 +7,11 @@ name: Core
 # releases froze is checked by the Compat workflow.
 
 on:
-  # Pull requests test every change before it merges; main runs once a day
-  # instead of on every push, which only tested again what its pull request
+  # Pull requests test every change before it merges; main runs every three hours
+  # (when it moved) instead of on every push, which only tested again what its pull request
   # had, and saves the dependencies' caches pull requests restore.
   schedule:
-    - cron: "0 19 * * *"
+    - cron: "0 */3 * * *"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -64,9 +64,18 @@ env:
     --features nsh-bundler/bundle,nsh-testing/bundle,nsh-testing/agent
 
 jobs:
+  # Scheduled runs: only when main moved since the last one.
+  changed:
+    if: github.event_name == 'schedule'
+    permissions:
+      actions: read
+    uses: ./.github/workflows/changed.yml
+
   check:
-    # Nothing for drafts or a pull request being closed.
-    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
+    needs: changed
+    # Nothing for drafts or a pull request being closed, nor for a scheduled
+    # run when main has not changed since the last one.
+    if: ${{ !cancelled() && needs.changed.outputs.run != 'false' && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     # Debounce (AGENTS.md "CI"): waits without a runner, so a newer
     # push cancels this run before it takes one.
     environment:

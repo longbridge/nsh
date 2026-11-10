@@ -59,7 +59,7 @@ export function Trigger(props: {
       tooltip={props.tip}
       hoverStyle={props.open || props.disabled ? undefined : variant() === "primary" ? { opacity: 0.94 } : variant() === "ghost" ? hovered() : finish.hover}
       activeStyle={{ ...(variant() === "primary" ? { opacity: 0.88 } : variant() === "ghost" ? { backgroundColor: alpha(colors.text, 0.09) } : finish.pressed), transform: [{ scale: 0.97 }] }}
-      focusStyle={focusRing()}
+      focusVisibleStyle={focusRing()}
       hitSlop={props.inline && !pointer && !terminal ? { left: 8, right: 8, top: 2, bottom: 2 } : undefined}
       style={{
         alignSelf: "flex-start",
