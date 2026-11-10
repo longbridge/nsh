@@ -2237,6 +2237,17 @@ test("a PNG goes on the clipboard as it is", async (t) => {
   assert.deepEqual(log.decoded, []);
 });
 
+test("a data: URI's image is decoded without fetch, which a page's CSP may refuse", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  const fetched = await withFetch(() => {
+    throw new TypeError("Failed to fetch");
+  }, () => player.writeClipboardImage(`data:image/png;base64,${btoa("png bytes")}`));
+  assert.deepEqual(fetched, []);
+  assert.equal(await (await log.items[0].data["image/png"]).text(), "png bytes");
+  assert.deepEqual(log.warnings, []);
+});
+
 test("an image the clipboard does not take is reported with a warning", async (t) => {
   const log = fakeClipboard(t, { failWrite: "Document is not focused." });
   const { player } = fakePlayer();

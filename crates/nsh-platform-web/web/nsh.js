@@ -6662,8 +6662,12 @@ class Player {
    * Safari only writes within the user's gesture, which an `await` loses.
    */
   writeClipboardImage(uri) {
+    // Decoded here: the CSP of a page whose app restricts `network` keeps `fetch` from `data:` URIs.
+    const base64 = /^data:([^;,]*);base64,/.exec(uri);
     const png = (async () => {
-      const blob = await (await fetch(uri)).blob();
+      const blob = base64
+        ? new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] })
+        : await (await fetch(uri)).blob();
       if (blob.type === "image/png") return blob;
       const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
       try {
