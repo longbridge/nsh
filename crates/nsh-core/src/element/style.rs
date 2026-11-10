@@ -1066,6 +1066,39 @@ impl StyleRefinement {
         self.entries.is_empty() && self.bound.is_empty()
     }
 
+    /// Styles while the element it styles is pressed (Tailwind's
+    /// `active:`), applied natively: in a look the app declares for a
+    /// component ([`super::ComponentStyle`]), its root's presses.
+    pub fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.extend_as(Variant::ACTIVE, f(StyleRefinement::default()));
+        self
+    }
+
+    /// Styles while a pointer hovers the element it styles (`hover:`).
+    pub fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.extend_as(Variant::HOVER, f(StyleRefinement::default()));
+        self
+    }
+
+    /// Styles while the element it styles has focus (`focus:`).
+    pub fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.extend_as(Variant::FOCUS, f(StyleRefinement::default()));
+        self
+    }
+
+    /// Styles while the element it styles or an element inside it has
+    /// focus (`focus-within:`).
+    pub fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.extend_as(Variant::FOCUS_WITHIN, f(StyleRefinement::default()));
+        self
+    }
+
+    /// Styles while the element it styles is disabled (`disabled:`).
+    pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.extend_as(Variant::DISABLED, f(StyleRefinement::default()));
+        self
+    }
+
     /// The rules, as Tailwind classes compile to: one per variant, in
     /// Tailwind's variant order.
     pub(crate) fn lower(&self) -> ClassList {
@@ -4475,6 +4508,44 @@ mod tests {
             assert_eq!(env_of(&typed.lower()), env_of(&parsed), "{classes}");
             assert!(!env_of(&parsed).is_empty(), "{classes}");
         }
+    }
+
+    /// A refinement's own state methods (the typed looks an app declares
+    /// for a component) lower to Tailwind's state variants.
+    #[test]
+    fn a_refinements_states_are_tailwinds_state_variants() {
+        let typed = s()
+            .bg(RED.shade(500))
+            .hover(|s| s.bg(SKY.shade(500)))
+            .active(|s| s.bg(EMERALD.shade(500)))
+            .focus(|s| s.opacity(0.5))
+            .focus_within(|s| s.border_2())
+            .disabled_style(|s| s.opacity(0.25))
+            .lower();
+        let classes = "bg-red-500 hover:bg-sky-500 active:bg-emerald-500 focus:opacity-50 \
+                       focus-within:border-2 disabled:opacity-25";
+        let parsed = tailwind::parse(&PRESETS, classes);
+        assert!(parsed.unknown().is_empty(), "{:?}", parsed.unknown());
+        assert_eq!(typed.deps(), parsed.deps());
+        for states in [
+            0,
+            state::HOVERED,
+            state::PRESSED | state::HOVERED,
+            state::FOCUSED,
+            state::FOCUS_WITHIN,
+            state::DISABLED,
+        ] {
+            assert_eq!(
+                resolve(&typed, false, states, 0),
+                resolve(&parsed, false, states, 0),
+                "states {states}"
+            );
+        }
+        // The hover rule applies only while hovered.
+        assert_ne!(
+            resolve(&typed, false, 0, 0),
+            resolve(&typed, false, state::HOVERED, 0)
+        );
     }
 
     #[test]

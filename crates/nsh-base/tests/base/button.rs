@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use nsh_base::button;
 use nsh_core::{
     EdgeInsets, MountBatch, MountItem, NodeId, Size, ViewStyle,
-    element::{ComponentStyle, Root, Tokens, set_component_style, set_tokens, tokens},
+    element::{ComponentStyle, Root, Tokens, set_component_style, tokens},
     platform::{ColorScheme, Idiom, Os},
     prelude::*,
 };
@@ -127,9 +127,14 @@ type Batches = Arc<Mutex<Vec<Vec<MountItem>>>>;
 
 /// A desktop app (hover reaches views) of root `C`, recording each batch.
 fn start_desktop<C: Component<Props = ()>>() -> (Headless, Batches) {
+    start_desktop_with(Root::of::<C>())
+}
+
+/// [`start_desktop`] of `root`.
+fn start_desktop_with(root: Root) -> (Headless, Batches) {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
@@ -256,12 +261,10 @@ fn changing_the_variant_restyles_in_one_commit() {
     assert_eq!(styles[0].borders.widths.to_array().map(|w| w.0), [2.0; 4]);
 }
 
-#[component]
-fn Hovered() -> impl IntoElement {
-    set_component_style(
-        "button",
-        ComponentStyle::new().variant_classes("primary", "bg-white hover:bg-black"),
-    );
+/// A button whose declared `primary` look has a hover style: typed
+/// (`.hover(..)` of the look's refinement) or in classes.
+fn hover_app(style: ComponentStyle) -> impl IntoElement {
+    set_component_style("button", style);
     view().child(
         button()
             .variant("primary")
@@ -272,9 +275,30 @@ fn Hovered() -> impl IntoElement {
     )
 }
 
+#[component]
+fn Hovered() -> impl IntoElement {
+    hover_app(ComponentStyle::new().variant("primary", |s| {
+        s.bg(rgb(0xffffff)).hover(|s| s.bg(rgb(0x000000)))
+    }))
+}
+
+#[component]
+fn HoveredClasses() -> impl IntoElement {
+    hover_app(ComponentStyle::new().variant_classes("primary", "bg-white hover:bg-black"))
+}
+
 #[test]
 fn a_declared_hover_style_follows_hover() {
     let (mut app, batches) = start_desktop::<Hovered>();
+    let go = target(&app, "label:Go");
+    assert_eq!(background(&batches, go), 0xffff_ffff);
+    app.hover("label:Go").unwrap();
+    assert_eq!(background(&batches, go), 0x0000_00ff);
+}
+
+#[test]
+fn a_declared_hover_class_follows_hover() {
+    let (mut app, batches) = start_desktop::<HoveredClasses>();
     let go = target(&app, "label:Go");
     assert_eq!(background(&batches, go), 0xffff_ffff);
     app.hover("label:Go").unwrap();
@@ -374,9 +398,6 @@ fn the_use_site_style_goes_after_the_declared_one() {
 
 #[component]
 fn Tokened() -> impl IntoElement {
-    let mut theme = Tokens::default();
-    theme.set_color("action", AdaptiveColor::new(rgb(0x112233), rgb(0x445566)));
-    set_tokens(theme);
     set_component_style(
         "button",
         ComponentStyle::new().variant("primary", |s| {
@@ -393,9 +414,10 @@ fn Tokened() -> impl IntoElement {
 
 #[test]
 fn declared_token_colors_follow_dark() {
-    let (mut app, batches) = start_desktop::<Tokened>();
-    // The app's tokens reach the look a turn after the first render.
-    app.wait(std::time::Duration::from_millis(50)).unwrap();
+    // The app's tokens, given before the first render.
+    let mut theme = Tokens::default();
+    theme.set_color("action", AdaptiveColor::new(rgb(0x112233), rgb(0x445566)));
+    let (mut app, batches) = start_desktop_with(Root::of::<Tokened>().tokens(theme));
     let go = target(&app, "label:Go");
     assert_eq!(background(&batches, go), 0x1122_33ff);
     app.set_environment("dark", |env| env.color_scheme = ColorScheme::Dark)
