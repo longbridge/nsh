@@ -106,6 +106,10 @@ final class ModalHost {
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(0);
             window.setNavigationBarColor(0);
+            // With three-button navigation the system lays a translucent scrim
+            // over a transparent navigation bar (API 29+): a grey band across
+            // the bottom of the app's popup, which reaches under the bar.
+            if (Build.VERSION.SDK_INT >= 29) window.setNavigationBarContrastEnforced(false);
             if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false);
             else window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
