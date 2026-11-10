@@ -3294,3 +3294,48 @@ pub enum Op {
     /// reaches a platform.
     Rust(crate::element::RustOp),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::EventKind;
+
+    /// Android reads an event's kind by its index in [`EventKind::ALL`], so
+    /// `Native.java`'s codes must follow this order: a kind inserted here
+    /// and not there makes Android report the kinds after it as others.
+    #[test]
+    fn androids_event_codes_follow_the_kinds() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nsh-platform-android/java/com/longbridge/nsh/Native.java"
+        );
+        let java = std::fs::read_to_string(path).expect("Native.java");
+        let codes: std::collections::HashMap<&str, usize> = java
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("static final int ")?;
+                let (name, value) = rest.strip_suffix(';')?.split_once(" = ")?;
+                Some((name, value.parse().ok()?))
+            })
+            .collect();
+        for (index, kind) in EventKind::ALL.iter().enumerate() {
+            let prop = kind.prop_name().trim_start_matches("on");
+            let mut name = String::new();
+            for (i, c) in prop.chars().enumerate() {
+                if c.is_ascii_uppercase() && i > 0 {
+                    name.push('_');
+                }
+                name.push(c.to_ascii_uppercase());
+            }
+            assert_eq!(
+                codes.get(name.as_str()),
+                Some(&index),
+                "Native.{name} for {kind:?}"
+            );
+        }
+        assert_eq!(
+            codes.len(),
+            EventKind::ALL.len(),
+            "Native.java has codes of no kind"
+        );
+    }
+}
