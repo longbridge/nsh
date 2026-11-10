@@ -119,7 +119,7 @@ export const paneWidth = () => windowSize().width - (sidebarOpen() ? SIDEBAR : 0
 export const columnsFor = (min: number, max: number, width = paneWidth(), gap = 20) =>
   Math.max(1, Math.min(max, Math.floor((width - 64 + gap) / (min + gap))));
 
-/** Whether the gallery lays out right to left (the settings' Right to left,
+/** Whether the gallery lays out right to left (the settings' RTL,
  * the phone's toolbar): the layout takes `direction: "rtl"`, the sidebar
  * moving to the right; the window's own controls keep their place. Kept
  * while the app runs. */
@@ -147,7 +147,18 @@ export function DirectionToggle(props: { bar?: boolean }) {
   return <ToolButton glyph={<LucideIcon name="pilcrow" size={16} tint={rtl() ? colors.accent : colors.muted} />} label={label()} title="RTL" on={rtl()} onPress={flip} />;
 }
 
-/** Switches the app between light and dark (`setColorScheme`), whatever the system shows. */
+/** The appearance the gallery is shown in: the system's (nsh.json
+ * `"appearance": "system"`), or light or dark whatever the system shows. */
+export type Appearance = "system" | "light" | "dark";
+/** The appearance chosen (the settings' Theme, the toolbar's switch). */
+export const appearance = signal<Appearance>("system");
+/** Shows the gallery in `next` (`setColorScheme`). */
+export function setAppearance(next: Appearance) {
+  appearance.set(next);
+  setColorScheme(next);
+}
+
+/** Switches the app between light and dark (`setAppearance`), whatever the system shows. */
 export function ThemeToggle(props: { bar?: boolean }) {
   // In the system's bar (iOS, Android) the system draws the button (iOS's
   // Liquid Glass): the item is the icon alone.
@@ -156,7 +167,7 @@ export function ThemeToggle(props: { bar?: boolean }) {
       <Press
         onPress={() => {
           play("toggle", { rate: isDark() ? 1 : 0.9 });
-          setColorScheme(isDark() ? "light" : "dark");
+          setAppearance(isDark() ? "light" : "dark");
         }}
         scale={0.92}
         accessibilityLabel={isDark() ? "Light appearance" : "Dark appearance"}
@@ -174,7 +185,7 @@ export function ThemeToggle(props: { bar?: boolean }) {
       title="Theme"
       onPress={() => {
           play("toggle", { rate: isDark() ? 1 : 0.9 });
-          setColorScheme(isDark() ? "light" : "dark");
+          setAppearance(isDark() ? "light" : "dark");
         }}
     />
   );

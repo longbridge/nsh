@@ -1,12 +1,12 @@
 import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { fpsEnabled, platform, setColorScheme, setFpsEnabled, windowSize } from "nsh";
+import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
 import { titleBar } from "nsh/desktop";
 import { Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
-import { Icon, LucideIcon } from "./icons";
+import { Icon, LucideIcon, type LucideIconName } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { loadSounds, play, setSoundsOn, soundsOn } from "../nsh-gallery-ui/sound";
@@ -22,7 +22,7 @@ import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl } from "./ui";
+import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl, appearance, setAppearance, type Appearance, segmentedLook } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
 loadSounds({
@@ -608,7 +608,52 @@ function SettingItem(props: { label: string; icon: JSX.Element; checked: boolean
   );
 }
 
-/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds, the appearance and the demos' direction. */
+/** The settings menu's appearance: System, Light and Dark as the segments
+ * of a segmented control, each a radio item of the menu (icons alone; the
+ * terminal, which draws no icons, names them). */
+function ThemeSetting() {
+  const look = segmentedLook({ size: "small" });
+  const option = (value: Appearance, title: string, icon: LucideIconName) => {
+    const on = () => appearance() === value;
+    return (
+      <MenuItem
+        role="menuitemradio"
+        checked={on()}
+        closeOnSelect={false}
+        onSelect={() => setAppearance(value)}
+        accessibilityLabel={title}
+        hoverStyle={on() ? undefined : { backgroundColor: alpha(colors.text, 0.06) }}
+        style={{
+          ...(terminal ? { paddingHorizontal: TERMINAL_COLUMN } : { width: 30 }),
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 6,
+          borderCurve: "continuous",
+          borderWidth: 1,
+          borderColor: "transparent",
+          ...(on() ? look.thumbStyle : {}),
+        }}
+      >
+        <If when={!terminal} else={<Text style={{ color: on() ? colors.text : colors.muted }}>{title}</Text>}>
+          <LucideIcon name={icon} size={14} tint={on() ? colors.text : colors.muted} />
+        </If>
+      </MenuItem>
+    );
+  };
+  return (
+    <View style={{ ...menuItemLook({ style: terminal ? { height: TERMINAL_ROW, gap: TERMINAL_GAP } : { height: 36, gap: 10 } }).style }}>
+      {!terminal && <LucideIcon name={isDark() ? "moon" : "sun"} size={16} tint={colors.muted} />}
+      <Text style={menuItemLabel()}>Theme</Text>
+      <View style={{ ...look.style, alignSelf: "center" }}>
+        {option("system", "System", "monitor")}
+        {option("light", "Light", "sun")}
+        {option("dark", "Dark", "moon")}
+      </View>
+    </View>
+  );
+}
+
+/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds, the demos' direction and the appearance. */
 function SettingsMenu() {
   const flipSounds = () => {
     if (soundsOn()) {
@@ -629,10 +674,10 @@ function SettingsMenu() {
   return (
     <Menu placement="top" align="end" offset={6} margin={8} trigger={trigger}>
       <MenuPanel side="top" minWidth={210}>
-        <SettingItem label="Performance monitor" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
+        <SettingItem label="FPS" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
         <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
-        <SettingItem label="Dark appearance" icon={<LucideIcon name="moon" size={16} tint={colors.muted} />} checked={isDark()} onSelect={() => setColorScheme(isDark() ? "light" : "dark")} />
-        <SettingItem label="Right to left" icon={<LucideIcon name="pilcrow" size={16} tint={colors.muted} />} checked={rtl()} onSelect={() => rtl.set(!rtl())} />
+        <SettingItem label="RTL" icon={<LucideIcon name="pilcrow" size={16} tint={colors.muted} />} checked={rtl()} onSelect={() => rtl.set(!rtl())} />
+        <ThemeSetting />
       </MenuPanel>
     </Menu>
   );
