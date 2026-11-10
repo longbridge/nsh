@@ -825,9 +825,10 @@ declares applies nothing and is warned of once per surface.
 - **Cost.** A component with no declaration when its element is built gets no binding at all, so an app that
   declares nothing sends exactly what it sent before. Declarations therefore come before the first render (nsh.json,
   or the Rust root component's body). A declared component has two bindings; each subscribes to the whole store
-  (one signal per surface), and each run clones that component's `ComponentStyle` (its maps of looks) and resolves
-  it: a change to any declaration runs every declared component's bindings again, which is rare (a brand or density
-  switch). Typed closures run inside the binding, so the theme tokens they read restyle on a theme change.
+  (one signal per surface). The store keeps one merged `Rc<ComponentStyle>` per component, rebuilt on a write, so a
+  run shares it instead of copying its maps, and the class binding reuses its last string while the look, variant and
+  size are the same: a change to any declaration runs every declared component's bindings again, which is rare (a
+  brand or density switch). Typed closures run inside the binding, so the theme tokens they read restyle on a theme change.
 - **`app_class`.** `declared_style` sets the root's `app_class` for the declared classes, so a component whose root
   takes the app's part classes through `app_class` itself cannot also use `declared_style` on that root yet.
 
