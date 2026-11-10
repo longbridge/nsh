@@ -172,9 +172,14 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde_json::Value>,
-    /// The languages whose data the app ships (read by the bundler).
-    #[serde(default, rename = "locales")]
-    _locales: Option<serde_json::Value>,
+    /// The languages whose data the app ships (checked by the bundler).
+    #[serde(default)]
+    locales: Option<serde_json::Value>,
+    /// The locales the app ships (`locales`, else its translations'
+    /// languages: `nsh_i18n::app_locales`), which Apple packages declare
+    /// (`CFBundleLocalizations`) so that system UI shows in them.
+    #[serde(skip)]
+    pub(crate) localizations: Vec<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
@@ -454,7 +459,10 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let dir = entry.parent().unwrap_or(Path::new("."));
     let path = dir.join("nsh.json");
     let Ok(text) = fs::read_to_string(&path) else {
-        return Ok(AppConfig::default());
+        return Ok(AppConfig {
+            localizations: app_localizations(dir, None),
+            ..AppConfig::default()
+        });
     };
     let (mut config, mut ignored) =
         parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
@@ -486,7 +494,45 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     config.macos.check()?;
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
+    config.localizations = app_localizations(dir, config.locales.as_ref());
     Ok(config)
+}
+
+/// The locales of the app in `dir` ([`nsh_i18n::app_locales`]), from
+/// `nsh.json`'s `locales` (its tags; the bundler warns of other values)
+/// or `locales/`'s translations (the bundler reports one it cannot read).
+fn app_localizations(dir: &Path, locales: Option<&serde_json::Value>) -> Vec<String> {
+    let locales = locales.and_then(serde_json::Value::as_array).map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    });
+    let translations = match locales {
+        Some(_) => Default::default(),
+        None => nsh_i18n::read_translations(dir).unwrap_or_default(),
+    };
+    nsh_i18n::app_locales(&translations, locales.as_deref())
+}
+
+/// Declares the app's locales to Apple's systems (`CFBundleLocalizations`,
+/// English, the development region, first): system UI, such as AppKit's and
+/// UIKit's menus, shows in the language the app does, which without it is
+/// English whatever the user's.
+fn bundle_localizations(d: &mut plist::Dictionary, config: &AppConfig) {
+    if config.localizations.is_empty() {
+        return;
+    }
+    let mut list = vec!["en".to_owned()];
+    for locale in &config.localizations {
+        if !list.contains(locale) {
+            list.push(locale.clone());
+        }
+    }
+    d.insert(
+        "CFBundleLocalizations".into(),
+        plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
+    );
 }
 
 /// `nsh.json`'s text as an [`AppConfig`], with what it left out: keys it
@@ -1439,6 +1485,7 @@ fn macos_info_plist(
         d.insert("LSUIElement".into(), true.into());
     }
     config.usage_descriptions(&mut d);
+    bundle_localizations(&mut d, config);
     // The app's own keys, over NSH's defaults (never over its reserved ones).
     d.extend(config.macos.info_plist()?);
     Ok(d)
@@ -1519,6 +1566,7 @@ fn info_plist(
     );
     d.insert("LSRequiresIPhoneOS".into(), true.into());
     config.usage_descriptions(&mut d);
+    bundle_localizations(&mut d, config);
     // A launch screen entry opts into the full screen (no letterboxing).
     d.insert(
         "UILaunchScreen".into(),
@@ -1933,6 +1981,42 @@ mod tests {
         assert!(usage(None));
         assert!(usage(Some(serde_json::json!({ "speech": true }))));
         assert!(!usage(Some(serde_json::json!({ "picker": true }))));
+    }
+
+    #[test]
+    fn apple_packages_declare_the_apps_languages() {
+        let dir = std::env::temp_dir().join(format!("nsh-localizations-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("locales")).unwrap();
+        fs::write(dir.join("App.tsx"), "").unwrap();
+        fs::write(dir.join("locales/en.yml"), "hello: Hello\n").unwrap();
+        fs::write(dir.join("locales/zh-CN.yml"), "hello: 你好\n").unwrap();
+        let declared = |config: &AppConfig| {
+            let macos = macos_info_plist("A", "com.a", "a", config, false).unwrap();
+            let ios = info_plist("A", "com.a", "a", config, "iphoneos").unwrap();
+            assert_eq!(
+                macos.get("CFBundleLocalizations"),
+                ios.get("CFBundleLocalizations")
+            );
+            macos.get("CFBundleLocalizations").map(|list| {
+                list.as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // The translations' languages, English (the development region) first...
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "zh-CN"]);
+        // ...or exactly those `locales` lists, as the bundle carries them.
+        fs::write(dir.join("nsh.json"), r#"{ "locales": ["ja", "zh-TW", 7] }"#).unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-TW"]);
+        // An app without either declares nothing: English, as before.
+        assert_eq!(declared(&AppConfig::default()), None);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
