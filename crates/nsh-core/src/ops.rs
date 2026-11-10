@@ -1856,7 +1856,9 @@ impl WebKey {
 }
 
 /// Where `scrollIntoView` puts a view along the axis of a scroll view
-/// around it: the DOM's `ScrollLogicalPosition`.
+/// around it: the DOM's `ScrollLogicalPosition`. Start and end are
+/// physical: top and bottom along a vertical scroll view, left and right
+/// along a horizontal one, in either writing direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollAlignment {
     /// Its start at the start of the viewport.
@@ -1889,7 +1891,10 @@ impl ScrollAlignment {
 
 /// How `scrollIntoView` scrolls
 /// ([`crate::element::ElementRef::scroll_into_view`], TS
-/// `ref.scrollIntoView(options)`).
+/// `ref.scrollIntoView(options)`). It places the view from the layout and
+/// the zoom scales the platforms last reported, as `measure()` does:
+/// transforms (animations included) and a `zoomTo` not applied yet are not
+/// taken into account.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct ScrollIntoView {

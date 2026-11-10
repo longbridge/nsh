@@ -243,20 +243,40 @@ impl<M: TextEngine> Core<M> {
                 // A culled scroll view is made for its command.
                 if parent.kind == Kind::Scroll && valid(&parent.frame) {
                     let viewport = parent.frame.size;
-                    let most = |content: Option<Points>, viewport: Points| {
-                        content.map_or(f32::INFINITY, |c| (c - viewport).0.max(0.0))
-                    };
-                    let most_x = most(scroll.content.map(|c| c.width), viewport.width);
-                    let most_y = most(scroll.content.map(|c| c.height), viewport.height);
-                    if let Some(&(_, (px, py))) = projected.iter().rfind(|(s, _)| *s == parent.id) {
-                        offset = (px.clamp(0.0, most_x), py.clamp(0.0, most_y));
+                    let inset = scroll.behavior.content_inset;
+                    // The range the platforms scroll over: the content and its insets.
+                    let range =
+                        |content: Option<Points>, viewport: Points, lead: Points, trail: Points| {
+                            let most = content.map_or(f32::INFINITY, |c| (c + trail - viewport).0);
+                            (-lead.0, most.max(-lead.0))
+                        };
+                    let content = (
+                        scroll.content.map(|c| c.width),
+                        scroll.content.map(|c| c.height),
+                    );
+                    let x_range = range(content.0, viewport.width, inset.left, inset.right);
+                    let y_range = range(content.1, viewport.height, inset.top, inset.bottom);
+                    let issued = projected
+                        .iter()
+                        .rfind(|(s, _)| *s == parent.id)
+                        .map(|&(_, to)| to)
+                        .or(scroll.target.map(|(_, to)| to));
+                    if let Some((px, py)) = issued {
+                        offset = (
+                            px.clamp(x_range.0, x_range.1),
+                            py.clamp(y_range.0, y_range.1),
+                        );
                     }
+                    // Unclamped when it stays: UIKit adds insets the core does not know.
+                    let settle = |to: f32, at: f32, (least, most): (f32, f32)| {
+                        if to == at { at } else { to.clamp(least, most) }
+                    };
                     let to = if scroll.horizontal {
                         let to = aligned(x, width, viewport.width.0, offset.0, options.inline);
-                        (to.clamp(0.0, most_x), offset.1)
+                        (settle(to, offset.0, x_range), offset.1)
                     } else {
                         let to = aligned(y, height, viewport.height.0, offset.1, options.block);
-                        (offset.0, to.clamp(0.0, most_y))
+                        (offset.0, settle(to, offset.1, y_range))
                     };
                     if to != offset {
                         scrolls.push((

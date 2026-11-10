@@ -264,6 +264,9 @@ tap id:nearest
 expect Called: nearest
 tap id:end
 expect Called: end
+# An alignment it does not know is a TypeError, at the call.
+tap id:unknown
+expect Unknown alignment: TypeError
 # core-resource
 tap id:case-core-resource
 # Resources without a source: a value at once, an initial value while the

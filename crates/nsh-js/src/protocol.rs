@@ -209,19 +209,27 @@ pub(crate) fn decode_command<'js>(
             let o = arg.as_object();
             let mut options = nsh_core::ScrollIntoView::default();
             let align = |key: &str, default| {
-                let value = o.and_then(|o| o.get::<_, Option<String>>(key).ok().flatten());
-                match value.as_deref() {
-                    None => default,
-                    Some(value) => {
-                        nsh_core::ScrollAlignment::from_name(value).unwrap_or_else(|| {
-                            log::warn!("scrollIntoView: unknown {key} {value:?}");
-                            default
-                        })
-                    }
+                let Some(value) = o.and_then(|o| o.get::<_, Value>(key).ok()) else {
+                    return Ok(default);
+                };
+                if value.is_undefined() {
+                    return Ok(default);
                 }
+                value
+                    .as_string()
+                    .and_then(|s| s.to_string().ok())
+                    .and_then(|name| nsh_core::ScrollAlignment::from_name(&name))
+                    .ok_or_else(|| {
+                        Exception::throw_type(
+                            arg.ctx(),
+                            &format!(
+                                "scrollIntoView: {key} must be \"start\", \"center\", \"end\" or \"nearest\""
+                            ),
+                        )
+                    })
             };
-            options.block = align("block", options.block);
-            options.inline = align("inline", options.inline);
+            options.block = align("block", options.block)?;
+            options.inline = align("inline", options.inline)?;
             if let Some(animated) =
                 o.and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
             {
