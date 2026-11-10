@@ -523,3 +523,55 @@ fn set_theme_replaces_the_apps_theme_while_it_runs() {
         ]
     );
 }
+
+#[test]
+fn set_theme_refuses_malformed_themes_without_changing_tokens_or_views() {
+    let source = r##"import { mount, setTheme, signal, Text, token, View } from "nsh";
+const status = signal("start");
+setTimeout(() => {
+  const invalid = [
+    { cssVars: null },
+    { cssVars: [] },
+    { cssVars: true },
+    { cssVars: 12 },
+    { cssVars: "light" },
+    { cssVars: { light: { brand: "rgb(255 0 0" } } },
+    { cssVars: { light: { brand: "oklch(0.7 0.1" } } },
+    { cssVars: { light: { brand: "var(--nothing" } } },
+    { cssVars: { light: { brand: "#zz" }, dark: { brand: "12px" } } },
+  ];
+  const results = invalid.map(theme => {
+    setTheme({ cssVars: { light: { brand: "#00ff00" } } });
+    try { setTheme(theme); return "taken"; }
+    catch (error) { return `${error.name} kept ${token("brand")}`; }
+  });
+  status.set(results.join("; "));
+}, 100);
+mount(() => <View><View class="h-4 bg-brand" /><Text>{status()}</Text></View>);
+"##;
+    let config = r##"{ "theme": { "cssVars": { "light": { "brand": "#123456" } } } }"##;
+    let (_engine, rx) =
+        crate::components::start_with(source, Environment::default(), None, Some(config));
+    let expected = ["TypeError kept #00ff00ff"; 9].join("; ");
+    let batches = crate::components::until(&rx, |b| crate::components::shows(b, &expected));
+    let texts: Vec<&str> = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter_map(|item| match item {
+            MountItem::Text { text, .. } => Some(&*text.text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts.last().copied(), Some(expected.as_str()));
+    let backgrounds: Vec<Color> = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter_map(|item| match item {
+            MountItem::ViewStyle { style, .. } if style.background_color.0 & 0xff != 0 => {
+                Some(style.background_color)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(backgrounds.last(), Some(&Color(0x00ff00ff)));
+}

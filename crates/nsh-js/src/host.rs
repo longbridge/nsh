@@ -1284,6 +1284,17 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
             }
         }
+        EventPayload::Wheel(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            let (x, y) = e.delta.xy();
+            let delta = rquickjs::Object::new(cx.clone())?;
+            delta.set("x", x)?;
+            delta.set("y", y)?;
+            obj.set("delta", delta)?;
+            obj.set("deltaMode", e.delta.mode_name())?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
+        }
         EventPayload::ContextMenu(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
             obj.set("pagePosition", point_object(cx, e.page_position)?)?;

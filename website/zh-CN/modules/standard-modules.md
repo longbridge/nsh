@@ -99,7 +99,8 @@ async function loadSettings(): Promise<string> {
 
 ## 文件
 
-`fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写原生文件，在浏览器中通过 Origin Private File System（OPFS）读写应用私有文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。所有失败都拒绝 Promise：授权范围之外的路径在任何磁盘操作之前以 `code` 为 `ERR_ACCESS_DENIED` 的错误拒绝（`permission` 为 `"fs"`，`resource` 为应用所写的路径）。
+`fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写原生文件，在浏览器中通过 Origin Private File System（OPFS）读写应用私有文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。所有失败都拒绝 Promise：授权范围之外的路径在任何磁盘操作之前以 `code` 为 `ERR_ACCESS_DENIED` 的错误拒绝（`permission` 为 `"fs"`，`resource` 为应用所写的路径）。图片、视频和声音显示的本地文件也按同样的 `read` 根目录检查（见
+[沙箱](../docs/sandbox-and-capabilities.md#network)）。
 
 ```json
 {

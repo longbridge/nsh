@@ -376,6 +376,7 @@ const Application: {
   quit(): void;
   restart(): void;
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
+  on(event: "quit", listener: () => void): () => void;
 };
 ```
 
@@ -384,6 +385,7 @@ const Application: {
 | `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
 | `restart()` | `restart()` | Quits the app as `quit()` does, then starts it again with the same arguments. |
 | `on("secondInstance", listener)` | `next_second_instance()` | The app was launched again while it runs ([Single instance](#single-instance)). |
+| `on("quit", listener)` | `on_app_quit(f)` | The app is quitting: its cleanup runs ([Quitting](#quitting)). |
 
 `Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
 update. The app stops as when its last window closes, then its run ends, also when closing the window alone would
@@ -409,6 +411,61 @@ async function changeLanguage(language: string) {
   if (await confirmRestart()) Application.restart();
 }
 ```
+
+### Quitting
+
+The app owns its Quit, as a GPUI app owns its `Quit` action. The application menu's `{ role: "quit" }` item and its key
+quit at once. An app that asks first (unsaved changes, a running upload) puts a Quit item of its own in the menu with
+the quit key, asks, then calls `quit()`:
+
+```rust tabs
+use nsh_core::{
+    desktop::MenuItem,
+    element::desktop::{on_app_quit, quit, set_application_menu},
+    prelude::*,
+};
+
+#[component]
+fn Editor() -> impl IntoElement {
+    let dirty = signal(false);
+    set_application_menu(vec![MenuItem::submenu("File", vec![
+        MenuItem::new("Quit").shortcut("mod+q").on_select(move || {
+            if dirty.get_untracked() {
+                ask_to_save(); // its Quit button calls `quit()`
+            } else {
+                quit();
+            }
+        }),
+    ])]);
+    // Runs however the app quits; it cannot keep it running.
+    on_app_quit(move || async move { save_session().await });
+    editor()
+}
+```
+
+```tsx tabs
+import { Application, Menu } from "nsh/desktop";
+
+function Editor() {
+  Menu.setApplicationMenu([
+    {
+      label: "File",
+      submenu: [{ label: "Quit", shortcut: "mod+q", onSelect: () => (dirty() ? askToSave() : Application.quit()) }],
+    },
+  ]);
+  // Runs however the app quits; it cannot keep it running.
+  Application.on("quit", async () => {
+    await saveSession();
+  });
+  return <EditorView />;
+}
+```
+
+`Application.on("quit", listener)` (Rust: `on_app_quit`) is the app's cleanup, as GPUI's `on_app_quit`: it runs
+however the app stops (its Quit item, `quit()`, its last window closing, the Dock's Quit, the system ending it when the
+user logs out, a host app removing its view), and cannot keep it running. A promise the listener returns is awaited,
+200 ms at most for all of them, while the platform waits for the app; past that the app stops. A listener added while a
+component renders goes with the component; the function `on` returns stops it.
 
 ### Single instance
 
@@ -861,6 +918,8 @@ Tray.set({
   ],
 });
 ```
+
+A window the app shows or focuses in `onClick` or in a menu item's `onSelect` comes to the front, on Linux's Wayland desktops too, where the panel hands the app the activation token of the click.
 
 A title keeps something in sight beside the icon in macOS's menu bar, such as a price, its change in a color of the app's theme. A run's color is fixed when `set` is called; set the tray inside an `effect` that reads the color scheme for a theme color to follow light and dark:
 

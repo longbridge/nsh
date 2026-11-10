@@ -99,7 +99,8 @@ Browser apps read an empty `process.env` object, and `os.homedir()` throws `ERR_
 
 ## Files
 
-`fs/promises` reads and writes native files on desktop hosts (macOS, Windows and Linux), and app-private browser files through the Origin Private File System (OPFS). Every path is checked against `capabilities.fs` before the operation starts: `read` roots for `readFile`, `readdir`, `stat`, `lstat`, `readlink` and `exists`, `write` roots for `writeFile`, `mkdir`, `rename`, `unlink` and `rmdir`. Every failure rejects the promise: a path outside the grants with `code` `ERR_ACCESS_DENIED` (`permission` `"fs"`, `resource` the path as the app wrote it), before any disk work.
+`fs/promises` reads and writes native files on desktop hosts (macOS, Windows and Linux), and app-private browser files through the Origin Private File System (OPFS). Every path is checked against `capabilities.fs` before the operation starts: `read` roots for `readFile`, `readdir`, `stat`, `lstat`, `readlink` and `exists`, `write` roots for `writeFile`, `mkdir`, `rename`, `unlink` and `rmdir`. Every failure rejects the promise: a path outside the grants with `code` `ERR_ACCESS_DENIED` (`permission` `"fs"`, `resource` the path as the app wrote it), before any disk work. The same `read` roots hold the local files images,
+videos and sounds show ([sandbox](../docs/sandbox-and-capabilities.md#network)).
 
 ```json
 {

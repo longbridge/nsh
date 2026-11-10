@@ -236,7 +236,7 @@ pub(crate) fn package(
         }
         None => None,
     };
-    let icons = match &config.icon {
+    let icons = match config.icon(crate::package::PackageTarget::Web) {
         Some(icon) => Icons::write(&site, icon)?,
         None => Icons::default(),
     };

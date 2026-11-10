@@ -14,6 +14,7 @@
 use nsh_core::{
     Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, ROOT_ID,
     desktop::{MenuItem, Shortcut},
+    geometry::Points,
     keymap::{Key, KeyMatch, Keystroke},
     platform::Os,
     tailwind::state::FOCUSED,
@@ -213,6 +214,42 @@ impl Headless {
             return;
         };
         self.move_focus(Some(stops[next]));
+        self.reveal(stops[next]);
+    }
+
+    /// The scroll views around `id`, which the keyboard focus reached,
+    /// scroll so that it shows, innermost first, as the platforms scroll
+    /// them for a focus Tab moves (at once here: no animation).
+    fn reveal(&mut self, id: NodeId) {
+        for view in self.screen.scrolls_around(id) {
+            let (Some(target), Some(viewport), Some(scroll)) = (
+                self.screen.bounds_in_root(id),
+                self.screen.bounds_in_root(view),
+                self.screen.scroll(view),
+            ) else {
+                continue;
+            };
+            let (start, len, dim, offset) = if scroll.horizontal {
+                (
+                    target.origin.x - viewport.origin.x,
+                    target.size.width,
+                    viewport.size.width,
+                    scroll.x,
+                )
+            } else {
+                (
+                    target.origin.y - viewport.origin.y,
+                    target.size.height,
+                    viewport.size.height,
+                    scroll.y,
+                )
+            };
+            let delta = nsh_core::scroll::reveal_focus_delta(start, start + len, dim);
+            let to = (offset + delta).clamp(Points::ZERO, self.screen.scroll_end(view));
+            if (to - offset).abs() >= Points(0.5) {
+                self.scroll_to(view, to);
+            }
+        }
     }
 
     /// Moves the keyboard focus to `to` (an input or a view), telling

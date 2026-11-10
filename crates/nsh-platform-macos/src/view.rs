@@ -643,6 +643,12 @@ define_class!(
                 // The stops Tab reaches report it, as inputs do.
                 if view.id() != ROOT_ID {
                     surface.event(view.id(), nsh_core::EventKind::Focus, nsh_core::EventPayload::None);
+                    // A stop the keyboard or the app focuses scrolls into
+                    // view, as a field does; one a click focuses is
+                    // where the pointer is already, and stays.
+                    if !pressing(self.mtm()) {
+                        crate::scroll::reveal(&surface, &view);
+                    }
                 }
             }
             accepted
@@ -736,6 +742,11 @@ define_class!(
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             match self.input_surface() {
+                // Nothing of this surface scrolls there: its host's turn.
+                // SAFETY: NSResponder's own handling (passes it up).
+                Some(surface) if crate::input::forwards_scroll(&surface, event) => unsafe {
+                    msg_send![super(self), scrollWheel: event]
+                },
                 // Scrolls move views: a frame for the performance monitor.
                 Some(surface) => surface.measure(true, || {
                     crate::input::event(&surface, event);
@@ -773,8 +784,7 @@ define_class!(
             }
         }
 
-        /// The Services menu (and Look Up / Translate in a selection's
-        /// context menu) can take the selected text as plain text.
+        /// AppKit Services can take the selected text as plain text.
         #[unsafe(method(validRequestorForSendType:returnType:))]
         fn valid_requestor(
             &self,
@@ -917,7 +927,8 @@ define_class!(
             })
         }
 
-        // What VoiceOver reaches of the children ([`crate::access::reached`]).
+        // What VoiceOver reaches of the children ([`crate::access::reached`]),
+        // in the order they are on screen ([`crate::access::in_reading_order`]).
         #[unsafe(method_id(accessibilityChildren))]
         fn accessibility_children(&self) -> Option<Retained<NSArray>> {
             let reached = self
@@ -925,14 +936,49 @@ define_class!(
                 .state
                 .try_borrow()
                 .map_or(crate::access::Reached::All, |s| crate::access::reached(&s));
-            // SAFETY: NSView's own children.
             let all = || -> Option<Retained<NSArray>> {
-                unsafe { msg_send![super(self), accessibilityChildren] }
+                // SAFETY: NSView's own children.
+                let all = unsafe { msg_send![super(self), accessibilityChildren] };
+                crate::access::in_reading_order(&NshView(self.retain()), all)
             };
             match reached {
-                crate::access::Reached::All => all(),
+                crate::access::Reached::All => {
+                    crate::access::scroll_bar::with_bar(&NshView(self.retain()), all())
+                }
                 crate::access::Reached::Controls => Some(crate::access::controls(all())),
                 crate::access::Reached::None => Some(NSArray::new()),
+            }
+        }
+
+        // `AXInvalid` beside AppKit's attributes while the content is
+        // invalid ([`crate::access::invalid`]): NSAccessibility has no
+        // property for it, so it is answered here, as WebKit does.
+        #[unsafe(method_id(accessibilityAttributeNames))]
+        fn accessibility_attribute_names(&self) -> Retained<NSArray> {
+            // SAFETY: NSView's own attributes, from its NSAccessibility
+            // properties.
+            let names: Retained<NSArray> =
+                unsafe { msg_send![super(self), accessibilityAttributeNames] };
+            if self.ivars().state.try_borrow().is_ok_and(|s| crate::access::invalid(&s)) {
+                let name = NSString::from_str(crate::access::INVALID_ATTRIBUTE);
+                // SAFETY: an array of attribute names, which are strings.
+                unsafe { msg_send![&*names, arrayByAddingObject: &*name] }
+            } else {
+                names
+            }
+        }
+
+        #[unsafe(method_id(accessibilityAttributeValue:))]
+        fn accessibility_attribute_value(&self, attribute: &NSString) -> Option<Retained<AnyObject>> {
+            if attribute.to_string() == crate::access::INVALID_ATTRIBUTE {
+                let invalid =
+                    self.ivars().state.try_borrow().is_ok_and(|s| crate::access::invalid(&s));
+                let value = NSString::from_str(if invalid { "true" } else { "false" });
+                Some(Retained::into_super(Retained::into_super(value)))
+            } else {
+                // SAFETY: NSView's own answer, from its NSAccessibility
+                // properties.
+                unsafe { msg_send![super(self), accessibilityAttributeValue: attribute] }
             }
         }
 
@@ -961,6 +1007,19 @@ define_class!(
                 crate::access::content_value(&NshView(self.retain()))
                     .map(|name| Retained::into_super(Retained::into_super(NSString::from_str(&name))))
             })
+        }
+
+        // A scroll area's bar on its axis ([`crate::access::scroll_bar`]).
+        #[unsafe(method_id(accessibilityVerticalScrollBar))]
+        fn accessibility_vertical_scroll_bar(&self) -> Option<Retained<AnyObject>> {
+            crate::access::scroll_bar::bar(&NshView(self.retain()), true)
+                .map(|bar| bar.into_super().into_super().into_super())
+        }
+
+        #[unsafe(method_id(accessibilityHorizontalScrollBar))]
+        fn accessibility_horizontal_scroll_bar(&self) -> Option<Retained<AnyObject>> {
+            crate::access::scroll_bar::bar(&NshView(self.retain()), false)
+                .map(|bar| bar.into_super().into_super().into_super())
         }
 
         #[unsafe(method_id(accessibilityRows))]

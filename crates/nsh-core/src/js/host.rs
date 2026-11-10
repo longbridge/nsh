@@ -535,6 +535,19 @@ export interface MouseEvent {
   pressedButton: MouseButton | null;
 }
 
+/** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
+export interface WheelEvent {
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+  /** How far it scrolled, in `deltaMode` units: positive `y` scrolls down (toward the end), positive `x` right, as the DOM's `deltaX` / `deltaY`. */
+  delta: Point;
+  /** `"points"`: a precise device (a touchpad); `"lines"`: mouse wheel notches. */
+  deltaMode: "points" | "lines";
+  modifiers: Modifiers;
+}
+
 /** A mouse button (GPUI's `MouseButton`). */
 export type MouseButton = "left" | "right" | "middle" | "back" | "forward";
 
@@ -663,6 +676,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::ALL,
         "(e: MouseEvent) => void",
         "The mouse moved over the view (or a view inside it), with or without a button down (`e.pressedButton`), or a modifier key changed while it rests there with none down; at most once per frame.",
+    ),
+    (
+        EventKind::Wheel,
+        on::ALL,
+        "(e: WheelEvent) => void",
+        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.ctrl` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
     ),
     (
         EventKind::ContextMenu,
@@ -868,8 +887,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::SelectionChange,
         on::VIEW,
-        "(e: { text: string; start?: number }) => void",
-        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it. Only the outermost selectable view of an area reports it.",
+        "(e: { text: string; start?: number; bounds?: Bounds; pageBounds?: Bounds }) => void",
+        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it; `bounds` is the box around the selected text in the view and `pageBounds` in the root view it is in, as of the event (an `Overlay`'s `anchor`: a bar of actions on the selection), while something is selected and the platform knows them. Only the outermost selectable view of an area reports it.",
     ),
     (
         EventKind::Paste,

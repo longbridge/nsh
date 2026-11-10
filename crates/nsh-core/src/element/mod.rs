@@ -57,6 +57,7 @@ pub(crate) mod module;
 mod once;
 pub mod palette;
 mod prop;
+pub(crate) mod quit;
 pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
@@ -210,12 +211,13 @@ pub use crate::{
     EllipsizeMode, EventKind, EventPayload, Haptic, HapticImpact, HapticNotification,
     HeaderSystemItem, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
     KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
-    ListAlignment, ListViewport, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial,
-    MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation, MouseButton, MouseEvent,
-    PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent,
-    ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScrollAlignment, SnapAlignment,
-    StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent,
-    TransformKind, TransformOrigin, Viewability,
+    ListAlignment, ListScrollPosition, ListViewport, MacOsBackdrop, MacOsBackdropBlending,
+    MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation,
+    MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents,
+    PointerType, PressEvent, ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation,
+    ScrollAlignment, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+    SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    WheelDelta, WheelEvent,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

@@ -270,7 +270,7 @@ impl ResolvedTextStyle {
 }
 
 /// Whether two span lists over one string style every character alike
-/// but for the colors ([`AttributedText::same_but_colors`]).
+/// but for the colors and what is hidden ([`AttributedText::same_but_colors`]).
 fn spans_same_but_colors(a: &[TextSpan], b: &[TextSpan]) -> bool {
     let colorless = |s: &ResolvedTextStyle| ResolvedTextStyle {
         color: Color::TRANSPARENT,
@@ -279,6 +279,9 @@ fn spans_same_but_colors(a: &[TextSpan], b: &[TextSpan]) -> bool {
             color: Color::TRANSPARENT,
             ..b
         }),
+        // Hidden characters keep their place in the lines: whether a run is
+        // drawn is decided when drawing, as its colors are.
+        hidden: false,
         ..*s
     };
     // Both cover the string end to end: walk the pieces where they overlap.
@@ -783,9 +786,11 @@ impl AttributedText {
     }
 
     /// Whether the two texts differ at most in their spans' colors (text,
-    /// decoration and background) and test metadata: the same characters
-    /// in the same styles but for those, wherever the spans begin and end
-    /// (neighbors that take the same color merge into one span).
+    /// decoration and background), which of them are hidden
+    /// ([`ResolvedTextStyle::hidden`]) and test metadata: the same
+    /// characters in the same styles but for those, wherever the spans
+    /// begin and end (neighbors that take the same color merge into one
+    /// span).
     pub(crate) fn same_but_colors(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
         let Self {
@@ -952,11 +957,12 @@ pub trait TextEngine {
     /// Whether the platform draws a text's colors from the
     /// [`AttributedText`] mounted with its layout, not from the
     /// typesetting state: the spans' text, decoration and background
-    /// colors, looked up by character when drawing. The prepared state and
+    /// colors and which spans are hidden ([`ResolvedTextStyle::hidden`]),
+    /// looked up by character when drawing. The prepared state and
     /// layouts then hold for any text that differs from theirs only in
-    /// those colors (wherever its spans begin and end), so a change of
-    /// colors alone keeps them: no new typesetting, measurement or layout,
-    /// only the new text mounted with the layout already drawn.
+    /// those (wherever its spans begin and end), so a change of colors or
+    /// of what is hidden alone keeps them: no new typesetting, measurement
+    /// or layout, only the new text mounted with the layout already drawn.
     fn draws_colors_from_text(&self) -> bool {
         false
     }

@@ -759,6 +759,8 @@ pub(crate) fn handle(
         }
         WM_ERASEBKGND => Some(Some(LRESULT(1))),
         WM_SIZE => {
+            // The frame's material follows the zoom state.
+            crate::shell::zoom_changed(hwnd);
             if let Some(window) = &window {
                 // What DWM shows past the last frame meanwhile, as the main
                 // window's.

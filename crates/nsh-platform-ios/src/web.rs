@@ -95,6 +95,32 @@ define_class!(
             decide.call((allowed as isize,));
         }
 
+        /// The page's `getUserMedia` gets what the app's `webview.media`
+        /// capability grants; the system still asks the user.
+        #[unsafe(method(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:))]
+        fn media_capture(
+            &self,
+            _web: &AnyObject,
+            _origin: &AnyObject,
+            _frame: &AnyObject,
+            kind: isize,
+            decide: &block2::Block<dyn Fn(isize)>,
+        ) {
+            use nsh_core::access::WebMedia;
+            // WKMediaCaptureTypeCamera = 0, Microphone = 1, CameraAndMicrophone = 2.
+            let wanted: &[WebMedia] = match kind {
+                0 => &[WebMedia::Camera],
+                1 => &[WebMedia::Microphone],
+                _ => &[WebMedia::Camera, WebMedia::Microphone],
+            };
+            let granted = wanted.iter().all(|m| self.ivars().access.allows_web_media(*m));
+            if !granted {
+                log::warn!(target: "js", "web view media capture is not granted: add it to capabilities.webview.media");
+            }
+            // WKPermissionDecisionGrant = 1, Deny = 2.
+            decide.call((if granted { 1 } else { 2 },));
+        }
+
         #[unsafe(method(webView:didStartProvisionalNavigation:))]
         fn did_start(&self, web: &AnyObject, _navigation: Option<&AnyObject>) {
             self.ivars().evaluations.navigated();
@@ -298,6 +324,7 @@ impl WebHost {
             let web: Option<Retained<AnyObject>> = msg_send![alloc, initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::ZERO), configuration: &*config];
             let Some(web) = web else { return };
             let _: () = msg_send![&web, setNavigationDelegate: &**handler];
+            let _: () = msg_send![&web, setUIDelegate: &**handler];
             let ui: &UIView = &*(Retained::as_ptr(&web) as *const UIView);
             ui.setAutoresizingMask(
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
@@ -463,6 +490,7 @@ impl Drop for WebHost {
         // SAFETY: breaks the cycle web view -> controller -> handler.
         unsafe {
             let _: () = msg_send![web, setNavigationDelegate: std::ptr::null::<AnyObject>()];
+            let _: () = msg_send![web, setUIDelegate: std::ptr::null::<AnyObject>()];
             let config: Retained<AnyObject> = msg_send![web, configuration];
             let content: Retained<AnyObject> = msg_send![&config, userContentController];
             let _: () =
