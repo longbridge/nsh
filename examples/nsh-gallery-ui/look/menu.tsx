@@ -56,7 +56,7 @@ export interface MenuItemLookOptions {
  * pointer and 46 on a touch screen (`menuItemSize`), 8 points in from the
  * popup's sides. Under the pointer and under the keyboard alike it takes
  * the neutral `accent` fill (`menuHighlight`), so arrow keys show where
- * they are; pressed, a shade deeper; disabled, 35%. Its label takes
+ * they are; pressed, a shade deeper; disabled, 50%. Its label takes
  * `menuItemLabel`, a note `menuItemNote`, an icon `menuItemGlyph`.
  */
 export function menuItemLook(o?: MenuItemLookOptions) {
@@ -82,7 +82,7 @@ export function menuItemLook(o?: MenuItemLookOptions) {
     get activeStyle(): ViewStyle {
       return menuPressed();
     },
-    disabledStyle: { opacity: 0.35 } as ViewStyle,
+    disabledStyle: { opacity: 0.5 } as ViewStyle,
   };
 }
 
@@ -165,7 +165,7 @@ export function menuSeparator(): ViewStyle {
 /**
  * The row that opens a submenu (a `Submenu`'s `trigger`): `menuItemLook`'s
  * row, `lead` (an icon) before the label and a faint chevron at its end;
- * disabled, 35%.
+ * disabled, 50%.
  */
 export function SubmenuRow(props: { label: string; lead?: JSX.Element; disabled?: boolean }) {
   const look = menuItemLook();

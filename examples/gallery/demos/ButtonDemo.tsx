@@ -3,7 +3,7 @@ import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
 import { Icon, IconLabel, type IconName } from "../icons";
 import { play as sound } from "../../nsh-gallery-ui/sound";
-import { alpha, Badge, Button, buttonLook, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, menuItemLook, mono, motion, radius, Spinner, splitButtonLook, terminal, TERMINAL_GAP, tints, Tip, Toggle, menuPopup } from "../ui"
+import { alpha, Badge, Button, buttonLook, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, menuItemLook, mono, motion, radius, Spinner, splitButtonLook, terminal, TERMINAL_GAP, tints, Tip, Toggle, LabeledToggle, LastEvent, menuPopup } from "../ui";
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
 // the button role; the look is the gallery's (`buttonLook` of
@@ -196,7 +196,7 @@ export function ButtonDemo() {
         <Each of={[...sizes]}>
           {(s) => (
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-              <Text style={{ width: 64, fontSize: 12, color: colors.faint, fontFamily: mono }}>{s().size}</Text>
+              <Text style={{ width: 64, fontSize: pointer ? 12 : 13, color: colors.muted }}>{s().label}</Text>
               <Button size={s().size} label="Continue" onPress={() => last.set(`pressed ${s().label} Continue`)} />
               <Button size={s().size} label="Add" icon="plus" variant="secondary" onPress={() => last.set(`pressed ${s().label} Add`)} />
               <Button size={s().size} label="Skip" variant="ghost" onPress={() => last.set(`pressed ${s().label} Skip`)} />
@@ -338,7 +338,7 @@ export function ButtonDemo() {
             />
           </If>
         </View>
-        <Caption label="The chevron's menu picks how the main action merges" note={strategy().value} />
+        <Caption label={strategy().note} />
       </Card>
     );
   }
@@ -388,7 +388,7 @@ export function ButtonDemo() {
       after(160, step);
     };
     return (
-      <Card title="Work that takes a while" subtitle="No second press while it runs; the result shows on the button">
+      <Card title="Work that takes a while" subtitle="One press while it runs; the result on the button">
         <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
           <Button
             label={save() === "busy" ? "Saving…" : save() === "done" ? "Saved" : "Save changes"}
@@ -407,7 +407,7 @@ export function ButtonDemo() {
             onPress={runUpload}
           />
         </View>
-        <Caption label="A spinner while waiting, a progress fill when the amount is known" note={save() === "busy" || progress() !== null ? "busy" : "idle"} />
+        <Caption label="A spinner while waiting, a progress fill when the amount is known" note={save() === "busy" || progress() !== null ? "Working…" : "Ready"} />
       </Card>
     );
   }
@@ -434,6 +434,7 @@ export function ButtonDemo() {
           borderWidth: 1,
           backgroundColor: colors.field,
           ...finish.field,
+          borderColor: colors.fieldBorder,
         }}
       >
         <Text style={{ flex: 1, numberOfLines: 1, fontSize: pointer ? 12 : 14, color: colors.text, fontFamily: mono }}>{props.text}</Text>
@@ -529,7 +530,7 @@ export function ButtonDemo() {
     const reason = () => (!title() ? "Add a title first" : !terms() ? "Accept the terms to publish" : null);
     const published = signal(false);
     return (
-      <Card title="Disabled, with its reason" subtitle="Say what to do, next to the button" right={<Toggle value={off()} onChange={(v) => off.set(v)} label="Disable all" />}>
+      <Card title="Disabled, with its reason" subtitle="Say what to do, next to the button" right={<LabeledToggle label="Disable all" value={off()} onChange={(v) => off.set(v)} />}>
         <View style={{ gap: 2 }}>
           <Row label="The post has a title" value={title()} onChange={(v) => {
             resize();
@@ -562,7 +563,7 @@ export function ButtonDemo() {
   function Last() {
     return (
       <Card title="Last event">
-        <Text style={{ fontSize: 13, color: colors.text, fontFamily: mono }}>{last()}</Text>
+        <LastEvent value={last()} hint="Press a button" />
       </Card>
     );
   }

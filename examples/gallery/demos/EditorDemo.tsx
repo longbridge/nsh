@@ -712,7 +712,10 @@ export function EditorDemo() {
           class="flex-1"
           defaultLayout={{
             center: { type: "tabs", panels: ["editor"] },
-            bottom: { layout: { type: "tabs", panels: ["problems"] }, size: 120 },
+            // Whole rows: the tab bar (28 and its rule), the list's padding (8) and six problems of 24, every
+            // one of the TypeScript sample's (an error, four warnings, an info), so none hides under the fold
+            // above the status bar.
+            bottom: { layout: { type: "tabs", panels: ["problems"] }, size: 29 + 8 + 6 * 24 },
           }}
           panels={[
             { id: "editor", closable: false },
@@ -844,7 +847,7 @@ export function EditorDemo() {
       </If>
 
       {/* A terminal's status line reads as words two columns apart (12pt is one), its edges one column in, as a pager's. */}
-      <View class="h-6 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1" style={terminal ? { gap: 24, paddingHorizontal: 8 } : undefined}>
+      <View class="h-7 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1" style={terminal ? { gap: 24, paddingHorizontal: 8 } : undefined}>
         <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] tabular-nums text-foreground">
           {caret()}
         </Text>
@@ -857,7 +860,8 @@ export function EditorDemo() {
         <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-info">
           {plural(count("info"), "info")}
         </Text>
-        <If when={!terminal || last() !== "—"}>
+        {/* Nothing until there is something to say: a lone dash reads as debris. */}
+        <If when={last() !== "—"}>
           <Text style={{ numberOfLines: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
             {last()}
           </Text>

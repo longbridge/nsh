@@ -525,8 +525,10 @@ const glyphs: Record<IconName, Draw> = {
     c.stroke();
   },
   bell: (c) => {
-    line(c, [5, 14, 5, 9, 7, 5.5, 10, 4.5, 13, 5.5, 15, 9, 15, 14, 5, 14]);
-    line(c, [8.5, 16.5, 11.5, 16.5]);
+    // As tall and wide as the set's other glyphs (about 14 of the 20 units): the body, its flared rim, the clapper.
+    line(c, [4.5, 14, 4.5, 9, 6.5, 4.75, 10, 3.25, 13.5, 4.75, 15.5, 9, 15.5, 14]);
+    line(c, [3, 14, 17, 14]);
+    line(c, [8.25, 17, 11.75, 17]);
   },
   spark: (c) => {
     line(c, [10, 3, 11.5, 8.5, 17, 10, 11.5, 11.5, 10, 17, 8.5, 11.5, 3, 10, 8.5, 8.5, 10, 3]);

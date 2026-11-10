@@ -11,7 +11,7 @@ import { platform, reduceMotion, Text, View } from "nsh";
 import type { CalendarEntry, SelectEntry, SelectGroup } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { alpha, colors, finish, radius, terminal, TERMINAL_COLUMN, tints } from "../theme";
-import { edgeClass, timeFieldClass } from "./field";
+import { edgeClass, fieldSize, timeFieldClass } from "./field";
 import { backdrop } from "./overlay";
 import { controlSize, narrowWindow } from "./surface";
 
@@ -48,7 +48,7 @@ export function listboxPopup(o?: ListboxPopupOptions): ViewStyle {
  * row's content once per item and the highlight moves without drawing.
  */
 export const optionClass =
-  "group rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70 disabled:opacity-35";
+  "group rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70 disabled:opacity-50";
 
 /**
  * What a select's or combobox's list takes besides its items (spread it):
@@ -101,14 +101,24 @@ export interface PickerLookOptions {
   clearable?: Live<boolean>;
   /** Layout over the look (a width), or a function reading it. */
   style?: Live<ViewStyle>;
+  /**
+   * `field` (the default): a select's trigger as shadcn's, the input's well
+   * (the field fill, the input's edge), so it lines up with the text fields
+   * of its form (a date picker's and a color picker's too: in dark
+   * shadcn's outline button is the input's fill and edge as well); `outline`:
+   * an outline button on the raised finish, for a trigger that is not a
+   * form's field.
+   */
+  kind?: "field" | "outline";
 }
 
 /**
  * A select's or date picker's trigger (spread it on the trigger's view): a
- * row on the raised finish, its edge stronger under the pointer and while
+ * row as high as a text field, on the field's well (`kind: "field"`) or the
+ * raised finish (`outline`), its edge stronger under the pointer and while
  * the list is open, the danger tone while invalid (each after the finish,
  * which has an edge of its own), the fields' focus edge while it has the
- * keys, sunk to 70% while pressed, 40% while disabled.
+ * keys, sunk to 70% while pressed, 50% while disabled.
  */
 export function pickerLook(o?: PickerLookOptions) {
   const invalid = () => !!read(o?.invalid);
@@ -130,12 +140,11 @@ export function pickerLook(o?: PickerLookOptions) {
         paddingRight: terminal ? (clearable ? 6 : 3) * TERMINAL_COLUMN : clearable ? clearInset + controlSize.clear + 8 : 10,
         borderRadius: radius.control,
         borderWidth: 1,
-        backgroundColor: colors.raised,
-        ...finish.raised,
-        borderColor: invalid() ? colors.danger : read(o?.open) ? colors.faint : colors.border,
+        ...(o?.kind === "outline" ? { backgroundColor: colors.raised, ...finish.raised } : { backgroundColor: colors.field, ...finish.field }),
+        borderColor: invalid() ? colors.danger : read(o?.open) ? colors.faint : o?.kind === "outline" ? colors.border : colors.fieldBorder,
         ...(terminal ? {} : { outlineStyle: "solid", outlineWidth: 2, outlineOffset: -1, outlineColor: alpha(invalid() ? colors.danger : colors.accent, 0) }),
         // Dimmed while the select is: the app knows, as it passes `disabled`.
-        opacity: read(o?.disabled) ? 0.4 : 1,
+        opacity: read(o?.disabled) ? 0.5 : 1,
         transitionProperty: "border-color, outline-color, opacity",
         transitionDuration: reduceMotion() ? 0 : 120,
         ...read(o?.style),
@@ -151,7 +160,7 @@ export function pickerLook(o?: PickerLookOptions) {
       const tone = invalid() ? colors.danger : colors.accent;
       return terminal ? { borderColor: tone } : { borderColor: tone, outlineColor: tone };
     },
-    disabledStyle: { opacity: 0.4 } as ViewStyle,
+    disabledStyle: { opacity: 0.5 } as ViewStyle,
   };
 }
 
@@ -169,6 +178,8 @@ export interface PickerProps {
   lead?: JSX.Element;
   /** The chevron at the end (the default); a date picker's trigger has none, its calendar says what opens. */
   chevron?: boolean;
+  /** `pickerLook`'s `kind`: the field's well (a select's, a date picker's: the default) or an outline button. */
+  kind?: "field" | "outline";
   style?: ViewStyle;
 }
 
@@ -189,6 +200,7 @@ export function Picker(props: PickerProps) {
         disabled: () => !!props.disabled,
         invalid: () => !!props.invalid,
         clearable: () => !!props.clearable,
+        kind: props.kind,
         style: () => props.style ?? {},
       })}
     >
@@ -196,7 +208,7 @@ export function Picker(props: PickerProps) {
         <Icon name={props.icon!} size={triggerIcon} tint={colors.muted} />
       </If>
       {props.lead}
-      <Text style={{ flex: 1, numberOfLines: 1, fontSize: controlSize.label, color: props.placeholder ? colors.muted : colors.text }}>{props.title}</Text>
+      <Text style={{ flex: 1, numberOfLines: 1, fontSize: fieldSize.font, color: props.placeholder ? colors.muted : colors.text }}>{props.title}</Text>
       <Chevron open={props.open} hidden={props.clearable || props.chevron === false || terminal} />
     </View>
   );

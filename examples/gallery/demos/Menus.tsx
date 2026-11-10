@@ -2,9 +2,9 @@ import { type JSX, LayoutAnimation, reduceMotion, Scroll, signal, Text, token, V
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu, Toolbar } from "nsh/base";
 import { platform } from "nsh";
 import { keymap } from "nsh";
-import { Icon, LucideIcon, type LucideIconName } from "../icons";
+import { Icon, type IconName, LucideIcon, type LucideIconName } from "../icons";
 import { toast, updateToast } from "../toast";
-import { alpha, backdrop, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, menuHighlight, setAppearance, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, menuPressed, menuSeparator, mono, Row, Segmented, SubmenuBack, SubmenuRow, terminal, Tip, menuPopup } from "../ui";
+import { alpha, Button, Caption, Card, colors, DemoPage, finish, isDark, menuHighlight, setAppearance, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, menuPressed, menuSeparator, mono, Row, Segmented, SubmenuBack, SubmenuRow, terminal, Tip, menuPopup, Kbd, placementWords } from "../ui";
 
 // The look of every menu here is the gallery's (`look/menu.tsx`):
 // `nsh/base` draws none.
@@ -70,7 +70,7 @@ function Separator() {
 }
 
 /** What opens a menu: a quiet menu bar title (`bar`), else a raised button. */
-function Chip(props: { label: string; icon?: "plus" | "search" | "star"; bar?: boolean; open?: boolean }) {
+function Chip(props: { label: string; icon?: "plus" | "search" | "star"; lucide?: LucideIconName; bar?: boolean; open?: boolean }) {
   // Open: selected, as the shared `Button`'s `selected` (a menu bar title
   // keeps the hover's accent fill, a raised button its pressed look).
   const look = () =>
@@ -98,6 +98,10 @@ function Chip(props: { label: string; icon?: "plus" | "search" | "star"; bar?: b
     >
       <If when={props.icon}>
         <Icon name={props.icon!} size={pointer ? 13 : 14} tint={colors.muted} />
+      </If>
+      {/* The terminal draws no icons. */}
+      <If when={props.lucide && !terminal}>
+        <LucideIcon name={props.lucide!} size={pointer ? 13 : 14} tint={colors.muted} />
       </If>
       <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text }}>{props.label}</Text>
     </View>
@@ -300,6 +304,12 @@ export function Menus() {
     );
   }
 
+  /** A file's icon by its kind (its extension). */
+  const kindIcon = (name: string): IconName => {
+    const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+    return ext === "pdf" ? "document" : ext === "jpg" || ext === "png" ? "photos" : ext === "key" ? "layers" : "file";
+  };
+
   function Rows() {
     let next = 5;
     const files = signal<File[]>([
@@ -339,8 +349,14 @@ export function Menus() {
               {(file, i) => (
                 <ContextMenu margin={8} {...menuPopup()} onOpenChange={changed(file().name)} trigger={
                   <Row first={i() === 0} focusable>
-                    <Icon name={file().starred ? "star" : "text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
-                    <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
+                    <Icon name={kindIcon(file().name)} size={16} tint={colors.muted} />
+                    {/* The star follows the name, so the kind's icon stays in its column. */}
+                    <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
+                      <If when={file().starred}>
+                        <Icon name="star" size={12} tint={colors.accent} />
+                      </If>
+                    </View>
                     <Menu align="end" offset={4} margin={8} {...menuPopup()} onOpenChange={changed(`${file().name} ⋯`)} trigger={
                       <View
                         accessibilityLabel={`Actions for ${file().name}`}
@@ -393,7 +409,7 @@ export function Menus() {
           onChange={(v) => align.set(v)}
         />
         <View style={{ alignItems: "center", paddingVertical: 24 }}>
-          <Menu placement={placement()} align={align()} offset={6} margin={8} {...menuPopup({ get side() { return placement(); } })} onOpenChange={changed("Placed")} trigger={<Chip label={`${placement()} · ${align()}`} open={isOpen("Placed")} />}>
+          <Menu placement={placement()} align={align()} offset={6} margin={8} {...menuPopup({ get side() { return placement(); } })} onOpenChange={changed("Placed")} trigger={<Chip label={placementWords(placement(), align())} lucide="map-pin" open={isOpen("Placed")} />}>
             <Item label="One" onSelect={() => log("chose One")} />
             <Item label="Two" onSelect={() => log("chose Two")} />
             <Item label="Three" onSelect={() => log("chose Three")} />
@@ -425,7 +441,7 @@ export function Menus() {
     };
     keymap.bind("mod+shift+p", () => open.set(!open()));
     return (
-      <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.desktop ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
+      <Card icon="spark" title="Opened by the app" subtitle="A button or a shortcut opens it" right={platform.desktop ? <Kbd label={keymap.label("mod+shift+p")} /> : undefined}>
         <Menu
           open={open()}
           onOpenChange={({ open: next, reason }) => {

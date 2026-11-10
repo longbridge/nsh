@@ -20,10 +20,13 @@ import { colors, TERMINAL_COLUMN, TERMINAL_GAP, terminal } from "./theme";
  */
 export const treeItemClass =
   "group rounded-md transition-colors duration-150 motion-reduce:transition-none hover:bg-hover active:opacity-70 " +
-  "selected:bg-brand-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-40";
+  "selected:bg-brand-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
 
 /** How far each level is indented, in points. */
 export const treeIndent = 14;
+
+/** A `TreeRow`'s height: compact with a pointer, a 44-point target on a touch screen. */
+export const treeRowHeight = desktop ? size.rowSm - 4 : size.rowSm;
 
 /**
  * A row's content: its chevron (folders), its icon (`icon`, else a folder
@@ -31,10 +34,8 @@ export const treeIndent = 14;
  */
 export function TreeRow(props: { entry: TreeEntry; icon?: IconName; tint?: string; detail?: string }) {
   if (terminal) return <TerminalTreeRow {...props} />;
-  // Compact with a pointer; a 44-point target on a touch screen.
-  const height = desktop ? size.rowSm - 4 : size.rowSm;
   return (
-    <View style={{ height, flexDirection: "row", alignItems: "center", gap: 6, paddingEnd: 8, paddingStart: 4 + props.entry.depth * treeIndent }}>
+    <View style={{ height: treeRowHeight, flexDirection: "row", alignItems: "center", gap: 6, paddingEnd: 8, paddingStart: 4 + props.entry.depth * treeIndent }}>
       <View
         class="transition-transform duration-200 ease-out motion-reduce:transition-none group-aria-expanded:rotate-90 rtl:group-aria-expanded:-rotate-90"
         style={{ width: 14, height: 14, opacity: props.entry.folder ? 1 : 0 }}

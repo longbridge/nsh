@@ -53,6 +53,19 @@ export const buttonSizes: Record<ButtonSize, ButtonDimensions> = pointer
   ? { small: { height: 24, font: 12, icon: 12, pad: 8 }, regular: { height: 28, font: 13, icon: 14, pad: 12 }, large: { height: 34, font: 14, icon: 15, pad: 16 } }
   : { small: { height: 36, font: 14, icon: 14, pad: 12 }, regular: { height: 40, font: 15, icon: 16, pad: 16 }, large: { height: 48, font: 17, icon: 18, pad: 20 } };
 
+/**
+ * A margin that hangs a ghost button's padding past the content edge on
+ * `side`, so its label lines up with the text beside it (a section head's
+ * trailing action, a row's first page) and only its hover fill reaches
+ * past, as a list row's does. None in the terminal, whose buttons are
+ * bracketed words.
+ */
+export function ghostOutdent(side: "left" | "right", size: ButtonSize = "regular"): ViewStyle {
+  if (terminal) return {};
+  const pad = -buttonSizes[size].pad;
+  return side === "left" ? { marginLeft: pad } : { marginRight: pad };
+}
+
 /** The smallest target a finger gets (Accessibility, "Touch targets"). */
 const TOUCH_TARGET = 44;
 
@@ -72,8 +85,10 @@ const read = <T,>(v: Live<T> | undefined): T | undefined => (typeof v === "funct
 const dimensions = (o?: ButtonLookOptions) => buttonSizes[read(o?.size) ?? "regular"];
 const filled = (kind: ButtonKind) => kind === "primary" || kind === "accent";
 
-/** The fill, edge and shadow of a kind at rest (or selected). */
-function rest(kind: ButtonKind, selected: boolean): ViewStyle {
+/** The fill, edge and shadow of a kind at rest (or selected). A disabled filled button gives up the citrus for the
+ * neutral raised fill: half a lime fill reads as a muddy olive in dark, louder than the enabled buttons beside it. */
+function rest(kind: ButtonKind, selected: boolean, disabled = false): ViewStyle {
+  if (filled(kind) && disabled) return finish.raised;
   if (filled(kind)) return { ...finish.accent, opacity: selected ? 0.88 : 1 };
   if (kind === "danger") {
     return {
@@ -98,7 +113,7 @@ function rest(kind: ButtonKind, selected: boolean): ViewStyle {
  * lightens, a ghost gets a whisper of the text color, a filled one a touch
  * of transparency; pressed it sinks to 97% (none with reduced motion) and
  * shades (a raised button's inner shade, a filled one dims). Keyboard
- * focus: `focusRing()`. Disabled: half opacity, no hover or press. Pair it with
+ * focus: `focusRing()`. Disabled: half opacity, no hover or press (a filled one on the raised fill, its label muted). Pair it with
  * `buttonLabel` for the label and `buttonGlyph` for an icon.
  */
 export function buttonLook(kind: Live<ButtonKind> = "secondary", o?: ButtonLookOptions) {
@@ -117,7 +132,7 @@ export function buttonLook(kind: Live<ButtonKind> = "secondary", o?: ButtonLookO
         alignItems: "center",
         justifyContent: "center",
         gap: pointer ? 6 : 8,
-        ...rest(k(), !!read(o?.selected)),
+        ...rest(k(), !!read(o?.selected), !!read(o?.disabled)),
         ...transition,
         ...read(o?.style),
       };
@@ -149,9 +164,10 @@ export function buttonLook(kind: Live<ButtonKind> = "secondary", o?: ButtonLookO
   };
 }
 
-/** The color of a kind's label and icon. */
-function ink(live: Live<ButtonKind>) {
+/** The color of a kind's label and icon; a disabled filled button's, on the neutral fill, is muted. */
+function ink(live: Live<ButtonKind>, disabled = false) {
   const kind = read(live) ?? "secondary";
+  if (filled(kind) && disabled) return colors.muted;
   return filled(kind) ? colors.onAccent : kind === "danger" ? colors.danger : colors.text;
 }
 
@@ -159,7 +175,7 @@ function ink(live: Live<ButtonKind>) {
 export function buttonLabel(kind: Live<ButtonKind> = "secondary", o?: ButtonLookOptions): TextStyle {
   return {
     get color() {
-      return ink(kind);
+      return ink(kind, !!read(o?.disabled));
     },
     get fontSize() {
       return dimensions(o).font;
@@ -175,7 +191,7 @@ export function buttonGlyph(kind: Live<ButtonKind> = "secondary", o?: ButtonLook
       return dimensions(o).icon;
     },
     get tint() {
-      return ink(kind);
+      return ink(kind, !!read(o?.disabled));
     },
   };
 }
