@@ -654,13 +654,26 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
     ))
 }
 
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size.
+fn from_rgba((w, h, rgba): (u32, u32, &[u8])) -> Result<Picture, String> {
+    let rgba = image::RgbaImage::from_raw(w, h, rgba.to_vec()).ok_or("RGBA of the wrong size")?;
+    Ok(Picture::still(
+        Pixels::from_rgba(rgba),
+        Natural::Pixels(w, h),
+    ))
+}
+
 /// The process's decoded images, in the core's budget.
 fn images() -> &'static Images<Picture> {
     static IMAGES: LazyLock<Images<Picture>> = LazyLock::new(|| {
         Images::with_on_evict(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let picture = decode(bytes, target)?;
+                let picture = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = picture.cost();
                 Ok((picture.clone(), picture.natural, cost))
             },

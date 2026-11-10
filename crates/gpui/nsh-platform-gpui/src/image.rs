@@ -449,6 +449,18 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Pixels, String> {
     decode_still(bytes, longest)
 }
 
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size.
+fn from_rgba((w, h, rgba): (u32, u32, &[u8])) -> Result<Pixels, String> {
+    let frame = image::RgbaImage::from_raw(w, h, rgba.to_vec()).ok_or("RGBA of the wrong size")?;
+    Ok(Pixels::new(
+        vec![bgra_frame(frame)],
+        Vec::new(),
+        0,
+        Natural::Pixels(w, h),
+    ))
+}
+
 /// The size `onLoad` and `Image.getSize` report: pixels, or an SVG's whole
 /// points.
 fn reported_size(natural: Natural) -> Size<DevicePixels> {
@@ -968,7 +980,10 @@ fn images() -> &'static Images<Pixels> {
         Images::with_on_evict(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let pixels = decode(bytes, target)?;
+                let pixels = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = pixels.bytes();
                 Ok((pixels.clone(), pixels.natural, cost))
             },
@@ -2129,6 +2144,19 @@ mod tests {
             frames: Frames::All,
         };
         decode(bytes, &target)
+    }
+
+    #[test]
+    fn takes_rgba_buffers_as_they_are() {
+        let rgba = [255u8, 0, 0, 255, 0, 0, 255, 128];
+        let pixels = from_rgba((2, 1, &rgba)).unwrap();
+        assert_eq!(pixels.natural, Natural::Pixels(2, 1));
+        // BGRA, alpha straight.
+        assert_eq!(
+            pixels.image.as_bytes(0).unwrap(),
+            &[0, 0, 255, 255, 255, 0, 0, 128]
+        );
+        assert!(from_rgba((2, 2, &rgba)).is_err());
     }
 
     #[test]
