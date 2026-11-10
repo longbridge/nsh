@@ -35097,3 +35097,105 @@ fn svg_drawn_as_an_image_carries_its_text_color() {
     assert_ne!(blue, Color(0xfb2c_36ff));
     assert_eq!(color_of(&batch, 4), None);
 }
+
+mod declared_styles {
+    use super::*;
+    use crate::{
+        element::{ComponentStyle, Root, set_component_style},
+        prelude::*,
+    };
+
+    /// A component taking the looks the app declares for `"chip"`.
+    #[derive(Clone, PartialEq, Props)]
+    struct ChipProps {
+        variant: crate::element::Prop<Option<SharedString>>,
+    }
+
+    #[component]
+    fn Chip(props: ChipProps) -> impl IntoElement {
+        view()
+            .w(px(10.0))
+            .h(px(10.0))
+            .declared_style("chip", props.variant, None::<SharedString>)
+    }
+
+    /// Declares the chip's `primary` look in classes, then shows a primary
+    /// chip the app gives its own class.
+    #[component]
+    fn Chips() -> impl IntoElement {
+        set_component_style(
+            "chip",
+            ComponentStyle::new().variant_classes("primary", "bg-primary"),
+        );
+        view()
+            .child(chip().variant("primary").app_class("bg-muted"))
+            .child(chip().variant("primary"))
+    }
+
+    /// The views sent a style, with their last style.
+    fn styled(batch: &MountBatch) -> Vec<(NodeId, ViewStyle)> {
+        let mut out: Vec<(NodeId, ViewStyle)> = Vec::new();
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                match out.iter_mut().find(|(of, _)| of == id) {
+                    Some(at) => at.1 = (**style).clone(),
+                    None => out.push((*id, (**style).clone())),
+                }
+            }
+        }
+        // In the order the chips were made.
+        out.sort_by_key(|(id, _)| *id);
+        out
+    }
+
+    fn mounted() -> (Core<FakeEngine>, Vec<(NodeId, ViewStyle)>) {
+        let mut c = core();
+        c.set_host_tokens(Some(tokens_with(&[
+            ("primary", AdaptiveColor::rgb(0x0000ff, 0x000044)),
+            ("muted", rgb(0x00ff00).into()),
+        ])));
+        c.mount_root(&Root::of::<Chips>());
+        let batch = c.commit().unwrap();
+        let styled = styled(&batch);
+        (c, styled)
+    }
+
+    #[test]
+    fn declared_classes_go_before_the_apps_class() {
+        let (_, styled) = mounted();
+        let backgrounds: Vec<Color> = styled.iter().map(|(_, s)| s.background_color).collect();
+        // The app's class wins over the declared look; alone, the look.
+        assert_eq!(
+            backgrounds,
+            [Color::from(rgb(0x00ff00)), Color::from(rgb(0x0000ff))]
+        );
+    }
+
+    #[test]
+    fn declared_classes_follow_the_theme() {
+        let (mut c, styled) = mounted();
+        let plain = styled[1].0;
+        c.set_host_tokens(Some(tokens_with(&[
+            ("primary", rgb(0xff00ff).into()),
+            ("muted", rgb(0x00ff00).into()),
+        ])));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, plain).unwrap().background_color,
+            Color::from(rgb(0xff00ff))
+        );
+        c.set_class_environment(crate::tailwind::ClassEnvironment {
+            dark: true,
+            ..Default::default()
+        });
+        c.set_host_tokens(Some(tokens_with(&[(
+            "primary",
+            AdaptiveColor::rgb(0x0000ff, 0x000044),
+        )])));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, plain).unwrap().background_color,
+            Color::from(rgb(0x000044))
+        );
+    }
+}

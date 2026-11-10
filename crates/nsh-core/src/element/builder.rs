@@ -6,6 +6,7 @@ use std::{any::Any, fmt, marker::PhantomData, rc::Rc, sync::Arc};
 use super::{
     Component, ComponentSpec, Event, IntoReactive, JsValue, PropError, Reactive, SharedString,
     component::AnyInstance,
+    component_styles::component_style_of,
     events::{self, GestureEvent, PanEvent},
     style::{StyleRefinement, Styled, Variant},
 };
@@ -943,6 +944,55 @@ pub trait Element: IntoElement + Sized {
     fn app_class(mut self, class: impl IntoReactive<Option<SharedString>>) -> Self {
         self.node().bind_attr(class, |a, class| a.class = class);
         self
+    }
+
+    /// The looks the app declared for `component` (a component's name,
+    /// `"button"`: [`super::set_component_style`], nsh.json `components`)
+    /// in the `variant` and `size` its page picks (`None`: the declared
+    /// defaults), on this element, a component's root: the base look, the
+    /// variant's, then the size's, typed styles before classes, all after
+    /// the element's own styles and before the app's `class` and styles at
+    /// the use site. A name nothing declares applies nothing and is warned
+    /// of once. A component nothing is declared for when the element is
+    /// made gets nothing from this, not even a binding.
+    fn declared_style(
+        mut self,
+        component: &'static str,
+        variant: impl IntoReactive<Option<SharedString>>,
+        size: impl IntoReactive<Option<SharedString>>,
+    ) -> Self {
+        if super::untracked(|| component_style_of(component)).is_none() {
+            return self;
+        }
+        let variant = shared_reactive(variant.into_reactive());
+        let size = shared_reactive(size.into_reactive());
+        let (picked_variant, picked_size) = (variant.clone(), size.clone());
+        self.style().bind(move |s| {
+            let Some(style) = component_style_of(component) else {
+                return;
+            };
+            let (variant, size) = (picked_variant(), picked_size());
+            let (variant, size) = (variant.as_deref(), size.as_deref());
+            style.warn_undeclared(component, variant, size);
+            for look in style.resolve(variant, size).0 {
+                s.extend_as(
+                    Variant::default(),
+                    look(StyleRefinement::default()).resolved(),
+                );
+            }
+        });
+        self.app_class(move || {
+            let style = component_style_of(component)?;
+            style.resolve(variant().as_deref(), size().as_deref()).1
+        })
+    }
+}
+
+/// `value` as a closure that several bindings call.
+fn shared_reactive<T: Clone + 'static>(value: Reactive<T>) -> Rc<dyn Fn() -> T> {
+    match value {
+        Reactive::Static(value) => Rc::new(move || value.clone()),
+        Reactive::Bound(f) => f,
     }
 }
 

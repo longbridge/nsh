@@ -31,6 +31,14 @@ pub struct ButtonProps {
     /// it, with no change to its layout or look.
     #[prop(default)]
     pub hit_slop: Prop<EdgeInsets>,
+    /// The variant of the looks the app declared for buttons
+    /// (`set_component_style("button", ..)` in Rust, nsh.json
+    /// `"components": { "button": { "variants": .. } }`) this button has
+    /// (`None`: the declared default). NSH names and draws none.
+    pub variant: Prop<Option<SharedString>>,
+    /// The size of the looks the app declared for buttons, as `variant`
+    /// (nsh.json `"components": { "button": { "sizes": .. } }`).
+    pub size: Prop<Option<SharedString>>,
     /// The content.
     pub children: Prop<Children>,
 }
@@ -53,6 +61,8 @@ pub enum ButtonEvent {
 /// `disabled:` classes or `activeStyle`, `hoverStyle`, `focusStyle`,
 /// `selectedStyle` and `disabledStyle`, and its children are its content.
 /// `hitSlop` widens where presses count past its bounds, as a view's does.
+/// The looks the app declares once for buttons apply by the `variant` and
+/// `size` a page picks, before the page's own `class` and `style`.
 /// In a `Toolbar` (or a `ToggleGroup`), it is one of the toolbar's items:
 /// a stop of the keyboard focus only while it is the item Tab enters the
 /// toolbar at, disabled with the toolbar too.
@@ -68,6 +78,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         })
         .selected_style(props.selected_style)
         .hit_slop(props.hit_slop)
+        .declared_style("button", props.variant, props.size)
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .on_press_down(move |_: &()| cx.emit(ButtonEvent::PressDown))
         .on_press_up(move |_: &()| cx.emit(ButtonEvent::PressUp))

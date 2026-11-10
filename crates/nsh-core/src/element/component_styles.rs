@@ -9,7 +9,11 @@
 //! several engines in one process keep their own, reads subscribe and
 //! writes notify.
 
-use std::{collections::BTreeMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
 
 use super::{SharedString, StyleRefinement, global};
 
@@ -141,6 +145,39 @@ impl ComponentStyle {
         (typed, classes)
     }
 
+    /// Warns, once per surface for each component and name, of a variant
+    /// or size an instance picks (or the defaults name) that `self` does
+    /// not declare: it applies nothing for that name.
+    pub(crate) fn warn_undeclared(
+        &self,
+        component: &str,
+        variant: Option<&str>,
+        size: Option<&str>,
+    ) {
+        let variant = variant.or(self.default_variant.as_deref());
+        let size = size.or(self.default_size.as_deref());
+        let missing = [
+            (
+                "variant",
+                variant.filter(|n| !self.variants.contains_key(*n)),
+            ),
+            ("size", size.filter(|n| !self.sizes.contains_key(*n))),
+        ];
+        if missing.iter().all(|(_, name)| name.is_none()) {
+            return;
+        }
+        let warned = global::<Warned>().with_untracked(|w| w.0.clone());
+        for (kind, name) in missing {
+            let Some(name) = name else { continue };
+            let fresh = warned
+                .borrow_mut()
+                .insert((component.to_owned(), kind, name.to_owned()));
+            if fresh {
+                log::warn!("`{component}` declares no {kind} `{name}`: it applies no look");
+            }
+        }
+    }
+
     /// Whether it declares nothing.
     fn is_empty(&self) -> bool {
         self.base.typed.is_none()
@@ -199,6 +236,11 @@ struct Store {
     typed: BTreeMap<String, ComponentStyle>,
     classes: BTreeMap<String, ComponentStyle>,
 }
+
+/// The undeclared names already warned of on the surface: a set behind a
+/// shared cell, so recording one notifies nothing.
+#[derive(Clone, Default)]
+struct Warned(Rc<RefCell<BTreeSet<(String, &'static str, String)>>>);
 
 /// Declares how `component` (a component's name, `"button"`) looks, in
 /// typed styles. It replaces the typed looks declared for it before, and
