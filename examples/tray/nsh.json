@@ -8,5 +8,6 @@
     "maximizable": false,
     "closeOnPress": false,
     "defaultVisible": false
-  }
+  },
+  "capabilities": { "loginItem": true }
 }

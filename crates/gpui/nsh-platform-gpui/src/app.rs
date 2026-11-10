@@ -1033,6 +1033,7 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         speech: None,
         audio: None,
         windows: options.windows.clone(),
+        login_item: None,
     }
 }
 

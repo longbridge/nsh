@@ -42,7 +42,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects), `speech`
   (`nsh`'s `Speech`: the microphone and the system's speech recognizer, whose transcript reaches the app; denied,
   `Speech.start` throws), `audio` (`nsh`'s `Sound` and `AudioPlayer`: making sound; denied, `Sound.load` rejects and
-  `new AudioPlayer` throws; a remote source also needs `network`), `host`
+  `new AudioPlayer` throws; a remote source also needs `network`), `loginItem` (`nsh/desktop`'s
+  `Application.loginItem` / `setLoginItem`: whether the system opens the app at login; never granted without it,
+  `Capabilities::all` leaves it off, but a Rust app, which has no declaration to make, has the login item without it,
+  for every call under its root (the Rust crates it links included): the engine tells the core the app is Rust,
+  `Core::set_rust_app`, and leaves its `Access` the undeclared set; denied, both reject), `host`
   (`nsh`'s `host`: the embedding app's functions `host.call` may call, names or prefixes ending in `*`, `true` for all;
   names and grants are 1 to 128 of `[A-Za-z0-9_.:-]` without `..` (`access::valid_host_name`), and the core refuses
   the call of any other name before it reads the grants, since hosts may put names in paths or URLs;
@@ -54,7 +58,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   read with `from_json_lenient` (the bundler warns of what it dropped, `nsh_engine::parse_capabilities` logs it), as a newer NSH may have written them: an unknown capability is not granted, an unknown key inside one drops that
   capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
   retains unrestricted network, webview, status bar, clipboard, picker, speech, audio and URL opening access. Process execution, filesystem access,
-  trusted web view input and the host's functions always require explicit declarations, including standalone apps. The embedding app
+  trusted web view input, the host's functions and the login item always require explicit declarations, including
+  standalone apps (a Rust app has the login item). The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
   `nsh build` / `nsh package`; the dev protocol's `Bundle` message, so development enforces the same capabilities; a change
@@ -68,8 +73,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - What a refusal does: every call JS makes fails with `JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the
   capability's key, `resource` what was asked for, `""` when the capability has none), which its promise rejects with.
   The modules check in the call, on the `System` the call gets, so the error is typed and nothing is queued:
-  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `Picker.pickFiles`, `Speech.start` (`runtime/speech.rs`; it throws), `Sound.load` / `new AudioPlayer` (`runtime/audio.rs`), `openUrl` (`runtime/device.rs`,
-  `open_url::not_granted`) and `Image.getSize` / `prefetch` (`runtime/image.rs`, `resource` the URL). `host.call` is
+  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `Picker.pickFiles`, `Speech.start`
+  (`runtime/speech.rs`; it throws), `Sound.load` / `new AudioPlayer` (`runtime/audio.rs`), `Application.loginItem` /
+  `setLoginItem` (`runtime/desktop.rs`; the core checks Rust's calls, `Action::LoginItem`), `openUrl`
+  (`runtime/device.rs`, `open_url::not_granted`) and `Image.getSize` / `prefetch` (`runtime/image.rs`, `resource` the
+  URL). `host.call` is
   refused by the core (the commit's `Command::HostCall`) and by the SDK channel (`nsh-js` `host_channel.rs`) with
   `nsh_core::host_channel::not_granted`. A refused `fetch` rejects as every failed fetch, with a `TypeError`, which
   carries `code`, `permission` `"network"` and `resource` the request's or the redirect's URL (`access::Refused`,

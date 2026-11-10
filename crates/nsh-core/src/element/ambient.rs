@@ -1780,6 +1780,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
     ));
 }
 
+/// Asks the core to read the app's login item (`enabled` `None`) or to
+/// change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<crate::desktop::LoginItem, crate::desktop::LoginItemError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

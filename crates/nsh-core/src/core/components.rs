@@ -5130,6 +5130,51 @@ impl<M: TextEngine> Core<M> {
         (parent != NO_KEY).then(|| self.nodes[parent as usize].id)
     }
 
+    /// Reads (`enabled` `None`) or changes the app's login item: on the
+    /// backend's thread when the runner gave the core one, the answer
+    /// delivered in a task here; without one the app has none (its status
+    /// is `unavailable`, and a change fails).
+    fn login_item_action(
+        &mut self,
+        enabled: Option<bool>,
+        answer: crate::element::AnswerSlot<
+            Result<crate::desktop::LoginItem, crate::desktop::LoginItemError>,
+        >,
+    ) {
+        use crate::desktop::{LoginItem, LoginItemError, LoginItemStatus};
+        if !self.rust_app && !self.access.allows_login_item() {
+            answer
+                .borrow_mut()
+                .deliver(Err(LoginItemError::AccessDenied));
+            self.deny(LoginItemError::AccessDenied.to_string());
+            return;
+        }
+        let Some(items) = self.login_item.as_mut() else {
+            answer.borrow_mut().deliver(match enabled {
+                None => Ok(LoginItem::new(LoginItemStatus::Unavailable)),
+                Some(_) => Err(LoginItemError::Unavailable),
+            });
+            return;
+        };
+        let result = items.call(enabled);
+        crate::element::task::spawn_raw(
+            &self.components.executor,
+            crate::ROOT_ID,
+            Box::pin(async move {
+                let result = match result.await {
+                    // Nothing to change where the platform has no login
+                    // item for the app (a sandboxed Linux app).
+                    Ok(LoginItemStatus::Unavailable) if enabled.is_some() => {
+                        Err(LoginItemError::Unavailable)
+                    }
+                    Ok(status) => Ok(LoginItem::new(status)),
+                    Err(error) => Err(LoginItemError::System(error)),
+                };
+                answer.borrow_mut().deliver(result);
+            }),
+        );
+    }
+
     /// Applies what the app asks about notifications: granted and where
     /// the platform shows them, the platform answers with
     /// [`EventKind::Notification`]; otherwise the answer is given here.
@@ -5725,6 +5770,7 @@ impl<M: TextEngine> Core<M> {
             Action::Speech(action) => self.speech_action(action),
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
+            Action::LoginItem(enabled, answer) => self.login_item_action(enabled, answer),
             Action::NextUrlSchemeOpen(answer) => {
                 let links = &mut self.components.url_schemes;
                 match links.pending.pop_front() {

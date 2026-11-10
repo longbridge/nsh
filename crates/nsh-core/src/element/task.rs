@@ -117,6 +117,13 @@ pub(crate) enum Action {
     Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
     Notification(NotificationAction),
+    /// Reads the app's login item (`None`) or registers it (`Some(true)`)
+    /// or removes it ([`crate::desktop::LoginItem`]); the login item after
+    /// it, or why it could not be read or changed, resolves the slot.
+    LoginItem(
+        Option<bool>,
+        AnswerSlot<Result<crate::desktop::LoginItem, crate::desktop::LoginItemError>>,
+    ),
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),

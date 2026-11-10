@@ -1,7 +1,7 @@
 // The desktop domain of the API's test apps (docs/dev/compatibility.md):
-// windows of the app's own and the tray, run as on macOS (`platform macos`),
-// with a `windows` capability that grants four kinds and three windows at
-// once.
+// windows of the app's own, the tray and the login item, run as on macOS
+// (`platform macos`), with a `windows` capability that grants four kinds and
+// three windows at once, and the `loginItem` capability.
 // Each case is a module of its own, shown alone when the script taps
 // `id:case-<case>` (a one-point view over the corner, out of the layout);
 // the steps after it are that case's.
@@ -13,6 +13,7 @@ import WindowOpen from "./window-open";
 import WindowProps from "./window-props";
 import WindowRef from "./window-ref";
 import LinkHover from "./link-hover";
+import LoginItem from "./login-item";
 
 const cases: Record<string, () => JSX.Element> = {
   "link-hover": LinkHover,
@@ -22,6 +23,7 @@ const cases: Record<string, () => JSX.Element> = {
   "window-access": WindowAccess,
   "window-props": WindowProps,
   "tray-click": TrayClick,
+  "login-item": LoginItem,
 };
 const shown = signal("");
 

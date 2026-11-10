@@ -45,6 +45,7 @@ mod image;
 mod input;
 mod keymap;
 mod linking;
+mod login_item;
 mod mount;
 mod native;
 mod navigation;

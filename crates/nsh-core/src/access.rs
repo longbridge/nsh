@@ -577,6 +577,14 @@ pub struct Capabilities {
     pub notifications: bool,
     /// The app may play sound (`Sound` and `AudioPlayer` of `nsh`).
     pub audio: bool,
+    /// The app may read and change its login item (`Application.loginItem`
+    /// and `setLoginItem` of `nsh/desktop`): whether the system opens it
+    /// when the user logs in. Never without a declaration
+    /// ([`Capabilities::all`] leaves it off); a Rust app, which has no
+    /// declaration to make, has the login item without it, for every call
+    /// under its root, the Rust crates it links included
+    /// ([`crate::Core::set_rust_app`]).
+    pub login_item: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
@@ -978,8 +986,8 @@ fn read_url(url: &str) -> Result<UrlParts<'_>, Unread> {
 
 impl Capabilities {
     /// Legacy unrestricted APIs for apps without a declaration. Socket,
-    /// process, filesystem and host function grants stay empty and always
-    /// require explicit opt-in.
+    /// process, filesystem and host function grants stay empty and the
+    /// login item off: they always require explicit opt-in.
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
@@ -1049,7 +1057,7 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 13] = [
+        const KNOWN: [&str; 14] = [
             "windows",
             "network",
             "webview",
@@ -1059,6 +1067,7 @@ impl Capabilities {
             "speech",
             "notifications",
             "audio",
+            "loginItem",
             "openUrl",
             "process",
             "fs",
@@ -1197,6 +1206,11 @@ impl Capabilities {
             caps.audio = audio
                 .as_bool()
                 .ok_or("capabilities.audio must be a boolean")?;
+        }
+        if let Some(login_item) = obj.get("loginItem") {
+            caps.login_item = login_item
+                .as_bool()
+                .ok_or("capabilities.loginItem must be a boolean")?;
         }
         if let Some(open_url) = obj.get("openUrl") {
             match open_url {
@@ -1445,6 +1459,9 @@ impl Capabilities {
         }
         if self.audio {
             obj.insert("audio".into(), true.into());
+        }
+        if self.login_item {
+            obj.insert("loginItem".into(), true.into());
         }
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
@@ -2317,6 +2334,13 @@ impl Access {
         self.each(|c| c.audio)
     }
 
+    /// Whether the app may read and change its login item
+    /// (`Application.loginItem` of `nsh/desktop`). Always requires explicit
+    /// opt-in, including for apps without a declaration.
+    pub fn allows_login_item(&self) -> bool {
+        self.each(|c| c.login_item)
+    }
+
     /// Whether `nsh/host` may call the embedding app's function `name`.
     pub fn allows_host(&self, name: &str) -> bool {
         self.each(|c| c.allows_host(name))
@@ -2961,6 +2985,34 @@ mod tests {
             granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
         };
         assert!(!narrowed.allows_web_input());
+    }
+
+    #[test]
+    fn the_login_item_needs_an_explicit_grant() {
+        // Apps without a declaration get the legacy set, which leaves it
+        // off: the shipped app must have asked for it.
+        assert!(!Access::all().allows_login_item());
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let declared = r#"{ "loginItem": true }"#;
+        assert!(access(declared).allows_login_item());
+        assert!(!access(r#"{ "loginItem": false }"#).allows_login_item());
+        assert!(!access(r#"{ "clipboard": true }"#).allows_login_item());
+        assert!(Capabilities::from_json(&serde_json::json!({ "loginItem": "yes" })).is_err());
+        // It round-trips, written only when granted (older runtimes read
+        // what newer signers write), and the embedding app may withhold it.
+        assert_eq!(
+            Capabilities::from_json(&caps(declared).to_json()),
+            Ok(caps(declared))
+        );
+        assert!(Capabilities::default().to_json().get("loginItem").is_none());
+        let narrowed = Access {
+            declared: caps(declared),
+            granted: Some(caps(r#"{ "clipboard": true }"#)),
+        };
+        assert!(!narrowed.allows_login_item());
     }
 
     #[test]

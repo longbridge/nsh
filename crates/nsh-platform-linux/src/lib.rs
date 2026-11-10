@@ -37,6 +37,7 @@ mod input;
 mod key_focus;
 mod keymap;
 mod links;
+mod login_item;
 mod menu_style;
 mod mount;
 mod native;

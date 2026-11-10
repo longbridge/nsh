@@ -10,7 +10,8 @@
 //! whose [`WindowRef::set`] changes its attributes and whose requests
 //! ([`WindowRef::set_mode`], [`WindowRef::minimize`], ...) the
 //! platform carries out, reporting what happened in
-//! [`WindowRef::state`]. [`quit`] and [`restart`] are `Application`'s.
+//! [`WindowRef::state`]. [`quit`], [`restart`], [`login_item`] and
+//! [`set_login_item`] are `Application`'s.
 //!
 //! A custom title bar hides the system's (`TitleBarOptions` with
 //! [`TitleBarStyle::Hidden`](crate::desktop::TitleBarStyle::Hidden)),
@@ -54,10 +55,10 @@ use super::{
 use crate::{
     Command, EventKind, EventPayload,
     desktop::{
-        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuRole,
-        Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes, WindowCloseCause,
-        WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions, WindowPlacement,
-        WindowPosition, WindowRequest, WindowState,
+        self, CloseReason, DesktopCommand, Display, DisplayId, LoginItem, LoginItemError,
+        MenuAction, MenuBarMode, MenuRole, Shortcut, TrayTitlePlacement, TrayTitleRun,
+        WindowAttributes, WindowCloseCause, WindowEvent, WindowFrame, WindowKind, WindowMode,
+        WindowOptions, WindowPlacement, WindowPosition, WindowRequest, WindowState,
     },
     geometry::{Bounds, Edges, Point, Points, Size},
     keymap::When,
@@ -994,6 +995,42 @@ pub(crate) fn add_quit_listener(
 /// that app, and on other platforms this has no effect.
 pub fn restart() {
     super::desktop_command(DesktopCommand::Restart);
+}
+
+/// The app's login item (TS: `Application.loginItem()`): whether the
+/// system opens the app when the user logs in, as the system has it now
+/// (nothing follows the system's settings on its own: ask again when the
+/// app shows it). To await in a task. A Rust app has it, for every call
+/// under its root; in a TSX app it needs the `loginItem` capability, which
+/// only a declaration grants ([`LoginItemError::AccessDenied`]), its Rust
+/// components' calls too. A run that has no login item answers
+/// [`LoginItemStatus::Unavailable`](crate::desktop::LoginItemStatus::Unavailable):
+/// a view embedded in another app, `nsh run`, the platforms without
+/// desktop windows. On macOS the login item is the app's bundle id's, the
+/// same for every copy of the app; on Windows and Linux it is this copy's
+/// (an entry naming another copy reads as disabled).
+pub fn login_item() -> Answer<Result<LoginItem, LoginItemError>> {
+    super::login_item_request(None)
+}
+
+/// Registers the app to open when the user logs in (`true`) or removes
+/// its registration (`false`) (TS: `Application.setLoginItem({ enabled })`),
+/// and answers with the login item after it: registering what is registered
+/// and removing what is not there succeed. It takes a `bool` or
+/// [`SetLoginItemOptions`](crate::desktop::SetLoginItemOptions), so options
+/// can join later without changing the calls written before them. Call it
+/// when the user turns the app's own setting on or off, never on the app's
+/// own (at every start, say): what the user chose in the system's settings
+/// stands. A registration that waits for the user there answers
+/// [`LoginItemStatus::RequiresApproval`](crate::desktop::LoginItemStatus::RequiresApproval).
+/// The changes run in the order the app makes them. Fails with
+/// [`LoginItemError::AccessDenied`] without the `loginItem` capability,
+/// [`LoginItemError::Unavailable`] where the app has no login item, and the
+/// system's error when it refuses.
+pub fn set_login_item(
+    options: impl Into<crate::desktop::SetLoginItemOptions>,
+) -> Answer<Result<LoginItem, LoginItemError>> {
+    super::login_item_request(Some(options.into().enabled))
 }
 
 /// An item of a menu (TS: `nsh/desktop`'s `MenuItem`): an item that runs

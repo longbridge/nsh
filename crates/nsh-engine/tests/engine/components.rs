@@ -111,6 +111,7 @@ fn app_config(
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     }
 }
 

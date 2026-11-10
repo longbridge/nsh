@@ -74,6 +74,7 @@ fn config(app: App) -> EngineConfig {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     }
 }
 
@@ -868,6 +869,68 @@ fn components_read_the_window_once_it_stops_and_the_displays() {
     engine.control().set_displays(Vec::new());
     advance(&engine, 0);
     assert_eq!(last_text(&rx, &mut last), "no window, displays 0");
+}
+
+/// A login item the system keeps on until it is turned off.
+struct FakeLoginItem(Mutex<bool>);
+
+impl nsh_core::desktop::LoginItemBackend for FakeLoginItem {
+    fn status(&self) -> std::io::Result<nsh_core::desktop::LoginItemStatus> {
+        Ok(match *self.0.lock().unwrap() {
+            true => nsh_core::desktop::LoginItemStatus::Enabled,
+            false => nsh_core::desktop::LoginItemStatus::Disabled,
+        })
+    }
+
+    fn set(&self, enabled: bool) -> std::io::Result<nsh_core::desktop::LoginItemStatus> {
+        *self.0.lock().unwrap() = enabled;
+        self.status()
+    }
+}
+
+/// Reads the app's login item, turns it off and shows both answers.
+#[component]
+fn LoginItemInfo() -> impl IntoElement {
+    use nsh_core::element::desktop::{login_item, set_login_item};
+    let shown = signal(String::from("login"));
+    spawn(async move {
+        let answer = |item: Result<nsh_core::desktop::LoginItem, _>| match item {
+            Ok(item) => format!("Ok({:?})", item.status),
+            Err(error) => format!("Err({error:?})"),
+        };
+        let read = answer(login_item().await);
+        let set = answer(set_login_item(false).await);
+        shown.set(format!("login {read} {set}"));
+    });
+    view().child(text(move || shown.get()))
+}
+
+/// A Rust app has its login item without declaring it, as a bundle must:
+/// native code reaches what the platform allows.
+#[test]
+fn a_rust_app_reads_and_changes_its_login_item() {
+    // The last text the app shows, once it is `expected` (or 5 seconds
+    // passed).
+    let shown = |backend: Option<Arc<dyn nsh_core::desktop::LoginItemBackend>>, expected| {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let config = EngineConfig {
+            login_item: backend,
+            ..config(App::Rust(Root::of::<LoginItemInfo>()))
+        };
+        let sink = FrameSink {
+            batches: tx,
+            frames: Arc::default(),
+        };
+        let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
+        let (texts, ..) = until(&rx, expected);
+        texts.last().cloned().unwrap_or_default()
+    };
+    let backend = Arc::new(FakeLoginItem(Mutex::new(true)));
+    let expected = "login Ok(Enabled) Ok(Disabled)";
+    assert_eq!(shown(Some(backend), expected), expected);
+    // Without one (a view embedded in another app, `nsh run`) it has none.
+    let expected = "login Ok(Unavailable) Err(Unavailable)";
+    assert_eq!(shown(None, expected), expected);
 }
 
 /// Shows whether the performance monitor measures and turns it on.

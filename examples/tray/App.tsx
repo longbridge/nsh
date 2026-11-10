@@ -5,10 +5,12 @@
 // window hides it (nsh.json's `closeOnPress: false`, then `hide()` when the
 // app hears `closePress`), so the app keeps running in the tray; the tray's
 // menu quits it. The window is a focus timer, whose time left the icon's
-// tooltip shows, and which comes forward when a session ends.
+// tooltip shows, and which comes forward when a session ends. The menu also
+// opens the app when the user logs in (`Application.setLoginItem`, granted by
+// nsh.json's `loginItem` capability), in the app `nsh package` builds.
 import { cleanup, computed, effect, mount, platform, signal, Text, View } from "nsh";
 import { Button, Progress } from "nsh/base";
-import { currentWindow, Tray } from "nsh/desktop";
+import { Application, currentWindow, type LoginItemStatus, Tray } from "nsh/desktop";
 import icon from "./tray.svg";
 
 /** The sessions' lengths, in minutes. */
@@ -53,12 +55,33 @@ function App() {
 
   // The close button hides the window: the app stays in the tray.
   win.on("closePress", () => win.hide());
+  const shown = computed(() => win.state()?.visible ?? false);
+
+  // Opening at login, as the system has it: read at the start, when the
+  // window shows or hides (the user may have changed it in the system's
+  // settings) and after each change. `unavailable` (under `nsh run`) leaves
+  // it out of the menu; `requiresApproval` (turned off in the system's
+  // settings) only the user turns back on, there.
+  const login = signal<LoginItemStatus>("unavailable");
+  const failed = (error: Error) => console.warn(`login item: ${error.message}`);
+  const readLogin = () => Application.loginItem().then(({ status }) => login.set(status), failed);
+  effect(() => {
+    shown();
+    readLogin();
+  });
+  const toggleLogin = () =>
+    Application.setLoginItem({ enabled: login() !== "enabled" }).then(
+      ({ status }) => login.set(status),
+      (error) => {
+        failed(error);
+        readLogin();
+      },
+    );
 
   // The icon follows the app: its tooltip says what is left (a change a
-  // minute), its menu starts or pauses the timer and shows or hides the
-  // window.
+  // minute), its menu starts or pauses the timer, shows or hides the window
+  // and opens the app at login.
   const tooltip = computed(() => (running() ? `Focus: ${Math.ceil(left() / 60)} min left` : "Focus"));
-  const shown = computed(() => win.state()?.visible ?? false);
   effect(() => {
     Tray.set({
       icon,
@@ -68,6 +91,12 @@ function App() {
         { label: shown() ? "Hide Focus" : "Show Focus", onSelect: () => (shown() ? win.hide() : win.focus()) },
         { label: running() ? "Pause" : "Start", onSelect: () => (running() ? pause() : start()) },
         { type: "separator" },
+        login() !== "unavailable" && {
+          label: login() === "requiresApproval" ? "Open at Login: Allow in Settings" : "Open at Login",
+          checked: login() === "enabled",
+          disabled: login() === "requiresApproval",
+          onSelect: toggleLogin,
+        },
         { role: "quit" },
       ],
     });

@@ -1005,6 +1005,11 @@ pub struct EngineConfig {
     /// built-in backend, which every desktop backend has, embedded or
     /// standalone. The main window's commands always go to the platform.
     pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
+    /// The app's login item (`Application.loginItem`): the platform's,
+    /// which a standalone app's runner gives (`run_app` with the backend's
+    /// `login_item` option), or a test's fake. `None` (the default): the
+    /// app has none, its status is `unavailable`.
+    pub login_item: Option<Arc<dyn nsh_core::desktop::LoginItemBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -1133,6 +1138,7 @@ impl EngineConfig {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         }
     }
 
@@ -1207,6 +1213,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
+            .field("login_item", &self.login_item.is_some())
             .field("windows", &self.windows.is_some())
             .finish()
     }
@@ -1986,9 +1993,13 @@ impl<M: TextEngine + 'static> Driver<M> {
         // and the script runs.
         let posts = nsh_core::element::Posts::new();
         core.set_posts(posts.clone());
-        if let App::Js(_) = &config.app {
-            // Only JS is limited (Rust code is as trusted as the platform).
-            core.set_max_nodes(config.limits.max_nodes);
+        match &config.app {
+            // Only JS is limited (Rust code is as trusted as the platform)...
+            App::Js(_) => core.set_max_nodes(config.limits.max_nodes),
+            // ...and a Rust app has the login item without declaring it, as a
+            // bundle must: it has no declaration to make, and its code could
+            // register itself anyway.
+            App::Rust(_) => core.set_rust_app(true),
         }
         core.set_access(access.clone());
         if let App::Js(bundle) = &config.app {
@@ -2040,6 +2051,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let app_url = core.app_url_cell();
         core.set_audio(config.audio.clone());
         core.set_window_backend(config.windows.clone());
+        core.set_login_item(config.login_item.clone());
         if let Some(window) = config.app.main_window() {
             core.set_main_window(window);
         }

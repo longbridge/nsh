@@ -82,6 +82,9 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
         // An app on its own, not a module embedded in another app.
         limits: Limits::standalone(),
+        // The packaged app's login item: a Rust app `nsh run` runs in
+        // place has none, so it never registers a development build.
+        login_item: DEVELOPMENT.get() != Some(&true),
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))

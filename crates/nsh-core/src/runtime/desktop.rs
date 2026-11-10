@@ -1,6 +1,7 @@
-//! `nsh/desktop`'s app functions (macOS, Windows, Linux; nothing happens
-//! elsewhere). Windows and menus, which call the app's functions and live
-//! in its reactive graph, are `nsh-js`'s.
+//! `nsh/desktop`'s app functions (macOS, Windows, Linux; elsewhere `quit`
+//! and `restart` do nothing and the login item is unavailable). Windows and
+//! menus, which call the app's functions and live in its reactive graph,
+//! are `nsh-js`'s.
 
 use std::{
     cell::{Cell, RefCell},
@@ -9,10 +10,10 @@ use std::{
 
 use crate::{
     Command, ROOT_ID,
-    desktop::DesktopCommand,
+    desktop::{DesktopCommand, LoginItem, LoginItemError, SetLoginItemOptions},
     element::{
-        CallCx, Callback, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx, PropEnum,
-        PropError, Ret, Stop, System, TsTypes, module, task::Action,
+        CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx,
+        PropEnum, PropError, Ret, Stop, System, TsTypes, codes, io_code, module, task::Action,
     },
     single_instance::SecondInstance,
 };
@@ -24,7 +25,31 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
     ));
 }
 
-/// The application as a whole (desktops; its functions do nothing elsewhere).
+/// Whether the app may use its login item: why not when it may not.
+fn login_item_granted(sys: &System) -> Result<(), JsError> {
+    if sys.access.allows_login_item() {
+        return Ok(());
+    }
+    Err(login_item_error(LoginItemError::AccessDenied))
+}
+
+/// What a login item call rejects with.
+fn login_item_error(error: LoginItemError) -> JsError {
+    match error {
+        LoginItemError::AccessDenied => JsError::access_denied(error.to_string(), "loginItem", ""),
+        LoginItemError::Unavailable => {
+            JsError::Error(error.to_string()).with_code(codes::UNAVAILABLE)
+        }
+        // Every failure has a code to branch on: the error's own, else EIO.
+        LoginItemError::System(io) => {
+            let code = io_code(&io).unwrap_or("EIO");
+            JsError::Error(LoginItemError::System(io).to_string()).with_code(code)
+        }
+    }
+}
+
+/// The application as a whole (desktops; elsewhere `quit` and `restart` do
+/// nothing, and the login item is `"unavailable"`).
 #[module]
 pub(crate) struct Application;
 
@@ -48,6 +73,44 @@ impl Application {
     /// to that app.
     pub(crate) fn restart(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Restart);
+    }
+
+    /// The app's login item: whether the system opens the app when the
+    /// user logs in, as the system has it now (nothing follows the system's
+    /// settings on its own: ask again when the app shows it). Its `status`:
+    /// `"enabled"`, `"disabled"`, `"requiresApproval"` (registered, and
+    /// waiting for the user in the system's settings, where only they turn
+    /// it on) or `"unavailable"` (this run has no login item: a view
+    /// embedded in another app, `nsh run`, the platforms without desktop
+    /// windows). Standalone apps on macOS, Windows and Linux. Rejects with
+    /// `ERR_ACCESS_DENIED` when the `loginItem` capability is not granted,
+    /// and with the system's error (Node's code, `EIO` without one).
+    pub(crate) async fn login_item(sys: System) -> Result<LoginItem, JsError> {
+        login_item_granted(&sys)?;
+        crate::element::desktop::login_item()
+            .await
+            .map_err(login_item_error)
+    }
+
+    /// Registers the app to open when the user logs in (`enabled: true`) or
+    /// removes its registration, and resolves with the login item after it:
+    /// registering what is registered and removing what is not there
+    /// succeed. Call it when the user turns the app's own setting on or off,
+    /// never on the app's own (at every start, say): what the user chose in
+    /// the system's settings stands. The changes run in the order the app
+    /// makes them.
+    /// Rejects with `ERR_ACCESS_DENIED` when the `loginItem` capability is
+    /// not granted, with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the
+    /// status is `"unavailable"`, and with the system's error (Node's code,
+    /// `EIO` without one).
+    pub(crate) async fn set_login_item(
+        options: SetLoginItemOptions,
+        sys: System,
+    ) -> Result<LoginItem, JsError> {
+        login_item_granted(&sys)?;
+        crate::element::desktop::set_login_item(options)
+            .await
+            .map_err(login_item_error)
     }
 
     /// Listens to `event`. `secondInstance`: with nsh.json

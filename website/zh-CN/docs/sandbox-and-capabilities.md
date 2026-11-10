@@ -7,10 +7,9 @@ group: delivery
 
 # 沙箱与能力
 
-用 Rust 编写的应用是编译进发布它的应用中的原生代码，和该应用的其余部分一样，以它的信任运行；它对 NSH 服务的调用（`fetch`、图片、
-web view、状态栏）和 TSX 一样经过同样的原生检查，受宿主授予的范围约束。应用运行的 TSX 和 JavaScript（它自己的，或它下载的
-[签名包](./signed-packages.md)）在每个视图一个的 QuickJS VM 中运行，它们在 VM 之外能做的一切都要经过 NSH 的原生运行时。因此，
-你可以在宿主应用制定的规则下运行并非自己编写的代码，例如第三方小程序或下载的更新：
+用 Rust 编写的应用是编译进发布它的应用中的原生代码，和该应用的其余部分一样，以它的信任运行；它对 NSH 服务的调用（`fetch`、图片、web view、状态栏）和 TSX 一样经过同样的原生检查，受宿主授予的范围约束，
+并且无需声明就能使用[登录项](#loginitem)。应用运行的 TSX 和 JavaScript（它自己的，或它下载的[签名包](./signed-packages.md)）在每个视图一个的 QuickJS VM 中运行，它们在 VM
+之外能做的一切都要经过 NSH 的原生运行时。因此，你可以在宿主应用制定的规则下运行并非自己编写的代码，例如第三方小程序或下载的更新：
 
 - **限制（Limits）** 约束单个应用可使用的内存、时间和原生资源。
 - **加固（Hardening）** 在 release 构建中移除所有把字符串变成代码的途径。
@@ -110,6 +109,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "speech": true,
     "notifications": true,
     "audio": true,
+    "loginItem": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
@@ -118,7 +118,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 ```
 
 **没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。原始 TCP socket 在每个应用中都按名称授予，即
-`network.sockets`；宿主的函数也一样，即 `host`。**有 `"capabilities"` 的应用
+`network.sockets`；宿主的函数和登录时打开也一样，分别是 `host` 和 `loginItem`。**有 `"capabilities"` 的应用
 只能做其中列出的事**：其他一律拒绝。NSH 读不懂的键或值不授予任何权限，构建时会给出警告，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
 [签名包](./signed-packages.md#由更新版本的-nsh-签名的包)可能声明了旧运行时不认识的能力：旧运行时不会授予它们。
 
@@ -213,6 +213,12 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 
 `"notifications": true` 允许应用显示系统通知并设置应用图标的角标（[`Notifications`](../modules/nsh.md#notifications)）。需要询问的系统仍会向用户请求一次权限。
 
+### `loginItem`
+
+`"loginItem": true` 允许应用读取和修改系统是否在用户登录时打开它（桌面平台上的
+[`Application.loginItem()` 和 `setLoginItem()`](../modules/nsh-desktop.md#登录时打开)）。只有声明了才会授予，没有
+`"capabilities"` 的应用也不例外。用 Rust 编写的应用以发布它的应用的信任运行，无需声明就能使用登录项。
+
 ### `openUrl`
 
 允许应用在应用之外打开 URL（[`openUrl`](../modules/nsh.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme。scheme 未被授予的 URL 以 `ERR_ACCESS_DENIED` reject（`permission` 为 `"openUrl"`，`resource` 为该 URL）。会执行代码或访问应用自身数据的 URL（`javascript:`、`data:`、`file:` 等）无论能力如何都不会打开。
@@ -271,6 +277,7 @@ if (host.available()) {
 | 声音 | `Sound.load` reject、`new AudioPlayer` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"audio"`，`resource` 为音源；不读取也不播放任何内容。 |
 | 语音 | `Speech.start` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"speech"`，`resource` 为 `""`；麦克风不会打开。 |
 | 通知 | `Notifications` 的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；不会显示任何东西。 |
+| 登录项 | `Application.loginItem` 和 `setLoginItem` 以 `ERR_ACCESS_DENIED` reject，`permission` 为 `"loginItem"`，`resource` 为 `""`；不会登记任何东西。 |
 | `openUrl` | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"openUrl"`，`resource` 为该 URL；不会打开任何东西。 |
 | 宿主调用 | `host.call` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"host"`，`resource` 为函数名（`host.post` 抛出同样的错误）；调用不会到达宿主。 |
 | 文件（`fs/promises`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"fs"`，`resource` 为该路径；不会访问磁盘。 |

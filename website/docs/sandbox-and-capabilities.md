@@ -7,12 +7,12 @@ group: delivery
 
 # Sandbox and Capabilities
 
-An app written in Rust is native code compiled into the app that ships it, as the rest of that app is, and runs with
-its trust; its calls into NSH's services (`fetch`, images, web views, the status bar) go through the same native
-checks as TSX's, under what a host grants. The TSX and JavaScript an app runs, its own or a [signed
-package](./signed-packages.md) it downloads, run in a QuickJS VM per view, and everything they can do outside that VM
-goes through NSH's native runtime. That makes it possible to run code you did not write, such as third-party mini apps
-or downloaded updates, under rules the host app controls:
+An app written in Rust is native code compiled into the app that ships it, as the rest of that app is, and runs with its
+trust; its calls into NSH's services (`fetch`, images, web views, the status bar) go through the same native checks as
+TSX's, under what a host grants, and it has the [login item](#loginitem) without a declaration. The TSX and JavaScript
+an app runs, its own or a [signed package](./signed-packages.md) it downloads, run in a QuickJS VM per view, and
+everything they can do outside that VM goes through NSH's native runtime. That makes it possible to run code you did not
+write, such as third-party mini apps or downloaded updates, under rules the host app controls:
 
 - **Limits** bound the memory, time and native resources one app can use.
 - **Hardening** removes the ways to turn strings into code in release builds.
@@ -120,6 +120,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "speech": true,
     "notifications": true,
     "audio": true,
+    "loginItem": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
@@ -128,10 +129,10 @@ An app declares what it may reach outside its VM in `nsh.json`:
 ```
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
-restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, and the host's functions
-through `host`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. A key or value NSH
-cannot read grants nothing: the build warns of it, so a typo shows up when you build instead of as a missing permission
-at runtime. A [signed
+restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, the host's functions
+through `host`, and opening at login through `loginItem`. **An app with `"capabilities"` may do only what it lists**:
+everything else is denied. A key or value NSH cannot read grants nothing: the build warns of it, so a typo shows up
+when you build instead of as a missing permission at runtime. A [signed
 package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
 runtime does not know: they are not granted there.
 
@@ -236,6 +237,13 @@ needs a `network` grant for its host.
 `"notifications": true` lets the app show system notifications and set its icon's badge
 ([`Notifications`](../modules/nsh.md#notifications)). The system still asks the user once, where it asks.
 
+### `loginItem`
+
+`"loginItem": true` lets the app read and change whether the system opens it when the user logs in
+([`Application.loginItem()` and `setLoginItem()`](../modules/nsh-desktop.md#opening-at-login), on the desktops). Only
+a declaration grants it, also for an app without `"capabilities"`. An app written in Rust has the login item without a
+declaration, as it runs with the trust of the app that ships it.
+
 ### `openUrl`
 
 Lets the app open URLs outside it ([`openUrl`](../modules/nsh.md#openurl), a `TextView`'s links with
@@ -299,6 +307,7 @@ if (host.available()) {
 | Speech | `Speech.start` throws `ERR_ACCESS_DENIED`, `permission` `"speech"` and `resource` `""`; the microphone stays off. |
 | Sound | `Sound.load` rejects and `new AudioPlayer` throws `ERR_ACCESS_DENIED`, `permission` `"audio"` and `resource` the source; nothing is read or played. |
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |
+| Login item | `Application.loginItem` and `setLoginItem` reject with `ERR_ACCESS_DENIED`, `permission` `"loginItem"` and `resource` `""`; nothing is registered. |
 | `openUrl` | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"openUrl"` and `resource` the URL; nothing opens. |
 | Host call | `host.call` rejects with `ERR_ACCESS_DENIED`, `permission` `"host"` and `resource` the function's name (`host.post` throws it); the call never reaches the host. |
 | Files (`fs/promises`) | The promise rejects with `ERR_ACCESS_DENIED`, `permission` `"fs"` and `resource` the path; the disk is never touched. |

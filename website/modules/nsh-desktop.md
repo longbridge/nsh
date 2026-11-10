@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, the login item (`login_item`, `set_login_item`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing (the login item is `"unavailable"` there), and `isAvailable` tells you whether its windows and menus are there.
 
 ```rust tabs
 use nsh_core::{
@@ -375,15 +375,29 @@ An app without `"capabilities"` in nsh.json may open windows of every kind excep
 const Application: {
   quit(): void;
   restart(): void;
+  loginItem(): Promise<LoginItem>;
+  setLoginItem(options: SetLoginItemOptions): Promise<LoginItem>;
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
   on(event: "quit", listener: () => void): () => void;
 };
+
+interface SetLoginItemOptions {
+  enabled: boolean;
+}
+
+interface LoginItem {
+  status: LoginItemStatus;
+}
+
+type LoginItemStatus = "enabled" | "disabled" | "requiresApproval" | "unavailable";
 ```
 
 | Member | Rust | Description |
 |---|---|---|
 | `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
 | `restart()` | `restart()` | Quits the app as `quit()` does, then starts it again with the same arguments. |
+| `loginItem()` | `login_item()` | Whether the system opens the app when the user logs in ([Opening at login](#opening-at-login)). |
+| `setLoginItem({ enabled })` | `set_login_item(enabled)` (a `bool` or `SetLoginItemOptions`) | Registers the app to open at login (`true`) or removes it (`false`), then resolves with the login item. |
 | `on("secondInstance", listener)` | `next_second_instance()` | The app was launched again while it runs ([Single instance](#single-instance)). |
 | `on("quit", listener)` | `on_app_quit(f)` | The app is quitting: its cleanup runs ([Quitting](#quitting)). |
 
@@ -501,6 +515,85 @@ also come through `UrlScheme.on("open")`.
 | iOS, Android, web | The system runs the app once; `secondInstance` is not reported |
 
 The release runners of `nsh package` read the setting; `nsh run` starts its development host as before.
+
+### Opening at login
+
+`Application.loginItem()` says whether the system opens the app when the user logs in, as the system has it now, and
+`Application.setLoginItem({ enabled })` registers the app or removes it. Both need the
+[`loginItem` capability](../docs/sandbox-and-capabilities.md#loginitem), which only a declaration grants:
+
+```json
+{
+  "capabilities": { "loginItem": true }
+}
+```
+
+A declaration lists everything the app uses, so `loginItem` goes beside the other capabilities the app needs
+([Sandbox and Capabilities](../docs/sandbox-and-capabilities.md)). An app written in Rust has the login item without a
+declaration, as it runs with the trust of the app that ships it, and awaits `login_item()` and `set_login_item(enabled)`
+in a task:
+
+```rust
+use nsh_core::element::desktop::{login_item, set_login_item};
+use nsh_core::prelude::*;
+
+let status = signal(None);
+spawn(async move {
+    if let Ok(item) = login_item().await {
+        status.set(Some(item.status));
+    }
+});
+// When the user turns the app's own setting on or off:
+let turn = move |enabled: bool| {
+    spawn(async move {
+        match set_login_item(enabled).await {
+            Ok(item) => status.set(Some(item.status)),
+            Err(error) => log::warn!("login item: {error}"),
+        }
+    });
+};
+```
+
+| `status` | Meaning |
+|---|---|
+| `"enabled"` | The system opens the app when the user logs in. |
+| `"disabled"` | The system leaves the app closed at login. |
+| `"requiresApproval"` | Registered, and waiting for the user in the system's settings (on Windows: they turned the app off among the startup apps). Only the user turns it on, there. |
+| `"unavailable"` | This run has no login item: a view embedded in another app, `nsh run`, iOS, Android and the web. |
+
+Call `setLoginItem` when the user turns the app's own setting on or off, never on the app's own (at every start, say):
+what the user chose in the system's settings stands. Registering what is registered and removing what is not there
+succeed, and the changes run in the order the app makes them. The status is the system's at the time of the call: read
+it again when the app shows its setting. Both functions reject with `ERR_ACCESS_DENIED` without the capability,
+`setLoginItem` with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the status is `"unavailable"`, and a failure of the
+system with its code, among them `EACCES` when the system does not permit the change, `ENAMETOOLONG` when the app's
+quoted path is longer than a Windows login item holds (260 characters), `EINVAL` when the app's id or path cannot name
+a login item, and `EIO` when the failure has no code of its own.
+
+| Platform | The login item | Shown in |
+|---|---|---|
+| macOS | The app bundle's (`SMAppService.mainApp`), kept for its bundle id: every copy of the app shares it. | System Settings, Login Items |
+| Windows | A value of the current user's `Run` key named by the app id, holding this executable's path. A value naming another copy reads as `"disabled"`; the installer `nsh package` builds removes it when it uninstalls the copy it names. | Settings' startup apps, Task Manager's Startup apps |
+| Linux | An XDG autostart entry, `~/.config/autostart/<app id>.desktop`, starting this executable. One the desktop's settings turned off reads as `"disabled"`, and enabling turns it on again. In a Flatpak or Snap sandbox the status is `"unavailable"`. | The desktop's autostart settings |
+
+It works in standalone apps, those `nsh package` builds among them; under `nsh run` the status is `"unavailable"`, so
+check it in a packaged app.
+
+```tsx
+import { signal } from "nsh";
+import { Application, type LoginItemStatus } from "nsh/desktop";
+
+const openAtLogin = signal<LoginItemStatus>("unavailable");
+// Read when the app shows its setting, and after each change.
+Application.loginItem().then(({ status }) => openAtLogin.set(status));
+
+async function setOpenAtLogin(enabled: boolean) {
+  const { status } = await Application.setLoginItem({ enabled });
+  openAtLogin.set(status);
+}
+```
+
+[`examples/tray`](https://github.com/longbridge/nsh/tree/main/examples/tray) offers it in its tray's menu.
 
 ## A title bar of your own
 
