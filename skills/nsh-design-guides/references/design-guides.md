@@ -8,8 +8,8 @@ group: ui
 # Design Guides
 
 Use this guide before choosing components or writing layout code for an app built with Native Shell. It records the
-product judgment GPUI Kit accumulated through years of desktop work, carried over to NSH: an interface should feel
-native, restrained, precise, and understandable without guesswork.
+product judgment NSH apps follow: an interface should feel native, restrained, precise, and understandable without
+guesswork.
 
 It is a general guide, not a visual style. Applied to an app's own style, it should lead to UI that is complete,
 refined and consistent: every state of every control designed, motion where things change, and one system of sizes,
@@ -66,9 +66,9 @@ variants, sizes, density and hover, pressed, focus, selected, disabled, loading 
 these components; they should not restyle base controls independently. Start it with the core set below and grow it
 with the app's needs, keeping every control complete.
 
-NSH's layering parallels GPUI Kit: `nsh-core` corresponds to GPUI and `nsh-base` to [`gpui-base`](https://gpui-kit.com/base), providing behavior,
-state, focus and accessibility. The styled layer corresponding to [`gpui-component`](https://gpui-kit.com/component) belongs to the app or a community
-library. The default theme supplies starting tokens; the app's styled components turn them into a complete visual
+NSH has three layers: `nsh-core` provides the primitives, layout and rendering; `nsh-base` (`nsh/base`) provides
+unstyled components with behavior, state, focus and accessibility; the styled layer above them belongs to the app (its
+`ui` layer) or a community library. The default theme supplies starting tokens; the app's styled components turn them into a complete visual
 system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-before-pages).
 
 ### The app's `ui` layer

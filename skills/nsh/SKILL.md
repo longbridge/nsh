@@ -14,8 +14,8 @@ When neither is specified, prefer Rust for an app shipped in its binary.
 Before building feature screens, read the Design and Coding Guides and establish
 or reuse the app's design standards, semantic Theme Tokens and styled component
 library. Keep them in the app repository. `nsh-base` (`nsh/base`) supplies unstyled
-behavior, as [`gpui-base`](https://gpui-kit.com/base) does; the styled layer analogous to [`gpui-component`](https://gpui-kit.com/component)
-belongs to the app or its chosen community library.
+behavior; the styled layer above it belongs to the app (its `ui` layer) or its
+chosen community library.
 
 Define theme colors centrally and consume semantic tokens throughout pages,
 components and states: `theme()` in Rust; token classes or `token()` in TSX.
