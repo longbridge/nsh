@@ -75,7 +75,7 @@ export function IconButton(props: { icon: LucideIconName; label: string; short?:
         accessibilityLabel={props.label}
         onPress={props.onPress}
         hoverStyle={props.disabled ? undefined : { backgroundColor: colors.raised }}
-        focusStyle={focusRing(1)}
+        focusVisibleStyle={focusRing(1)}
         style={{ width: terminal ? undefined : 32, height: terminal ? undefined : 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: terminal ? undefined : ghostFill(), opacity: props.disabled ? 0.35 : 1 }}
       >
         <If when={terminal} else={<LucideIcon name={props.icon} size={16} tint={colors.text} />}>

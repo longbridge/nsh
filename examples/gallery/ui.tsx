@@ -3,7 +3,7 @@
 import type { Bounds, JSX, ScrollProps } from "nsh";
 import { Canvas, computed, Image, Scroll, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
-import { alpha, Appear, Button, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
+import { alpha, Appear, Button, colors, focusedSection, focusRing, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
 import { play, setSoundsOn, soundsOn } from "../nsh-gallery-ui/sound";
 import logoDark from "./logo-dark.svg";
@@ -196,6 +196,7 @@ export function ToolButton(props: { icon: IconName; label: string; title?: strin
       tooltip={<Tip label={props.label} shortcut={props.shortcut} />}
       hoverStyle={hovered()}
       activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }}
+      focusVisibleStyle={focusRing()}
       style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}
     >
       <Icon name={props.icon} size={16} tint={colors.muted} />

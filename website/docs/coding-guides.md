@@ -663,8 +663,10 @@ Rules:
   `unknown class` warning is a finding to fix;
 - use semantic tokens for meaning, not palette position;
 - keep state-independent geometry in the ordinary builder chain or class string;
-- use `active:`, `hover:` and `focus:` (`.active(..)`, `.hover(..)`, `.focus(..)`) for runtime interaction states;
-  they apply natively, with no round trip to app code;
+- use `active:`, `hover:` and `focus-visible:` (`.active(..)`, `.hover(..)`, `.focus_visible(..)`) for runtime
+  interaction states; they apply natively, with no round trip to app code. `focus-visible:` is the keyboard's ring:
+  it shows when the keyboard moved the focus, not after a click or a tap; keep `focus:` for any focus (an input's
+  edge, a list's highlighted row);
 - use a component's semantic state styles (`selected:`, `checked:`, `disabled:`) for checked, selected, pressed, or
   disabled appearance;
 - keep popup ownership in explicit state (`open` with `onOpenChange`) so its trigger can render the open or pressed
@@ -770,7 +772,7 @@ Make focus ownership explicit:
   than on bare views;
 - move focus with a ref's `focus()` from an event or an effect that follows a state change, and move the screen
   reader's with `set_accessibility_focus()` (Rust) or `setAccessibilityFocus` from `nsh` (TSX);
-- render a visible `focus:` state;
+- render a visible `focus-visible:` state;
 - do not request focus unconditionally while rendering.
 
 Composite widgets should implement the complete navigation model (arrow movement, Home / End or page movement where
