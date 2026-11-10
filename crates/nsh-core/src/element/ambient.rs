@@ -1206,6 +1206,17 @@ pub fn run_on_main_thread<R: Send + 'static>(
 }
 
 /// A future polled under `owner` ([`Owner::scope`]).
+/// `future`, polled under `owner`, boxed for the executor.
+pub(super) fn owned(
+    owner: Owner,
+    future: impl Future<Output = ()> + 'static,
+) -> std::pin::Pin<Box<dyn Future<Output = ()>>> {
+    Box::pin(Owned {
+        owner,
+        future: Box::pin(future),
+    })
+}
+
 struct Owned<F> {
     owner: Owner,
     future: std::pin::Pin<Box<F>>,

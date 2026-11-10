@@ -185,7 +185,7 @@ tap id:menu
 expect Calls: menu done
 expect Popup: closed
 tap id:application
-expect Calls: application done, quit function, restart function
+expect Calls: application done, quit function, restart function, stop function
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] windowState

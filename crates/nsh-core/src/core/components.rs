@@ -1194,6 +1194,43 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Whether something runs as the app quits ([`crate::element::desktop::on_app_quit`],
+    /// `Application.on("quit")`): the engine gives it time to.
+    pub fn has_quit_listeners(&self) -> bool {
+        !self.components.executor.quit.borrow().is_empty()
+    }
+
+    /// The app quits: starts each quit listener's work, oldest first, as
+    /// tasks the engine runs ([`Core::run_component_tasks`]) until
+    /// [`Core::quit_pending`] is false or
+    /// [`QUIT_TIMEOUT`](crate::element::desktop::QUIT_TIMEOUT) has passed.
+    /// Whether any started.
+    pub fn start_quit(&mut self) -> bool {
+        let _entered = self.components.runtime.enter();
+        let executor = self.components.executor.clone();
+        let listeners = executor.quit.borrow().all();
+        for listener in listeners {
+            match caught(|| listener()) {
+                Ok(future) => {
+                    let pending = crate::element::quit::Pending::new(&executor.quitting);
+                    // Detached: it runs until it ends or the engine stops.
+                    drop(crate::element::task::spawn_future(&executor, async move {
+                        future.await;
+                        drop(pending);
+                    }));
+                }
+                Err(message) => log::error!(target: "js", "a quit listener failed: {message}"),
+            }
+        }
+        self.apply_actions();
+        self.quit_pending()
+    }
+
+    /// Whether the work quit listeners started is still running.
+    pub fn quit_pending(&self) -> bool {
+        self.components.executor.quitting.get() > 0
+    }
+
     /// Runs the closures that waited for the app's answer to the events
     /// handed to JS before this commit ([`crate::element::after_answer`]),
     /// each under its owner; one whose owner went is dropped unrun.

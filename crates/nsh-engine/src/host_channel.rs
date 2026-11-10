@@ -223,6 +223,15 @@ impl HostChannel {
         self.lock().fake_handlers.get(name).cloned()
     }
 
+    /// Asks the engine to stop without interrupting JS, so its quit
+    /// listeners run ([`HostChannel::shutdown`] follows): events sent
+    /// meanwhile follow the shutdown message, kept for the next app.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn request_shutdown(&self, tx: &Sender<Message>) {
+        let _inner = self.lock();
+        let _ = tx.send(Message::Shutdown);
+    }
+
     /// Events sent once JS is interrupted must follow the shutdown
     /// message, so the attachment can recover them for the next app.
     #[cfg(not(target_arch = "wasm32"))]

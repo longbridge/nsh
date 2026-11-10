@@ -943,6 +943,48 @@ pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
 
+pub use super::quit::QUIT_TIMEOUT;
+
+/// Runs `f` as the app quits, for its cleanup (TS: `Application.on("quit",
+/// …)`), as GPUI's `App::on_app_quit`: saving what it keeps, closing a
+/// connection. It cannot keep the app running; an app that asks first
+/// quits from a Quit of its own ([`quit`] from a menu item with the `mod+q`
+/// shortcut, after its confirmation). It runs when the app stops: its Quit
+/// item and [`quit`], its last window closing, the system ending it
+/// (logging out), a host app removing its view. The engine waits for the
+/// futures it returns [`QUIT_TIMEOUT`] at most, together, and while it
+/// waits the platform does: keep it short. Removed with the current owner.
+///
+/// ```ignore
+/// on_app_quit(move || {
+///     let draft = draft.get_untracked();
+///     async move { save_draft(draft).await }
+/// });
+/// ```
+pub fn on_app_quit<F>(f: impl FnMut() -> F + 'static)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    let owner = Owner::current();
+    let f = RefCell::new(f);
+    let listener: super::quit::QuitListener = Rc::new(move || {
+        let future = owner.run(|| (f.borrow_mut())());
+        super::ambient::owned(owner, future)
+    });
+    let subscription = add_quit_listener(listener);
+    cleanup(move || drop(subscription));
+}
+
+/// Adds `listener` to what runs as the app quits, until the subscription
+/// drops (`Application.on("quit")` keeps one while the VM lasts).
+pub(crate) fn add_quit_listener(
+    listener: super::quit::QuitListener,
+) -> super::quit::QuitSubscription {
+    let quit = &super::ambient::executor().quit;
+    let id = quit.borrow_mut().add(listener);
+    super::quit::QuitSubscription::new(quit, id)
+}
+
 /// Restarts the app (TS: `Application.restart`): it quits as [`quit`]
 /// does, and once this process has exited the platform starts the same
 /// program again with the arguments it was started with. For a setting
