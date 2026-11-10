@@ -18,7 +18,7 @@
 //! - The title is `XAyatanaLabel` (the AppIndicator extension), its runs'
 //!   text without their colors: panels that show it (GNOME's AppIndicator
 //!   extension, Unity, MATE, Budgie) draw it right of the icon, whatever
-//!   `title_position` says; the others show the icon alone.
+//!   `title_placement` says; the others show the icon alone.
 
 use std::{cell::RefCell, rc::Weak, sync::Arc};
 

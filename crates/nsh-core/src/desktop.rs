@@ -866,9 +866,25 @@ pub struct TrayTitleRun {
     pub color: Option<Hsla>,
 }
 
-/// Which side of the tray's icon its title shows on ([`Tray::title_position`]).
+impl TrayTitleRun {
+    /// A run of `text` in the panel's text color.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            color: None,
+        }
+    }
+
+    /// The run in `color`.
+    pub fn color(mut self, color: impl Into<Hsla>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+}
+
+/// Which side of the tray's icon its title shows on ([`Tray::title_placement`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
-pub enum TrayTitlePosition {
+pub enum TrayTitlePlacement {
     /// Right of the icon, as menu bar apps usually show it.
     #[default]
     Right,
@@ -895,7 +911,7 @@ pub struct Tray {
     /// icon alone.
     pub title: Vec<TrayTitleRun>,
     /// Which side of the icon the title shows on.
-    pub title_position: TrayTitlePosition,
+    pub title_placement: TrayTitlePlacement,
     /// Its menu: opened by a secondary click (a primary one too when
     /// [`Self::click`] is 0); empty for none.
     pub menu: Arc<[MenuItem]>,

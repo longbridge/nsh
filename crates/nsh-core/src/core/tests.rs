@@ -22122,6 +22122,11 @@ mod rust_menus {
         crate::element::desktop::set_tray(
             crate::element::desktop::tray()
                 .tooltip("Player")
+                .title([
+                    crate::desktop::TrayTitleRun::new("Now "),
+                    crate::desktop::TrayTitleRun::new("playing").color(crate::color::rgb(0xd92d20)),
+                ])
+                .title_placement(crate::desktop::TrayTitlePlacement::Left)
                 .menu([MenuItem::new("Pause").on_select(move || log.set("pause".into()))])
                 .on_click(move |e| log.set(format!("click {}", e.bounds.is_some()))),
         );
@@ -22154,6 +22159,17 @@ mod rust_menus {
             })
             .expect("the tray");
         assert_eq!(tray.tooltip, "Player");
+        assert_eq!(
+            tray.title,
+            [
+                crate::desktop::TrayTitleRun::new("Now "),
+                crate::desktop::TrayTitleRun::new("playing").color(crate::color::rgb(0xd92d20)),
+            ]
+        );
+        assert_eq!(
+            tray.title_placement,
+            crate::desktop::TrayTitlePlacement::Left
+        );
         assert!(tray.click >= 1 << 31);
         let Item::Action(pause) = &tray.menu[0] else {
             panic!("an action: {:?}", tray.menu);

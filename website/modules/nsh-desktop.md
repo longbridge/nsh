@@ -803,7 +803,7 @@ interface TrayModule {
 | `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
 | `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
 | `title` | Text beside the icon, as runs `{ text, color? }`, each in its own color (a CSS color; without one, the menu bar's text color): what the app keeps in sight, such as a price. macOS's menu bar shows it in the menu bar's font. Linux's panels that show AppIndicator labels (GNOME's AppIndicator extension, Unity, MATE, Budgie) show its text right of the icon, in the panel's color; Plasma, Waybar and Windows' notification area show the icon alone. |
-| `titlePosition` | Which side of the icon the title shows on: `"right"` (the default) or `"left"`. macOS only; Linux's panels always draw the title right of the icon. |
+| `titlePlacement` | Which side of the icon the title shows on: `"right"` (the default) or `"left"`. macOS only; Linux's panels always draw the title right of the icon. |
 | `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
 | `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too), with `{ bounds }`: where the icon is ([below](#a-window-at-the-icon)). |
 
@@ -825,9 +825,18 @@ Tray.set({
 });
 ```
 
-A title keeps something in sight beside the icon in macOS's menu bar, such as a price, its change in a color of the app's theme:
+A title keeps something in sight beside the icon in macOS's menu bar, such as a price, its change in a color of the app's theme. A run's color is fixed when `set` is called; set the tray inside an `effect` that reads the color scheme for a theme color to follow light and dark:
 
-```tsx
+```rust tabs
+use nsh_core::desktop::TrayTitleRun;
+
+set_tray(tray().icon(icon).title([
+    TrayTitleRun::new("AAPL 228.00 "),
+    TrayTitleRun::new("+1.33%").color(color(tokens().color("up").unwrap())),
+]));
+```
+
+```tsx tabs
 import { token } from "nsh";
 
 Tray.set({
@@ -879,7 +888,7 @@ function atIcon(icon: Bounds, size: Size): Point {
 }
 ```
 
-In Rust, `set_tray(tray()...)` is the same (`None` removes it): `tray()` is a builder with `.icon(..)`, `.tooltip(..)`, `.menu(items)` (the same `MenuItem`s as `set_application_menu`) and `.on_click(|e| ..)`, whose `TrayClickEvent` carries `bounds: Option<Bounds<Points>>`. Its handlers run under the owner that set it, while that owner lives; in an `effect` it follows the signals it reads. One tray per app, shared with TSX: the last set wins.
+In Rust, `set_tray(tray()...)` is the same (`None` removes it): `tray()` is a builder with `.icon(..)`, `.tooltip(..)`, `.title(runs)` (`TrayTitleRun::new(text)`, with `.color(..)`), `.title_placement(..)` (`TrayTitlePlacement`), `.menu(items)` (the same `MenuItem`s as `set_application_menu`) and `.on_click(|e| ..)`, whose `TrayClickEvent` carries `bounds: Option<Bounds<Points>>`. Its handlers run under the owner that set it, while that owner lives; in an `effect` it follows the signals it reads. One tray per app, shared with TSX: the last set wins.
 
 ```rust
 use nsh_core::element::desktop::{MenuItem, main_window, quit, set_tray, tray};
