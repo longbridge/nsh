@@ -85,7 +85,10 @@ use windows::{
     Win32::{
         Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::{
-            Direct2D::D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+            Direct2D::{
+                Common::D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, ID2D1CommandList,
+            },
             DirectWrite::{
                 DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_WEIGHT, DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_TEXT_ALIGNMENT,
@@ -226,6 +229,9 @@ pub(crate) struct InputState {
     format: RefCell<Option<IDWriteTextFormat>>,
     /// The placeholder, laid out.
     placeholder: RefCell<Option<IDWriteTextLayout>>,
+    /// What RichEdit drew last (in the content box's points), shown again
+    /// when it cannot draw.
+    drawn: RefCell<Option<ID2D1CommandList>>,
 }
 
 impl InputState {
@@ -305,6 +311,7 @@ impl InputState {
                 dragging: Cell::new(false),
                 format: RefCell::new(None),
                 placeholder: RefCell::new(None),
+                drawn: RefCell::new(None),
             }
         })
     }
@@ -672,6 +679,40 @@ impl InputState {
             caret.height as f32 / s,
         ))
     }
+
+    /// Records what RichEdit draws, in the content box's points, as
+    /// `drawn`. While an input method's edit holds the text (committing a
+    /// composition) RichEdit draws nothing: the last drawing stays, or the
+    /// field would flash empty for a frame. Recorded with a context of
+    /// its own, then drawn in the window's pass.
+    fn record(&self, cx: &DrawCx<'_>, e: &Editor) {
+        let (ox, oy) = self.origin.get();
+        let s = cx.scale.max(0.01);
+        let bounds = self.client();
+        let list = crate::decor::layer::with_context(cx.gfx, |dc| {
+            // SAFETY: COM calls on a context nobody else draws with;
+            // `EndDraw` follows `BeginDraw`, the list is closed before use.
+            unsafe {
+                let list = dc.CreateCommandList().ok()?;
+                dc.SetTarget(&list);
+                dc.SetDpi(96.0 * s, 96.0 * s);
+                dc.BeginDraw();
+                // RichEdit draws in the window's client pixels.
+                dc.SetTransform(
+                    &(Matrix3x2::translation(-ox as f32, -oy as f32)
+                        * Matrix3x2::scale(1.0 / s, 1.0 / s)),
+                );
+                let drawn = e.draw(dc.as_raw(), bounds);
+                let ended = dc.EndDraw(None, None);
+                dc.SetTarget(None);
+                (drawn && ended.is_ok() && list.Close().is_ok()).then_some(list)
+            }
+        })
+        .flatten();
+        if let Some(list) = list {
+            self.drawn.replace(Some(list));
+        }
+    }
 }
 
 impl Hosted for InputState {
@@ -687,6 +728,7 @@ impl Hosted for InputState {
         }
         self.update_client();
         let Some(e) = &self.editor else { return };
+        self.record(cx, e);
         let (w, h) = size;
         let multiline = self.multiline();
         if multiline {
@@ -725,23 +767,18 @@ impl Hosted for InputState {
         // RichEdit lays the text out (and sizes its caret from the field's
         // format) only when it draws: an empty field is drawn too (nothing
         // shows, the background is transparent), or its first caret keeps
-        // the height of the default font.
-        {
-            // RichEdit draws in the window's client pixels: the content
-            // box's origin there is this item's origin.
-            let (ox, oy) = self.origin.get();
-            let s = cx.scale.max(0.01);
-            let mut current = Matrix3x2::default();
-            // SAFETY: COM calls between BeginDraw and EndDraw; the
-            // transform is restored after.
+        // the height of the default font. The recording is in the content
+        // box's points, as this item draws.
+        if let Some(drawn) = &*self.drawn.borrow() {
+            // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
-                cx.dc.GetTransform(&mut current);
-                let to_item = Matrix3x2::translation(-ox as f32, -oy as f32)
-                    * Matrix3x2::scale(1.0 / s, 1.0 / s)
-                    * current;
-                cx.dc.SetTransform(&to_item);
-                e.draw(cx.dc.as_raw(), self.client());
-                cx.dc.SetTransform(&current);
+                cx.dc.DrawImage(
+                    drawn,
+                    None,
+                    None,
+                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    D2D1_COMPOSITE_MODE_SOURCE_OVER,
+                );
             }
         }
 

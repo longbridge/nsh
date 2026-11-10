@@ -374,8 +374,10 @@ impl Editor {
     }
 
     /// Draws the text into `target` (an `ID2D1RenderTarget` whose
-    /// transform maps client pixels), in `bounds`.
-    pub(crate) fn draw(&self, target: *mut c_void, bounds: RECT) {
+    /// transform maps client pixels), in `bounds`. False when the services
+    /// would not draw: while an input method's edit holds the text (the
+    /// commit of a composition), drawing fails and nothing is drawn.
+    pub(crate) fn draw(&self, target: *mut c_void, bounds: RECT) -> bool {
         let mut rc = RECTL {
             left: bounds.left,
             top: bounds.top,
@@ -395,8 +397,9 @@ impl Editor {
             )
         };
         if hr.is_err() {
-            log::warn!("TxDrawD2D failed: {hr:?}");
+            log::debug!("TxDrawD2D failed: {hr:?}");
         }
+        hr.is_ok()
     }
 
     /// Marks the field as being drawn until the guard drops: what the
