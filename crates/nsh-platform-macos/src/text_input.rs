@@ -2070,9 +2070,21 @@ fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
     });
 }
 
+/// The input view's frame changed (`crate::view::NshView::place`): places
+/// the editor again, or hides it while the view has no area.
+pub(crate) fn resized(view: &NshView) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    place(view, &input);
+}
+
 /// Places the pad over the whole view and the editor (and a text view's
 /// placeholder) in it at the content box (`crate::native::resized` keeps
-/// the pad at the view's size).
+/// the pad at the view's size). While the view or its content box has no
+/// area (a `display: none` subtree lays its views out at a zero frame) the
+/// pad is hidden: it does not clip, so the editor would keep drawing at its
+/// last frame.
 fn place(view: &NshView, input: &InputState) {
     let frame = view.state().frame;
     let bounds = Bounds {
@@ -2086,7 +2098,12 @@ fn place(view: &NshView, input: &InputState) {
         },
     };
     let content = input.content.get().unwrap_or(bounds);
-    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
+    let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
+    let hidden = empty(bounds) || empty(content);
+    if input.pad.isHidden() != hidden {
+        input.pad.setHidden(hidden);
+    }
+    if hidden {
         return;
     }
     view.set_native(&input.pad, bounds);

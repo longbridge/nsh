@@ -13,6 +13,8 @@
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
 #[cfg(target_os = "macos")]
+mod input_hidden;
+#[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
 mod title_bar;
@@ -28,9 +30,12 @@ fn main() {
                 mount::bench_alone();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
+            } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
+                input_hidden::run();
             } else {
                 window_press::run();
                 title_bar::run();
+                input_hidden::run();
                 mount::run();
             }
         }
