@@ -7,7 +7,8 @@
 //! trigger's again as a menu or popover closes, so Return during its exit
 //! chooses nothing in it and opens it again, its keys working as before. A tooltip's `delay` of `Infinity` never ends and
 //! one of `NaN` is none; the keyboard focus shows a tooltip in every idiom
-//! until it leaves or Escape is pressed. On a manual clock: time moves only as the test
+//! until it leaves or Escape is pressed. Escape or a choice closes a menu
+//! whose `open` the app controls every time, also when the app opened it itself. On a manual clock: time moves only as the test
 //! says.
 
 use std::{
@@ -16,7 +17,9 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{MenuEvent, PopoverEvent, TooltipEvent, menu, menu_item, popover, submenu, tooltip};
+use nsh_base::{
+    MenuEvent, PopoverEvent, TooltipEvent, button, menu, menu_item, popover, submenu, tooltip,
+};
 use nsh_core::{
     MountItem, NodeId, Size,
     element::{Root, input},
@@ -447,6 +450,91 @@ fn a_menu_opened_again_on_its_way_out_takes_its_keys_again() {
     app.app.press_key("down").unwrap();
     app.app.press_key("enter").unwrap();
     app.app.wait_for("text:chose:[Save]").unwrap();
+}
+
+/// A menu whose `open` the app controls, its trigger a view around a
+/// button that flips `open` itself, with another button beside it; the
+/// reports of `onOpenChange` on screen (`o` open, `c` closed).
+#[component]
+fn FlippedMenuScreen() -> impl IntoElement {
+    let open = signal(false);
+    let changes = signal(String::new());
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .open(move || Some(open.get()))
+                .on_open_change(move |e: &MenuEvent| {
+                    if let MenuEvent::OpenChange(next, _) = e {
+                        changes.update(|c| c.push(if *next { 'o' } else { 'c' }));
+                        open.set(*next);
+                    }
+                })
+                .trigger(
+                    view().focusable(false).child(
+                        button()
+                            .on_press(move || open.set(!open.get_untracked()))
+                            .child(
+                                view()
+                                    .test_id("trigger")
+                                    .w(px(80.0))
+                                    .h(px(30.0))
+                                    .child(text("View")),
+                            ),
+                    ),
+                )
+                .child(
+                    menu_item()
+                        .accessibility_label("About")
+                        .child(view().test_id("about").child(text("About"))),
+                ),
+        )
+        .child(
+            button().on_press(|| {}).child(
+                view()
+                    .test_id("other")
+                    .w(px(80.0))
+                    .h(px(30.0))
+                    .child(text("Other")),
+            ),
+        )
+        .child(text(move || format!("changes:{}", changes.get())))
+}
+
+/// Opens [`FlippedMenuScreen`]'s menu with its button and closes it with
+/// `close`, three times, pressing the other button in between.
+fn flipped_menu_closes(how: &str, close: impl Fn(&mut Headless)) {
+    let mut app = start(Root::of::<FlippedMenuScreen>(), false);
+    for round in 0..3 {
+        app.app.press("id:trigger").unwrap();
+        app.app.run_for(Duration::from_millis(300)).unwrap();
+        assert!(app.app.shows("About"), "round {round}: open");
+        close(&mut app.app);
+        app.app.run_for(Duration::from_millis(300)).unwrap();
+        assert!(
+            !app.app.shows("About"),
+            "round {round}: closed by {how} ({})",
+            app.app
+                .screen()
+                .texts()
+                .into_iter()
+                .find(|t| t.starts_with("changes:"))
+                .unwrap_or_default()
+        );
+        app.app.press("id:other").unwrap();
+        app.app.run_for(Duration::from_millis(50)).unwrap();
+    }
+}
+
+#[test]
+fn escape_closes_a_controlled_menu_the_app_opened_itself_each_time() {
+    flipped_menu_closes("Escape", |app| app.press_key("escape").unwrap());
+}
+
+#[test]
+fn choosing_an_item_closes_a_controlled_menu_the_app_opened_itself_each_time() {
+    flipped_menu_closes("a choice", |app| app.press("id:about").unwrap());
 }
 
 /// A popover fading for 120 ms on its way out, with a button inside whose

@@ -67,6 +67,10 @@ pub(crate) struct OpenState {
     /// that (a secondary click on an open context menu's trigger closes
     /// it and opens it again, both reported).
     asked: Stored<Option<bool>>,
+    /// The popup's own owner, which lets go of `asked`: a request comes
+    /// from what it shows (Escape, an item chosen), which the answer
+    /// closing it takes away before the answer reaches the popup.
+    owner: Owner,
 }
 
 impl OpenState {
@@ -75,6 +79,7 @@ impl OpenState {
             controlled: open,
             own: signal(default_open.get_untracked()),
             asked: stored(None),
+            owner: Owner::current(),
         }
     }
 
@@ -105,8 +110,10 @@ impl OpenState {
         } else {
             self.asked.replace(Some(open));
             let asked = self.asked;
-            after_answer(move || {
-                asked.replace(None);
+            self.owner.run(|| {
+                after_answer(move || {
+                    asked.replace(None);
+                })
             });
         }
     }
