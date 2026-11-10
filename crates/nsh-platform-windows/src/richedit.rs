@@ -191,6 +191,11 @@ struct Host {
     /// The services (not counted: they hold the host), for timers and the
     /// queries notifications make. Null once they are released.
     services: Cell<*mut c_void>,
+    /// Set while `TxDrawD2D` runs: the services invalidate themselves as
+    /// they draw, inside the window's `WM_PAINT`, where asking for another
+    /// paint would be lost (`EndPaint` validates the window) and would
+    /// leave the surface waiting for a paint that never comes.
+    drawing: Cell<bool>,
     /// Asks the field to draw again.
     invalidate: Box<dyn Fn()>,
     /// Called after a timer's message, which may have changed the
@@ -202,6 +207,15 @@ thread_local! {
     /// The services' timers: the thread timer's id → the host and the
     /// services' own id.
     static TIMERS: RefCell<Vec<(usize, *const Host, u32)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// While a field is drawn ([`Editor::drawing`]).
+pub(crate) struct Drawing<'a>(&'a Cell<bool>, bool);
+
+impl Drop for Drawing<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.1);
+    }
 }
 
 /// A windowless RichEdit control.
@@ -229,6 +243,7 @@ impl Editor {
             caret: Cell::new(Caret::default()),
             notes: Cell::new(Notes::default()),
             services: Cell::new(std::ptr::null_mut()),
+            drawing: Cell::new(false),
             invalidate,
             after_timer,
         }));
@@ -367,6 +382,7 @@ impl Editor {
             right: bounds.right,
             bottom: bounds.bottom,
         };
+        let _drawing = self.drawing();
         // SAFETY: the vtable's call with a live render target and
         // rectangle; a null update rectangle draws everything.
         let hr = unsafe {
@@ -381,6 +397,14 @@ impl Editor {
         if hr.is_err() {
             log::warn!("TxDrawD2D failed: {hr:?}");
         }
+    }
+
+    /// Marks the field as being drawn until the guard drops: what the
+    /// services invalidate meanwhile is what is being drawn.
+    pub(crate) fn drawing(&self) -> Drawing<'_> {
+        // SAFETY: the host lives as long as the editor.
+        let host = unsafe { &*self.host };
+        Drawing(&host.drawing, host.drawing.replace(true))
     }
 
     /// The services gained or lost the focus (UI activation and the
@@ -630,18 +654,27 @@ unsafe extern "system" fn tx_set_scroll_range(_: This, _: i32, _: i32, _: i32, _
 unsafe extern "system" fn tx_set_scroll_pos(this: This, _: i32, _: i32, _: BOOL) -> BOOL {
     // The text scrolled: drawn again (and the field reports it).
     // SAFETY: a live host.
-    unsafe { (host(this).invalidate)() };
+    let host = unsafe { host(this) };
+    if !host.drawing.get() {
+        (host.invalidate)();
+    }
     BOOL(1)
 }
 
 unsafe extern "system" fn tx_invalidate_rect(this: This, _: *const RECT, _: BOOL) {
     // SAFETY: a live host.
-    unsafe { (host(this).invalidate)() }
+    let host = unsafe { host(this) };
+    if !host.drawing.get() {
+        (host.invalidate)();
+    }
 }
 
 unsafe extern "system" fn tx_view_change(this: This, _: BOOL) {
     // SAFETY: a live host.
-    unsafe { (host(this).invalidate)() }
+    let host = unsafe { host(this) };
+    if !host.drawing.get() {
+        (host.invalidate)();
+    }
 }
 
 unsafe extern "system" fn tx_create_caret(this: This, _: HBITMAP, width: i32, height: i32) -> BOOL {

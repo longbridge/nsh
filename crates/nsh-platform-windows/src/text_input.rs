@@ -107,8 +107,9 @@ use windows::{
                 PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO, TM_PLAINTEXT,
                 TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
                 TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE, TXTBIT_DISABLEDRAG,
-                TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE, TXTBIT_PARAFORMATCHANGE, TXTBIT_READONLY,
-                TXTBIT_SCROLLBARCHANGE, TXTBIT_USEPASSWORD, TXTBIT_WORDWRAP,
+                TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
+                TXTBIT_PARAFORMATCHANGE, TXTBIT_READONLY, TXTBIT_SCROLLBARCHANGE,
+                TXTBIT_USEPASSWORD, TXTBIT_WORDWRAP,
             },
             Input::{
                 Ime::{
@@ -675,6 +676,10 @@ impl InputState {
 
 impl Hosted for InputState {
     fn draw(&self, cx: &mut DrawCx<'_>, size: (f32, f32)) {
+        // Inside the window's paint: what RichEdit invalidates while it
+        // is told its size and drawn is drawn now (asking for another
+        // paint here would be lost).
+        let _drawing = self.editor.as_ref().map(|e| e.drawing());
         self.set_size(size);
         if self.scale.get() != cx.scale {
             self.scale.set(cx.scale);
@@ -775,7 +780,10 @@ impl Hosted for InputState {
 /// password); RichEdit's own drag and drop stays off (the window is the
 /// drop target of files).
 fn base_bits(config: &InputConfig) -> u32 {
-    let mut bits = TXTBIT_D2DDWRITE | TXTBIT_AUTOWORDSEL | TXTBIT_DISABLEDRAG;
+    // The selection shows only while the field has the keys, as on the
+    // other platforms.
+    let mut bits =
+        TXTBIT_D2DDWRITE | TXTBIT_AUTOWORDSEL | TXTBIT_DISABLEDRAG | TXTBIT_HIDESELECTION;
     if config.multiline {
         bits |= TXTBIT_MULTILINE | TXTBIT_WORDWRAP;
     }
