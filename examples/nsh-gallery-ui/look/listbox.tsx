@@ -443,8 +443,9 @@ export interface CalendarItemProps {
  * for the selected date and a range's ends, the range's other days on a
  * band of the quiet fill from end to end (`data-range-*`) whose corners
  * round at the weeks' ends, the other months' days muted, the disabled ones
- * muted at half opacity, and the keyboard's day in a soft ring (`ring/40`,
- * 2 points).
+ * muted at half opacity, and the keyboard's day lit as a list's highlighted
+ * row is (`optionClass`: the brand tint and edge), so Select, Combobox,
+ * Command and the calendar move one kind of highlight.
  */
 export function CalendarItem(props: CalendarItemProps) {
   const kind = props.item.kind;
@@ -519,8 +520,8 @@ export function CalendarItem(props: CalendarItemProps) {
   // range's middle days and reaches from its ends' middles (a range of one day has none), rounded where a week
   // starts or ends. The square takes the quiet fill under the pointer and for today, `primary` for the selected
   // date and a range's ends (`aria-selected`, which ranks over the hover; a range's middle days keep the band). A
-  // disabled day takes no hover fill, unless it is today. The days take the focus as the calendar opens, and
-  // `focus-visible:` is `focus:` here, so the ring is soft enough to sit on today from the start.
+  // disabled day takes no hover fill, unless it is today. The keyboard's day takes the lists' highlight (the brand
+  // tint and edge); on the selected day only the edge, over `primary`.
   const own = () => (props.item.outside ? "text-muted-foreground" : "text-foreground");
   const column = () => (props.item.date ? columnOf(props.item.date, props.firstDayOfWeek ?? 0) : -1);
   return (
@@ -541,7 +542,7 @@ export function CalendarItem(props: CalendarItemProps) {
         <View
           class={
             `${props.item.today ? quietFill : "group-disabled:bg-transparent"} transition-colors duration-100 motion-reduce:transition-none ` +
-            `group-hover:${quietFill} group-aria-selected:bg-primary group-data-range-middle:bg-transparent group-focus:outline-2 group-focus:outline-ring/40`
+            `group-hover:${quietFill} group-aria-selected:bg-primary group-data-range-middle:bg-transparent border border-transparent group-focus:border-brand/30 group-focus:bg-brand-tint group-aria-selected:group-focus:bg-primary group-data-range-middle:group-focus:bg-brand-tint`
           }
           style={{ width: cell, height: cell, borderRadius: cellRadius(), alignItems: "center", justifyContent: "center" }}
         >
