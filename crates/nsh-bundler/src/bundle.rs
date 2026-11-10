@@ -1699,6 +1699,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// An app that reads an export off a namespace, so that shells without
+    /// it still run it, uses that export only: once bundled and minified.
+    #[test]
+    fn native_use_names_what_a_namespace_is_read_for() {
+        let dir = single(
+            "namespace",
+            "import * as base from \"nsh/base\";\n\
+             import { mount, Text } from \"nsh\";\n\
+             const EmojiPicker = (base as any).EmojiPicker;\n\
+             mount(() => (EmojiPicker ? <EmojiPicker /> : <Text>none</Text>));\n",
+        );
+        let bundle = bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: true,
+            split: false,
+            ui_sets: vec![nsh_base::registry().into()],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            bundle.native_use.imports.get("nsh/base"),
+            Some(&crate::Imported::Names(
+                ["EmojiPicker".to_owned()].into_iter().collect()
+            )),
+            "{}",
+            bundle.code
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn named_imports_the_module_does_not_export_fail_the_build() {
         let dir = single(
