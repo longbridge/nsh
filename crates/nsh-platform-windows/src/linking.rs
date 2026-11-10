@@ -13,8 +13,9 @@
 //!   mutex keyed by the app id and marks its top-level window with a property
 //!   ([`attach`]). A later launch with a URL finds that window, lets it take
 //!   the foreground, hands it the URL in a `WM_COPYDATA` and exits; the
-//!   running instance restores its window, brings it to the front and sends
-//!   the URL. A launch without a URL opens another window, as before.
+//!   running instance shows its window (restored, or shown when hidden),
+//!   brings it to the front and sends the URL. A launch without a URL opens
+//!   another window, as before.
 
 use std::{
     cell::RefCell,
@@ -36,7 +37,7 @@ use windows::{
             Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
             WindowsAndMessaging::{
                 AllowSetForegroundWindow, EnumWindows, GA_ROOT, GetAncestor, GetPropW,
-                GetWindowThreadProcessId, IsIconic, SMTO_ABORTIFHUNG, SW_RESTORE,
+                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
                 SendMessageTimeoutW, SetForegroundWindow, SetPropW, ShowWindow, WM_COPYDATA,
                 WM_NCDESTROY,
             },
@@ -188,17 +189,33 @@ unsafe extern "system" fn link_proc(
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
-/// A URL from a later launch: brings the window to the front and sends it.
+/// A URL from a later launch: shows the window, brings it to the front and
+/// sends the URL. A hidden window shows as the app's `focus()` shows it
+/// (one hidden since launch, nsh.json `window.defaultVisible: false`,
+/// drawn before DWM composites it), as a link shows it on macOS and Linux.
 fn received(window: HWND, url: String) {
-    // SAFETY: plain calls on the app's window; the sender allowed this
-    // process to take the foreground.
-    unsafe {
-        if IsIconic(window).as_bool() {
-            let _ = ShowWindow(window, SW_RESTORE);
-        }
-        let _ = SetForegroundWindow(window);
-    }
     let surface = SURFACE.with(|s| s.borrow().as_ref().and_then(Weak::upgrade));
+    // SAFETY: plain queries on the app's window.
+    let (iconic, visible) = unsafe {
+        (
+            IsIconic(window).as_bool(),
+            IsWindowVisible(window).as_bool(),
+        )
+    };
+    if iconic {
+        // SAFETY: a plain call on the app's window.
+        let _ = unsafe { ShowWindow(window, SW_RESTORE) };
+    } else if !visible {
+        match &surface {
+            Some(surface) if surface.main_unshown.get() => {
+                crate::app::show_main(surface, window);
+            }
+            _ => crate::window::show(window),
+        }
+    }
+    // SAFETY: a plain call on the app's window; the sender allowed this
+    // process to take the foreground.
+    let _ = unsafe { SetForegroundWindow(window) };
     match surface {
         Some(surface) => send(&surface, url),
         None => log::warn!("links: a URL arrived without a window to take it"),

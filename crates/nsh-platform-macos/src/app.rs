@@ -154,9 +154,17 @@ pub struct AppOptions {
     /// macos` sets it (the development host's `--background`) unless told
     /// `--foreground`: the test agent's input goes to the window directly.
     pub background: bool,
+    /// How [`run_app`]'s app takes part in the system's UI: a Dock icon and
+    /// the menu bar ([`Regular`](ActivationPolicy::Regular), the default)
+    /// or neither ([`Accessory`](ActivationPolicy::Accessory), a menu bar
+    /// app: `nsh.json` `macos.activationPolicy`). Set before the app's code
+    /// runs, so the Dock never shows an accessory app.
+    /// [`background`](Self::background) takes precedence.
+    pub activation_policy: ActivationPolicy,
     /// Hides the standalone window on close while retaining its engine.
-    /// Reopening from the Dock shows the same window. Quit still stops the app.
-    /// Only used by [`run_app`]; defaults to false.
+    /// Reopening from the Dock shows the same window (an accessory app,
+    /// which has no Dock icon, shows it itself: from its tray, say). Quit
+    /// still stops the app. Only used by [`run_app`]; defaults to false.
     pub keep_alive_on_close: bool,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
@@ -227,6 +235,7 @@ impl Default for AppOptions {
             display: None,
             keep_size: false,
             background: false,
+            activation_policy: ActivationPolicy::Regular,
             keep_alive_on_close: false,
             components: Default::default(),
             appearance: Appearance::System,
@@ -239,6 +248,33 @@ impl Default for AppOptions {
             host: nsh_engine::HostChannel::default(),
             transparent: false,
         }
+    }
+}
+
+/// How an app takes part in the system's UI ([`AppOptions::activation_policy`]),
+/// as GPUI's `ActivationPolicy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ActivationPolicy {
+    /// A Dock icon, the menu bar while the app is active, a place in the
+    /// app switcher.
+    #[default]
+    Regular,
+    /// None of them: a menu bar app (`LSUIElement`), whose windows show as a
+    /// regular app's.
+    Accessory,
+}
+
+/// The policy [`run_app`] gives the app: a background app is Prohibited
+/// (AppKit does not activate it; an Accessory app is not guaranteed to
+/// stay inactive when its window comes up), else the app's own.
+fn activation_policy(options: &AppOptions) -> NSApplicationActivationPolicy {
+    if options.background {
+        return NSApplicationActivationPolicy::Prohibited;
+    }
+    match options.activation_policy {
+        ActivationPolicy::Regular => NSApplicationActivationPolicy::Regular,
+        ActivationPolicy::Accessory => NSApplicationActivationPolicy::Accessory,
     }
 }
 
@@ -523,6 +559,83 @@ struct Running {
     window: Retained<NSWindow>,
     view: Rc<AppView>,
     keep_alive_on_close: bool,
+    /// It runs in the background ([`AppOptions::background`]).
+    #[cfg(feature = "dev")]
+    background: bool,
+    /// A development host's window, made before its app's options came: it
+    /// shows when the app comes (unless they say it starts hidden) or an
+    /// error does ([`dev_app_came`], [`dev_error_shown`]).
+    #[cfg(feature = "dev")]
+    held: Cell<bool>,
+}
+
+/// Shows the standalone app's window as it launches: key, the app active,
+/// or, in the background, in front without activating the app.
+fn show_launched(window: &NSWindow, surface: &Surface, background: bool) {
+    if background {
+        // Shown without activating the app (it never is: its window is
+        // never key, and the test agent's input goes to it directly).
+        window.orderFrontRegardless();
+        window.makeFirstResponder(Some(surface.root.ns()));
+        // The window that would be key: its state says it has the
+        // keyboard, which the test agent's keys go to.
+        crate::window::became_key(surface, window);
+    } else {
+        window.makeKeyAndOrderFront(None);
+        window.makeFirstResponder(Some(surface.root.ns()));
+        NSApplication::sharedApplication(surface.mtm).activate();
+    }
+}
+
+/// The window of the standalone app whose surface is `surface`, while a
+/// development host holds it unshown: taken (it shows now), with whether
+/// the app runs in the background.
+#[cfg(feature = "dev")]
+fn take_held(surface: &Surface) -> Option<(Retained<NSWindow>, bool)> {
+    RUNNING.with(|running| {
+        let running = running.try_borrow().ok()?;
+        let running = running.as_ref()?;
+        let ours = std::ptr::eq(&**running.view.surface(), surface);
+        (ours && running.held.replace(false)).then(|| (running.window.clone(), running.background))
+    })
+}
+
+/// A development host's app came (`visible`: unless its nsh.json `window`
+/// says the main window starts hidden): the window, held until the app's
+/// options came, shows as the app's package would show it.
+#[cfg(feature = "dev")]
+pub(crate) fn dev_app_came(surface: &Surface, visible: bool) {
+    let Some((window, background)) = take_held(surface) else {
+        return;
+    };
+    if visible {
+        show_launched(&window, surface, background);
+        crate::window::main_shown(surface);
+    } else {
+        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
+    }
+}
+
+/// A development host shows an error: the window shows with it while it is
+/// hidden, held until the app came or hidden by the app (one hidden since
+/// launch whose startup failed: a tray app before its icon came), so the
+/// error is seen.
+#[cfg(feature = "dev")]
+pub(crate) fn dev_error_shown(surface: &Surface) {
+    let hidden = RUNNING.with(|running| {
+        let running = running.try_borrow().ok()?;
+        let running = running.as_ref()?;
+        if !std::ptr::eq(&**running.view.surface(), surface) {
+            return None;
+        }
+        let held = running.held.replace(false);
+        let hidden = !running.window.isVisible() && !running.window.isMiniaturized();
+        (held || hidden).then(|| (running.window.clone(), running.background))
+    });
+    if let Some((window, background)) = hidden {
+        show_launched(&window, surface, background);
+        crate::window::main_shown(surface);
+    }
 }
 
 thread_local! {
@@ -624,17 +737,19 @@ define_class!(
             }
             // A link opened while the app runs brings it forward.
             app.activate();
-            let window = RUNNING.with(|running| {
+            let shown = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .map(|running| running.window.clone())
+                    .map(|running| (running.window.clone(), running.view.clone()))
             });
-            if let Some(window) = window {
+            if let Some((window, view)) = shown {
                 if window.isMiniaturized() {
                     window.deminiaturize(None);
                 }
                 window.makeKeyAndOrderFront(None);
+                // Hidden since launch: it opens in its mode.
+                crate::window::main_shown(view.surface());
             }
         }
 
@@ -658,17 +773,19 @@ define_class!(
 
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-            let window = RUNNING.with(|running| {
+            let running = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .map(|running| running.window.clone())
+                    .map(|running| (running.window.clone(), running.view.surface().clone()))
             });
-            if let Some(window) = window {
+            if let Some((window, surface)) = running {
                 if window.isMiniaturized() {
                     window.deminiaturize(None);
                 }
                 window.makeKeyAndOrderFront(None);
+                // One hidden at launch shows in the mode it opens in.
+                crate::window::main_shown(&surface);
             }
             false
         }
@@ -695,6 +812,22 @@ define_class!(
                 Some(surface) => crate::window::main_should_close(&surface, window),
                 None => true,
             }
+        }
+
+        // Before a zoom: the frame it returns to (`crate::window_state`).
+        #[unsafe(method(windowShouldZoom:toFrame:))]
+        fn should_zoom(&self, window: &NSWindow, _frame: NSRect) -> bool {
+            let surface = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .filter(|running| &*running.window == window)
+                    .map(|running| running.view.surface().clone())
+            });
+            if let Some(surface) = surface {
+                crate::window_state::will_zoom(&surface.window, window);
+            }
+            true
         }
 
         #[unsafe(method(windowWillClose:))]
@@ -835,14 +968,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    // A background app is Prohibited: AppKit does not activate it. An
-    // Accessory app is not guaranteed to stay inactive when its window
-    // comes up.
-    app.setActivationPolicy(if options.background {
-        NSApplicationActivationPolicy::Prohibited
-    } else {
-        NSApplicationActivationPolicy::Regular
-    });
+    app.setActivationPolicy(activation_policy(&options));
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
@@ -928,6 +1054,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     {
         center_on_display(&window, display);
     }
+    // A development host's window waits for its app, which brings the
+    // window's options (`dev_app_came`).
+    let held = loaded.is_none();
     // The app starts once launching finished (`start_pending`), after the
     // links it was launched with.
     let pending = match loaded {
@@ -938,18 +1067,13 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     #[cfg(feature = "dev")]
     let pending = pending.or(dev_server.map(AppSource::DevServer));
     PENDING.with(|p| *p.borrow_mut() = pending);
-    if options.background {
-        // Shown without activating the app (it never is: its window is
-        // never key, and the test agent's input goes to it directly).
-        window.orderFrontRegardless();
-        window.makeFirstResponder(Some(view.surface().root.ns()));
-        // The window that would be key: its state says it has the
-        // keyboard, which the test agent's keys go to.
-        crate::window::became_key(view.surface(), &window);
-    } else {
-        window.makeKeyAndOrderFront(None);
-        window.makeFirstResponder(Some(view.surface().root.ns()));
-        app.activate();
+    // nsh.json `window.defaultVisible: false`: the window is made and the
+    // app runs in it, unseen, until it shows it (a tray app).
+    let shown = !held && launch.visible_at_launch();
+    if shown {
+        show_launched(&window, view.surface(), options.background);
+    } else if !held {
+        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
     }
     let view_surface = view.surface().clone();
     RUNNING.with(|r| {
@@ -957,10 +1081,18 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             window,
             view,
             keep_alive_on_close: options.keep_alive_on_close,
+            #[cfg(feature = "dev")]
+            background: options.background,
+            #[cfg(feature = "dev")]
+            held: Cell::new(held),
         })
     });
     // The mode it opens in, once it shows.
-    crate::window::launched_main(&view_surface, kept.map(|p| p.mode).or(launch.default_mode));
+    crate::window::launched_main(
+        &view_surface,
+        kept.map(|p| p.mode).or(launch.default_mode),
+        shown,
+    );
     app.run();
     stop_running();
     app.setDelegate(None);
@@ -1099,9 +1231,35 @@ fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
 
 #[cfg(test)]
 mod tests {
+    use objc2_app_kit::NSApplicationActivationPolicy;
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-    use super::secondary;
+    use super::{ActivationPolicy, AppOptions, activation_policy, secondary};
+
+    /// The app's policy, unless it runs in the background, which never
+    /// activates it.
+    #[test]
+    fn the_activation_policy_is_the_apps_unless_it_runs_in_the_background() {
+        let options = |background, activation_policy| AppOptions {
+            background,
+            activation_policy,
+            ..AppOptions::default()
+        };
+        assert_eq!(
+            activation_policy(&AppOptions::default()),
+            NSApplicationActivationPolicy::Regular
+        );
+        assert_eq!(
+            activation_policy(&options(false, ActivationPolicy::Accessory)),
+            NSApplicationActivationPolicy::Accessory
+        );
+        for policy in [ActivationPolicy::Regular, ActivationPolicy::Accessory] {
+            assert_eq!(
+                activation_policy(&options(true, policy)),
+                NSApplicationActivationPolicy::Prohibited
+            );
+        }
+    }
 
     fn frame(x: f64, y: f64, w: f64, h: f64) -> NSRect {
         NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))

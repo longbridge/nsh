@@ -234,7 +234,7 @@ All of these rows were compiled and called from TSX. A wrong argument names the 
 ### What each kind may do
 
 - **Synchronous** computes and keeps state. It runs outside the reactive runtime, so `signal(..)` panics, and TSX gets `Error: no reactive runtime: signals are used on the engine thread, while components run`. The same goes for `theme()`, `dialog` and the other UI free functions.
-- **`cx: &mut ModuleCx`** reaches the platform in order with the changes TS made before the call: `set_clipboard`, `dialog`, `dismiss_keyboard`, `set_status_bar`, `animate_layout`, `announce_for_accessibility`, `set_color_scheme`.
+- **`cx: &mut ModuleCx`** reaches the platform in order with the changes TS made before the call: `set_clipboard`, `dialog`, `dismiss_keyboard`, `set_status_bar`, `animate_layout`, `announce_for_accessibility`, `set_color_scheme`. It runs in the reactive runtime, so it may `spawn` a task (which runs to its end) and make signals.
 - **`async`** gets the core's services: `timer`, `fetch`, dialogs. Move blocking work off the thread with `blocking(..)`, and async work with `background(..)`; those two are for native targets. It runs on the engine thread, so a long synchronous stretch inside a task freezes updates.
 
 A synchronous call that blocks freezes the app too. A synchronous call costs about what a JS method call does, so crossing is rarely a reason to move code. Embedded under limits, a call over its budget (default 2 s) is cut off.

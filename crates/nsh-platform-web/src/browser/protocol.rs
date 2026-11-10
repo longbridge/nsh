@@ -149,6 +149,7 @@ pub(crate) fn decode_command<'js>(name: &str, arg: Value<'js>) -> compat::Result
         "stopLoading" => Command::StopLoading,
         "injectJavaScript" => Command::InjectJavaScript(string(&arg)?),
         "postMessage" => Command::PostMessage(string(&arg)?),
+        "insertText" => Command::InsertText(string(&arg)?),
         "sendInput" => match web_input(&arg) {
             Some(input) => Command::SendInput(input),
             None => return Ok(None),

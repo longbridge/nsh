@@ -20,7 +20,8 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
-    ApproxTextEngine, MountBatch,
+    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, PayloadValue,
+    ROOT_ID,
     element::{Callback, Registry, Root},
     geometry::{Points, Size},
     platform::{Idiom, Locale, LocaleSettings, Os},
@@ -28,7 +29,8 @@ use nsh_core::{
 };
 use nsh_dev::protocol::TestIdiom;
 use nsh_engine::{
-    AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
+    AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, EngineControl, Environment,
+    MountSink,
 };
 
 use crate::{
@@ -319,11 +321,14 @@ fn drive(
         ui_sets,
         ..EngineConfig::new(bundle)
     };
+    let images = Arc::new(Mutex::new(VmImages::default()));
     let sink = VmSink {
         events: events.clone(),
+        images: images.clone(),
     };
-    let _vm = Engine::start(config, || ApproxTextEngine, sink)
+    let vm = Engine::start(config, || ApproxTextEngine, sink)
         .map_err(|e| format!("the test file's engine did not start: {e}"))?;
+    images.lock().unwrap().start(vm.control());
     let mut out = Vec::new();
     loop {
         match results.recv() {
@@ -362,7 +367,7 @@ fn compile_test_file(run: &TestRun, file: &Path) -> Result<(Bundle, Option<Strin
         "// Made by `nsh test`: runs the tests of {name}.\nimport {path};\nimport {{ run }} from \"{}\";\nrun();\n",
         crate::module::RUNNER
     );
-    std::fs::write(&entry, code).map_err(|e| format!("{}: {e}", entry.display()))?;
+    write_whole(&entry, &code).map_err(|e| format!("{}: {e}", entry.display()))?;
     let Built::Js(bundle, map) = (run.compile)(&entry, Entry::TestFile)? else {
         return Err(format!("{}: built as a Rust root", entry.display()));
     };
@@ -372,6 +377,24 @@ fn compile_test_file(run: &TestRun, file: &Path) -> Result<(Bundle, Option<Strin
         None => *bundle,
     };
     Ok((bundle, map))
+}
+
+/// Writes `contents` to `path` so that a reader sees it whole, never cut
+/// short: into a file of this process's, then moved over `path`. The entry
+/// of a test file is the same path for every `nsh test` of the app (its
+/// `.nsh/test`): written in place, one run's truncation could be bundled by
+/// another running the same file at that moment, whose VM then loaded an
+/// empty module, never ran its tests and never ended, with nothing printed.
+fn write_whole(path: &Path, contents: &str) -> std::io::Result<()> {
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}-{n}.tmp", std::process::id()));
+    let temporary = path.with_file_name(name);
+    std::fs::write(&temporary, contents)?;
+    std::fs::rename(&temporary, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temporary);
+    })
 }
 
 /// The source map `map` (of a bundle made in `dir`) with its sources
@@ -417,13 +440,58 @@ enum Event {
     Error(AppError),
 }
 
-/// The test file's VM renders nothing; its errors are the run's.
+/// The test file's VM renders nothing; its errors are the run's. It loads
+/// no images either: an `Image.getSize` / `Image.prefetch` of the test
+/// itself fails, as a headless app's does, rather than waiting forever.
 struct VmSink {
     events: Sender<Event>,
+    images: Arc<Mutex<VmImages>>,
+}
+
+/// The test file's VM's control, and the image requests made before the
+/// sink had it (the VM starts before [`Engine::start`] returns).
+#[derive(Default)]
+struct VmImages {
+    control: Option<EngineControl>,
+    waiting: Vec<u32>,
+}
+
+impl VmImages {
+    fn answer(&mut self, id: u32) {
+        let Some(control) = &self.control else {
+            self.waiting.push(id);
+            return;
+        };
+        let fields = vec![
+            ("id", PayloadValue::Number(f64::from(id))),
+            (
+                "error",
+                PayloadValue::Str("headless runs load no images".into()),
+            ),
+        ];
+        control.dispatch_event(ROOT_ID, EventKind::ImageInfo, EventPayload::Map(fields));
+    }
+
+    fn start(&mut self, control: EngineControl) {
+        self.control = Some(control);
+        for id in std::mem::take(&mut self.waiting) {
+            self.answer(id);
+        }
+    }
 }
 
 impl MountSink for VmSink {
-    fn submit(&self, _batch: MountBatch) {}
+    fn submit(&self, batch: MountBatch) {
+        for item in &batch.items {
+            if let MountItem::Command {
+                command: Command::ImageInfo { id, .. },
+                ..
+            } = item
+            {
+                self.images.lock().unwrap().answer(*id);
+            }
+        }
+    }
 
     fn report(&self, error: &AppError) {
         let _ = self.events.send(Event::Error(error.clone()));
@@ -1278,5 +1346,34 @@ mod tests {
             serde_json::to_value(&environment).unwrap(),
             serde_json::json!({ "idiom": "desktop" })
         );
+    }
+
+    /// Another `nsh test` of the app bundles the same entry while this one
+    /// writes it: it reads the entry whole, never cut short.
+    #[test]
+    fn a_test_entry_is_read_whole_while_it_is_written_again() {
+        let dir = std::env::temp_dir().join(format!("nsh-write-whole-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.test.tsx.run.js");
+        let code = "// Made by `nsh test`.\n".repeat(64);
+        write_whole(&entry, &code).unwrap();
+        let writer = {
+            let (entry, code) = (entry.clone(), code.clone());
+            std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    write_whole(&entry, &code).unwrap();
+                }
+            })
+        };
+        for _ in 0..2000 {
+            assert_eq!(std::fs::read_to_string(&entry).unwrap(), code);
+        }
+        writer.join().unwrap();
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, [std::ffi::OsString::from("App.test.tsx.run.js")]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1874,8 +1874,9 @@ pub struct Keyboard {
 impl Keyboard {
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`,
     /// `"shift+/"`, `"escape"`; `mod` is the platform's command key): the
-    /// app's shortcut of it hears it (`onKeyCommand`), else the focused
-    /// input takes it, else Escape goes back.
+    /// app's shortcut of it hears it (`onKeyCommand`), else on a desktop
+    /// the application menu's item with that shortcut is chosen, else the
+    /// focused input takes it, else Escape goes back.
     pub async fn press(this: Instance<Self>, keys: String) -> Result<(), JsError> {
         let steps = this.with(|k| k.steps.clone());
         steps.run(move |app| app.press_key(&keys)).await
@@ -2191,6 +2192,13 @@ impl App {
     /// when there is nothing to go back from.
     pub async fn back(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, |app| app.back()).await
+    }
+
+    /// Goes forward in the browser's history, as its forward button does.
+    /// Only `nsh test --target web` has one; elsewhere it rejects
+    /// (`ERR_NSH_TEST_UNSUPPORTED`).
+    pub async fn forward(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.forward()).await
     }
 
     /// Answers the dialogs the app shows from now on (`AlertDialog.show`, action

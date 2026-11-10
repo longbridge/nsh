@@ -42,8 +42,8 @@ on:
   push:
     tags: ["v*"]
   schedule:
-    # 18:00 UTC, 02:00 in Singapore: after the day's merges.
-    - cron: "0 18 * * *"
+    # 18:30 UTC, 02:30 in Singapore: after the day's merges.
+    - cron: "30 18 * * *"
   workflow_dispatch:
     inputs:
       tag:

@@ -116,6 +116,7 @@ pub(crate) struct NativeModule {
 const NSH: &[Item] = &[
     crate::env::TOKEN_EXPORT,
     crate::env::SET_THEME_EXPORT,
+    crate::env::APP_INFO_EXPORT,
     (
         "signal",
         Export::Function(reactive::signal, 2),
@@ -375,6 +376,26 @@ export interface Theme {
     light?: Record<string, string | number>;
     dark?: Record<string, string | number>;
   };
+}
+
+/** The app as it was built (`appInfo()`). */
+export interface AppInfo {
+  /** `nsh.json`'s `"id"`; `null` without one. */
+  readonly id: string | null;
+  /** `nsh.json`'s `"name"`; `null` without one. */
+  readonly name: string | null;
+  /** The version the code was built as: `nsh.json`'s `"version"`, or the
+   * one `nsh package` / `nsh publish` was given (`--version`); `null`
+   * without one. */
+  readonly version: string | null;
+  /** The build number the code was built as: `nsh.json`'s `"build"`, or the
+   * one `nsh package` / `nsh publish` was given (`--build`); `null`
+   * without one. */
+  readonly build: number | null;
+  /** A development build: `nsh run`, `nsh dev`, `nsh test` and `nsh build`
+   * without `--release`. `false` for release builds: `nsh package`,
+   * `nsh publish`, `nsh build --release`. */
+  readonly development: boolean;
 }
 "#;
 

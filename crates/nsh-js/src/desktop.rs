@@ -46,6 +46,9 @@ pub(crate) struct Menus {
     closed: Cell<JsValue>,
     /// The tray's functions: its menu's and its click's.
     tray: RefCell<Vec<(u32, JsValue)>>,
+    /// The id of the tray's click among them (0: none), whose function gets
+    /// the click's event.
+    tray_click: Cell<u32>,
     /// The global shortcuts registered.
     globals: RefCell<Vec<Global>>,
     /// The root's `onMenu` handler is set.
@@ -59,6 +62,7 @@ impl Default for Menus {
             app: RefCell::default(),
             popup: RefCell::default(),
             tray: RefCell::default(),
+            tray_click: Cell::new(0),
             globals: RefCell::default(),
             closed: Cell::new(UNDEFINED),
             listening: Cell::new(false),
@@ -557,16 +561,45 @@ unsafe extern "C" fn on_menu(
                 .map(|g| unsafe { qjs::JS_DupValue(cx, g.on_press) })
         });
     let Some(f) = f else { return UNDEFINED };
-    // SAFETY: a call of an owned function, freed after it.
+    // The tray's click gets `{ bounds }`: the icon's frame, `null` where
+    // the platform does not report one.
+    let mut event = (id != 0 && id == m.tray_click.get()).then(|| tray_click_event(cx, e));
+    let (argc, argv) = match &mut event {
+        Some(event) => (1, event as *mut JsValue),
+        None => (0, ptr::null_mut()),
+    };
+    // SAFETY: a call of an owned function, freed after it, with its owned
+    // argument.
     unsafe {
-        let r = qjs::JS_Call(cx, f, UNDEFINED, 0, ptr::null_mut());
+        let r = qjs::JS_Call(cx, f, UNDEFINED, argc, argv);
         qjs::JS_FreeValue(cx, f);
+        if let Some(event) = event {
+            qjs::JS_FreeValue(cx, event);
+        }
         if qjs::JS_IsException(r) {
             return r;
         }
         qjs::JS_FreeValue(cx, r);
     }
     UNDEFINED
+}
+
+/// The tray click's event (owned): `{ bounds }`, from the platform's report
+/// `e`.
+fn tray_click_event(cx: *mut JsContext, e: JsValue) -> JsValue {
+    let bounds = get(cx, e, c"bounds");
+    let bounds = if nullish(bounds) {
+        free(cx, bounds);
+        qjs::JS_NULL
+    } else {
+        bounds
+    };
+    // SAFETY: a new object taking the owned value.
+    unsafe {
+        let o = qjs::JS_NewObject(cx);
+        qjs::JS_SetPropertyStr(cx, o, c"bounds".as_ptr(), bounds);
+        o
+    }
 }
 
 /// The next id of a menu item, a tray's click or a global shortcut.
@@ -590,6 +623,7 @@ unsafe extern "C" fn set_tray(
     let options = arg(argc, argv, 0);
     if nullish(options) {
         keep(cx, &menus(cx).tray, Vec::new());
+        menus(cx).tray_click.set(0);
         return send(cx, DesktopCommand::SetTray(None))
             .err()
             .unwrap_or(UNDEFINED);
@@ -629,6 +663,7 @@ unsafe extern "C" fn set_tray(
         0
     };
     keep(cx, &menus(cx).tray, functions);
+    menus(cx).tray_click.set(click);
     let mut tray = Tray::default();
     tray.icon = icon;
     tray.tooltip = string(cx, options, c"tooltip").unwrap_or_default();
@@ -1158,6 +1193,15 @@ export interface MenuModule {
   popup(items: readonly (MenuItem | null | undefined | false)[], at?: Point): Promise<void>;
 }
 
+/** A click on the tray's icon. */
+export interface TrayClickEvent {
+  /** The icon's frame on the screen, in points, in the coordinates of
+   * `displays()` and `setBounds` (from the primary display's top left,
+   * `y` growing down): where to place a popup window beside it. `null`
+   * when the system does not say where the icon is (always on Linux). */
+  bounds: Bounds | null;
+}
+
 /** The app's icon in the system tray. */
 export interface TrayOptions {
   /** The icon, as `<Image>`'s `src` takes it (an imported file, or a URL).
@@ -1171,8 +1215,9 @@ export interface TrayOptions {
   /** Its menu, opened by a secondary click (and a primary one without
    * `onClick`). */
   menu?: readonly (MenuItem | null | undefined | false)[];
-  /** Called when the icon is clicked with the primary button. */
-  onClick?: () => void;
+  /** Called when the icon is clicked with the primary button (on Windows,
+   * Enter or Space on the icon too), with where the icon is. */
+  onClick?: (event: TrayClickEvent) => void;
 }
 
 /** The app's icon in the system tray: the notification area on Windows, the

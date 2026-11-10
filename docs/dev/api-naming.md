@@ -49,7 +49,8 @@ go elsewhere under these rules rather than into them.
 - One word stays one word: `readonly`, never `readOnly` (*guides* "readonly"; `docs/READONLY-NAMING-RESEARCH.md`).
 - A runtime module's member is a free function of `nsh_core::prelude` named for what it is, since Rust has no module
   object to qualify it: `UrlScheme.url()` / `setUrl(url)` → `app_url()` / `set_app_url(url)` (the app's address; a bare
-  `url` would read as any URL), `UrlScheme.on("open", …)` → `next_url_scheme_open()`.
+  `url` would read as any URL), `setUrl(url, { history })` → `set_app_url_with(url, history)` (the option as an argument, as
+  `on_key_with`), `UrlScheme.on("open", …)` → `next_url_scheme_open()`, `UrlScheme.on("change", …)` → `next_app_url_change()`.
 
 ## Conventions
 
@@ -205,6 +206,13 @@ emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.t
 ...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
 entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
+`DataTable`'s column `fixed` uses `nsh_base::data_table::ColumnFixed`, scoped to its
+component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follows its
+`Left` / `Right` variants (`crates/component/src/table/column.rs`). TS uses `"left"` / `"right"`;
+`true` remains a shorthand for `"left"`, and `false` leaves the column scrolling. NSH's
+`ColumnFixed::None` represents the unfixed state that GPUI Kit stores as `Option::None`.
+Left-fixed columns lead the order and right-fixed columns close it.
+
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
@@ -339,6 +347,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `Window.orderFront()` | `WindowRef.focus()` | Where names come from | The DOM's and GPUI's verb |
 | `Window.setMenuBar(mode)` | `Menu.setMenuBar(mode)` | Where names come from | The menu bar is the menus' |
 | `Window.open(c, { size, position, level, frame })` → `{ id, focus, hide, close }` | `Window.open(c, WindowOptions)` → `WindowRef`; `<Window>` | Open state | `defaultSize`, `defaultPosition`; `level` and `frame` attributes |
+| `show: false` (GPUI's `WindowOptions::show`, Electron's `BrowserWindow`), `visible: false` (Tauri) | nsh.json `window.defaultVisible: false` (Rust `MainWindowOptions::default_visible`) | Open state | 2026-11-09: the main window is open from launch; what starts otherwise is `WindowState.visible`, which `show()` and `hide()` change, so `default` + the state's name, as `defaultMode` is `mode`'s (not `defaultOpen`: being open is the window's existence) |
 | (the focused window as "current") | `currentWindow()`: the window the calling component renders in (tree-scoped, through context); `focusedWindow()` the focused one | Environment | Named as Tauri's `getCurrentWindow()` under the accessor rule; the meaning of Flutter's, Qt's and Compose's |
 | **Standard modules** | | | |
 | `net.connect(host, port)` | `net.connect({ host, port })` (`ConnectOptions`) | Shapes that can grow | 2026-10-28: Node's `net.connect(options)`, so a timeout or TLS can join them |
@@ -790,6 +799,7 @@ and `Input`'s React Native names follow the rules as well.
 | `Select::open`, `on_open_change` | `open`, `defaultOpen`, `onOpenChange(open, reason)`, `onOpen`, `onClose`, `onCancel` | `Menu`'s (popups, below) | The keys that open it from the trigger (Down, Up, Return, Space) are presses of the trigger: reason `"triggerPress"`; a choice is `"select"` |
 | `SearchableList::searchable`, its search input's placeholder | `searchable`, `searchPlaceholder`; `searchClass` / `searchStyle` | `gpui-component` `Select::searchable`, `search_placeholder` | |
 | (the search input's name: `gpui-component`'s `Input` falls back to its placeholder, `input/input.rs:736-749`) | `searchAccessibilityLabel` (none by default) | `clearButtonAccessibilityLabel`; `Slider`'s `startAccessibilityLabel` | A placeholder is a hint shown while the field is empty, not its name (WAI-ARIA), so the app names the field in its own words; a part's label is the part's name + `AccessibilityLabel` |
+| (none: GPUI's tests find elements by their own handles) | `searchTestID` (none by default) | `testID`; `Combobox`'s `inputTestID` | UI tests find the search field, made by the select inside its popup, by the app's id; a part's id is the part's name + `TestID`, as its label is the part's name + `AccessibilityLabel` |
 | `Select::cleanable` (a clear button in place of the chevron while a value is chosen; `clean` sets none and emits `Confirm(None)`; `tab_stop(false)`) | `cleanable`; the part `clearButtonClass` / `clearButtonStyle`, the slot `clearButton`, `clearButtonAccessibilityLabel`; `onChange(null)` | `gpui-component` `select.rs:542`, `:472-476`, `:611-619`; `input/clear_button.rs` | The button is a sibling after the trigger, which is the app's element: inside it, a press would also open the list. Its label is the app's (`gpui-component`'s is `t!("Input.Clear")`; NSH has no built-in strings), as `handleAccessibilityLabel` is `ResizablePanel`'s |
 | `Select::placeholder`, `icon`, `title_prefix`, `appearance` | the app's `trigger` | `gpui-component` `select.rs:706-733`, `:771` | What the trigger shows is the app's element: it draws the placeholder, the chevron or icon and the title with any prefix |
 | `Select::menu_width`, `menu_max_h` | `popupClass` / `popupStyle` (`w-*`, `max-h-*`) | `gpui-component` `select.rs:694-704` | Sizes are styles of the popup part; it is at least as wide as the trigger |
@@ -804,6 +814,7 @@ and `Input`'s React Native names follow the rules as well.
 | `gpui-base`'s `Confirm { secondary: true }` (Cmd+Enter, Ctrl+Enter off macOS) | Mod+Return closes the list with `"select"` and confirms | `base/src/combobox.rs:18-31` | |
 | `query`, `set_query` (the state's) | `query` (controlled) + `onQueryChange({ query })`, `defaultQuery` | `combobox.rs:397`, `:402` | Value state again; each opening starts from `defaultQuery` (else empty), as `Select`'s search starts empty |
 | `searchable`, `search_placeholder`, `empty`, `disabled`, `cleanable` | the input is the search, always: `placeholder`, `inputClass` / `inputStyle`; `empty`, `disabled`, `cleanable` as `Select`'s (`cleanable` with the clear button's parts) | `combobox.rs:293`, `:811`, `:829`, `:823`, `:817` | shadcn/ui's combobox types into its trigger; a list without search is a `Select` |
+| (none) | `inputTestID` (none by default) | `Select`'s `searchTestID` | UI tests find the input, made by the combobox inside its root, by the app's id (`testID` names the root) |
 | `footer(fn)` (below a separator) | slot `footer`, part `footerClass` / `footerStyle` | `combobox.rs:857` | The separator is the app's look (a border on the footer part) |
 | `placeholder`, `icon`, `appearance`, `render_trigger` (`ComboboxTriggerContext`: selection, placeholder, open, disabled) | `placeholder`; the app's `triggerButton` (a chevron), `prefix` and `suffix` around the input; the field's look the root's `class` / `style` | `combobox.rs:48`, `:799`, `:840`, `:846`; `gpui-component` `input` `prefix` / `suffix` | The field is the component's row, every look the app's; what the context gives the app has (`value`, `open` or `onOpenChange`, `disabled`) |
 | `check_icon` | `renderItem`'s `selected` | `combobox.rs:805` | The row's look is the app's |

@@ -15,7 +15,7 @@ demo: el-menu
 选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，在触摸屏上由手指按住触发元素打开，或在触发元素下方由浏览器和 Linux 上的键盘、macOS 和 Windows 上的读屏软件打开。
 
 在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目；在桌面上，之后按 Down 或 Home 键聚焦第一个可用的条目，按 Up 或 End 键聚焦最后一个。
-在桌面和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。
+在桌面和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。指针打开的子菜单，在方向键把焦点移到所在菜单的另一个条目时关闭。
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
@@ -228,7 +228,7 @@ function ViewMenu() {
 
 没有 `open` 时，菜单自己保存状态（`Menu` 的初始值为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`、`"select"`、`"pressOutside"`、`"backdropPress"`、`"cancel"`、`"contextMenu"` 或 `"longPress"`。
 
-`Submenu` 自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
+`Submenu` 自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"focus"`（键盘焦点移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
 
 ```tsx
 const recent = signal<string[] | null>(null);
@@ -243,6 +243,31 @@ const recent = signal<string[] | null>(null);
     {(name) => <MenuItem onSelect={() => openFile(name())}><Text>{name()}</Text></MenuItem>}
   </Each>
 </Submenu>
+```
+
+## 长列表
+
+条目很多、或条数由数据决定（模型、账号、最近的文件）的菜单，把它们放进 `MenuList`（Rust）：一个虚拟化列表，只建出视口附近的行。它的行是菜单的条目，与前后的条目排在一起：Up、Down、Home 和 End 在列表的每一行之间移动，先滚到某一行再聚焦它，并跳过禁用的行，然后接着走到列表前后的条目，包括 `Submenu` 的条目。`render_item` 按行号画出每一行，每行一个 `MenuItem` 或 `Submenu`；请给列表设一个高度。
+
+```rust
+use nsh_base::{MenuListEntry, menu, menu_item, menu_list, submenu};
+use nsh_core::prelude::*;
+
+let models = signal(vec![/* … */]);
+menu()
+    .trigger(text("Model"))
+    .child(
+        menu_list()
+            .count(move || models.with(|m: &Vec<Model>| m.len() as u32))
+            .render_item(move |e: &MenuListEntry| {
+                let index = e.index as usize;
+                menu_item()
+                    .on_select(move || choose(index))
+                    .child(text(move || models.with(|m| m[index].name.clone())))
+            })
+            .h(px(240.0)),
+    )
+    .child(submenu().trigger(text("Reasoning")).child(/* … */))
 ```
 
 <a id="props"></a>
@@ -299,6 +324,14 @@ const recent = signal<string[] | null>(null);
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
 | `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 它的条目。 |
+
+### MenuList（Rust）
+
+| Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `.count(..)` | `u32` | `0` | 行数。 |
+| `.render_item(\|e: &MenuListEntry\| ..)` | `MenuListEntry { index }` | 无 | 按行号画出一行：一个 `MenuItem` 或 `Submenu`。 |
+| 样式方法 | | 无 | 列表的外观；请给它一个高度（`.h(..)`）。 |
 
 `MenuSeparator` 是一个由你设置样式（`class`、`style`）的视图，与所在层级的条目一起显示。
 

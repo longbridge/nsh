@@ -3,6 +3,7 @@ name = "nsh-base"
 description = "Behavior and infrastructure foundations of NSH apps' UI (`nsh/base`), unstyled: navigation, safe areas, dialogs, the keyboard and the status bar."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true

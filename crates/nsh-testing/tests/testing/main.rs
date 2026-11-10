@@ -126,7 +126,7 @@ fn headless_runs_play_the_platform_s_part() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 11);
+    assert_eq!(results.len(), 12);
 }
 
 #[test]
@@ -306,6 +306,33 @@ fn headless_desktops_play_the_platform_s_windows() {
 }
 
 #[test]
+fn menu_shortcuts_choose_the_application_menu_s_items() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/menus");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn an_app_inserts_the_pastes_it_allows_as_the_user_s_edits() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/paste");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn a_main_window_nsh_json_starts_hidden_shows_when_the_app_asks() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/hidden-main");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
 fn apps_run_under_the_capabilities_their_nsh_json_declares() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/capabilities");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
@@ -352,4 +379,13 @@ fn expect_compares_values_as_jest_does() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 8);
+}
+
+#[test]
+fn forward_goes_forward_on_the_web_only() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/history");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
 }

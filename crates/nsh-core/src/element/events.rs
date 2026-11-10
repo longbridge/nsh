@@ -16,18 +16,32 @@ use crate::{
 pub struct FileDropEvent {
     /// Absolute `file:` URLs in platform order; encoded filenames are preserved.
     pub uris: Vec<String>,
+    /// The MIME type of each of `uris`, in their order, by the file's name
+    /// (TS: `mimeTypes`): `""` when the name says none (a directory, no
+    /// extension), as the DOM's `File.type`.
+    pub mime_types: Vec<String>,
     /// Where the files were let go, in the window's coordinates (TS:
     /// `pagePosition`), on backends that know it (Linux).
     pub page_position: Option<Point<Points>>,
 }
 
 /// Local files or directories a drag offers to an element while it enters
-/// (`on_file_drag_enter`); nothing has been dropped yet.
+/// (`on_file_drag_enter`); nothing has been dropped yet, and no file has
+/// been read.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct FileDragEvent {
     /// Absolute `file:` URLs in platform order; encoded filenames are preserved.
     pub uris: Vec<String>,
+    /// The MIME type of each of `uris`, as [`FileDropEvent::mime_types`].
+    pub mime_types: Vec<String>,
+}
+
+/// The MIME types of the files `uris` name, in their order.
+fn mime_types(uris: &[String]) -> Vec<String> {
+    uris.iter()
+        .map(|uri| crate::platform::file_mime_type(uri).to_owned())
+        .collect()
 }
 
 /// A scroll view moved (`on_scroll`): the offset, and the sizes it moves in.
@@ -356,6 +370,14 @@ pub(crate) fn data(p: &EventPayload) -> Option<Cow<'_, str>> {
     string(p, "data").map(Cow::Borrowed)
 }
 
+/// An error's message when its `code` says the platform has no such
+/// feature (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`).
+pub(crate) fn unavailable(p: &EventPayload) -> Option<Cow<'_, str>> {
+    (string(p, "code") == Some(crate::element::codes::UNAVAILABLE))
+        .then(|| message(p))
+        .flatten()
+}
+
 pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     Some(Cow::Owned(Selection {
         start: number(p, "start") as u32,
@@ -569,6 +591,7 @@ pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
     match p {
         EventPayload::FileDrop(uris) => Some(Cow::Owned(FileDropEvent {
             uris: uris.clone(),
+            mime_types: mime_types(uris),
             page_position: None,
         })),
         EventPayload::FileDropAt {
@@ -576,6 +599,7 @@ pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
             page_position,
         } => Some(Cow::Owned(FileDropEvent {
             uris: uris.clone(),
+            mime_types: mime_types(uris),
             page_position: Some(*page_position),
         })),
         _ => None,
@@ -585,7 +609,10 @@ pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
 pub(crate) fn file_drag(p: &EventPayload) -> Option<Cow<'_, FileDragEvent>> {
     match p {
         EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
-            Some(Cow::Owned(FileDragEvent { uris: uris.clone() }))
+            Some(Cow::Owned(FileDragEvent {
+                uris: uris.clone(),
+                mime_types: mime_types(uris),
+            }))
         }
         _ => None,
     }
@@ -620,6 +647,29 @@ mod tests {
                 .uris,
             uris
         );
+    }
+
+    #[test]
+    fn file_drags_and_drops_type_each_offered_file_by_its_name() {
+        use crate::{EventPayload, Points, geometry::point};
+        let uris: Vec<String> = vec![
+            "file:///tmp/a%20b.png".into(),
+            "file:///tmp/c.JPG".into(),
+            "file:///tmp/folder/".into(),
+        ];
+        let types = ["image/png", "image/jpeg", ""];
+        let offered = EventPayload::FileDrop(uris.clone());
+        let drag = super::file_drag(&offered).unwrap();
+        assert_eq!(drag.uris, uris);
+        assert_eq!(drag.mime_types, types);
+        let at = EventPayload::FileDropAt {
+            uris: uris.clone(),
+            page_position: point(Points(3.0), Points(4.0)),
+        };
+        let drop = super::file_drop(&at).unwrap();
+        assert_eq!(drop.mime_types, types);
+        assert_eq!(drop.page_position, Some(point(Points(3.0), Points(4.0))));
+        assert!(super::file_drag(&EventPayload::None).is_none());
     }
 
     #[test]

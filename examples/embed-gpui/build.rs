@@ -39,6 +39,8 @@ fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
         minify: release,
         split: false,
         ui_sets: ui_sets.clone(),
+        development: !release,
+        ..Default::default()
     })
     .map_err(|e| e.plain)?;
     let bytecode =

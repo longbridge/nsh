@@ -53,6 +53,7 @@ fn start(name: &str) -> (Engine, Receiver<MountBatch>) {
         minify: false,
         ui_sets: vec![nsh_base::registry().into()],
         split: false,
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();

@@ -176,7 +176,7 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   It uses the ordinary hot-patch/full-bundle protocol and reports `HostPlatform::Tui`. App errors open a dismissible
   panel and successful updates close it. `--points-per-cell WIDTHxHEIGHT` overrides `nsh.json`'s
   `"tui": { "pointsPerCell": "8x16" }`; both dimensions are finite, positive points, defaulting to 8 by 16.
-  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui-host`; Rust edits
+  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui/tui-host`; Rust edits
   restart it through the existing watcher. The CLI asks the host to exit on a stop before reaping it, allowing
   raw mode and the alternate screen to be restored. See [the terminal backend](tui.md).
 - `nsh run --target android` forwards the dev server's port to the device (`adb reverse tcp:<port> tcp:<port>`,
@@ -307,7 +307,7 @@ report it:
   (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
   500 ms count up (`clicks` 2 is a double press), as the platforms count them;
 - `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
-  `delayLongPress` (500 ms) `LongPress` and `PressOut`;
+  `delayLongPress` (500 ms) `LongPress` and `PressOut`, at the match's center as `press` does;
 - `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
 - `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
   `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line
@@ -346,7 +346,10 @@ report it:
 - `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh`'s `keymap` parses it for the
   environment's OS; on every environment (a hardware keyboard: phones and tablets have one too) the root's keymap
   (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is, among the focused
-  window's and those of no window (`Keymap::find_in`), and the root hears `KeyCommand`; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
+  window's and those of no window (`Keymap::find_in`), and the root hears `KeyCommand`; then, on a desktop, the
+  application menu (`DesktopCommand::SetMenu`, `Screen::app_menu`) chooses its item with that shortcut
+  (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
+  hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
   `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
@@ -567,9 +570,11 @@ it gets `--background` unless `nsh test --foreground` (`AppOptions::background`)
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
 without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
 the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
-"Checking a change"). A left button press into a web view of the inactive app goes to the `WKWebView` directly
-(`agent::mouse`), since AppKit gives an inactive window's first click only to views that accept the first mouse. A
-window that is not the
+"Checking a change"). It gets `--activation-policy` too when nsh.json's `macos.activationPolicy` is not the default
+(`MacosConfig::host_args`, as under `nsh run`): `--background` takes precedence, so the app runs with its policy under
+`--foreground` (`docs/dev/macos.md` "Activation policy"). A left button press into a web view of the inactive app goes
+to the `WKWebView` directly (`agent::mouse`), since AppKit gives an inactive window's first click only to views that
+accept the first mouse. A window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
 for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
@@ -862,6 +867,9 @@ program that describes them, builds the hosts and runners with them, and does ev
     with Rust components"). `gpui-host` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os = "linux",
     target_os = "macos", windows))`) is a workspace of its own in `.nsh/rust/gpui` (excluded from the main one), written
     only when the GPUI host is built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates.
+    `tui-host` is one too, in `.nsh/rust/tui` (`RustApp::tui_workspace`), written only when the terminal host is built:
+    `nsh check`, `nsh test` and the other targets never resolve the terminal's crates, which nsh's crates.io releases
+    before the terminal backend lack.
     The hosts and runners of Windows, macOS, Linux and iOS (`<platform>-host`, `<platform>-app`, `rust-<platform>`;
     `components_platform`) also register each crate's native components: `#[native_components(<platform>)]`
     (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` at the crate's root makes,
@@ -990,7 +998,7 @@ directory. A checkout's build never downloads: it builds its runtimes with cargo
 
 The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
 is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
-are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
+are. App-specific development hosts are generated in `.nsh/rust/tui/tui-host`.
 
 ## Releases
 
