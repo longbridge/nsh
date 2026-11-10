@@ -51,7 +51,7 @@ impl Headless {
             self.send(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
         }
         // A click releases its button, as the desktop hosts report it.
-        if let Some(id) = self.screen.mouse_up_target(target) {
+        for id in self.screen.mouse_up_targets(target) {
             let origin = self
                 .screen
                 .bounds_in_root(id)

@@ -1091,6 +1091,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
         }
         Simulated::Up(x, y) => {
             release_buttons(surface);
+            mouse_up(surface, x, y, held, MouseButton::Left);
             up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
@@ -1120,8 +1121,11 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             link_cursor(surface, x, y);
             mouse_moved(surface, x, y, held);
         }
+        // A right click: the press opens the menu, the release follows,
+        // as a real one's does.
         Simulated::ContextMenu(x, y) => {
             context_menu(surface, x, y, held);
+            mouse_up(surface, x, y, held, MouseButton::Right);
         }
     }
 }

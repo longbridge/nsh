@@ -2193,10 +2193,21 @@ impl Screen {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
     }
 
-    /// The view that hears a mouse button released on `id`: it, or the
-    /// nearest around it listening to `onMouseUp`.
-    pub(crate) fn mouse_up_target(&self, id: NodeId) -> Option<NodeId> {
-        self.up_to(id, |v| v.events.contains(EventKind::MouseUp))
+    /// The views that hear a mouse button released on `id`: it and every
+    /// view around it listening to `onMouseUp`, inside out, as the
+    /// platforms walk them.
+    pub(crate) fn mouse_up_targets(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        while let Some(view) = self.nodes.get(&id) {
+            if view.events.contains(EventKind::MouseUp) {
+                targets.push(id);
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        targets
     }
 
     /// The app's keyboard shortcuts (`nsh/keymap`).

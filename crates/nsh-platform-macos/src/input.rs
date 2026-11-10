@@ -155,6 +155,9 @@ pub(crate) struct Input {
     /// hosted view's or another app's) — `NSCursor::currentCursor` is
     /// another object than the one set when the pointer is customized.
     cursor: Cell<Option<Cursor>>,
+    /// A Control-click (the secondary click) is down: its left-button
+    /// release is the secondary button's (`onMouseUp` reports `right`).
+    control_click: Cell<bool>,
     /// Hovered views and the cursor are picked again on the main queue
     /// (what is under the mouse moved).
     repick: Cell<bool>,
@@ -753,6 +756,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 .contains(NSEventModifierFlags::Control) =>
         {
             input.last.set(Some((x, y)));
+            input.control_click.set(true);
             context_menu(surface, x, y, event.modifierFlags());
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
@@ -789,7 +793,12 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::LeftMouseUp => {
             input.last.set(Some((x, y)));
-            mouse_up(surface, x, y, Mouse::of(event), MouseButton::Left);
+            let button = if input.control_click.replace(false) {
+                MouseButton::Right
+            } else {
+                MouseButton::Left
+            };
+            mouse_up(surface, x, y, Mouse::of(event), button);
             up(surface, x, y, time);
             update_cursor(surface, x, y);
             let control = input.window_control.borrow_mut().take();

@@ -60,6 +60,8 @@ const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
 /** The DOM's `button` numbers, in the order a released button is named by. */
 const MOUSE_BUTTON_NAMES = ["left", "middle", "right", "back", "forward"];
+/** The DOM's `buttons` bit of each `button` number. */
+const MOUSE_BUTTON_BITS = [1, 4, 2, 8, 16];
 /** The keys whose press or release is reported as a mouse move. */
 const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
@@ -7532,6 +7534,9 @@ class Player {
     root.addEventListener("pointermove", (e) => {
       this.mouseMoved(e);
       if (e.pointerType !== "mouse") return;
+      // A button released while another is still held comes as a move
+      // that names it (`pointerup` is only the last button's release).
+      if (e.button >= 0 && !(e.buttons & MOUSE_BUTTON_BITS[e.button])) this.mouseUp(e);
       this.hover = [e.clientX, e.clientY];
       this.hoverButtons = e.buttons;
       // Reveal only a draggable thumb under the pointer.
