@@ -59,7 +59,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 | `id` | string | required | The bundle identifier / Android package name, in reverse-DNS form under a domain you own. It also names where the app keeps its [storage](../modules/nsh.md#storage), so each app has its own. `nsh package` and `nsh publish` warn about the `com.example.` placeholder. |
 | `version` | string | `"1.0.0"` | The user-visible version (`CFBundleShortVersionString`, `versionName`). |
 | `build` | number | `1` | The build number (`CFBundleVersion`, `versionCode`). Raise it for every release you upload. |
-| `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
+| `icon` | string \| object | none | A square PNG, ideally 1024×1024, relative to `nsh.json`, or one per platform ([Icons](#icons)). |
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
@@ -343,6 +343,22 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
   macOS or Linux, the executable keeps the default icon in Explorer, and the window and the taskbar show `icon.ico`.
   `nsh run --target windows` and `nsh test --target windows` show it too.
 - **Web:** resized to 32 pixels (the favicon), 180 (`apple-touch-icon`), 192 and 512 (the web app manifest).
+
+Platforms draw icons differently: macOS artwork sits inset on a transparent canvas (824 of 1024 pixels), while
+Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platform; its keys are `macos`, `windows`,
+`linux`, `ios`, `android` and `web`, and a platform left out gets the system's default:
+
+```json
+{
+  "icon": {
+    "macos": "icon-macos.png",
+    "windows": "icon.png",
+    "linux": "icon.png"
+  }
+}
+```
+
+`--icon` replaces it for the target being packaged.
 
 Without an icon, the system shows its default.
 

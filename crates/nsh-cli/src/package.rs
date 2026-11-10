@@ -150,8 +150,9 @@ pub(crate) struct AppConfig {
     pub(crate) version: Option<String>,
     /// Build number.
     pub(crate) build: Option<u32>,
-    /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`.
-    pub(crate) icon: Option<PathBuf>,
+    /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`;
+    /// one for every target or one per platform ([`AppIcon`]).
+    pub(crate) icon: Option<AppIcon>,
     /// The lowest runtime that runs a signed package (`nsh publish`).
     pub(crate) min_runtime: Option<String>,
     /// Read and checked by the bundler.
@@ -464,6 +465,49 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) asset_url: Option<&'a str>,
 }
 
+/// `nsh.json` `"icon"`: one PNG for every target, or one per platform
+/// (`{ "macos": "icon-mac.png", "windows": "icon-win.png" }`) since their
+/// conventions differ (macOS draws its artwork inset on a transparent
+/// canvas, Windows edge to edge). A platform left out gets no icon.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum AppIcon {
+    /// The icon of every target.
+    All(PathBuf),
+    /// The icons by platform: `macos`, `windows`, `linux`, `ios`, `android`,
+    /// `web` ([`AppIcon::PLATFORMS`]).
+    Platforms(std::collections::BTreeMap<String, PathBuf>),
+}
+
+impl AppIcon {
+    /// The keys of [`AppIcon::Platforms`].
+    const PLATFORMS: [&str; 6] = ["macos", "windows", "linux", "ios", "android", "web"];
+
+    /// The icon of `target`'s platform.
+    pub(crate) fn of(&self, target: PackageTarget) -> Option<&Path> {
+        let platform = match target {
+            PackageTarget::Ios | PackageTarget::IosSimulator => "ios",
+            PackageTarget::Android => "android",
+            PackageTarget::Linux => "linux",
+            PackageTarget::Macos => "macos",
+            PackageTarget::Windows => "windows",
+            PackageTarget::Web => "web",
+            PackageTarget::Gpui => return None,
+        };
+        match self {
+            AppIcon::All(icon) => Some(icon),
+            AppIcon::Platforms(icons) => icons.get(platform).map(PathBuf::as_path),
+        }
+    }
+}
+
+impl AppConfig {
+    /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`).
+    pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
+        self.icon.as_ref()?.of(target)
+    }
+}
+
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
 pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let dir = entry.parent().unwrap_or(Path::new("."));
@@ -499,10 +543,26 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ignored.push(format!("window: {e}"));
         config.window = None;
     }
+    config.icon = match config.icon {
+        Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
+        Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
+            icons
+                .into_iter()
+                .filter(|(platform, _)| {
+                    let known = AppIcon::PLATFORMS.contains(&platform.as_str());
+                    if !known {
+                        ignored.push(format!("unknown key `icon.{platform}`"));
+                    }
+                    known
+                })
+                .map(|(platform, icon)| (platform, dir.join(icon)))
+                .collect(),
+        )),
+        None => None,
+    };
     warn_ignored(&path, &ignored);
     config.ios.check(ApplePlatform::Ios)?;
     config.macos.check()?;
-    config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     config.localizations = app_localizations(dir, config.locales.as_ref());
     Ok(config)
@@ -865,7 +925,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
-    if let Some(icon) = &config.icon {
+    if let Some(icon) = config.icon(PackageTarget::Ios) {
         let partial = compile_icon(icon, &app, sdk)?;
         for (key, value) in partial {
             info.insert(key, value);
@@ -1054,7 +1114,7 @@ fn package_android(
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
             abis: &abis,
-            icon: config.icon.as_deref(),
+            icon: config.icon(PackageTarget::Android),
             assets,
             signing,
         },
@@ -1133,13 +1193,14 @@ fn package_linux(
     let mut info = desktop_app_json(config, name, id, version);
     info["schemes"] = serde_json::json!(config.schemes);
     fs::write(resources.join("app.json"), info.to_string())?;
-    if let Some(icon) = &config.icon {
+    let icon = config.icon(PackageTarget::Linux);
+    if let Some(icon) = icon {
         fs::copy(icon, dir.join(format!("{id}.png")))
             .with_context(|| format!("copy {}", icon.display()))?;
     }
     fs::write(
         dir.join(format!("{id}.desktop")),
-        desktop_entry(name, id, executable, config.icon.is_some(), &config.schemes),
+        desktop_entry(name, id, executable, icon.is_some(), &config.schemes),
     )?;
     let archive = options.out.join(format!("{name}.tar.gz"));
     let _ = fs::remove_file(&archive);
@@ -1232,7 +1293,7 @@ fn package_macos(
         nsh.join("app.json"),
         app_json(info, &schemes, config.window.as_ref()),
     )?;
-    let icon = match &config.icon {
+    let icon = match config.icon(PackageTarget::Macos) {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
             true
@@ -2166,6 +2227,48 @@ mod tests {
     }
 
     #[test]
+    fn nsh_json_icon_is_one_for_every_target_or_one_per_platform() {
+        let dir = std::env::temp_dir().join(format!("nsh-icon-config-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        fs::write(dir.join("nsh.json"), r#"{ "icon": "icon.png" }"#).unwrap();
+        let config = read_config(&entry).unwrap();
+        for target in [
+            PackageTarget::Macos,
+            PackageTarget::Windows,
+            PackageTarget::Web,
+        ] {
+            assert_eq!(config.icon(target), Some(dir.join("icon.png").as_path()));
+        }
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "icon": { "macos": "mac.png", "windows": "win.png", "mac": "typo.png" } }"#,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert_eq!(
+            config.icon(PackageTarget::Macos),
+            Some(dir.join("mac.png").as_path())
+        );
+        assert_eq!(
+            config.icon(PackageTarget::Windows),
+            Some(dir.join("win.png").as_path())
+        );
+        assert_eq!(config.icon(PackageTarget::Linux), None);
+        assert_eq!(
+            config.icon,
+            Some(AppIcon::Platforms(
+                [
+                    ("macos".to_owned(), dir.join("mac.png")),
+                    ("windows".to_owned(), dir.join("win.png")),
+                ]
+                .into()
+            ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn nsh_json_ignores_keys_it_does_not_know() {
         let (config, unknown) = parse_config(
             r#"{
@@ -2208,7 +2311,7 @@ mod tests {
             r#"{
                 "name": "Orders",
                 "build": "7",
-                "icon": { "light": "a.png", "dark": "b.png" },
+                "icon": ["a.png"],
                 "schemes": ["orders", { "scheme": "x" }],
                 "web": { "base": "/orders/", "connect": ["a.com", 1] },
                 "android": { "targetSdk": "latest" },
