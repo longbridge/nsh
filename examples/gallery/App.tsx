@@ -22,7 +22,7 @@ import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl, appearance, setAppearance, type Appearance, segmentedLook } from "./ui";
+import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl, appearance, setAppearance, type Appearance, segmentedLook, menuPopup } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
 loadSounds({
@@ -672,13 +672,11 @@ function SettingsMenu() {
     </View>
   );
   return (
-    <Menu placement="top" align="end" offset={6} margin={8} trigger={trigger}>
-      <MenuPanel side="top" minWidth={210}>
-        <SettingItem label="FPS" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
-        <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
-        <SettingItem label="RTL" icon={<LucideIcon name="pilcrow" size={16} tint={colors.muted} />} checked={rtl()} onSelect={() => rtl.set(!rtl())} />
-        <ThemeSetting />
-      </MenuPanel>
+    <Menu placement="top" align="end" offset={6} margin={8} {...menuPopup({ side: "top", minWidth: 210 })} trigger={trigger}>
+      <SettingItem label="FPS" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
+      <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
+      <SettingItem label="RTL" icon={<LucideIcon name="pilcrow" size={16} tint={colors.muted} />} checked={rtl()} onSelect={() => rtl.set(!rtl())} />
+      <ThemeSetting />
     </Menu>
   );
 }
