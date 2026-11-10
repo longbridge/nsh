@@ -3542,7 +3542,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
             // Mouse moves wait for the frame, the latest per view; any other
             // event comes after the moves before it (a view hears where the
-            // mouse went before it hears it leave).
+            // mouse went before it hears it leave). A drag on the desktops
+            // also sends a touch move with each mouse move: that is the same
+            // motion, not an event after it.
             if event == EventKind::MouseMove {
                 match state.mouse_moves.iter_mut().find(|(v, _)| *v == id) {
                     Some((_, pending)) => *pending = payload,
@@ -3550,7 +3552,10 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 }
                 return true;
             }
-            state.dispatch_mouse_moves(script);
+            if !matches!(&payload, EventPayload::Touch(t) if t.phase == nsh_core::TouchPhase::Move)
+            {
+                state.dispatch_mouse_moves(script);
+            }
             // The core tracks input text for layout and to recognize stale
             // values (from JS and from Rust components alike).
             if let (EventKind::ChangeText, EventPayload::Text { text, count }) = (event, &payload) {

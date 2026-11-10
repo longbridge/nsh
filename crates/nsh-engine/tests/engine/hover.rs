@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, EventKind, EventMask, EventPayload, MountBatch, MountItem, MouseButton,
-    MouseEvent, NodeId, Size, geometry::px, keymap::Modifiers,
+    MouseEvent, NodeId, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, geometry::px,
+    keymap::Modifiers,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
@@ -215,12 +216,31 @@ fn a_move_with_a_button_down_reaches_on_mouse_move_with_the_button() {
     control.dispatch_event(outer, EventKind::MouseEnter, at(0.0, false, None));
     control.dispatch_event(inner, EventKind::MouseEnter, at(0.0, false, None));
     until_log(&rx, "log in outer 0,2|in inner");
-    // A drag: merged as any moves, each with the button held.
+    // A drag: on the desktops each move with a button down also sends a
+    // touch move for any touch listener or responder; `onMouseMove` is
+    // still merged across them, each with the button held.
     for x in 1..=20 {
         control.dispatch_event(
             inner,
             EventKind::MouseMove,
             at(x as f32, false, Some(MouseButton::Left)),
+        );
+        control.dispatch_event(
+            ROOT_ID,
+            EventKind::Touch,
+            EventPayload::Touch(Box::new(TouchEvent {
+                phase: TouchPhase::Move,
+                timestamp: x as f64,
+                activated: None,
+                points: vec![TouchPoint {
+                    id: 1,
+                    target: inner,
+                    path: Vec::new(),
+                    page: nsh_core::geometry::point(px(x as f32 + 10.0), px(12.0)),
+                    location: nsh_core::geometry::point(px(x as f32), px(2.0)),
+                    changed: true,
+                }],
+            })),
         );
     }
     control.dispatch_event(outer, EventKind::MouseLeave, at(21.0, false, None));
