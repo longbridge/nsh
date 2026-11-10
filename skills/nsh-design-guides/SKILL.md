@@ -48,7 +48,7 @@ order (`grep -n '^## ' references/design-guides.md`):
 | Start from the task                   | Always; task hierarchy, what to leave out                              |
 | Visual language                       | Color, typography, spacing, radius, borders, elevation, density, icons |
 | Layout patterns                       | Window and page structure, sidebars, toolbars, panels, forms           |
-| Components and composition            | Picking a component, composing parts, when to build a new one          |
+| Components and composition            | Picking a component, composing parts, when to build a new one; component standards (size scale, radius tokens, state tokens) for the app's styled controls |
 | Interaction states                    | Hover, focus, pressed, selected, disabled, loading, validation, danger |
 | Feedback and overlays                 | Dialog, sheet, popover, menu, notification, tooltip, dismissal, focus  |
 | Motion                                | Any state change, animation, transition, spring, gesture release or shader; which tool, tokens, reduced motion |

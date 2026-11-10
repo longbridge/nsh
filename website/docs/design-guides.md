@@ -691,6 +691,34 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
 }
 ```
 
+### Component standards
+
+GPUI Kit's styled components (`gpui-component`) are long proven on the desktop. An app's own styled controls on
+`nsh/base` follow the same standards, so they agree with each other without per-screen tuning:
+
+- **One size scale drives everything.** A control takes one `size` (xs, sm, md default, lg), and the size sets its
+  height, horizontal padding, text size, icon size, gap and radius together; never set them one by one per use. GPUI
+  Kit's buttons are 20 / 24 / 32pt tall (xs / sm / md and lg), inputs share those heights, table rows 26 / 30 / 32 /
+  40pt with cell padding growing in step. On touch, the hit target stays at least 44pt even when the drawn control is
+  smaller. A `compact` variant tightens padding, not height.
+- **Icon buttons are squares of the control height** (20 / 24 / 32pt) with a 14–16pt icon; a button's icon is one step
+  smaller than its text line. A button group or toolbar uses one size throughout.
+- **Radius comes from two tokens.** `radius` (6pt in GPUI Kit's default) for controls and popups, `radius-lg` (8pt) for
+  containers that hold controls; small controls and tags take half the radius. Fully round shapes come from the theme
+  too (`radius-full`), so a theme that squares its corners squares avatars, dots and thumbs as well.
+- **States are tokens per variant.** Each variant (default, primary, secondary, danger, ghost, outline) has a normal,
+  hover and active color in the theme (`primary`, `primary-hover`, `primary-active`); tinted and ghost variants use
+  one hue at rising strength, about 10% at rest, 20% hovered, 40% pressed. A selected button and a button whose menu
+  is open share one style. Disabled shows no hover or press; loading dims the control slightly and keeps its size.
+- **Composite controls read as one.** In a split button or segmented group, hovering one part shows the others'
+  hover at half strength; only the outer corners are rounded.
+- **One popup surface.** Popover, menu, select, combobox and date picker share one style: the popover background, a
+  ring-and-shadow edge, the theme radius. A new anchored surface reuses it.
+- **Focus ring outside the border.** The ring is drawn outside the control (its radius the control's plus the ring
+  width), so translucent backgrounds stay intact; leave it room where an ancestor clips.
+- **Inputs and lists share padding.** Text inputs, selects and the lists they open use the same horizontal padding
+  per size, so text in a field and in its dropdown starts on one line.
+
 ## Interaction states
 
 ### Make the result understandable before the click
@@ -1480,6 +1508,12 @@ report each group as passed or as what was fixed. A group not checked is not pas
 - [ ] The pressed state covers the whole hit area, keeps the label readable, and does not shift layout.
 - [ ] Releasing outside cancels without firing; a control owning a menu stays visibly open until the menu closes.
 - [ ] Disabled controls show neither hover nor pressed.
+
+**Component standards**
+- [ ] Each styled control takes one `size` that sets its height, padding, text, icon and radius together; heights
+  and paddings match across buttons, inputs, selects and toolbars of one size.
+- [ ] State colors come from per-variant tokens (normal, hover, active); selected and menu-open share one style.
+- [ ] Popups share one surface; focus rings sit outside the border with room to show.
 
 **Other states**
 - [ ] Focus-visible rings on every keyboard-reachable control, outside the clip; selected, disabled and loading
