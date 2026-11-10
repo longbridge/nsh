@@ -47,6 +47,7 @@ fn launch(
         minify: false,
         split: false,
         ui_sets: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &[]).unwrap();

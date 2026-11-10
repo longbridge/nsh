@@ -69,7 +69,7 @@ nsh package App.tsx --target linux [--run]   # TSX 应用
   <Name>                 可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
   nsh/bundle.nshc        编译后的 TSX 应用
   nsh/assets/…           应用导入的资源（也包括 Rust crate 的 `assets!()`）
-  nsh/app.json           窗口标题和应用 id
+  nsh/app.json           窗口标题、应用 id 和 nsh.json 中的窗口设置
   <id>.desktop           桌面条目（StartupWMClass 为应用 id）
   <id>.png               图标（nsh.json 指定了图标时）
 .nsh/out/<Name>.tar.gz

@@ -84,6 +84,9 @@ thread_local! {
     static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The launch parameters of the next app the page starts
+    /// ([`nsh_set_host_params`]): its `host.params`.
+    static HOST_PARAMS: RefCell<serde_json::Map<String, serde_json::Value>> = RefCell::new(serde_json::Map::new());
     /// The address the next app starts at ([`nsh_set_page_url`]).
     static PAGE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// What the page reported last ([`nsh_environment`]), kept for the
@@ -484,7 +487,8 @@ fn page() -> Environment {
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
 /// shortcuts are Apple's), `host` (the page answers `nsh/host` calls:
 /// `createPlayer`'s `host`) and `screenColor` (the browser has an
-/// `EyeDropper`); missing keys keep their value. Called before the app starts
+/// `EyeDropper`) and `shaders` (`false` once a shader view found no
+/// WebGL 2); missing keys keep their value. Called before the app starts
 /// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
@@ -592,6 +596,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     env.notifications = flag("notifications").unwrap_or(env.notifications);
     env.audio = flag("audio").unwrap_or(env.audio);
+    env.shaders = flag("shaders").unwrap_or(env.shaders);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -609,6 +614,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.screen_color = env.screen_color;
         e.notifications = env.notifications;
         e.audio = env.audio;
+        e.shaders = env.shaders;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
         if rescaled && app.text.emoji_measured() {
@@ -709,7 +715,14 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
-        host: Default::default(),
+        host: {
+            let host = nsh_engine::HostChannel::new();
+            let params = HOST_PARAMS.with(|p| std::mem::take(&mut *p.borrow_mut()));
+            if !params.is_empty() {
+                host.set_params(params);
+            }
+            host
+        },
         picker: None,
         speech: None,
         audio: None,
@@ -825,6 +838,25 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
     // SAFETY: guaranteed by the caller.
     let url = unsafe { string(ptr, len) };
     BASE_URL.with(|b| *b.borrow_mut() = Some(url));
+}
+
+/// Sets the launch parameters of the next app the page starts (its
+/// `host.params`, a JSON object; anything else is none): what the page
+/// knows before the app runs, such as data it was served with, so the
+/// app's first frame shows it without asking for it again.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_set_host_params(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let json = unsafe { string(ptr, len) };
+    let params = match serde_json::from_str(&json) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    HOST_PARAMS.with(|p| *p.borrow_mut() = params);
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the
@@ -1621,6 +1653,19 @@ pub extern "C" fn nsh_root_size(
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_states(id: u32, states: u32) -> f64 {
     send(|app| app.control.set_states(id, states as u16))
+}
+
+/// The user gave the page input with a pointer (`modality` 1: a mouse
+/// button, a pen or a finger going down) or the keyboard (0: a key that
+/// is not a modifier alone), before it acts: `focus-visible:` follows it.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_input_modality(modality: u32) -> f64 {
+    let modality = if modality == 1 {
+        nsh_core::platform::InputModality::Pointer
+    } else {
+        nsh_core::platform::InputModality::Keyboard
+    };
+    send(|app| app.control.set_input_modality(modality))
 }
 
 /// The surface was resized (points).

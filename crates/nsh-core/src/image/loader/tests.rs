@@ -659,3 +659,14 @@ fn wanted_sizes_pick_buckets_by_natural_size() {
         4000
     );
 }
+
+#[cfg(feature = "loader")]
+#[test]
+fn loopback_urls_skip_the_environment_proxy() {
+    use super::http::is_loopback;
+    assert!(is_loopback("http://127.0.0.1:8790/assets/logo.svg"));
+    assert!(is_loopback("http://localhost:8790/assets/a.ttf"));
+    assert!(is_loopback("http://[::1]:8790/assets/a.png"));
+    assert!(!is_loopback("http://10.0.0.2:8790/assets/a.png"));
+    assert!(!is_loopback("https://pbs.twimg.com/media/a?format=jpg"));
+}

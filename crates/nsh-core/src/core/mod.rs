@@ -490,6 +490,9 @@ fn shader_role(tag: Tag) -> Option<crate::shader::ShaderRole> {
 struct ImageState {
     source: Option<ImageSource>,
     options: crate::mount::ImageOptions,
+    /// An `svg()` the platform draws as an image: its mount item carries the
+    /// text color ([`crate::mount::ImageOptions::current_color`]).
+    svg_current_color: bool,
 }
 
 struct Node {
@@ -659,6 +662,10 @@ struct Node {
     /// still shows its last row, so it is hidden from sight, touches and
     /// assistive technology ([`Core::set_spare`]).
     spare: bool,
+    /// An attachment of a text inside a hidden span (`visibility:
+    /// "hidden"`): hidden with the span's characters, from sight, touches
+    /// and assistive technology ([`Core::hide_attachments`]).
+    hidden_in_text: bool,
     /// `android={{ elevation }}`.
     elevation: Points,
     /// `ios={{ backdropMaterial }}`.
@@ -758,7 +765,7 @@ impl Node {
         if self.list.as_ref().is_some_and(|l| l.parent) {
             style.overflow_hidden = true;
         }
-        if self.spare {
+        if self.spare || self.hidden_in_text {
             style.hidden = true;
         }
         if let Some(sides) = self.cell_border {
@@ -808,7 +815,7 @@ impl Node {
         if self.states & crate::tailwind::state::DISABLED != 0 {
             props.accessibility.state.disabled = true;
         }
-        if self.spare {
+        if self.spare || self.hidden_in_text {
             props.accessibility.hidden = true;
         }
         if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
@@ -912,6 +919,7 @@ impl Node {
             emitted: None,
             escapes: false,
             spare: false,
+            hidden_in_text: false,
         }
     }
 }
@@ -1258,6 +1266,18 @@ pub struct Core<M: TextEngine> {
     /// The chain changed since the focus watches last looked
     /// (`ElementRef::on_focus_in`).
     focus_within_changed: bool,
+    /// What the user last gave the surface input with, as the platform
+    /// reports it (`classes::set_input_modality`); `None` before any.
+    modality: Option<crate::platform::InputModality>,
+    /// The focus shows (`focus-visible:`), decided when it was reported
+    /// (`classes::focus_shows`) and again when a key is typed.
+    focus_visible: bool,
+    /// The view in the `FOCUS_VISIBLE` state, by key and id
+    /// (`classes::update_focus_visible`).
+    focus_visible_on: Option<(Key, NodeId)>,
+    /// `focus_visible` changed with the focus staying where it is: the
+    /// next commit round moves the state.
+    focus_visible_moved: bool,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1305,6 +1325,9 @@ pub struct Core<M: TextEngine> {
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
+    /// The main window has been on screen, or it opens shown: its reports
+    /// are where the user left it ([`Core::keep_window_placement`]).
+    main_shown: bool,
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
@@ -1380,6 +1403,7 @@ impl<M: TextEngine> Core<M> {
             windows: Default::default(),
             window_ids: Default::default(),
             keep_main_placement: false,
+            main_shown: false,
             clipboard: None,
             picker: None,
             window_backend: None,
@@ -1451,6 +1475,10 @@ impl<M: TextEngine> Core<M> {
             focus_scratch: Vec::new(),
             focus_moved: false,
             focus_within_changed: false,
+            modality: None,
+            focus_visible: false,
+            focus_visible_on: None,
+            focus_visible_moved: false,
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -1635,6 +1663,7 @@ impl<M: TextEngine> Core<M> {
     /// to open it there ([`crate::desktop::MainWindowOptions::kept_placement`]).
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
         self.keep_main_placement = options.restore_bounds;
+        self.main_shown |= options.visible_at_launch();
         if let Some(state) = self.components.environment.window_state {
             self.keep_window_placement(crate::ROOT_ID, &state);
         }
@@ -1790,7 +1819,9 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
         let mut dependents = false;
+        let mut moved = false;
         if let Some(scroll) = node.scroll.as_mut() {
+            moved = scroll.offset != (x, y);
             scroll.offset = (x, y);
             if !scroll.dependents.is_empty() {
                 scroll.pending.retain(|&(n, _)| n > applied);
@@ -1803,6 +1834,11 @@ impl<M: TextEngine> Core<M> {
         self.cull_moved(key);
         if dependents {
             self.dependents_dirty(key);
+        }
+        // A link's hint placed where the pointer came over it would be left
+        // behind by the content (`Core::overlay_scrolled`).
+        if moved && !self.overlays.is_empty() {
+            self.overlay_scrolled(key);
         }
     }
 
@@ -2384,6 +2420,14 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command {
+                id,
+                command: Command::CancelPress,
+            } => {
+                self.key(id)?;
+                self.cancel_press(id);
+                Ok(())
+            }
+            Op::Command {
                 command: Command::ClearJsResponder,
                 ..
             } => {
@@ -2609,12 +2653,25 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Keeps the placement of window `id` (its root node) a platform
-    /// reported, when the app asked to restore its bounds.
+    /// reported, when the app asked to restore its bounds. A main window
+    /// hidden since launch (`defaultVisible: false`) is not where the user
+    /// left it until it first shows: it has yet to take the mode it opens
+    /// in, and GTK has yet to size it. Once it has shown, its reports are,
+    /// hidden ones too: one hidden right after a move or resize reports
+    /// where it was left only then. (A development host's reload starts a
+    /// new core: there such a window shown before the reload counts as
+    /// hidden since launch until it shows again.)
     pub(crate) fn keep_window_placement(
         &mut self,
         id: NodeId,
         state: &crate::desktop::WindowState,
     ) {
+        if id == crate::ROOT_ID {
+            self.main_shown |= state.visible;
+            if !self.main_shown {
+                return;
+            }
+        }
         let key = if id == crate::ROOT_ID {
             self.keep_main_placement
                 .then(|| crate::desktop::window::placement_key("main"))
@@ -2751,12 +2808,16 @@ impl<M: TextEngine> Core<M> {
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
         // share untouched.
+        let visible_moved = std::mem::take(&mut self.focus_visible_moved);
         if self.focus_moved {
             self.update_focus_within();
+            self.update_focus_visible();
             // The hints the focus came to or left.
             if !self.overlays.is_empty() {
                 self.focus_hints();
             }
+        } else if visible_moved {
+            self.update_focus_visible();
         }
         self.sync_colors();
         self.sync_ch();
@@ -2848,6 +2909,18 @@ impl<M: TextEngine> Core<M> {
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
+        }
+        // Presses a component passes on, onto this commit's layout.
+        for (id, press, answer) in std::mem::take(&mut self.components.presses) {
+            let target = self.press_target(id, press.page_position);
+            if let Some((node, position)) = target {
+                self.events.push(crate::element::JsEvent::Event(
+                    node,
+                    EventKind::Press,
+                    EventPayload::Press(crate::PressEvent { position, ..press }),
+                ));
+            }
+            answer.borrow_mut().deliver(target.is_some());
         }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
@@ -3104,7 +3177,30 @@ impl<M: TextEngine> Core<M> {
         self.nodes[key as usize].layout = Some(layout);
         self.sync_grid_role(key);
         self.became(key, style);
+        if kind == Kind::WebView && !self.components.environment.web_views {
+            self.web_view_unavailable(id);
+        }
         Ok(())
+    }
+
+    /// A web view on a platform that shows none fails at once (`onError`
+    /// with `code` `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). Always reported:
+    /// the `onError` listener is set after the node is made.
+    fn web_view_unavailable(&mut self, id: NodeId) {
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                (
+                    "message",
+                    PayloadValue::Str("web views are not available on this platform".into()),
+                ),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
+                ),
+            ]),
+        ));
     }
 
     /// Whether node `key` is a control: a view with a control's
@@ -3704,11 +3800,12 @@ impl<M: TextEngine> Core<M> {
         } else {
             node.view_style != view
         };
-        // A span's background is part of its block's text.
-        let span_background_changed = node.inline
+        // A span's background and visibility are part of its block's text.
+        let span_drawing_changed = node.inline
             && node.kind == Kind::Text
-            && span_background(&node.view_style, node.id) != span_background(&view, node.id);
-        let text_changed = node.text_style != text || span_background_changed;
+            && (span_background(&node.view_style, node.id) != span_background(&view, node.id)
+                || node.view_style.hidden != view.hidden);
+        let text_changed = node.text_style != text || span_drawing_changed;
         // What its children inherit as `currentColor`.
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
         let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
@@ -3850,6 +3947,10 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
                 Kind::Text | Kind::RawText | Kind::Input => {}
+                // An `svg()` drawn as an image paints `currentColor` too.
+                _ if node.image.as_ref().is_some_and(|i| i.svg_current_color) => {
+                    self.mark(k, dirty::IMAGE);
+                }
                 _ => stack.extend_from_slice(&self.nodes[k as usize].children),
             }
         }
@@ -4587,6 +4688,7 @@ impl<M: TextEngine> Core<M> {
                         }
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
+                        ImageProp::SvgCurrentColor(on) => image.svg_current_color = on,
                     }
                     flags |= dirty::IMAGE;
                 }
@@ -5027,6 +5129,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::FocusWithin, patch);
                 return Ok(());
             }
+            Prop::FocusVisibleStyle(patch) => {
+                self.set_part_style(key, classes::Part::FocusVisible, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
                 return Ok(());
@@ -5060,6 +5166,13 @@ impl<M: TextEngine> Core<M> {
                     if node.kind == Kind::Text && node.inline {
                         rebuild_span = true;
                     }
+                }
+            }
+            Prop::WebElement(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.web_element != value {
+                    props.web_element = value;
+                    flags |= dirty::VIEW_PROPS;
                 }
             }
             Prop::WindowDrag(value) => {
@@ -5203,8 +5316,16 @@ impl<M: TextEngine> Core<M> {
                     if attached {
                         self.accessory_attached(key, true);
                     }
+                    return Ok(());
                 }
-                return Ok(());
+                // Other views: the embedding app finds them by it
+                // (`watchScroll`).
+                let value: Option<Arc<str>> = name.as_deref().map(Into::into);
+                let props = node.props.get_or_insert_default();
+                if props.native_id != value {
+                    props.native_id = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
             }
             Prop::Modal(prop) => {
                 if let Some(root) = node.root.as_mut() {
@@ -5571,6 +5692,11 @@ impl<M: TextEngine> Core<M> {
             None => p.children.len(),
         };
         self.set_inline(child, inline);
+        if !inline {
+            // An attachment hidden with its span leaves the text: shown
+            // where it goes (in a text, its block decides again).
+            self.set_hidden_in_text(child, false);
+        }
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.tree_order_changed |= self.track_tree_order;
@@ -5647,6 +5773,12 @@ impl<M: TextEngine> Core<M> {
                     .insert_child_at_index(parent_layout, index as usize, child_layout);
             }
             self.needs_layout = true;
+            // A dialog opening in content a scroll view has not made yet
+            // makes the views around it: it shows over everything.
+            let parent_created = parent_created
+                || (child_kind == Kind::Modal
+                    && self.nodes[parent as usize].culled
+                    && self.uncull(parent));
             // An overlay's native view goes to its root view
             // (`sync_overlays`).
             if parent_created
@@ -6170,6 +6302,7 @@ impl<M: TextEngine> Core<M> {
             || node.macos_backdrop.is_some()
             || parent_list
             || node.spare
+            || node.hidden_in_text
         {
             flags |= dirty::VIEW;
         }
@@ -6210,7 +6343,11 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
-        if node.props.is_some() || node.spare || node.list.as_ref().is_some_and(|l| l.parent) {
+        if node.props.is_some()
+            || node.spare
+            || node.hidden_in_text
+            || node.list.as_ref().is_some_and(|l| l.parent)
+        {
             flags |= dirty::VIEW_PROPS;
         }
         match kind {
@@ -6337,6 +6474,7 @@ impl<M: TextEngine> Core<M> {
                         blur_radius: image.options.blur_radius,
                         fade_ms: image.options.fade_ms,
                         position: node.view_style.object_position,
+                        current_color: image.svg_current_color.then(|| self.resolved_paint(key).1),
                     },
                 });
             }
@@ -6806,7 +6944,8 @@ impl<M: TextEngine> Core<M> {
         let multiplier = node.paragraph.font_multiplier(self.font_scale);
         let inserted = self.update_attachments(key);
         let mut alignments = crate::AttachmentAlignments::default();
-        self.collect_text(key, base, &mut text, &mut alignments);
+        self.collect_text(key, base, &mut text, &mut alignments, false);
+        self.hide_attachments(key, false);
         if multiplier != 1.0 {
             for span in &mut text.spans {
                 span.style = scaled(span.style, multiplier);
@@ -6815,6 +6954,7 @@ impl<M: TextEngine> Core<M> {
         let layout = self.nodes[key as usize]
             .layout
             .expect("text block has layout");
+        let colors_at_draw = self.text_engine.draws_colors_from_text();
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         if *cx.text == text && cx.alignments == alignments {
@@ -6833,11 +6973,33 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
+        // Only colors changed, and the platform draws them from the text:
+        // its typesetting, measurements and final layout all stand; the new
+        // text is mounted with the layout drawn (a fitted text has a layout
+        // of its own text, made again).
+        if !inserted
+            && cx.alignments == alignments
+            && colors_at_draw
+            && cx
+                .laid_out
+                .as_ref()
+                .is_none_or(|l| Arc::ptr_eq(&l.text, &cx.text))
+            && cx.text.same_but_colors(&text)
+        {
+            let text = Arc::new(text);
+            if let Some(laid) = &mut cx.laid_out {
+                laid.text = text.clone();
+            }
+            cx.text = text;
+            cx.metadata_changed = true;
+            return true;
+        }
         cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
-        // Platform typesetting state embeds colors too: always rebuild it.
+        // Platform typesetting state embeds colors too (unless it draws
+        // them from the text, above): rebuild it.
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;
@@ -6865,12 +7027,15 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
+    /// The text of `key`'s children into `out`; `in_press`: inside a span
+    /// taking presses.
     fn collect_text(
         &self,
         key: Key,
         style: ResolvedTextStyle,
         out: &mut AttributedText,
         alignments: &mut crate::AttachmentAlignments,
+        in_press: bool,
     ) {
         for &c in &self.nodes[key as usize].children {
             let child = &self.nodes[c as usize];
@@ -6885,14 +7050,36 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
-                    self.collect_text(c, inner, out, alignments);
-                    if pressable(child.events) {
+                    // `visibility: "hidden"` on a span hides its characters,
+                    // and those of the spans inside it, where they stand.
+                    if inner.hidden || child.view_style.hidden {
+                        inner = inner.hide();
+                    }
+                    let press = pressable(child.events);
+                    let hinted = child.overlay_watched & overlay::watch::HINT != 0;
+                    self.collect_text(c, inner, out, alignments, in_press || press);
+                    // A link with a hint (its URL) hears the pointer come
+                    // over its characters and leave them. A span that takes
+                    // no presses (a `RichEditor`'s link mark: the editor's
+                    // touches place the caret and open it) is one only for
+                    // its hint: no press, no stop of Tab. Inside a span that
+                    // takes presses it is none, so that span, the innermost
+                    // link there, keeps the press of those characters.
+                    // Hidden characters take no presses, as CSS's hidden
+                    // elements take no pointer events.
+                    if !inner.hidden && (press || (hinted && !in_press)) {
+                        let mut events = child.events;
+                        if hinted {
+                            events.set(EventKind::MouseEnter, true);
+                            events.set(EventKind::MouseLeave, true);
+                        }
                         out.links.push(crate::text::TextLink {
                             start,
                             end: out.len_utf16(),
                             node: child.id,
-                            events: child.events,
-                            focus_stop: child.props.as_ref().is_none_or(|p| p.focus_stop(true)),
+                            events,
+                            focus_stop: press
+                                && child.props.as_ref().is_none_or(|p| p.focus_stop(true)),
                         });
                     }
                     if let Some(test_id) = child.props.as_ref().and_then(|p| p.test_id.clone()) {
@@ -8321,6 +8508,47 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Hides the attachments of text `key` (views and images inside it) that
+    /// are inside a hidden span, `hidden` when `key` is one, and shows the
+    /// others: nothing of a hidden span is drawn or takes presses.
+    fn hide_attachments(&mut self, key: Key, hidden: bool) {
+        let count = self.nodes[key as usize].children.len();
+        for i in 0..count {
+            let c = self.nodes[key as usize].children[i];
+            let child = &self.nodes[c as usize];
+            if child.is_overlay() {
+                continue;
+            }
+            match child.kind {
+                Kind::RawText | Kind::Overlay => {}
+                Kind::Text => {
+                    let hidden = hidden || child.view_style.hidden;
+                    self.hide_attachments(c, hidden);
+                }
+                _ if child.layout.is_some() => self.set_hidden_in_text(c, hidden),
+                _ => {}
+            }
+        }
+    }
+
+    /// Hides attachment `key` with the hidden span it is in, or shows it
+    /// again; sent at once, as [`Core::set_spare`].
+    fn set_hidden_in_text(&mut self, key: Key, hidden: bool) {
+        let node = &mut self.nodes[key as usize];
+        if node.hidden_in_text == hidden {
+            return;
+        }
+        node.hidden_in_text = hidden;
+        if !node.created {
+            // Its new view gets both (`ensure_created`).
+            return;
+        }
+        let (id, props) = (node.id, node.mounted_props());
+        let style = self.mounted_view_style(key);
+        self.mount.push(MountItem::ViewStyle { id, style });
+        self.mount.push(MountItem::ViewProps { id, props });
+    }
+
     /// Hides list cell `key`, which has no item but still shows its last
     /// row (`visibility: hidden` and `accessibilityElementsHidden`), or
     /// shows it again as its list places it. Sent at once: this round's
@@ -8426,9 +8654,12 @@ impl<M: TextEngine> Core<M> {
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
         list.offset += anchor;
+        // A splice above the viewport already moved the offset, to keep
+        // the visible rows in place: like measurements, that says nothing
+        // about where the user is.
+        let spliced = list.take_splice_anchor();
+        anchor += spliced;
         let kept = anchor;
-        // A splice above the viewport already moved the offset.
-        anchor += list.take_splice_anchor();
         // Inverted lists keep their distance from the end instead;
         // `maintainVisibleContentPosition` follows the end near it.
         anchor += list.anchor_end(kept);

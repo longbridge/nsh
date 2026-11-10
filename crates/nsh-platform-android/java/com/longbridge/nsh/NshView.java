@@ -482,6 +482,35 @@ public class NshView extends FrameLayout {
         mounter.components.put(name, factory);
     }
 
+    /** Hears a scroll view the host watches ({@link #watchScroll}) come and go, on the UI thread. */
+    public interface ScrollWatcher {
+        /**
+         * The scroll view is there: at once when it already is, and again
+         * with a new handle when the app replaces the element or reloads.
+         *
+         * @param handle follows and drives it
+         */
+        void onAttached(NshScrollHandle handle);
+
+        /** The scroll view is gone (deleted, its {@code nativeID} changed or its app stopped): its handle is dead. */
+        void onDetached();
+    }
+
+    /**
+     * Watches the app's {@code <Scroll>} whose {@code nativeID} is
+     * {@code nativeId}, for native UI of the host that follows or drives the
+     * app's scrolling in the frame of the scroll, without JS (a sheet under
+     * the content, say): {@code watcher} gets a {@link NshScrollHandle} when
+     * the scroll view is there. With several of the same {@code nativeID},
+     * the newest one is watched. One watcher per {@code nativeID}.
+     *
+     * @param nativeId the scroll view's {@code nativeID}
+     * @param watcher the watcher (UI thread), or null to stop watching
+     */
+    public void watchScroll(String nativeId, ScrollWatcher watcher) {
+        mounter.watchScroll(nativeId, watcher);
+    }
+
     /**
      * The launch parameters of the apps loaded from now on: what the app
      * reads synchronously at start as {@code host.params} ({@code nsh/host}),
@@ -1104,6 +1133,13 @@ public class NshView extends FrameLayout {
     void submit(byte[] ops, Object[] objects, long seq) {
         main.post(() -> {
             if (handle != 0) mounter.apply(ops, objects, seq);
+        });
+    }
+
+    /** The app's functions for the UI thread wait in Rust: run them after the batches before. */
+    void runMainThreadTasks() {
+        main.post(() -> {
+            if (handle != 0) Native.runMainThreadTasks(handle);
         });
     }
 

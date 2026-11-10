@@ -145,6 +145,20 @@ fn emphasis_beside_cjk_text() {
             }),
         ]
     );
+    // Full-width brackets inside, punctuation after; plain CJK letters.
+    assert_eq!(
+        blocks("说明**（可选）**为"),
+        vec![p(vec![t("说明"), strong(vec![t("（可选）")]), t("为")])]
+    );
+    assert_eq!(
+        blocks("**注意**：这里，中文**加粗**中文"),
+        vec![p(vec![
+            strong(vec![t("注意")]),
+            t("：这里，中文"),
+            strong(vec![t("加粗")]),
+            t("中文"),
+        ])]
+    );
     // `_` reads as in CommonMark: not inside words.
     assert_eq!(blocks("中_“x”_中"), vec![p(vec![t("中_“x”_中")])]);
     // Code, HTML and links keep their text as written.
@@ -278,11 +292,29 @@ fn bare_urls_end_at_cjk_text() {
             t("。后面"),
         ])]
     );
-    // A path with CJK characters ends there; angle brackets and links keep
-    // the whole URL.
+    // Emphasis after the CJK text that ends the URL.
+    assert_eq!(
+        blocks("访问https://a.dev获取**数据**"),
+        vec![p(vec![
+            t("访问"),
+            url("https://a.dev"),
+            t("获取"),
+            strong(vec![t("数据")]),
+        ])]
+    );
+    // A path keeps its CJK characters and ends at CJK punctuation; angle
+    // brackets and links keep the whole URL.
     assert_eq!(
         blocks("https://zh.wikipedia.org/wiki/中文"),
-        vec![p(vec![url("https://zh.wikipedia.org/wiki/"), t("中文")])]
+        vec![p(vec![url("https://zh.wikipedia.org/wiki/中文")])]
+    );
+    assert_eq!(
+        blocks("见https://zh.wikipedia.org/wiki/中文（维基）。"),
+        vec![p(vec![
+            t("见"),
+            url("https://zh.wikipedia.org/wiki/中文"),
+            t("（维基）。"),
+        ])]
     );
     assert_eq!(
         blocks("<https://zh.wikipedia.org/wiki/中文> [维基](https://zh.wikipedia.org/wiki/中文)"),
@@ -354,6 +386,15 @@ fn emphasis_beside_latin_text_is_commonmarks() {
         ])])]
     );
     assert_eq!(blocks("naïve**“q”**x"), vec![p(vec![t("naïve**“q”**x")])]);
+    assert_eq!(
+        blocks("**bold**text a*b*c"),
+        vec![p(vec![
+            strong(vec![t("bold")]),
+            t("text a"),
+            em(vec![t("b")]),
+            t("c"),
+        ])]
+    );
 }
 
 #[test]
@@ -1112,6 +1153,42 @@ fn streaming() {
     );
     // Without the option, as written.
     assert_eq!(md("Some **bold").blocks, vec![p(vec![t("Some **bold")])]);
+}
+
+#[test]
+fn streamed_reference_brackets_and_unknown_tags_stay_text() {
+    // Every prefix of a streamed reply: reference numbers in escaped
+    // brackets never flash as a formula, and words in an unknown tag never
+    // vanish once their `>` has arrived.
+    let parser = Parser::new().options(MarkdownOptions {
+        streaming: true,
+        ..options()
+    });
+    for source in [
+        "增长较快\\[1\\]\\[3\\]，见 <US tech> 板块",
+        "\\[1\\] \\[3\\]",
+        "<foo> and <US tech>\nnext",
+    ] {
+        for (end, _) in source.char_indices().skip(1).chain([(source.len(), ' ')]) {
+            let prefix = &source[..end];
+            let doc = parser.markdown(prefix);
+            let debug = format!("{:?}", doc.blocks);
+            assert!(!debug.contains("Math"), "{prefix:?}: {debug}");
+            let text = doc.plain_text();
+            for tag in ["<US tech>", "<foo>"] {
+                if prefix.contains(tag) {
+                    assert!(text.contains(tag), "{prefix:?}: {text:?}");
+                }
+            }
+        }
+    }
+    // Finished, the same text.
+    assert_eq!(
+        blocks("增长较快\\[1\\]\\[3\\]，见 <US tech> 板块"),
+        vec![p(vec![t("增长较快[1][3]，见 <US tech> 板块")])]
+    );
+    assert_eq!(blocks("\\[1\\] \\[3\\]"), vec![p(vec![t("[1] [3]")])]);
+    assert_eq!(blocks("<foo> x"), vec![p(vec![t("<foo> x")])]);
 }
 
 #[test]

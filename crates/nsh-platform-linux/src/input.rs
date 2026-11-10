@@ -143,6 +143,9 @@ pub(crate) struct Input {
     mouse_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views that are hovered now.
     hovered: RefCell<Vec<NshView>>,
+    /// The link of a text the mouse is over, with its text view
+    /// ([`hover_link`]).
+    link_hovered: RefCell<Option<(NshView, nsh_core::TextLink)>>,
     /// Native gesture values by view.
     gestures: RefCell<FxHashMap<NodeId, (glib::WeakRef<NshView>, GestureValues)>>,
     /// The JS responder blocks native scrolling and pans.
@@ -266,6 +269,7 @@ pub(crate) fn install_on(surface: &Rc<Surface>, root: &NshView, window: Option<&
             // Where the mouse was last: GTK's leave carries no position.
             let (x, y) = surface.input.last.get().unwrap_or_default();
             set_hovered(&surface, Vec::new(), x, y);
+            hover_link(&surface, None, x, y);
         }
     });
     root.add_controller(motion);
@@ -308,6 +312,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
+    input.link_hovered.borrow_mut().take();
     input.last_state.set(None);
     input.button.set(None);
     input.gestures.borrow_mut().clear();
@@ -377,6 +382,17 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
         gestures.remove(&id);
     } else {
         gestures.insert(id, (view.downgrade(), values));
+    }
+}
+
+/// Presses a control without a pointer, after its input path admitted it.
+/// Keyboard and accessibility activation share the same payload and order.
+pub(crate) fn activate(surface: &Surface, view: &NshView) {
+    let events = view.state().events;
+    for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+        if events.contains(kind) {
+            surface.event(view.id(), kind, EventPayload::None);
+        }
     }
 }
 
@@ -592,6 +608,9 @@ fn shields_page(surface: &Surface, event: &gdk::Event) -> bool {
 fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
     use gdk::EventType as T;
     let ty = event.event_type();
+    if matches!(ty, T::ButtonPress | T::TouchBegin) {
+        pointer_input(surface);
+    }
     match ty {
         T::ButtonPress
         | T::ButtonRelease
@@ -935,6 +954,12 @@ pub(crate) fn hold(keys: gdk::ModifierType, down: bool) {
 
 /// Feeds a simulated pointer action through the same path as real input.
 #[cfg(feature = "dev")]
+/// A button or a finger went down: told before the press acts, so the
+/// focus it moves does not show (`focus-visible:`).
+fn pointer_input(surface: &Surface) {
+    surface.control(|c| c.set_input_modality(nsh_core::platform::InputModality::Pointer));
+}
+
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
     let held = HELD.with(std::cell::Cell::get);
@@ -947,6 +972,9 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     | Simulated::Hover(x, y)
     | Simulated::ContextMenu(x, y)) = action;
     surface.input.last.set(Some((x, y)));
+    if matches!(action, Simulated::Down(..) | Simulated::ContextMenu(..)) {
+        pointer_input(surface);
+    }
     match action {
         Simulated::Down(x, y) => {
             // Simulated drags carry no state: the button held is recorded.
@@ -969,6 +997,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
                 .last_state
                 .set(Some(gdk::ModifierType::empty()));
             motion(surface, Key::Mouse, x, y, time);
+            link_cursor(surface, x, y);
             mouse_moved(surface, x, y, gdk::ModifierType::empty());
         }
         Simulated::Wheel(x, y, dx, dy) => {
@@ -978,6 +1007,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
         Simulated::Hover(x, y) => {
             surface.input.last_state.set(Some(held));
             hover(surface, x, y);
+            link_cursor(surface, x, y);
             mouse_moved(surface, x, y, held);
         }
         Simulated::ContextMenu(x, y) => {
@@ -1190,24 +1220,60 @@ fn chain(view: &NshView) -> Vec<NshView> {
 /// A point in root coordinates in `view`'s.
 /// The cursor is per widget: a text with pressable link spans shows the
 /// pointer while the mouse at `(x, y)` (root coordinates) is on one, its
-/// own cursor elsewhere.
+/// own cursor elsewhere. The link under it hears the mouse come and go
+/// ([`hover_link`]).
 fn link_cursor(surface: &Surface, x: f32, y: f32) {
     let Some(hit) = pick(&event_root(surface), x, y) else {
+        hover_link(surface, None, x, y);
         return;
     };
     let view = &hit.view;
-    let over = {
+    // `None`: no text with links (its own cursor stays).
+    let link = {
         let s = view.state();
-        let Some(text) = &s.text else { return };
-        if text.text.links.is_empty() {
-            return;
+        match &s.text {
+            Some(text) if !text.text.links.is_empty() => {
+                let (lx, ly) = local(surface, view, x, y);
+                Some(crate::text::char_at(&s, lx, ly).and_then(|i| text.text.link_at(i).copied()))
+            }
+            _ => None,
         }
-        let (lx, ly) = local(surface, view, x, y);
-        crate::text::char_at(&s, lx, ly)
-            .and_then(|i| text.text.link_at(i))
-            .is_some_and(|l| has_press(l.events))
     };
-    set_cursor(view, over);
+    let Some(link) = link else {
+        hover_link(surface, None, x, y);
+        return;
+    };
+    set_cursor(view, link.is_some_and(|l| has_press(l.events)));
+    hover_link(surface, link.map(|l| (view.clone(), l)), x, y);
+}
+
+/// The mouse at `(x, y)` (root coordinates) is over `link` of a text view
+/// (none: no link): a link listening hears `onMouseEnter` when the mouse
+/// comes over its characters and `onMouseLeave` when it leaves them, as a
+/// view does (the core shows a link's hint, its URL, by them).
+fn hover_link(surface: &Surface, link: Option<(NshView, nsh_core::TextLink)>, x: f32, y: f32) {
+    let input = &surface.input;
+    let same = input.link_hovered.borrow().as_ref().map(|(_, l)| l.node)
+        == link.as_ref().map(|(_, l)| l.node);
+    if same {
+        return;
+    }
+    let state = input.last_state.get().unwrap_or(gdk::ModifierType::empty());
+    let old = input.link_hovered.replace(link.clone());
+    for (kind, hovered) in [(EventKind::MouseLeave, old), (EventKind::MouseEnter, link)] {
+        if let Some((view, l)) = hovered
+            && l.events.contains(kind)
+        {
+            let (lx, ly) = local(surface, &view, x, y);
+            let event = nsh_core::MouseEvent::new(
+                point(Points(lx), Points(ly)),
+                point(Points(x), Points(y)),
+                modifiers(state),
+                pressed_button(surface, state),
+            );
+            surface.event(l.node, kind, EventPayload::Mouse(event));
+        }
+    }
 }
 
 fn local(surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32, f32) {

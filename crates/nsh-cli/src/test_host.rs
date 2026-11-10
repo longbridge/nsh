@@ -156,6 +156,12 @@ fn start(
 ) -> Result<TestHost, String> {
     let server = serve(entry, options)?;
     let entry = resolve(entry)?;
+    if matches!(
+        target,
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+    ) {
+        crate::package::note_hidden_main_window(&entry);
+    }
     let dir = entry.parent().unwrap_or(Path::new("."));
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
@@ -201,6 +207,12 @@ fn start(
         if !foreground {
             command.arg("--background");
         }
+        // As the app runs (`--background` takes precedence): a menu bar app
+        // run `--foreground` has no Dock icon either. As `nsh run` does, a
+        // test runs as a regular app when `nsh.json` does not read (the
+        // keys only packages use are checked there too).
+        let config = crate::package::read_config(&entry).unwrap_or_default();
+        command.args(config.macos.host_args());
     }
     if target == Target::Gpui && cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some()
     {

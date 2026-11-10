@@ -143,6 +143,10 @@ impl SelectionTexts for Texts {
         &self.texts[i].text
     }
 
+    fn copied(&self, i: usize, range: std::ops::Range<u32>) -> String {
+        self.texts[i].copied_text(range)
+    }
+
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.frames[i]
     }
@@ -663,6 +667,8 @@ fn selected_text(surface: u64, area: Option<&NshView>) -> Option<String> {
         let texts = Texts::of(&current.area);
         current.model.text(&texts)
     });
+    // A selection of hidden characters only copies nothing.
+    let text = text.filter(|t| !t.is_empty());
     put(current);
     text
 }

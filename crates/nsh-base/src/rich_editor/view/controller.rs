@@ -199,6 +199,8 @@ pub(crate) struct Rv {
     pub(crate) table_gesture: Rc<RefCell<Option<TableGesture>>>,
     /// What that drag shows: a column's or row's new size, a drop line.
     pub(crate) table_preview: Signal<Option<TablePreview>>,
+    /// The selection a touch made, its handles and edit menu.
+    pub(crate) touch: super::touch::Touch,
 }
 
 impl Rv {
@@ -253,6 +255,7 @@ impl Rv {
             base_keymap: Rc::new(base_keymap),
             table_gesture: Rc::default(),
             table_preview: signal(None),
+            touch: super::touch::Touch::new(),
         };
         rv.sync_tree(&state);
         rv.sync_decorations(&state);
@@ -382,6 +385,7 @@ impl Rv {
         if selection_changed {
             self.sel_rev.update(|r| *r += 1);
             self.sync_node_selection(&state);
+            self.touch_follow();
         }
         if state.scroll_to_selection() != old.scroll_to_selection() {
             self.scroll_pending.set(true);
@@ -870,7 +874,7 @@ impl Rv {
         self.empty_sink();
     }
 
-    fn delete_selection(&self) {
+    pub(crate) fn delete_selection(&self) {
         let state = self.session.state();
         if state.selection().empty() {
             return;
@@ -881,7 +885,7 @@ impl Rv {
         self.dispatch(tr);
     }
 
-    fn select_all(&self) {
+    pub(crate) fn select_all(&self) {
         let state = self.session.state();
         let mut tr = state.tr();
         tr.set_selection(crate::rich_editor::state::AllSelection::new(state.doc()).into());
@@ -1616,7 +1620,7 @@ impl Rv {
 
     /// The selection a pointer makes from `anchor` to `head`: a plugin's,
     /// else a text selection.
-    fn between(
+    pub(crate) fn between(
         &self,
         state: &EditorState,
         anchor: &crate::rich_editor::model::ResolvedPos,
@@ -1634,6 +1638,16 @@ impl Rv {
             Point::new(at.x - page.x, at.y - page.y),
             self.scroll_y.get_untracked(),
         )));
+    }
+
+    /// The content point less the root view's point now: the offset the
+    /// pointer (or the last layout) showed, moved by the scroll since.
+    pub(crate) fn page_shift(&self) -> Option<Point<Points>> {
+        let (shift, scroll) = self.pointer.get()?;
+        Some(Point::new(
+            shift.x,
+            shift.y + (self.scroll_y.get_untracked() - scroll),
+        ))
     }
 
     /// Measures where the content is on the page (after a layout, and as a
@@ -2077,6 +2091,7 @@ impl Rv {
         if !focused {
             self.drag.borrow_mut().take();
             self.drop_at.set(None);
+            self.close_edit_menu();
         }
         self.restart_blink();
     }
@@ -2499,7 +2514,7 @@ fn word_bounds(text: &str) -> Vec<(usize, usize)> {
 }
 
 /// The word at `pos` (document positions), for a double press.
-fn word_at(doc: &Node, pos: usize) -> Option<(usize, usize)> {
+pub(crate) fn word_at(doc: &Node, pos: usize) -> Option<(usize, usize)> {
     let p = doc.resolve(pos).ok()?;
     if !p.parent().inline_content() {
         return None;

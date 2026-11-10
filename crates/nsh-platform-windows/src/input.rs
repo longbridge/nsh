@@ -70,6 +70,7 @@ use nsh_core::{
         SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
         laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -284,6 +285,9 @@ pub(crate) struct Input {
     mouse_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views that are hovered now.
     hovered: RefCell<Vec<NshView>>,
+    /// The link of a text the mouse is over, with its text view
+    /// ([`hover_link`]).
+    link_hovered: RefCell<Option<(NshView, nsh_core::TextLink)>>,
     /// The hosted item under the mouse (it gets moves and a leave).
     hover_item: RefCell<Option<Item>>,
     /// The [`crate::view::Hosted::raw`] items (web views) pointers went
@@ -492,6 +496,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
+    input.link_hovered.borrow_mut().take();
     input.hover_item.borrow_mut().take();
     input.raw.borrow_mut().clear();
     input.gestures.borrow_mut().clear();
@@ -832,6 +837,11 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if event.kind == PointerKind::Down {
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -899,6 +909,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             // hear where the mouse last was.
             let at = surface.input.last.take().unwrap_or((x, y));
             set_hovered(surface, Vec::new(), at, event.modifiers, None);
+            hover_link(surface, None, at, event.modifiers, None);
             set_hover_item(surface, None, (x, y), event.modifiers);
         }
     }
@@ -1044,6 +1055,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     let input = &surface.input;
     if MODIFIER_KEYS.contains(&event.vk) && !event.repeat {
         modifiers_changed(surface, event.modifiers);
+    } else if event.down {
+        // Before the key acts: the focus it moves shows (`focus-visible:`).
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
     }
     if !event.down {
         // `DefWindowProc` opens the window menu when Alt is released after
@@ -2073,6 +2087,12 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers, button: Op
         };
         set_hovered(surface, views, (x, y), modifiers, button);
     }
+    // The same pick says which link of a text the mouse is over.
+    let link = hit
+        .as_ref()
+        .filter(|h| h.item.is_none())
+        .and_then(|h| link_under(&h.view, x, y).map(|l| (h.view.clone(), l)));
+    hover_link(surface, link, (x, y), modifiers, button);
     // While the mouse is down, its moves go to what it pressed.
     if !pressed {
         let item = hit.and_then(|h| h.item.map(|n| Item::Hosted(h.view, n)));
@@ -2100,6 +2120,50 @@ fn set_hovered(
     for v in entered {
         set_state(surface, v, HOVERED, true);
         hover_event(surface, v, EventKind::MouseEnter, at, modifiers, button);
+    }
+}
+
+/// The link of `view`'s text under the mouse at `(x, y)` (root
+/// coordinates), if any.
+fn link_under(view: &NshView, x: f32, y: f32) -> Option<nsh_core::TextLink> {
+    if view
+        .state()
+        .text
+        .as_ref()
+        .is_none_or(|t| t.text.links.is_empty())
+    {
+        return None;
+    }
+    let (lx, ly) = local(view, x, y);
+    let s = view.state();
+    let text = s.text.as_ref()?;
+    crate::text::char_at(&s, lx, ly).and_then(|i| text.text.link_at(i).copied())
+}
+
+/// The mouse at `at` (root coordinates) is over `link` of a text view
+/// (none: no link): a link listening hears `onMouseEnter` when the mouse
+/// comes over its characters and `onMouseLeave` when it leaves them, as a
+/// view does (the core shows a link's hint, its URL, by them).
+fn hover_link(
+    surface: &Surface,
+    link: Option<(NshView, nsh_core::TextLink)>,
+    at: (f32, f32),
+    modifiers: Modifiers,
+    button: Option<MouseButton>,
+) {
+    let input = &surface.input;
+    let same = input.link_hovered.borrow().as_ref().map(|(_, l)| l.node)
+        == link.as_ref().map(|(_, l)| l.node);
+    if same {
+        return;
+    }
+    let old = input.link_hovered.replace(link.clone());
+    for (kind, hovered) in [(EventKind::MouseLeave, old), (EventKind::MouseEnter, link)] {
+        if let Some((view, l)) = hovered
+            && l.events.contains(kind)
+        {
+            surface.event(l.node, kind, mouse_payload(&view, at, modifiers, button));
+        }
     }
 }
 

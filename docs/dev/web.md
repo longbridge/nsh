@@ -11,11 +11,13 @@ Every web runtime runs the app's TSX on the browser's own JavaScript engine: the
 its own (no `nsh-js`, no QuickJS). The browser loads the app's ES modules; Wasm contains the Rust engine, reactive
 graph, core, base components, layout and DOM backend. Native targets keep QuickJS.
 
-`Player.runModule(entry, { appId, capabilities, chunks, imports })` returns a promise after the entry module
+`Player.runModule(entry, { appId, capabilities, chunks, imports, params })` returns a promise after the entry module
 loads; `Player.runSource(code, { appId, capabilities, sourceMap, name })` does the same for a module given as
 source text (a blob URL: development bundles, the playground). Either replaces the previous app. Each run has a
 fresh same-origin iframe realm, preserving native module identity, cycles, top-level await and browser globals.
-`stop()` disposes Rust owners, outstanding bridge calls, callbacks, blob module URLs and the iframe. The iframe is
+`params` (a JSON object) is the app's `host.params` (`nsh_set_host_params`, kept for the next start and given to its
+engine's `HostChannel`); the packaged page passes the JSON of a `<script type="application/json" id="nsh-params">`
+when the page has one, so a server that already has the first screen's data can hand it to the app with the page. `stop()` disposes Rust owners, outstanding bridge calls, callbacks, blob module URLs and the iframe. The iframe is
 **not a security sandbox**: standalone code has the page origin's authority. Do not use it for untrusted plugins;
 signed packages, hardening and VM limits are the native hosts' (`sandbox.md`).
 
@@ -190,7 +192,9 @@ build to the same file) and takes `nsh.js` from the crate.
   in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
   added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
   (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
-  (the dev server serves its files at the root). The app ships as minified ES modules
+  (the dev server serves its files at the root). `nsh.json` `web.history` reaches `createPlayer`'s `history` on
+  both pages (the packaged page's `app.history`, the dev page's `HISTORY`, which `with_page_host` fills in); without
+  it the player's default (`window.top === window`) holds. The app ships as minified ES modules
   (`app.<digest>.js` and `<chunk>.<digest>.js`). An import map resolves original chunk URLs to hashed files;
   transitive entry fonts load before startup and dynamic imports prepare the requested chunk's font dependencies.
   The browser loads static dependencies, module cycles and dynamic chunks itself. No bytecode or hardening
@@ -336,7 +340,12 @@ A Rust app (`nsh.json` `"root"`: `rust_app::RootConfig`, its entry the `nsh.json
 at all: its member `rust-web` is `nsh-platform-web` **without the feature `browser-core`** (no browser host, the
 engine without `js`) and `nsh_platform_web::rust_app!(sets, app_root())`, whose `nsh_app_init` also registers the
 root (`set_root`); `app_root()` is generated from `"root"`, `"theme"` (compiled in with `include_str!`) and
-`"appearance"` (`Root::appearance`). The page calls `player.runRust()` (`nsh_start_rust`) instead of `runModule`:
+`"appearance"` (`Root::appearance`). Its `sets` take `nsh/base`'s core part only
+(`nsh_base::registry_of([parts::core])`, `RustApp::rust_web_sets`), not `nsh_base::registry()`: with no JS, nothing
+makes a component by its registered name, the root makes each component by type (`nsh_base::select()`), which links
+that component where it is used, and the set gives the theme's tokens and the built-in scroll bars. Registering every
+part would link every component of `nsh/base` into the module. The page calls `player.runRust()` (`nsh_start_rust`)
+instead of `runModule`:
 the packaged page when `app.rust` is set (no `app.js`), the dev page (`{{rust}}`) once the dev server greets it; the
 dev session publishes no bundles (`DevSession::rust_root`). The browser host's exports (`nsh_browser_*`) are
 `cfg(feature = "browser-core")`. The runtime builds to
@@ -344,8 +353,9 @@ dev session publishes no bundles (`DevSession::rust_root`). The browser host's e
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
 (`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
-Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no browser host, so smaller than
-the prebuilt runtime, which a TSX entry needs.
+Rust app (2026-11) its `nsh.wasm` is 9.15 MB (3.11 MB with `gzip -9`, 2.18 MB with brotli; 12.78 / 4.40 / 3.00 MB
+while it registered every part of `nsh/base`; `examples/tasks-rs` 5.23 MB, 11.04 MB before): no browser host, which
+a TSX entry needs.
 
 ### Crates that call JS through wasm-bindgen
 
@@ -789,6 +799,28 @@ browsers' touches into what phones report:
   again, and when no page went the top one gets the address it showed (`shownUrl`). `page` events are checked as
   `http(s)` URLs (`check_page_url`) instead of against the app's schemes, and every address the app sets by
   `check_address` (length, no whitespace), where it calls.
+- **Address moves the app did not make** (`UrlScheme.on("change")`): each entry's state also has its place among this
+  load's entries (`nshIndex`), and the player mirrors each entry's depth (`historyIndex`, `historyDepths`), so a back
+  of the app's own goes to the newest earlier entry at most as deep (`entryAtDepth`) and a `popstate` knows which way
+  the user went. The root's `onUrlScheme` event with `change: "back" | "forward" | "address"` (`url_scheme::CHANGE`,
+  `AppUrlChangeCause`; another cause is the address alone, quietly) sets the address and queues an `AppUrlChange` for
+  `next_app_url_change()`, at most 16, and only once something listened (`hears_changes`: before it the address has
+  them); the TS module posts each to the listeners there are and keeps none. The player sends it for a traversal
+  between entries of one depth (`tellAddress(cause)`), for a `#fragment` the user typed (a state-less entry of the
+  page whose address is not the one shown: it gets this session's state at the depth shown and the next index, and the
+  app's pages stay; before, it sent the app back to its start), and for a back that popped pages when the entry's
+  address is not the one the app showed and the app set none as it answered: the player waits until the pages it
+  popped are dismissed (`dismissing`, `goBack`) and the app had a turn after their `onDismiss`, at most
+  `POP_ANSWER_MS` (1.5 s; a page's `onDismiss` follows its slide, `settlePop`). A forward to a depth the stack lost
+  stays `open`.
+- **Pushed addresses** (`setUrl(url, { history: "push" })`, `set_app_url_with(url, HistoryBehavior::Push)`): the core
+  sends the web root `Command::PushAppUrl` (`pushAppUrl`) instead of `SetAppUrl`, and `setPageUrl` marks the waiting
+  address a push (`pageUrlPush`; in one turn the last address wins and a push wins over a replace). `syncHistory`
+  pushes it as an entry of its own (`pushEntry(depth, url)`, which drops the mirror's forward entries as the browser
+  drops its own) when the turn pushed no page's entry (else the address goes on the new top entry, as a replace) and
+  it is not the landed entry's address; a turn that popped pages pushes it once its `history.go` lands. A new run
+  drops a push waiting (`resetHistory`). `browser/address.js` hands the options to the core as they are; the core
+  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL.
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
@@ -933,6 +965,36 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   is: its own imports are absolute URLs.
   Headless `nsh test` runs the same module for each app a test opens (`nsh_testing` `page_host.rs`,
   `docs/dev/tooling.md` "Headless runs").
+
+## Search engines
+
+A site published with `nsh package --target web` can be read by search engines and link previews as server-rendered
+HTML is: its views carry the document's structure, its pages are URLs, and its head says what each page is.
+Prerendering (writing each URL's first screen as static HTML ahead of time, or on demand as incremental static
+regeneration does) is a tool of the site's own beside NSH; `examples/seo-site` is one (`server.mjs`, `render.mjs`).
+
+**Document elements.** `nsh.js` `elementTag` picks the HTML element a view or text is drawn as from its props
+(`encode.rs` `props_json`): `role="header"` is `h1` to `h6` by `accessibilityLevel` (`h2` without one, ARIA's
+default), `role="link"` with an `href` (`ViewProps::href`, which `nsh-base`'s `Link` sets) is `a`, and
+`web={{ element }}` (`Prop::WebElement`, `ViewProps::web_element`, the `WebElement` enum) names what `role` cannot
+say (`p`, `nav`, `article`, `time`, ...) and wins over the role. `retag` replaces the view's element by one of that
+tag, carrying its attributes, children and fields and taking its place in `views`; views whose element is a control
+of its own (images, scroll views, canvases, inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the
+browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
+link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
+listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the
+browser does, and a context menu on it is the browser's (open in a new tab, copy the link) unless the link or a view
+in it listens for `onContextMenu` (`contextMenu`, where the runtime otherwise prevents the browser's menu). The other
+backends store `web_element` and draw nothing differently.
+
+**The page's head.** `nsh/web` is a native module like the platform modules (`nsh_core::js::NATIVE_MODULES`): the
+QuickJS hosts serve `nsh-js`'s `web_page.rs` (`Head` renders nothing), the browser runtime its
+own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web` namespace). `page.js` runs in the
+page's realm (the app runs in its iframe's) and writes the page's real `<head>`: each mounted `Head` is an entry in
+mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later
+one wins key by key, `meta` by `name` / `property`), the elements the heads made (`data-nsh-head`) are written again,
+and `document.title` / `<html lang>` fall back to what the page had before. A `canonical` path starts at the site's
+base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
 
 ## Not implemented
 

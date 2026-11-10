@@ -175,6 +175,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | 被按下时。 |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | 指针悬停在视图上时。 |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | 视图获得焦点时。 |
+| `focusVisibleStyle` | `.focus_visible(\|s\| ..)` | `focus-visible:` | 视图获得焦点并显示焦点时：键盘把焦点移到了这里，或应用在按键之后移动了焦点；文本输入框获得焦点时总是显示。按压或轻点给出的焦点不显示。 |
 | `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | 视图自身或其内部的视图获得焦点时（`Overlay` 的内容算在它所在的视图内部）。 |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | `disabled` 时。 |
 | `checkedStyle` | `.checked(\|s\| ..)`、`.checked_style(style)` | `checked:` | `accessibilityState.checked` 为 `true` 时（复选框、开关、单选框；`"mixed"` 不算勾选）。 |
@@ -376,6 +377,40 @@ view().on_press(open_page).child(
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
 
+### 页面的标记
+
+在 Web 上，每个视图都是一个 HTML 元素，即它的属性所表明的元素，让搜索引擎和屏幕阅读器看到页面的标题、段落、链接和地标区域；布局、样式和事件仍是视图自己的。其他平台照常绘制视图。
+
+| 视图是什么 | Web 上的元素 |
+|---|---|
+| `role="header"`，`accessibilityLevel` 为 1 到 6（Rust 中为 `.role(AccessibilityRole::Header)`、`.accessibility_level(n)`） | `h1` … `h6`（没有级别时为 `h2`） |
+| 带 `href` 的 [`Link`](./link.md) | 指向 `href` 的 `a` |
+| `web={{ element }}`（Rust 中为 `.web_element(WebElement::P)`） | 它指定的元素：`"p"`、`"nav"`、`"header"`、`"footer"`、`"main"`、`"article"`、`"section"`、`"aside"`、`"ul"`、`"ol"`、`"li"`、`"strong"`、`"em"`、`"blockquote"`、`"figure"`、`"figcaption"`、`"time"`、`"address"`；优先于 `role` |
+| 其他 | `div` |
+
+链接的按压归 `Link`：普通点击触发它的 `onOpen`（配合 `openWith="app"`，应用照常导航）；爬虫跟随 `href`，按住修饰键点击或用鼠标中键点击时像浏览器链接一样打开它。
+
+```rust tabs
+use nsh_base::{LinkOpenWith, link};
+use nsh_core::{WebElement, prelude::*};
+
+link()
+    .href("/notes/q3-earnings")
+    .open_with(LinkOpenWith::App)
+    .on_open(move |_: &SharedString| routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").role(AccessibilityRole::Header).accessibility_level(2))
+    .child(text("Revenue grew 12%.").web_element(WebElement::P))
+```
+
+```tsx tabs
+<Link href="/notes/q3-earnings" openWith="app" onOpen={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text role="header" accessibilityLevel={2}>Q3 earnings</Text>
+  <Text web={{ element: "p" }}>Revenue grew 12%.</Text>
+</Link>
+```
+
+[Web](../docs/web.md#搜索引擎) 展示了用这种方式构建的完整站点。
+
 ### 驱动动画值的手势
 
 这些属性把手势绑定到[原生动画值](../modules/nsh.md#animation)，值在 UI 线程上变化，每帧都不经过应用代码。参见[触摸与手势](../docs/touch-and-gestures.md)。
@@ -477,6 +512,7 @@ view()
 | `focus()` / `blur()` | `focus()` / `blur()` | `ViewRef` | 让 `<Input>` 获取焦点（弹出键盘），或让可按下的视图获得键盘焦点 / 失去焦点。 |
 | `measure()` | `measure()` | `ViewRef` | [视图的位置](../docs/touch-and-gestures.md)。 |
 | `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
+| `insertText(text)` | `insert_text(text)` | `InputRef` | 以用户编辑的方式用 `text` 替换选区，是撤销历史中的一步（Linux、Web、无头测试）。 |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`、`ListRef` | 滚动到某个偏移量。 |
 | `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef`（可缩放的 `<Scroll>`） | 围绕内容中的某点缩放到 `scale`。 |
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | 沿列表方向滚动到某个偏移量。 |

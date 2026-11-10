@@ -9,7 +9,8 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::{MountBatch, Points, Size};
 use nsh_engine::{
-    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, Lifecycle, MountSink, Policy,
+    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, Lifecycle, MainThreadTask,
+    MountSink, Policy,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -80,6 +81,11 @@ impl MountSink for MainThreadSink {
                 mounter.request_frame();
             }
         });
+    }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        // The main queue is serial: after the batches submitted before it.
+        DispatchQueue::main().exec_async(move || task.run());
     }
 
     fn hot_update_failed(&self) {
@@ -394,6 +400,8 @@ impl RootView {
             notifications: true,
             // AVAudioEngine and AVPlayer.
             audio: true,
+            // wgpu on Metal, in builds with it, until it finds no GPU.
+            shaders: nsh_engine::shader::LINKED,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()
@@ -827,6 +835,7 @@ impl RootView {
             access,
             self.ivars().options.components.clone(),
         );
+        installed.watch_scrolls(self.ivars().options.scroll_watchers.clone());
         // The app's downloaded images go through its disk cache.
         installed.set_image_cache(engine.image_cache());
         if self.ivars().options.fps || nsh_engine::perf::enabled_by_env() {
@@ -889,6 +898,9 @@ pub struct SurfaceOptions {
     pub cache: nsh_engine::CacheOptions,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
+    /// The scroll views the embedding app watches by `nativeID`
+    /// ([`crate::AppView::watch_scroll`]).
+    pub scroll_watchers: crate::ScrollWatchers,
     /// The embedding app's channel with the apps (`nsh/host`): launch
     /// parameters, events and handlers of their calls and posts, one for
     /// every app the surface runs.
@@ -909,6 +921,7 @@ impl Default for SurfaceOptions {
             storage: None,
             cache: nsh_engine::CacheOptions::default(),
             components: crate::component::Components::default(),
+            scroll_watchers: crate::ScrollWatchers::default(),
             host: nsh_engine::HostChannel::default(),
             fps: false,
         }

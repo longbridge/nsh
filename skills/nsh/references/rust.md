@@ -666,6 +666,7 @@ async fn digest(path: std::path::PathBuf) -> Result<usize, String> {
 | `set_timeout`, `set_interval` | Engine thread | Delayed and repeating work | Yes |
 | `blocking(f)` | tokio's blocking threads | Blocking calls | **No** |
 | `background(fut)` | tokio's threads | `Send` futures, CPU work | **No** |
+| `run_on_main_thread(f)` | The platform's main thread, after the turn's views are mounted | APIs that only work there (AppKit, UIKit); await the result | Engine thread |
 
 - Long work on the engine thread freezes the UI's bindings. Move it to `blocking` or `background`, await the result in a
   `spawn`, and write signals there.

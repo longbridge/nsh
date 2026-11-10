@@ -418,6 +418,10 @@ style span:gone textUnderlineOffset 2
 style span:SHOUT textTransform uppercase
 style span:outer color #007affff
 style span:inner color #007affff
+# A hidden span keeps its characters and their place: as wide as shown.
+expect Seen unseen words
+frame id:hidden-span 0 942 131 17
+frame id:shown-span 0 959 131 17
 style span:inner fontSize 16
 covers [styles] fontFamily
 covers [styles] fontSize
@@ -677,6 +681,20 @@ style id:frame backgroundColor #ccccccff
 state id:popup-field none
 style id:holder backgroundColor #ccccccff
 covers [props] focusWithinStyle
+# state-focus-visible
+tap id:case-state-focus-visible
+# No focus: the field's own style.
+style id:ringed backgroundColor #ccccccff
+style id:ringed opacity 0.5
+# A field that edits shows its focus: `focus-visible:` and
+# `focusVisibleStyle`.
+state id:ringed focused
+style id:ringed backgroundColor #3366ffff
+style id:ringed opacity 1
+state id:ringed none
+style id:ringed backgroundColor #ccccccff
+style id:ringed opacity 0.5
+covers [props] focusVisibleStyle
 # paint-inline-align
 tap id:case-paint-inline-align
 # The headless engine's 16.8 pt line has its baseline at the bottom and a

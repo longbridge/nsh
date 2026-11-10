@@ -112,7 +112,8 @@ pub use self::{
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     audio::{
-        AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+        AudioFailure, AudioPlayer, PlayerState, Sound, SoundSource, audio_available, audio_player,
+        load_sound,
     },
     builder::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
@@ -141,9 +142,9 @@ pub use self::{
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
-        CaretEvent, Composition, FileDropEvent, GestureEvent, HintReason, ImageProgress,
-        NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection, TextSelectionEvent,
-        VideoInfo, VideoProgress, WebNavigation,
+        CaretEvent, Composition, FileDragEvent, FileDropEvent, GestureEvent, HintReason,
+        ImageProgress, NativeEvent, OverlayPosition, PanEvent, ScrollEvent, Selection,
+        TextSelectionEvent, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -191,7 +192,7 @@ pub(crate) use self::{
     animated::LiveNode,
     back::BackListener,
     builder::{ElKind, PlaceFn},
-    component::{AnyInstance, caught},
+    component::{AnyInstance, caught, panic_message},
     task::{
         Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
         NotificationAction, SpeechAction,
@@ -224,6 +225,7 @@ pub use crate::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
         transparent_black, transparent_white, white, yellow,
     },
+    main_thread::{MainThreadError, OnMainThread},
     overlay::{Align, Placement},
     platform::{
         Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,

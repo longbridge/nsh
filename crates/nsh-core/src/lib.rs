@@ -34,6 +34,7 @@ pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
+pub mod main_thread;
 pub mod mobile;
 mod mount;
 pub mod navigation;
@@ -95,7 +96,7 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
+        DialogButtonStyle, EditAction, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
         HapticNotification, HeaderSlot, HeaderSystemItem, IMAGE_SCALES, ImageProp, ImageScales,
         ImageSource, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
         ListAlignment, ListContentStyle, ListViewport, ModalAnimation, ModalPresentation,
@@ -103,8 +104,8 @@ pub use crate::{
         PasteEvent, PastedFile, PayloadValue, PointerType, PressEvent, Prop, ROOT_ID, ResizeMode,
         ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, ScrollbarSetting, SnapAlignment,
         StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent,
-        TouchPhase, TouchPoint, TransitionFallback, Viewability, WebInput, WebKey, WebLoad,
-        WebSource,
+        TouchPhase, TouchPoint, TransitionFallback, Viewability, WebElement, WebInput, WebKey,
+        WebLoad, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

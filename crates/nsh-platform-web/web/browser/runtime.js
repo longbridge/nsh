@@ -1,3 +1,5 @@
+import { createWebPage } from "./page.js";
+
 // A module given as source text, as a blob URL; its source map inline, so
 // DevTools maps it.
 function moduleURL(code, name, sourceMap) {
@@ -57,10 +59,11 @@ export function createBrowserHost(player) {
     } },
     // `owned`: blob URLs that go with the app. `nativeExports`
     // (`{ specifier: [name] }`): what the app imports by name from native
-    // modules (a published app's, `web::native_exports`). Their bindings
-    // are live, so what a gate called after the start registers (a side
-    // module loaded before the chunk) is filled then.
-    async run(entry, { appId = "", capabilities = "", imports: moduleMap = {}, chunks = {}, nativeExports = {} } = {}, owned = []) {
+    // modules (a published app's, `web::native_exports`). Their modules
+    // are made before the realm loads any module; their bindings are live,
+    // so what a gate called after the start registers (a side module
+    // loaded before the chunk) is filled then.
+    async run(entry, { appId = "", capabilities = "", imports: moduleMap = {}, chunks = {}, nativeExports = {}, params } = {}, owned = []) {
       if (current?.stopping) throw new Error("cannot start an app during disposal");
       const [width, height] = player.reset();
       let values;
@@ -162,7 +165,23 @@ export function createBrowserHost(player) {
           // errors retain their filename and original rejection value.
           bootstrap.crossOrigin = "anonymous";
           bootstrap.src = new URL("./bootstrap.js", import.meta.url).href;
-          bootstrap.onerror = () => finish(false, new Error("could not load the browser facade"));
+          bootstrap.onerror = async () => {
+            let detail = bootstrap.src;
+            // A stalled probe must not hide the load failure. Stop it early.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3000);
+            try {
+              const response = await fetch(bootstrap.src, { cache: "no-store", signal: controller.signal });
+              const type = response.headers.get("content-type") ?? "no content-type";
+              detail += ` (status ${response.status}, ${type})`;
+              response.body?.cancel();
+            } catch (error) {
+              detail += ` (fetch failed: ${error})`;
+            } finally {
+              clearTimeout(timer);
+            }
+            finish(false, new Error(`could not load the browser facade: ${detail}`));
+          };
           bootstrap.onload = () => finish(false, new Error("the browser facade did not initialize"));
           realm.addEventListener("error", failed);
           try { doc.head.append(bootstrap); } catch (error) { finish(false, error); }
@@ -216,6 +235,8 @@ export function createBrowserHost(player) {
         call(401, [appId, capabilities]);
         player.begin(width, settings => {
           player.withStrings([settings], (p, l) => player.wasm.nsh_environment(p, l));
+          // `host.params`: what the page gives the app to start with.
+          if (params != null) player.withStrings([JSON.stringify(params)], (p, l) => player.wasm.nsh_set_host_params?.(p, l));
           const delay = player.wasm.nsh_browser_start(width, height, player.dark ? 1 : 0, devicePixelRatio || 1);
           if (delay === -2) throw new Error("browser engine startup failed");
           return delay;
@@ -242,6 +263,7 @@ export function createBrowserHost(player) {
         host = createHost(call, reactive, dom, env, active, nsh.host);
         nsh.host = host.host;
         configureAPIs(nsh, modules, dom, active, env);
+        const page = createWebPage(reactive, player);
         // Where the app is the page, `setUrl` takes a URL of the page's
         // origin, resolved once as `history.replaceState` resolves it
         // (against the page's `<base href>`).
@@ -261,6 +283,7 @@ export function createBrowserHost(player) {
         namespaces.set("nsh/android", { ...mobile, isAvailable: false });
         namespaces.set("nsh/ios", { ...mobile, isAvailable: false });
         namespaces.set("nsh", nsh);
+        namespaces.set("nsh/web", page.exports);
         namespaces.set("nsh:rt", dom.rt);
         // Development bundles import it for `__nsh_hot`, the global their
         // modules and update scripts call.

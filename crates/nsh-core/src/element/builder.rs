@@ -156,6 +156,27 @@ impl IntoListener<PressEvent, ()> for Listener<()> {
     }
 }
 
+/// A drag-entry listener may ignore the offered files, as before they were reported.
+impl<F: Fn() + 'static> IntoListener<events::FileDragEvent, WithoutEvent> for F {
+    fn into_listener(self) -> Listener<events::FileDragEvent> {
+        Listener::new(Rc::new(move |_: &events::FileDragEvent| self()))
+    }
+}
+
+/// A drag-entry listener may keep its original unit argument.
+impl<F: Fn(&()) + 'static> IntoListener<events::FileDragEvent, OfUnit> for F {
+    fn into_listener(self) -> Listener<events::FileDragEvent> {
+        Listener::new(Rc::new(move |_: &events::FileDragEvent| self(&())))
+    }
+}
+
+/// A stored unit listener may ignore a drag entry's files.
+impl IntoListener<events::FileDragEvent, ()> for Listener<()> {
+    fn into_listener(self) -> Listener<events::FileDragEvent> {
+        self.map(|_: &events::FileDragEvent| ())
+    }
+}
+
 impl<E: ?Sized> Clone for Listener<E> {
     fn clone(&self) -> Self {
         Self {
@@ -1406,11 +1427,13 @@ pub trait Interactive: Element {
         self
     }
 
-    /// A local file drag entered this desktop drop destination.
-    fn on_file_drag_enter<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// A local file drag entered this desktop drop destination. The URLs
+    /// describe the offered files; their contents are not read. GTK waits
+    /// for its file-list preload before reporting entry.
+    fn on_file_drag_enter<M>(self, listener: impl IntoListener<events::FileDragEvent, M>) -> Self {
         self.on(
             EventKind::FileDragEnter,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::file_drag),
         )
     }
 
@@ -1821,6 +1844,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The HTML element the web draws the view as (a paragraph, a
+    /// landmark, a list), for search engines and readers of the page's
+    /// markup, where `role` cannot say it: headings are
+    /// `role(AccessibilityRole::Header)` with a level, links `Link`s. The
+    /// other platforms ignore it.
+    fn web_element(mut self, element: crate::WebElement) -> Self {
+        super::host::set(self.node(), Prop::WebElement(Some(element)));
+        self
+    }
+
     /// Whether a desktop press drags the window and a double click follows
     /// the system's title-bar behavior. The nearest explicit value wins;
     /// inputs and press/touch handlers inside a drag region stay interactive.
@@ -1864,7 +1897,8 @@ pub trait Interactive: Element {
         self
     }
 
-    /// The id inputs name an input accessory by (`nativeID`).
+    /// `nativeID`: names the view for others: inputs find an input accessory
+    /// by it, and the embedding app a scroll view it watches (`watchScroll`).
     fn native_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::NativeId(Some(id.into())));
         self
@@ -1888,6 +1922,16 @@ pub trait Interactive: Element {
     fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.style().extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while focused and showing it (Tailwind's `focus-visible:`;
+    /// TS: `focusVisibleStyle`): the keyboard moved the focus there, or it
+    /// is an input that edits. Focus a press gave shows [`Self::focus`]'s
+    /// styles only: the ring for keyboard users goes here.
+    fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::FOCUS_VISIBLE, s);
         self
     }
 
@@ -2541,6 +2585,14 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
+    /// Styles while its root has focus and shows it (`focus-visible:`):
+    /// the keyboard moved the focus there.
+    pub fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS_VISIBLE, s);
+        self
+    }
+
     /// Styles while its root or an element inside it has focus
     /// (`focus-within:`).
     pub fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
@@ -2708,6 +2760,14 @@ pub trait ComponentBuilder: Element {
         self
     }
 
+    /// Styles while its root has focus and shows it (`focus-visible:`):
+    /// the keyboard moved the focus there.
+    fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS_VISIBLE, s);
+        self
+    }
+
     /// Styles while its root or an element inside it has focus
     /// (`focus-within:`).
     fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
@@ -2745,5 +2805,43 @@ impl<C: Component> ParentElement for ComponentElement<C> {}
 impl<C: Component> IntoElement for ComponentElement<C> {
     fn into_element(self) -> AnyElement {
         AnyElement(self.node)
+    }
+}
+
+#[cfg(test)]
+mod file_listener_tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn file_drag_enter_keeps_all_original_listener_forms() {
+        let calls = Rc::new(Cell::new(0));
+        let a = calls.clone();
+        let b = calls.clone();
+        let c = calls.clone();
+        let d = calls.clone();
+        let unit: Listener<()> = (move |_: &()| c.set(c.get() + 1)).into_listener();
+        let nodes = [
+            view().on_file_drag_enter(move || a.set(a.get() + 1)),
+            view().on_file_drag_enter(move |_: &()| b.set(b.get() + 1)),
+            view().on_file_drag_enter(unit),
+            view().on_file_drag_enter(move |e: &events::FileDragEvent| {
+                assert_eq!(e.uris, ["file:///tmp/a%20b.png"]);
+                assert_eq!(e.mime_types, ["image/png"]);
+                d.set(d.get() + 1);
+            }),
+        ];
+        let payload = EventPayload::FileDrop(vec!["file:///tmp/a%20b.png".into()]);
+        for mut node in nodes {
+            let listener = node
+                .node()
+                .handlers
+                .iter()
+                .find(|(kind, _)| *kind == EventKind::FileDragEnter)
+                .unwrap();
+            listener.1.call(&payload);
+        }
+        assert_eq!(calls.get(), 4);
     }
 }

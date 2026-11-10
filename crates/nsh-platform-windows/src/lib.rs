@@ -51,6 +51,7 @@ mod navigation;
 mod notifications;
 mod picker;
 mod render;
+mod richedit;
 mod scroll;
 mod selectable_view;
 mod shader;
