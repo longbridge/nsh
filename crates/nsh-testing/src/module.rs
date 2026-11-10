@@ -489,7 +489,8 @@ impl nsh_core::element::CallbackArgs for FakeArgs {
 
 impl JsValue for ModuleFakes {
     fn ts_type(_types: &mut TsTypes) -> String {
-        "Record<string, Record<string, unknown>>".into()
+        // Not `unknown | …`, which is `unknown` and leaves the arrows untyped.
+        "Record<string, Record<string, {} | null | ((...args: any[]) => unknown)>>".into()
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
@@ -788,13 +789,11 @@ fn host_setup(
             let fake = match fake {
                 ModuleFakeOption::Value(value) => ModuleFake::Value(value),
                 ModuleFakeOption::Function(function) => {
-                    // Not a name `host.call` reaches by chance: no
-                    // embedding app answers it.
-                    let name = format!("nsh/test: {specifier}#{path}");
+                    let name = format!("{specifier}#{path}");
                     let index = functions.len();
                     functions.push((name.clone(), HostFunction::Module(function)));
                     let tx = tx.clone();
-                    channel.handle(name.clone(), move |call| {
+                    channel.handle_module_fake(name.clone(), move |call| {
                         let _ = tx.send((index, call));
                     });
                     ModuleFake::Call(name)

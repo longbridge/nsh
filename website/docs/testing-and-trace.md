@@ -244,6 +244,10 @@ expect(saved).toEqual([["token", null]]);
 Arguments and answers cross as JSON values. Faking runs headless only: with `--target`, `modules` rejects
 with `ERR_NSH_TEST_UNSUPPORTED`.
 
+Keys name an export or one of its own members, such as a class's static methods: instances keep their class's
+methods, and a value stand-in for a `#[class]` export replaces the class as a whole. A key that names no export or
+member is skipped with a warning in the log.
+
 The URLs the app opens ([`openUrl`](../modules/nsh.md#openurl), a `TextView`'s links with `links="open"`) are
 recorded and reported to the app as opened, and nothing opens on this machine. `app.openedUrls()` lists them:
 

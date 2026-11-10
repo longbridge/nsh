@@ -447,9 +447,11 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - `open`'s `modules` are stand-ins on the same channel (`HostChannel::fake_module_export`, read by the app's VM
   through `HostBridge::module_fakes`): when the VM makes a native module's exports (`nsh-js` `modules.rs` `init`,
   `host_module`), a faked export or member (`Export.member`, and a flat default module's object member) becomes the
-  stand-in (`host_channel.rs` `stand_in`): a value, a function returning it, or a function whose calls cross as a
-  call of a name only the test's channel handles (`nsh/test: <specifier>#<path>`), its arguments a JSON array,
-  without the `host` capability's check or a time limit, answered by the test's function like a handler's;
+  stand-in (`host_channel.rs` `stand_in`): a value, a function returning it, or a function whose calls cross as
+  `HostBridge::call_module_fake` of `<specifier>#<path>`, its arguments a JSON array, without the `host` capability's
+  check or a time limit, answered by the test's function like a handler's. Their handlers
+  (`HostChannel::handle_module_fake`) are kept apart from the embedding app's: `host.call` never reaches them, and
+  they leave the channel unconfigured, so `host.available()` and a page host (`web.host`) stay as they were;
 - images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 

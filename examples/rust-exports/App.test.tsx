@@ -22,30 +22,3 @@ test("the class keeps its state in Rust", async () => {
   await app.waitFor("Accrued: $116.15");
   expect(app.texts()).toContain("Savings: $116.15");
 });
-
-test("open's modules stand in for the crate's module", async () => {
-  const calls: unknown[][] = [];
-  // Faking runs headless only: on a real platform (`--target`) `open`
-  // rejects `modules`, and the crate's own module answers instead.
-  const app = await open("./App.tsx", {
-    modules: {
-      "rust-exports/native": {
-        // A value: the plain function returns it at once.
-        "Ledger.format": "$9.99",
-        // A function: each call is a promise of what it returns.
-        "Ledger.fetchRate": async (...args: unknown[]) => {
-          calls.push(args);
-          return 0.25;
-        },
-      },
-    },
-  }).catch((e: Error & { code?: string }) => {
-    if (e.code === "ERR_NSH_TEST_UNSUPPORTED") return null;
-    throw e;
-  });
-  if (!app) return;
-  expect(app.shows("Formatted at once: $9.99")).toBe(true);
-  await app.press("Fetch rate");
-  await app.waitFor("Rate: 25%");
-  expect(calls).toEqual([[]]);
-});

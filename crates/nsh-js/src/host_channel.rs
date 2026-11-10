@@ -255,17 +255,20 @@ fn start_call(cx: Ctx, args: Args<'_>) -> R<V> {
         })
         .flatten();
     let data = to_json(cx, args.get(1))?;
-    begin_call(cx, name, data, timeout, deadline)
+    begin_call(cx, name, data, timeout, deadline, false)
 }
 
 /// Starts call `name` with `data`, waiting `timeout` milliseconds (0: as
-/// long as it takes) until `deadline`: its promise.
+/// long as it takes) until `deadline`: its promise. A stand-in's call
+/// (`stand_in`) goes to the test's function of `name`, never to the
+/// embedding app's.
 fn begin_call(
     cx: Ctx,
     name: String,
     data: JsonValue,
     timeout: f64,
     deadline: Option<nsh_core::time::Instant>,
+    stand_in: bool,
 ) -> R<V> {
     let state = channel(cx);
     if state.calls.borrow().len() >= MAX_PENDING_CALLS {
@@ -276,9 +279,12 @@ fn begin_call(
     let id = state.next_call.get() + 1;
     state.next_call.set(id);
     let started = match bridge(cx) {
-        Some(bridge) => bridge
-            .call(id, &name, data)
-            .map_err(|message| nsh_core::host_channel::host_error(&message)),
+        Some(bridge) => if stand_in {
+            bridge.call_module_fake(id, &name, data)
+        } else {
+            bridge.call(id, &name, data)
+        }
+        .map_err(|message| nsh_core::host_channel::host_error(&message)),
         None => Err(nsh_core::host_channel::no_host()),
     };
     match started {
@@ -327,7 +333,9 @@ pub(crate) fn stand_in(cx: Ctx, real: Raw, fake: &ModuleFake) -> R<V> {
                 let data: R<Vec<JsonValue>> =
                     (0..args.len()).map(|i| to_json(cx, args.get(i))).collect();
                 match data {
-                    Ok(data) => begin_call(cx, name.clone(), JsonValue::Array(data), 0.0, None),
+                    Ok(data) => {
+                        begin_call(cx, name.clone(), JsonValue::Array(data), 0.0, None, true)
+                    }
                     Err(Throw) => js::rejected_with_exception(cx),
                 }
             })
@@ -549,8 +557,9 @@ mod tests {
     struct Bridge {
         calls: RefCell<Vec<(u64, String, JsonValue)>>,
         posts: RefCell<Vec<(String, JsonValue)>>,
-        /// The stand-ins of `nsh`'s exports.
+        /// The stand-ins of `nsh`'s exports, and the calls of theirs.
         fakes: Vec<(String, ModuleFake)>,
+        fake_calls: RefCell<Vec<(u64, String, JsonValue)>>,
     }
 
     impl HostBridge for Bridge {
@@ -575,6 +584,11 @@ mod tests {
                 "nsh" => self.fakes.clone(),
                 _ => Vec::new(),
             }
+        }
+
+        fn call_module_fake(&self, id: u64, name: &str, data: JsonValue) -> Result<(), String> {
+            self.fake_calls.borrow_mut().push((id, name.into(), data));
+            Ok(())
         }
     }
 
@@ -675,6 +689,7 @@ host.post("seen", "home");
                 ("Image.prefetch".into(), ModuleFake::Value(json!("ready"))),
                 ("Image.getSize".into(), ModuleFake::Call("size".into())),
                 ("nothing".into(), ModuleFake::Value(json!(0))),
+                ("Image.prefech".into(), ModuleFake::Value(json!(0))),
             ],
             ..Bridge::default()
         });
@@ -684,18 +699,42 @@ host.post("seen", "home");
 import {{ batch, Image }} from "nsh";
 report("batch " + batch(() => 1));
 report("prefetch " + Image.prefetch("a.png"));
+report("typo " + ("prefech" in Image));
 Image.getSize("b.png", {{ at: 2 }}).then((s) => report("size " + s.width));
 "#
         ))
         .unwrap();
         host.run_jobs();
-        assert_eq!(reported(&host), ["batch 42", "prefetch ready"]);
-        let calls = bridge.calls.borrow().clone();
+        assert_eq!(reported(&host), ["batch 42", "prefetch ready", "typo false"]);
+        assert!(bridge.calls.borrow().is_empty());
+        let calls = bridge.fake_calls.borrow().clone();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1, "size");
         assert_eq!(calls[0].2, json!(["b.png", { "at": 2 }]));
         host.host_reply(calls[0].0, Ok(json!({ "width": 64 })));
         assert_eq!(reported(&host), ["size 64"]);
+    }
+
+    #[test]
+    fn the_app_s_calls_never_reach_a_stand_in() {
+        let host = Host::new().unwrap();
+        allow_host(&host);
+        let bridge = Rc::new(Bridge {
+            fakes: vec![("Image.getSize".into(), ModuleFake::Call("size".into()))],
+            ..Bridge::default()
+        });
+        host.set_host_bridge(bridge.clone());
+        host.eval_source(&format!(
+            r#"{REPORT}
+host.call("size", "b.png");
+"#
+        ))
+        .unwrap();
+        host.run_jobs();
+        assert!(bridge.fake_calls.borrow().is_empty());
+        let calls = bridge.calls.borrow().clone();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, "size");
     }
 
     #[test]

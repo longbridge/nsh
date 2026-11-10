@@ -223,6 +223,8 @@ expect(saved).toEqual([["token", null]]);
 
 参数和回答以 JSON 值传递。替换只在 headless 运行：使用 `--target` 时，`modules` 会以 `ERR_NSH_TEST_UNSUPPORTED` reject。
 
+键对应一个导出或它自身的成员，例如类的静态方法：实例沿用类的方法，`#[class]` 导出的值替身会整个替换这个类。对不上任何导出或成员的键会被跳过，并在日志中给出警告。
+
 应用打开的 URL（[`openUrl`](../modules/nsh.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）会被记录下来，并以“已打开”回报给应用，本机上不会真正打开任何东西。`app.openedUrls()` 列出它们：
 
 ```tsx

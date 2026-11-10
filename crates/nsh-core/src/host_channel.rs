@@ -138,6 +138,17 @@ pub trait HostBridge {
         let _ = specifier;
         Vec::new()
     }
+
+    /// Hands call `id` of a stand-in ([`ModuleFake::Call`] `name`), with
+    /// its arguments as an array, to the test's function of `name`, as
+    /// [`HostBridge::call`] does to the embedding app's handlers: the app's
+    /// `host.call` never reaches these. `nsh test`'s hook, not part of the
+    /// embedding API.
+    #[doc(hidden)]
+    fn call_module_fake(&self, id: u64, name: &str, data: JsonValue) -> Result<(), String> {
+        let _ = (id, data);
+        Err(format!("no stand-in answers \"{name}\""))
+    }
 }
 
 /// A stand-in `nsh test` gives an export of a native module, or a member of
@@ -150,9 +161,9 @@ pub enum ModuleFake {
     /// This value in its place; a function's stand-in is a function
     /// returning it.
     Value(JsonValue),
-    /// A function whose calls go to the embedding app's handler of this
-    /// name ([`HostBridge::call`]), with the arguments as an array: it
-    /// returns a promise of the answer.
+    /// A function whose calls go to the test's function of this name
+    /// ([`HostBridge::call_module_fake`]), with the arguments as an array:
+    /// it returns a promise of the answer.
     Call(String),
 }
 
