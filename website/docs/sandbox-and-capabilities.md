@@ -156,7 +156,10 @@ An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and
 
 Paths are matched as the request sends them, after WHATWG's URL parser resolves dot segments, percent-encoded ones
 too: `/v1/../admin` and `/v1/%2e%2e/admin` are `/admin`, which `pathPrefix: "/v1"` does not cover. The request goes
-out with the URL that was checked, so the server receives the path the rule matched.
+out with the URL that was checked, so the server receives the path the rule matched. A rule's own paths are read the
+same way: `/my photos` covers `/my%20photos`, and a path with a `.` or `..` segment is an error. An encoded `/` or `\`
+(`%2F`, `%5C`) stays as written, so `/v1/x%2F..%2F..%2Fadmin` is under `/v1`; a server that decodes them before it
+resolves dot segments serves another path.
 
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so

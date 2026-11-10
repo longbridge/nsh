@@ -120,11 +120,13 @@ pub struct HttpGrant {
     pub schemes: Vec<String>,
     /// The port, the scheme's default when the URL has none; `None`: any.
     pub port: Option<u16>,
-    /// Exact paths (without the query).
+    /// Exact paths (without the query), as requests send them: WHATWG's
+    /// serialization (`/my%20photos`), which parsing a grant writes them
+    /// in; a path written otherwise matches nothing.
     pub paths: Vec<String>,
     /// Path prefixes, matching whole segments (`/v1` covers `/v1/x`, not
     /// `/v10`). With `paths`, a path matching either is covered; with
-    /// neither, every path is.
+    /// neither, every path is. Written as `paths` are.
     pub path_prefixes: Vec<String>,
 }
 
@@ -800,6 +802,28 @@ fn native_relative(uri: &str, base: Option<&str>) -> bool {
         && !is_own_media(uri)
         && local_file(uri).is_none()
         && !names_host(uri)
+}
+
+/// `path` (starting with `/`) as a request sends it: WHATWG's serialization
+/// (`/my photos` → `/my%20photos`, `/über` → `/%C3%BCber`). `None` when a
+/// segment is `.` or `..`, encoded or not and as WHATWG splits it (at `\\`
+/// too, tabs and newlines dropped), which a request never sends.
+fn path_as_sent(path: &str) -> Option<String> {
+    // Read as WHATWG reads it: tabs and newlines dropped, a backslash a `/`.
+    let path: String = path
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .map(|c| if c == '\\' { '/' } else { c })
+        .collect();
+    let dots = path.split('/').any(|segment| {
+        let segment = segment.to_ascii_lowercase().replace("%2e", ".");
+        segment == "." || segment == ".."
+    });
+    if dots {
+        return None;
+    }
+    let url = url::Url::parse(&format!("http://h{path}")).ok()?;
+    Some(url.path().to_owned())
 }
 
 /// Whether `text` starts with `prefix`, ignoring ASCII case.
@@ -1805,6 +1829,22 @@ fn http_grant(g: &Map<String, Value>) -> Result<HttpGrant, String> {
             "{what}: path `{bad}` must start with / and has no `*`, `?` or `#` (paths match as written)"
         ));
     }
+    // Requests are matched as WHATWG's parser sends them (`/my%20photos`),
+    // so the grant's paths are read the same way.
+    let as_sent = |list: Vec<String>| -> Result<Vec<String>, String> {
+        let mut sent = Vec::new();
+        for path in list {
+            let path = path_as_sent(&path).ok_or_else(|| {
+                format!("{what}: path `{path}` has a `.` or `..` segment, which no request sends")
+            })?;
+            if !sent.contains(&path) {
+                sent.push(path);
+            }
+        }
+        Ok(sent)
+    };
+    let paths = as_sent(paths)?;
+    let path_prefixes = as_sent(path_prefixes)?;
     Ok(HttpGrant {
         host: HostPattern::new(host)?,
         methods,
@@ -3409,6 +3449,47 @@ mod tests {
                 Some(Cow::Borrowed(own)),
                 "{own}"
             );
+        }
+    }
+
+    /// A grant's paths are read as a request sends them (WHATWG percent-
+    /// encodes spaces, `{`, `}` and what is not ASCII), so a path written
+    /// with them matches; one with dot segments could match nothing and is
+    /// a parse error.
+    #[test]
+    fn grant_paths_match_as_requests_send_them() {
+        let a = Access {
+            declared: caps(
+                r#"{ "network": { "http": [
+                    { "host": "cdn.example.com", "pathPrefix": "/my photos" },
+                    { "host": "cdn.example.com", "paths": ["/über.png", "/{id}.png"] }
+                ] } }"#,
+            ),
+            granted: None,
+        };
+        for url in [
+            "https://cdn.example.com/my photos/a.png",
+            "https://cdn.example.com/my%20photos/a.png",
+            "https://cdn.example.com/über.png",
+            "https://cdn.example.com/{id}.png",
+        ] {
+            assert!(a.allows_http("GET", url), "{url}");
+            assert!(a.media_url(url, None, None).is_some(), "{url}");
+        }
+        assert!(!a.allows_http("GET", "https://cdn.example.com/my photosx/a.png"));
+        // WHATWG reads `\\` as `/` and drops tabs and newlines, so these
+        // are dot segments too.
+        for bad in [
+            "/a/../b",
+            "/./a",
+            "/a/%2e%2e/b",
+            "/a/.%2E",
+            "/public\\..\\private",
+            "/a/.\t./b",
+            "/a/.\n/b",
+        ] {
+            let json = serde_json::json!({ "network": { "http": [{ "host": "h.example", "pathPrefix": bad }] } });
+            assert!(Capabilities::from_json(&json).is_err(), "{bad}");
         }
     }
 

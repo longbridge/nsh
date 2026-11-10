@@ -143,7 +143,8 @@ source names a host is read after WHATWG's stripping (spaces and C0 controls aro
 that stripping changed is ambiguous. The spellings of a key are merged and may appear together (gpui-shell's
 `scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot
 match is a parse error rather than a silent grant of nothing: a scheme outside the four, port 0, a path without a
-leading `/` or with `*`, `?` or `#`, a method that is not a token. WebSockets (the global and the `websocket` module)
+leading `/`, with `*`, `?` or `#`, or with a `.` or `..` segment, a method that is not a token. A rule's paths are kept
+as requests send them (`path_as_sent`: WHATWG's serialization, `/my photos` → `/my%20photos`). WebSockets (the global and the `websocket` module)
 go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
 `https` (or under their own scheme, for rules listing `ws` / `wss`), on the parsed URL the handshake then connects
 to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). A
