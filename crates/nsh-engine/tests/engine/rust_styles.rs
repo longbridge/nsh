@@ -494,7 +494,7 @@ fn a_rust_apps_tabs_show_the_apps_value() {
 }
 
 /// Buttons of a Rust app whose looks its code declares for one size,
-/// beside those its root carries from `nsh.json` `"components"`.
+/// beside those its root carries from its theme's `"components"`.
 #[component]
 fn DeclaredButtons() -> impl IntoElement {
     nsh_core::element::set_component_style(
@@ -512,7 +512,7 @@ fn DeclaredButtons() -> impl IntoElement {
         .child(nsh_base::button().child(text("Plain")))
 }
 
-/// A Rust app's root carries `nsh.json` `"components"` (as the generated
+/// A Rust app's root carries its theme's `"components"` (as the generated
 /// code compiles it in): the engine stores it before the first render, so
 /// the button that picks the variant takes its classes along with the
 /// typed look the app's code declares, and the one that picks none takes

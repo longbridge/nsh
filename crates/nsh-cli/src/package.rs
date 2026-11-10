@@ -103,10 +103,6 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde_json::Value>,
-    /// The looks of the `nsh/base` controls (read and checked by the
-    /// bundler; Rust apps read it in `rust_app.rs`).
-    #[serde(default, rename = "components")]
-    _components: Option<serde_json::Value>,
     /// The languages whose data the app ships (read by the bundler).
     #[serde(default, rename = "locales")]
     _locales: Option<serde_json::Value>,
@@ -1795,15 +1791,6 @@ mod tests {
                 "unknown key `web.futureWebKey`",
             ]
         );
-    }
-
-    #[test]
-    fn nsh_json_knows_the_components_key() {
-        let (_, ignored) = parse_config(
-            r#"{ "components": { "button": { "variants": { "primary": "bg-primary" } } } }"#,
-        )
-        .unwrap();
-        assert!(ignored.is_empty(), "{ignored:?}");
     }
 
     #[test]

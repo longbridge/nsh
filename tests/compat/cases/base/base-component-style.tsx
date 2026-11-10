@@ -1,8 +1,8 @@
 // A case of the API's test suite (docs/dev/compatibility.md): the looks
-// an app declares once for `nsh/base`'s components (nsh.json
-// `"components"`), picked by name: a `Button`'s `variant` and `size` take
-// the classes nsh.json gives them, the theme's tokens resolved; a button
-// that picks none takes no look. Its script checks each.
+// an app declares once for `nsh/base`'s components (its theme's
+// `"components"`, beside `cssVars`), picked by name: a `Button`'s `variant`
+// and `size` take the classes the theme gives them, its tokens resolved; a
+// button that picks none takes no look. Its script checks each.
 import { Text, View } from "nsh";
 import { Button } from "nsh/base";
 

@@ -548,6 +548,12 @@ pub(super) struct Components {
     app_tokens: Arc<Tokens>,
     /// The embedding app's tokens: win over [`Self::app_tokens`].
     host_tokens: Option<Arc<Tokens>>,
+    /// The app's own component looks (its theme's `components`, as JSON),
+    /// given back when a theme without `components` follows one with them.
+    app_component_styles: Option<Box<str>>,
+    /// Whether the component looks applied are a theme's that `setTheme`
+    /// gave, not the app's own.
+    theme_component_styles: bool,
     /// Boxed: making a view (or applying its patches) takes its instance
     /// out of the map and back.
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
@@ -713,6 +719,8 @@ impl Default for Components {
             tokens: Arc::new(Tokens::default()),
             app_tokens: Arc::new(Tokens::default()),
             host_tokens: None,
+            app_component_styles: None,
+            theme_component_styles: false,
             instances: FxHashMap::default(),
             owners: FxHashMap::default(),
             slot_names: FxHashMap::default(),
@@ -899,7 +907,10 @@ impl<M: TextEngine> Core<M> {
     /// `uiTheme` on the root: the app's theme file (`nsh.json`, `setTheme`),
     /// which the UI set that reads themes makes tokens of. What it cannot
     /// read is left out and the rest applies, so a bundle made by a newer
-    /// NSH keeps its theme here.
+    /// NSH keeps its theme here. A theme with `components` (a theme
+    /// `setTheme` gives) brings its component looks; one without gives the
+    /// app's own back. The app's own theme reaches the core without them:
+    /// they come checked, as [`Core::set_component_styles`].
     pub(super) fn set_ui_theme(&mut self, json: &str) {
         match self.components.registry.tokens(Some(json)) {
             Some(Ok((tokens, left_out))) => {
@@ -911,15 +922,39 @@ impl<M: TextEngine> Core<M> {
             Some(Err(e)) => log::warn!("theme: {e}"),
             None => log::warn!("theme: no UI set reads themes"),
         }
+        let components = serde_json::from_str::<serde_json::Value>(json)
+            .ok()
+            .and_then(|theme| theme.get("components").map(ToString::to_string));
+        match components {
+            Some(components) => {
+                self.components.theme_component_styles = true;
+                self.apply_component_styles(&components);
+            }
+            None if self.components.theme_component_styles => {
+                self.components.theme_component_styles = false;
+                let own = self.components.app_component_styles.clone();
+                self.apply_component_styles(own.as_deref().unwrap_or("{}"));
+            }
+            None => {}
+        }
     }
 
-    /// The looks `nsh.json` `components` declares for `nsh-base`'s
-    /// components (JSON text: `componentStyles` on a TSX app's root, a
-    /// Rust app's [`Root::components_json`](crate::element::Root::components_json)),
-    /// replacing those set before. What it cannot read is left out with a
-    /// warning and the rest applies, so a bundle made by a newer NSH keeps
-    /// its looks here.
+    /// The app's own component looks, its theme's `components` (JSON text:
+    /// `componentStyles` on a TSX app's root, a Rust app's
+    /// [`Root::components_json`](crate::element::Root::components_json)),
+    /// replacing those set before; while a theme `setTheme` gave has looks
+    /// of its own, they apply when a theme without them follows. What it
+    /// cannot read is left out with a warning and the rest applies, so a
+    /// bundle made by a newer NSH keeps its looks here.
     pub fn set_component_styles(&mut self, json: &str) {
+        self.components.app_component_styles = Some(json.into());
+        if !self.components.theme_component_styles {
+            self.apply_component_styles(json);
+        }
+    }
+
+    /// Replaces every class look with those of `json`.
+    fn apply_component_styles(&mut self, json: &str) {
         let _entered = self.components.runtime.enter();
         for what in crate::element::set_component_classes(json) {
             log::warn!("{what}, ignored");

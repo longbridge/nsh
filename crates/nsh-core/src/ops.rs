@@ -2768,7 +2768,7 @@ pub enum Prop {
     #[prop(js = "uiTheme", with = crate::js::host_values::ui_theme, internal)]
     UiTheme(Box<str>),
     /// The looks of `nsh-base`'s components per variant and size
-    /// (`nsh.json` `components`, JSON), on the root.
+    /// (the `components` of `nsh.json`'s theme, JSON), on the root.
     #[prop(js = "componentStyles", with = crate::js::host_values::component_styles, internal)]
     ComponentStyles(Box<str>),
     /// An image option.

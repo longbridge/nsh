@@ -669,8 +669,8 @@ impl Root {
         }
     }
 
-    /// The looks `nsh.json` `"components"` declares for `nsh-base`'s
-    /// components, as its JSON text, which nsh's generated code compiles
+    /// The looks the app's theme (`nsh.json` `"theme"`) declares in its
+    /// `"components"` for `nsh-base`'s components, as its JSON text, which nsh's generated code compiles
     /// in (its classes checked when it was generated). The engine stores
     /// them before the first render, beside what the app's code declares
     /// with [`set_component_style`](super::set_component_style); what the

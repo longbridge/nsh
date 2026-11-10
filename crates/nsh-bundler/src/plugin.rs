@@ -49,22 +49,24 @@ pub(crate) struct NshPlugin {
     pub(crate) split: bool,
 }
 
-/// The `"tailwind"`, `"theme"`, `"appearance"`, `"statusBar"` and
-/// `"components"` of the app's `nsh.json`.
+/// The `"tailwind"`, `"theme"` (and the component looks the theme
+/// declares, `"components"`), `"appearance"` and `"statusBar"` of the app's
+/// `nsh.json`.
 #[derive(Debug, Default)]
 pub(crate) struct ThemeSetup {
     /// The Tailwind theme as JSON, for the runtime (`None`: the default).
     pub(crate) json: Option<String>,
     /// Parsed, to check classes at build time.
     pub(crate) theme: nsh_core::tailwind::Theme,
-    /// The theme of the Rust components (a gpui-kit theme file), checked.
+    /// The theme of the Rust components (a gpui-kit theme file), checked,
+    /// without its `"components"` (which go in `components`).
     pub(crate) ui: Option<String>,
     /// `"appearance"`: `"light"` or `"dark"` (`None`: the system's).
     pub(crate) appearance: Option<&'static str>,
     /// `"statusBar"`, checked, as JSON: the status bar's default.
     pub(crate) status_bar: Option<String>,
-    /// `"components"`, its unknown classes taken out, as JSON: the looks
-    /// of `nsh-base`'s components per variant and size.
+    /// The theme's `"components"`, its unknown classes taken out, as JSON:
+    /// the looks of `nsh-base`'s components per variant and size.
     pub(crate) components: Option<String>,
     /// The app's translations (`locales/`) and the language data it ships
     /// (`"locales"`), as the runtime's `i18n` takes them: a module of their

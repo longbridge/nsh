@@ -523,3 +523,92 @@ fn set_theme_replaces_the_apps_theme_while_it_runs() {
         ]
     );
 }
+
+/// A TSX app whose theme declares its buttons' looks, and that sets a theme
+/// with looks of its own, one without and `null` while it runs: a step
+/// every 100 ms.
+const SET_THEME_COMPONENTS: &str = r##"import { mount, setTheme, signal, Text, View } from "nsh";
+import { Button } from "nsh/base";
+
+const status = signal("start");
+const steps = [
+  () => {
+    setTheme({
+      cssVars: {},
+      components: { button: { variants: { primary: "bg-[#00ff00]" } } },
+    });
+    return "theirs";
+  },
+  () => {
+    setTheme({ cssVars: { light: { brand: "#0000ff" } } });
+    return "colors only";
+  },
+  () => {
+    setTheme({
+      cssVars: {},
+      components: { button: { variants: { primary: "bg-[#ff0000]" } } },
+    });
+    return "theirs again";
+  },
+  () => {
+    setTheme(null);
+    return "back";
+  },
+];
+steps.forEach((step, i) => setTimeout(() => status.set(step()), 100 * (i + 1)));
+
+mount(() => (
+  <View>
+    <Button variant="primary" testID="buy">
+      <Text>Buy</Text>
+    </Button>
+    <Text>{status()}</Text>
+  </View>
+));
+"##;
+
+/// A theme `setTheme` gives brings its component looks; a theme without
+/// them gives the app's own back, and so does `null`.
+#[test]
+fn set_theme_brings_its_component_looks() {
+    let config = r##"{ "theme": {
+        "cssVars": {},
+        "components": { "button": { "variants": { "primary": "bg-[#123456]" } } }
+    } }"##;
+    let (_engine, rx) = crate::components::start_with(
+        SET_THEME_COMPONENTS,
+        Environment::default(),
+        None,
+        Some(config),
+    );
+    let batches = crate::components::until(&rx, |b| crate::components::shows(b, "back"));
+    let buy = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("buy") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the button");
+    let mut backgrounds: Vec<Color> = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter_map(|item| match item {
+            MountItem::ViewStyle { id, style } if *id == buy => Some(style.background_color),
+            _ => None,
+        })
+        .collect();
+    backgrounds.dedup();
+    assert_eq!(
+        backgrounds,
+        [
+            Color(0x123456ff),
+            Color(0x00ff00ff),
+            Color(0x123456ff),
+            Color(0xff0000ff),
+            Color(0x123456ff),
+        ]
+    );
+}

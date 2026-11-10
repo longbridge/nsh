@@ -550,7 +550,8 @@ fn toml_string(line: &str, key: &str) -> Option<String> {
 }
 
 /// The `"root"` of the app's `config` (its `nsh.json`, in `dir`) with its
-/// `"theme"`, `"appearance"`, `"statusBar"` and `"components"`.
+/// `"theme"` (and the component looks it declares, `"components"`),
+/// `"appearance"` and `"statusBar"`.
 fn root_config(
     dir: &Path,
     config: &serde_json::Value,
@@ -583,11 +584,15 @@ fn root_config(
             Some(path)
         }
     };
-    // The theme's tokens are classes (`bg-primary`) of `"components"`: the
-    // default's unless the app sets its own.
+    // The theme's tokens are classes (`bg-primary`) of its `"components"`:
+    // the default's unless the app sets its own.
     let mut tokens = None;
+    let mut declared = None;
     if let Some(theme) = &theme {
         let json = fs::read_to_string(theme)?;
+        declared = serde_json::from_str::<serde_json::Value>(&json)
+            .ok()
+            .and_then(|mut theme| theme.get_mut("components").map(serde_json::Value::take));
         let (theme, ignored) = nsh_base::Theme::from_json_lenient(&json)
             .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
         for what in ignored {
@@ -597,14 +602,14 @@ fn root_config(
         }
         tokens = Some(theme.into_tokens());
     }
-    let components = match config.get("components") {
+    let components = match &declared {
         None => None,
         Some(v) => {
             let mut classes = nsh_core::tailwind::Theme::default();
             classes.set_tokens(&tokens.unwrap_or_else(|| nsh_base::Theme::default().into_tokens()));
             let (checked, unknown) = nsh_bundler::checked_components(&classes, v);
             for what in unknown {
-                crate::ui::warn(format_args!("nsh.json: components: {what}, ignored"));
+                crate::ui::warn(format_args!("nsh.json: theme: components: {what}, ignored"));
             }
             match checked {
                 Some(json) => {
@@ -3203,16 +3208,17 @@ mod tests {
                 "{bad}"
             );
         }
-        // `"components"` is written to the workspace with the classes this
-        // NSH does not know taken out (with a warning); none, no file.
+        // The theme's `"components"` is written to the workspace with the
+        // classes this NSH does not know taken out (with a warning); none,
+        // no file.
         let root = super::root_config(
             &dir,
             &config(
-                r#"{ "root": "App", "components": { "button": {
+                r#"{ "root": "App", "theme": { "cssVars": {}, "components": { "button": {
                     "base": "rounded-md bg-nope",
                     "variants": { "primary": "bg-primary" },
                     "defaults": { "variant": "primary" }
-                } } }"#,
+                } } } }"#,
             ),
             &ws,
         )

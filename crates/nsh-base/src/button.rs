@@ -32,12 +32,12 @@ pub struct ButtonProps {
     #[prop(default)]
     pub hit_slop: Prop<EdgeInsets>,
     /// The variant of the looks the app declared for buttons
-    /// (`set_component_style("button", ..)` in Rust, nsh.json
+    /// (`set_component_style("button", ..)` in Rust, the theme file's
     /// `"components": { "button": { "variants": .. } }`) this button has
     /// (`None`: the declared default). NSH names and draws none.
     pub variant: Prop<Option<SharedString>>,
     /// The size of the looks the app declared for buttons, as `variant`
-    /// (nsh.json `"components": { "button": { "sizes": .. } }`). TS's
+    /// (the theme file's `"components": { "button": { "sizes": .. } }`). TS's
     /// `size`; Rust's setter is `with_size`, beside `Styled::size` (the
     /// width and height), as gpui-component's `Sizable::with_size`.
     #[prop(rename = "size")]

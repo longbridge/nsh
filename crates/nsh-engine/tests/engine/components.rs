@@ -2571,7 +2571,7 @@ mount(() => (
 ));
 "##;
 
-/// A TSX app's `nsh.json` `"components"` reaches the core before the first
+/// A TSX app's theme's `"components"` reaches the core before the first
 /// render: the `Button` that picks the variant takes its classes, with the
 /// theme's token resolved, and the one that picks none takes no look.
 #[test]
@@ -2582,8 +2582,10 @@ fn a_tsx_button_takes_its_declared_variant() {
         None,
         Some(
             r##"{
-                "theme": { "cssVars": { "light": { "primary": "#0000ff" }, "dark": { "primary": "#0000ff" } } },
-                "components": { "button": { "variants": { "primary": "bg-primary bg-nope" } } }
+                "theme": {
+                    "cssVars": { "light": { "primary": "#0000ff" }, "dark": { "primary": "#0000ff" } },
+                    "components": { "button": { "variants": { "primary": "bg-primary bg-nope" } } }
+                }
             }"##,
         ),
     );

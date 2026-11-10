@@ -3387,7 +3387,7 @@ unsafe extern "C" fn unmount(
 /// or null), its appearance (`"light"` / `"dark"`, or null), the status
 /// bar's default (`nsh.json` `"statusBar"` as JSON, or null), what
 /// `appInfo()` reports (JSON, or null) and the looks of `nsh-base`'s
-/// components (`nsh.json` `"components"` as JSON, or null), before anything
+/// components (the theme's `"components"` as JSON, or null), before anything
 /// renders.
 unsafe extern "C" fn setup(
     cx: *mut JsContext,

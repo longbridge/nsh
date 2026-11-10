@@ -947,7 +947,7 @@ pub trait Element: IntoElement + Sized {
     }
 
     /// The looks the app declared for `component` (a component's name,
-    /// `"button"`: [`super::set_component_style`], nsh.json `components`)
+    /// `"button"`: [`super::set_component_style`], the theme's `components`)
     /// in the `variant` and `size` its page picks (`None`: the declared
     /// defaults), on this element, a component's root: the base look, the
     /// variant's, then the size's, typed styles before classes, all after

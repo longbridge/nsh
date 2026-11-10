@@ -368,7 +368,9 @@ export interface Tokens {}
  * values as CSS writes them (colors, `var(--name)`, `color-mix()`, lengths in
  * `px` or `rem`, font family lists for `font-*`). `theme`'s apply in both
  * appearances, `light`'s in the light one and in the dark one where `dark`
- * leaves them out, `dark`'s in the dark one.
+ * leaves them out, `dark`'s in the dark one. `components` are the looks the
+ * theme gives `nsh/base`'s components, which pages pick by `variant` and
+ * `size`; a theme without them keeps the app's own.
  */
 export interface Theme {
   cssVars: {
@@ -376,6 +378,19 @@ export interface Theme {
     light?: Record<string, string | number>;
     dark?: Record<string, string | number>;
   };
+  components?: Record<string, ComponentLooks>;
+}
+
+/**
+ * One component's looks in a theme (`Theme.components`), as Tailwind
+ * classes: its `base` look, a look per `variant` and per `size` name the
+ * app chooses, and the variant and size a component naming none takes.
+ */
+export interface ComponentLooks {
+  base?: string;
+  variants?: Record<string, string>;
+  sizes?: Record<string, string>;
+  defaults?: { variant?: string; size?: string };
 }
 
 /** The app as it was built (`appInfo()`). */
