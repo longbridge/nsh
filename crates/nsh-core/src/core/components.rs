@@ -6005,6 +6005,35 @@ impl<M: TextEngine> Core<M> {
                 if item < crate::element::menus::FIRST_ID {
                     return false;
                 }
+                // The platform's answer to a global shortcut's registration.
+                let registered = match payload {
+                    EventPayload::Map(entries) => entries.iter().find_map(|(k, v)| match v {
+                        crate::PayloadValue::Bool(b) if *k == "registered" => Some(*b),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                if let Some(registered) = registered {
+                    menus.borrow_mut().registered(item, registered);
+                    self.apply_actions();
+                    return true;
+                }
+                let click = menus.borrow().tray_click(item);
+                if let Some(click) = click {
+                    let bounds = match payload {
+                        EventPayload::Map(entries) => entries.iter().find_map(|(k, v)| match v {
+                            crate::PayloadValue::Bounds(b) if *k == "bounds" => Some(*b),
+                            _ => None,
+                        }),
+                        _ => None,
+                    };
+                    let result = caught(|| click(bounds));
+                    self.apply_actions();
+                    if let Err(message) = result {
+                        log::error!(target: "js", "the tray's click failed: {message}");
+                    }
+                    return true;
+                }
                 let handler = menus.borrow().handler(item);
                 // An item of a menu replaced since the platform showed it.
                 if let Some(handler) = handler {

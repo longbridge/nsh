@@ -56,7 +56,7 @@ use std::{
     time::Duration,
 };
 
-use gtk4::{self as gtk, gdk, glib, glib::translate::ToGlibPtr, graphene, prelude::*};
+use gtk4::{self as gtk, gdk, gio, glib, glib::translate::ToGlibPtr, graphene, prelude::*};
 use nsh_core::{
     Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, NodeId, PayloadValue,
     PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
@@ -832,8 +832,60 @@ fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> 
         if input {
             return false;
         }
+        if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
+            // Text in a selectable view has the area's menu.
+            let target = crate::selectable_view::area_of(&v).unwrap_or(v);
+            return edit_menu(surface, &target, x, y);
+        }
     }
     false
+}
+
+/// The edit menu of selectable text or a selectable view `target` (Copy,
+/// Select All, GTK's own labels), at `(x, y)` (root coordinates). Its
+/// items run the `clipboard.copy` / `selection.select-all` actions the
+/// target installs.
+fn edit_menu(surface: &Surface, target: &NshView, x: f32, y: f32) -> bool {
+    let selected = if target.state().props.selectable_view {
+        crate::selectable_view::has_selection(surface, target)
+    } else {
+        crate::text::has_selection(target)
+    };
+    let p = event_root(surface)
+        .compute_point(target, &graphene::Point::new(x, y))
+        .unwrap_or_else(|| graphene::Point::new(x, y));
+    let popover = gtk::PopoverMenu::from_model(Some(&edit_menu_model(selected)));
+    popover.set_parent(target);
+    popover.set_has_arrow(false);
+    popover.set_halign(gtk::Align::Start);
+    popover.set_position(gtk::PositionType::Bottom);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(p.x() as i32, p.y() as i32, 1, 1)));
+    popover.connect_closed(|menu| {
+        let menu = menu.clone();
+        glib::idle_add_local_once(move || menu.unparent());
+    });
+    popover.popup();
+    true
+}
+
+/// The edit menu's items (GTK's label with its mnemonic, action); Copy
+/// only with a selection.
+fn edit_menu_items(selected: bool) -> Vec<(String, &'static str)> {
+    let gtk = |s| glib::dgettext(Some("gtk40"), s).to_string();
+    let mut items = Vec::new();
+    if selected {
+        items.push((gtk("_Copy"), "clipboard.copy"));
+    }
+    items.push((gtk("Select _All"), "selection.select-all"));
+    items
+}
+
+fn edit_menu_model(selected: bool) -> gio::Menu {
+    let menu = gio::Menu::new();
+    for (label, action) in edit_menu_items(selected) {
+        menu.append(Some(&label), Some(action));
+    }
+    menu
 }
 
 /// The event's position in the root's coordinates (`None` for events of
@@ -2542,6 +2594,25 @@ mod tests {
         for ty in [T::KeyPress, T::KeyRelease, T::GrabBroken, T::FocusChange] {
             assert!(!real_pointer(ty), "{ty:?}");
         }
+    }
+
+    #[test]
+    fn edit_menu_items() {
+        let actions = |m: &gio::Menu| {
+            (0..m.n_items())
+                .map(|i| {
+                    m.item_attribute_value(i, "action", None)
+                        .and_then(|v| v.get::<String>())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            actions(&edit_menu_model(true)),
+            ["clipboard.copy", "selection.select-all"]
+        );
+        // Nothing to copy: only Select All.
+        assert_eq!(actions(&edit_menu_model(false)), ["selection.select-all"]);
     }
 
     #[test]
