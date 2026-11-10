@@ -2228,12 +2228,7 @@ pub(crate) fn write_selection(
     surface: &crate::surface::Surface,
     board: &objc2_app_kit::NSPasteboard,
 ) -> bool {
-    let Some(text) = surface.selection.area.text().or_else(|| {
-        surface
-            .selection
-            .with_range()
-            .and_then(|v| selected_text(&v))
-    }) else {
+    let Some(text) = selection_text(surface) else {
         return false;
     };
     board.clearContents();
@@ -2241,6 +2236,16 @@ pub(crate) fn write_selection(
     let kind = unsafe { objc2_app_kit::NSPasteboardTypeString };
     board.setString_forType(&objc2_foundation::NSString::from_str(&text), kind);
     true
+}
+
+/// The selected text of the surface, if any.
+pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String> {
+    surface.selection.area.text().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+    })
 }
 
 /// A secondary click on selectable text or in a selectable view: Copy
@@ -2283,6 +2288,30 @@ pub(crate) fn context_menu(surface: &crate::surface::Surface) {
         // SAFETY: the root view answers both actions and outlives the menu.
         unsafe { item.setTarget(Some(root.ns())) };
         item.setEnabled(enabled);
+        menu.addItem(&item);
+    }
+    // Look Up (dictionary, Wikipedia, Siri Knowledge), the same panel as
+    // Force Click / Ctrl+Cmd+D. Translate and Services are added by AppKit
+    // because the root view is a valid Services requestor.
+    if let Some(text) = selection_text(surface).filter(|t| !t.trim().is_empty()) {
+        let word: String = text.trim().chars().take(24).collect();
+        let more = if text.trim().chars().count() > 24 {
+            "…"
+        } else {
+            ""
+        };
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        // SAFETY: a new item with a selector the root view implements.
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(&format!("Look Up \u{201c}{word}{more}\u{201d}")),
+                Some(sel!(nshLookUp:)),
+                &NSString::new(),
+            )
+        };
+        // SAFETY: the root view answers the action and outlives the menu.
+        unsafe { item.setTarget(Some(root.ns())) };
         menu.addItem(&item);
     }
     NSMenu::popUpContextMenu_withEvent_forView(&menu, &event, root.ns());
