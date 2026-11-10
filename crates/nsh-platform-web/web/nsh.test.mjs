@@ -2164,3 +2164,90 @@ test("a key event without `key` falls back to its physical key instead of throwi
   assert.equal(keyCode({}), -1);
   assert.equal(keyCode({ key: "a", code: "KeyA" }), 97);
 });
+
+/** A browser clipboard that keeps what is written and image codecs that
+ * record their work; `failWrite` makes `navigator.clipboard.write` reject. */
+function fakeClipboard(t, { failWrite } = {}) {
+  const log = { items: [], decoded: [], closed: 0, warnings: [] };
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const { ClipboardItem, createImageBitmap, OffscreenCanvas } = globalThis;
+  const warn = console.warn;
+  t.after(() => {
+    Object.defineProperty(globalThis, "navigator", saved);
+    Object.assign(globalThis, { ClipboardItem, createImageBitmap, OffscreenCanvas });
+    console.warn = warn;
+  });
+  console.warn = (m) => log.warnings.push(m);
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      clipboard: {
+        write(items) {
+          log.items.push(...items);
+          return failWrite ? Promise.reject(new Error(failWrite)) : Promise.resolve();
+        },
+      },
+    },
+  });
+  globalThis.ClipboardItem = class {
+    constructor(data) {
+      this.data = data;
+    }
+  };
+  globalThis.createImageBitmap = async (blob) => {
+    log.decoded.push(blob.type);
+    return { width: 3, height: 2, close: () => log.closed++ };
+  };
+  globalThis.OffscreenCanvas = class {
+    constructor(width, height) {
+      Object.assign(this, { width, height });
+    }
+    getContext() {
+      return { drawImage() {} };
+    }
+    async convertToBlob({ type }) {
+      return new Blob([`${this.width}x${this.height}`], { type });
+    }
+  };
+  return log;
+}
+
+test("an image that is not a PNG goes on the clipboard as a PNG", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  const done = player.writeClipboardImage("data:image/jpeg;base64,/9j/");
+  // Written at once: Safari only writes within the user's gesture.
+  assert.equal(log.items.length, 1);
+  await done;
+  assert.deepEqual(Object.keys(log.items[0].data), ["image/png"]);
+  const png = await log.items[0].data["image/png"];
+  assert.equal(png.type, "image/png");
+  assert.equal(await png.text(), "3x2");
+  assert.deepEqual(log.decoded, ["image/jpeg"]);
+  assert.equal(log.closed, 1);
+  assert.deepEqual(log.warnings, []);
+});
+
+test("a PNG goes on the clipboard as it is", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  await player.writeClipboardImage(`data:image/png;base64,${btoa("png bytes")}`);
+  const png = await log.items[0].data["image/png"];
+  assert.equal(await png.text(), "png bytes");
+  assert.deepEqual(log.decoded, []);
+});
+
+test("an image the clipboard does not take is reported with a warning", async (t) => {
+  const log = fakeClipboard(t, { failWrite: "Document is not focused." });
+  const { player } = fakePlayer();
+  await player.writeClipboardImage("data:image/png;base64,");
+  assert.deepEqual(log.warnings, ["[nsh] Clipboard.writeImage: Document is not focused."]);
+});
+
+test("a page without the async clipboard reports a write with a warning", async (t) => {
+  const log = fakeClipboard(t);
+  globalThis.navigator.clipboard = undefined;
+  const { player } = fakePlayer();
+  await player.writeClipboardImage("data:image/png;base64,");
+  assert.equal(log.warnings.length, 1);
+});

@@ -715,6 +715,10 @@ Things that were found the hard way. Read the section of the area you change bef
   "Progressive blur", inside continuous-cornered cards). Either one alone is fine, as are circular corners. A clipping
   view with continuous corners (`nsh-curve-clip`) takes circular corners of its radius while a backdrop-filtered view
   (`nsh-backdrop`) is inside it (`nsh.js`, `placeCorners`).
+- **The async clipboard writes only PNG images**: a `ClipboardItem` of `image/jpeg` or `image/webp` is rejected
+  (Chrome 156; the clipboard kept what it held), and Safari writes only within the user's gesture, which an `await`
+  before `clipboard.write` loses. `writeClipboardImage` (`nsh.js`) starts the write at once with a promise of the
+  PNG, the image encoded again when it is another format, and logs a failure with a warning.
 - **Canvas `measureText` gives color emoji their 1x advance, the DOM draws them at the screen's pixel ratio**:
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of
