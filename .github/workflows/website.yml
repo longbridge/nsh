@@ -29,26 +29,15 @@ on:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
     types: [opened, synchronize, reopened, ready_for_review, closed]
+    # Only the site and the web runtime: Rust application's `web` job builds
+    # the web runtime for every change to the crates, and main's deployment
+    # builds the site after a merge (.github/ci/paths.py).
     paths:
       - "website/**"
       - "skills/**"
       - "examples/tasks/**"
       - "examples/tasks-rs/**"
-      - "crates/nsh-base/**"
-      - "crates/nsh-bundler/**"
-      - "crates/nsh-cli/**"
-      - "crates/nsh-core/**"
-      - "crates/nsh-dev/**"
-      - "crates/nsh-engine/**"
-      - "crates/nsh-i18n/**"
-      - "crates/nsh-js/**"
-      - "crates/nsh-macros/**"
-      - "crates/nsh-package/**"
       - "crates/nsh-platform-web/**"
-      - "crates/nsh-testing/**"
-      - "crates/nsh-updater/**"
-      - "crates/xtask/**"
-      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
