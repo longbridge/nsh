@@ -1713,6 +1713,12 @@ impl<M: TextEngine> Core<M> {
             .set_storage(crate::storage::Store::new(backend));
     }
 
+    /// The app's own data directory, what [`crate::element::data_dir`]
+    /// gives; `None`: it has none.
+    pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.components.runtime.set_data_dir(dir);
+    }
+
     /// Logs (once) that the app was refused `what`.
     fn deny(&mut self, what: String) {
         if self.denied.len() < 256 && self.denied.insert(what.clone()) {
