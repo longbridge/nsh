@@ -188,6 +188,12 @@ pub(crate) struct Surface {
     pub(crate) target_scale: Cell<f32>,
     /// A paint is requested.
     invalid: Cell<bool>,
+    /// A frame is being drawn ([`Surface::paint`]).
+    painting: Cell<bool>,
+    /// A paint was requested while a frame was drawn: asked for again
+    /// once it is done (the request made inside `WM_PAINT` does not come
+    /// back as another `WM_PAINT`).
+    repaint: Cell<bool>,
     /// The next frame draws the whole window ([`Surface::invalidate`]).
     full_damage: Cell<bool>,
     /// The change stamp of the last request to draw the whole window
@@ -307,6 +313,8 @@ impl Surface {
             fps: RefCell::new(None),
             target_scale: Cell::new(0.0),
             invalid: Cell::new(false),
+            painting: Cell::new(false),
+            repaint: Cell::new(false),
             // The first frame draws everything.
             full_damage: Cell::new(true),
             whole_change: Cell::new(0),
@@ -675,6 +683,10 @@ impl Surface {
     }
 
     fn request_paint(&self) {
+        if self.painting.get() {
+            self.repaint.set(true);
+            return;
+        }
         if !self.invalid.replace(true) {
             crate::window::invalidate(self.hwnd());
         }
@@ -724,10 +736,29 @@ impl Surface {
     /// Draws the window (`WM_PAINT`).
     pub(crate) fn paint(self: &Rc<Self>) {
         self.invalid.set(false);
+        self.painting.set(true);
         // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
         // `invalid` stays set (no second `WM_PAINT` meanwhile).
-        if crate::render::frame(self) {
+        let deferred = crate::render::frame(self);
+        self.painting.set(false);
+        if deferred {
             self.invalid.set(true);
+        } else if self.repaint.replace(false) {
+            // What changed while the frame was drawn (a text field's text
+            // services laying out as they draw) is drawn by the next one.
+            self.invalid.set(true);
+            let hwnd = self.hwnd();
+            if !hwnd.is_invalid() {
+                // SAFETY: a plain call on a window of this thread.
+                let _ = unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        Some(hwnd),
+                        crate::window::WM_NSH_PAINT,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    )
+                };
+            }
         }
     }
 
