@@ -4,8 +4,9 @@
 //! with it; a ref's `on_focus_in` / `on_focus_out` hear the focus come into
 //! an element and leave it, a `Popover`'s content counting as inside the
 //! view that holds the popover, and the focus in a popover that closes
-//! goes back to its trigger. A press on a field that listens to presses
-//! focuses it first.
+//! goes back to its trigger; the app's `focus()` on the content in
+//! `on_open` moves the focus into it. A press on a field that listens to
+//! presses focuses it first.
 
 use std::{
     collections::HashMap,
@@ -222,6 +223,59 @@ fn escape_in_a_popover_gives_the_focus_back_to_its_trigger() {
     app.app.press_key("escape").unwrap();
     app.app.wait_for("focus trigger inside trigger").unwrap();
     assert!(!app.app.shows("Inside"));
+}
+
+/// A popover whose panel the app focuses in `on_open`, as a non-modal
+/// dialog takes the focus when it opens.
+#[component]
+fn PopoverOpenFocus() -> impl IntoElement {
+    let log = signal(String::from("focus"));
+    let note = move |what: &'static str| log.update(|log| log.push_str(what));
+    let panel = element_ref();
+    view()
+        .child(text(move || log.get()))
+        .child(
+            popover()
+                .on_open(move || panel.focus())
+                .trigger(
+                    view()
+                        .test_id("trigger")
+                        .focusable(true)
+                        .w(px(100.0))
+                        .h(px(30.0))
+                        .on_focus(move |_: &()| note(" trigger"))
+                        .child(text("Details")),
+                )
+                .child(
+                    view()
+                        .element_ref(&panel)
+                        .focusable(true)
+                        .h(px(30.0))
+                        .on_focus(move |_: &()| note(" panel"))
+                        .child(text("Panel")),
+                ),
+        )
+        .child(view().test_id("after").focusable(true).h(px(30.0)))
+}
+
+#[test]
+fn focusing_the_content_in_on_open_moves_the_focus_into_a_popover() {
+    let mut app = start(Root::new::<PopoverOpenFocus>(|| ()));
+    app.app.press_key("tab").unwrap();
+    app.app.wait_for("focus trigger").unwrap();
+    // Opened from the keyboard: `on_open` comes once the content is
+    // there, so its ref focuses the panel.
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("focus trigger panel").unwrap();
+    // Escape closes it and the focus goes back to the trigger.
+    app.app.press_key("escape").unwrap();
+    app.app.wait_for("focus trigger panel trigger").unwrap();
+    assert!(!app.app.shows("Panel"));
+    // Opened by a press, the same.
+    app.app.press("id:trigger").unwrap();
+    app.app
+        .wait_for("focus trigger panel trigger panel")
+        .unwrap();
 }
 
 /// A field that listens to presses, as a combobox's does, and a log of

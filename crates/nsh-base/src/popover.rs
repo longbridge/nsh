@@ -76,7 +76,8 @@ pub enum PopoverEvent {
     /// back), with why: set `open` to follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
-    /// It is shown.
+    /// It is shown, its content rendered: refs inside it name their views,
+    /// so focusing one here moves the keyboard focus into the popover.
     Open,
     /// It is gone (also when the app closed it), after its exit.
     Close,
