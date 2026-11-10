@@ -256,8 +256,8 @@ function App() {
   const said = signal("");
   const note = (s: string) => said.set(`${said()} ${s}`);
   note(`start:${UrlScheme.url()}`);
-  UrlScheme.on("change", ({ url, cause }) => {
-    note(`${cause}:${url}`);
+  UrlScheme.on("change", ({ url, reason }) => {
+    note(`${reason}:${url}`);
     if (url.endsWith("last")) note(`now:${UrlScheme.url()} done`);
   });
   UrlScheme.on("open", ({ url }) => note(`open:${url}`));
@@ -272,14 +272,14 @@ fn page_event(control: &EngineControl, url: &str, change: Option<&str>) {
         (nsh_core::url_scheme::URL, PayloadValue::Str(url.into())),
         ("page", PayloadValue::Bool(true)),
     ];
-    if let Some(cause) = change {
-        payload.push(("change", PayloadValue::Str(cause.into())));
+    if let Some(reason) = change {
+        payload.push(("change", PayloadValue::Str(reason.into())));
     }
     control.dispatch_event(ROOT_ID, EventKind::UrlScheme, EventPayload::Map(payload));
 }
 
 #[test]
-fn address_moves_the_app_did_not_make_reach_change_with_their_cause() {
+fn address_moves_the_app_did_not_make_reach_change_with_their_reason() {
     let text = run_app_with(
         bundle_of(CHANGE_APP, "nsh-app-url-change"),
         &[],
@@ -288,7 +288,7 @@ fn address_moves_the_app_did_not_make_reach_change_with_their_cause() {
         |control| {
             page_event(control, "https://a.test/inbox#archive", Some("address"));
             page_event(control, "https://a.test/inbox", Some("back"));
-            // A cause of a newer platform's is the address alone.
+            // A reason of a newer platform's is the address alone.
             page_event(control, "https://a.test/inbox?unknown", Some("teleport"));
             page_event(control, "https://a.test/inbox#last", Some("forward"));
         },

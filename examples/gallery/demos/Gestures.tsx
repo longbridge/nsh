@@ -135,7 +135,7 @@ function Ball() {
     },
   });
   return (
-    <Card icon="scroll" title="PanResponder" subtitle="Positions go through JS; the page does not scroll" right={<Badge label={state().label} tone={state().tone} />}>
+    <Card icon="scroll" title="PanResponder" subtitle="Positions through JS; the page stays put" right={<Badge label={state().label} tone={state().tone} />}>
       <View style={{ ...stage(), height: 200 }}>
         <Dots />
         <View
@@ -183,7 +183,7 @@ function TouchPad() {
     );
   };
   return (
-    <Card icon="system" title="Touch events" subtitle={hint("Start, move, end and cancel, for every finger", "Start, move, end and cancel, for the mouse and every finger")} right={<Badge label={`${fingers().length} down`} tone={fingers().length ? "accent" : "neutral"} />}>
+    <Card icon="system" title="Touch events" subtitle={hint("Start, move, end and cancel, per finger", "Start, move, end, cancel: mouse and fingers")} right={<Badge label={`${fingers().length} down`} tone={fingers().length ? "accent" : "neutral"} />}>
       <View
         onTouchStart={note("start")}
         onTouchMove={note("move")}
@@ -248,7 +248,7 @@ function PressEvents() {
     }
   };
   return (
-    <Card icon="components" title="Press events" subtitle="In, press, long press and out; native feedback" right={<Badge label={`${count()}`} />}>
+    <Card icon="components" title="Press events" subtitle="In, press, long press, out; native feedback" right={<Badge label={`${count()}`} />}>
       <View
         onPressDown={() => fire("pressIn")}
         onPressUp={() => fire("pressOut")}
@@ -372,7 +372,7 @@ function HitSlop() {
   breathe.start();
   cleanup(() => breathe.stop());
   return (
-    <Card icon="search" title="Hit slop" subtitle={hint("A 12 pt dot that takes taps 30 pt around it", "A 12 pt dot that takes clicks 30 pt around it")} right={<Badge label={`${taps()} taps`} tone={taps() ? "accent" : "neutral"} />}>
+    <Card icon="search" title="Hit slop" subtitle={hint("A 12 pt dot that takes taps 30 pt around it", "A 12 pt dot taking clicks 30 pt around it")} right={<Badge label={`${taps()} taps`} tone={taps() ? "accent" : "neutral"} />}>
       <View style={{ ...stage(), height: 140, alignItems: "center", justifyContent: "center" }}>
         <Dots />
         <View
@@ -472,6 +472,28 @@ function Hover() {
   );
 }
 
+/** A wheel over a canvas: Control + wheel zooms, the wheel pans, and the page around does not scroll (desktops, web). */
+function WheelPad() {
+  const zoom = signal(1);
+  const pan = signal({ x: 0, y: 0 });
+  return (
+    <Card icon="gestures" title="Wheel" subtitle="Control + wheel zooms, the wheel pans" right={<Badge label={`${Math.round(zoom() * 100)}%`} tone="neutral" />}>
+      <View
+        testID="wheel-pad"
+        onWheel={(e) => {
+          const unit = e.deltaMode === "lines" ? 16 : 1;
+          if (e.modifiers.control) zoom.update((z) => Math.min(4, Math.max(0.25, z * (1 - (e.delta.y * unit) / 200))));
+          else pan.update((p) => ({ x: p.x - e.delta.x * unit, y: p.y - e.delta.y * unit }));
+        }}
+        style={{ ...stage(), height: 120, overflow: "hidden", alignItems: "center", justifyContent: "center" }}
+      >
+        <View style={{ width: 48, height: 48, borderRadius: 10, backgroundColor: colors.accent, transform: [{ translateX: pan().x }, { translateY: pan().y }, { scale: zoom() }] }} />
+      </View>
+      <Api label="Wheel over a view" api="onWheel" />
+    </Card>
+  );
+}
+
 /** Elements labelled for VoiceOver / TalkBack. */
 function Accessibility() {
   const last = signal("");
@@ -507,5 +529,5 @@ function Accessibility() {
 }
 
 export function Gestures() {
-  return <DemoPage cards={[Transformable, Ball, Hover, TouchPad, PressEvents, HitSlop, PointerEvents, Accessibility]} />;
+  return <DemoPage cards={[Transformable, Ball, Hover, WheelPad, TouchPad, PressEvents, HitSlop, PointerEvents, Accessibility]} />;
 }

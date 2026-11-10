@@ -34,7 +34,8 @@ export function ToggleGroup<T extends string>(props: {
   return (
     <BaseToggleGroup
       testID={props.testID}
-      style={{ flexDirection: "row", padding: 2, gap: TOOL_GAP, borderRadius: 9, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.border }}
+      // No box of its own: the toolbar's separators already part the groups, as shadcn's toolbar does.
+      style={{ flexDirection: "row", gap: TOOL_GAP }}
     >
       <Each of={props.items}>
         {(item) => {

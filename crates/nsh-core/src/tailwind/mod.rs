@@ -135,6 +135,9 @@ pub mod deps {
     /// The view's own `data-*` attributes (`data-range-start:`); a group's
     /// are [`GROUP`].
     pub const DATA: u16 = 2048;
+    /// The pointer's precision and the terminal (`pointer-fine:`,
+    /// `pointer-coarse:`, `terminal:`).
+    pub const DEVICE: u16 = 4096;
 }
 
 /// CSS's `ch` where no font is known ([`ClassList::apply`]): half a `rem`,
@@ -164,6 +167,18 @@ pub enum Platform {
     Web,
 }
 
+/// How precise the primary pointer is (`pointer-fine:`, `pointer-coarse:`),
+/// as CSS's `pointer` media feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pointer {
+    /// A finger on a touch screen.
+    #[default]
+    Coarse,
+    /// A mouse or a trackpad: desktop behavior (a desktop OS, a desktop
+    /// browser, a terminal).
+    Fine,
+}
+
 /// The environment variants depend on, set by the engine.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ClassEnvironment {
@@ -173,6 +188,10 @@ pub struct ClassEnvironment {
     pub platform: Platform,
     /// The user asked for less motion.
     pub reduce_motion: bool,
+    /// The primary pointer's precision.
+    pub pointer: Pointer,
+    /// Drawn in a terminal (`terminal:`).
+    pub terminal: bool,
 }
 
 /// What a node's classes are matched against: the core builds it per
@@ -215,6 +234,8 @@ pub(crate) struct Condition {
     platform: Option<Platform>,
     rtl: Option<bool>,
     reduce_motion: Option<bool>,
+    pointer: Option<Pointer>,
+    terminal: Option<bool>,
     /// Required [`state`] bits.
     states: u16,
     /// [`state`] bits that must be off (`enabled:`).
@@ -238,6 +259,8 @@ impl Condition {
     fn matches(&self, cx: &Context<'_>, data: Data<'_>) -> bool {
         if self.dark.is_some_and(|d| d != cx.env.dark)
             || self.platform.is_some_and(|p| p != cx.env.platform)
+            || self.pointer.is_some_and(|p| p != cx.env.pointer)
+            || self.terminal.is_some_and(|t| t != cx.env.terminal)
             || self.rtl.is_some_and(|r| r != cx.rtl)
             || self
                 .reduce_motion
@@ -316,6 +339,9 @@ impl Condition {
         }
         if self.reduce_motion.is_some() {
             d |= deps::MOTION;
+        }
+        if self.pointer.is_some() || self.terminal.is_some() {
+            d |= deps::DEVICE;
         }
         if self.states != 0 || self.not_states != 0 {
             d |= deps::STATE;
@@ -462,10 +488,14 @@ pub(crate) mod rank {
     pub(crate) const LTR: Key = Key::new(62);
     pub(crate) const RTL: Key = Key::new(63);
     pub(crate) const DARK: Key = Key::new(64);
+    /// Tailwind's pointer variants, after `dark:` as it registers them.
+    pub(crate) const POINTER_COARSE: Key = Key::new(65);
+    pub(crate) const POINTER_FINE: Key = Key::new(66);
     /// NSH's platform variants, after Tailwind's.
     pub(crate) const IOS: Key = Key::new(70);
     pub(crate) const ANDROID: Key = Key::new(71);
     pub(crate) const WEB: Key = Key::new(72);
+    pub(crate) const TERMINAL: Key = Key::new(73);
 }
 
 impl Rule {
@@ -1264,6 +1294,18 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
         "web" => {
             cond.platform = Some(Platform::Web);
             rank::WEB
+        }
+        "pointer-coarse" => {
+            cond.pointer = Some(Pointer::Coarse);
+            rank::POINTER_COARSE
+        }
+        "pointer-fine" => {
+            cond.pointer = Some(Pointer::Fine);
+            rank::POINTER_FINE
+        }
+        "terminal" => {
+            cond.terminal = Some(true);
+            rank::TERMINAL
         }
         v => {
             // `data-range-start`: Tailwind 4's boolean form, `[data-range-start]`.

@@ -132,8 +132,8 @@ const schema = defineSchema({
 const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 ```
 
-A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, or JSON),
-`parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"json"`) and `check(doc)`, which
+A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, `"html"`, or JSON),
+`parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"html"`, `"json"`) and `check(doc)`, which
 returns the document with its attribute defaults filled in. `nodes`, `marks` and `topNode` name its types. Markdown
 maps to the starter schema's names (`paragraph`, `heading`, `blockquote`, `codeBlock`, `bulletList`,
 `orderedList`, `listItem`, `bold`, `italic`, `code`, `link`, `strike`).
@@ -175,7 +175,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `isEmpty`, `undoDepth`, `redoDepth`, `composing` | What a UI shows about the editor |
 | `setContent(content, format?)` | Replaces the document, as one undoable change |
 | `insertContent(content, format?)` | Inserts content over the selection |
-| `getJSON()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
+| `getJSON()`, `getHTML()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
 | `dispatch(tr)` | Applies a transaction given as JSON (its steps against the current document) |
 | `on(event, listener)` | Calls `listener` with the payload of every `event`, in JS's next turn: `revision` (`{ revision }`, after every change, from any source), `update`, `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`. Returns a function that stops it; a listener added while a component renders stops with the component |
 | `focus()`, `blur()` | Moves the keyboard focus to or from the views showing the editor |

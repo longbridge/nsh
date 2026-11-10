@@ -283,6 +283,58 @@ const at = signal<number | null>(null);
 </View>
 ```
 
+### Wheel
+
+`onWheel` hears a mouse wheel or touchpad scroll over a view, on macOS, Windows, Linux, the GPUI backend and the web
+(the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
+it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
+pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
+or a view around one, only observes: the scroll view still scrolls. JS never cancels a native scroll after the fact
+(the main thread does not wait for it), so whether a view takes the wheel is decided by what is mounted, as with
+`onContextMenu`.
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `onWheel` | `.on_wheel(..)` | `(e: WheelEvent) => void` | A mouse wheel or touchpad scrolled over the view or a view inside it. |
+
+`WheelEvent` has `position` and `pagePosition`, as `MouseEvent`, the `modifiers` held, `delta` (a `Point`: positive
+`y` scrolls down, toward the end, positive `x` right, as the DOM's `deltaX` / `deltaY`) and `deltaMode`: `"lines"` for
+mouse wheel notches, `"points"` for a precise device (a touchpad, a Magic Mouse; AppKit's `hasPreciseScrollingDeltas`,
+the DOM's `DOM_DELTA_PIXEL`). In Rust `delta` is a `WheelDelta`, `Lines(Point<f32>)` or `Points(Point<Points>)`, as
+GPUI's `ScrollDelta`; `delta.points(line_height)` gives points either way.
+
+```rust tabs
+// A canvas: Control + wheel zooms, the wheel pans.
+let zoom = signal(1.0_f32);
+let offset = signal(Point::<Points>::default());
+
+view()
+    .size_full()
+    .on_wheel(move |e: &WheelEvent| {
+        let d = e.delta.points(px(16.0));
+        if e.modifiers.ctrl {
+            zoom.update(|z| *z *= (1.0 - d.y.0 / 200.0).clamp(0.5, 2.0));
+        } else {
+            offset.update(|o| *o = point(o.x - d.x, o.y - d.y));
+        }
+    })
+```
+
+```tsx tabs
+// A canvas: Control + wheel zooms, the wheel pans.
+const zoom = signal(1);
+const offset = signal({ x: 0, y: 0 });
+
+<View
+  style={{ flex: 1 }}
+  onWheel={(e) => {
+    const unit = e.deltaMode === "lines" ? 16 : 1;
+    if (e.modifiers.control) zoom.update((z) => z * Math.min(2, Math.max(0.5, 1 - (e.delta.y * unit) / 200)));
+    else offset.update((o) => ({ x: o.x - e.delta.x * unit, y: o.y - e.delta.y * unit }));
+  }}
+/>
+```
+
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and

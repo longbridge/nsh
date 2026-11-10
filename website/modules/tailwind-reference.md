@@ -49,7 +49,7 @@ view()
 ## How classes combine
 
 - **Later wins.** Among utilities of the same variant level, the one later in the string wins: `"p-4 p-2"` is `p-2`. A component can take a `class` prop and append it to its own classes without `tailwind-merge`.
-- **Variants apply after plain utilities**, in Tailwind's variant order: `group-*:` (by their state, then by group name), `selection:`, `placeholder:`, position (`first:` ...), `checked:`, `indeterminate:`, `selected:`, `focus-within:`, `hover:`, `focus:`, `focus-visible:`, `active:`, `enabled:`, `disabled:`, `aria-busy:`, `aria-checked:`, `aria-expanded:`, `aria-pressed:`, `aria-selected:`, `data-*:` (by name), motion, `max-*:` breakpoints widest first, then breakpoints ascending, orientation, direction, `dark:`, then platform. A class's highest variant decides, then its next highest, and one more variant comes later (`dark:hover:` after `dark:`), as Tailwind sorts them. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
+- **Variants apply after plain utilities**, in Tailwind's variant order: `group-*:` (by their state, then by group name), `selection:`, `placeholder:`, position (`first:` ...), `checked:`, `indeterminate:`, `selected:`, `focus-within:`, `hover:`, `focus:`, `focus-visible:`, `active:`, `enabled:`, `disabled:`, `aria-busy:`, `aria-checked:`, `aria-expanded:`, `aria-pressed:`, `aria-selected:`, `data-*:` (by name), motion, `max-*:` breakpoints widest first, then breakpoints ascending, orientation, direction, `dark:`, `pointer-coarse:`, `pointer-fine:`, then platform (`terminal:` last). A class's highest variant decides, then its next highest, and one more variant comes later (`dark:hover:` after `dark:`), as Tailwind sorts them. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
 - **`style` wins over classes.** The inline `style` is applied on top of the resolved classes. A style key is the CSS property of its name, the one the utilities set, so it replaces that property and nothing else: `style={{ paddingLeft: 8 }}` beats `pl-4` and keeps `pr-4`. An important utility (`!p-4` or `p-4!`) wins over the inline style too.
 - **Text styles inherit.** Text utilities on a view (`text-white`, `font-bold`, `text-center`, ...) pass to the `<Text>` and `<Input>` elements inside it, as in CSS.
 - **Display is CSS's.** `flex` and `inline-flex` make a row unless a direction utility says otherwise, wherever it is in the string (`flex-col flex` is a column). A style's `display: "flex"` is a row in the same way; views that set no display keep NSH's column default.
@@ -447,6 +447,8 @@ Variants make a utility conditional: `dark:bg-zinc-900`, `md:flex-row`, `active:
 | `dark:` | the appearance is dark | `.dark(\|s\| …)` |
 | `ios:` | running on iOS or Mac Catalyst | `.when(os() == Os::Ios, …)` |
 | `android:` | running on Android | `.when(os() == Os::Android, …)` |
+| `terminal:` | drawn in a terminal | `.when(idiom() == Idiom::Terminal, …)` |
+| `pointer-fine:`, `pointer-coarse:` | the primary pointer is a mouse or trackpad (the desktops, a desktop browser, a terminal) / a finger | `.when(is_desktop(), …)` |
 | `portrait:`, `landscape:` | the window is taller than wide / wider than tall | `.style_when(move \|\| window().height > window().width, …)` |
 | `ltr:`, `rtl:` | the layout direction | `.style_when(rtl, …)` |
 | `motion-safe:`, `motion-reduce:` | the user has not / has asked for reduced motion | `.style_when(reduce_motion, …)` |

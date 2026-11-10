@@ -83,7 +83,7 @@ import { TextView } from "nsh/base";
 
 ## 读取选中的文字
 
-在可选择视图上设置 `onSelectionChange`（Rust 中为 `.on_text_selection_change(..)`），每次选区变化时都会收到选中的文字：`{ text, start }`，即复制会得到的内容及其在整个视图文字中的起始位置；不再有选中内容时（点击别处、按 Escape、另一个视图开始选择）收到 `""`。只在内容变化时报告。可选择视图嵌套时由外层视图报告，因为选区只有一个。设置了 `selectable` 的 [`TextView`](./text-view.md) 也以同样方式报告自己的选区（`onSelectionChange`，Rust 中为 `.on_selection_change(..)`）。聊天应用可以用它引用读者在回答中选中的部分：
+在可选择视图上设置 `onSelectionChange`（Rust 中为 `.on_text_selection_change(..)`），每次选区变化时都会收到选中的文字：`{ text, start, bounds, pageBounds }`，即复制会得到的内容、它在整个视图文字中的起始位置，以及它在视图中和所在根视图中的外框（macOS 和 Windows；锚定在 `pageBounds` 的 `Overlay` 就是选区上方的操作栏）；不再有选中内容时（点击别处、按 Escape、另一个视图开始选择）收到 `""`。只在文字或外框变化时报告。可选择视图嵌套时由外层视图报告，因为选区只有一个。设置了 `selectable` 的 [`TextView`](./text-view.md) 也以同样方式报告自己的选区（`onSelectionChange`，Rust 中为 `.on_selection_change(..)`）。聊天应用可以用它引用读者在回答中选中的部分：
 
 ```rust tabs
 use nsh_core::prelude::*;

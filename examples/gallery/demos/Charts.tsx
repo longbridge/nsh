@@ -146,7 +146,7 @@ function Live() {
   const peakAlign = (): "left" | "center" | "right" => (peak() < 8 ? "left" : peak() > LIVE_POINTS - 9 ? "right" : "center");
   const breathing = () => running() && !reduceMotion();
   return (
-    <Card icon="stocks" title="Live price" subtitle="A tick a second in its ten-second range, the last price tagged at its height">
+    <Card icon="stocks" title="Live price" subtitle="A tick a second, the last price tagged">
       <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={{ flex: 1, gap: 6 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -462,7 +462,7 @@ function Drawdown() {
   );
   const total = (EQUITY[EQUITY.length - 1].value / EQUITY[0].value - 1) * 100;
   return (
-    <Card icon="stocks" title="Drawdown" subtitle="Value over its distance from the high, the worst run shaded">
+    <Card icon="stocks" title="Drawdown" subtitle="Value against its high, the worst run shaded">
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
         <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{`$${count(shown().value)}`}</Text>
         <Text style={{ fontSize: 12, color: shown().drawdown < -0.05 ? toneColor("danger") : colors.muted, fontVariant: ["tabular-nums"] }}>
@@ -560,9 +560,10 @@ const PERIODS = [
 ] as const;
 type Period = (typeof PERIODS)[number]["value"];
 const RESOURCES: { name: string; color: string; unit: string; total: number; used: Record<Period, number> }[] = [
-  { name: "Compute", color: chart.s1, unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
-  { name: "Memory", color: chart.s2, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
-  { name: "Network", color: chart.s3, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
+  // Getters: the series colors follow the appearance, so they are read when the rings render.
+  { name: "Compute", get color() { return chart.s1; }, unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
+  { name: "Memory", get color() { return chart.s2; }, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
+  { name: "Network", get color() { return chart.s3; }, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
 ];
 /** In a terminal the rings take more Cells, so the average and its
  * caption fit in the innermost ring's hole, clear of its arcs. */
@@ -1172,7 +1173,7 @@ function Funnel() {
   const fading = "transition-opacity duration-150 motion-reduce:transition-none";
   const channelName = () => CHANNELS.find((c) => c.value === channel())!.label;
   return (
-    <Card icon="stocks" title="Conversion funnel" subtitle="From a first visit to a first trade, and what each stage keeps">
+    <Card icon="stocks" title="Conversion funnel" subtitle="From a first visit to a first trade">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>{(shown()?.name ?? "Visits to first trade").toUpperCase()}</Text>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
@@ -1665,7 +1666,7 @@ function RiskReturn() {
   // On the card's color, so the grid and the index's lines pass under the words.
   const corner = { ...axis(), color: colors.faint, paddingHorizontal: 6, paddingVertical: 4, backgroundColor: colors.surface, borderRadius: 4 };
   return (
-    <Card icon="stocks" title="Risk vs return" subtitle="Each holding's volatility against its return, sized by market cap">
+    <Card icon="stocks" title="Risk vs return" subtitle="Volatility against return, sized by market cap">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>
           {shown() ? `${shown()!.ticker === "SPX" ? "S&P 500" : shown()!.ticker} · ${shown()!.ticker === "SPX" ? "BENCHMARK" : shown()!.name.toUpperCase()}` : `PORTFOLIO · ${period()}`}
@@ -1851,7 +1852,7 @@ function Targets() {
   const raised = () => rows().filter((r) => r.revised > 0).length;
   const height = () => rows().length * TARGET_ROW;
   return (
-    <Card icon="stocks" title="Price targets" subtitle="Where analysts see each stock in a year, against today's price">
+    <Card icon="stocks" title="Price targets" subtitle="Analysts' one-year targets against today's price">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>{shown() ? `${shown()!.ticker} · ${shown()!.analysts} ANALYSTS` : `${name().toUpperCase()} · ${rows().length} STOCKS`}</Text>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
@@ -2320,7 +2321,7 @@ function Correlation() {
   const tick = () => ({ ...axis(), fontSize: compact() ? 9 : 10.5, color: colors.muted });
   const ramp = () => [colors.info, colors.line, chart.s1];
   return (
-    <Card icon="table" title="Holdings correlation" subtitle="How closely each pair of holdings moves, from their daily returns">
+    <Card icon="table" title="Holdings correlation" subtitle="How closely each pair of holdings moves">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>{shown() ? `${shown()!.a} × ${shown()!.b}` : `${PAIR_TICKERS.length} HOLDINGS · ${lookback()}`}</Text>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
@@ -2450,7 +2451,7 @@ function Seasonality() {
   const gutter = () => (compact() ? 34 : 36);
   const totals = () => (compact() ? 46 : 54);
   return (
-    <Card icon="chart" title="Monthly returns" subtitle="Every month since 2020, red for a loss and green for a gain">
+    <Card icon="chart" title="Monthly returns" subtitle="Every month since 2020, red for a loss">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>{shown() ? `${shown()!.month.toUpperCase()} ${shown()!.year}` : `${name().toUpperCase()} · 2020–2026`}</Text>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
@@ -2576,7 +2577,7 @@ function Activity() {
   const tick = () => ({ ...axis(), fontSize: compact() ? 9 : 10.5 });
   const ramp = () => [colors.line, chart.s1];
   return (
-    <Card icon="layers" title="Trading activity" subtitle="Trades every half hour of a week, the busier the brighter">
+    <Card icon="layers" title="Trading activity" subtitle="Trades every half hour of a week">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>{shown() ? `${shown()!.day.toUpperCase()} ${shown()!.slot}–${slotEnd(shown()!.slot)}` : `${market()} · TRADES PER HALF HOUR`}</Text>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
@@ -2913,7 +2914,7 @@ function Watchlist() {
     return (closes[closes.length - 1].close / closes[0].close - 1) * 100;
   };
   return (
-    <Card icon="stocks" title="Watchlist" subtitle="Sparklines that draw in once and stay whole as their rows scroll back">
+    <Card icon="stocks" title="Watchlist" subtitle="Sparklines that draw in once and stay whole">
       <PlotAppearScope id="watchlist">
         <List testID="watchlist" each={WATCH} keyExtractor={(w) => w.symbol} estimatedItemSize={WATCH_ROW} style={{ height: WATCH_ROW * 5 }}>
           {(w) => {
@@ -3073,7 +3074,7 @@ function MarketMap() {
   };
   const tone = (v: number): Tone => (v > 0 ? "up" : v < 0 ? "down" : "neutral");
   return (
-    <Card icon="stocks" title="Market map" subtitle="The largest stocks by sector, sized by market cap and colored by their change">
+    <Card icon="stocks" title="Market map" subtitle="The largest stocks by sector, sized by market cap">
       <View style={{ gap: 4 }}>
         <Text style={tipTitle()}>{readout().title}</Text>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
@@ -3140,7 +3141,8 @@ const ALLOCATION_VIEWS = [
 type AllocationView = (typeof ALLOCATION_VIEWS)[number]["value"];
 const ASSET_CLASSES = ["Equities", "Bonds", "Alternatives", "Cash"] as const;
 type AssetClass = (typeof ASSET_CLASSES)[number];
-const ASSET_COLOR: Record<AssetClass, string> = { Equities: chart.s1, Bonds: chart.s2, Alternatives: chart.s4, Cash: chart.s3 };
+/** Each class's series color, read when the plot renders so it follows the appearance. */
+const assetColor = (c: AssetClass) => ({ Equities: chart.s1, Bonds: chart.s2, Alternatives: chart.s4, Cash: chart.s3 })[c];
 const ASSET_GROUP: Record<AssetClass, string> = {
   Equities: "fill-chart-1/15",
   Bonds: "fill-chart-2/15",
@@ -3197,7 +3199,7 @@ function Allocation() {
   const weight = (k: number) => `${fixed((k / total()) * 100, 1)}%`;
   const shown = () => rows()[tip()] ?? rows()[0];
   return (
-    <Card icon="stocks" title="Allocation" subtitle="A portfolio's asset classes and the positions in each, by value">
+    <Card icon="stocks" title="Allocation" subtitle="Asset classes and their positions, by value">
       <Figures>
         {ASSET_CLASSES.map((c) => (
           <Figure label={c} value={weight(valueOf(rows().find((r) => r.id === c)!))} />
@@ -3205,7 +3207,7 @@ function Allocation() {
       </Figures>
       <Plot
         data={rows()}
-        colorScale={{ type: "ordinal", domain: [...ASSET_CLASSES], range: ASSET_CLASSES.map((c) => ASSET_COLOR[c]) }}
+        colorScale={{ type: "ordinal", domain: [...ASSET_CLASSES], range: ASSET_CLASSES.map(assetColor) }}
         appearGeneration={1}
         motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 700, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 380, damping: 36 } }}
         tooltipPlacement="pointer"

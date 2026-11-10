@@ -138,7 +138,7 @@ runtime does not know: they are not granted there.
 ### `network`
 
 Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `placeholder`, canvas images,
-`Image.getSize` / `Image.prefetch`), video sources and raw TCP sockets (`net.connect`).
+`Image.getSize` / `Image.prefetch`), video and sound sources and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
 |---|---|---|
@@ -154,6 +154,13 @@ Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`,
 
 An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and with both a path matching either.
 
+Paths are matched as the request sends them, after WHATWG's URL parser resolves dot segments, percent-encoded ones
+too: `/v1/../admin` and `/v1/%2e%2e/admin` are `/admin`, which `pathPrefix: "/v1"` does not cover. The request goes
+out with the URL that was checked, so the server receives the path the rule matched. A rule's own paths are read the
+same way: `/my photos` covers `/my%20photos`, and a path with a `.` or `..` segment is an error. An encoded `/` or `\`
+(`%2F`, `%5C`) stays as written, so `/v1/x%2F..%2F..%2Fadmin` is under `/v1`; a server that decodes them before it
+resolves dot segments serves another path.
+
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
 `https://api.example.com@evil.io/` is checked as `evil.io`. A URL that platforms read as different hosts or paths is
@@ -165,8 +172,23 @@ A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss:/
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
 `sockets` lists each host and port exactly, and only `sockets` grants them.
 
-`asset:` URIs (the app's own files) are always allowed; images and videos may also use `data:` URIs and relative
-paths.
+`asset:` URIs (the app's own files) are always allowed while their path stays inside the app's files, as `fetch`'s do:
+no empty, `.` or `..` segment, encoded or not, and no backslash, colon or encoded `/`. Images, videos and sounds may
+also use `data:` and `blob:` URIs. A relative path is the page's on the web; a native app has no page, so for an app
+with capabilities it loads nothing there (a sound's relative path is a bundled file). A source that starts with `//`
+names a host: on the web it takes the page's scheme and is checked as that URL; in a native app it has no page to take
+a scheme from, so it loads nothing (write `https://…`). Any other source with a scheme is checked as a URL, and loads
+what was checked. Spaces and control characters around a source are dropped, as the URL parser drops them, and the
+cleaned URL loads. A source that platforms read differently (a backslash, a control character, tab or newline inside
+it, an unusual host) is granted only by `*` and loads as written (in a native app, one that starts with `//` then loads
+nothing).
+
+A local file in a media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
+`C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, as
+`fs/promises` reads files, and so only on the desktops. Its symlinks are resolved when the source is set, and the
+platform loads the resolved path, so a link inside a granted root then does not lead out of it; a link made there
+later is followed while the source stays set. On the web, `/x.png` is the page's
+own path. An app without `capabilities` loads local files as before.
 
 ### `webview`
 

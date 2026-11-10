@@ -150,8 +150,9 @@ pub(crate) struct AppConfig {
     pub(crate) version: Option<String>,
     /// Build number.
     pub(crate) build: Option<u32>,
-    /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`.
-    pub(crate) icon: Option<PathBuf>,
+    /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`;
+    /// one for every target or one per platform ([`AppIcon`]).
+    pub(crate) icon: Option<AppIcon>,
     /// The lowest runtime that runs a signed package (`nsh publish`).
     pub(crate) min_runtime: Option<String>,
     /// Read and checked by the bundler.
@@ -172,9 +173,14 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde_json::Value>,
-    /// The languages whose data the app ships (read by the bundler).
-    #[serde(default, rename = "locales")]
-    _locales: Option<serde_json::Value>,
+    /// The languages whose data the app ships (checked by the bundler).
+    #[serde(default)]
+    locales: Option<serde_json::Value>,
+    /// The locales the app ships (`locales`, else its translations'
+    /// languages: `nsh_i18n::app_locales`), which Apple packages declare
+    /// (`CFBundleLocalizations`) so that system UI shows in them.
+    #[serde(skip)]
+    pub(crate) localizations: Vec<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
@@ -198,6 +204,13 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// The app runs once (`"singleInstance": true`, Windows and Linux): a
+    /// second launch hands its arguments and working directory to the
+    /// running instance (`Application.on("secondInstance", ...)`) and exits
+    /// before it opens a window. Written into `app.json`, where the
+    /// release runner reads it; macOS runs one instance of an app already.
+    #[serde(default)]
+    pub(crate) single_instance: bool,
     /// The main window's launch-time options (`"window"`, checked by
     /// [`read_config`]): written into `app.json` and the dev server's app
     /// info, where the runners read them before the app's code runs.
@@ -342,6 +355,9 @@ pub(crate) fn desktop_app_json(
     if let Some(window) = &config.window {
         info["window"] = window.clone();
     }
+    if config.single_instance {
+        info["singleInstance"] = true.into();
+    }
     info
 }
 
@@ -449,12 +465,58 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) asset_url: Option<&'a str>,
 }
 
+/// `nsh.json` `"icon"`: one PNG for every target, or one per platform
+/// (`{ "macos": "icon-mac.png", "windows": "icon-win.png" }`) since their
+/// conventions differ (macOS draws its artwork inset on a transparent
+/// canvas, Windows edge to edge). A platform left out gets no icon.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum AppIcon {
+    /// The icon of every target.
+    All(PathBuf),
+    /// The icons by platform: `macos`, `windows`, `linux`, `ios`, `android`,
+    /// `web` ([`AppIcon::PLATFORMS`]).
+    Platforms(std::collections::BTreeMap<String, PathBuf>),
+}
+
+impl AppIcon {
+    /// The keys of [`AppIcon::Platforms`].
+    const PLATFORMS: [&str; 6] = ["macos", "windows", "linux", "ios", "android", "web"];
+
+    /// The icon of `target`'s platform.
+    pub(crate) fn of(&self, target: PackageTarget) -> Option<&Path> {
+        let platform = match target {
+            PackageTarget::Ios | PackageTarget::IosSimulator => "ios",
+            PackageTarget::Android => "android",
+            PackageTarget::Linux => "linux",
+            PackageTarget::Macos => "macos",
+            PackageTarget::Windows => "windows",
+            PackageTarget::Web => "web",
+            PackageTarget::Gpui => return None,
+        };
+        match self {
+            AppIcon::All(icon) => Some(icon),
+            AppIcon::Platforms(icons) => icons.get(platform).map(PathBuf::as_path),
+        }
+    }
+}
+
+impl AppConfig {
+    /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`).
+    pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
+        self.icon.as_ref()?.of(target)
+    }
+}
+
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
 pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let dir = entry.parent().unwrap_or(Path::new("."));
     let path = dir.join("nsh.json");
     let Ok(text) = fs::read_to_string(&path) else {
-        return Ok(AppConfig::default());
+        return Ok(AppConfig {
+            localizations: app_localizations(dir, None),
+            ..AppConfig::default()
+        });
     };
     let (mut config, mut ignored) =
         parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
@@ -481,12 +543,66 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ignored.push(format!("window: {e}"));
         config.window = None;
     }
+    config.icon = match config.icon {
+        Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
+        Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
+            icons
+                .into_iter()
+                .filter(|(platform, _)| {
+                    let known = AppIcon::PLATFORMS.contains(&platform.as_str());
+                    if !known {
+                        ignored.push(format!("unknown key `icon.{platform}`"));
+                    }
+                    known
+                })
+                .map(|(platform, icon)| (platform, dir.join(icon)))
+                .collect(),
+        )),
+        None => None,
+    };
     warn_ignored(&path, &ignored);
     config.ios.check(ApplePlatform::Ios)?;
     config.macos.check()?;
-    config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
+    config.localizations = app_localizations(dir, config.locales.as_ref());
     Ok(config)
+}
+
+/// The locales of the app in `dir` ([`nsh_i18n::app_locales`]), from
+/// `nsh.json`'s `locales` (its tags; the bundler warns of other values)
+/// or `locales/`'s translations (the bundler reports one it cannot read).
+fn app_localizations(dir: &Path, locales: Option<&serde_json::Value>) -> Vec<String> {
+    let locales = locales.and_then(serde_json::Value::as_array).map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    });
+    let translations = match locales {
+        Some(_) => Default::default(),
+        None => nsh_i18n::read_translations(dir).unwrap_or_default(),
+    };
+    nsh_i18n::app_locales(&translations, locales.as_deref())
+}
+
+/// Declares the app's locales to Apple's systems (`CFBundleLocalizations`,
+/// English, the development region, first): system UI, such as AppKit's and
+/// UIKit's menus, shows in the language the app does, which without it is
+/// English whatever the user's.
+fn bundle_localizations(d: &mut plist::Dictionary, config: &AppConfig) {
+    if config.localizations.is_empty() {
+        return;
+    }
+    let mut list = vec!["en".to_owned()];
+    for locale in &config.localizations {
+        if !list.contains(locale) {
+            list.push(locale.clone());
+        }
+    }
+    d.insert(
+        "CFBundleLocalizations".into(),
+        plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
+    );
 }
 
 /// `nsh.json`'s text as an [`AppConfig`], with what it left out: keys it
@@ -809,7 +925,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
-    if let Some(icon) = &config.icon {
+    if let Some(icon) = config.icon(PackageTarget::Ios) {
         let partial = compile_icon(icon, &app, sdk)?;
         for (key, value) in partial {
             info.insert(key, value);
@@ -998,7 +1114,7 @@ fn package_android(
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
             abis: &abis,
-            icon: config.icon.as_deref(),
+            icon: config.icon(PackageTarget::Android),
             assets,
             signing,
         },
@@ -1077,13 +1193,14 @@ fn package_linux(
     let mut info = desktop_app_json(config, name, id, version);
     info["schemes"] = serde_json::json!(config.schemes);
     fs::write(resources.join("app.json"), info.to_string())?;
-    if let Some(icon) = &config.icon {
+    let icon = config.icon(PackageTarget::Linux);
+    if let Some(icon) = icon {
         fs::copy(icon, dir.join(format!("{id}.png")))
             .with_context(|| format!("copy {}", icon.display()))?;
     }
     fs::write(
         dir.join(format!("{id}.desktop")),
-        desktop_entry(name, id, executable, config.icon.is_some(), &config.schemes),
+        desktop_entry(name, id, executable, icon.is_some(), &config.schemes),
     )?;
     let archive = options.out.join(format!("{name}.tar.gz"));
     let _ = fs::remove_file(&archive);
@@ -1176,7 +1293,7 @@ fn package_macos(
         nsh.join("app.json"),
         app_json(info, &schemes, config.window.as_ref()),
     )?;
-    let icon = match &config.icon {
+    let icon = match config.icon(PackageTarget::Macos) {
         Some(icon) => {
             macos_icns(icon, &resources.join("AppIcon.icns"))?;
             true
@@ -1439,6 +1556,7 @@ fn macos_info_plist(
         d.insert("LSUIElement".into(), true.into());
     }
     config.usage_descriptions(&mut d);
+    bundle_localizations(&mut d, config);
     // The app's own keys, over NSH's defaults (never over its reserved ones).
     d.extend(config.macos.info_plist()?);
     Ok(d)
@@ -1519,6 +1637,7 @@ fn info_plist(
     );
     d.insert("LSRequiresIPhoneOS".into(), true.into());
     config.usage_descriptions(&mut d);
+    bundle_localizations(&mut d, config);
     // A launch screen entry opts into the full screen (no letterboxing).
     d.insert(
         "UILaunchScreen".into(),
@@ -1936,6 +2055,42 @@ mod tests {
     }
 
     #[test]
+    fn apple_packages_declare_the_apps_languages() {
+        let dir = std::env::temp_dir().join(format!("nsh-localizations-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("locales")).unwrap();
+        fs::write(dir.join("App.tsx"), "").unwrap();
+        fs::write(dir.join("locales/en.yml"), "hello: Hello\n").unwrap();
+        fs::write(dir.join("locales/zh-CN.yml"), "hello: 你好\n").unwrap();
+        let declared = |config: &AppConfig| {
+            let macos = macos_info_plist("A", "com.a", "a", config, false).unwrap();
+            let ios = info_plist("A", "com.a", "a", config, "iphoneos").unwrap();
+            assert_eq!(
+                macos.get("CFBundleLocalizations"),
+                ios.get("CFBundleLocalizations")
+            );
+            macos.get("CFBundleLocalizations").map(|list| {
+                list.as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // The translations' languages, English (the development region) first...
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "zh-CN"]);
+        // ...or exactly those `locales` lists, as the bundle carries them.
+        fs::write(dir.join("nsh.json"), r#"{ "locales": ["ja", "zh-TW", 7] }"#).unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-TW"]);
+        // An app without either declares nothing: English, as before.
+        assert_eq!(declared(&AppConfig::default()), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn apps_claim_their_url_schemes_in_the_package() {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
@@ -2005,6 +2160,15 @@ mod tests {
     }
 
     #[test]
+    fn single_instance_apps_say_so_in_app_json() {
+        let config: AppConfig = serde_json::from_str(r#"{ "singleInstance": true }"#).unwrap();
+        let info = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(info["singleInstance"], serde_json::json!(true));
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("singleInstance").is_none());
+    }
+
+    #[test]
     fn apps_add_their_own_info_plist_keys() {
         let config: AppConfig = serde_json::from_value(serde_json::json!({
             "ios": {
@@ -2063,6 +2227,48 @@ mod tests {
     }
 
     #[test]
+    fn nsh_json_icon_is_one_for_every_target_or_one_per_platform() {
+        let dir = std::env::temp_dir().join(format!("nsh-icon-config-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        fs::write(dir.join("nsh.json"), r#"{ "icon": "icon.png" }"#).unwrap();
+        let config = read_config(&entry).unwrap();
+        for target in [
+            PackageTarget::Macos,
+            PackageTarget::Windows,
+            PackageTarget::Web,
+        ] {
+            assert_eq!(config.icon(target), Some(dir.join("icon.png").as_path()));
+        }
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "icon": { "macos": "mac.png", "windows": "win.png", "mac": "typo.png" } }"#,
+        )
+        .unwrap();
+        let config = read_config(&entry).unwrap();
+        assert_eq!(
+            config.icon(PackageTarget::Macos),
+            Some(dir.join("mac.png").as_path())
+        );
+        assert_eq!(
+            config.icon(PackageTarget::Windows),
+            Some(dir.join("win.png").as_path())
+        );
+        assert_eq!(config.icon(PackageTarget::Linux), None);
+        assert_eq!(
+            config.icon,
+            Some(AppIcon::Platforms(
+                [
+                    ("macos".to_owned(), dir.join("mac.png")),
+                    ("windows".to_owned(), dir.join("win.png")),
+                ]
+                .into()
+            ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn nsh_json_ignores_keys_it_does_not_know() {
         let (config, unknown) = parse_config(
             r#"{
@@ -2105,7 +2311,7 @@ mod tests {
             r#"{
                 "name": "Orders",
                 "build": "7",
-                "icon": { "light": "a.png", "dark": "b.png" },
+                "icon": ["a.png"],
                 "schemes": ["orders", { "scheme": "x" }],
                 "web": { "base": "/orders/", "connect": ["a.com", 1] },
                 "android": { "targetSdk": "latest" },

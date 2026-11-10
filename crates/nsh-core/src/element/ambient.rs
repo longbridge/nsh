@@ -860,6 +860,19 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
+/// The next later launch of the app (TS: `Application.on("secondInstance",
+/// ...)`): with `nsh.json` `"singleInstance": true`, a second launch on
+/// Windows or Linux hands the running instance its arguments and working
+/// directory and exits; those that came before anything listened first
+/// ([`crate::single_instance`]). The main window is already brought
+/// forward. Never on macOS (Launch Services activates the running app
+/// instead), iOS, Android or the web. To await in a task.
+pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextSecondInstance(slot));
+    answer
+}
+
 /// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
 /// URL of a scheme the app claims (`nsh.json` `schemes`), those
 /// that came before anything listened first, the one that launched the app
@@ -876,7 +889,10 @@ pub fn next_url_scheme_open() -> Answer<String> {
 /// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
 /// it already. Moves while nothing listened since the app started are not
 /// kept; once something listened, at most
-/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+/// [`crate::url_scheme::MAX_PENDING`] wait. One call waits at a time, as
+/// with [`next_url_scheme_open`]: a newer call takes the next move and the
+/// one before gets none, so an app awaits it in one task (TS's `change`
+/// listeners share one). To await in a task.
 pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
     let (answer, slot) = Answer::new();
     act(Action::NextAppUrlChange(slot));
@@ -939,6 +955,17 @@ pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::Histo
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view's ref runs scripts and answers with their results
+/// here (TS: `WebView.evaluateAvailable()`,
+/// [`ElementRef::evaluate`](super::ElementRef::evaluate)): the platform has
+/// it and the app's capabilities grant `webview`. Elsewhere `evaluate`
+/// fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To await in a task.
+pub fn web_evaluate_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebEvaluateAvailable(slot));
     answer
 }
 
@@ -1179,6 +1206,17 @@ pub fn run_on_main_thread<R: Send + 'static>(
 }
 
 /// A future polled under `owner` ([`Owner::scope`]).
+/// `future`, polled under `owner`, boxed for the executor.
+pub(super) fn owned(
+    owner: Owner,
+    future: impl Future<Output = ()> + 'static,
+) -> std::pin::Pin<Box<dyn Future<Output = ()>>> {
+    Box::pin(Owned {
+        owner,
+        future: Box::pin(future),
+    })
+}
+
 struct Owned<F> {
     owner: Owner,
     future: std::pin::Pin<Box<F>>,

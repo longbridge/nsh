@@ -1,6 +1,6 @@
 import { Canvas, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { alpha, Badge, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, type ToggleSize, Toggle as Switch, toolbarRule, toolbarTrack } from "../ui";
+import { alpha, Badge, Caption, Card, colors, DemoPage, finish, focusRing, hovered, motion, terminal, TERMINAL_GAP, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, type ToggleSize, toolbarRule, toolbarTrack, LabeledToggle, LastEvent } from "../ui";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
 // `nsh/base`'s `Toggle` owns presses, the pressed state screen readers hear
@@ -73,6 +73,9 @@ function Tool(props: Content & {
 }
 
 type Align = "left" | "center" | "right" | "justify";
+
+/** An alignment in words, for the caption. */
+const ALIGNED: Record<Align, string> = { left: "left aligned", center: "centered", right: "right aligned", justify: "justified" };
 
 /** Four lines of a paragraph, set as `align` sets them, on Lucide's grid and pen. */
 function AlignGlyph(props: { align: Align; tint: string; size: number }) {
@@ -230,7 +233,7 @@ export function ToggleDemo() {
             The quick brown fox jumps over the lazy dog, then naps in the sun until the evening breeze comes in.
           </Text>
         </View>
-        <Caption label={pointer ? "Tab into the toolbar, then ← → move, Space presses" : "Press a mark, then an alignment"} note={`${marks().length} of ${MARKS.length} · ${align()}`} />
+        <Caption label={pointer ? "Tab in, then ← → and Space" : "Press a mark, then an alignment"} note={`${marks().length === 1 ? "1 mark" : `${marks().length} marks`}, ${ALIGNED[align()]}`} />
       </Card>
     );
   }
@@ -282,7 +285,7 @@ export function ToggleDemo() {
       </View>
     );
     return (
-      <Card title="View switcher" subtitle="A segmented group: the thumb springs to the one shown" right={<Badge label={`${FILES.length} items`} />}>
+      <Card title="View switcher" subtitle="The thumb springs to the one shown" right={<Badge label={`${FILES.length} items`} />}>
         <ToggleGroup
           style={{
             flexDirection: "row",
@@ -291,8 +294,8 @@ export function ToggleDemo() {
             borderRadius: 9,
             borderCurve: "continuous",
             borderWidth: 1,
-            borderColor: finish.track.borderColor,
-            backgroundColor: colors.track,
+            borderColor: colors.border,
+            backgroundColor: colors.inset,
             boxShadow: finish.track.boxShadow,
           }}
         >
@@ -386,7 +389,7 @@ export function ToggleDemo() {
     ];
     const starred = signal<string[]>(["Launch checklist"]);
     return (
-      <Card title="Favorite" subtitle="One toggle alone: the star pops when it turns on" right={<Badge label={`${starred().length} starred`} />}>
+      <Card title="Favorite" subtitle="The star pops when it turns on" right={<Badge label={`${starred().length} starred`} />}>
         <View>
           <Each of={items}>
             {(item, i) => {
@@ -460,7 +463,7 @@ export function ToggleDemo() {
       { value: "comments", icon: "message-circle", label: "Comments" },
     ];
     return (
-      <Card title="Disabled" subtitle="A group the app locks, and one toggle on its own" right={<Switch value={locked()} onChange={(v) => locked.set(v)} label="Lock toolbar" />}>
+      <Card title="Disabled" subtitle="A locked group and a lone toggle" right={<LabeledToggle label="Lock toolbar" value={locked()} onChange={(v) => locked.set(v)} />}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 12 }}>
           <ToggleGroup disabled={locked()} style={track()}>
             <Each of={tools}>
@@ -487,7 +490,7 @@ export function ToggleDemo() {
   function Last() {
     return (
       <Card title="Last event">
-        <Text style={{ fontSize: 13, color: colors.text, fontFamily: mono }}>{last()}</Text>
+        <LastEvent value={last()} hint="Press a toggle" />
       </Card>
     );
   }

@@ -2804,24 +2804,33 @@ fn spare_list_cells_are_hidden_until_placed_again() {
 
     // Far down, the window takes all 17 cells and 8 more; back at the
     // top, the 8 it no longer needs stay where the window left them,
-    // showing their own rows there.
+    // showing their own rows there, out of sight. Screen readers skip the
+    // cells the window left behind (the rows there may have moved since
+    // they were laid out) until their new rows are bound: nothing else is
+    // mounted before.
     c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     c.commit();
     c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
-    assert!(
-        c.commit().is_none(),
-        "nothing to mount before the rows are bound"
-    );
+    let left = c.commit().expect("the cells left behind");
+    for &cell in &cells {
+        assert_eq!(hidden_in(&left, cell), (None, Some(true)), "cell {cell}");
+        assert_eq!(frame_of(&left, cell), None, "cell {cell}");
+    }
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
     let placed = c.commit().unwrap();
     let mut spare = Vec::new();
     for &cell in &cells {
-        assert_eq!(hidden_in(&placed, cell), (None, None), "cell {cell}");
         match frame_of(&placed, cell) {
-            Some(frame) => assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}"),
-            None => spare.push(cell),
+            Some(frame) => {
+                assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}");
+                assert_eq!(hidden_in(&placed, cell), (None, Some(false)), "cell {cell}");
+            }
+            None => {
+                assert_eq!(hidden_in(&placed, cell), (None, None), "cell {cell}");
+                spare.push(cell);
+            }
         }
     }
     assert_eq!(spare.len(), 8);
@@ -6111,6 +6120,30 @@ fn the_apps_appearance_wins_over_the_systems() {
 }
 
 #[test]
+fn pointer_and_terminal_restyle_natively() {
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "bg-white pointer-fine:bg-black terminal:bg-red-500",
+    );
+    let background = |batch: &MountBatch| view_style_of(batch, 2).map(|s| s.background_color);
+    assert_eq!(background(&c.commit().unwrap()), Some(Color(0xffff_ffff)));
+    c.set_class_environment(crate::tailwind::ClassEnvironment {
+        pointer: crate::tailwind::Pointer::Fine,
+        ..Default::default()
+    });
+    assert_eq!(background(&c.commit().unwrap()), Some(Color(0x0000_00ff)));
+    c.set_class_environment(crate::tailwind::ClassEnvironment {
+        pointer: crate::tailwind::Pointer::Fine,
+        terminal: true,
+        ..Default::default()
+    });
+    let red = background(&c.commit().unwrap()).unwrap();
+    assert_ne!(red, Color(0x0000_00ff));
+}
+
+#[test]
 fn dark_mode_and_breakpoints_restyle_natively() {
     let mut c = core();
     view_with_classes(&mut c, 2, "bg-white dark:bg-black p-2 md:p-8");
@@ -7723,6 +7756,8 @@ fn focus_within_follows_a_focus_nothing_tracks() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
     assert!(c.has_focus_within(4) && c.has_focus_within(6) && c.has_focus_within(ROOT_ID));
     c.set_states(6, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
     assert!(!c.has_focus_within(2) && !c.has_focus_within(ROOT_ID));
@@ -7768,6 +7803,8 @@ fn focus_within_follows_an_input_without_focus_classes() {
     // Only the frame changes: the input reads no state.
     assert!(view_style_of(&batch, 4).is_none(), "{:?}", batch.items);
     c.set_states(4, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
@@ -7884,6 +7921,42 @@ fn a_focus_moving_inside_keeps_focus_within_in_either_order() {
 }
 
 #[test]
+fn a_blur_waits_for_the_frame_before_the_focus_leaves() {
+    use crate::tailwind::state::FOCUSED;
+    // Regression (#1188): a move reported as a blur then a focus in two
+    // messages, with a commit between them (AppKit resigns the first
+    // responder before the next one becomes it), left the frame for one
+    // commit and came back.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 2, ""),
+        ],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    c.commit();
+    c.set_states(4, 0);
+    assert!(c.commit().is_none(), "the blur waits for the frame");
+    assert!(c.wants_frame());
+    assert!(c.has_focus_within(2));
+    c.set_states(6, FOCUSED);
+    assert!(c.commit().is_none(), "one move inside, nothing sent");
+    assert!(c.has_focus_within(2) && c.has_focus_within(6) && !c.has_focus_within(4));
+    assert!(!c.wants_frame());
+    // A blur no focus follows lets go at the frame.
+    c.set_states(6, 0);
+    assert!(c.commit().is_none());
+    c.run_frame(crate::time::now());
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!c.has_focus_within(2) && !c.wants_frame());
+}
+
+#[test]
 fn an_overlays_content_is_within_the_view_it_is_in() {
     use crate::tailwind::state::FOCUSED;
     // Regression: a popup's trigger (4) and the popup (an overlay in the
@@ -7995,6 +8068,8 @@ fn a_focus_within_style_applies_while_the_focus_is_inside() {
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.8);
     c.set_states(4, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
@@ -8035,6 +8110,8 @@ fn focus_moved_after_a_pointer_does_not_show_until_a_key() {
     assert!(focus_visible(&c, 2));
     // Leaving takes both states off.
     c.set_states(2, 0);
+    // A lone blur lets go at the frame.
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
     assert!(!focus_visible(&c, 2));
@@ -8073,6 +8150,97 @@ fn focus_moved_by_the_keyboard_shows_at_once() {
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.5);
     assert!(view_style_of(&batch, 2).is_none_or(|s| s.opacity == 0.5));
     assert!(!focus_visible(&c, 2) && !focus_visible(&c, 4));
+}
+
+#[test]
+fn a_part_projected_focused_shows_focus_visible_while_the_focus_does() {
+    use crate::{
+        platform::InputModality,
+        tailwind::state::{FOCUS_VISIBLE, FOCUSED},
+    };
+    // A tree (2) that keeps the focus and its row (4) at the cursor.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50"),
+            (
+                4,
+                2,
+                "opacity-50 focus:opacity-75 focus-visible:opacity-100",
+            ),
+        ],
+    );
+    c.commit();
+    let row = c.key(4).unwrap();
+    let projected = |states| Op::SetProp {
+        id: 4,
+        prop: Prop::ProjectedStates(states),
+    };
+    // A press on the row: the tree takes the focus unseen, the row is the
+    // cursor only.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    apply(&mut c, vec![projected(FOCUSED)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.75);
+    assert_eq!(c.styled_states(row) & FOCUS_VISIBLE, 0);
+    // An arrow key: the tree's focus shows, and so does its cursor.
+    c.set_input_modality(InputModality::Keyboard);
+    let batch = c.commit().unwrap();
+    assert!(focus_visible(&c, 2));
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
+    // The cursor moving off the row takes both off; back on, both show.
+    apply(&mut c, vec![projected(0)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.5);
+    apply(&mut c, vec![projected(FOCUSED)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
+    // The focus leaving the tree (its row still projected as it renders
+    // next) takes `focus-visible:` off at once.
+    c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.75);
+    // Never its own state: its events and accessibility do not see it.
+    assert_eq!(c.nodes[row as usize].states & FOCUS_VISIBLE, 0);
+}
+
+#[test]
+fn a_part_projected_focused_follows_a_press_moving_the_focus() {
+    use crate::{
+        platform::InputModality,
+        tailwind::state::{FOCUS_VISIBLE, FOCUSED},
+    };
+    // The keyboard's focus shows on a button (2); a press then gives a
+    // list (4) the focus, its option (6) at the cursor.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, ""),
+            (4, ROOT_ID, ""),
+            (6, 4, "opacity-50 focus-visible:opacity-100"),
+        ],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Keyboard);
+    c.set_states(2, FOCUSED);
+    c.commit();
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(4, FOCUSED);
+    c.set_states(2, 0);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::ProjectedStates(FOCUSED),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(view_style_of(&batch, 6).is_none_or(|s| s.opacity == 0.5));
+    let option = c.key(6).unwrap();
+    assert_eq!(c.styled_states(option) & FOCUS_VISIBLE, 0);
 }
 
 #[test]
@@ -8980,6 +9148,506 @@ fn refused_urls_fail_and_send_nothing() {
         field("code"),
         Some(&crate::PayloadValue::Str("ERR_ACCESS_DENIED".into()))
     );
+}
+
+/// An image or a video loads the URL the check granted, as WHATWG's parser
+/// reads it: `//` takes the base's scheme, dot segments are resolved, and a
+/// source naming a host the app is not granted loads nothing.
+#[test]
+fn media_sources_load_the_url_the_check_granted() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    c.set_base_url(Some("https://app.example/index.html".into()));
+    let image = |id, uri: &str| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: uri.into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = image(2, "//docs.example.com/a/../x.png");
+    ops.extend(image(4, "//bank.example/x.png"));
+    ops.extend(image(6, "https:\\\\bank.example\\x.png"));
+    ops.extend(image(8, "asset:/own.png"));
+    ops.extend([
+        Op::Create {
+            id: 10,
+            tag: Tag::Video,
+        },
+        Op::SetProp {
+            id: 10,
+            prop: Prop::Native(NativeProp::Src(Some(
+                "//docs.example.com/v/../v.mp4".into(),
+            ))),
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 10,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let images: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image { id, source, .. } => {
+                Some((*id, source.as_ref().map(|s| s.uri.to_string())))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        images,
+        [
+            (2, Some("https://docs.example.com/x.png".to_owned())),
+            (4, None),
+            (6, None),
+            (8, Some("asset:/own.png".to_owned())),
+        ]
+    );
+    let video = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id: 10,
+            props: crate::NativeProps::Video(p),
+        } => Some(p.source.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        video.flatten().as_deref(),
+        Some("https://docs.example.com/v.mp4")
+    );
+}
+
+/// In a native app (no base), a relative image or video source loads
+/// nothing for an app with capabilities: the platforms read it against the
+/// working directory.
+#[test]
+fn relative_media_sources_load_nothing_in_a_native_app() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["*"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: "img/a.png".into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Video,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::Native(NativeProp::Src(Some("Users/a/clip.mp4".into()))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let image = batch.items.iter().find_map(|i| match i {
+        MountItem::Image { id: 2, source, .. } => Some(source.clone()),
+        _ => None,
+    });
+    assert_eq!(image, Some(None));
+    let video = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id: 4,
+            props: crate::NativeProps::Video(p),
+        } => Some(p.source.clone()),
+        _ => None,
+    });
+    assert_eq!(video.flatten(), None);
+}
+
+/// Draws `uris` on canvas 2 (made on the first call), the frame's number
+/// in the destination so each draw differs: the image URIs it sent.
+fn drawn_on_canvas(c: &mut Core<FakeEngine>, uris: &[&str], frame: f32) -> Vec<String> {
+    let mut ops = Vec::new();
+    if c.key(2).is_err() {
+        ops.extend([
+            Op::Create {
+                id: 2,
+                tag: Tag::Canvas,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ]);
+    }
+    ops.push(Op::Draw {
+        id: 2,
+        drawing: Box::new(crate::canvas::Drawing {
+            ops: uris
+                .iter()
+                .map(|uri| crate::canvas::CanvasOp::DrawImage {
+                    image: crate::canvas::CanvasImage { uri: (*uri).into() },
+                    source: None,
+                    dest: [crate::canvas::Num::Const(frame); 4],
+                })
+                .collect(),
+            ..Default::default()
+        }),
+    });
+    apply(c, ops);
+    let batch = c.commit().unwrap();
+    batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Canvas { drawing, .. } => Some(drawing),
+            _ => None,
+        })
+        .flat_map(|d| d.ops.iter())
+        .filter_map(|op| match op {
+            crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A canvas checks its images on every draw. What it remembers of a
+/// network image's check goes with the grant: once the grant changes, the
+/// next draw is checked against the new one.
+#[test]
+fn canvas_images_follow_a_changed_grant() {
+    let grant = |hosts: &[&str]| {
+        Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "network": { "hosts": hosts } }),
+            )
+            .unwrap(),
+            granted: None,
+        })
+    };
+    let mut c = core();
+    c.set_access(grant(&["docs.example.com"]));
+    let image = "https://docs.example.com/a/../x.png";
+    assert_eq!(
+        drawn_on_canvas(&mut c, &[image], 1.0),
+        ["https://docs.example.com/x.png"]
+    );
+    assert_eq!(
+        drawn_on_canvas(&mut c, &[image], 2.0),
+        ["https://docs.example.com/x.png"]
+    );
+    c.set_access(grant(&["cdn.example.com"]));
+    assert_eq!(drawn_on_canvas(&mut c, &[image], 3.0), Vec::<String>::new());
+}
+
+/// A canvas's local image is resolved on every draw, never remembered: a
+/// file granted on one draw and replaced by a link out of the root is
+/// refused on the next.
+#[cfg(unix)]
+#[test]
+fn canvas_local_images_are_resolved_on_every_draw() {
+    let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let root = base.join(format!("canvas-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("allowed")).unwrap();
+    let root = crate::access::canonicalize(&root).unwrap();
+    std::fs::write(root.join("allowed/a.png"), b"public").unwrap();
+    std::fs::write(root.join("secret.png"), b"secret").unwrap();
+    let allowed = root.join("allowed").to_str().unwrap().to_owned();
+    let access = Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "fs": { "read": [allowed.clone()] } }),
+        )
+        .unwrap(),
+        granted: None,
+    });
+    let mut c = core();
+    c.set_access(access.clone());
+    c.set_media_files(Arc::new(crate::access::MediaFiles::new(
+        &access,
+        None,
+        &crate::access::TrustedPaths::default(),
+        true,
+    )));
+    let image = format!("{allowed}/a.png");
+    assert_eq!(
+        drawn_on_canvas(&mut c, &[&image], 1.0),
+        std::slice::from_ref(&image)
+    );
+    std::fs::remove_file(root.join("allowed/a.png")).unwrap();
+    std::os::unix::fs::symlink(root.join("secret.png"), root.join("allowed/a.png")).unwrap();
+    assert_eq!(
+        drawn_on_canvas(&mut c, &[&image], 2.0),
+        Vec::<String>::new()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A placeholder loads the URL the check granted, as the image's source
+/// does, and shows nothing when its host is not granted.
+#[test]
+fn placeholders_load_the_url_the_check_granted() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    c.set_base_url(Some("https://app.example/index.html".into()));
+    let placeholder = |id, uri: &str| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Image(ImageProp::Placeholder(Some(ImageSource {
+                    uri: uri.into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                }))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = placeholder(2, "//docs.example.com/a/../p.png");
+    ops.extend(placeholder(4, "//bank.example/p.png"));
+    ops.extend(placeholder(6, "asset:/../outside.png"));
+    ops.extend(placeholder(8, "asset:/inside.png"));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let placeholders: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image { id, options, .. } => {
+                Some((*id, options.placeholder.as_ref().map(|s| s.uri.to_string())))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        placeholders,
+        [
+            (2, Some("https://docs.example.com/p.png".to_owned())),
+            (4, None),
+            (6, None),
+            (8, Some("asset:/inside.png".to_owned())),
+        ]
+    );
+}
+
+/// A local image loads its canonical path when `capabilities.fs.read` holds
+/// it, in the form it was written, and nothing when it leaves the root.
+#[cfg(unix)]
+#[test]
+fn local_images_load_the_path_the_fs_grant_holds() {
+    let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let root = base.join(format!("core-media-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("allowed")).unwrap();
+    std::fs::create_dir_all(root.join("outside")).unwrap();
+    let root = crate::access::canonicalize(&root).unwrap();
+    let allowed = root.join("allowed").to_str().unwrap().to_owned();
+    let access = Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "fs": { "read": [allowed.clone()] } }),
+        )
+        .unwrap(),
+        granted: None,
+    });
+    let mut c = core();
+    c.set_access(access.clone());
+    c.set_media_files(Arc::new(crate::access::MediaFiles::new(
+        &access,
+        None,
+        &crate::access::TrustedPaths::default(),
+        true,
+    )));
+    let image = |id, uri: String| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: uri.into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = image(2, format!("{allowed}/./a.png"));
+    ops.extend(image(4, format!("file://{allowed}/sub/../a.png")));
+    ops.extend(image(6, format!("{allowed}/../outside/b.png")));
+    ops.extend(image(8, format!("file://{allowed}/%2e%2e/outside/b.png")));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let images: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image { id, source, .. } => {
+                Some((*id, source.as_ref().map(|s| s.uri.to_string())))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        images,
+        [
+            (2, Some(format!("{allowed}/a.png"))),
+            (4, Some(format!("file://{allowed}/a.png"))),
+            (6, None),
+            (8, None),
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A canvas image draws, and `Image.getSize` / `prefetch` loads, the URL the
+/// check granted; one naming a host the app is not granted is dropped.
+#[test]
+fn canvas_images_and_image_info_load_the_url_the_check_granted() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    c.set_base_url(Some("https://app.example/index.html".into()));
+    let draw = |uri: &str| crate::canvas::CanvasOp::DrawImage {
+        image: crate::canvas::CanvasImage { uri: uri.into() },
+        source: None,
+        dest: [crate::canvas::Num::Const(0.0); 4],
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Canvas,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Draw {
+                id: 2,
+                drawing: Box::new(crate::canvas::Drawing {
+                    ops: vec![
+                        draw("//docs.example.com/a/../x.png"),
+                        draw("//bank.example/x.png"),
+                    ],
+                    ..Default::default()
+                }),
+            },
+            Op::Command {
+                id: ROOT_ID,
+                command: Command::ImageInfo {
+                    id: 1,
+                    uri: "//docs.example.com/b/../y.png".into(),
+                },
+            },
+            Op::Command {
+                id: ROOT_ID,
+                command: Command::ImageInfo {
+                    id: 2,
+                    uri: "//bank.example/y.png".into(),
+                },
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let drawn: Vec<String> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Canvas { drawing, .. } => Some(drawing),
+            _ => None,
+        })
+        .flat_map(|d| d.ops.iter())
+        .filter_map(|op| match op {
+            crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(drawn, ["https://docs.example.com/x.png"]);
+    let asked: Vec<String> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Command {
+                command: Command::ImageInfo { uri, .. },
+                ..
+            } => Some(uri.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, ["https://docs.example.com/y.png"]);
 }
 
 /// A refusal names the host to grant, or, for a URL no host grant can
@@ -13759,6 +14427,50 @@ mod components {
         assert_eq!(shown.last().unwrap(), "heard end not-allowed");
     }
 
+    /// Shows the later launches of the app it hears.
+    #[component]
+    fn Relaunched() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            loop {
+                let launch = next_second_instance().await;
+                let line = format!("{} in {}", launch.args.join(","), launch.cwd);
+                shown.set(format!("{} [{line}]", untracked(|| shown.get())));
+            }
+        });
+        view().child(text(move || format!("launches{}", shown.get())))
+    }
+
+    #[test]
+    fn later_launches_wait_for_the_app_and_come_in_order() {
+        use crate::single_instance::SecondInstance;
+        let mut c = core();
+        let launch = |c: &mut Core<FakeEngine>, args: &[&str]| {
+            let args = args.iter().map(|a| a.to_string()).collect();
+            c.component_event(
+                crate::ROOT_ID,
+                EventKind::SecondInstance,
+                &SecondInstance::new(args, "/home/u").to_payload(),
+            );
+        };
+        // Before the app listens: kept for it.
+        launch(&mut c, &["a.txt"]);
+        c.mount_root(&crate::element::Root::new::<Relaunched>(|| ()));
+        c.commit();
+        launch(&mut c, &["--new", "b.txt"]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("b.txt")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "launches [a.txt in /home/u] [--new,b.txt in /home/u]"
+        );
+        // Not a launch: dropped.
+        assert!(!c.component_event(
+            crate::ROOT_ID,
+            EventKind::SecondInstance,
+            &EventPayload::None
+        ));
+    }
+
     /// Asks for the permission, shows a notification and sets the badge when
     /// its button is pressed; shows the answers and the presses.
     #[component]
@@ -13950,6 +14662,47 @@ mod components {
         c.mount_root(&crate::element::Root::new::<WebInputCheck>(|| ()));
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("web input")));
         shown.last().unwrap().clone()
+    }
+
+    /// Evaluates a script that never answers in a web view, with a short
+    /// timeout, and shows whether the platform evaluates and how it ended.
+    #[component]
+    fn EvaluateCheck() -> impl IntoElement {
+        let shown = signal(String::from("asking"));
+        let page = element_ref();
+        spawn(async move {
+            let available = web_evaluate_available().await;
+            let options = EvaluateOptions {
+                timeout: std::time::Duration::from_millis(5),
+            };
+            let code = match page.evaluate("new Promise(() => {})", options).await {
+                Ok(evaluation) => format!("value {}", evaluation.value),
+                Err(error) => error.code().unwrap_or("none").to_owned(),
+            };
+            shown.set(format!("evaluate {available} {code}"));
+        });
+        view()
+            .child(web_view("about:blank").element_ref(&page))
+            .child(text(move || shown.get()))
+    }
+
+    #[test]
+    fn evaluate_answers_by_its_timeout_where_the_platform_evaluates() {
+        let shown = |platform: bool| {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                web_evaluate: platform,
+                ..Default::default()
+            });
+            c.mount_root(&crate::element::Root::new::<EvaluateCheck>(|| ()));
+            let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("evaluate ")));
+            shown.last().unwrap().clone()
+        };
+        assert_eq!(shown(true), "evaluate true ETIMEDOUT");
+        assert_eq!(
+            shown(false),
+            "evaluate false ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
     }
 
     #[test]
@@ -14730,6 +15483,7 @@ mod touch {
                 page: point(px(x), px(100.0)),
                 location: point(px(x - 10.0), px(5.0)),
                 changed: true,
+                pointer_type: crate::PointerType::Touch,
             }],
         }))
     }
@@ -20028,6 +20782,72 @@ mod views {
         assert_eq!(texts(&c.commit().unwrap()), ["caught 1"]);
     }
 
+    thread_local! {
+        /// What the quitter's listener did.
+        static QUIT_LOG: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Ready on its second poll: work that waits for something.
+    #[derive(Default)]
+    struct YieldOnce(bool);
+
+    impl std::future::Future for YieldOnce {
+        type Output = ();
+
+        fn poll(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<()> {
+            if std::mem::replace(&mut self.0, true) {
+                std::task::Poll::Ready(())
+            } else {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        }
+    }
+
+    /// Saves as the app quits.
+    #[derive(Default)]
+    struct Quitter;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct QuitterProps {}
+
+    impl Component for Quitter {
+        type Props = QuitterProps;
+        type Event = NoEvent;
+
+        fn view(_: QuitterProps, _: Scope<NoEvent>) -> impl IntoElement {
+            crate::element::desktop::on_app_quit(|| {
+                QUIT_LOG.with(|log| log.borrow_mut().push("started"));
+                async {
+                    YieldOnce::default().await;
+                    QUIT_LOG.with(|log| log.borrow_mut().push("saved"));
+                }
+            });
+            view()
+        }
+    }
+
+    #[test]
+    fn quit_listeners_run_their_work_as_the_app_quits() {
+        let mut c = core();
+        assert!(!c.has_quit_listeners());
+        c.mount_root(&Root::new::<Quitter>(|| QuitterProps {}));
+        c.commit();
+        assert!(c.has_quit_listeners());
+        assert!(QUIT_LOG.with(|log| log.borrow().is_empty()));
+        assert!(c.start_quit());
+        assert_eq!(QUIT_LOG.with(|log| log.borrow().clone()), ["started"]);
+        c.run_component_tasks();
+        assert_eq!(
+            QUIT_LOG.with(|log| log.borrow().clone()),
+            ["started", "saved"]
+        );
+        assert!(!c.quit_pending());
+    }
+
     /// Its view panics as it is made.
     #[derive(Default)]
     struct Broken;
@@ -22081,6 +22901,11 @@ mod rust_menus {
         crate::element::desktop::set_tray(
             crate::element::desktop::tray()
                 .tooltip("Player")
+                .title([
+                    crate::desktop::TrayTitleRun::new("Now "),
+                    crate::desktop::TrayTitleRun::new("playing").color(crate::color::rgb(0xd92d20)),
+                ])
+                .title_placement(crate::desktop::TrayTitlePlacement::Left)
                 .menu([MenuItem::new("Pause").on_select(move || log.set("pause".into()))])
                 .on_click(move |e| log.set(format!("click {}", e.bounds.is_some()))),
         );
@@ -22113,6 +22938,17 @@ mod rust_menus {
             })
             .expect("the tray");
         assert_eq!(tray.tooltip, "Player");
+        assert_eq!(
+            tray.title,
+            [
+                crate::desktop::TrayTitleRun::new("Now "),
+                crate::desktop::TrayTitleRun::new("playing").color(crate::color::rgb(0xd92d20)),
+            ]
+        );
+        assert_eq!(
+            tray.title_placement,
+            crate::desktop::TrayTitlePlacement::Left
+        );
         assert!(tray.click >= 1 << 31);
         let Item::Action(pause) = &tray.menu[0] else {
             panic!("an action: {:?}", tray.menu);
@@ -22336,6 +23172,51 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
     let delivered = c.commit().unwrap();
     assert!(delivered.items.iter().any(|item| matches!(item,
         MountItem::Text { text, .. } if text.text == "4 5 14 25")));
+}
+
+#[test]
+fn wheels_reach_rust_listeners_with_their_delta() {
+    use crate::prelude::*;
+    #[component]
+    fn Canvas() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_wheel(move |e: &WheelEvent| {
+                let (dx, dy) = e.delta.xy();
+                at.set(format!(
+                    "{} {} {dx} {dy} {} {}",
+                    e.position.x.0,
+                    e.page_position.y.0,
+                    e.delta.precise(),
+                    e.modifiers.ctrl
+                ))
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Canvas>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::Wheel) => Some(*id),
+            _ => None,
+        })
+        .expect("the listening view mounts Wheel in its event mask");
+    let event = crate::WheelEvent::new(
+        point(px(4.0), px(5.0)),
+        point(px(14.0), px(25.0)),
+        crate::WheelDelta::Lines(point(0.0, -2.0)),
+        crate::keymap::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    );
+    assert!(c.component_event(host, EventKind::Wheel, &EventPayload::Wheel(event)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "4 25 0 -2 false true")));
 }
 
 /// A container `2` with `style` and empty children `4`, `6`, ... with
@@ -24253,6 +25134,27 @@ fn a_caret_is_located_in_the_root_view() {
         "pageBounds",
         PayloadValue::Bounds(rect(12.0, 30.0, 0.0, 0.0))
     )));
+
+    // A selection's box gets its place in the root view the same way; a
+    // payload with none (nothing selected) stays as it is.
+    let mut payload = EventPayload::Map(vec![
+        ("text", PayloadValue::Str("ab".into())),
+        ("bounds", PayloadValue::Bounds(rect(5.0, 2.0, 30.0, 18.0))),
+    ]);
+    c.locate_selection(4, &mut payload);
+    let EventPayload::Map(fields) = &payload else {
+        panic!("a map");
+    };
+    assert!(fields.contains(&(
+        "pageBounds",
+        PayloadValue::Bounds(rect(17.0, 32.0, 30.0, 18.0))
+    )));
+    let mut payload = EventPayload::Map(vec![("text", PayloadValue::Str(String::new()))]);
+    c.locate_selection(4, &mut payload);
+    assert_eq!(
+        payload,
+        EventPayload::Map(vec![("text", PayloadValue::Str(String::new()))])
+    );
 }
 
 fn touch_down(path: Vec<NodeId>) -> EventPayload {
@@ -24266,6 +25168,7 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             page: point(px(5.0), px(6.0)),
             location: point(px(5.0), px(6.0)),
             changed: true,
+            pointer_type: crate::PointerType::Touch,
         }],
         activated: None,
     }))
@@ -24380,6 +25283,74 @@ fn overlays_hear_presses_outside_and_cancel_from_the_top() {
         _ => None,
     });
     assert!(root_events.is_some_and(|e| !e.contains(EventKind::Touch)));
+}
+
+#[test]
+fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::Overlay, 4, &[]);
+    add(&mut c, 8, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 10, Tag::View, 8, &[]);
+    add(&mut c, 12, Tag::View, 6, &[]);
+    add(&mut c, 14, Tag::View, 2, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::PressOutside,
+                enabled: true,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    js_events(&mut c);
+
+    let menu = |pointer_type| {
+        EventPayload::ContextMenu(crate::ContextMenuEvent::new(
+            point(px(1.0), px(2.0)),
+            point(px(5.0), px(46.0)),
+            Default::default(),
+            pointer_type,
+        ))
+    };
+    let mouse = Some(crate::PointerType::Mouse);
+    for (id, pointer_type, outside) in [
+        // Another view, and a view inside it.
+        (8, mouse, true),
+        (10, mouse, true),
+        // The anchor and what is in it, the overlay, one inside it.
+        (2, mouse, false),
+        (14, mouse, false),
+        (4, mouse, false),
+        (12, mouse, false),
+        // The keyboard and a long press do not press.
+        (10, None, false),
+        (10, Some(crate::PointerType::Touch), false),
+    ] {
+        c.component_event(id, EventKind::ContextMenu, &menu(pointer_type));
+        let events = js_events(&mut c);
+        let pressed = events.iter().find_map(|(at, kind, payload)| {
+            (*at == 4 && *kind == EventKind::PressOutside).then_some(payload)
+        });
+        assert_eq!(pressed.is_some(), outside, "{id} {pointer_type:?}");
+        if let Some(payload) = pressed {
+            assert_eq!(
+                payload,
+                &EventPayload::Map(vec![(
+                    "pagePosition",
+                    PayloadValue::Point(point(px(5.0), px(46.0)))
+                )])
+            );
+        }
+    }
 }
 
 #[test]
@@ -34582,6 +35553,20 @@ mod audio {
         text(move || shown.get())
     }
 
+    /// Loads a sound from bytes once and shows why it was refused, naming
+    /// the capability.
+    #[component]
+    fn ByteClick() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            shown.set(match load_sound(b"RIFF a click".as_slice()).await {
+                Ok(_) => "loaded".into(),
+                Err(failure) => format!("{} {:?}", failure.error.as_str(), failure.permission),
+            });
+        });
+        text(move || shown.get())
+    }
+
     /// Plays a remote player, seeks it, and closes it.
     #[component]
     fn Voice() -> impl IntoElement {
@@ -34604,6 +35589,23 @@ mod audio {
             seen.push(format!("{:?}", player.next().await));
             drop(player);
             shown.set(seen.join("|"));
+        });
+        text(move || shown.get())
+    }
+
+    /// Opens a player of a source written with a dot segment and an
+    /// upper-case host, and plays it.
+    #[component]
+    fn LooseVoice() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            let mut player = audio_player(
+                "https://EXAMPLE.com/a/../voice.m4a",
+                crate::audio::PlayerSettings::default(),
+            );
+            player.play();
+            let event = player.next().await;
+            shown.set(format!("{event:?}"));
         });
         text(move || shown.get())
     }
@@ -34724,6 +35726,22 @@ mod audio {
             granted: None,
         }));
         assert_eq!(shown_after::<Click>(&mut c), "not-allowed");
+        // Bytes the app holds need the capability as much as a source: the
+        // core refuses them (without the engine's loader context) ...
+        assert_eq!(shown_after::<ByteClick>(&mut c), "not-allowed None");
+        // ... and so does the load, before it reads them, naming it.
+        c.set_image_context(crate::image::loader::Context {
+            access: Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+                granted: None,
+            }),
+            ..Default::default()
+        });
+        assert_eq!(
+            shown_after::<ByteClick>(&mut c),
+            "not-allowed Some(\"audio\")"
+        );
+        c.set_image_context(crate::image::loader::Context::default());
         assert_eq!(audio.log(), Vec::<String>::new());
     }
 
@@ -34839,9 +35857,31 @@ mod audio {
         assert_eq!(
             shown_after::<Voice>(&mut c),
             // Nothing after the failure: the core closed it.
-            "Failed { error: NotAllowed, message: \"the source is not granted\" }|None"
+            "Failed { error: NotAllowed, message: \"the source is not granted by capabilities.network\" }|None"
         );
         assert_eq!(audio.log(), Vec::<String>::new());
+    }
+
+    /// A player opens the URL the check granted (`Access::media_url`), as
+    /// WHATWG's parser reads the source.
+    #[test]
+    fn a_player_opens_the_url_the_check_granted() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "audio": true, "network": { "hosts": ["example.com"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        shown_after::<LooseVoice>(&mut c);
+        settle(&mut c);
+        assert_eq!(
+            audio.log().first().map(String::as_str),
+            Some("open https://example.com/voice.m4a false")
+        );
     }
 }
 
@@ -35772,6 +36812,175 @@ mod each_order {
         assert_eq!(&reordered[1..3], &[original[3], original[1]]);
         assert_eq!(MADE.with(Cell::get), 3);
     }
+}
+
+/// The default `evaluate` timeout.
+const T: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn evaluation_core() -> Core<FakeEngine> {
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::Ios,
+        web_evaluate: true,
+        ..Default::default()
+    });
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    c
+}
+
+#[test]
+fn web_evaluation_correlates_replies_and_ignores_late_or_foreign_replies() {
+    use crate::element::Answer;
+    let mut c = evaluation_core();
+    let (one, a) = Answer::new();
+    let (two, b) = Answer::new();
+    c.start_web_evaluation(2, "1".into(), T, a.clone());
+    c.start_web_evaluation(2, "2".into(), T, b.clone());
+    let batch = c.commit().unwrap();
+    let ids: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            MountItem::Command {
+                command: Command::Evaluate { request, .. },
+                ..
+            } => Some(*request),
+            _ => None,
+        })
+        .collect();
+    let reply = |id, value| {
+        EventPayload::Map(vec![
+            ("id", PayloadValue::Number(id as f64)),
+            (
+                "data",
+                PayloadValue::Str(format!(r#"{{"status":"ok","value":{value}}}"#)),
+            ),
+        ])
+    };
+    c.answer_web_evaluation(99, &reply(ids[0], 100));
+    assert!(a.borrow().value.is_none());
+    c.answer_web_evaluation(2, &reply(ids[1], 2));
+    c.answer_web_evaluation(2, &reply(ids[0], 1));
+    c.answer_web_evaluation(2, &reply(ids[0], 999));
+    assert_eq!(a.borrow_mut().value.take().unwrap().unwrap().value, 1);
+    assert_eq!(b.borrow_mut().value.take().unwrap().unwrap().value, 2);
+    drop((one, two));
+}
+
+#[test]
+fn web_evaluation_disposal_and_timeout_release_requests() {
+    use crate::element::Answer;
+    let mut c = evaluation_core();
+    let (future, slot) = Answer::new();
+    c.start_web_evaluation(2, "new Promise(()=>{})".into(), T, slot.clone());
+    c.commit();
+    c.timeout_web_evaluation(1);
+    assert_eq!(
+        slot.borrow_mut().value.take().unwrap().unwrap_err().code(),
+        Some("ETIMEDOUT")
+    );
+    assert!(c.commit().unwrap().items.iter().any(|i| matches!(
+        i,
+        MountItem::Command {
+            command: Command::CancelEvaluate { request: 1 },
+            ..
+        }
+    )));
+    drop(future);
+    let (future, slot) = Answer::new();
+    c.start_web_evaluation(2, "1".into(), T, slot.clone());
+    c.apply(Op::Release { id: 2 }).unwrap();
+    assert_eq!(
+        slot.borrow_mut().value.take().unwrap().unwrap_err().code(),
+        Some("ERR_NSH_WEBVIEW_ABORTED")
+    );
+    drop(future);
+}
+
+#[test]
+fn web_evaluation_preserves_order_with_injection_and_navigation_commands() {
+    let mut c = evaluation_core();
+    apply(
+        &mut c,
+        vec![
+            Op::Evaluate {
+                id: 2,
+                call: 1,
+                script: "globalThis.x = 1; 1".into(),
+                timeout: T,
+            },
+            Op::Command {
+                id: 2,
+                command: Command::InjectJavaScript("globalThis.x = 2".into()),
+            },
+            Op::Evaluate {
+                id: 2,
+                call: 2,
+                script: "globalThis.x".into(),
+                timeout: T,
+            },
+            Op::Command {
+                id: 2,
+                command: Command::Reload,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let commands: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            MountItem::Command { id: 2, command } => Some(command),
+            _ => None,
+        })
+        .collect();
+    assert!(matches!(commands.as_slice(), [
+        Command::Evaluate { script: first, .. },
+        Command::InjectJavaScript(injected),
+        Command::Evaluate { script: second, .. },
+        Command::Reload,
+    ] if first == "globalThis.x = 1; 1" && injected == "globalThis.x = 2" && second == "globalThis.x"));
+}
+
+#[test]
+fn web_evaluation_requires_a_capable_host_even_with_a_mobile_environment() {
+    use crate::element::Answer;
+    let mut c = evaluation_core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::Ios,
+        ..Default::default()
+    });
+    let (future, slot) = Answer::new();
+    c.start_web_evaluation(2, "1".into(), T, slot.clone());
+    assert_eq!(
+        slot.borrow_mut().value.take().unwrap().unwrap_err().code(),
+        Some("ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
+    );
+    assert!(
+        !c.commit()
+            .is_some_and(|batch| batch.items.iter().any(|item| matches!(
+                item,
+                MountItem::Command {
+                    command: Command::Evaluate { .. },
+                    ..
+                }
+            )))
+    );
+    drop(future);
 }
 
 /// An `svg()` the platform draws as an image (the web) is sent with its text
