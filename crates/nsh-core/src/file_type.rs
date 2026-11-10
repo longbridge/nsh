@@ -3,13 +3,38 @@
 //! the registry on Windows, `MimeType` in the desktop entry on Linux), so
 //! the app shows in Open With and opens the files the user double-clicks.
 //!
-//! A file the system opens the app with comes as a `file://` URL through
-//! the same path as the app's links ([`crate::url_scheme`]: TS
-//! `UrlScheme.on("open", ...)`, Rust
-//! [`next_url_scheme_open`](crate::element::next_url_scheme_open)), the
-//! file that launched the app included, as AppKit's
-//! `application:openURLs:` hands both. The core lets `file:` URLs through
-//! only when the app declares file types ([`FILE_SCHEME`]).
+//! A file the system opens the app with comes to the app as a path, apart
+//! from its links: TS `Application.on("openFiles", ...)`, Rust
+//! [`next_open_files`](crate::element::next_open_files), the files that
+//! launched the app included. The platforms report it to the core as a
+//! `file://` URL (AppKit's `application:openURLs:` hands both kinds), and
+//! the core takes `file:` URLs only when the app declares file types
+//! ([`FILE_SCHEME`]).
+
+/// The most files kept while no listener takes them: past it the oldest
+/// goes.
+pub const MAX_PENDING: usize = 64;
+
+/// Whether `url` is a `file:` URL (a file the system opened the app with).
+pub(crate) fn is_file_url(url: &str) -> bool {
+    url.get(..5)
+        .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+}
+
+/// The local path of `url`, a `file:` URL; `None` for one of another host
+/// or that names no absolute path.
+/// The web opens no files.
+pub(crate) fn file_path(url: &str) -> Option<std::path::PathBuf> {
+    #[cfg(any(unix, windows))]
+    {
+        url::Url::parse(url).ok()?.to_file_path().ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = url;
+        None
+    }
+}
 
 /// The scheme of the URLs of the files the app opens, which the core lets
 /// through when the app declares file types.

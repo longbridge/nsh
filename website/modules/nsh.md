@@ -2068,52 +2068,6 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.open_url` (Linux, iOS), `NshAppView.openURL`
 (Swift), `NshView.openUrl` or `NshView.handleUrlSchemeIntent` (Android).
 
-### Files the app opens
-
-An app that opens documents (a media player, an editor) lists their types under `fileTypes` in nsh.json. `nsh package`
-declares them to the system, so the app shows in Open With and opens the files the user double-clicks. Each file comes
-to `UrlScheme.on("open")` as a `file://` URL, the file that launched the app included, as AppKit's
-`application:openURLs:` hands files and links alike:
-
-```json
-{
-  "fileTypes": [
-    { "name": "Video", "extensions": ["mp4", "mov"], "mimeTypes": ["video/mp4", "video/quicktime"], "contentTypes": ["public.movie"] }
-  ]
-}
-```
-
-```tsx
-import { UrlScheme } from "nsh";
-
-UrlScheme.on("open", ({ url }) => {
-  const link = new URL(url);
-  if (link.protocol === "file:") play(decodeURIComponent(link.pathname));
-});
-```
-
-| Key | Description |
-| --- | --- |
-| `name` | What the system calls the kind of file (`"Video"`). Required. |
-| `extensions` | The extensions, without the dot (`["mp4", "mov"]`). |
-| `mimeTypes` | The MIME types (`["video/mp4"]`): Linux lists the app for them. |
-| `contentTypes` | Uniform Type Identifiers (`["public.movie"]`): iOS lists the app for them. |
-| `role` | `"viewer"` (the default) or `"editor"`. |
-
-Each type names `extensions` or `contentTypes`. Rust code gets the files from `next_url_scheme_open()`, as links
-(`url::Url::to_file_path` turns one into a path). NSH lets `file:` URLs through only for an app that declares file types.
-
-| Platform | How the app opens files |
-| --- | --- |
-| macOS | `CFBundleDocumentTypes` in `Info.plist`; Launch Services opens the app, or hands the files to the one that runs |
-| iOS, Mac Catalyst | `CFBundleDocumentTypes` in `Info.plist` (by `contentTypes`); the system hands the app a copy of the file |
-| Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts: a ProgID per type, listed in each extension's `OpenWithProgids`. A second launch with files hands them to the running app |
-| Linux | `MimeType` of the desktop entry, with `Exec … %U`; the app runs once and a second launch hands its files to the running app |
-| Android, web | Not declared; `fileTypes` is left out of their packages |
-
-With [`singleInstance`](nsh-desktop.md#single-instance) a second launch also reports `secondInstance`, with its
-arguments as given.
-
 ### UrlScheme.url
 
 `url()` is the app's address and `setUrl(url)` sets it, so an app gives its pages addresses on every platform:

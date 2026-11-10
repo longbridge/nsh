@@ -213,8 +213,8 @@ pub(crate) struct AppConfig {
     pub(crate) single_instance: bool,
     /// The file types the app opens (`"fileTypes"`: `[{ "name": "Video",
     /// "extensions": ["mp4"] }]`), which packages declare to the system;
-    /// the app hears the files as `file://` URLs through
-    /// `UrlScheme.on("open", ...)` (`nsh_core::file_type`). [`read_config`]
+    /// the app hears the files through `Application.on("openFiles", ...)`
+    /// (`nsh_core::file_type`). [`read_config`]
     /// checks them ([`AppConfig::file_types`]).
     #[serde(default)]
     pub(crate) file_types: Option<serde_json::Value>,

@@ -169,8 +169,8 @@ pub struct AppOptions {
     pub single_instance: bool,
     /// The file types the app opens (nsh.json `fileTypes`), for
     /// [`run_app`]: its desktop entry lists their MIME types, it runs once,
-    /// and hands each file to the app as a `file://` URL
-    /// (`UrlScheme.on("open", ...)`), as for [`schemes`](Self::schemes).
+    /// and hands each file to the app (`Application.on("openFiles", ...)`),
+    /// reported as a `file://` URL as for [`schemes`](Self::schemes).
     pub file_types: Vec<nsh_core::file_type::FileType>,
 }
 

@@ -202,7 +202,7 @@ pub struct AppOptions {
     /// The file types the app opens (nsh.json `fileTypes`, from the
     /// package's `nsh\app.json`): [`run_app`] registers them for the
     /// current user (Open With) and hands the files it is started with to
-    /// the app as `file://` URLs (`UrlScheme.on("open", ...)`), a later
+    /// the app (`Application.on("openFiles", ...)`), a later
     /// launch with files handing them to the running instance.
     pub file_types: Vec<nsh_core::file_type::FileType>,
 }
