@@ -26,6 +26,10 @@ mod watch;
 /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
 pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
 
+/// The most network image checks [`Core`] remembers for its canvases; past
+/// it, it starts over.
+const CANVAS_IMAGES: usize = 1024;
+
 /// The start of a player's error when the core refuses its source; the
 /// capability that would grant it follows (`network`, `fs`).
 pub(crate) const SOURCE_NOT_GRANTED: &str = "the source is not granted by capabilities.";
@@ -1304,6 +1308,11 @@ pub struct Core<M: TextEngine> {
     /// The roots local media files are read under
     /// ([`Core::set_media_files`]).
     media_files: Arc<crate::access::MediaFiles>,
+    /// What the check answered for the network images canvases draw, by
+    /// source: a canvas checks its images on every draw. Only answers that
+    /// depend on nothing but the grant and the base, which clear it when
+    /// they change; local files are resolved on every draw.
+    canvas_images: rustc_hash::FxHashMap<Arc<str>, Option<Arc<str>>>,
     /// Denials already logged (each once).
     denied: rustc_hash::FxHashSet<String>,
     /// The windows' attribute records, by root node (the main window's is
@@ -1388,6 +1397,7 @@ impl<M: TextEngine> Core<M> {
             access: Arc::default(),
             base_url: None,
             media_files: Arc::default(),
+            canvas_images: Default::default(),
             denied: Default::default(),
             windows: Default::default(),
             window_ids: Default::default(),
@@ -1615,6 +1625,7 @@ impl<M: TextEngine> Core<M> {
                 .set(crate::element::desktop::WindowAccess(Some(access.clone())));
         }
         self.access = access;
+        self.canvas_images.clear();
     }
 
     /// Sets the URL media sources starting with `//` resolve against, whose
@@ -1625,6 +1636,7 @@ impl<M: TextEngine> Core<M> {
     /// page's, not local files, so only pages set one.
     pub fn set_base_url(&mut self, url: Option<Arc<str>>) {
         self.base_url = url;
+        self.canvas_images.clear();
     }
 
     /// Sets the `capabilities.fs.read` roots the app's local media files
@@ -1633,6 +1645,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`crate::access::Access::media_url`]).
     pub fn set_media_files(&mut self, files: Arc<crate::access::MediaFiles>) {
         self.media_files = files;
+        self.canvas_images.clear();
     }
 
     /// Sets what the core's own image loads (an [`crate::element::svg`]'s
@@ -2326,16 +2339,38 @@ impl<M: TextEngine> Core<M> {
                     let base = self.base_url.clone();
                     let files = self.media_files.clone();
                     let mut refused = Vec::new();
+                    let checked = &mut self.canvas_images;
                     // An image draws what the check granted
                     // (`Access::media_url`).
                     drawing.ops.retain_mut(|op| match op {
                         crate::canvas::CanvasOp::DrawImage { image, .. } => {
-                            match access.media_url(&image.uri, base.as_deref(), Some(&files)) {
-                                Some(std::borrow::Cow::Owned(url)) => {
-                                    image.uri = url.into();
+                            let granted = match checked.get(&image.uri) {
+                                Some(granted) => granted.clone(),
+                                None => {
+                                    let granted = access
+                                        .media_url(&image.uri, base.as_deref(), Some(&files))
+                                        .map(|url| match url {
+                                            std::borrow::Cow::Owned(url) => Arc::from(url),
+                                            std::borrow::Cow::Borrowed(_) => image.uri.clone(),
+                                        });
+                                    // A file's answer changes with the disk:
+                                    // never remembered.
+                                    if crate::access::media_capability(&image.uri, base.as_deref())
+                                        == "network"
+                                    {
+                                        if checked.len() >= CANVAS_IMAGES {
+                                            checked.clear();
+                                        }
+                                        checked.insert(image.uri.clone(), granted.clone());
+                                    }
+                                    granted
+                                }
+                            };
+                            match granted {
+                                Some(url) => {
+                                    image.uri = url;
                                     true
                                 }
-                                Some(std::borrow::Cow::Borrowed(_)) => true,
                                 None => {
                                     refused.push(image.uri.clone());
                                     false
