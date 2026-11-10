@@ -1182,19 +1182,21 @@ mod command_tests {
                 .err()
                 .expect("version exits");
             assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
-            assert_eq!(
-                error.to_string(),
-                format!(
-                    "nsh {} ({}{})\n",
-                    env!("CARGO_PKG_VERSION"),
-                    env!("NSH_GIT_SHA"),
-                    if env!("NSH_CHANNEL") == "nightly" {
-                        " nightly"
-                    } else {
-                        ""
-                    }
-                )
-            );
+            let text = error.to_string();
+            let prefix = format!("nsh {} ({}", env!("CARGO_PKG_VERSION"), env!("NSH_GIT_SHA"));
+            let rest = text.strip_prefix(&prefix).expect("version and revision");
+            if env!("NSH_CHANNEL") == "nightly" {
+                // ` nightly YYYY-MM-DD)`: the date it was built.
+                let date = rest
+                    .strip_prefix(" nightly ")
+                    .and_then(|r| r.strip_suffix(")\n"))
+                    .expect("nightly build date");
+                assert!(
+                    date.len() == 10 && date.as_bytes()[4] == b'-' && date.as_bytes()[7] == b'-'
+                );
+            } else {
+                assert_eq!(rest, ")\n");
+            }
         }
     }
 
