@@ -29,3 +29,24 @@ echo 'for (let i = 0; i < 8; i++) await app.press("id:edit");' | nsh test exampl
 
 Compare the final four edits after four warmups. Headless runs keep the complete document mounted; the trace
 includes selection geometry as well as the changed text. Results: `docs/dev/performance.md`.
+
+`ChildAppends.tsx` measures ordinary sibling insertion, with `COUNT` selecting the size:
+
+```sh
+cargo build -p nsh-cli --locked -j2 --config profile.dev.package.nsh-core.opt-level=3
+./target/debug/nsh test examples/bench/ChildAppends.tsx --trace
+```
+
+Set `MOUNTED=true` to start with an empty container, then append on a press:
+`echo 'await app.press("id:append");' | ./target/debug/nsh test examples/bench/ChildAppends.tsx --trace`.
+The Core-only benchmark covers both cases, constructing operations and checking order, frames and full mount-batch
+hashes outside its timed interval:
+
+```sh
+cargo test -p nsh-core --lib --features declarations --locked -j2 \
+  --config profile.dev.package.nsh-core.opt-level=3 bench_child_appends \
+  -- --ignored --nocapture --test-threads=1
+```
+
+Compare alternating runs of both versions on the same CPU, with no builds running. Results and scope:
+`docs/dev/performance.md`.

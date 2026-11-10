@@ -6118,12 +6118,16 @@ impl<M: TextEngine> Core<M> {
             if self.nodes[parent as usize].list.is_none()
                 && !self.nodes[child as usize].is_layout_root()
             {
-                let index = self.render_index(parent, pos);
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
-                self.layout
-                    .insert_child_at_index(parent_layout, index as usize, child_layout);
+                if before.is_none() {
+                    self.layout.add_child(parent_layout, child_layout);
+                } else {
+                    let index = self.render_index(parent, pos);
+                    self.layout
+                        .insert_child_at_index(parent_layout, index as usize, child_layout);
+                }
             }
             self.needs_layout = true;
             // A dialog opening in content a scroll view has not made yet

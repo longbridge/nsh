@@ -4,6 +4,42 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Ordinary child appends (`core::insert`, 2026-11-10, Linux x86_64, Ryzen 9 7950X,
+against `7a2c11e0`; dev/test profile with `nsh-core` at `opt-level=3`, `FakeEngine`).
+The ignored `bench_child_appends` times operation application and layout/commit, excluding
+operation construction and validation. Seven alternating runs per version on one CPU, medians:
+
+| Siblings | Initial assembly, before → after (ms) | Append to mounted parent, before → after (ms) |
+|---|---|---|
+| 1,000 | 2.60 → 2.08 | 3.59 → 3.05 |
+| 5,000 | 26.44 → 10.51 | 54.65 → 40.81 |
+| 10,000 | 81.49 → 18.60 | 218.19 → 155.28 |
+
+An append whose normalized `before` is `None` uses `LayoutTree::add_child`, taking the
+layout children count directly instead of scanning preceding logical siblings. Anchored inserts
+still use `render_index`; List children and independent layout roots keep their existing paths.
+The mounted-parent case still searches for native stacking order in `native_before`. Order,
+frames, complete mount-batch hashes and work counts match in every pair. At 10,000 siblings,
+initial assembly keeps 30,001 ops / 30,004 items / 10,002 nodes; appending after an empty
+parent's first commit keeps 30,000 / 30,001 / 10,002. These Core measurements exclude QuickJS
+and native text shaping, mounting and drawing.
+
+Headless `nsh test examples/bench/ChildAppends.tsx --trace` (same baseline and Core optimization,
+other crates at their dev defaults, three alternating runs per version on one CPU):
+
+| Siblings / operation | Commit, before → after (ms) | Ops / items / nodes |
+|---|---|---|
+| 1,000, initial | 13.58 → 7.06 | 3,017 / 3,020 / 1,006 |
+| 5,000, initial | 190.92 → 35.24 | 15,017 / 15,020 / 5,006 |
+| 10,000, initial | 694.60 → 69.58 | 30,017 / 30,020 / 10,006 |
+| 1,000, append after mounting | 26.07 → 19.85 | 3,000 / 3,002 / 1,006 |
+
+Every ordered trace batch matches. `COUNT` selects the sibling count; `MOUNTED=true` starts
+with an empty parent, then `await app.press("id:append")` appends the children. The counter
+control keeps 57 ops / 51 items / 21 nodes initially and 10 / 7 / 24 after `+1`, with commit
+medians 331 / 234 → 322 / 216 µs. These short control timings establish unchanged work counts.
+Commit times exclude script evaluation and native input, shaping, mounting and drawing.
+
 Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
 `nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
 culling enabled, 80 ASCII characters per paragraph, both Core order checks applied together:

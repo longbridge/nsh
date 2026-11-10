@@ -1699,6 +1699,246 @@ fn placeholder_text_outside_text_is_ignored() {
     assert_eq!(inserts, vec![(2, None), (4, None)]);
 }
 
+mod child_appends {
+    use std::{hint::black_box, time::Instant};
+
+    use super::*;
+
+    fn insert(c: &mut Core<FakeEngine>, parent: NodeId, child: NodeId, before: Option<NodeId>) {
+        c.apply(Op::Insert {
+            parent,
+            child,
+            before,
+        })
+        .unwrap();
+    }
+
+    fn view(c: &mut Core<FakeEngine>, id: NodeId) {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+    }
+
+    fn children(c: &Core<FakeEngine>, id: NodeId) -> Vec<NodeId> {
+        let key = c.key(id).unwrap();
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect()
+    }
+
+    fn assert_layout(c: &Core<FakeEngine>, parent: NodeId, expected: &[NodeId]) {
+        let layout = c.nodes[c.key(parent).unwrap() as usize].layout.unwrap();
+        let expected: Vec<_> = expected
+            .iter()
+            .map(|&id| c.nodes[c.key(id).unwrap() as usize].layout.unwrap())
+            .collect();
+        assert_eq!(c.layout.children(layout), expected);
+    }
+
+    #[test]
+    fn append_layout_order_survives_non_layout_siblings_and_moves() {
+        let mut c = core();
+        view(&mut c, 2);
+        c.apply(Op::CreateText {
+            id: 4,
+            text: "unshown".into(),
+        })
+        .unwrap();
+        view(&mut c, 6);
+        c.apply(Op::Create {
+            id: 8,
+            tag: Tag::Overlay,
+        })
+        .unwrap();
+        view(&mut c, 10);
+        c.apply(style_op(10, &[("display", StyleValue::Str("none"))]))
+            .unwrap();
+        view(&mut c, 12);
+        for id in [4, 6, 8, 10, 12] {
+            insert(&mut c, 2, id, None);
+        }
+        assert_eq!(children(&c, 2), [4, 6, 8, 10, 12]);
+        // Raw text has no layout; an overlay is its own root. Hidden views
+        // still have their place in the layout tree.
+        assert_layout(&c, 2, &[6, 10, 12]);
+
+        insert(&mut c, 2, 6, None);
+        assert_eq!(children(&c, 2), [4, 8, 10, 12, 6]);
+        assert_layout(&c, 2, &[10, 12, 6]);
+        insert(&mut c, 2, 6, Some(10));
+        assert_eq!(children(&c, 2), [4, 8, 6, 10, 12]);
+        assert_layout(&c, 2, &[6, 10, 12]);
+
+        view(&mut c, 14);
+        view(&mut c, 16);
+        insert(&mut c, 16, 14, None);
+        insert(&mut c, 2, 14, None);
+        assert!(children(&c, 16).is_empty());
+        assert_layout(&c, 16, &[]);
+        assert_layout(&c, 2, &[6, 10, 12, 14]);
+
+        let logical = children(&c, 2);
+        assert!(matches!(
+            c.apply(Op::Insert {
+                parent: 2,
+                child: 6,
+                before: Some(16)
+            }),
+            Err(ApplyError::BadAnchor(16))
+        ));
+        assert!(matches!(
+            c.apply(Op::Insert {
+                parent: 2,
+                child: 6,
+                before: Some(404)
+            }),
+            Err(ApplyError::UnknownNode(404))
+        ));
+        assert!(matches!(
+            c.apply(Op::Insert {
+                parent: 2,
+                child: 6,
+                before: Some(6)
+            }),
+            Err(ApplyError::BadAnchor(6))
+        ));
+        assert_eq!(children(&c, 2), logical);
+        assert_layout(&c, 2, &[6, 10, 12, 14]);
+    }
+
+    #[test]
+    fn appending_to_a_layout_holder_keeps_its_real_child_order() {
+        let mut c = core();
+        view(&mut c, 2);
+        let holder = c.nodes[c.key(2).unwrap() as usize].layout.unwrap();
+        c.layout.set_holder(holder);
+        for id in [4, 8] {
+            view(&mut c, id);
+            c.apply(style_op(
+                id,
+                &[
+                    ("width", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ))
+            .unwrap();
+        }
+        insert(&mut c, 2, 4, None);
+        insert(&mut c, ROOT_ID, 2, None);
+        c.commit();
+        assert_layout(&c, 2, &[4]);
+        // A non-layout child does not change what the holder lays out;
+        // the second view makes it a normal container again.
+        c.apply(Op::CreateText {
+            id: 6,
+            text: String::new(),
+        })
+        .unwrap();
+        insert(&mut c, 2, 6, None);
+        insert(&mut c, 2, 8, None);
+        let batch = c.commit().unwrap();
+        assert_eq!(children(&c, 2), [4, 6, 8]);
+        assert_layout(&c, 2, &[4, 8]);
+        assert_eq!(frame_of(&batch, 8).unwrap().origin.y, px(20.0));
+        assert_eq!(
+            c.nodes[c.key(2).unwrap() as usize].frame.size.height,
+            px(40.0)
+        );
+    }
+
+    fn hash_bytes(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf29ce484222325, |h, b| {
+            (h ^ *b as u64).wrapping_mul(0x100000001b3)
+        })
+    }
+
+    fn sample(n: u32, mounted: bool) -> serde_json::Value {
+        let mut c = core();
+        view(&mut c, 2);
+        if mounted {
+            insert(&mut c, ROOT_ID, 2, None);
+            black_box(c.commit());
+        }
+
+        // Build the incoming operation batch outside the timed interval.
+        // Appends to a detached parent correspond to JSX's bottom-up tree
+        // construction; the mounted case also exercises native stacking.
+        let mut ops = Vec::with_capacity(n as usize * 3 + 1);
+        for i in 0..n {
+            let id = 4 + 2 * i;
+            ops.push(Op::Create { id, tag: Tag::View });
+            ops.push(style_op(
+                id,
+                &[
+                    ("width", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(16.0)),
+                ],
+            ));
+            ops.push(Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            });
+        }
+        if !mounted {
+            ops.push(Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            });
+        }
+        let op_count = ops.len();
+        let started = Instant::now();
+        for op in ops {
+            c.apply(op).unwrap();
+        }
+        let apply_us = started.elapsed().as_secs_f64() * 1_000_000.0;
+        let batch = c.commit().unwrap();
+        let total_us = started.elapsed().as_secs_f64() * 1_000_000.0;
+        black_box(&batch);
+
+        let expected: Vec<_> = (0..n).map(|i| 4 + 2 * i).collect();
+        assert_eq!(children(&c, 2), expected);
+        assert_layout(&c, 2, &expected);
+        assert_eq!(c.node_count(), n as usize + 2);
+        let frames: Vec<_> = std::iter::once(2)
+            .chain(expected.iter().copied())
+            .map(|id| (id, c.nodes[c.key(id).unwrap() as usize].frame))
+            .collect();
+        // Full returned batch and final frames/order, not just timings.
+        // Formatting and verification are outside the measured interval.
+        serde_json::json!({
+            "kind": "core_append",
+            "scenario": if mounted { "mounted" } else { "initial" },
+            "children": n,
+            "ops": op_count,
+            "apply_us": apply_us,
+            "total_us": total_us,
+            "mount_items": batch.items.len(),
+            "live_nodes": c.node_count(),
+            "prepares": c.text_engine.prepares.get(),
+            "measures": c.text_engine.measures.get(),
+            "layouts": c.text_engine.layouts.get(),
+            "order_hash": format!("{:016x}", hash_bytes(format!("{expected:?}").as_bytes())),
+            "frames_hash": format!("{:016x}", hash_bytes(format!("{frames:?}").as_bytes())),
+            "mount_hash": format!("{:016x}", hash_bytes(format!("{:?}", batch.items).as_bytes())),
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_child_appends() {
+        for mounted in [false, true] {
+            black_box(sample(100, mounted));
+        }
+        for n in [100, 1000, 5000, 10000] {
+            for mounted in [false, true] {
+                println!("CHILD_APPENDS {}", sample(n, mounted));
+            }
+        }
+    }
+}
+
 #[test]
 fn remove_reinsert_and_release() {
     let mut c = core();
