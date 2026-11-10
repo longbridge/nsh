@@ -9,9 +9,10 @@
 //! is what is drawn. Hinted metrics and rounded glyph positions are off on
 //! both sides, so measuring is resolution-independent.
 //!
-//! Colors and decorations are not part of a layout: the core reuses a
-//! layout for a text that only differs in them (`AttributedText::layout_eq`),
-//! so they are read from the drawn text's spans, per glyph cluster.
+//! Colors and decorations are not part of a layout: they are read from the
+//! drawn text's spans, per glyph cluster, so the core keeps a layout for a
+//! text that only differs in its colors
+//! (`TextEngine::draws_colors_from_text`).
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -869,6 +870,11 @@ impl TextEngine for PangoTextEngine {
             width = width.min(max.max(0.0));
         }
         Size::new(Points(width), Points(from_pango(bottom).ceil()))
+    }
+
+    fn draws_colors_from_text(&self) -> bool {
+        // Colors and decorations are read from the drawn text's spans.
+        true
     }
 
     fn breaks_lines_greedily(&self) -> bool {
