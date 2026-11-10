@@ -664,6 +664,45 @@ impl AttributedText {
         self.spans.get(i.min(self.spans.len().saturating_sub(1)))
     }
 
+    /// The pieces of the UTF-16 range `range` that no hidden run covers
+    /// ([`ResolvedTextStyle::hidden`]), in order: where a selection's
+    /// highlight is drawn. The whole range when no run is hidden.
+    pub fn shown_ranges(&self, range: Range<u32>) -> Vec<Range<u32>> {
+        if !self.has_hidden() {
+            return vec![range];
+        }
+        let mut out: Vec<Range<u32>> = Vec::new();
+        let mut at = range.start;
+        let first = self.spans.partition_point(|s| s.end <= at);
+        for s in &self.spans[first..] {
+            if at >= range.end {
+                break;
+            }
+            let to = s.end.min(range.end);
+            if !s.style.hidden && to > at {
+                match out.last_mut() {
+                    Some(last) if last.end == at => last.end = to,
+                    _ => out.push(at..to),
+                }
+            }
+            at = at.max(to);
+        }
+        // Characters past the runs count as shown.
+        if at < range.end {
+            match out.last_mut() {
+                Some(last) if last.end == at => last.end = range.end,
+                _ => out.push(at..range.end),
+            }
+        }
+        out
+    }
+
+    /// Whether the character at the UTF-16 offset `index` is in a hidden
+    /// run ([`ResolvedTextStyle::hidden`]): nothing of it is drawn.
+    pub fn hidden_at(&self, index: u32) -> bool {
+        self.span_at(index).is_some_and(|s| s.style.hidden)
+    }
+
     /// The background of the character at the UTF-16 offset `index`.
     pub fn background_at(&self, index: u32) -> Option<TextBackground> {
         self.span_at(index)?.style.background

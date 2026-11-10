@@ -1400,8 +1400,11 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
         let alpha = (tint.0 & 0xff) as f32 / 255.0 * 0.3;
         let tint = Color((tint.0 & !0xff) | (alpha * 255.0).round() as u32);
         CGContext::set_fill_color_with_color(c, Some(&cg_color(tint)));
-        for rect in selection_rects(text, content, range) {
-            CGContext::fill_rect(c, rect);
+        // Hidden characters show no highlight, as nothing of them shows.
+        for shown in drawn.text.shown_ranges(range.0..range.1) {
+            for rect in selection_rects(text, content, (shown.start, shown.end)) {
+                CGContext::fill_rect(c, rect);
+            }
         }
     }
     // CoreText draws in a y-up space with the origin at the bottom of the
@@ -2258,7 +2261,7 @@ fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();
     let drawn = state.text.as_ref()?;
     let (a, b) = drawn.selection.as_ref()?.range.get()?;
-    Some(drawn.text.copied_text(a..b))
+    Some(drawn.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.
@@ -2459,6 +2462,11 @@ fn draw_glyphs(cx: &CGContext, line: &LaidLine, stretches: &mut Stretches<'_>) {
                 .get(kCTUnderlineStyleAttributeName)
                 .is_some();
             stretches.each(run, |range, style| {
+                // Nothing of a hidden run is drawn: not its color emoji,
+                // which keep their own colors, nor its underline.
+                if style.hidden {
+                    return;
+                }
                 if underlined {
                     let n = range.length as usize;
                     positions.clear();
@@ -2585,6 +2593,9 @@ fn draw_decorations(cx: &CGContext, line: &LaidLine, stretches: &mut Stretches<'
             }
             let mut positions = Vec::new();
             stretches.each(run, |range, span| {
+                if span.hidden {
+                    return;
+                }
                 positions.clear();
                 positions.resize(range.length as usize, CGPoint::new(0.0, 0.0));
                 run.positions(

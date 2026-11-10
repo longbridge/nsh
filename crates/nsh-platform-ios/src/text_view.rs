@@ -115,6 +115,60 @@ fn draw_decorations(cx: &CGContext, line: &LaidLine) {
     }
 }
 
+/// Clips `cx` to all but the hidden runs of `line` (y-up text space), if
+/// it has some, saving the state first; returns whether it did. CoreText
+/// draws a color emoji in its own colors whatever its run's color, so a
+/// hidden run's glyphs are clipped out, with their shadow and decorations.
+fn clip_hidden(cx: &CGContext, line: &LaidLine, text: &AttributedText) -> bool {
+    let mut hidden: Vec<(CGFloat, CGFloat)> = Vec::new();
+    // SAFETY: the line's own run array (of CTRuns); a null out pointer is
+    // allowed.
+    unsafe {
+        let runs = line.line.glyph_runs();
+        for i in 0..runs.count() {
+            let run = &*runs.value_at_index(i).cast::<CTRun>();
+            let range = run.string_range();
+            if range.length <= 0 || !text.hidden_at(range.location as u32) {
+                continue;
+            }
+            let x = line.origin.x
+                + line
+                    .line
+                    .offset_for_string_index(range.location, std::ptr::null_mut());
+            let width = run.typographic_bounds(
+                CFRange {
+                    location: 0,
+                    length: 0,
+                },
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            hidden.push((x, x + width));
+        }
+    }
+    if hidden.is_empty() {
+        return false;
+    }
+    hidden.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let c = Some(cx);
+    CGContext::save_g_state(c);
+    // Far past the line's own extent: only the hidden runs' edges clip.
+    let (bottom, height) = (line.origin.y - 1.0e4, 2.0e4);
+    let mut from = line.origin.x - 1.0e4;
+    for (left, right) in hidden.into_iter().chain([(line.origin.x + 1.0e5, 0.0)]) {
+        if left > from {
+            CGContext::add_rect(
+                c,
+                CGRect::new(CGPoint::new(from, bottom), CGSize::new(left - from, height)),
+            );
+        }
+        from = from.max(right);
+    }
+    CGContext::clip(c);
+    true
+}
+
 /// One decoration line centered on `y` (y-up), `style` as encoded by the
 /// text engine: solid, double, dotted, dashed, wavy.
 fn stroke_decoration(
@@ -347,12 +401,19 @@ define_class!(
                 // SAFETY: no auxiliary info.
                 unsafe { CGContext::begin_transparency_layer(c, None) };
             }
+            let attributed = self.ivars().text.borrow();
+            let hidden = attributed.as_ref().filter(|t| t.has_hidden());
             for line in &text.lines {
+                // Nothing of a hidden run is drawn.
+                let clipped = hidden.is_some_and(|t| clip_hidden(&cx, line, t));
                 CGContext::set_text_position(c, line.origin.x, line.origin.y);
                 // SAFETY: a valid line and context.
                 unsafe { line.line.draw(&cx) };
                 if text.strikethrough {
                     draw_decorations(&cx, line);
+                }
+                if clipped {
+                    CGContext::restore_g_state(c);
                 }
             }
             if let Some(color) = color {

@@ -118,11 +118,13 @@
 - **Hidden spans**: `visibility: "hidden"` on a nested `<Text>` (`.invisible()`) marks its runs, and those of the
   spans inside it, `ResolvedTextStyle::hidden`. The core resolves them in `collect_text`: their characters stay in the
   text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring),
-  they are drawn transparent with no background, and they make no links. What leaves the text through the user goes
-  through `AttributedText::copied_text` (copies: hidden runs and attachments' placeholders left out) and
-  `shown_text` (screen readers, the test model's texts); selectable views copy through `SelectionTexts::copied`. The
-  web gives the runs `visibility: hidden`, which its copy handler and the browser's accessibility tree skip. Android
-  draws them transparent; its copies and TalkBack still take the whole text.
+  and they make no links; attachments inside them are hidden views (`Core::hide_attachments`). Each backend skips the
+  hidden runs when it draws (glyphs, color emoji, decorations, shadows, animated colors), never relying on the
+  transparent color alone, and leaves them out of selection highlights (`AttributedText::shown_ranges`). What leaves
+  the text through the user goes through `AttributedText::copied_text` (copies: hidden runs and attachments'
+  placeholders left out) and `shown_text` (screen readers, the test model's texts); selectable views copy through
+  `SelectionTexts::copied`. Android marks the runs with a span of their own in the laid out text, which its drawing,
+  copies and TalkBack read; the web gives the runs `visibility: hidden`.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own
   layout root at its content size (`update_attachments`), it becomes an object replacement character (U+FFFC,
   `AttributedText::attachments`) that the engine sizes to it (CTRunDelegate; Android a `ReplacementSpan`), so
