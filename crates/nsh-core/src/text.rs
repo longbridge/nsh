@@ -269,6 +269,46 @@ impl ResolvedTextStyle {
     }
 }
 
+/// Whether two span lists over one string style every character alike
+/// but for the colors ([`AttributedText::same_but_colors`]).
+fn spans_same_but_colors(a: &[TextSpan], b: &[TextSpan]) -> bool {
+    let colorless = |s: &ResolvedTextStyle| ResolvedTextStyle {
+        color: Color::TRANSPARENT,
+        decoration_color: None,
+        background: s.background.map(|b| TextBackground {
+            color: Color::TRANSPARENT,
+            ..b
+        }),
+        ..*s
+    };
+    // Both cover the string end to end: walk the pieces where they overlap.
+    let (mut a, mut b) = (a.iter().peekable(), b.iter().peekable());
+    loop {
+        match (a.peek(), b.peek()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) => {
+                let overlap = x.start < y.end && y.start < x.end;
+                if !overlap || colorless(&x.style) != colorless(&y.style) {
+                    return false;
+                }
+                match x.end.cmp(&y.end) {
+                    std::cmp::Ordering::Less => {
+                        a.next();
+                    }
+                    std::cmp::Ordering::Greater => {
+                        b.next();
+                    }
+                    std::cmp::Ordering::Equal => {
+                        a.next();
+                        b.next();
+                    }
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
 /// A run of characters with one style.
 ///
 /// Offsets are in UTF-16 code units, which is what both Apple
@@ -703,6 +743,43 @@ impl AttributedText {
         }
     }
 
+    /// Whether the two texts differ at most in their spans' colors (text,
+    /// decoration and background) and test metadata: the same characters
+    /// in the same styles but for those, wherever the spans begin and end
+    /// (neighbors that take the same color merge into one span).
+    pub(crate) fn same_but_colors(&self, other: &Self) -> bool {
+        // Enumerating the fields makes additions revisit this comparison.
+        let Self {
+            text,
+            spans,
+            align,
+            max_lines,
+            ellipsize,
+            no_wrap,
+            shadow,
+            links,
+            writing_direction,
+            rtl,
+            selectable,
+            selection_color,
+            attachments,
+            test_ids: _,
+        } = self;
+        text == &other.text
+            && align == &other.align
+            && max_lines == &other.max_lines
+            && ellipsize == &other.ellipsize
+            && no_wrap == &other.no_wrap
+            && shadow == &other.shadow
+            && links == &other.links
+            && writing_direction == &other.writing_direction
+            && rtl == &other.rtl
+            && selectable == &other.selectable
+            && selection_color == &other.selection_color
+            && attachments == &other.attachments
+            && spans_same_but_colors(spans, &other.spans)
+    }
+
     /// Equality of the content the platform draws, excluding test metadata.
     pub(crate) fn rendering_eq(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
@@ -833,6 +910,18 @@ pub trait TextEngine {
         false
     }
 
+    /// Whether the platform draws a text's colors from the
+    /// [`AttributedText`] mounted with its layout, not from the
+    /// typesetting state: the spans' text, decoration and background
+    /// colors, looked up by character when drawing. The prepared state and
+    /// layouts then hold for any text that differs from theirs only in
+    /// those colors (wherever its spans begin and end), so a change of
+    /// colors alone keeps them: no new typesetting, measurement or layout,
+    /// only the new text mounted with the layout already drawn.
+    fn draws_colors_from_text(&self) -> bool {
+        false
+    }
+
     /// The final layout in a box of exactly `size`, for drawing.
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout;
 
@@ -915,6 +1004,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
 
     fn breaks_lines_greedily(&self) -> bool {
         (**self).breaks_lines_greedily()
+    }
+
+    fn draws_colors_from_text(&self) -> bool {
+        (**self).draws_colors_from_text()
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {

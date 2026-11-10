@@ -392,8 +392,11 @@ objc2-io-surface = { version = "0.3.2", default-features = false, features = [
 ] }
 objc2-metal = { version = "0.3.2", default-features = false, features = [
   "std",
+  "block2",
   "objc2-io-surface",
   "MTLAllocation",
+  "MTLCommandBuffer",
+  "MTLCommandQueue",
   "MTLDevice",
   "MTLPixelFormat",
   "MTLResource",
