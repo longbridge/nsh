@@ -59,7 +59,7 @@ const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 /** The DOM's `buttons` bits, in the order a held button is named by. */
 const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
 /** The keys whose press or release is reported as a mouse move. */
-const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
 // caret (`caretBounds`).
 const CARET_STYLE = [
@@ -6666,14 +6666,19 @@ class Player {
    * Browsers write images as PNG only, so another format is decoded and
    * encoded again. The write starts before that, with the PNG to come:
    * Safari only writes within the user's gesture, which an `await` loses.
+   * The PNG holds a GIF's first frame only, so another format also goes on
+   * as it is, as browsers' own Copy Image does: an `<img>` of it as HTML,
+   * which pastes give the app, and in Chromium a `web ` format, which
+   * `readClipboardImage` prefers.
    */
   writeClipboardImage(uri) {
     // Decoded here: the CSP of a page whose app restricts `network` keeps `fetch` from `data:` URIs.
     const base64 = /^data:([^;,]*);base64,/.exec(uri);
+    const original = base64
+      ? Promise.resolve().then(() => new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] }))
+      : fetch(uri).then((response) => response.blob());
     const png = (async () => {
-      const blob = base64
-        ? new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] })
-        : await (await fetch(uri)).blob();
+      const blob = await original;
       if (blob.type === "image/png") return blob;
       const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
       try {
@@ -6688,7 +6693,15 @@ class Player {
     // Handled by the write; this keeps it from reporting twice when the write never starts.
     png.catch(() => {});
     try {
-      return navigator.clipboard.write([new ClipboardItem({ "image/png": png })]).catch(fail);
+      const data = { "image/png": png };
+      // The types go in now, before the image has loaded: `data:` URIs say theirs.
+      const type = base64?.[1] ?? "";
+      if (type !== "image/png") {
+        const src = uri.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        data["text/html"] = new Blob([`<img src="${src}">`], { type: "text/html" });
+        if (type && ClipboardItem.supports?.(`web ${type}`)) data[`web ${type}`] = original;
+      }
+      return navigator.clipboard.write([new ClipboardItem(data)]).catch(fail);
     } catch (err) {
       // No clipboard (an insecure context) or no `ClipboardItem`.
       fail(err);
@@ -6823,9 +6836,11 @@ class Player {
     let blob = null;
     try {
       for (const item of (await navigator.clipboard?.read()) ?? []) {
-        const type = item.types.find((t) => t.startsWith("image/"));
+        // The original `writeClipboardImage` kept beside its PNG first.
+        const type = item.types.find((t) => t.startsWith("web image/")) ?? item.types.find((t) => t.startsWith("image/"));
         if (type) {
           blob = await item.getType(type);
+          if (type.startsWith("web ")) blob = new Blob([blob], { type: type.slice(4) });
           break;
         }
       }
@@ -7569,7 +7584,7 @@ class Player {
    * on the next move.
    */
   modifiersChanged(e) {
-    if (!MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons || !this.mouseTracked.size) return;
+    if (!MOUSE_MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons || !this.mouseTracked.size) return;
     const [x, y] = this.hover;
     const target = document.elementFromPoint(x, y);
     if (!target || !this.root.contains(target)) return;

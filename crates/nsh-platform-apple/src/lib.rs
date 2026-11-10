@@ -7,4 +7,5 @@
 pub mod audio;
 pub mod notifications;
 pub mod speech;
+pub mod web_evaluation;
 pub mod web_scheme;

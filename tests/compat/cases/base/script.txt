@@ -4163,6 +4163,7 @@ expect State: text string true false
 expect Attr: true
 expect Split: true 3
 expect Content: Plain line **b**
+expect Html: <h2>T</h2><p>a <em>b</em></p>
 expect Insert: xyb
 expect Dispatch: all xy
 expect Node: true node

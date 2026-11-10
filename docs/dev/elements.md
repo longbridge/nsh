@@ -239,8 +239,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   listens, with the path of listening nodes (`EventPayload::Touch`, sent to the root; moves are merged per engine turn). The
   negotiation runs as in React Native, natively (`nsh-js` `touch.rs`), asking the app's handlers. A grant returning true
   (PanResponder's default) sends `SetJsResponder`: scroll
-  views around stop taking the touches (UIKit: their pan recognizer is disabled; Android: `ScrollBox.jsBlocked`); a native
-  scroll view that starts dragging first cancels the JS touches. The `…ShouldSetResponder` handlers also get a
+  views around stop taking the touches (UIKit: their pan recognizer is disabled; Android: `ScrollBox.jsBlocked`), and the
+  presses of the views around it end with no long press or press after them (UIKit: their `PressRecognizer`s are
+  cancelled; Android: `Box.cancelPress`, `Pressable.cancel`); a native scroll view that starts dragging first cancels the
+  JS touches. The `…ShouldSetResponder` handlers also get a
   `gestureState` (`ResponderGestureState`: `dx`, `dy`, `vx`, `vy`, `moveX`, `moveY`, `x0`, `y0`, `numberActiveTouches`,
   since the first finger went down; `nsh_core::element::PanGesture`, the same the core gives Rust claims). Rust components'
   nodes on the path hear the same event first and negotiate their own responder in the core (`claim_touches`,
@@ -535,3 +537,21 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
 - **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.
+
+## WebView evaluation
+
+`WebViewRef.evaluate(script, { timeout })` (TS, `nsh-js` `components.rs`) and Rust's
+`ElementRef::evaluate(script, EvaluateOptions)` run through the same request table in
+`core/web_evaluation.rs`: it checks `Environment::web_evaluate`, the `webview` grant and
+the limits, keeps each request's deadline (`timeout`; it sends `Command::CancelEvaluate`
+when it passes), and settles the request from the internal `WebEvaluation` event a
+platform replies with, never from page messages. `platform/web_evaluation.rs` and
+`web_evaluation.js` hold the page wrapper (JSON result contract, polling of returned
+Promises, cleanup) that every platform runs. iOS and macOS share
+`nsh-platform-apple`'s `web_evaluation.rs` (WKWebView completions); Android runs it in
+`WebBox.java` (`evaluateJavascript`). The platforms abort requests on a new-document
+navigation, explicit navigation commands, a reloading source, renderer loss and
+disposal; page-initiated same-document history updates keep them. Platforms that leave
+`web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
+`WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
+

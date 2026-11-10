@@ -259,6 +259,7 @@ events! {
     EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
     Wheel = "onWheel": "A mouse wheel or touchpad scrolled over the view (payload: [`EventPayload::Wheel`]): the nearest listener around the view under the pointer hears it; one nearer than any scroll view under the pointer takes the wheel, so nothing scrolls or zooms natively ([`crate::input::wheel_listener`]).",
 
+    WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2068,6 +2069,22 @@ pub enum Command {
     StopLoading,
     /// Run JavaScript in a web view's page.
     InjectJavaScript(String),
+    /// Run a script in a web view's page for its result
+    /// ([`crate::platform::web_evaluation`]); the platform answers on this
+    /// node with [`EventKind::WebEvaluation`] (`id`: the request, `data`:
+    /// the JSON envelope), once.
+    Evaluate {
+        /// The engine's request, echoed in the reply.
+        request: u32,
+        /// The app's script.
+        script: String,
+    },
+    /// Give up request `request` of [`Command::Evaluate`]: release what the
+    /// platform keeps for it, answering nothing.
+    CancelEvaluate {
+        /// The request.
+        request: u32,
+    },
     /// Send a message to a web view's page (`window.onmessage` data).
     PostMessage(String),
     /// Give a web view's page input as the user's own (trusted events).
@@ -3161,6 +3178,18 @@ pub enum NativeProp {
 /// A mutation produced by the JS renderer.
 #[derive(Debug)]
 pub enum Op {
+    /// `ref.evaluate(script, { timeout })` of a web view, in order with
+    /// the UI's ops: JS promise `call` settles with its result.
+    Evaluate {
+        /// The web view.
+        id: NodeId,
+        /// The JS promise's call number.
+        call: u32,
+        /// The app's script.
+        script: String,
+        /// How long the script may take to answer.
+        timeout: std::time::Duration,
+    },
     /// What a canvas draws (replaces the previous drawing).
     Draw {
         /// The canvas.

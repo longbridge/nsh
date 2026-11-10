@@ -976,6 +976,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Dialog,
     EventKind::BackPress,
     EventKind::ImageInfo,
+    EventKind::WebEvaluation,
     EventKind::Clipboard,
     EventKind::Host,
     EventKind::Pick,
