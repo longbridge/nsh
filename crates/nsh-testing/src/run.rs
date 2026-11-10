@@ -379,6 +379,8 @@ fn compile_test_file(
     let entry = run.work_dir.join(format!("{name}.run.js"));
     let path = serde_json::to_string(&file.to_string_lossy().replace('\\', "/"))
         .map_err(|e| e.to_string())?;
+    // The test file's import is the second line, which `test_file_of`
+    // reads back.
     let code = format!(
         "// Made by `nsh test`: runs the tests of {name}.\nimport {path};\nimport {{ run }} from \"{}\";\nrun();\n",
         crate::module::RUNNER
@@ -398,6 +400,21 @@ fn compile_test_file(
         None => *bundle,
     };
     Ok((bundle, map, asset_root))
+}
+
+/// The test file the entry `entry` made for it imports
+/// ([`compile_test_file`]); `None` when `entry` is not such an entry.
+#[cfg(feature = "bundle")]
+pub(crate) fn test_file_of(entry: &Path) -> Option<PathBuf> {
+    let code = std::fs::read_to_string(entry).ok()?;
+    let mut lines = code.lines();
+    if !lines.next()?.starts_with("// Made by `nsh test`") {
+        return None;
+    }
+    let import = lines.next()?.strip_prefix("import ")?.strip_suffix(';')?;
+    serde_json::from_str::<String>(import)
+        .ok()
+        .map(PathBuf::from)
 }
 
 /// Writes `contents` to `path` so that a reader sees it whole, never cut

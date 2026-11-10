@@ -399,23 +399,37 @@ impl NshPlugin {
     /// on every system. A file outside it fails the build: the files an app
     /// imports ship with it, and a package holds only its directory.
     fn ship(&self, path: &Path) -> anyhow::Result<String> {
-        // The resolver's ids are real paths, as the root is; a spelling of
-        // its own (a drive letter's case) is compared once canonical.
-        let canonical;
-        let rel = match path.strip_prefix(&self.asset_root) {
-            Ok(rel) => Ok(rel),
-            Err(_) => {
-                canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-                canonical.strip_prefix(&self.asset_root)
-            }
-        };
-        let Ok(rel) = rel else {
+        // Inside once real, always: a link in the app to a file outside it
+        // (a pixel-density variant found beside an image, which the
+        // resolver never saw) ships nothing a package could hold, and the
+        // CLI's `asset_in_root` refuses links out too.
+        let real = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let Ok(real_rel) = real.strip_prefix(&self.asset_root) else {
+            let shown = match path.strip_prefix(&self.asset_root) {
+                Ok(rel) => format!(
+                    "`{}` links to {}, which",
+                    rel.to_string_lossy().replace('\\', "/"),
+                    real.display()
+                ),
+                Err(_) => format!("`{}`", relative(path, &self.asset_root)),
+            };
             return Err(self.refuse(format!(
-                "`{}` is outside the app's directory {}: the files an app imports ship with it, so move it inside",
-                relative(path, &self.asset_root),
+                "{shown} is outside the app's directory {}: the files an app imports ship with it, so move it inside",
                 self.asset_root.display()
             )));
         };
+        // Named as imported or found when that path is in the app, so a
+        // variant that links elsewhere in it keeps its image's name
+        // (`logo@2x.png`, which hosts derive from `logo.png`); else as
+        // real (the resolver's own spelling, a drive letter's case).
+        let rel = path
+            .strip_prefix(&self.asset_root)
+            .ok()
+            .filter(|rel| {
+                rel.components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)))
+            })
+            .unwrap_or(real_rel);
         let name = rel
             .components()
             .map(|c| c.as_os_str().to_string_lossy())
@@ -1124,6 +1138,78 @@ mod tests {
             error.starts_with("img/a@3x.png\ncannot read image: "),
             "{error}"
         );
+    }
+
+    /// A pixel-density variant that links out of the app fails the build,
+    /// as an import of the file it links to would: found beside the image,
+    /// it is in the app by name only, and no package could ship it.
+    #[cfg(unix)]
+    #[test]
+    fn a_variant_linking_out_of_the_app_is_refused() {
+        let dir = app("link-out", "a.png", &[("a.png", (40, 30))]);
+        let outside = dir.with_file_name(format!(
+            "{}-a@2x.png",
+            dir.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::write(&outside, png(80, 60)).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("img/a@2x.png")).unwrap();
+        for error in [
+            try_bundle(&dir).unwrap_err().plain,
+            crate::bundle_hot(&dir.join("App.tsx"), &[])
+                .unwrap_err()
+                .plain,
+        ] {
+            assert!(error.contains("`img/a@2x.png` links to "), "{error}");
+            assert!(error.contains("is outside the app's directory"), "{error}");
+        }
+        let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An imported image that links out of the app fails the build too
+    /// (the resolver hands over the file it links to).
+    #[cfg(unix)]
+    #[test]
+    fn an_image_linking_out_of_the_app_is_refused() {
+        let dir = app("image-out", "a.png", &[]);
+        let outside = dir.with_file_name(format!(
+            "{}-a.png",
+            dir.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::write(&outside, png(40, 30)).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("img/a.png")).unwrap();
+        let error = try_bundle(&dir).unwrap_err().plain;
+        assert!(error.contains("is outside the app's directory"), "{error}");
+        let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A variant linking to a file elsewhere in the app ships under its
+    /// image's name, which hosts derive the variant's URL from, not the
+    /// name of the file it links to.
+    #[cfg(unix)]
+    #[test]
+    fn a_variant_linking_inside_the_app_keeps_its_name() {
+        let dir = app("link-in", "a.png", &[("a.png", (40, 30))]);
+        std::fs::create_dir_all(dir.join("hires")).unwrap();
+        std::fs::write(dir.join("hires/big.png"), png(80, 60)).unwrap();
+        std::os::unix::fs::symlink("../hires/big.png", dir.join("img/a@2x.png")).unwrap();
+        let built = bundled(&dir);
+        assert!(
+            built.code.contains("url: \"asset:/img/a.png\""),
+            "{}",
+            built.code
+        );
+        assert!(built.code.contains("scales: [1, 2]"), "{}", built.code);
+        assert_eq!(assets(&built), ["img/a.png", "img/a@2x.png"]);
+        let hot = crate::bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        let names: Vec<String> = hot
+            .assets
+            .iter()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(names, ["img/a.png", "img/a@2x.png"]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

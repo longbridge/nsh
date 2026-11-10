@@ -35,6 +35,13 @@ pub struct BundleOptions {
     /// The UI sets the hosts serve, described (`nsh_base::registry()`
     /// and an app's own, as `SetDescription`s): their modules stay imports.
     pub ui_sets: Vec<nsh_core::element::description::SetDescription>,
+    /// A file whose app's directory is the asset root
+    /// ([`Bundle::asset_root`]) in place of the entry's: the test file of
+    /// the entry `nsh test` makes for it, which may be written anywhere
+    /// (`nsh_testing::TestRun::work_dir`), so that the files the test file
+    /// imports are named from its app. The theme, capabilities and
+    /// resolution stay the entry's. `None`: the entry's.
+    pub asset_root_from: Option<PathBuf>,
 }
 
 /// The app's identity a build gives it in place of `nsh.json`'s (what a
@@ -575,6 +582,22 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     // opens below its app's root starts alike headless and in a window.
     let main_window = main_window(&cwd)?;
     let resolve = ResolveSetup::read(&app)?;
+    let asset_root = match &options.asset_root_from {
+        Some(file) => {
+            let file = dunce::canonicalize(file).map_err(|e| {
+                BundleError::other(format!("asset root not found: {}: {e}", file.display()))
+            })?;
+            let dir = if file.is_dir() {
+                file
+            } else {
+                file.parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or(file)
+            };
+            app_dir(&dir)
+        }
+        None => app,
+    };
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let natives = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
@@ -610,7 +633,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         vec![Pluginable::new_shared(plugin::NshPlugin {
             split: options.split,
             root: cwd_for_errors,
-            asset_root: app.clone(),
+            asset_root: asset_root.clone(),
             error: plugin_error.clone(),
             assets: assets.clone(),
             hot: false,
@@ -659,7 +682,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     // Each one is inside: the plugin named it, or failed the build.
     let mut assets: Vec<PathBuf> = std::mem::take(&mut *assets.lock().expect("assets lock"))
         .into_iter()
-        .filter_map(|p| p.strip_prefix(&app).ok().map(PathBuf::from))
+        .filter_map(|p| p.strip_prefix(&asset_root).ok().map(PathBuf::from))
         .collect();
     assets.sort();
     assets.dedup();
@@ -685,7 +708,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         chunks,
         entry_imports,
         assets,
-        asset_root: app,
+        asset_root,
         watch_files: watch_files(&bundler, &cwd_root),
         natives: natives.into_iter().collect(),
         native_use,
@@ -1777,6 +1800,53 @@ mod tests {
         let error = release(&alone.join("Main.tsx")).unwrap_err().plain;
         assert!(error.contains("is outside the app's directory"), "{error}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The entry `nsh test` makes for a test file may be written outside
+    /// the app (`nsh_testing::TestRun::work_dir`): with the test file as
+    /// `asset_root_from`, what the test file imports is named from its app,
+    /// with or without an `nsh.json`; without it, from the entry's.
+    #[test]
+    fn a_test_entry_outside_the_app_names_assets_from_the_test_file() {
+        for config in [true, false] {
+            let test = showing("../assets/dot.png");
+            let dir = asset_app(
+                &format!("from-{config}"),
+                config,
+                &[("tests/a.test.tsx", &test)],
+            );
+            let work = dir.with_file_name(format!(
+                "{}-work",
+                dir.file_name().unwrap().to_string_lossy()
+            ));
+            std::fs::create_dir_all(&work).unwrap();
+            let file = dir.join("tests/a.test.tsx");
+            let entry = work.join("a.test.tsx.run.js");
+            std::fs::write(
+                &entry,
+                format!("import {:?};\n", file.to_string_lossy().replace('\\', "/")),
+            )
+            .unwrap();
+            let built = bundle(&BundleOptions {
+                entry: entry.clone(),
+                asset_root_from: Some(file.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+            assert!(
+                built.code.contains("\"asset:/assets/dot.png\""),
+                "{}",
+                built.code
+            );
+            assert_eq!(built.assets, [PathBuf::from("assets/dot.png")]);
+            assert_eq!(built.asset_root, dir);
+            // The entry's own directory roots it otherwise, and the file is
+            // outside.
+            let error = release(&entry).unwrap_err().plain;
+            assert!(error.contains("is outside the app's directory"), "{error}");
+            let _ = std::fs::remove_dir_all(work);
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// A font an entry below its app imports is named from the app too

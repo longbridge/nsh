@@ -106,7 +106,7 @@ pub fn test_sets() -> Vec<Registry> {
 /// once for several tests and clone it.
 #[cfg(feature = "bundle")]
 pub fn compile_tsx(entry: impl AsRef<Path>, ui_sets: &[Registry]) -> Result<Bundle, String> {
-    let (app, map, _) = build(entry.as_ref(), ui_sets)?;
+    let (app, map, _) = build(entry.as_ref(), ui_sets, None)?;
     Ok(match map {
         Some(map) => app.with_source_map(map),
         None => app,
@@ -114,11 +114,13 @@ pub fn compile_tsx(entry: impl AsRef<Path>, ui_sets: &[Registry]) -> Result<Bund
 }
 
 /// `entry` built against `ui_sets`: its bytecode, its source map and the
-/// directory its assets are named from (`nsh_bundler::Bundle::asset_root`).
+/// directory its assets are named from (`nsh_bundler::Bundle::asset_root`:
+/// the app's of `asset_root_from` when given, else the entry's).
 #[cfg(feature = "bundle")]
 fn build(
     entry: &Path,
     ui_sets: &[Registry],
+    asset_root_from: Option<std::path::PathBuf>,
 ) -> Result<(Bundle, Option<String>, std::path::PathBuf), String> {
     let sets: Vec<SetDescription> = ui_sets
         .iter()
@@ -131,6 +133,7 @@ fn build(
         split: false,
         ui_sets: sets.clone(),
         development: true,
+        asset_root_from,
         ..Default::default()
     })
     .map_err(|e| format!("{}: {e}", entry.display()))?;
@@ -161,11 +164,14 @@ pub fn compiler(ui_sets: Vec<Registry>) -> Compile {
             entry.to_owned()
         };
         let (bundle, source_map, asset_root) = match kind {
-            Entry::App => build(entry, &ui_sets)?,
+            Entry::App => build(entry, &ui_sets, None)?,
             Entry::TestFile => {
                 let mut sets = ui_sets.clone();
                 sets.extend(test_sets());
-                build(entry, &sets)?
+                // The entry is in the run's work directory, which may be
+                // outside the app: what the test file imports is named
+                // from the test file's app.
+                build(entry, &sets, run::test_file_of(entry))?
             }
         };
         Ok(Built::Js {
