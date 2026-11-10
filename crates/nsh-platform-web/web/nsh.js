@@ -7434,8 +7434,8 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) are left out, as the native
-   * platforms copy. */
+   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
+   * the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -7480,6 +7480,12 @@ class Player {
         last = run.parentNode;
         lastArea = area;
         lastBox = box;
+      }
+      // A hidden run (`visibility: hidden` on a span) keeps its place but
+      // is not copied; the line's break after it still is.
+      if (getComputedStyle(run).visibility === "hidden") {
+        if (to === text.length && run._after) out += run._after;
+        continue;
       }
       const part = text.slice(from, to);
       out += area ? part.replaceAll("\uFFFC", "") : part;

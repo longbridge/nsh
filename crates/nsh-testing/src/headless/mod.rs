@@ -2207,6 +2207,28 @@ mod tests {
         );
     }
 
+    /// A paragraph whose last words hold their place hidden.
+    #[component]
+    fn Partly() -> impl IntoElement {
+        text("Shown ")
+            .child(text("not yet").invisible())
+            .child(" end")
+    }
+
+    #[test]
+    fn hidden_spans_are_not_on_screen() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Partly>())).unwrap();
+        app.first_render().unwrap();
+        let screen = app.screen();
+        assert_eq!(screen.texts(), ["Shown  end"]);
+        assert!(!screen.shows("not yet"));
+        let nodes = screen.layout_nodes();
+        let text = nodes.iter().find_map(|n| n.text.as_ref()).unwrap();
+        // The characters are still laid out, in the text the platform gets.
+        assert_eq!(text.text.text, "Shown not yet end");
+        assert!(text.text.spans[1].style.hidden);
+    }
+
     #[component]
     fn EmptySpans() -> impl IntoElement {
         text("before ")

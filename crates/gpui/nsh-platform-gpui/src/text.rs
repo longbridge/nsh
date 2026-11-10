@@ -2883,13 +2883,12 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
     );
 }
 
-/// The selected text of `view`, without attachments' placeholders.
+/// The selected text of `view`, without attachments' placeholders and
+/// hidden runs.
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    let text: Vec<u16> = state.text.as_ref()?.text.text.encode_utf16().collect();
-    let part = text.get(a as usize..(b as usize).min(text.len()))?;
-    Some(String::from_utf16_lossy(part).replace(ATTACHMENT_CHAR, ""))
+    Some(state.text.as_ref()?.text.copied_text(a..b))
 }
 
 /// Selects all of `view`'s text.

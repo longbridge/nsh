@@ -115,6 +115,14 @@
   inline box), rounded on every line (`box-decoration-break: clone`), drawn behind the selection and the glyphs. CoreText
   splits runs where the background's `NshBackground` attribute changes; the web emits the boxes as elements behind
   the runs.
+- **Hidden spans**: `visibility: "hidden"` on a nested `<Text>` (`.invisible()`) marks its runs, and those of the
+  spans inside it, `ResolvedTextStyle::hidden`. The core resolves them in `collect_text`: their characters stay in the
+  text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring),
+  they are drawn transparent with no background, and they make no links. What leaves the text through the user goes
+  through `AttributedText::copied_text` (copies: hidden runs and attachments' placeholders left out) and
+  `shown_text` (screen readers, the test model's texts); selectable views copy through `SelectionTexts::copied`. The
+  web gives the runs `visibility: hidden`, which its copy handler and the browser's accessibility tree skip. Android
+  draws them transparent; its copies and TalkBack still take the whole text.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own
   layout root at its content size (`update_attachments`), it becomes an object replacement character (U+FFFC,
   `AttributedText::attachments`) that the engine sizes to it (CTRunDelegate; Android a `ReplacementSpan`), so
