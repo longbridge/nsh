@@ -3272,12 +3272,12 @@ impl Pattern {
     }
 
     /// As failure messages show it: a string quoted, a `RegExp` as it reads.
+    /// The caller bounds it, keeping the whole pattern for comparisons.
     fn describe(&self) -> String {
-        let text = match self {
+        match self {
             Pattern::Contains(part) => JsonValue::String(part.clone()).to_string(),
             Pattern::RegExp(_, source) => source.clone(),
-        };
-        values::shorten(&text, crate::failure::SCREEN_TEXT_LIMIT)
+        }
     }
 }
 
@@ -3386,6 +3386,17 @@ const fails = (f, message) => {{
             try { expect(prefix + "A").toBe(prefix + "B"); } catch (e) { shown = e.message; }
             if (!shown || shown.length >= 6000 || !shown.includes("A") || !shown.includes("B"))
                 throw new Error("the difference was hidden: " + shown);
+        "#);
+    }
+
+    #[test]
+    fn a_long_match_pattern_keeps_the_difference() {
+        run(r#"
+            const prefix = "x".repeat(5000);
+            let shown;
+            try { expect(prefix + "A").toMatch(prefix + "B"); } catch (e) { shown = e.message; }
+            if (!shown || shown.length >= 6000 || !shown.includes("A") || !shown.includes("B"))
+                throw new Error("the pattern's difference was hidden: " + shown);
         "#);
     }
 
