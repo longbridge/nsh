@@ -562,7 +562,7 @@ export function ToolbarDemo() {
               style={{ width: terminal ? undefined : big, height: terminal ? undefined : big, borderRadius: big / 2, alignItems: "center", justifyContent: "center", backgroundColor: colors.light, ...transition() }}
               hoverStyle={{ opacity: 0.9 }}
               activeStyle={{ transform: [{ scale: 0.9 }] }}
-              focusStyle={focusRing(2)}
+              focusVisibleStyle={focusRing(2)}
             >
               <View style={{ transform: [{ scale: pop }] }}>
                 <If when={playing()} else={<ToolIcon icon="play" label="Play" size={pointer ? 18 : 22} tint={colors.onLight} />}>
@@ -700,7 +700,7 @@ export function ToolbarDemo() {
             onOpen={({ href }) => last.set(`Open: ${href}`)}
             style={{ paddingHorizontal: 8, height: TOOL.side, justifyContent: "center", borderRadius: 6, borderWidth: 1, borderColor: "transparent", ...transition() }}
             hoverStyle={hovered()}
-            focusStyle={focusRing(1)}
+            focusVisibleStyle={focusRing(1)}
             disabledStyle={{ opacity: 0.4 }}
           >
             <Text style={{ fontSize: TOOL.text, color: colors.accent, textDecorationLine: "underline" }}>Review guide</Text>

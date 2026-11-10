@@ -61,7 +61,7 @@ function App() {
                 picked() === i() && styles().selected,
               ]}
               hoverStyle={{ opacity: 0.88 }}
-              focusStyle={focusRing()}
+              focusVisibleStyle={focusRing()}
               activeStyle={{ opacity: 0.7 }}
             >
               <Text style={{ color: ui().text, fontSize: desktop ? 13 : undefined }}>{label()}</Text>
@@ -89,7 +89,7 @@ function App() {
           transitionTimingFunction: "ease-in-out",
         }}
         hoverStyle={{ opacity: 0.88 }}
-        focusStyle={focusRing()}
+        focusVisibleStyle={focusRing()}
         activeStyle={{ opacity: 0.7 }}
       >
         <Text style={{ color: ui().page, fontWeight: "600" }}>{on() ? "On" : "Off"}</Text>

@@ -296,9 +296,9 @@ export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0
 export const ghostFill = () => (terminal ? token("secondary") : "transparent");
 
 /**
- * The keyboard focus (`focusStyle`): the edge turns the theme's muted olive
- * `ring` and a 3-point halo of it lies around the view (`offset` moves the
- * halo out from the edge).
+ * The keyboard focus (`focusVisibleStyle`: not after a click or a tap): the
+ * edge turns the theme's muted olive `ring` and a 3-point halo of it lies
+ * around the view (`offset` moves the halo out from the edge).
  */
 export const focusRing = (offset = 0): ViewStyle => ({
   borderColor: token("ring"),

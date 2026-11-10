@@ -19,7 +19,7 @@ fn docs() -> impl IntoElement {
         .text_color(move || theme().primary)
         .underline()
         .hover(|s| s.opacity(0.8))
-        .focus(|s| s.rounded_sm().outline(px(2.0)).outline_color(move || theme().ring))
+        .focus_visible(|s| s.rounded_sm().outline(px(2.0)).outline_color(move || theme().ring))
         .child(text("Read the docs"))
 }
 ```
@@ -32,7 +32,7 @@ function App() {
   return (
     <Link
       href="https://example.com/docs"
-      class="self-start text-primary underline hover:opacity-80 focus:rounded-sm focus:outline-2 focus:outline-ring"
+      class="self-start text-primary underline hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
     >
       <Text>Read the docs</Text>
     </Link>
@@ -108,7 +108,7 @@ import { Link } from "nsh/base";
 ```tsx
 <Link
   href="https://example.com/changelog"
-  class="self-start text-primary underline decoration-primary/40 transition-colors hover:decoration-primary active:opacity-70 focus:outline-2 focus:outline-ring disabled:text-muted-foreground disabled:no-underline"
+  class="self-start text-primary underline decoration-primary/40 transition-colors hover:decoration-primary active:opacity-70 focus-visible:outline-2 focus-visible:outline-ring disabled:text-muted-foreground disabled:no-underline"
 >
   <Text>Changelog</Text>
 </Link>
@@ -158,7 +158,7 @@ const visited = signal(new Set<string>());
 
 - 链接对屏幕阅读器是一个元素，角色为 `"link"`；它的标签是子元素的文字，或 `accessibilityLabel`。`href` 只是数据：屏幕阅读器读出的是标签。
 - `current` 读作当前页（ARIA 的 `aria-current="page"`），`disabled` 按平台读出不可用元素的方式读出。
-- 在 macOS 和 Web 上，链接是键盘焦点的一站：Tab 到达它，Return 和 Space 打开它，`focus:` 样式显示焦点所在。
+- 在 macOS 和 Web 上，链接是键盘焦点的一站：Tab 到达它，Return 和 Space 打开它，`focus-visible:` 样式显示焦点所在。
 
 标签、角色和播报的一般说明见[无障碍](../docs/accessibility.md)。
 

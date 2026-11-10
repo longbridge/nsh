@@ -95,7 +95,7 @@ export function HoverCardDemo() {
           role="link"
           onPress={() => log(`onPress /people/${p.handle}`)}
           hoverStyle={{ backgroundColor: alpha(colors.accent, 0.12) }}
-          focusStyle={focusRing(1)}
+          focusVisibleStyle={focusRing(1)}
           style={{ borderRadius: 4, paddingHorizontal: 2, marginHorizontal: -3, borderWidth: 1, borderColor: "transparent", transitionProperty: "background-color", transitionDuration: 120 }}
         >
           <Text style={{ fontSize: body, fontWeight: "500", color: colors.accent }}>@{p.name}</Text>
@@ -209,7 +209,7 @@ export function HoverCardDemo() {
           role="link"
           onPress={() => log(`onPress ${s.href}`)}
           hoverStyle={{ borderBottomColor: colors.accent }}
-          focusStyle={focusRing(1)}
+          focusVisibleStyle={focusRing(1)}
           style={{ borderBottomWidth: 1, borderBottomColor: alpha(colors.accent, 0.35), transitionProperty: "border-color", transitionDuration: 150 }}
         >
           <Text style={{ fontSize: body, color: colors.accent }}>{props.label}</Text>
@@ -289,7 +289,7 @@ export function HoverCardDemo() {
             focusable
             accessibilityLabel={`${q.symbol} ${price().toFixed(2)}`}
             hoverStyle={{ backgroundColor: alpha(toneColor(tone()), 0.16) }}
-            focusStyle={focusRing(1)}
+            focusVisibleStyle={focusRing(1)}
             style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8, height: pointer ? 26 : 32, borderRadius: 13, borderWidth: 1, borderColor: alpha(toneColor(tone()), 0.25), backgroundColor: alpha(toneColor(tone()), 0.08), transitionProperty: "background-color", transitionDuration: 120 }}
           >
             <Text style={{ fontSize: small, fontWeight: "600", fontFamily: mono, color: colors.text }}>${q.symbol}</Text>
@@ -387,7 +387,7 @@ export function HoverCardDemo() {
             margin={8}
             onOpenChange={changed("delays")}
             trigger={
-              <View focusable hoverStyle={{ backgroundColor: alpha(colors.text, 0.06) }} focusStyle={focusRing(1)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, height: pointer ? 28 : 40, borderRadius: 8, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border }}>
+              <View focusable hoverStyle={{ backgroundColor: alpha(colors.text, 0.06) }} focusVisibleStyle={focusRing(1)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, height: pointer ? 28 : 40, borderRadius: 8, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border }}>
                 <LucideIcon name="hand" size={14} tint={colors.muted} />
                 <Text style={{ fontSize: body, color: colors.text }}>{pointer ? "Rest here" : "Tap here"}</Text>
               </View>
@@ -424,7 +424,7 @@ export function HoverCardDemo() {
             trigger={
               // A terminal shows the focus itself: no edge kept for a ring,
               // which would take a row above and below.
-              <View focusable focusStyle={terminal ? undefined : focusRing(1)} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 8, borderWidth: terminal ? 0 : 1, borderColor: "transparent" }}>
+              <View focusable focusVisibleStyle={terminal ? undefined : focusRing(1)} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 8, borderWidth: terminal ? 0 : 1, borderColor: "transparent" }}>
                 <Avatar name="Ravi Patel" size={pointer ? 28 : 34} />
                 <Text style={{ fontSize: body, color: colors.text }}>Build #4182</Text>
               </View>

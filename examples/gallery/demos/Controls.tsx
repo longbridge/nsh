@@ -181,7 +181,7 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
         // Nearly the chip's height under a finger; a terminal's is its mark, as text.
         style={terminal ? undefined : { width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
-        focusStyle={focusRing()}
+        focusVisibleStyle={focusRing()}
       >
         <If when={terminal} else={<Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />}>
           <Text style={{ color: colors.muted }}>×</Text>
@@ -929,7 +929,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           class="group"
           style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
           activeStyle={pressed}
-          focusStyle={focusRing(2)}
+          focusVisibleStyle={focusRing(2)}
           disabledStyle={dimmed}
           {...checkboxLook({ scale: props.scale })}
           indicator={<CheckboxMark mark={props.mark} scale={props.scale} />}
@@ -1058,7 +1058,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 class="group"
                 style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
                 activeStyle={pressed}
-                focusStyle={focusRing(2)}
+                focusVisibleStyle={focusRing(2)}
                 disabledStyle={dimmed}
               >
                 <RadioRing on={choice() === t().name} scale={t().scale} />
@@ -1346,7 +1346,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 }}
                 hoverStyle={open() ? undefined : hovered()}
                 activeStyle={pressed}
-                focusStyle={focusRing()}
+                focusVisibleStyle={focusRing()}
               >
                 <Text style={{ fontSize: size.detail, color: colors.muted }}>Sort by</Text>
                 <Text style={{ fontSize: size.detail, fontWeight: "500", color: colors.text }}>{sortTitle()}</Text>
@@ -1364,7 +1364,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             onPress={() => set(sort(), !down())}
             class="items-center justify-center rounded-md enabled:hover:bg-accent active:bg-track"
             style={{ width: pointer ? 26 : 34, height: pointer ? 26 : 34 }}
-            focusStyle={focusRing()}
+            focusVisibleStyle={focusRing()}
           >
             <View class="transition-transform duration-200 motion-reduce:transition-none" style={{ transform: [{ rotate: down() ? "0deg" : "180deg" }] }}>
               <Icon name="arrow-down" size={pointer ? 14 : 16} tint={colors.muted} />
@@ -2028,7 +2028,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               }}
               hoverStyle={{ borderColor: colors.faint }}
               activeStyle={pressed}
-              focusStyle={focusRing()}
+              focusVisibleStyle={focusRing()}
             >
               {/* A date picker's trigger leads with the calendar, as `DateTrigger` does. */}
               <If when={!terminal}>
@@ -2189,7 +2189,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                   style={chip(slot() === s())}
                   activeStyle={{ transform: [{ scale: 0.95 }] }}
                   hoverStyle={slot() === s() ? undefined : { borderColor: colors.faint }}
-                  focusStyle={focusRing()}
+                  focusVisibleStyle={focusRing()}
                   disabledStyle={{ opacity: 0.4 }}
                 >
                   <Text

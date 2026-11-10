@@ -671,6 +671,29 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
     })
 }
 
+/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
+/// view `view` that sets no cursor of its own: the pointer there wins over
+/// the I-beam of selectable text and the arrow of plain text, as on the
+/// other desktops (#759).
+fn over_link(view: &NshView, x: f32, y: f32) -> bool {
+    {
+        let s = view.state();
+        if css_cursor(s.style.cursor).is_some()
+            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
+        {
+            return false;
+        }
+    }
+    let (lx, ly) = local(view, x, y);
+    let s = view.state();
+    let Some(text) = s.text.as_ref() else {
+        return false;
+    };
+    crate::text::char_at(&s, lx, ly)
+        .and_then(|i| text.text.link_at(i))
+        .is_some_and(|link| has_press(link.events))
+}
+
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
@@ -685,6 +708,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         {
             return c;
         }
+    }
+    if over_link(&hit.view, x, y) {
+        return Cursor::Hand;
     }
     let mut view = Some(hit.view);
     while let Some(v) = view {
