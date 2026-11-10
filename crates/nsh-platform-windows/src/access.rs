@@ -154,6 +154,12 @@ pub(crate) enum Control {
     Tree,
     /// `UIA_TreeItemControlTypeId`.
     TreeItem,
+    /// A pane read as "dialog", with `UIA_IsDialogPropertyId` (ARIA's
+    /// `dialog`, as browsers map it).
+    Dialog,
+    /// A pane read as "alert dialog", with `UIA_IsDialogPropertyId`
+    /// (ARIA's `alertdialog`).
+    AlertDialog,
 }
 
 impl Control {
@@ -227,6 +233,8 @@ impl Control {
             Control::Switch => "toggle switch",
             Control::Timer => "timer",
             Control::Grid => "grid",
+            Control::Dialog => "dialog",
+            Control::AlertDialog => "alert dialog",
             _ => return None,
         })
     }
@@ -318,6 +326,8 @@ pub(crate) fn control_for(a: &Accessibility, kind: ViewKind, pressable: bool) ->
         Role::Navigation => Control::Navigation,
         Role::Tree => Control::Tree,
         Role::TreeItem => Control::TreeItem,
+        Role::Dialog => Control::Dialog,
+        Role::AlertDialog => Control::AlertDialog,
     })
 }
 
@@ -1248,6 +1258,8 @@ mod tests {
             (Role::TreeItem, Control::TreeItem),
             (Role::MenuItemCheckbox, Control::MenuItem),
             (Role::MenuItemRadio, Control::MenuItem),
+            (Role::Dialog, Control::Dialog),
+            (Role::AlertDialog, Control::AlertDialog),
         ] {
             assert_eq!(
                 control_for(&with_role(role), ViewKind::View, false),

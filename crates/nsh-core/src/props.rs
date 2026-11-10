@@ -132,6 +132,15 @@ pub enum AccessibilityRole {
     /// (`accessibilityState.checked`).
     #[prop(rename = "menuitemradio")]
     MenuItemRadio,
+    /// A dialog over the rest of the app, named by its `label` (its
+    /// title): what `nsh_base::dialog` is unless the app gives it another
+    /// role.
+    Dialog,
+    /// A dialog that asks the user to confirm something or tells them
+    /// something urgent (a destructive action's confirmation), named by
+    /// its `label`.
+    #[prop(rename = "alertdialog")]
+    AlertDialog,
 }
 
 /// Whether a checkable element is checked (`accessibilityState.checked`).

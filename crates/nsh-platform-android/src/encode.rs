@@ -1461,6 +1461,8 @@ fn role_index(role: AccessibilityRole) -> i32 {
         TreeItem => 40,
         MenuItemCheckbox => 41,
         MenuItemRadio => 42,
+        Dialog => 43,
+        AlertDialog => 44,
     }
 }
 

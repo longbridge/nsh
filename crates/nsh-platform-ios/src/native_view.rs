@@ -461,7 +461,9 @@ fn steps(a: &Accessibility) -> bool {
 }
 
 /// Roles of groups whose elements stay VoiceOver's own: a semantic
-/// group, which VoiceOver names by its label as it moves into it.
+/// group, which VoiceOver names by its label as it moves into it. A
+/// dialog is one (UIKit has no dialog trait): its title is said as the
+/// focus enters it, and its controls stay reachable.
 fn is_container(a: &Accessibility) -> bool {
     matches!(
         a.role,
@@ -470,6 +472,8 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Navigation
             | AccessibilityRole::Tree
             | AccessibilityRole::Toolbar
+            | AccessibilityRole::Dialog
+            | AccessibilityRole::AlertDialog
     )
 }
 
@@ -691,6 +695,13 @@ mod tests {
         ));
         assert!(is_container(
             &props(AccessibilityRole::Toolbar, &[]).accessibility
+        ));
+        // A labelled dialog names what VoiceOver enters, never hiding it.
+        assert!(is_container(
+            &props(AccessibilityRole::Dialog, &[]).accessibility
+        ));
+        assert!(is_container(
+            &props(AccessibilityRole::AlertDialog, &[]).accessibility
         ));
         assert!(!is_container(
             &props(AccessibilityRole::Button, &[]).accessibility

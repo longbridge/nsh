@@ -380,6 +380,10 @@ enum Ax {
     Navigation,
     /// An item of a tree.
     TreeItem,
+    /// A dialog (ARIA's `dialog`).
+    Dialog,
+    /// An alert dialog (ARIA's `alertdialog`).
+    AlertDialog,
     /// A view standing for the window's close button (`windowControl`).
     CloseButton,
     /// ... its minimize button.
@@ -864,6 +868,17 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
                 constant(NSAccessibilityGroupRole),
                 named("AXLandmarkNavigation"),
             ),
+            // As WebKit maps ARIA's `dialog` and `alertdialog`: VoiceOver
+            // says "web dialog" / "alert dialog" and the label as it
+            // enters.
+            Ax::Dialog => (
+                constant(NSAccessibilityGroupRole),
+                named("AXApplicationDialog"),
+            ),
+            Ax::AlertDialog => (
+                constant(NSAccessibilityGroupRole),
+                named("AXApplicationAlertDialog"),
+            ),
             // As an option: AppKit's outline rows need the outline's rows
             // and columns; an item of a tree is static text that reports
             // its expanded state and its disclosure level.
@@ -1025,6 +1040,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         // A tree is a list of its items, as a listbox is (see `TreeItem`).
         Role::Tree => Ax::List,
         Role::TreeItem => Ax::TreeItem,
+        Role::Dialog => Ax::Dialog,
+        Role::AlertDialog => Ax::AlertDialog,
     }
 }
 
@@ -1208,6 +1225,8 @@ mod tests {
             (Role::TreeItem, Ax::TreeItem),
             (Role::MenuItemCheckbox, Ax::MenuItem),
             (Role::MenuItemRadio, Ax::MenuItem),
+            (Role::Dialog, Ax::Dialog),
+            (Role::AlertDialog, Ax::AlertDialog),
         ] {
             assert_eq!(role_for(&with_role(role), ViewKind::View, false), ax);
         }
