@@ -63,7 +63,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk` and `usesCleartextTraffic`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
@@ -182,6 +182,20 @@ against that level, so the SDK needs its platform (`sdkmanager "platforms;androi
   "android": { "targetSdk": 36 }
 }
 ```
+
+### Plain HTTP
+
+Packaged apps make requests over HTTPS. For servers without TLS, such as one on the local network,
+`android.usesCleartextTraffic` lets the app make plain `http://` requests as well
+([`android:usesCleartextTraffic`](https://developer.android.com/guide/topics/manifest/application-element#usesCleartextTraffic)):
+
+```json
+{
+  "android": { "usesCleartextTraffic": true }
+}
+```
+
+Development builds (`nsh run --target android`) always allow plain HTTP: they load the app from the dev server over it.
 
 ### Google Play: App Bundles
 

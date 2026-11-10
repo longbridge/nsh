@@ -202,6 +202,10 @@ pub(crate) struct Apk<'a> {
     pub(crate) activity: &'a str,
     /// Development builds: debuggable, cleartext HTTP (the dev server).
     pub(crate) dev: bool,
+    /// Plain HTTP is allowed (`android:usesCleartextTraffic`): development
+    /// builds (the dev server's assets) and apps whose `nsh.json` sets
+    /// `android.usesCleartextTraffic`.
+    pub(crate) cleartext: bool,
     /// The app may show notifications: `POST_NOTIFICATIONS` is declared.
     pub(crate) notifications: bool,
     /// URL schemes that open the app (nsh.json `schemes`): one
@@ -349,7 +353,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     } else {
         ""
     };
-    let cleartext = if apk.dev {
+    let cleartext = if apk.cleartext {
         r#" android:usesCleartextTraffic="true""#
     } else {
         ""
@@ -808,6 +812,7 @@ mod tests {
             target_sdk: super::DEFAULT_TARGET_SDK,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            cleartext: false,
             notifications,
             schemes: &[],
             rust,
@@ -860,6 +865,20 @@ mod tests {
         let permission = "android.permission.POST_NOTIFICATIONS";
         assert!(super::manifest_xml(&apk(false, true)).contains(permission));
         assert!(!super::manifest_xml(&apk(false, false)).contains(permission));
+    }
+
+    #[test]
+    fn only_an_app_that_asks_allows_cleartext_traffic() {
+        let attribute = r#"android:usesCleartextTraffic="true""#;
+        assert!(!super::manifest_xml(&apk(false, false)).contains(attribute));
+        let manifest = super::manifest_xml(&super::Apk {
+            cleartext: true,
+            ..apk(false, false)
+        });
+        let application = manifest.find("<application").unwrap();
+        let activity = manifest.find("<activity").unwrap();
+        let at = manifest.find(attribute).expect(&manifest);
+        assert!(application < at && at < activity, "{manifest}");
     }
 
     #[test]
