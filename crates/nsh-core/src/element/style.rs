@@ -4510,8 +4510,9 @@ mod tests {
         }
     }
 
-    /// A refinement's own state methods (the typed looks an app declares
-    /// for a component) lower to Tailwind's state variants.
+    /// A refinement's state methods (the typed looks an app declares for a
+    /// component), its own and `Styled`'s `selected`, lower to Tailwind's
+    /// state variants.
     #[test]
     fn a_refinements_states_are_tailwinds_state_variants() {
         let typed = s()
@@ -4521,9 +4522,10 @@ mod tests {
             .focus(|s| s.opacity(0.5))
             .focus_within(|s| s.border_2())
             .disabled_style(|s| s.opacity(0.25))
+            .selected(|s| s.bg(VIOLET.shade(500)))
             .lower();
         let classes = "bg-red-500 hover:bg-sky-500 active:bg-emerald-500 focus:opacity-50 \
-                       focus-within:border-2 disabled:opacity-25";
+                       focus-within:border-2 disabled:opacity-25 selected:bg-violet-500";
         let parsed = tailwind::parse(&PRESETS, classes);
         assert!(parsed.unknown().is_empty(), "{:?}", parsed.unknown());
         assert_eq!(typed.deps(), parsed.deps());
@@ -4534,6 +4536,8 @@ mod tests {
             state::FOCUSED,
             state::FOCUS_WITHIN,
             state::DISABLED,
+            state::SELECTED,
+            state::SELECTED | state::HOVERED,
         ] {
             assert_eq!(
                 resolve(&typed, false, states, 0),

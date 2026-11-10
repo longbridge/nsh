@@ -292,7 +292,7 @@ import { Canvas, token } from "nsh";
 
 应用把接受 `variant` 和 `size` 的 `nsh/base` 控件（`Button`）的外观声明一次，每个页面按名称使用：`nsh.json` 中的 `"components"` 为每个组件保存一个基础外观、按名称
 区分的各变体和尺寸的外观，以及控件没有指名时使用的变体和尺寸。每个外观是一串类名，状态写成变体（`hover:`、`active:`、
-`focus:`、`disabled:`）。在 Rust 中，同样的声明是类型化的：用样式方法调用 `set_component_style`；两种语言的页面都用
+`focus:`、`disabled:`、`selected:`）。在 Rust 中，同样的声明是类型化的：用样式方法调用 `set_component_style`；两种语言的页面都用
 `variant` 和 `size` 选取外观：
 
 ```rust tabs

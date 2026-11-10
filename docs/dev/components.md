@@ -807,7 +807,7 @@ and `size`; Rust's setter of the size is `with_size`, beside `Styled::size`, as 
 (`element/component_styles.rs`) is a per-surface global signal holding two maps by component name: typed looks
 (`set_component_style("button", ComponentStyle::new().base(..).variant("primary", ..).size("sm", ..))`, the app's
 Rust code, `Styled` closures that may declare states with `.hover(..)` / `.active(..)` / `.focus(..)` /
-`.focus_within(..)` / `.disabled_style(..)`) and class looks (nsh.json `"components"`, read by
+`.focus_within(..)` / `.disabled_style(..)` and `Styled`'s `.selected(..)`) and class looks (nsh.json `"components"`, read by
 `set_component_classes`: a TSX app's bundle sends them to the root as `componentStyles` before the first render, a
 Rust app's root carries them, `Root::components_json`, which the engine sets with `Core::set_component_styles`; the
 bundler and the CLI take out unknown classes with a warning, the core leaves out what it cannot read).
