@@ -2317,7 +2317,12 @@ class Player {
       el._border.className = `nsh-border ${this.styleClass(border)}`;
       el._border._cornerClass = null;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
-      el.append(el._border);
+      // Under the child views, as on iOS and macOS: a child drawn over the
+      // border (a label on an outlined field) covers it. It stays over the
+      // view's own fills (a shader, text runs).
+      let next = el.firstChild;
+      while (next && (next === el._border || next._kind === undefined)) next = next.nextSibling;
+      if (el._border.nextSibling !== next || el._border.parentNode !== el) el.insertBefore(el._border, next);
     } else if (el._border) {
       el._border.remove();
       el._border = null;
