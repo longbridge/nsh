@@ -22073,6 +22073,104 @@ mod rust_menus {
             DesktopCommand::SetMenu(_) | DesktopCommand::PopupMenu { .. }
         )));
     }
+
+    /// A tray with a menu and a click, and a global shortcut, from Rust.
+    #[component]
+    fn TrayAndShortcut() -> impl IntoElement {
+        let log = signal(String::from("ready"));
+        crate::element::desktop::set_tray(
+            crate::element::desktop::tray()
+                .tooltip("Player")
+                .menu([MenuItem::new("Pause").on_select(move || log.set("pause".into()))])
+                .on_click(move |e| log.set(format!("click {}", e.bounds.is_some()))),
+        );
+        let taken = crate::element::desktop::register_global_shortcut("ctrl+alt+p", move || {
+            log.update(|l| l.push_str(" pressed"))
+        });
+        spawn(async move {
+            let taken = taken.await;
+            log.update(|l| l.push_str(&format!(" taken {taken}")));
+        });
+        view().child(text(move || log.get()))
+    }
+
+    #[test]
+    fn rust_tray_and_global_shortcuts_run_their_handlers() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<TrayAndShortcut>());
+        let batch = c.commit().unwrap();
+        let tray = batch
+            .items
+            .iter()
+            .filter_map(desktop)
+            .find_map(|c| match c {
+                DesktopCommand::SetTray(Some(tray)) => Some(tray.clone()),
+                _ => None,
+            })
+            .expect("the tray");
+        assert_eq!(tray.tooltip, "Player");
+        assert!(tray.click >= 1 << 31);
+        let Item::Action(pause) = &tray.menu[0] else {
+            panic!("an action: {:?}", tray.menu);
+        };
+        let global = batch
+            .items
+            .iter()
+            .filter_map(desktop)
+            .find_map(|c| match c {
+                DesktopCommand::RegisterGlobalShortcut { id, shortcut } => Some((*id, *shortcut)),
+                _ => None,
+            })
+            .expect("the global shortcut");
+        assert_eq!(
+            global.1,
+            crate::desktop::Shortcut::parse("ctrl+alt+p", false).unwrap()
+        );
+
+        let n = |id: u32| PayloadValue::Number(f64::from(id));
+        assert!(menu_event(
+            &mut c,
+            vec![
+                ("id", n(global.0)),
+                ("registered", PayloadValue::Bool(true))
+            ]
+        ));
+        assert!(menu_event(&mut c, vec![("id", n(global.0))]));
+        let mut shown = texts_of(&c.commit().unwrap());
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !shown.contains(&"ready pressed taken true".to_owned()) {
+            assert!(std::time::Instant::now() < end, "not answered: {shown:?}");
+            c.run_component_tasks();
+            if let Some(batch) = c.commit() {
+                shown.extend(texts_of(&batch));
+            }
+        }
+
+        assert!(menu_event(&mut c, vec![("id", n(pause.id))]));
+        let batch = c.commit().unwrap();
+        assert!(texts_of(&batch).contains(&"pause".to_owned()));
+
+        let bounds = crate::geometry::Bounds::new(
+            crate::geometry::point(Points(10.0), Points(0.0)),
+            crate::geometry::Size {
+                width: Points(24.0),
+                height: Points(24.0),
+            },
+        );
+        assert!(menu_event(
+            &mut c,
+            vec![
+                ("id", n(tray.click)),
+                ("bounds", PayloadValue::Bounds(bounds))
+            ]
+        ));
+        let batch = c.commit().unwrap();
+        assert!(texts_of(&batch).contains(&"click true".to_owned()));
+    }
 }
 
 #[test]
