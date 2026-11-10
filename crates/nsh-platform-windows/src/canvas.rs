@@ -118,6 +118,13 @@ use crate::{
 
 /// Layouts kept per canvas before the cache is emptied.
 const MAX_LAYOUTS: usize = 256;
+
+#[cfg(test)]
+thread_local! {
+    /// Whether paints that cannot change pixels are elided. The pixel
+    /// equivalence tests record each list with the shortcut on and off.
+    static SKIP_PAINTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
 /// Wedges per turn of a conic gradient (plus one per stop).
 const CONIC_WEDGES: usize = 64;
 /// How closely curves are flattened where Direct2D needs it (widened
@@ -580,6 +587,84 @@ impl Default for State {
     }
 }
 
+/// Whether the current shadow is visible (`blur > 0 || offset != 0`, with
+/// a color that has alpha).
+fn casts_shadow(state: &State) -> bool {
+    let (color, blur, ox, oy) = state.shadow;
+    !color.is_transparent() && (blur > 0.0 || ox != 0.0 || oy != 0.0)
+}
+
+/// Whether `state` and `paint` paint no pixel at all, so the recording can
+/// skip the paint before building its geometry, laying out its text or
+/// looking up its bitmap.
+///
+/// `paint` is the foreground of a shape, rect or text; `None` is an image,
+/// whose own pixels supply its color. Only `source-over` paints are
+/// considered: the other composites still change the destination outside
+/// the shape. A shadow keeps a transparent foreground visible, and
+/// `globalAlpha` multiplies the shadow's alpha, so it hides even a
+/// configured, opaque shadow.
+///
+/// This reads the animated values as they are now, once per recording; it
+/// never caches the decision on the operation list.
+fn paints_nothing(state: &State, args: &[Option<AnimationValue>], paint: Option<&Paint>) -> bool {
+    #[cfg(test)]
+    if !SKIP_PAINTS.with(std::cell::Cell::get) {
+        return false;
+    }
+    if state.composite != Composite::SourceOver {
+        return false;
+    }
+    if state.alpha == 0.0 {
+        return true;
+    }
+    let Some(paint) = paint else {
+        // An image's pixels are its color; the alpha above is the only
+        // state-wide attenuation.
+        return false;
+    };
+    if casts_shadow(state) {
+        // A transparent foreground still shows its shadow.
+        return false;
+    }
+    match paint {
+        Paint::Color(c) => c.is_transparent(),
+        // `Paint::Slot` is an animated color; an unset slot resolves
+        // transparent, as `color` does.
+        Paint::Slot(s) => match args.get(*s as usize).copied().flatten() {
+            Some(AnimationValue::Color(c)) => Color(c).is_transparent(),
+            _ => true,
+        },
+        Paint::Gradient(g) => match g.shape {
+            // `brush` draws nothing for no stops, a zero-length linear
+            // gradient, or a radial gradient it cannot draw as one ellipse.
+            GradientShape::Linear { start, end } => {
+                g.stops.is_empty() || (start.x.0 == end.x.0 && start.y.0 == end.y.0)
+            }
+            GradientShape::Radial {
+                start,
+                start_radius,
+                end,
+                end_radius,
+            } => {
+                g.stops.is_empty()
+                    || radial([
+                        start.x.0,
+                        start.y.0,
+                        start_radius.0,
+                        end.x.0,
+                        end.y.0,
+                        end_radius.0,
+                    ])
+                    .is_none()
+            }
+            // A conic gradient paints wedges even when one stop is
+            // transparent; only no stops paint nothing.
+            GradientShape::Conic { .. } => g.stops.is_empty(),
+        },
+    }
+}
+
 /// How a shape is painted.
 #[derive(Clone, Copy)]
 enum Mode {
@@ -1013,6 +1098,10 @@ impl<'a> Replay<'a> {
         let Some(to_user) = self.state.transform.invert() else {
             return Ok(());
         };
+        // Before the geometry is built.
+        if self.paints_nothing(Some(self.paint(mode))) {
+            return Ok(());
+        }
         let rule = match mode {
             Mode::Fill(rule) => rule,
             Mode::Stroke => FillRule::NonZero,
@@ -1024,6 +1113,10 @@ impl<'a> Replay<'a> {
     /// `fillRect` / `strokeRect` (the current path stays).
     fn rect(&mut self, r: &[Num; 4], mode: Mode) -> windows::core::Result<()> {
         if self.state.singular {
+            return Ok(());
+        }
+        // Before the rectangle geometry is made.
+        if self.paints_nothing(Some(self.paint(mode))) {
             return Ok(());
         }
         let geometry = self.rect_geometry(r)?;
@@ -1178,8 +1271,13 @@ impl<'a> Replay<'a> {
     }
 
     fn casts_shadow(&self) -> bool {
-        let (color, blur, ox, oy) = self.state.shadow;
-        !color.is_transparent() && (blur > 0.0 || ox != 0.0 || oy != 0.0)
+        casts_shadow(&self.state)
+    }
+
+    /// Whether this paint cannot change a pixel, so its geometry, layout
+    /// or bitmap need not be made ([`paints_nothing`]).
+    fn paints_nothing(&self, paint: Option<&Paint>) -> bool {
+        paints_nothing(&self.state, self.args, paint)
     }
 
     /// Draws the shadow of what `draw` paints.
@@ -1642,6 +1740,10 @@ impl<'a> Replay<'a> {
         if text.is_empty() || self.state.singular {
             return Ok(());
         }
+        // Before DirectWrite lays the text out and builds its glyphs.
+        if self.paints_nothing(Some(self.paint(mode))) {
+            return Ok(());
+        }
         let Some(entry) = self.text.layout(text, &self.state.font) else {
             return Ok(());
         };
@@ -1724,6 +1826,11 @@ impl<'a> Replay<'a> {
         dest: &[Num; 4],
     ) -> windows::core::Result<()> {
         if self.state.singular {
+            return Ok(());
+        }
+        // Before the bitmap is looked up; the image's own pixels are its
+        // color, so a transparent foreground does not hide it.
+        if self.paints_nothing(None) {
             return Ok(());
         }
         let Some(bitmap) = self.bitmap(uri) else {
@@ -2665,6 +2772,344 @@ mod tests {
         }
     }
 
+    /// Records `ops` with `args` on a transparent bitmap.
+    fn recorded(gfx: &Gfx, ops: &[CanvasOp], args: &[Option<AnimationValue>]) -> Vec<u8> {
+        let images = FxHashMap::default();
+        let mut text = TextCache::default();
+        let list = record(gfx, ops, 0, args, &images, &mut text).unwrap();
+        pixels(gfx, &[&list])
+    }
+
+    fn alpha_at(data: &[u8], x: usize, y: usize) -> u8 {
+        data[(y * 100 + x) * 4 + 3]
+    }
+
+    /// Paints that cannot change a pixel (zero global alpha, a transparent
+    /// color or animated color) record exactly what their omission paints,
+    /// and the same recorded list paints again once the values are visible.
+    #[test]
+    fn invisible_source_over_paints_are_omitted() {
+        let c = Num::Const;
+        // `alphas[1]` (slot 0) is zero and the animated color (slot 1) is
+        // transparent while recording; the static zero alpha and the
+        // transparent color stay invisible at every value.
+        let ops = vec![
+            CanvasOp::GlobalAlpha(c(0.0)),
+            CanvasOp::FillStyle(Paint::Color(Color(0x00ff00ff))),
+            CanvasOp::FillRect([c(2.0), c(2.0), c(20.0), c(20.0)]),
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::BeginPath,
+            CanvasOp::Path(PathOp::Rect([c(30.0), c(2.0), c(20.0), c(20.0)])),
+            CanvasOp::Stroke(None),
+            CanvasOp::Fill(None, FillRule::NonZero),
+            CanvasOp::GlobalAlpha(c(1.0)),
+            CanvasOp::FillStyle(Paint::Color(Color::TRANSPARENT)),
+            CanvasOp::FillRect([c(2.0), c(30.0), c(20.0), c(20.0)]),
+            CanvasOp::FillStyle(Paint::Slot(1)),
+            CanvasOp::FillRect([c(30.0), c(30.0), c(20.0), c(20.0)]),
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::FillRect([c(60.0), c(2.0), c(20.0), c(20.0)]),
+        ];
+        // The same state and current path, with the four paints that show
+        // nothing removed.
+        let omitted = vec![
+            CanvasOp::GlobalAlpha(c(0.0)),
+            CanvasOp::FillStyle(Paint::Color(Color(0x00ff00ff))),
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::BeginPath,
+            CanvasOp::Path(PathOp::Rect([c(30.0), c(2.0), c(20.0), c(20.0)])),
+            CanvasOp::GlobalAlpha(c(1.0)),
+            CanvasOp::FillStyle(Paint::Color(Color::TRANSPARENT)),
+            CanvasOp::FillStyle(Paint::Slot(1)),
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::FillRect([c(60.0), c(2.0), c(20.0), c(20.0)]),
+        ];
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let hidden = [
+            Some(AnimationValue::Number(0.0)),
+            Some(AnimationValue::Color(0x00000000)),
+        ];
+        let elided = recorded(&gfx, &ops, &hidden);
+        assert_eq!(elided, recorded(&gfx, &omitted, &hidden));
+        // The shortcut itself changes no pixel.
+        let control = {
+            SKIP_PAINTS.with(|skip| skip.set(false));
+            let pixels = recorded(&gfx, &ops, &hidden);
+            SKIP_PAINTS.with(|skip| skip.set(true));
+            pixels
+        };
+        assert_eq!(elided, control);
+        // A visible control paints, and none of the invisible paints do.
+        assert!(alpha_at(&elided, 70, 12) > 0);
+        for (x, y) in [(12, 12), (40, 12), (12, 40), (40, 40)] {
+            assert_eq!(alpha_at(&elided, x, y), 0, "({x}, {y})");
+        }
+        // Re-recording the same operations with visible values paints the
+        // paints the zero values hid.
+        let visible = [
+            Some(AnimationValue::Number(1.0)),
+            Some(AnimationValue::Color(0x00ff00ff)),
+        ];
+        let shown = recorded(&gfx, &ops, &visible);
+        assert!(alpha_at(&shown, 40, 12) > 0, "the animated alpha");
+        assert!(alpha_at(&shown, 40, 40) > 0, "the animated color");
+        // The constant zero alpha and the transparent color stay hidden.
+        assert_eq!(alpha_at(&shown, 12, 12), 0);
+        assert_eq!(alpha_at(&shown, 12, 40), 0);
+    }
+
+    /// The shortcut keeps a shadow of a transparent foreground and never
+    /// stands in for `clearRect`; a visible paint over an empty current
+    /// path still paints nothing.
+    #[test]
+    fn clear_rect_and_shadows_keep_their_effects() {
+        let c = Num::Const;
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        // A transparent foreground with a configured shadow is never
+        // skipped. Direct2D's shadow effect takes the drawn shape's alpha,
+        // which is zero here, so the pixels are empty either way: the test
+        // holds the conservative decision and byte equality.
+        let shadowed = vec![
+            CanvasOp::GlobalAlpha(c(1.0)),
+            CanvasOp::FillStyle(Paint::Color(Color::TRANSPARENT)),
+            CanvasOp::ShadowColor(Color(0xff0000ff)),
+            CanvasOp::ShadowBlur(Points(2.0)),
+            CanvasOp::ShadowOffset(point(Points(10.0), Points(0.0))),
+            CanvasOp::FillRect([c(10.0), c(10.0), c(20.0), c(20.0)]),
+        ];
+        let mut state = State::default();
+        state.fill = Paint::Color(Color::TRANSPARENT);
+        state.shadow = (Color(0xff0000ff), 2.0, 10.0, 0.0);
+        assert!(!paints_nothing(&state, &[], Some(&state.fill)));
+        let control = {
+            SKIP_PAINTS.with(|skip| skip.set(false));
+            let pixels = recorded(&gfx, &shadowed, &[]);
+            SKIP_PAINTS.with(|skip| skip.set(true));
+            pixels
+        };
+        assert_eq!(recorded(&gfx, &shadowed, &[]), control);
+        // A foreground that does paint keeps its shadow.
+        let translucent = vec![
+            CanvasOp::GlobalAlpha(c(1.0)),
+            CanvasOp::FillStyle(Paint::Color(Color(0x00ff0080))),
+            CanvasOp::ShadowColor(Color(0xff0000ff)),
+            CanvasOp::ShadowBlur(Points(2.0)),
+            CanvasOp::ShadowOffset(point(Points(10.0), Points(0.0))),
+            CanvasOp::FillRect([c(10.0), c(10.0), c(20.0), c(20.0)]),
+        ];
+        let shadow = recorded(&gfx, &translucent, &[]);
+        assert!(alpha_at(&shadow, 12, 20) > 0, "the foreground");
+        assert!(alpha_at(&shadow, 35, 20) > 0, "the shadow");
+        // `clearRect` erases what was painted, whatever the paint state.
+        let erased = vec![
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::FillRect([c(10.0), c(10.0), c(40.0), c(20.0)]),
+            CanvasOp::ClearRect([c(20.0), c(10.0), c(10.0), c(20.0)]),
+        ];
+        let erased = recorded(&gfx, &erased, &[]);
+        assert!(alpha_at(&erased, 15, 20) > 0);
+        assert_eq!(alpha_at(&erased, 25, 20), 0);
+        // An empty current path is a no-op, not an error.
+        let empty = vec![
+            CanvasOp::FillStyle(Paint::Color(Color(0x00ff00ff))),
+            CanvasOp::Fill(None, FillRule::NonZero),
+            CanvasOp::Stroke(None),
+        ];
+        assert!(recorded(&gfx, &empty, &[]).iter().all(|b| *b == 0));
+    }
+
+    /// Zero-alpha text is skipped before DirectWrite lays it out, and a
+    /// later nonzero value lays it out and draws the same glyphs.
+    #[test]
+    fn text_op_zero_alpha_skips_layout() {
+        let c = Num::Const;
+        let text = "glyphs";
+        let ops = vec![
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::FillText {
+                text: text.into(),
+                x: c(10.0),
+                y: c(30.0),
+                max_width: None,
+            },
+        ];
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let hidden = [Some(AnimationValue::Number(0.0))];
+        let mut cache = TextCache::default();
+        let images = FxHashMap::default();
+        let list = record(&gfx, &ops, 0, &hidden, &images, &mut cache).unwrap();
+        assert!(cache.layouts.is_empty(), "skipped before the layout");
+        assert!(pixels(&gfx, &[&list]).iter().all(|b| *b == 0));
+        // The same drawing with the text operation omitted paints the
+        // same pixels.
+        let omitted = vec![
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+        ];
+        assert_eq!(pixels(&gfx, &[&list]), recorded(&gfx, &omitted, &hidden));
+        // A nonzero alpha lays the text out and draws the same glyphs it
+        // does without the animated alpha.
+        let shown = [Some(AnimationValue::Number(1.0))];
+        let mut cache = TextCache::default();
+        let list = record(&gfx, &ops, 0, &shown, &images, &mut cache).unwrap();
+        assert_eq!(cache.layouts.len(), 1);
+        let shown = pixels(&gfx, &[&list]);
+        assert!(shown.iter().any(|b| *b != 0), "the glyphs");
+        let control = vec![
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::GlobalAlpha(c(1.0)),
+            CanvasOp::FillText {
+                text: text.into(),
+                x: c(10.0),
+                y: c(30.0),
+                max_width: None,
+            },
+        ];
+        assert_eq!(shown, recorded(&gfx, &control, &[]));
+    }
+
+    /// A conic gradient's transparent stop does not make the paint a
+    /// transparent solid: its wedges still paint toward the opaque stops,
+    /// byte for byte as without the shortcut. Only a gradient with no stops
+    /// paints nothing.
+    #[test]
+    fn conic_gradient_stroke_is_painted_even_under_animated_color_slots() {
+        let c = Num::Const;
+        // Around (50, 30): transparent at 0, red at half a turn (the
+        // rectangle's left edge), green at a full turn.
+        let conic = [(0.0, 0x00000000), (0.5, 0xff0000ff), (1.0, 0x00ff00ff)]
+            .iter()
+            .fold(
+                CanvasGradient::conic(Radians(0.0), point(Points(50.0), Points(30.0))),
+                |g, (o, c)| g.add_color_stop(Percentage(*o), Color(*c)),
+            );
+        let ops = vec![
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::StrokeStyle(Paint::Gradient(Arc::new(conic.clone()))),
+            CanvasOp::LineWidth(c(8.0)),
+            CanvasOp::BeginPath,
+            CanvasOp::Path(PathOp::Rect([c(20.0), c(10.0), c(60.0), c(40.0)])),
+            CanvasOp::Stroke(None),
+        ];
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let args = [Some(AnimationValue::Number(1.0))];
+        let elided = recorded(&gfx, &ops, &args);
+        let control = {
+            SKIP_PAINTS.with(|skip| skip.set(false));
+            let pixels = recorded(&gfx, &ops, &args);
+            SKIP_PAINTS.with(|skip| skip.set(true));
+            pixels
+        };
+        assert_eq!(elided, control);
+        // The stop at half a turn (the rectangle's left edge) is opaque.
+        assert!(alpha_at(&control, 20, 30) > 0);
+        // No stops: `brush` paints nothing either way.
+        let empty = CanvasGradient::conic(Radians(0.0), point(Points(50.0), Points(30.0)));
+        let ops = vec![
+            CanvasOp::StrokeStyle(Paint::Gradient(Arc::new(empty))),
+            CanvasOp::LineWidth(c(8.0)),
+            CanvasOp::BeginPath,
+            CanvasOp::Path(PathOp::Rect([c(20.0), c(10.0), c(60.0), c(40.0)])),
+            CanvasOp::Stroke(None),
+        ];
+        assert!(recorded(&gfx, &ops, &args).iter().all(|b| *b == 0));
+    }
+
+    /// An image at zero global alpha is skipped on the alpha alone; at a
+    /// nonzero alpha a transparent foreground fill/stroke does not hide it
+    /// (the bitmap's own pixels are its color).
+    #[test]
+    fn image_with_zero_alpha_is_skipped() {
+        let mut state = State::default();
+        state.alpha = 0.0;
+        // Even a configured, opaque shadow paints nothing at alpha 0
+        // (`shadow` multiplies its color by the state's alpha).
+        state.shadow = (Color(0xff0000ff), 4.0, 10.0, 0.0);
+        state.fill = Paint::Color(Color::TRANSPARENT);
+        assert!(paints_nothing(&state, &[], None));
+    }
+
+    #[test]
+    fn image_with_transparent_fill_is_not() {
+        let mut state = State::default();
+        state.alpha = 1.0;
+        state.fill = Paint::Color(Color::TRANSPARENT);
+        state.stroke = Paint::Color(Color::TRANSPARENT);
+        state.shadow = (Color(0xff0000ff), 4.0, 10.0, 0.0);
+        assert!(!paints_nothing(&state, &[], None));
+    }
+
+    /// A configured shadow is invisible at zero global alpha: `shadow`
+    /// multiplies the shadow color's alpha by the state's.
+    #[test]
+    fn shadows_with_zero_global_alpha_make_no_pixels() {
+        let c = Num::Const;
+        let mut state = State::default();
+        state.alpha = 0.0;
+        state.shadow = (Color(0xff0000ff), 4.0, 10.0, 0.0);
+        state.fill = Paint::Color(Color(0x00ff00ff));
+        assert!(paints_nothing(&state, &[], Some(&state.fill)));
+        // The same drawing at nonzero alpha keeps its shadow: the shortcut
+        // must not skip an opaque or transparent foreground that casts one.
+        state.alpha = 1.0;
+        state.fill = Paint::Color(Color::TRANSPARENT);
+        assert!(!paints_nothing(&state, &[], Some(&state.fill)));
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let ops = vec![
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::FillStyle(Paint::Color(Color(0x00ff00ff))),
+            CanvasOp::ShadowColor(Color(0xff0000ff)),
+            CanvasOp::ShadowBlur(Points(2.0)),
+            CanvasOp::ShadowOffset(point(Points(10.0), Points(0.0))),
+            CanvasOp::FillRect([c(10.0), c(10.0), c(20.0), c(20.0)]),
+        ];
+        let hidden = [Some(AnimationValue::Number(0.0))];
+        assert!(recorded(&gfx, &ops, &hidden).iter().all(|b| *b == 0));
+        let visible = [Some(AnimationValue::Number(1.0))];
+        let shown = recorded(&gfx, &ops, &visible);
+        assert!(alpha_at(&shown, 35, 20) > 0, "the shadow");
+        assert!(alpha_at(&shown, 15, 20) > 0, "the fill");
+    }
+
+    /// The decision is made while recording: one recorded list paints at
+    /// zero alpha and again at nonzero alpha.
+    #[test]
+    fn reappearance_after_alpha_becomes_nonzero() {
+        let c = Num::Const;
+        let ops = vec![
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+            CanvasOp::FillRect([c(10.0), c(10.0), c(40.0), c(20.0)]),
+        ];
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        assert!(
+            recorded(&gfx, &ops, &[Some(AnimationValue::Number(0.0))])
+                .iter()
+                .all(|b| *b == 0)
+        );
+        let shown = recorded(&gfx, &ops, &[Some(AnimationValue::Number(1.0))]);
+        assert!(alpha_at(&shown, 30, 20) > 0);
+    }
+
     #[test]
     fn a_split_drawing_draws_what_the_whole_one_does() {
         let c = Num::Const;
@@ -2731,6 +3176,70 @@ mod tests {
                 px(&alone, 40, 25)[3]
             );
         }
+        // A tail with a transparent stroke and a later stroke that changes,
+        // inside a clip the head pushes and the tail restores: the two
+        // lists paint what the whole drawing does at every value.
+        let ops = vec![
+            CanvasOp::Save,
+            CanvasOp::Translate(c(10.0), c(5.0)),
+            CanvasOp::Path(PathOp::Rect([c(0.0), c(0.0), c(40.0), c(30.0)])),
+            CanvasOp::Clip(None, FillRule::NonZero),
+            CanvasOp::FillStyle(Paint::Color(Color(0x0000ffff))),
+            CanvasOp::FillRect([c(0.0), c(0.0), c(20.0), c(20.0)]),
+            // The tail starts at the animated alpha.
+            CanvasOp::GlobalAlpha(Num::Slot(0)),
+            CanvasOp::BeginPath,
+            CanvasOp::Path(PathOp::Rect([c(0.0), c(0.0), c(30.0), c(30.0)])),
+            CanvasOp::Stroke(None),
+            CanvasOp::GlobalAlpha(c(1.0)),
+            CanvasOp::StrokeStyle(Paint::Slot(1)),
+            CanvasOp::BeginPath,
+            CanvasOp::Path(PathOp::Rect([c(5.0), c(5.0), c(20.0), c(20.0)])),
+            CanvasOp::Stroke(None),
+            CanvasOp::Restore,
+        ];
+        let drawing = Drawing {
+            ops: ops.clone(),
+            ..Drawing::default()
+        };
+        let at = split(&drawing);
+        assert_eq!(at, 6);
+        let pixels_at = |data: &[u8], x: usize, y: usize| data[(y * 100 + x) * 4..][..4].to_vec();
+        for (alpha, color) in [(0.0, 0x00000000), (0.5, 0xff0000ff), (1.0, 0x0000ffff)] {
+            let args = [
+                Some(AnimationValue::Number(alpha)),
+                Some(AnimationValue::Color(color)),
+            ];
+            let whole = record(&gfx, &ops, 0, &args, &images, &mut text).unwrap();
+            let head = record(&gfx, &ops[..at], 0, &args, &images, &mut text).unwrap();
+            let tail = record(&gfx, &ops, at, &args, &images, &mut text).unwrap();
+            assert_eq!(
+                pixels(&gfx, &[&head, &tail]),
+                pixels(&gfx, &[&whole]),
+                "alpha {alpha}, color {color:#010x}"
+            );
+        }
+        // At zero the transparent stroke paints nothing; the later stroke
+        // paints once its color is visible.
+        let zero = [
+            Some(AnimationValue::Number(0.0)),
+            Some(AnimationValue::Color(0x00000000)),
+        ];
+        let whole = record(&gfx, &ops, 0, &zero, &images, &mut text).unwrap();
+        let data = pixels(&gfx, &[&whole]);
+        // The transparent stroke's right edge, outside the head's fill.
+        assert_eq!(pixels_at(&data, 40, 20), [0, 0, 0, 0]);
+        // The later stroke is invisible, so the head's blue fill stays.
+        assert_eq!(pixels_at(&data, 15, 20), [255, 0, 0, 255]);
+        let visible = [
+            Some(AnimationValue::Number(1.0)),
+            Some(AnimationValue::Color(0xff0000ff)),
+        ];
+        let whole = record(&gfx, &ops, 0, &visible, &images, &mut text).unwrap();
+        let data = pixels(&gfx, &[&whole]);
+        assert!(pixels_at(&data, 40, 20)[3] > 0);
+        // The red stroke now covers the blue fill's edge.
+        assert_ne!(pixels_at(&data, 15, 20), [255, 0, 0, 255]);
     }
 
     #[test]
