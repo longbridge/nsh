@@ -103,6 +103,12 @@
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
   flight) until the rows in the viewport are all measured, the user scrolls away or the items change. Platforms only
   apply what they get.
+- **Reading position** (`ListRef.measureScrollPosition()`, `ElementRef::measure_scroll_position`): answered by
+  the core at the commit, as `measure()` is, from the list's own row positions (`ListState::scroll_position`,
+  `Core::list_scroll_position`): the row the viewport starts in and how far into it, so an app keeps a reading
+  position without adding up row sizes of its own, which would miss the rows the list measured but whose cells it
+  recycled before placing them, and the estimates it uses for the rest. `scrollToIndex` with `viewOffset: -offset`
+  restores it. Platforms never see the command.
 - **Lists in their parent's viewport** (`viewport="parent"`, `ListLayout::viewport(ListViewport::Parent)`; `own`,
   the default, is a scroll view of its own): fixed when the list's native view is made (a change in the batch that
   makes it counts; later ones warn once). The list mounts as a plain view clipping its cells and lies in its parent's layout at its full length (padding,

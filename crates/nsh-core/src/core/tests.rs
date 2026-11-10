@@ -2470,6 +2470,18 @@ fn render_list_binds(
     row_height: f32,
     paced: usize,
 ) -> usize {
+    render_sized_binds(c, next_id, cells, &|_| row_height, paced)
+}
+
+/// [`render_list_binds`] with row `index` `row_height(index)` points
+/// tall.
+fn render_sized_binds(
+    c: &mut Core<FakeEngine>,
+    next_id: &mut u32,
+    cells: &mut Vec<u32>,
+    row_height: &dyn Fn(u32) -> f32,
+    paced: usize,
+) -> usize {
     let mut binds = Vec::new();
     c.take_list_binds(&mut binds);
     c.take_paced_list_binds(paced, &mut binds);
@@ -2502,7 +2514,7 @@ fn render_list_binds(
             let cell = cells[slot as usize];
             c.apply(style_op(
                 cell,
-                &[("height", StyleValue::Number(row_height))],
+                &[("height", StyleValue::Number(row_height(index)))],
             ))
             .unwrap();
             c.apply(Op::SetProp {
@@ -2631,6 +2643,169 @@ fn tracked_tree_order_puts_a_lists_cells_in_screen_order() {
     assert!(shown.windows(2).all(|w| y(&w[0]) <= y(&w[1])), "{shown:?}");
     // The cells were recycled out of the order they were made in.
     assert_ne!(shown, cells);
+}
+
+/// Plays a list's scroll view on the platform: applies the scrolls the
+/// core sends it, clamped to its content, counting them as a platform
+/// does.
+#[derive(Default)]
+struct ScrollingPlatform {
+    y: f32,
+    applied: u32,
+    content: f32,
+}
+
+impl ScrollingPlatform {
+    /// Applies what `batch` sends list `id` of `viewport` points;
+    /// whether it scrolled.
+    fn apply(&mut self, batch: &MountBatch, id: NodeId, viewport: f32) -> bool {
+        let mut scrolled = false;
+        for item in &batch.items {
+            match item {
+                MountItem::ScrollContent { id: i, size } if *i == id => {
+                    self.content = size.height.0;
+                }
+                MountItem::ScrollBy { id: i, dy, .. } if *i == id => {
+                    self.y += dy.0;
+                    self.applied += 1;
+                    scrolled = true;
+                }
+                MountItem::Command {
+                    id: i,
+                    command: Command::ScrollTo { y, .. },
+                } if *i == id => {
+                    self.y = y.0;
+                    self.applied += 1;
+                    scrolled = true;
+                }
+                _ => {}
+            }
+            self.y = self.y.clamp(0.0, (self.content - viewport).max(0.0));
+        }
+        scrolled
+    }
+
+    /// Commits and renders the rows list 2 binds, row `index`
+    /// `row_height(index)` tall, reporting the scrolls it applies, until
+    /// nothing changes.
+    fn settle(
+        &mut self,
+        c: &mut Core<FakeEngine>,
+        next_id: &mut u32,
+        cells: &mut Vec<u32>,
+        row_height: &dyn Fn(u32) -> f32,
+    ) {
+        for _ in 0..50 {
+            let batch = c.commit();
+            let scrolled = batch.as_ref().is_some_and(|b| self.apply(b, 2, 400.0));
+            if scrolled {
+                c.set_scroll_offset(2, point(px(0.0), px(self.y)), self.applied);
+            }
+            let bound = render_sized_binds(c, next_id, cells, row_height, usize::MAX);
+            if batch.is_none() && !scrolled && bound == 0 {
+                return;
+            }
+        }
+        panic!("the list never settled");
+    }
+}
+
+/// What `ref.measureScrollPosition()` of node `id` answers.
+fn scroll_position(c: &mut Core<FakeEngine>, id: NodeId) -> crate::JsonValue {
+    c.apply(Op::Command {
+        id,
+        command: Command::MeasureScrollPosition { call: 7 },
+    })
+    .unwrap();
+    c.commit();
+    js_events(c)
+        .into_iter()
+        .find_map(|(_, _, payload)| match payload {
+            EventPayload::Native { name, data } if &*name == "$return" && data["c"] == 7 => {
+                Some(data["v"].clone())
+            }
+            _ => None,
+        })
+        .expect("an answer")
+}
+
+/// The row list 2 lays out at content offset `y`, and how far into it
+/// `y` is, from the frames of its cells.
+fn row_laid_out_at(c: &Core<FakeEngine>, y: f32) -> (u32, f32) {
+    let list = c.nodes[c.key(2).unwrap() as usize].list.as_ref().unwrap();
+    list.slots
+        .iter()
+        .filter_map(|s| s.ready().map(|index| (index, s.cell)))
+        .find_map(|(index, cell)| {
+            let frame = c.nodes[cell as usize].frame;
+            let (top, height) = (frame.origin.y.0, frame.size.height.0);
+            (top <= y && y < top + height).then_some((index, y - top))
+        })
+        .expect("a row at the offset")
+}
+
+/// After a jump far into rows laid out by their estimate and corrected
+/// as they are measured, and a scroll, the list says which row the
+/// viewport starts in and how far into it, as its cells are laid out
+/// (rows above measured and estimated alike); scrolling a list made anew
+/// to that row, that far, puts the viewport's start back there.
+#[test]
+fn a_list_measures_where_its_viewport_starts_among_its_rows() {
+    let row_height = |index: u32| 30.0 + (index * 37 % 7) as f32 * 15.0;
+    let open = |c: &mut Core<FakeEngine>| {
+        thousand_rows(c);
+        let (mut next_id, mut cells) = (100, Vec::new());
+        let mut platform = ScrollingPlatform::default();
+        platform.settle(c, &mut next_id, &mut cells, &row_height);
+        (next_id, cells, platform)
+    };
+    let mut c = core();
+    let (mut next_id, mut cells, mut platform) = open(&mut c);
+    assert_eq!(
+        scroll_position(&mut c, 2),
+        serde_json::json!({ "index": 0, "offset": 0.0 })
+    );
+    assert_eq!(scroll_position(&mut c, ROOT_ID), crate::JsonValue::Null);
+
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToIndex {
+            index: 400,
+            animated: false,
+            view_position: crate::geometry::Percentage(0.0),
+            view_offset: px(0.0),
+        },
+    })
+    .unwrap();
+    platform.settle(&mut c, &mut next_id, &mut cells, &row_height);
+    assert_eq!(row_laid_out_at(&c, platform.y), (400, 0.0));
+    // Measured rows replaced their estimates on the way.
+    assert_ne!(platform.y, 400.0 * 50.0);
+    platform.y += 70.0;
+    c.set_scroll_offset(2, point(px(0.0), px(platform.y)), platform.applied);
+    platform.settle(&mut c, &mut next_id, &mut cells, &row_height);
+
+    let (index, offset) = row_laid_out_at(&c, platform.y);
+    assert!(offset > 0.0, "{index} {offset}");
+    let at = scroll_position(&mut c, 2);
+    assert_eq!(at, serde_json::json!({ "index": index, "offset": offset }));
+
+    // A list made anew restores it with `scrollToIndex`.
+    let mut c = core();
+    let (mut next_id, mut cells, mut platform) = open(&mut c);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToIndex {
+            index,
+            animated: false,
+            view_position: crate::geometry::Percentage(0.0),
+            view_offset: px(-offset),
+        },
+    })
+    .unwrap();
+    platform.settle(&mut c, &mut next_id, &mut cells, &row_height);
+    assert_eq!(row_laid_out_at(&c, platform.y), (index, offset));
+    assert_eq!(scroll_position(&mut c, 2), at);
 }
 
 #[test]

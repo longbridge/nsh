@@ -40,7 +40,7 @@ use std::{rc::Rc, sync::Arc};
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
 
-pub use self::measure::Measurement;
+pub use self::measure::{ListScrollPosition, Measurement};
 use self::{
     layout_tree::LayoutTree,
     list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget},
@@ -2566,6 +2566,13 @@ impl<M: TextEngine> Core<M> {
                 self.answer_measure(id, call);
                 Ok(())
             }
+            Op::Command {
+                id,
+                command: Command::MeasureScrollPosition { call },
+            } if self.key(id).is_err() => {
+                self.answer_scroll_position(id, call);
+                Ok(())
+            }
             // A window's attributes go into its record, sent once per
             // commit; opening one is checked and resolved here.
             Op::Command {
@@ -3032,6 +3039,9 @@ impl<M: TextEngine> Core<M> {
         for (id, answer) in std::mem::take(&mut self.components.measures) {
             answer.borrow_mut().deliver(self.measure(id));
         }
+        for (id, answer) in std::mem::take(&mut self.components.scroll_positions) {
+            answer.borrow_mut().deliver(self.list_scroll_position(id));
+        }
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
@@ -3076,6 +3086,10 @@ impl<M: TextEngine> Core<M> {
             // are gone or not shown).
             if let Command::Measure { call } = command {
                 self.answer_measure(id, call);
+                continue;
+            }
+            if let Command::MeasureScrollPosition { call } = command {
+                self.answer_scroll_position(id, call);
                 continue;
             }
             let Ok(key) = self.key(id) else { continue };
@@ -10096,6 +10110,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::ImageInfo { .. }
                 | C::AccessibilityFocus
                 | C::Measure { .. }
+                | C::MeasureScrollPosition { .. }
                 | C::SetClipboard { .. }
                 | C::ReadClipboard { .. }
                 | C::SetClipboardImage { .. }
