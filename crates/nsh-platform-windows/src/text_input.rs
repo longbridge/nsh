@@ -703,27 +703,30 @@ impl Hosted for InputState {
         let color = self.anim_color.get().unwrap_or(config.style.color);
         let empty = e.text_units().is_empty();
 
-        if empty {
-            if let Some(placeholder) = self.placeholder_layout() {
-                let tint = config
-                    .placeholder_color
-                    .unwrap_or_else(|| color.with_alpha(0.5));
-                let y = if multiline {
-                    0.0
-                } else {
-                    (h - metrics(&placeholder).height) / 2.0
-                };
-                // SAFETY: a COM call between BeginDraw and EndDraw.
-                unsafe {
-                    cx.dc.DrawTextLayout(
-                        Vector2 { X: 0.0, Y: y },
-                        &placeholder,
-                        cx.solid(tint),
-                        D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
-                    );
-                }
+        if empty && let Some(placeholder) = self.placeholder_layout() {
+            let tint = config
+                .placeholder_color
+                .unwrap_or_else(|| color.with_alpha(0.5));
+            let y = if multiline {
+                0.0
+            } else {
+                (h - metrics(&placeholder).height) / 2.0
+            };
+            // SAFETY: a COM call between BeginDraw and EndDraw.
+            unsafe {
+                cx.dc.DrawTextLayout(
+                    Vector2 { X: 0.0, Y: y },
+                    &placeholder,
+                    cx.solid(tint),
+                    D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                );
             }
-        } else {
+        }
+        // RichEdit lays the text out (and sizes its caret from the field's
+        // format) only when it draws: an empty field is drawn too (nothing
+        // shows, the background is transparent), or its first caret keeps
+        // the height of the default font.
+        {
             // RichEdit draws in the window's client pixels: the content
             // box's origin there is this item's origin.
             let (ox, oy) = self.origin.get();
