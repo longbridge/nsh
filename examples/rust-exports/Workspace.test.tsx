@@ -2,6 +2,8 @@ import { expect, open, test } from "nsh/test";
 
 test("the app plugin selects a palette through the official theme service", async () => {
   const app = await open("./Workspace.tsx");
+  await app.setColorScheme("light");
+  await app.waitFor("Accent: #2563ebff");
   await app.waitFor("Workspace: built");
   expect(app.spanStyle("Workspace preview").color).toBe("#2563ebff");
 
