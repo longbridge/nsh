@@ -381,6 +381,11 @@ impl Mounter {
                     old,
                     self.layout_animation.as_ref(),
                 );
+                // A scroll area's bar reads its position against the
+                // viewport.
+                if old.size != frame.size {
+                    crate::access::scroll_bar::moved(view);
+                }
                 match view.kind() {
                     ViewKind::Stack => crate::navigation::stack_resized(surface, view),
                     ViewKind::Canvas => view.changed(),
@@ -485,6 +490,8 @@ impl Mounter {
             MountItem::ScrollBehavior { id, behavior } => {
                 if let Some(view) = self.get(*id) {
                     crate::scroll::behavior(surface, view, behavior);
+                    // Its content insets are part of how far it scrolls.
+                    crate::access::scroll_bar::moved(view);
                 }
             }
             MountItem::Refreshing { id, refreshing } => {

@@ -26,11 +26,13 @@ mod macos {
     use nsh_core::{element::Root, prelude::*};
     use nsh_platform_macos::{
         AppOptions, AppView,
-        objc2::{MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::AnyObject},
+        objc2::{
+            MainThreadMarker, MainThreadOnly, Message, msg_send, rc::Retained, runtime::AnyObject,
+        },
         objc2_app_kit::{
             NSAccessibility, NSApplication, NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask,
         },
-        objc2_foundation::{NSDate, NSPoint, NSRect, NSRunLoop, NSSize, NSString},
+        objc2_foundation::{NSDate, NSNumber, NSPoint, NSRect, NSRunLoop, NSSize, NSString},
     };
 
     /// The test sets it to change the texts inside the elements.
@@ -38,6 +40,9 @@ mod macos {
 
     /// The scale requested by the frame checks, in percent.
     static ZOOM: AtomicU32 = AtomicU32::new(100);
+
+    /// The test sets it to scroll the scroll area to its end.
+    static SCROLLED: AtomicBool = AtomicBool::new(false);
 
     /// An option and a tree item holding only a text, an option with a
     /// label of its own, and a button holding only a text.
@@ -80,6 +85,7 @@ mod macos {
             )
             .child(geometry())
             .child(order())
+            .child(scroll_area())
     }
 
     /// A scroll view and a plain view, each holding two texts made bottom
@@ -109,6 +115,26 @@ mod macos {
                     .h(px(80.0))
                     .children(two("plain-second", "plain-first")),
             )
+    }
+
+    /// A scroll view whose content is three times its height.
+    #[component]
+    fn ScrollArea() -> impl IntoElement {
+        let area = element_ref();
+        set_interval(Duration::from_millis(20), move || {
+            if SCROLLED.swap(false, Ordering::SeqCst) {
+                area.scroll_to_end(false);
+            }
+        });
+        scroll()
+            .element_ref(&area)
+            .test_id("scroll-area")
+            .absolute()
+            .left(px(260.0))
+            .top(px(180.0))
+            .w(px(100.0))
+            .h(px(50.0))
+            .child(view().h(px(150.0)))
     }
 
     /// Fixed geometry makes the expected screen frames independent of
@@ -259,6 +285,20 @@ mod macos {
             .unwrap_or_default()
     }
 
+    /// The role and value of the accessibility element `object`.
+    fn role_and_value(object: &AnyObject) -> (Option<String>, Option<f64>) {
+        // SAFETY: NSAccessibility getters, sent to an element on the main
+        // thread.
+        let role: Option<Retained<NSString>> = unsafe { msg_send![object, accessibilityRole] };
+        let value: Option<Retained<AnyObject>> = unsafe { msg_send![object, accessibilityValue] };
+        (
+            role.map(|r| r.to_string()),
+            value
+                .and_then(|v| v.downcast::<NSNumber>().ok())
+                .map(|n| n.as_f64()),
+        )
+    }
+
     fn string(object: Option<Retained<AnyObject>>) -> Option<String> {
         object
             .and_then(|o| o.downcast::<NSString>().ok())
@@ -337,6 +377,34 @@ mod macos {
             ["scrolled-first", "scrolled-second"]
         );
         assert_eq!(children_of(&root, "plain"), ["plain-second", "plain-first"]);
+
+        // A scroll view is a scroll area, its scroll bar on its axis telling
+        // where it is scrolled to, from 0 at the start to 1 at the end.
+        until("the scroll area", || find(&root, "scroll-area").is_some());
+        let area = find(&root, "scroll-area").expect("the scroll area");
+        assert_eq!(
+            area.accessibilityRole().map(|r| r.to_string()).as_deref(),
+            Some("AXScrollArea")
+        );
+        assert!(area.accessibilityHorizontalScrollBar().is_none());
+        let bar = area
+            .accessibilityVerticalScrollBar()
+            .expect("a vertical bar");
+        assert_eq!(
+            role_and_value(&bar),
+            (Some("AXScrollBar".into()), Some(0.0))
+        );
+        let children = area.accessibilityChildren().expect("children");
+        assert!(
+            children
+                .iter()
+                .any(|c| std::ptr::eq(&*c as *const AnyObject, &*bar as *const AnyObject)),
+            "the bar is among the children"
+        );
+        SCROLLED.store(true, Ordering::SeqCst);
+        until("the bar's value at the end", || {
+            role_and_value(&bar).1 == Some(1.0)
+        });
 
         until("the geometry mount", || find(&root, "nested-row").is_some());
         println!("window backing scale: {}", window.backingScaleFactor());
