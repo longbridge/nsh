@@ -33776,6 +33776,8 @@ mod audio {
     /// Plays in place of the platform: records what it is asked.
     struct FakeAudio {
         log: Mutex<Vec<String>>,
+        /// The names the loads went by.
+        hints: Mutex<Vec<String>>,
         decodes: Mutex<Decodes>,
     }
 
@@ -33783,6 +33785,7 @@ mod audio {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 log: Mutex::default(),
+                hints: Mutex::default(),
                 decodes: Mutex::new(Decodes {
                     duration: Duration::from_millis(400),
                     bytes: 70_000,
@@ -33799,8 +33802,11 @@ mod audio {
     impl AudioBackend for FakeAudio {
         fn command(&self, command: AudioCommand, events: &AudioSink) {
             let line = match &command {
-                AudioCommand::Load { max_duration, .. } => {
+                AudioCommand::Load {
+                    max_duration, hint, ..
+                } => {
                     assert_eq!(*max_duration, crate::audio::MAX_SOUND_DURATION);
+                    self.hints.lock().unwrap().push(hint.clone());
                     let d = self.decodes.lock().unwrap();
                     events.send(AudioEvent::Loaded {
                         duration: d.duration,
@@ -33878,6 +33884,24 @@ mod audio {
         let shown = signal(String::new());
         spawn(async move {
             shown.set(failed(load_sound(&click_uri()).await));
+        });
+        text(move || shown.get())
+    }
+
+    /// Loads a sound from bytes the app holds: the same bytes twice (one
+    /// static, one a copy) and other bytes once, and plays each.
+    #[component]
+    fn ByteSounds() -> impl IntoElement {
+        const TICK: &[u8; 16] = b"RIFF\0\0\0\0WAVEtick";
+        let shown = signal(String::new());
+        spawn(async move {
+            let a = load_sound(TICK).await.unwrap();
+            let b = load_sound(TICK.to_vec()).await.unwrap();
+            let c = load_sound(b"ID3 another".as_slice()).await.unwrap();
+            a.play(0.5, 1.0);
+            b.play(0.5, 1.0);
+            c.play(1.0, 1.0);
+            shown.set("done".into());
         });
         text(move || shown.get())
     }
@@ -33961,6 +33985,34 @@ mod audio {
                 "stop",
                 "unload"
             ]
+        );
+    }
+
+    #[test]
+    fn bytes_load_once_named_by_their_format() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        assert_eq!(shown_after::<ByteSounds>(&mut c), "done");
+        settle(&mut c);
+        assert_eq!(
+            audio.log(),
+            [
+                "load",
+                "load",
+                "play 0.5 1",
+                "play 0.5 1",
+                "play 1 1",
+                "unload",
+                "unload"
+            ]
+        );
+        let hints = audio.hints.lock().unwrap().clone();
+        assert_eq!(hints.len(), 2);
+        assert!(hints[0].starts_with("data:audio/wav;nsh-key="), "{hints:?}");
+        assert!(
+            hints[1].starts_with("data:audio/mpeg;nsh-key="),
+            "{hints:?}"
         );
     }
 

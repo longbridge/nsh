@@ -2224,7 +2224,7 @@ import { AudioPlayer, Sound } from "nsh";
 ```ts
 declare class Sound {
   static available(): Promise<boolean>;
-  static load(src: string): Promise<Sound>;
+  static load(src: string | Uint8Array): Promise<Sound>;
   play(options?: { volume?: number; rate?: number }): void;
   stop(): void;
   readonly duration: number;
@@ -2268,7 +2268,7 @@ type AudioErrorCode =
 
 ### Sound.load
 
-从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，也可以直接给音频文件的字节（应用生成或下载的 `Uint8Array`；Rust 里还可以是嵌进程序的字节，`load_sound(include_bytes!("tick.wav"))`），并解码进内存。字节的格式（WAV、AAC、MP3 等）从字节本身读出。引擎已加载过的源会共享，相同的字节也一样：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
 
 ### Sound.play
 

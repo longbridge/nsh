@@ -112,7 +112,8 @@ pub use self::{
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     audio::{
-        AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+        AudioFailure, AudioPlayer, PlayerState, Sound, SoundSource, audio_available, audio_player,
+        load_sound,
     },
     builder::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
