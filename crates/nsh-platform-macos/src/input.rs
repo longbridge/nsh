@@ -43,7 +43,9 @@
 //! take it over, and its view reaching an edge does not hand the rest to
 //! an outer one. Trackpad pinches (`magnifyWithEvent:`) and rotations
 //! (`rotateWithEvent:`) drive the native pinch / rotation values; mice
-//! pinch with Control + wheel.
+//! pinch with Control + wheel. Over a zoomable scroll view nearer than a
+//! view that pinches, both zoom it around the pointer
+//! ([`crate::scroll::pinch`]).
 //!
 //! The decisions over plain data (what a pointer going down may start, a
 //! press's events, hover changes, hit areas, pinches, wheel latching) are
@@ -100,8 +102,13 @@ struct Transform {
     view: NshView,
     pinch: bool,
     rotation: bool,
+    /// It zooms `view`, a zoomable scroll view, rather than driving its
+    /// pinch values.
+    zoom: bool,
     scale: f32,
     degrees: f32,
+    /// Where the pointer is (root coordinates).
+    at: (f32, f32),
 }
 
 /// Pointer state of one surface.
@@ -1266,8 +1273,7 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
 /// The innermost view at `p` (`view`'s coordinates) among the children
 /// in `view`'s container.
 fn pick_children(view: &NshView, p: (f32, f32)) -> Option<Hit> {
-    let offset = container_offset(view);
-    let p = (p.0 + offset.0, p.1 + offset.1);
+    let p = into_container(view, p);
     view.child_views()
         .iter()
         .rev()
@@ -1289,14 +1295,24 @@ fn on_native(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> bool
     })
 }
 
-/// The origin of `view`'s container's bounds (its scroll offset): the
-/// scroll state, not the bounds — while scrolling the offset shows as a
-/// layer transform and the bounds catch up when it settles.
-fn container_offset(view: &NshView) -> (f32, f32) {
+/// The origin of `view`'s container's bounds (its scroll offset) and its
+/// zoom: the scroll state, not the bounds — while scrolling the offset
+/// shows as a layer transform and the bounds catch up when it settles.
+fn container_offset(view: &NshView) -> ((f32, f32), f32) {
     if view.container_view().is_none() {
-        return (0.0, 0.0);
+        return ((0.0, 0.0), 1.0);
     }
-    crate::scroll::bounds_origin(view)
+    (
+        crate::scroll::bounds_origin(view),
+        crate::scroll::zoom(view),
+    )
+}
+
+/// A point in `view`'s coordinates in its container's (its children's
+/// parent space).
+fn into_container(view: &NshView, p: (f32, f32)) -> (f32, f32) {
+    let (o, z) = container_offset(view);
+    (p.0 / z + o.0, p.1 / z + o.1)
 }
 
 /// A point in the coordinates of `child`'s parent's container in
@@ -1373,8 +1389,7 @@ pub(crate) fn local(_surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32,
     // From the outermost (the root) inwards.
     for pair in views.windows(2).rev() {
         let (child, parent) = (&pair[0], &pair[1]);
-        let o = container_offset(parent);
-        match into_child(child, (p.0 + o.0, p.1 + o.1)) {
+        match into_child(child, into_container(parent, p)) {
             Some(cp) => p = cp,
             None => return (x, y),
         }
@@ -1396,8 +1411,11 @@ pub(crate) fn to_top(view: &NshView, p: (f32, f32), transforms: bool) -> Option<
             p = project(&m, p)?;
         }
         let origin = child.ns().frame().origin;
-        let o = container_offset(parent);
-        p = (p.0 + origin.x as f32 - o.0, p.1 + origin.y as f32 - o.1);
+        let (o, z) = container_offset(parent);
+        p = (
+            (p.0 + origin.x as f32 - o.0) * z,
+            (p.1 + origin.y as f32 - o.1) * z,
+        );
     }
     Some(p)
 }
@@ -2191,27 +2209,34 @@ fn transform_payload(key: &'static str, amount: f32) -> EventPayload {
 }
 
 /// The innermost view at `(x, y)` that pinches (`rotation` false) or
-/// rotates, as a transform of that one kind.
+/// rotates, as a transform of that one kind; a pinch also zooms the
+/// innermost zoomable scroll view.
 fn transform_at(surface: &Surface, x: f32, y: f32, rotation: bool) -> Option<Transform> {
     let hit = pick(&event_root(surface), x, y)?;
     chain(&hit.view).into_iter().find_map(|v| {
+        let zoom = !rotation && crate::scroll::pinches(&v);
         let (id, events) = {
             let s = v.state();
             (s.id, s.events)
         };
         let (pinch, rotates) = transforms(&gesture_values(surface, &v, id), events);
-        let takes = if rotation { rotates } else { pinch };
+        let takes = zoom || if rotation { rotates } else { pinch };
         takes.then(|| Transform {
             view: v,
             pinch: !rotation,
             rotation,
+            zoom,
             scale: 1.0,
             degrees: 0.0,
+            at: (x, y),
         })
     })
 }
 
-fn transform_begin(surface: &Surface, t: &Transform) {
+fn transform_begin(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        return crate::scroll::pinch_begin(surface, &t.view);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2234,7 +2259,12 @@ fn transform_begin(surface: &Surface, t: &Transform) {
     }
 }
 
-fn transform_move(surface: &Rc<Surface>, t: &Transform) {
+/// `t` moved; a zoom past the limits rubber-bands when `rubber` (fingers).
+fn transform_move(surface: &Rc<Surface>, t: &Transform, rubber: bool) {
+    if t.zoom {
+        let at = local(surface, &t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch(surface, &t.view, t.scale, at, rubber);
+    }
     let id = t.view.state().id;
     {
         let mut anim = surface.anim.borrow_mut();
@@ -2249,7 +2279,11 @@ fn transform_move(surface: &Rc<Surface>, t: &Transform) {
     surface.ensure_ticking();
 }
 
-fn transform_end(surface: &Surface, t: &Transform) {
+fn transform_end(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let at = local(surface, &t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch_end(surface, &t.view, at);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2294,9 +2328,10 @@ fn trackpad_transform(
             let mut slot = slot.borrow_mut();
             let Some(t) = slot.as_mut() else { return };
             change(t);
+            t.at = (x, y);
             t.clone()
         };
-        transform_move(surface, &t);
+        transform_move(surface, &t, true);
     }
     if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled)
         && let Some(t) = slot.borrow_mut().take()
@@ -2339,7 +2374,8 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
         }
     };
     t.scale *= input::zoom_factor(dy);
-    transform_move(surface, &t);
+    t.at = (x, y);
+    transform_move(surface, &t, false);
     *input.zoom.borrow_mut() = Some((t, generation));
     let key = surface.key();
     later(ZOOM_IDLE, move || {
@@ -2570,11 +2606,12 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
     let hit = pick(&event_root(surface), x, y)?;
     let views = chain(&hit.view);
     let horizontal = dx.abs() > dy.abs();
+    // Zoomable views scroll along both axes.
     let along = |v: &NshView| {
         v.state()
             .scroll
             .as_ref()
-            .is_some_and(|s| s.horizontal == horizontal)
+            .is_some_and(|s| s.horizontal == horizontal || s.behavior.zooms())
     };
     let any_along = views.iter().any(along);
     views.into_iter().find(|v| {

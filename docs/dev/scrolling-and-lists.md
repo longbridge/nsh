@@ -45,7 +45,12 @@
   resolution when a zoom ends. Android has no zooming scroll view: `ScrollBox` switches to its `ZScroll`, which scales the
   content around its top left and scrolls both ways itself (ScaleGestureDetector around the focal point, panning with any
   number of fingers, OverScroller flings, rubber bands past the edges and the zoom limits). Pinches start only after
-  Android's minimum span (about 27 mm between the fingers). Zoom reports go to the core (`EngineControl::zoom`).
+  Android's minimum span (about 27 mm between the fingers). macOS: the scroll view's container's bounds are its frame
+  over the zoom scale (AppKit shows it as the container layer's scale, and hit tests and converts the zoomed children),
+  committed on every move; the offset is UIKit's zoomed `contentOffset`, along both axes; trackpad pinches and Control +
+  wheel zoom the innermost zoomable view around the pointer (`scroll.rs`'s `pinch`), wheels and trackpads scroll it both
+  ways, and texts and canvases are drawn again at the zoomed resolution when a zoom ends. Zoom reports go to the core
+  (`EngineControl::zoom`).
 - **List** props: `each`, `estimatedItemSize`, `numColumns` (both may change while the list shows: the first visible item keeps its place, `ListState::visible_anchor`; a change of columns remembers it in `columns_anchor`, so resizing back and forth does not drift), `inverted` (chat: item 0 at the bottom, starts at the end and keeps its
   distance from the end as content changes; with `onLoadMoreAtStart`, only while at it, the visible rows when scrolled away), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth

@@ -22,6 +22,8 @@ mod title_bar;
 mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_press;
+#[cfg(target_os = "macos")]
+mod zoom;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
         println!("Native AppKit checks skipped; run with --ignored in a desktop session.");
@@ -34,11 +36,14 @@ fn main() {
                 mount::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some() {
+                zoom::run();
             } else {
                 window_press::run();
                 window_hover::run();
                 title_bar::run();
                 input_hidden::run();
+                zoom::run();
                 mount::run();
             }
         }

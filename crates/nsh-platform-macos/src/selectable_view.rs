@@ -48,8 +48,9 @@ const SLOP_PRESS: f32 = 10.0;
 struct Texts {
     views: Vec<NshView>,
     contents: Vec<Arc<AttributedText>>,
-    /// Each view's origin in the area's coordinates.
-    origins: Vec<(f32, f32)>,
+    /// Each view's origin in the area's coordinates, and the zoom it shows
+    /// at there (zoomable scroll views between them).
+    origins: Vec<((f32, f32), f32)>,
     /// Each text's content box in the area's coordinates.
     frames: Vec<Bounds<Points>>,
 }
@@ -72,8 +73,8 @@ impl SelectionTexts for Texts {
     }
 
     fn offset_at(&self, i: usize, p: Point<Points>) -> u32 {
-        let (x, y) = self.origins[i];
-        crate::text::caret_at(&self.views[i].state(), p.x.0 - x, p.y.0 - y)
+        let ((x, y), z) = self.origins[i];
+        crate::text::caret_at(&self.views[i].state(), (p.x.0 - x) / z, (p.y.0 - y) / z)
     }
 
     fn key(&self, i: usize) -> u64 {
@@ -88,11 +89,13 @@ impl SelectionTexts for Texts {
 /// Lists the texts of `area`'s subtree.
 fn collect(area: &NshView) -> Texts {
     let mut texts = Texts::default();
-    walk(area, (0.0, 0.0), &mut texts);
+    walk(area, (0.0, 0.0), 1.0, &mut texts);
     texts
 }
 
-fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
+/// Lists the texts of `view`'s subtree, `view` at `origin` of the area,
+/// shown at `zoom`.
+fn walk(view: &NshView, origin: (f32, f32), zoom: f32, out: &mut Texts) {
     if view.ns().isHidden() {
         return;
     }
@@ -104,20 +107,21 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
             let content = drawn.content;
             out.views.push(view.clone());
             out.contents.push(drawn.text.clone());
-            out.origins.push(origin);
+            out.origins.push((origin, zoom));
             out.frames.push(bounds(
                 point(
-                    Points(origin.0 + content.origin.x.0),
-                    Points(origin.1 + content.origin.y.0),
+                    Points(origin.0 + content.origin.x.0 * zoom),
+                    Points(origin.1 + content.origin.y.0 * zoom),
                 ),
-                content.size,
+                content.size * zoom,
             ));
         }
     }
     // Children sit in the container's bounds, which scroll views move: by
     // their offset, which shows as a layer transform before the bounds
-    // have it.
+    // have it, and zoom.
     let offset = crate::scroll::bounds_origin(view);
+    let inner = zoom * crate::scroll::zoom(view);
     // In reading order: a virtual list's recycled cells are mounted in no
     // particular order.
     let start = out.len();
@@ -125,11 +129,11 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
     for child in view.child_views() {
         let frame = child.ns().frame();
         let at = (
-            origin.0 + frame.origin.x as f32 - offset.0,
-            origin.1 + frame.origin.y as f32 - offset.1,
+            origin.0 + (frame.origin.x as f32 - offset.0) * inner,
+            origin.1 + (frame.origin.y as f32 - offset.1) * inner,
         );
         let from = out.len();
-        walk(&child, at, out);
+        walk(&child, at, inner, out);
         runs.push((
             bounds(
                 point(Points(frame.origin.x as f32), Points(frame.origin.y as f32)),
