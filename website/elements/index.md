@@ -419,6 +419,10 @@ presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style
 presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
 only.
 
+The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
+the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the
+list after its last row.
+
 Focus and presses are separate. A view that takes keys while it has the focus (a chart, a slider, a list that moves
 its selection with the arrow keys) sets `focusable` and binds its keys while focused (`onFocus` / `onBlur` with
 [`keymap`](../modules/nsh.md#keymap)); a press on it still reaches a pressable around it, such as a card that

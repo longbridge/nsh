@@ -87,6 +87,10 @@
 - **Kept rows**: a row holding the keyboard focus, an open overlay (a row's menu or popover; not a hint) or an end of
   a text selection stays bound wherever the list scrolls, so the field keeps the focus and the menu stays open
   (`Core::sync_kept`, each commit before the lists update). Once none is left in it, the row is recycled as any other.
+  The rows on either side of the focused row are kept with it: the platforms' Tab and Shift+Tab reach only views that
+  exist, so the next row is always there for them, however far the render window lags behind (keys repeating faster
+  than the reveal scrolls, a runtime list binding its overscan paced, the list scrolled away from the focus); the row
+  the focus reaches scrolls into view, which renders the rows around it.
 - **Revealing a view** (`reveal`, `ElementRef::reveal`): a command on the view that the
   core turns into `ScrollTo` commands of the `Scroll`s around it at the commit, in place among the commands
   (`Core::reveal_scrolls`, `core/measure.rs`), innermost first, each from where the ones inside it end up and the

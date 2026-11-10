@@ -2343,6 +2343,22 @@ impl Screen {
         self.nodes.get_mut(&id)?.scroll.as_mut()
     }
 
+    /// The scroll views around `id`, innermost first.
+    pub(crate) fn scrolls_around(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut at = self.nodes.get(&id).and_then(|v| v.parent);
+        while let Some(parent) = at {
+            let Some(view) = self.nodes.get(&parent) else {
+                break;
+            };
+            if view.scroll.is_some() {
+                out.push(parent);
+            }
+            at = view.parent;
+        }
+        out
+    }
+
     /// How far scroll view `id` goes along its axis: its content past its
     /// frame (unbounded while the content's size is not known).
     pub(crate) fn scroll_end(&self, id: NodeId) -> Points {
