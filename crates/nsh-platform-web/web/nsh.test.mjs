@@ -453,6 +453,35 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   delete globalThis.document;
 });
 
+test("a touch whose press focused a field leaves the focus there", () => {
+  const { player } = fakePlayer();
+  player.editable = (target) => target.field === true;
+  const field = { focus() {} };
+  const pressable = {};
+  player.view = () => ({ _field: field });
+  globalThis.window = { focus() {} };
+  // Whether the mouse events of a press of `pointer` leave the focus alone.
+  const kept = (pointer, target, focused, focuses) => {
+    globalThis.document = { activeElement: focused, hasFocus: () => true };
+    player.lastPointer = pointer;
+    player.pressFocus = null;
+    if (focuses) player.op_cmd([0, 1, "focus"]);
+    let prevented = false;
+    player.mouseDown({ target, preventDefault: () => (prevented = true) });
+    return prevented;
+  };
+  assert.equal(kept("mouse", pressable, field, false), true, "a click moves no focus");
+  assert.equal(kept("mouse", { field: true }, null, false), false, "a click in a field is the field's");
+  // A tap outside a field leaves it, and the keyboard closes.
+  assert.equal(kept("touch", pressable, field, false), false, "a tap elsewhere");
+  // The app focused the field for this press (an editor's text): it stays.
+  assert.equal(kept("touch", pressable, field, true), true, "a tap that focused the field");
+  // The focus moved on since (the app focused something else).
+  assert.equal(kept("touch", pressable, {}, true), false, "the field no longer has the focus");
+  delete globalThis.document;
+  delete globalThis.window;
+});
+
 test("Return presses a focused pressable, not a focused stop that takes no presses", () => {
   const { player } = fakePlayer();
   player.wasm.nsh_key = () => -1;
