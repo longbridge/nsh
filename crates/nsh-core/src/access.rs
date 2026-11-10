@@ -464,7 +464,7 @@ impl MediaFiles {
     /// cannot lead out of it. `None` with no roots (an app reading what the
     /// platform allows): the caller opens the path itself.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn open(&self, path: &Path) -> Option<std::io::Result<std::fs::File>> {
+    pub(crate) fn open(&self, path: &Path) -> Option<std::io::Result<std::fs::File>> {
         if self.declared.is_empty() {
             return None;
         }
