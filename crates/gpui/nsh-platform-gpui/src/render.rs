@@ -9,10 +9,11 @@
 //! 1. shadows and background ([`crate::decor::draw_background`]),
 //! 2. the content, clipped to the bounds: a shader's frame (to the rounded
 //!    bounds), text, image, canvas,
-//! 3. the border ([`crate::decor::draw_border`]),
+//! 3. the border ([`crate::decor::draw_border`]) when the view does not
+//!    clip,
 //! 4. the children (clipped to the bounds when the view clips),
 //! 5. the hosted items ([`crate::view::Native`]) and the scroll indicator,
-//! 6. the outline.
+//! 6. the border when the view clips, then the outline.
 //!
 //! GPUI paints primitives (quads, paths, glyphs, images) in window
 //! coordinates (logical pixels, which are nsh's points), with no world
@@ -679,13 +680,13 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
         }
         None => crate::canvas::draw(cx, &state),
     }
-    // The border over the view's own content and under its children, as
-    // on iOS and macOS: a child drawn over it (a label on an outlined
-    // field) covers it.
-    cx.pop();
-    crate::decor::draw_border(cx, &state);
-    if clip {
-        cx.push_clip_rounded(crate::geom::rect(0.0, 0.0, w, h), state.radii());
+    // As on iOS and macOS: a view that does not clip has its border over
+    // its own content and under its children (a label on an outlined field
+    // covers it); a clipping one has it over its children (a rounded card
+    // with a full-bleed image), as a layer border.
+    if !clip {
+        cx.pop();
+        crate::decor::draw_border(cx, &state);
     }
     let natives = state.natives.clone();
     let culled = clip && cx.culled();
@@ -717,6 +718,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     crate::scroll::draw_indicator(cx, view, &state);
     if clip {
         cx.pop();
+        crate::decor::draw_border(cx, &state);
     }
     crate::decor::draw_outline_of(cx, &state);
 }

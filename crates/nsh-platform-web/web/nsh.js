@@ -2169,7 +2169,9 @@ class Player {
     child._removing = false;
     child._leftWith = null;
     const host = parent._layer ?? parent;
-    host.insertBefore(child, before && before.parentNode === host ? before : null);
+    // Appended children stay under a border drawn over them.
+    const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
+    host.insertBefore(child, before && before.parentNode === host ? before : last);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
@@ -2317,11 +2319,17 @@ class Player {
       el._border.className = `nsh-border ${this.styleClass(border)}`;
       el._border._cornerClass = null;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
-      // Under the child views, as on iOS and macOS: a child drawn over the
-      // border (a label on an outlined field) covers it. It stays over the
-      // view's own fills (a shader, text runs).
-      let next = el.firstChild;
-      while (next && (next === el._border || next._kind === undefined)) next = next.nextSibling;
+      // As on iOS and macOS: a view that does not clip has its border under
+      // its child views (a label on an outlined field covers it), over its
+      // own fills (a shader, text runs); a clipping one (a rounded card with
+      // a full-bleed image) has it over its children, as a layer border.
+      const overflow = CLASSES.rules.get(el._class)?.style.overflow;
+      el._borderOver = !!(overflow && overflow !== "visible") || el.classList.contains("nsh-scroll") || el.classList.contains("nsh-clip");
+      let next = null;
+      if (!el._borderOver) {
+        next = el.firstChild;
+        while (next && (next === el._border || next._kind === undefined)) next = next.nextSibling;
+      }
       if (el._border.nextSibling !== next || el._border.parentNode !== el) el.insertBefore(el._border, next);
     } else if (el._border) {
       el._border.remove();
