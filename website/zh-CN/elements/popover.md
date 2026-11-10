@@ -82,7 +82,7 @@ const open = signal(false);
 
 ## 键盘焦点
 
-弹出框打开时不移动键盘焦点。要让弹出框像一个小的非模态对话框那样接住焦点，就在 `onOpen` 中聚焦它的内容：`onOpen` 在内容渲染之后才触发，此时内容里的 ref 已经指向各自的视图。给这个视图加上 `focusable`（或一个按压处理函数），它才能持有焦点。焦点在弹出框内时，弹出框因 Escape 或被应用关闭，焦点会在桌面平台上回到触发元素；外部按压则让焦点留在按压所在的位置。
+弹出框打开时不移动键盘焦点。要让弹出框像一个小的非模态对话框那样接住焦点，就在 `onOpen` 中聚焦它的内容：`onOpen` 在内容渲染之后才触发，此时内容里的 ref 已经指向各自的视图。给这个视图加上 `focusable`（或一个按压处理函数），它才能持有焦点。焦点在弹出框内时，弹出框因 Escape 或被应用关闭，焦点会在桌面平台上于它开始离开时回到触发元素，离开途中按下的键归触发元素；外部按压则让焦点留在按压所在的位置。
 
 ```rust tabs
 let panel = element_ref();
@@ -117,7 +117,7 @@ let panel!: ViewRef;
 
 ## 出现与离开
 
-弹出框随你的过渡出现和离开。`popupStartingClass` 是弹出层第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观：这就是它的出现。`popupEndingClass` 是关闭后的外观：弹出框会保留下来、不再接受按压，直到这些过渡播放完毕才离开，随后触发 `onClose`。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开。
+弹出框随你的过渡出现和离开。`popupStartingClass` 是弹出层第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观：这就是它的出现。`popupEndingClass` 是关闭后的外观：弹出框会保留下来、不再接受按压和按键，直到这些过渡播放完毕才离开，随后触发 `onClose`。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开。
 
 ```tsx
 <Popover

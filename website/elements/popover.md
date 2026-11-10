@@ -88,8 +88,8 @@ const open = signal(false);
 A popover leaves the keyboard focus where it is when it opens. For a popover that works like a small non-modal dialog,
 focus its content in `onOpen`: it comes once the content is rendered, so refs inside it reach their views. Make the
 view `focusable` (or give it a press handler) so it can hold the focus. When the popover closes with the focus inside
-it, by Escape or by the app, the focus goes back to the trigger on the desktops; a press outside leaves it where the
-press put it.
+it, by Escape or by the app, the focus goes back to the trigger on the desktops as it starts to go, so a key pressed
+during its exit is the trigger's; a press outside leaves it where the press put it.
 
 ```rust tabs
 let panel = element_ref();
@@ -124,7 +124,7 @@ For a list of actions use a [Menu](./menu.md), which becomes a sheet on phones; 
 
 A popover comes and goes with your transitions. `popupStartingClass` is the popup's look in its first frame, and the
 `transition-*` classes of `popupClass` carry it to its own look: its entrance. `popupEndingClass` is its look once
-closed: the popover stays, taking no presses, while those transitions run, then goes, and `onClose` follows. Opened
+closed: the popover stays, taking no presses or keys, while those transitions run, then goes, and `onClose` follows. Opened
 again on its way out, it returns to its look from where it is. `popupStartingStyle` and `popupEndingStyle` do the same
 with inline styles. When the user asks for less motion, it appears and goes at once.
 

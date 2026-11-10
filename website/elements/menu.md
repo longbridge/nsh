@@ -238,8 +238,9 @@ item.
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
 `popupStartingClass` is its look in its first frame, `popupEndingClass` its look once closed, which it keeps while the
-`transition-*` classes of `popupClass` run, and `onClose` follows. Submenus take the same looks and close with their
-menu. The sheet of phones slides in and out on its own.
+`transition-*` classes of `popupClass` run, and `onClose` follows. On its way out it takes no presses or keys: the
+keyboard focus is back on the trigger as it closes, so Return during the exit chooses no item and opens the menu
+again. Submenus take the same looks and close with their menu. The sheet of phones slides in and out on its own.
 
 ```tsx
 <Menu
