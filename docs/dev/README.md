@@ -5,6 +5,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | Page | What |
 |---|---|
 | [architecture.md](architecture.md) | Threads, the data flow from JS to native views, crates |
+| [runtime-plugins.md](runtime-plugins.md) | Proposal: official and user runtime capability plugins, composition and lifecycle |
 | [native-pipeline.md](native-pipeline.md) | How apps are compiled and run: the JSX compiler, the native modules, the renderer, types, hot reload |
 | [js-modules.md](js-modules.md) | The modules (`nsh`, `nsh/*`, apps' UI sets), where each module is implemented and declared, platform props, where new things go |
 | [api-naming.md](api-naming.md) | API names: how TSX names follow `gpui-base`'s, the conventions, the renames |
