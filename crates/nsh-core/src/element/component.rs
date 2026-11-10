@@ -542,6 +542,7 @@ pub struct Root {
     status_bar: Option<crate::StatusBarSetting>,
     main_window: Option<crate::desktop::MainWindowOptions>,
     translations: Option<crate::i18n::Translations>,
+    components: Option<Arc<str>>,
 }
 
 impl Root {
@@ -557,6 +558,7 @@ impl Root {
             status_bar: None,
             main_window: None,
             translations: None,
+            components: None,
         }
     }
 
@@ -665,6 +667,23 @@ impl Root {
                 self
             }
         }
+    }
+
+    /// The looks `nsh.json` `"components"` declares for `nsh-base`'s
+    /// components, as its JSON text, which nsh's generated code compiles
+    /// in (its classes checked when it was generated). The engine stores
+    /// them before the first render, beside what the app's code declares
+    /// with [`set_component_style`](super::set_component_style); what the
+    /// core cannot read is logged and left out.
+    #[doc(hidden)]
+    pub fn components_json(mut self, json: &str) -> Self {
+        self.components = Some(json.into());
+        self
+    }
+
+    /// The looks of [`Root::components_json`], as JSON text.
+    pub fn components_json_ref(&self) -> Option<&str> {
+        self.components.as_deref()
     }
 
     /// The main window's launch options ([`Root::main_window`]).

@@ -346,6 +346,10 @@ pub(crate) struct RootConfig {
     /// The app's translations (`locales/`) as JSON, written to the
     /// workspace and compiled into the runners.
     translations: Option<PathBuf>,
+    /// `"components"` (its classes checked) as JSON, written to the
+    /// workspace and compiled into the runners: the looks of `nsh-base`'s
+    /// components the app declares as data.
+    components: Option<PathBuf>,
 }
 
 /// Whether `entry` is a Rust app's (`entry::resolve` gives its `nsh.json`
@@ -546,7 +550,7 @@ fn toml_string(line: &str, key: &str) -> Option<String> {
 }
 
 /// The `"root"` of the app's `config` (its `nsh.json`, in `dir`) with its
-/// `"theme"`, `"appearance"` and `"statusBar"`.
+/// `"theme"`, `"appearance"`, `"statusBar"` and `"components"`.
 fn root_config(
     dir: &Path,
     config: &serde_json::Value,
@@ -579,16 +583,39 @@ fn root_config(
             Some(path)
         }
     };
+    // The theme's tokens are classes (`bg-primary`) of `"components"`: the
+    // default's unless the app sets its own.
+    let mut tokens = None;
     if let Some(theme) = &theme {
         let json = fs::read_to_string(theme)?;
-        let (_, ignored) = nsh_base::Theme::from_json_lenient(&json)
+        let (theme, ignored) = nsh_base::Theme::from_json_lenient(&json)
             .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
         for what in ignored {
             crate::ui::warn(format_args!(
                 "nsh.json: theme: {what}, ignored (one of a newer NSH, or a typo)"
             ));
         }
+        tokens = Some(theme.into_tokens());
     }
+    let components = match config.get("components") {
+        None => None,
+        Some(v) => {
+            let mut classes = nsh_core::tailwind::Theme::default();
+            classes.set_tokens(&tokens.unwrap_or_else(|| nsh_base::Theme::default().into_tokens()));
+            let (checked, unknown) = nsh_bundler::checked_components(&classes, v);
+            for what in unknown {
+                crate::ui::warn(format_args!("nsh.json: components: {what}, ignored"));
+            }
+            match checked {
+                Some(json) => {
+                    let path = workspace.join("components.json");
+                    write(&path, &json)?;
+                    Some(path)
+                }
+                None => None,
+            }
+        }
+    };
     let appearance = match config.get("appearance").and_then(|a| a.as_str()) {
         None | Some("system") => None,
         Some(a @ ("light" | "dark")) => Some(a.to_owned()),
@@ -648,6 +675,7 @@ fn root_config(
         url_schemes,
         window,
         translations,
+        components,
     })
 }
 
@@ -2538,7 +2566,8 @@ fn set_fn(krate: &AppCrate) -> String {
 }
 
 /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-/// `"appearance"`, `"statusBar"`, `"id"`, `"schemes"`, `"window"`) in the crate the generated code links as `krate`, under
+/// `"appearance"`, `"statusBar"`, `"id"`, `"schemes"`, `"window"`,
+/// `"components"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!(
@@ -2596,6 +2625,12 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     }
     if let Some(window) = &root.window {
         make.push_str(&format!("\n        .main_window_json({window:?})"));
+    }
+    if let Some(components) = &root.components {
+        make.push_str(&format!(
+            "\n        .components_json(include_str!({:?}))",
+            components.to_string_lossy()
+        ));
     }
     format!(
         "\n/// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and\n\
@@ -2922,6 +2957,7 @@ mod tests {
                 url_schemes: Vec::new(),
                 window: None,
                 translations: None,
+                components: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
             app.write_workspace().unwrap();
@@ -3167,6 +3203,28 @@ mod tests {
                 "{bad}"
             );
         }
+        // `"components"` is written to the workspace with the classes this
+        // NSH does not know taken out (with a warning); none, no file.
+        let root = super::root_config(
+            &dir,
+            &config(
+                r#"{ "root": "App", "components": { "button": {
+                    "base": "rounded-md bg-nope",
+                    "variants": { "primary": "bg-primary" },
+                    "defaults": { "variant": "primary" }
+                } } }"#,
+            ),
+            &ws,
+        )
+        .unwrap();
+        let path = root.components.expect("components");
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["button"]["base"], "rounded-md");
+        assert_eq!(written["button"]["variants"]["primary"], "bg-primary");
+        assert_eq!(written["button"]["defaults"]["variant"], "primary");
+        let root = super::root_config(&dir, &config(r#"{ "root": "App" }"#), &ws).unwrap();
+        assert_eq!(root.components, None);
         let code = super::root_fn(
             "#[cfg(x)]\n",
             "app_native",
@@ -3181,6 +3239,7 @@ mod tests {
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
                 translations: None,
+                components: Some("/app/.nsh/rust/components.json".into()),
             },
         );
         for line in [
@@ -3192,6 +3251,7 @@ mod tests {
             ".url_schemes([\"myapp\"])",
             ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
             r#".main_window_json("{\"defaultSize\":{\"width\":900,\"height\":600},\"title\":\"Notes\"}")"#,
+            ".components_json(include_str!(\"/app/.nsh/rust/components.json\"))",
         ] {
             assert!(code.contains(line), "no {line:?} in\n{code}");
         }
@@ -3213,6 +3273,7 @@ mod tests {
                 url_schemes: Vec::new(),
                 window: None,
                 translations: None,
+                components: None,
             }),
         );
         app.write_workspace().unwrap();
@@ -3896,6 +3957,7 @@ panic = \"abort\"
                 url_schemes: Vec::new(),
                 window: None,
                 translations: None,
+                components: None,
             }),
         );
         app.write_workspace().unwrap();

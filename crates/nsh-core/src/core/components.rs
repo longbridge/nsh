@@ -913,11 +913,13 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// `componentStyles` on the root: the looks `nsh.json` `components`
-    /// declares for `nsh-base`'s components, replacing those set before.
-    /// What it cannot read is left out with a warning and the rest
-    /// applies, so a bundle made by a newer NSH keeps its looks here.
-    pub(super) fn set_component_styles(&mut self, json: &str) {
+    /// The looks `nsh.json` `components` declares for `nsh-base`'s
+    /// components (JSON text: `componentStyles` on a TSX app's root, a
+    /// Rust app's [`Root::components_json`](crate::element::Root::components_json)),
+    /// replacing those set before. What it cannot read is left out with a
+    /// warning and the rest applies, so a bundle made by a newer NSH keeps
+    /// its looks here.
+    pub fn set_component_styles(&mut self, json: &str) {
         let _entered = self.components.runtime.enter();
         for what in crate::element::set_component_classes(json) {
             log::warn!("{what}, ignored");

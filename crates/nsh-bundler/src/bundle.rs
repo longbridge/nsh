@@ -458,8 +458,9 @@ fn tailwind_setup(
 /// the app's theme does not define) taken out of each class string, as
 /// JSON for the runtime, and a line naming each class taken out. The rest
 /// of its form the core checks when it reads it (keys of a newer NSH are
-/// left as they are); `None` when it is not an object.
-fn checked_components(
+/// left as they are); `None` when it is not an object. TSX apps' bundles
+/// and Rust apps' generated roots both carry what it returns.
+pub fn checked_components(
     theme: &nsh_core::tailwind::Theme,
     components: &serde_json::Value,
 ) -> (Option<String>, Vec<String>) {

@@ -1949,6 +1949,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(translations) = root.translations_ref() {
                 core.set_translations(translations.clone());
             }
+            // Before the first render: a component binds its declared
+            // looks only when it is built with a declaration.
+            if let Some(components) = root.components_json_ref() {
+                core.set_component_styles(components);
+            }
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");

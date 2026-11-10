@@ -492,3 +492,53 @@ fn a_rust_apps_tabs_show_the_apps_value() {
         .count();
     assert_eq!(selected, 1);
 }
+
+/// Buttons of a Rust app whose looks its code declares for one size,
+/// beside those its root carries from `nsh.json` `"components"`.
+#[component]
+fn DeclaredButtons() -> impl IntoElement {
+    nsh_core::element::set_component_style(
+        "button",
+        nsh_core::element::ComponentStyle::new().size("lg", |s| s.rounded(px(8.0))),
+    );
+    view()
+        .flex_1()
+        .child(
+            nsh_base::button()
+                .variant("primary")
+                .size("lg")
+                .child(text("Buy")),
+        )
+        .child(nsh_base::button().child(text("Plain")))
+}
+
+/// A Rust app's root carries `nsh.json` `"components"` (as the generated
+/// code compiles it in): the engine stores it before the first render, so
+/// the button that picks the variant takes its classes along with the
+/// typed look the app's code declares, and the one that picks none takes
+/// neither.
+#[test]
+fn a_rust_apps_root_declares_its_button_looks() {
+    let (_engine, rx) = start_root(
+        Root::new::<DeclaredButtons>(|| ())
+            .components_json(r#"{ "button": { "variants": { "primary": "bg-white" } } }"#),
+    );
+    let first = seen(&rx);
+    let white = nsh_core::Color(0xffffffff);
+    let mut buy: Vec<u32> = first
+        .styles
+        .iter()
+        .filter(|(_, s)| s.background_color == white)
+        .map(|(id, _)| *id)
+        .collect();
+    buy.dedup();
+    assert_eq!(buy.len(), 1, "only the primary button is white");
+    let style = first
+        .styles
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == buy[0])
+        .map(|(_, s)| s)
+        .unwrap();
+    assert_eq!(style.border_radius, px(8.0), "the typed size applies too");
+}
