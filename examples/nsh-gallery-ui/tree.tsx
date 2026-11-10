@@ -33,9 +33,9 @@ export function TreeRow(props: { entry: TreeEntry; icon?: IconName; tint?: strin
   // Compact with a pointer; a 44-point target on a touch screen.
   const height = desktop ? size.rowSm - 4 : size.rowSm;
   return (
-    <View style={{ height, flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8, paddingLeft: 4 + props.entry.depth * treeIndent }}>
+    <View style={{ height, flexDirection: "row", alignItems: "center", gap: 6, paddingEnd: 8, paddingStart: 4 + props.entry.depth * treeIndent }}>
       <View
-        class="transition-transform duration-200 ease-out motion-reduce:transition-none group-aria-expanded:rotate-90"
+        class="transition-transform duration-200 ease-out motion-reduce:transition-none group-aria-expanded:rotate-90 rtl:group-aria-expanded:-rotate-90"
         style={{ width: 14, height: 14, opacity: props.entry.folder ? 1 : 0 }}
       >
         <Icon name="chevron" size={14} tint={colors.muted} />

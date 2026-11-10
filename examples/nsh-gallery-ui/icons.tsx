@@ -711,6 +711,9 @@ const glyphs: Record<IconName, Draw> = {
   },
 };
 
+/** The glyphs that point along the line (forward, back): mirrored right to left. */
+const directional: ReadonlySet<IconName> = new Set<IconName>(["chevron", "back"]);
+
 /** A glyph, stroked with `tint`; `weight` is the stroke in the glyphs' 20-unit box (1.6 by default). */
 export function Icon(props: { name: IconName; size?: number; tint: string; weight?: number }) {
   const size = props.size ?? 20;
@@ -719,6 +722,7 @@ export function Icon(props: { name: IconName; size?: number; tint: string; weigh
   if (terminal && props.name === "check") return <Text style={{ color: props.tint }}>✓</Text>;
   return (
     <Canvas
+      class={directional.has(props.name) ? "rtl:-scale-x-100" : undefined}
       style={{ pointerEvents: "none", width: size, height: size }}
       draw={(cx, { width }) => {
         cx.scale(width / 20, width / 20);

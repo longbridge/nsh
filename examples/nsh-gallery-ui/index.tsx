@@ -579,7 +579,8 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
       // 8 pt more to press on every side (a hit slop around the small
       // track), without taking more room.
       style={{ margin: -8, padding: 8 }}
-      trackStyle={look.trackStyle}
+      trackClass={look.trackClass}
+          trackStyle={look.trackStyle}
       thumbStyle={look.thumbStyle}
     />
   );

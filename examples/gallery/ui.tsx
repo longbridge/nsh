@@ -119,12 +119,13 @@ export const paneWidth = () => windowSize().width - (sidebarOpen() ? SIDEBAR : 0
 export const columnsFor = (min: number, max: number, width = paneWidth(), gap = 20) =>
   Math.max(1, Math.min(max, Math.floor((width - 64 + gap) / (min + gap))));
 
-/** Whether the demos lay out right to left (the settings' Right to left,
- * the phone's toolbar): their stack takes `direction: "rtl"`, the window's
- * sidebar and title bar keep the system's. Kept while the app runs. */
+/** Whether the gallery lays out right to left (the settings' Right to left,
+ * the phone's toolbar): the layout takes `direction: "rtl"`, the sidebar
+ * moving to the right; the window's own controls keep their place. Kept
+ * while the app runs. */
 export const rtl = signal(false);
 
-/** The `direction` of what shows the demos. */
+/** The `direction` of the gallery's layout. */
 export const demoDirection = () => (rtl() ? "rtl" : "inherit");
 
 /** Lays the demos out right to left and back. */

@@ -389,7 +389,7 @@ function Search() {
     <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 12, paddingBottom: 8 }}>
       <Input
         ref={(node) => (input = node)}
-        {...field({ style: terminal ? undefined : { paddingLeft: 26 } })}
+        {...field({ style: terminal ? undefined : { paddingStart: 26 } })}
         value={query()}
         onChange={({ value }) => query.set(value)}
         onKeyPress={(e) => e.key === "Escape" && query.set("")}
@@ -397,7 +397,7 @@ function Search() {
         accessibilityLabel="Search demos"
       />
       <If when={!terminal}>
-        <View style={{ position: "absolute", left: 20, top: 7, pointerEvents: "none" }}>
+        <View style={{ position: "absolute", start: 20, top: 7, pointerEvents: "none" }}>
           <Icon name="search" size={14} tint={colors.faint} />
         </View>
       </If>
@@ -519,15 +519,26 @@ function DemoList() {
  * row changes at once (0 pt collapsed); the panel slides natively, over the
  * content pane. */
 function Sidebar() {
-  const slide = createAnimatedValue(untracked(sidebarOpen) ? 0 : -SIDEBAR);
+  // Hidden, it is past the window's edge at its start: the left, or the
+  // right while the demos run right to left.
+  const away = (right: boolean) => (right ? SIDEBAR : -SIDEBAR);
+  const slide = createAnimatedValue(untracked(sidebarOpen) ? 0 : away(untracked(rtl)));
   let first = true;
+  let wasRtl = untracked(rtl);
   effect(() => {
     const open = sidebarOpen();
+    const flipped = rtl();
     if (first) {
       first = false;
       return;
     }
-    Animated.timing(slide, { toValue: open ? 0 : -SIDEBAR, duration: 220, easing: Easing.out(Easing.cubic) }).start();
+    // The direction changes the side, at once: only showing and hiding slide.
+    if (flipped !== wasRtl) {
+      wasRtl = flipped;
+      slide.set(open ? 0 : away(flipped));
+      return;
+    }
+    Animated.timing(slide, { toValue: open ? 0 : away(flipped), duration: 220, easing: Easing.out(Easing.cubic) }).start();
   });
   return (
     <View style={{ width: sidebarOpen() ? SIDEBAR : 0, flexShrink: 0, zIndex: 1 }}>
@@ -536,12 +547,12 @@ function Sidebar() {
           position: "absolute",
           top: 0,
           bottom: 0,
-          left: 0,
+          start: 0,
           width: SIDEBAR,
           translate: [slide, 0],
           backgroundColor: colors.sidebar,
-          borderRightWidth: 1,
-          borderRightColor: colors.sidebarBorder,
+          borderEndWidth: 1,
+          borderEndColor: colors.sidebarBorder,
         }}
       >
         <View
@@ -549,12 +560,12 @@ function Sidebar() {
           style={
             terminal
               ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
-              : { height: 44, flexDirection: "row", alignItems: "center", paddingLeft: titleBar().left + 16, paddingRight: 10 }
+              : { height: 44, flexDirection: "row", alignItems: "center", paddingStart: (rtl() ? 0 : titleBar().left) + 16, paddingEnd: 10 }
           }
         >
-          {/* The mark at the sidebar's top left, past the window's controls. */}
+          {/* The mark at the sidebar's top start, past the window's controls (at the left, so right to left the sidebar is clear of them). */}
           {!terminal && <Logo size={22} />}
-          {!terminal && <Text style={{ marginLeft: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
+          {!terminal && <Text style={{ marginStart: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
           <View style={{ flex: 1 }} />
           <SidebarToggle />
         </View>
@@ -564,7 +575,7 @@ function Sidebar() {
           style={[
             { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.sidebarBorder },
             // The rule takes a whole row in the terminal: the rest of it is padding.
-            terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
+            terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingStart: 16, paddingEnd: 10 },
           ]}
         >
           {/* Where NSH lives, for screenshots of the gallery. */}
@@ -645,15 +656,17 @@ function DemoPane() {
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 6,
-                  paddingLeft: sidebarOpen() ? 32 : titleBar().left + 12,
-                  paddingRight: 16,
+                  // Clear of the window's controls, at the left: the start
+                  // while the sidebar is hidden, the end right to left.
+                  paddingStart: sidebarOpen() ? 32 : (rtl() ? 0 : titleBar().left) + 12,
+                  paddingEnd: rtl() ? titleBar().left + 12 : 16,
                   borderBottomWidth: 1,
                   borderBottomColor: colors.line,
                 }
           }
         >
           <If when={!sidebarOpen()}>
-            <View style={{ marginRight: terminal ? TERMINAL_COLUMN : 8 }}>
+            <View style={{ marginEnd: terminal ? TERMINAL_COLUMN : 8 }}>
               <SidebarToggle />
             </View>
           </If>
@@ -689,9 +702,9 @@ function Desktop() {
   effect(() => shownDemo.set(selected()));
   keymap.bind("mod+b", toggleSidebar);
   return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
+    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background, direction: demoDirection() }}>
       <Sidebar />
-      <NavStack state={nav} style={{ flex: 1, direction: demoDirection() }}>
+      <NavStack state={nav} style={{ flex: 1 }}>
         {(route) => {
           if (route.name !== "page") {
             return (
