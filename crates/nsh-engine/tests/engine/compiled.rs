@@ -197,6 +197,16 @@ fn start_app(app: &str) -> (Engine, Receiver<MountBatch>) {
 /// [`start_app`] on a platform whose screen headers are `header_heights`
 /// ([`nsh_core::NO_NATIVE_HEADER`]: none, as on the desktops and the web).
 fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Receiver<MountBatch>) {
+    start_app_culling(app, header_heights, false)
+}
+
+/// [`start_app_with`], with scroll views making only the views near their
+/// viewport (`content_culling`), as the platforms' apps do.
+fn start_app_culling(
+    app: &str,
+    header_heights: (Points, Points),
+    content_culling: bool,
+) -> (Engine, Receiver<MountBatch>) {
     let dir = std::env::temp_dir().join(format!(
         "nsh-compiled-nav-{}-{}-{}",
         std::process::id(),
@@ -231,7 +241,7 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
-        content_culling: false,
+        content_culling,
         network: None,
         websocket: None,
         refuse_connections: None,
@@ -348,6 +358,70 @@ fn navigation_stacks_screens_and_modals() {
         })
     });
     assert!(text_id(&batch, "in modal").is_some());
+}
+
+const SCROLL_DIALOG: &str = r#"import { mount, signal, Scroll, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+
+const open = signal(false);
+
+mount(() => (
+  <Scroll style={{ flex: 1 }}>
+    <View style={{ height: 3000 }}>
+      <View testID="open" onPress={() => open.set(true)}>
+        <Text>Open</Text>
+      </View>
+      <Dialog open={open()} presentation="pageSheet">
+        <Text>in sheet</Text>
+      </Dialog>
+    </View>
+    <View style={{ height: 3000 }}>
+      <Dialog open={open()}>
+        <Text>far down</Text>
+      </Dialog>
+    </View>
+  </Scroll>
+));
+"#;
+
+/// A dialog in a scroll view's content opens as the platforms' apps run
+/// it (`content_culling`): its modal shows over everything, beside the
+/// content in view and in content far down that was not made yet.
+#[test]
+fn dialogs_in_a_scroll_view_open_with_content_culling() {
+    let (engine, rx) = start_app_culling(SCROLL_DIALOG, (px(44.0), px(96.0)), true);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let button = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+            _ => None,
+        })
+        .expect("the button");
+    engine
+        .control()
+        .dispatch_event(button, EventKind::Press, EventPayload::None);
+    let modals = |b: &MountBatch| {
+        b.items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Create {
+                        kind: nsh_core::ViewKind::Modal,
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    let batch = next(&rx, |b| modals(b) > 0);
+    assert_eq!(modals(&batch), 2);
+    assert!(text_id(&batch, "in sheet").is_some());
+    assert!(text_id(&batch, "far down").is_some());
 }
 
 const MODAL_DISMISS: &str = r#"import { mount, signal, Text, View } from "nsh";

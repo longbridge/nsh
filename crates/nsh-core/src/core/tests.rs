@@ -26795,6 +26795,66 @@ fn a_culled_view_reports_its_layout_and_is_made_for_a_command() {
 }
 
 #[test]
+fn a_dialog_in_a_scroll_view_s_content_is_made_wherever_it_opens() {
+    // A dialog's modal shows over everything, not at its place in the
+    // content: it is made beside a row in view, and in a row far down
+    // that is not made yet, with the views around it.
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    ops.extend(child_view(4, 2, 50.0, &[]));
+    ops.extend(child_view(6, 2, 1000.0, &[]));
+    ops.extend(child_view(8, 2, 50.0, &[]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&4));
+    assert!(!created_in(&batch).contains(&8));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 10,
+                tag: Tag::Modal,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 10,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&10));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 12,
+                tag: Tag::Modal,
+            },
+            Op::Insert {
+                parent: 8,
+                child: 12,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let made = created_in(&batch);
+    assert!(made.contains(&8) && made.contains(&12), "{made:?}");
+}
+
+#[test]
 fn sticky_views_stick_in_the_viewport_of_the_scroll_view_around_them() {
     let mut c = core();
     let sticky = [
