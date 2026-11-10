@@ -3544,6 +3544,12 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
             nsh_core::tailwind::Platform::Ios
         },
         reduce_motion: env.reduce_motion,
+        pointer: if env.desktop() {
+            nsh_core::tailwind::Pointer::Fine
+        } else {
+            nsh_core::tailwind::Pointer::Coarse
+        },
+        terminal: env.idiom == Idiom::Terminal,
     }
 }
 
