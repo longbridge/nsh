@@ -5,33 +5,6 @@ name: Windows
 # --target windows`, `cargo run` on Windows).
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "crates/nsh-bundler/**"
-      - "crates/nsh-cli/**"
-      - "crates/nsh-core/**"
-      - "crates/nsh-dev/**"
-      - "crates/nsh-engine/**"
-      - "crates/nsh-i18n/**"
-      - "crates/nsh-js/**"
-      - "crates/nsh-macros/**"
-      - "crates/nsh-package/**"
-      - "crates/nsh-updater/**"
-      - "crates/nsh-platform-windows/**"
-      - "crates/nsh-testing/**"
-      - "crates/nsh-base/**"
-      - "crates/nsh-windows-app/**"
-      - "crates/nsh-windows-host/**"
-      - "crates/xtask/**"
-      - "examples/counter/**"
-      - "examples/gallery/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo/**"
-      - "rust-toolchain.toml"
-      - ".github/workflows/windows.yml"
-      - ".github/actions/cargo/**"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -61,6 +34,12 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/windows.yml"
       - ".github/actions/cargo/**"
+  # Main's commits were checked as pull requests: no run per merge, which
+  # held a runner for every workflow on each of ~80 merges a day. A daily
+  # run on main checks what merges combined and saves the caches pull
+  # requests restore (.github/actions/cargo).
+  schedule:
+    - cron: "17 20 * * *"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:

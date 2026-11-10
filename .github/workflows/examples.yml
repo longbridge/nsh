@@ -10,12 +10,6 @@ name: Examples
 # `crates/**`, so a change to the examples alone was never built.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "examples/**"
-      - ".github/workflows/examples.yml"
-      - ".github/actions/cargo/**"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -24,6 +18,12 @@ on:
       - "examples/**"
       - ".github/workflows/examples.yml"
       - ".github/actions/cargo/**"
+  # Main's commits were checked as pull requests: no run per merge, which
+  # held a runner for every workflow on each of ~80 merges a day. A daily
+  # run on main checks what merges combined and saves the caches pull
+  # requests restore (.github/actions/cargo).
+  schedule:
+    - cron: "17 20 * * *"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:

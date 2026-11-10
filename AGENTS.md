@@ -613,14 +613,17 @@ it), and its jobs skip drafts and the `closed` event: a draft runs nothing until
 merging a pull request starts a run that runs nothing but takes its concurrency group, cancelling the runs it still
 has queued or running. The jobs that build (all but `CI paths`) are debounced: they name the environment
 `ci-debounce` with `deployment: false`, whose wait timer holds them a few minutes without a runner, so a push
-followed by another within that time cancels the first run before it starts. Each workflow's concurrency group is
-the pull request's number, or the ref for pushes and queue runs (`github.event.pull_request.number || github.ref`):
-a merged pull request's `closed` event carries the base branch as its ref, so a group of the ref alone would cancel
-`main`'s run of the merge commit. Groups cancel in progress (Website's pushes to `main` queue instead: each one
-deploys).
+followed by another within that time cancels the first run before it starts. A merge to `main` runs no checks: its
+pull request ran them, and a run per workflow on each merge held the runners every open pull request waited for.
+The check workflows run on `main` once a day instead (`schedule`), which checks what merges combined and saves the
+caches; pushes to `main` run only Website (it deploys), `CI paths` and `Packages`. Each workflow's concurrency group
+is the pull request's number, or the ref for pushes, schedules and queue runs
+(`github.event.pull_request.number || github.ref`): a merged pull request's `closed` event carries the base branch
+as its ref, so a group of the ref alone would cancel `main`'s runs. Groups cancel in progress (Website's pushes to
+`main` queue instead: each one deploys).
 CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` installs a pinned release after the toolchain
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
-`main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
+`main`'s daily runs and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
 directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`.
 

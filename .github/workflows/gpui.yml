@@ -6,15 +6,9 @@ name: GPUI
 # it (`nsh run --target gpui`).
 
 on:
-  # Only the GPUI workspace's own changes run it; a daily run catches what
-  # changes to the crates it shares with the main workspace break.
-  push:
-    branches: [main]
-    paths:
-      - "crates/gpui/**"
-      - "examples/embed-gpui/**"
-      - ".github/workflows/gpui.yml"
-      - ".github/actions/cargo/**"
+  # Only the GPUI workspace's own pull requests run it; a daily run on main
+  # catches what changes to the crates it shares with the main workspace
+  # break, and saves the caches pull requests restore.
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.

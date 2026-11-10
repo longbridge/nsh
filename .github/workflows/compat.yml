@@ -13,12 +13,16 @@ name: Compat
 # passes in seconds without building.
 
 on:
-  push:
-    branches: [main]
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
     types: [opened, synchronize, reopened, ready_for_review, closed]
+  # Main's commits were checked as pull requests: no run per merge, which
+  # held a runner for every workflow on each of ~80 merges a day. A daily
+  # run on main checks what merges combined and saves the caches pull
+  # requests restore (.github/actions/cargo).
+  schedule:
+    - cron: "17 20 * * *"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:

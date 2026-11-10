@@ -159,6 +159,8 @@ def main():
         workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
         on = workflow[True]
         for event in ("push", "pull_request"):
+            if event not in on:
+                continue
             patterns = (on[event] or {}).get("paths")
             if patterns is None and event == "pull_request":
                 patterns = filtered(workflow)
