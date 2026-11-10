@@ -10,7 +10,7 @@ function App() {
   return (
     <View style={{ flex: 1, paddingTop: 80 }}>
       <Text>{`outer ${outer()} inner ${inner()}`}</Text>
-      <View role="button" onPress={() => cell?.scrollIntoView({ animated: false })} style={{ height: 44 }}>
+      <View role="button" onPress={() => cell?.reveal({ animated: false })} style={{ height: 44 }}>
         <Text>Show cell</Text>
       </View>
       <Scroll style={{ height: 200 }} onScroll={(e) => outer.set(e.offset.y)}>

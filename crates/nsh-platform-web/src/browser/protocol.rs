@@ -210,39 +210,15 @@ pub(crate) fn decode_command<'js>(name: &str, arg: Value<'js>) -> compat::Result
                 .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
                 .unwrap_or(true),
         },
-        "scrollIntoView" => {
-            let o = arg.as_object();
-            let mut options = nsh_core::ScrollIntoView::default();
-            let align = |key: &str, default| {
-                let Some(value) = o.as_ref().and_then(|o| o.get::<_, Value>(key).ok()) else {
-                    return Ok(default);
-                };
-                if value.is_undefined() {
-                    return Ok(default);
-                }
-                value
-                    .as_string()
-                    .and_then(|s| s.to_string().ok())
-                    .and_then(|name| nsh_core::ScrollAlignment::from_name(&name))
-                    .ok_or_else(|| {
-                        Exception::throw_type(
-                            arg.ctx(),
-                            &format!(
-                                "scrollIntoView: {key} must be \"start\", \"center\", \"end\" or \"nearest\""
-                            ),
-                        )
-                    })
-            };
-            options.block = align("block", options.block)?;
-            options.inline = align("inline", options.inline)?;
-            if let Some(animated) = o
-                .as_ref()
-                .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
-            {
-                options.animated = animated;
-            }
-            Command::ScrollIntoView(options)
-        }
+        "reveal" => Command::Reveal(
+            <nsh_core::RevealOptions as HostValue>::decode(&Js(arg.clone()), &mut HostCx::default())
+                .ok_or_else(|| {
+                    Exception::throw_type(
+                        arg.ctx(),
+                        "reveal: vertical and horizontal must be \"start\", \"center\", \"end\" or \"nearest\"",
+                    )
+                })?,
+        ),
         "layoutAnimation" => Command::LayoutAnimation(
             <LayoutAnimation as HostValue>::decode(&Js(arg), &mut HostCx::default())
                 .unwrap_or_default(),

@@ -562,22 +562,20 @@ let scroll!: ScrollRef;
 
 ### 把视图滚到可见处
 
-每个元素的 ref 都有 `scrollIntoView`，与 DOM 的同名方法一样：它按这次更新的布局，从内到外滚动视图外围的滚动视图，让视图显示出来。`block` 决定视图在纵向滚动视图里的位置，`inline` 决定在横向滚动视图里的位置：`"start"`（`block` 的默认值）、`"center"`、`"end"` 或 `"nearest"`（`inline` 的默认值）。`"nearest"` 下已经完整可见或铺满视口的视图不动，否则把它越出的那一边对齐到视口的同一边（比视口长的视图则把另一边对齐到视口的另一边）。`"start"` 和 `"end"` 指物理方向：纵向滚动视图里是上和下，横向滚动视图里是左和右，从左到右和从右到左的布局都一样。每个滚动视图从之前发给它的滚动所到的位置出发（无论平台是否已经回报），停在内容两端（含 `contentInset` 留出的部分）。视图的位置按布局计算，与 `measure()` 一样，因此不计入变换（包括动画），也不计入平台尚未应用的 `zoomTo`。默认带动画，`animated: false` 直接跳到位置。`List` 的行用列表自己的 `scrollToIndex` 滚动。
+每个元素的 ref 都有 `reveal`：它按这次更新的布局，从内到外滚动视图外围的滚动视图，让视图显示出来。`vertical` 决定视图在纵向滚动视图里的位置，`horizontal` 决定在横向滚动视图里的位置：`"start"`（`vertical` 的默认值）、`"center"`、`"end"` 或 `"nearest"`（`horizontal` 的默认值）。`"nearest"` 下已经完整可见或铺满视口的视图不动，否则把它越出的那一边对齐到视口的同一边（比视口长的视图则把另一边对齐到视口的另一边）。`"start"` 和 `"end"` 指物理方向：纵向滚动视图里是上和下，横向滚动视图里是左和右，从左到右和从右到左的布局都一样。每个滚动视图从之前发给它的滚动所到的位置出发（无论平台是否已经回报），停在内容两端（含 `contentInset` 留出的部分）。视图的位置按布局计算，与 `measure()` 一样，因此不计入变换（包括动画），也不计入平台尚未应用的 `zoomTo`。默认带动画，`animated: false` 直接跳到位置。`List` 的行用列表自己的 `scrollToIndex` 滚动。
 
 ```rust tabs
 let row = element_ref();
-let mut options = ScrollIntoView::default();
-options.block = ScrollAlignment::Center;
 
 view().element_ref(&row).child(text("Quality check"))
-view().on_press(move || row.scroll_into_view(options))
+view().on_press(move || row.reveal(RevealOptions::default().vertical(ScrollAlignment::Center)))
 ```
 
 ```tsx tabs
 let row!: ViewRef;
 
 <View ref={row}>…</View>
-<View onPress={() => row.scrollIntoView({ block: "center" })}>…</View>
+<View onPress={() => row.reveal({ vertical: "center" })}>…</View>
 ```
 
 ## 滚动视图与键盘

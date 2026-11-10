@@ -212,7 +212,7 @@ pub use crate::{
     ListAlignment, ListViewport, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial,
     MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation, MouseButton, MouseEvent,
     PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent,
-    ResizeMode, ReturnKeyType, ScreenAnimation, ScrollAlignment, ScrollIntoView, SnapAlignment,
+    ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScrollAlignment, SnapAlignment,
     StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent,
     TransformKind, TransformOrigin, Viewability,
     animation::{

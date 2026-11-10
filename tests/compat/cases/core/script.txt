@@ -252,10 +252,10 @@ tap id:measure
 expect Sizes: 100x10 110x11 120x12 130x13 150x15 160x16
 expect Calls: 1
 covers [nsh:rt] ref
-# core-scroll-into-view
-tap id:case-core-scroll-into-view
+# core-reveal
+tap id:case-core-reveal
 expect Called: none
-# The ref's method takes no options, a block, an inline and animated.
+# The ref's method takes no options, vertical, horizontal and animated.
 tap id:default
 expect Called: default
 tap id:center

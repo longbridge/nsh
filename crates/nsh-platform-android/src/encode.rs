@@ -739,7 +739,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::SetStatusBar(_)
                     | Command::CancelPress
                     | Command::ScrollToIndex { .. }
-                    | Command::ScrollIntoView(_)
+                    | Command::Reveal(_)
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.

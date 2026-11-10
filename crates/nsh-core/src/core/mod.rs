@@ -360,7 +360,7 @@ struct ScrollState {
     issued: u32,
     /// Where the last `ScrollTo` sent scrolls it, with its number in
     /// `issued` (moved by the `ScrollBy`s after it), until a report shows
-    /// it applied: `scrollIntoView` starts from there.
+    /// it applied: `reveal` starts from there.
     target: Option<(u32, (f32, f32))>,
     /// The lists virtualized against this scroll view (`viewport="parent"`;
     /// empty for nearly every scroll view).
@@ -2895,14 +2895,12 @@ impl<M: TextEngine> Core<M> {
         if self
             .commands
             .iter()
-            .any(|(_, c)| matches!(c, Command::ScrollIntoView(_)))
+            .any(|(_, c)| matches!(c, Command::Reveal(_)))
         {
             let mut projected = Vec::new();
             for (id, command) in std::mem::take(&mut self.commands) {
                 let commands = match command {
-                    Command::ScrollIntoView(options) => {
-                        self.scrolls_into_view(id, options, &projected)
-                    }
+                    Command::Reveal(options) => self.reveal_scrolls(id, options, &projected),
                     command => vec![(id, command)],
                 };
                 for (id, command) in commands {

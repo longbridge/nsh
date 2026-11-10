@@ -187,8 +187,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
   the keyboard focus: "Keyboard focus" above) and `scrollTo({ x, y, animated })` (use `ref`); lists also
   `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; every node
-  `scrollIntoView({ block, inline, animated })`; `Keyboard.dismiss()` (`nsh`).
-  Commands run after the commit's other mount items; list scrolls and `scrollIntoView` are resolved by the core with
+  `reveal({ vertical, horizontal, animated })`; `Keyboard.dismiss()` (`nsh`).
+  Commands run after the commit's other mount items; list scrolls and `reveal` are resolved by the core with
   the current layout (`docs/dev/scrolling-and-lists.md`).
 - **`measure()`** (on any node's ref) resolves, once the turn's changes are laid out, to `{ bounds, pagePosition }`
   or `null` (not in the tree, never shown). `bounds` is the frame in the parent, as

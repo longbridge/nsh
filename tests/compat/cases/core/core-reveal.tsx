@@ -22,14 +22,14 @@ function App() {
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>Called: {called()}</Text>
       <Text>Unknown alignment: {failure()}</Text>
-      {button("default", () => rows[7].scrollIntoView())}
-      {button("center", () => rows[3].scrollIntoView({ block: "center", animated: false }))}
-      {button("nearest", () => rows[9].scrollIntoView({ block: "nearest", inline: "nearest" }))}
-      {button("end", () => rows[0].scrollIntoView({ block: "end", inline: "start", animated: true }))}
+      {button("default", () => rows[7].reveal())}
+      {button("center", () => rows[3].reveal({ vertical: "center", animated: false }))}
+      {button("nearest", () => rows[9].reveal({ vertical: "nearest", horizontal: "nearest" }))}
+      {button("end", () => rows[0].reveal({ vertical: "end", horizontal: "start", animated: true }))}
       {button("unknown", () => {
         try {
           // @ts-expect-error: not an alignment
-          rows[5].scrollIntoView({ block: "middle" });
+          rows[5].reveal({ vertical: "middle" });
           failure.set("returned");
         } catch (e) {
           failure.set(e instanceof TypeError ? "TypeError" : "other");

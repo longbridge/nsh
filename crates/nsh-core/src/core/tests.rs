@@ -15692,16 +15692,16 @@ fn presses_passed_on_reach_the_innermost_pressable_view() {
     ));
 }
 
-/// `scrollIntoView` becomes a `ScrollTo` of the scroll view around, placed
+/// `reveal` becomes a `ScrollTo` of the scroll view around, placed
 /// as its alignment says, and nothing when the view is where it would go.
 #[test]
-fn scrolls_a_view_into_view() {
+fn reveals_a_view() {
     let mut c = scroll_around_view(500.0, 30.0);
-    let scroll = |c: &mut Core<FakeEngine>, block| {
+    let scroll = |c: &mut Core<FakeEngine>, vertical| {
         c.apply(Op::Command {
             id: 6,
-            command: Command::ScrollIntoView(crate::ScrollIntoView {
-                block,
+            command: Command::Reveal(crate::RevealOptions {
+                vertical,
                 animated: false,
                 ..Default::default()
             }),
@@ -15808,8 +15808,8 @@ fn scrolls_of_scroll_view(c: &mut Core<FakeEngine>) -> Vec<f32> {
 fn nearest_into_view() -> Op {
     Op::Command {
         id: 6,
-        command: Command::ScrollIntoView(crate::ScrollIntoView {
-            block: crate::ScrollAlignment::Nearest,
+        command: Command::Reveal(crate::RevealOptions {
+            vertical: crate::ScrollAlignment::Nearest,
             animated: false,
             ..Default::default()
         }),
@@ -15833,10 +15833,10 @@ fn nearest_keeps_the_viewport_inside_a_longer_view() {
     assert_eq!(scrolls_of_scroll_view(&mut c), vec![520.0]);
 }
 
-/// `scrollIntoView` starts from where the commit's earlier scroll commands
+/// `reveal` starts from where the commit's earlier scroll commands
 /// put the scroll view, not from where the platform last reported it.
 #[test]
-fn scroll_into_view_follows_earlier_scroll_commands() {
+fn reveal_follows_earlier_scroll_commands() {
     let mut c = scroll_around_view(0.0, 30.0);
     c.apply(Op::Command {
         id: 2,
@@ -15863,9 +15863,9 @@ fn scroll_into_view_follows_earlier_scroll_commands() {
 }
 
 /// A scroll from an earlier commit counts until the platform reports it
-/// applied: `scrollIntoView` starts from where it goes.
+/// applied: `reveal` starts from where it goes.
 #[test]
-fn scroll_into_view_follows_unreported_scrolls() {
+fn reveal_follows_unreported_scrolls() {
     let mut c = scroll_around_view(0.0, 30.0);
     c.apply(Op::Command {
         id: 2,
@@ -15888,7 +15888,7 @@ fn scroll_into_view_follows_unreported_scrolls() {
 /// With content insets, a view already in view stays put, at the offsets
 /// the insets add past either end.
 #[test]
-fn scroll_into_view_keeps_still_within_content_insets() {
+fn reveal_keeps_still_within_content_insets() {
     let inset = |c: &mut Core<FakeEngine>, insets: EdgeInsets| {
         c.apply(Op::SetProp {
             id: 2,
@@ -15924,8 +15924,8 @@ fn scroll_into_view_keeps_still_within_content_insets() {
     c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
     c.apply(Op::Command {
         id: 6,
-        command: Command::ScrollIntoView(crate::ScrollIntoView {
-            block: crate::ScrollAlignment::Start,
+        command: Command::Reveal(crate::RevealOptions {
+            vertical: crate::ScrollAlignment::Start,
             animated: false,
             ..Default::default()
         }),

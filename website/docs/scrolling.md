@@ -560,34 +560,32 @@ let scroll!: ScrollRef;
 
 Lists add `scrollToIndex`, `scrollToOffset` and `scrollToEnd`; see [Lists](./lists.md#scrolling-from-code).
 
-### Scrolling a view into view
+### Revealing a view
 
-Every element's ref has `scrollIntoView`, as the DOM's: it scrolls the scroll views around the view, innermost first,
-so the view shows, with the layout of the update it goes out with. `block` places the view along vertical scroll views
-and `inline` along horizontal ones: `"start"` (the default for `block`), `"center"`, `"end"`, or `"nearest"` (the
-default for `inline`), which leaves a view in full view, or one covering the viewport, where it is and otherwise brings
-the edge it is past to that edge of the viewport (a view longer than the viewport: its other edge to the viewport's
-other edge). `"start"` and `"end"` are physical: top and bottom along vertical scroll views, left and right along
-horizontal ones, in left-to-right and right-to-left layouts alike. Each scroll view starts from where the scrolls sent
-to it before put it, reported or not, and stops at its content's ends, past them by its `contentInset`. The view is
-placed from the layout, as `measure()` places it, so transforms (animations included) are not taken into account,
+Every element's ref has `reveal`: it scrolls the scroll views around the view, innermost first, so the view shows,
+with the layout of the update it goes out with. `vertical` places the view along vertical scroll views and
+`horizontal` along horizontal ones: `"start"` (the default for `vertical`), `"center"`, `"end"`, or `"nearest"` (the
+default for `horizontal`), which leaves a view in full view, or one covering the viewport, where it is and otherwise
+brings the edge it is past to that edge of the viewport (a view longer than the viewport: its other edge to the
+viewport's other edge). `"start"` and `"end"` are physical: top and bottom along vertical scroll views, left and right
+along horizontal ones, in left-to-right and right-to-left layouts alike. Each scroll view starts from where the scrolls
+sent to it before put it, reported or not, and stops at its content's ends, past them by its `contentInset`. The view
+is placed from the layout, as `measure()` places it, so transforms (animations included) are not taken into account,
 and neither is a `zoomTo` the platform has not applied yet. It animates by default; `animated: false` jumps. Rows of a
 `List` scroll with the list's own `scrollToIndex`.
 
 ```rust tabs
 let row = element_ref();
-let mut options = ScrollIntoView::default();
-options.block = ScrollAlignment::Center;
 
 view().element_ref(&row).child(text("Quality check"))
-view().on_press(move || row.scroll_into_view(options))
+view().on_press(move || row.reveal(RevealOptions::default().vertical(ScrollAlignment::Center)))
 ```
 
 ```tsx tabs
 let row!: ViewRef;
 
 <View ref={row}>…</View>
-<View onPress={() => row.scrollIntoView({ block: "center" })}>…</View>
+<View onPress={() => row.reveal({ vertical: "center" })}>…</View>
 ```
 
 ## Scroll views and the keyboard

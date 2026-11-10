@@ -1855,11 +1855,13 @@ impl WebKey {
     }
 }
 
-/// Where `scrollIntoView` puts a view along the axis of a scroll view
-/// around it: the DOM's `ScrollLogicalPosition`. Start and end are
-/// physical: top and bottom along a vertical scroll view, left and right
-/// along a horizontal one, in either writing direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Where `reveal` puts a view along the axis of a scroll view around it
+/// (GPUI's `ScrollStrategy`, with the DOM's `ScrollLogicalPosition`
+/// names, as [`SnapAlignment`]). Physical: start and end are top and
+/// bottom along a vertical scroll view, left and right along a horizontal
+/// one, in either writing direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
 pub enum ScrollAlignment {
     /// Its start at the start of the viewport.
     #[default]
@@ -1875,44 +1877,54 @@ pub enum ScrollAlignment {
     Nearest,
 }
 
-impl ScrollAlignment {
-    /// The alignment TS names `name` (`"start"`, `"center"`, `"end"`,
-    /// `"nearest"`).
-    pub fn from_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "start" => Self::Start,
-            "center" => Self::Center,
-            "end" => Self::End,
-            "nearest" => Self::Nearest,
-            _ => return None,
-        })
-    }
-}
-
-/// How `scrollIntoView` scrolls
-/// ([`crate::element::ElementRef::scroll_into_view`], TS
-/// `ref.scrollIntoView(options)`). It places the view from the layout and
-/// the zoom scales the platforms last reported, as `measure()` does:
+/// How `reveal` scrolls ([`crate::element::ElementRef::reveal`], TS
+/// `ref.reveal(options)`). It places the view from the layout and the
+/// zoom scales the platforms last reported, as `measure()` does:
 /// transforms (animations included) and a `zoomTo` not applied yet are not
 /// taken into account.
+///
+/// ```
+/// # use nsh_core::{RevealOptions, ScrollAlignment};
+/// let options = RevealOptions::default().vertical(ScrollAlignment::Center);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
-pub struct ScrollIntoView {
-    /// Along vertical scroll views; `Start` by default, as the DOM's.
-    pub block: ScrollAlignment,
-    /// Along horizontal scroll views; `Nearest` by default, as the DOM's.
-    pub inline: ScrollAlignment,
-    /// Animate the scrolls; `true` by default, as `scrollTo`'s.
+pub struct RevealOptions {
+    /// Along vertical scroll views; `Start` by default.
+    pub vertical: ScrollAlignment,
+    /// Along horizontal scroll views; `Nearest` by default.
+    pub horizontal: ScrollAlignment,
+    /// Animate the scrolls; `true` by default, as `scroll_to`'s.
     pub animated: bool,
 }
 
-impl Default for ScrollIntoView {
+impl Default for RevealOptions {
     fn default() -> Self {
         Self {
-            block: ScrollAlignment::Start,
-            inline: ScrollAlignment::Nearest,
+            vertical: ScrollAlignment::Start,
+            horizontal: ScrollAlignment::Nearest,
             animated: true,
         }
+    }
+}
+
+impl RevealOptions {
+    /// Sets where the view goes along vertical scroll views.
+    pub fn vertical(mut self, alignment: ScrollAlignment) -> Self {
+        self.vertical = alignment;
+        self
+    }
+
+    /// Sets where the view goes along horizontal scroll views.
+    pub fn horizontal(mut self, alignment: ScrollAlignment) -> Self {
+        self.horizontal = alignment;
+        self
+    }
+
+    /// Sets whether the scrolls animate.
+    pub fn animated(mut self, animated: bool) -> Self {
+        self.animated = animated;
+        self
     }
 }
 
@@ -1989,7 +2001,7 @@ pub enum Command {
     },
     /// Scroll the scroll views around the view so it shows (resolved by
     /// the core into their `ScrollTo`; never mounted).
-    ScrollIntoView(ScrollIntoView),
+    Reveal(RevealOptions),
     /// Scroll a list to the end of its content.
     ScrollToEnd {
         /// Animate the change.

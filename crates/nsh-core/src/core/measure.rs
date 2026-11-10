@@ -1,5 +1,5 @@
 //! Where views are: measuring a node for `ref.measure()`, scrolling one
-//! into view (`ref.scrollIntoView()`), and the areas descendants cover
+//! into view (`ref.reveal()`), and the areas descendants cover
 //! outside their parents' bounds, which platforms hit-test
 //! ([`MountItem::Overflow`]).
 
@@ -8,7 +8,7 @@ use crate::{
     EventPayload, JsonValue, PayloadValue,
     geometry::{Bounds, Point, Points, point, rect},
     mount::MountItem,
-    ops::{Command, NodeId, ScrollAlignment, ScrollIntoView},
+    ops::{Command, NodeId, RevealOptions, ScrollAlignment},
     text::TextEngine,
 };
 
@@ -203,15 +203,15 @@ impl<M: TextEngine> Core<M> {
     /// the view is not laid out. A scroll view in `projected` (the offsets
     /// earlier commands of the commit scroll it to, the last one last) is
     /// taken to be there.
-    pub(super) fn scrolls_into_view(
+    pub(super) fn reveal_scrolls(
         &self,
         id: NodeId,
-        options: ScrollIntoView,
+        options: RevealOptions,
         projected: &[(NodeId, (f32, f32))],
     ) -> Vec<(NodeId, Command)> {
         let mut scrolls = Vec::new();
         if self.measure(id).is_none() {
-            log::warn!("scrollIntoView: view {id} is not laid out");
+            log::warn!("reveal: view {id} is not laid out");
             return scrolls;
         }
         let Ok(mut k) = self.key(id) else {
@@ -272,10 +272,10 @@ impl<M: TextEngine> Core<M> {
                         if to == at { at } else { to.clamp(least, most) }
                     };
                     let to = if scroll.horizontal {
-                        let to = aligned(x, width, viewport.width.0, offset.0, options.inline);
+                        let to = aligned(x, width, viewport.width.0, offset.0, options.horizontal);
                         (settle(to, offset.0, x_range), offset.1)
                     } else {
-                        let to = aligned(y, height, viewport.height.0, offset.1, options.block);
+                        let to = aligned(y, height, viewport.height.0, offset.1, options.vertical);
                         (offset.0, settle(to, offset.1, y_range))
                     };
                     if to != offset {

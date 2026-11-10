@@ -3351,7 +3351,7 @@
 			"zoomTo",
 			"scrollToIndex",
 			"scrollToEnd",
-			"scrollIntoView",
+			"reveal",
 			"reload",
 			"goBack",
 			"goForward",

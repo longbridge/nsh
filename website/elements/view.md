@@ -249,7 +249,7 @@ into an input, and files dropped on an input outside any destination, behave as 
 ## Ref methods
 
 A plain view's ref is a `ViewRef`: `focus()`, `blur()`, `measure()` and
-[`scrollIntoView()`](../docs/scrolling.md#scrolling-a-view-into-view). `ref` (`.element_ref(&handle)` in Rust) gives you its node, e.g. to pass to
+[`reveal()`](../docs/scrolling.md#revealing-a-view). `ref` (`.element_ref(&handle)` in Rust) gives you its node, e.g. to pass to
 `setAccessibilityFocus` ([`nsh`'s accessibility API](../modules/nsh.md#accessibility)), or to measure it
 (`handle.measure()` in Rust).
 
