@@ -1139,19 +1139,37 @@ impl<M: TextEngine> Core<M> {
     /// The platforms send no touch for a secondary click; a menu asked for
     /// by the keyboard or an assistive technology is no press, nor is a
     /// long press, whose touch went down already.
-    pub(super) fn overlay_context_menu(&mut self, id: NodeId, event: &ContextMenuEvent) {
+    ///
+    /// Returns those `onPressOutside` events (each overlay and its payload)
+    /// for the caller to hand out before `onContextMenu` itself, as a
+    /// press outside comes before what the press does: a context menu open
+    /// on the view closes before the view asks for one again, which then
+    /// opens where the pointer is.
+    pub fn context_menu_presses_outside(
+        &mut self,
+        id: NodeId,
+        event: &ContextMenuEvent,
+    ) -> Vec<(NodeId, EventPayload)> {
         if event.pointer_type != Some(PointerType::Mouse) || self.overlay_state.watched.is_empty() {
-            return;
+            return Vec::new();
         }
         let Ok(mut key) = self.key(id) else {
-            return;
+            return Vec::new();
         };
         let mut path = Vec::new();
         while key != NO_KEY {
             path.push(self.nodes[key as usize].id);
             key = self.nodes[key as usize].parent;
         }
+        let from = self.events.len();
         self.press_outside(event.page_position, &path);
+        self.events
+            .drain(from..)
+            .filter_map(|event| match event {
+                crate::element::JsEvent::Event(id, _, payload) => Some((id, payload)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// A press at `page` on the views of `path` (the one pressed first):
