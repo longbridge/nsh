@@ -3,7 +3,9 @@
 //! closed, it stays with its ending look for as long as its transitions
 //! then run, and `onClose` comes after; opened again on its way out it is
 //! taken back; with reduced motion, or no ending look, it goes at once and
-//! nothing more is sent. A tooltip's `delay` of `Infinity` never ends and
+//! nothing more is sent. On its way out it takes no keys: the focus is the
+//! trigger's again as a menu or popover closes, so Return during its exit
+//! chooses nothing in it and opens it again, its keys working as before. A tooltip's `delay` of `Infinity` never ends and
 //! one of `NaN` is none; the keyboard focus shows a tooltip in every idiom
 //! until it leaves or Escape is pressed. On a manual clock: time moves only as the test
 //! says.
@@ -356,6 +358,146 @@ fn a_desktop_menu_and_its_submenu_go_with_their_exit() {
     app.app.run_for(Duration::from_millis(150)).unwrap();
     assert!(!app.app.shows("New") && !app.app.shows("Mail"));
     app.app.wait_for("Closed: true").unwrap();
+}
+
+/// A desktop menu fading for 120 ms on its way out, with the items chosen
+/// on screen in order.
+#[component]
+fn KeyMenuScreen() -> impl IntoElement {
+    let chose = signal(Vec::<&'static str>::new());
+    let item = move |label: &'static str| {
+        menu_item()
+            .accessibility_label(label)
+            .on_select(move || chose.update(|c| c.push(label)))
+            .child(text(label))
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .popup_class("transition-opacity duration-120")
+                .popup_ending_class("opacity-0")
+                .trigger(
+                    view()
+                        .test_id("file")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("File")),
+                )
+                .child(item("Open"))
+                .child(item("Save")),
+        )
+        .child(text(move || {
+            chose.with(|c| format!("chose:[{}]", c.join(",")))
+        }))
+}
+
+/// The menu opened from the keyboard on its focused trigger (the focus
+/// on Open), past its entrance.
+fn key_menu_app() -> App {
+    let mut app = start(Root::of::<KeyMenuScreen>(), false);
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    app.app.wait_for("Save").unwrap();
+    app
+}
+
+#[test]
+fn a_menu_on_its_way_out_does_not_choose_again() {
+    let mut app = key_menu_app();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:chose:[Save]").unwrap();
+    app.app.run_for(Duration::from_millis(16)).unwrap();
+    assert!(app.app.shows("Save"), "kept while it goes");
+    app.app.press_key("enter").unwrap();
+    app.app.run_for(Duration::from_millis(300)).unwrap();
+    assert!(
+        app.app.shows("chose:[Save]"),
+        "chosen once, not again by the key while it goes"
+    );
+}
+
+#[test]
+fn a_menu_closed_with_escape_takes_no_return_on_its_way_out() {
+    let mut app = key_menu_app();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app.run_for(Duration::from_millis(16)).unwrap();
+    assert!(app.app.shows("Save"), "kept while it goes");
+    app.app.press_key("enter").unwrap();
+    app.app.run_for(Duration::from_millis(300)).unwrap();
+    assert!(app.app.shows("chose:[]"), "nothing chosen");
+}
+
+#[test]
+fn a_menu_opened_again_on_its_way_out_takes_its_keys_again() {
+    let mut app = key_menu_app();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app.run_for(Duration::from_millis(16)).unwrap();
+    // Return on the trigger, which has the focus again, takes it back,
+    // focused on its first item as an opening from the keyboard is.
+    app.app.press_key("enter").unwrap();
+    app.app.run_for(Duration::from_millis(300)).unwrap();
+    assert!(app.app.shows("Save"), "taken back");
+    assert!(app.app.shows("chose:[]"), "nothing chosen yet");
+    app.app.press_key("down").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:chose:[Save]").unwrap();
+}
+
+/// A popover fading for 120 ms on its way out, with a button inside whose
+/// presses are counted.
+#[component]
+fn KeyPopoverScreen() -> impl IntoElement {
+    let applied = signal(0u32);
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            popover()
+                .popup_class("transition-opacity duration-120")
+                .popup_ending_class("opacity-0")
+                .trigger(
+                    view()
+                        .test_id("trigger")
+                        .w(px(100.0))
+                        .h(px(30.0))
+                        .child(text("Details")),
+                )
+                .child(
+                    view()
+                        .test_id("apply")
+                        .h(px(30.0))
+                        .on_press(move || applied.update(|n| *n += 1))
+                        .child(text("Apply")),
+                ),
+        )
+        .child(text(move || format!("applied:{}", applied.get())))
+}
+
+#[test]
+fn a_popover_closed_with_escape_takes_no_return_on_its_way_out() {
+    let mut app = start(Root::of::<KeyPopoverScreen>(), false);
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    app.app.wait_for("Apply").unwrap();
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:applied:1").unwrap();
+    app.app.press_key("escape").unwrap();
+    app.app.run_for(Duration::from_millis(16)).unwrap();
+    assert!(app.app.shows("Apply"), "kept while it goes");
+    app.app.press_key("enter").unwrap();
+    app.app.run_for(Duration::from_millis(300)).unwrap();
+    assert!(
+        app.app.shows("applied:1"),
+        "not pressed again while it goes"
+    );
 }
 
 #[derive(Clone, PartialEq, Props)]

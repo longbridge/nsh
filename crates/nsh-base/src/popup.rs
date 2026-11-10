@@ -244,9 +244,10 @@ impl StateLooks {
 /// `data-starting-style` / `data-ending-style`: opened, it is mounted with
 /// its starting look until its first display frame, so the app's
 /// `transition-*` classes run its entrance; closed, it stays mounted with
-/// its ending look (taking no presses) for as long as its transitions then
-/// run (the core says, [`ElementRef::transition_time`]; two seconds at
-/// most), then goes. Opened again on its way out, it is taken back (its
+/// its ending look (taking no presses, nor keys once its component gave
+/// the focus back: [`Self::focus_back_on_close`]) for as long as its
+/// transitions then run (the core says, [`ElementRef::transition_time`];
+/// two seconds at most), then goes. Opened again on its way out, it is taken back (its
 /// transitions run back). Without a look for a state, or when the user
 /// asked for less motion, it skips that state: a popup with no ending look
 /// goes at once, as one with no motion did.
@@ -363,9 +364,43 @@ impl PopupPresence {
         self.mounted.get()
     }
 
+    /// [`Self::mounted`], untracked.
+    pub(crate) fn mounted_untracked(self) -> bool {
+        self.mounted.get_untracked()
+    }
+
     /// The ref its popup part carries.
     pub(crate) fn popup(self) -> ElementRef {
         self.popup
+    }
+
+    /// The keyboard focus in the popup as it closes (Escape, a choice in
+    /// it, the app closing it) goes back where `back` puts it (its
+    /// trigger) at once, not once the popup is gone: on its way out the
+    /// popup takes no keys, as it takes no presses, so a key pressed
+    /// during its exit cannot act in it again. `open` is tracked; `back`
+    /// runs as it turns false while the focus is inside.
+    pub(crate) fn focus_back_on_close(
+        self,
+        open: impl Fn() -> bool + 'static,
+        back: impl Fn() + 'static,
+    ) {
+        let inside = stored(false);
+        self.popup.on_focus_in(move || {
+            inside.replace(true);
+        });
+        self.popup.on_focus_out(move || {
+            inside.replace(false);
+        });
+        let was = stored(false);
+        effect(move || {
+            let now = open();
+            // Not cleared here: the focus watch says when the focus leaves,
+            // and keeps its own record of where it is across openings.
+            if was.replace(now) && !now && inside.get() {
+                untracked(&back);
+            }
+        });
     }
 
     /// The part's classes now: its own with its state's over them
