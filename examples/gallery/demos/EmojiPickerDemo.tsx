@@ -68,7 +68,7 @@ function Composer() {
   const open = signal(false);
   const recent = signal<string[]>(["👍", "😂", "❤️", "🎉", "🙏", "🔥"]);
   return (
-    <Card title="Message composer" subtitle={pointer ? "Tabs over the search, the skin tone hand, the emoji under the pointer named below" : "A sheet across the screen, the tabs at its foot"}>
+    <Card title="Message composer" subtitle={pointer ? "Tabs, search, skin tones, the name below" : "A sheet across the screen, the tabs at its foot"}>
       <View class="flex-row items-center gap-1 rounded-2xl border border-border bg-raised" style={{ paddingLeft: 4, paddingRight: 12, minHeight: pointer ? 40 : 48 }}>
         <PickerFrom
           open={open()}
@@ -116,7 +116,7 @@ function Reactions() {
       );
   };
   return (
-    <Card title="Reactions" subtitle="The quick ones from recent use; any other from the full picker">
+    <Card title="Reactions" subtitle="Recent ones first; any other from the picker">
       <View style={{ gap: 10 }}>
         <View style={{ flexDirection: "row", gap: 10 }}>
           <View class="items-center justify-center rounded-full" style={{ width: 32, height: 32, backgroundColor: colors.raised }}>

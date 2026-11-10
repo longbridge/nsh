@@ -18,6 +18,8 @@ export interface ChoiceOptions {
   scale?: number;
   /** A round box (a task's, as reminders draw it). */
   round?: boolean;
+  /** Disabled, as the control is (`checkboxLook`): its edge stays drawn under the row's half opacity in dark. */
+  disabled?: boolean | (() => boolean);
 }
 
 /** A box's or ring's size: `scale` times the page's; one row high in the
@@ -34,10 +36,12 @@ const dims = (scale = 1) => ({
  * `borderWidth` (a quick setting's icon lights up from it too, under a
  * `ChoiceLight`). Light, the field's well; dark, a step above the card
  * (shadcn's `dark:bg-input/30`) inside an edge a step brighter than a
- * field's, so an empty box still stands out, dimmed too. */
-export const choiceWell = (): ViewStyle =>
+ * field's, so an empty box still stands out, dimmed too: `disabled`, its
+ * edge twice as strong, so the row's half opacity leaves it as strong as an
+ * enabled box's (the mark and the label fade, the box stays drawn). */
+export const choiceWell = (o?: { disabled?: boolean }): ViewStyle =>
   isDark()
-    ? { backgroundColor: alpha(colors.fieldBorder, 0.3), backgroundImage: "none", borderColor: alpha(colors.text, 0.2), boxShadow: finish.field.boxShadow }
+    ? { backgroundColor: alpha(colors.fieldBorder, 0.3), backgroundImage: "none", borderColor: alpha(colors.text, o?.disabled ? 0.4 : 0.2), boxShadow: finish.field.boxShadow }
     : { backgroundColor: colors.field, backgroundImage: "none", borderColor: colors.fieldBorder, boxShadow: finish.field.boxShadow };
 
 /** A layer over the whole of its parent, its content centered: layers that cross over in place. */
@@ -75,7 +79,7 @@ export function checkboxLook(o?: ChoiceOptions): CheckboxLook {
         alignItems: "center",
         justifyContent: "center",
         borderWidth: 1,
-        ...choiceWell(),
+        ...choiceWell({ disabled: !!read(o?.disabled) }),
       };
     },
   };
@@ -144,13 +148,13 @@ export function CheckboxMark(props: { mark: CheckboxMarkKind } & ChoiceOptions) 
  * once checked, with a dot of the ink on the citrus growing in from half
  * its size; 16 points with a pointer, 22 on a touch screen.
  */
-export function RadioRing(props: { on: boolean; scale?: number }) {
+export function RadioRing(props: { on: boolean; scale?: number; disabled?: boolean }) {
   const d = dims(props.scale);
   const on = follow(() => (props.on ? 1 : 0));
   return (
     <View
       class={choiceSink}
-      style={{ width: d.control, height: d.height, borderRadius: d.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...choiceWell() }}
+      style={{ width: d.control, height: d.height, borderRadius: d.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...choiceWell({ disabled: props.disabled }) }}
     >
       <ChoiceLight on={on} radius={d.control / 2} />
       <View

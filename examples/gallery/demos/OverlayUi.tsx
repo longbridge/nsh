@@ -4,7 +4,7 @@
 import { createAnimatedValue, type JSX, platform, signal, split, Text, token, View } from "nsh";
 import { Input, type InputProps } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
-import { alpha, Caption, Card, colors, finish, focusRing, hovered, mono, radius, solidTint, terminal, toneColor, type Tone } from "../ui";
+import { alpha, Caption, Card, colors, fieldSize, finish, focusRing, hovered, mono, radius, solidTint, terminal, toneColor, type Tone } from "../ui";
 
 /** A pointer and a keyboard: desktop density. */
 export const pointer = platform.desktop;
@@ -96,7 +96,7 @@ export function Trigger(props: {
 }
 
 /**
- * A one-line text field: a well below the surface it sits on, an accent
+ * A one-line text field, as tall and in the type of the form's (`fieldSize`): a well below the surface it sits on, an accent
  * ring that fades in around it while it has the keyboard, `prefix` before
  * the text.
  */
@@ -117,7 +117,7 @@ export function Field(props: InputProps & { prefix?: string }) {
       }}
     >
       <If when={own.prefix}>
-        <Text style={{ paddingLeft: pointer ? 8 : 12, fontSize: pointer ? 13 : 15, color: colors.faint }}>{own.prefix}</Text>
+        <Text style={{ paddingLeft: fieldSize.pad, fontSize: fieldSize.font, color: colors.faint }}>{own.prefix}</Text>
       </If>
       <Input
         {...input}
@@ -132,13 +132,14 @@ export function Field(props: InputProps & { prefix?: string }) {
         style={[
           {
             flex: 1,
-            paddingHorizontal: own.prefix ? 2 : pointer ? 8 : 12,
-            fontSize: pointer ? 13 : 15,
+            paddingHorizontal: own.prefix ? 2 : fieldSize.pad,
+            // The form's field size (`fieldSize`), inside the well's 1-point edge.
+            fontSize: fieldSize.font,
             color: colors.text,
             placeholderColor: colors.muted,
             caretColor: colors.accent,
             selectionColor: colors.accent,
-            ...(props.multiline ? { minHeight: pointer ? 56 : 84, paddingTop: pointer ? 6 : 12, paddingBottom: pointer ? 6 : 12 } : { height: pointer ? 28 : 40 }),
+            ...(props.multiline ? { minHeight: pointer ? 56 : 84, paddingTop: pointer ? 6 : 12, paddingBottom: pointer ? 6 : 12 } : { height: fieldSize.height - 2 }),
           },
           ...(Array.isArray(own.style) ? own.style : [own.style]),
         ]}

@@ -26,6 +26,11 @@ const origins: Record<PopupSide, string> = { bottom: "top", top: "bottom", left:
  * grows from 96 % and slides the last `distance` points out of its
  * trigger's edge, decelerating into place. Reduced motion lands it at once.
  */
+/** Where a popup goes, in words for its trigger: "Bottom, centered", "Top, at the end". */
+export function placementWords(side: PopupSide, align: "start" | "center" | "end"): string {
+  return `${side[0].toUpperCase()}${side.slice(1)}, ${align === "center" ? "centered" : `at the ${align}`}`;
+}
+
 export function popIn(side: PopupSide = "bottom", distance = 4): MotionSpec {
   const away = side === "top" || side === "left" ? distance : -distance;
   const axis = side === "top" || side === "bottom" ? "translateY" : "translateX";

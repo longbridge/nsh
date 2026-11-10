@@ -6,7 +6,7 @@ import { AlertDialog, Dialog, NavPage, NavStack, Input, createNavStack } from "n
 import { safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";
+import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, LabeledToggle } from "../ui";
 import { TitleBar } from "../TitleBar";
 
 const edges = ["top", "bottom", "left", "right"] as const;
@@ -532,8 +532,8 @@ export function Navigation() {
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
-              <LinkRow icon="play" title="No animation" note='animation="none"' onPress={push(Instant)} />
-              <LinkRow icon="gestures" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
+              <LinkRow icon="animation" title="No animation" note='animation="none"' onPress={push(Instant)} />
+              <LinkRow icon="back" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
               <LinkRow icon="form" title="Unsaved changes" note="popOnBack + onBackPress" onPress={push(Unsaved)} />
               <LinkRow icon="lists" title="A deep stack" note="push / popToRoot" onPress={push(() => <Deep depth={1} />)} />
             </View>
@@ -556,7 +556,7 @@ export function Navigation() {
             icon="system"
             title="Back button"
             subtitle={hint("Android: BackHandler", "BackHandler: Escape, Alt+Left")}
-            right={<Toggle value={intercept()} onChange={(v) => intercept.set(v)} label="Intercept the back button" />}
+            right={<LabeledToggle label="Intercept" value={intercept()} onChange={(v) => intercept.set(v)} />}
           >
             <Figure value={String(backs())} unit={backs() === 1 ? "press" : "presses"} note={intercept() ? "caught" : "popped"} tone={intercept() ? "warn" : "accent"} />
             <Text style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>

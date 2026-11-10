@@ -5,7 +5,7 @@ import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
 import { isAvailable as hasWindow, titleBar } from "nsh/desktop";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, fieldLook, fieldSize, fieldText, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
+import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, fieldLook, fieldSize, fieldText, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
 
 /** A pointer and a keyboard: desktop density. */
 const pointer = platform.desktop;
@@ -105,9 +105,10 @@ function Field(
     <View style={{ gap: terminal ? 0 : 6, translate: [shake, 0], opacity: props.disabled ? 0.5 : 1 }}>
       {/* The terminal keeps two columns between the label, the API and the hint: one would run them together. */}
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: terminal ? TERMINAL_GAP : 8 }}>
-        <Text style={{ flex: 1, fontSize: 13, fontWeight: "500", color: colors.muted }}>{own.label}</Text>
+        <Text style={{ flex: 1, fontSize: 13, fontWeight: "500", color: colors.text }}>{own.label}</Text>
         <If when={own.api}>
-          <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{own.api}</Text>
+          {/* The API in the sans of the hints beside it, as the sections' notes: one face on every field's row. */}
+          <Text style={{ fontSize: 12, color: colors.faint }}>{own.api}</Text>
         </If>
         <If when={own.hint}>
           <Text style={{ fontSize: 13, color: own.hintColor ?? colors.faint, fontVariant: ["tabular-nums"], transitionProperty: "color", transitionDuration: 150 }}>{own.hint}</Text>
@@ -129,7 +130,7 @@ function Field(
           {...input}
           style={[
             {
-              ...fieldText({ readonly: props.readonly, multiline: props.multiline }),
+              ...fieldText({ readonly: props.readonly, multiline: props.multiline, inWell: true }),
               // The terminal keeps one Cell between a prefix and the value.
               paddingLeft: own.prefix && terminal ? TERMINAL_COLUMN : fieldPad,
             },
@@ -259,7 +260,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
         <IconTile name={props.icon} size={34} />
         <View style={terminal ? { flex: 1, flexDirection: "row", gap: TERMINAL_GAP } : { flex: 1, gap: 2 }}>
           <Text style={{ flex: terminal ? 1 : undefined, fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
-          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint }}>
             {props.note}
           </Text>
         </View>
@@ -571,11 +572,12 @@ export function Form() {
           <Card
             icon="form"
             title="Keyboard"
-            subtitle="keyboardDismissMode while dragging"
-            right={<Badge label={`${Math.round(keyboardFrame().height)} pt`} tone={keyboardFrame().height > 0 ? "accent" : "neutral"} />}
+            subtitle="How a drag dismisses the keyboard"
+            // Only where there is an on-screen keyboard: what it covers while up.
+            right={pointer ? undefined : <Badge label={keyboardFrame().height > 0 ? `Keyboard up, ${Math.round(keyboardFrame().height)} pt` : "Keyboard hidden"} tone={keyboardFrame().height > 0 ? "accent" : "neutral"} />}
           >
             <Segmented options={modes} value={mode()} onChange={(m) => mode.set(m)} />
-            <Caption label={hint("Drag the form with the keyboard up", "Desktops have no on-screen keyboard to dismiss")} note={mode()} />
+            <Caption label={hint("Drag the form with the keyboard up", "Desktops have no on-screen keyboard to dismiss")} />
           </Card>
         ),
         () => (
@@ -672,8 +674,7 @@ export function Form() {
             </Pair>
             <Field
               label="Offset"
-              api="numbers-and-punctuation"
-              hint="dark keyboard (iOS)"
+              hint="A dark keyboard on iOS"
               keyboardType="numbers-and-punctuation"
               ios={{ keyboardAppearance: "dark" }}
               placeholder="-12.5"

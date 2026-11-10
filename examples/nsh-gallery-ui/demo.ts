@@ -8,7 +8,7 @@ import { controlSize, insetSurface } from "./look/surface";
 import { inputLook, type FieldLookOptions } from "./look/field";
 import { buttonLabel, buttonLook, type ButtonKind, type ButtonLookOptions } from "./look/button";
 export { ui, tint } from "./palette";
-export { buttonGlyph, buttonLabel, buttonLook, buttonSizes, iconButtonGlyph, iconButtonLook, type ButtonKind, type ButtonLookOptions, type ButtonSize, type IconButtonLookOptions } from "./look/button";
+export { buttonGlyph, buttonLabel, buttonLook, buttonSizes, ghostOutdent, iconButtonGlyph, iconButtonLook, type ButtonKind, type ButtonLookOptions, type ButtonSize, type IconButtonLookOptions } from "./look/button";
 export { switchHitSlop, switchLook, type SwitchLook, type SwitchSize } from "./look/switch";
 export { toggleGlyph, toggleLabel, toggleLook, toggleSizes, toolbarRule, toolbarTrack, type ToggleDimensions, type ToggleLookOptions, type ToggleSize, type ToolbarTrackOptions } from "./look/tool";
 export { menuHighlight, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, menuPressed, menuSeparator, menuPopup, MenuLabel, SubmenuBack, SubmenuRow, type MenuItemDimensions, type MenuItemLookOptions, type MenuPopupOptions, type MenuItemTextOptions } from "./look/menu";
@@ -23,7 +23,9 @@ export { progressFill, progressGlide, progressLook, progressRail, progressRemain
 export { DisclosureChevron, disclosurePanel, disclosureTriggerLook, type DisclosurePanelOptions, type DisclosureTriggerOptions } from "./look/disclosure";
 export { carouselArrowLook, CarouselDot, carouselDotItemLook, carouselPaginationLook, carouselSizes, linkColor, linkLook, linkSize, LinkText, paginationArrows, paginationItemClass, type CarouselArrowOptions, type LinkState } from "./look/nav";
 export { categoryColors, plotAxisText, plotBaseline, plotCrossLine, plotDotClass, plotGrid, plotHoverDot, plotReference, plotTooltip, plotTooltipTitle, plotWash, seriesColor, seriesColors } from "./look/plot";
-export { DiffHunkActions, dockClasses, DockDragPreview, DockTab, dockTabCloseClass, resizableHandle, resizableHandleLook, richEditorClasses, textViewCaretClass, textViewLinkClasses } from "./look/workspace";
+export { DiffHunkActions, diffHunkTone, diffViewStyles, dockClasses, DockDragPreview, DockTab, dockTabCloseClass, resizableHandle, resizableHandleLook, richEditorClasses, textViewCaretClass, textViewLinkClasses } from "./look/workspace";
+export { colorAreaLook, colorChecker, ColorCopy, ColorDropper, ColorFields, colorFormats, ColorPanel, ColorPopover, colorSliderLook, ColorSwatches, ColorTrigger, type ColorFieldsProps, type ColorPanelProps, type ColorPopoverProps } from "./look/color";
+export { formatColor, inkOn } from "./color-format";
 export { photoUrl, type PhotoName } from "./photos";
 export { scrollbarTheme } from "./scrollbar-theme";
 
@@ -67,7 +69,7 @@ export interface ButtonOptions {
    * in `toggleLook`, not a button. */
   on?: boolean | (() => boolean);
   /** Disabled (pass the same value to the element's `disabled`): no hover
-   * and no press feedback; dimmed to 40%. */
+   * and no press feedback; dimmed to 50%. */
   disabled?: boolean | (() => boolean);
   /** Where it sits in a column of a desktop layout (`alignSelf`): buttons
    * are as wide as their labels there, so the default is `flex-start`;
