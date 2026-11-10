@@ -834,6 +834,10 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
         if input {
             return;
         }
+        if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
+            crate::text::context_menu(surface);
+            return;
+        }
     }
 }
 
