@@ -2,6 +2,7 @@ import { cleanup, effect, type InputRef, type JSX, reduceMotion, Scroll, signal,
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
 import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
+import { isAvailable as hasWindow, titleBar } from "nsh/desktop";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, fieldLook, fieldSize, fieldText, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
@@ -792,6 +793,11 @@ export function Form() {
       ]}
     >
       <Dialog open={sheet()} presentation="pageSheet" onOpenChange={({ open }) => sheet.set(open)} style={{ flex: 1 }}>
+        {/* On the desktops a dialog covers the whole window: leave the
+            gallery's title bar showing, and still dragging the window. */}
+        <If when={hasWindow && !terminal}>
+          <View desktop={{ windowDrag: true }} style={{ height: titleBar().height || 40, flexShrink: 0 }} />
+        </If>
         <View
           style={{
             flex: 1,
