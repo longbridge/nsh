@@ -380,3 +380,12 @@ fn expect_compares_values_as_jest_does() {
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 8);
 }
+
+#[test]
+fn forward_goes_forward_on_the_web_only() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/history");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}

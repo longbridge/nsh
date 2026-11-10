@@ -380,8 +380,8 @@ crate::static_reactive!(Painter: Painter, Drawing);
 /// budget (`docs/dev/images.md`), leased while an element shows it. Inline
 /// markup and a drawing in memory show in the first frame; others when
 /// they load. A source that cannot be drawn draws nothing (logged). The
-/// web runtime shows it as an image the browser draws, where
-/// `currentColor` is black.
+/// web runtime shows it as an image the browser draws, with its
+/// `currentColor` written out as the element's text color.
 pub fn svg(src: impl IntoReactive<super::ImageSrc>) -> Svg {
     #[cfg(all(feature = "svg", not(target_arch = "wasm32")))]
     {
@@ -401,6 +401,11 @@ pub fn svg(src: impl IntoReactive<super::ImageSrc>) -> Svg {
             crate::PropertyValue::ObjectFit(Some(ResizeMode::Contain)),
         );
         node.bind_attr(src, |attrs, src| attrs.src = Some(src));
+        // The platform draws it: its `currentColor` is the text color.
+        set(
+            &mut node,
+            Prop::Image(crate::ImageProp::SvgCurrentColor(true)),
+        );
         Svg(node)
     }
 }

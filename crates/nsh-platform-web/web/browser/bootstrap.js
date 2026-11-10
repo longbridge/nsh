@@ -6067,11 +6067,12 @@
 	* `base()`, what `history.replaceState` resolves against (the page's
 	* `document.baseURI`); `origin`, the page's. `url()` reads the core's
 	* address as it is, which has the page's from before the app's code runs.
+	* The options (`{ history }`) go to the core as they are, which checks them.
 	*/
 	function configureAddress(urlScheme, page) {
 		const { setUrl } = urlScheme;
-		urlScheme.setUrl = (to) => {
-			if (typeof to !== "string" || NOT_IN_AN_ADDRESS.test(to) || new TextEncoder().encode(to).length > MAX_ADDRESS_BYTES) return setUrl(to);
+		urlScheme.setUrl = (to, ...options) => {
+			if (typeof to !== "string" || NOT_IN_AN_ADDRESS.test(to) || new TextEncoder().encode(to).length > MAX_ADDRESS_BYTES) return setUrl(to, ...options);
 			let resolved;
 			try {
 				resolved = new URL(to, page.base());
@@ -6079,7 +6080,7 @@
 				throw new TypeError(`UrlScheme.setUrl: not a URL: ${to}`);
 			}
 			if (resolved.origin !== page.origin) throw new TypeError(`UrlScheme.setUrl: ${resolved.href} is not of the page's origin`);
-			setUrl(resolved.href);
+			setUrl(resolved.href, ...options);
 		};
 	}
 

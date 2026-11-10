@@ -139,11 +139,14 @@ covers [nsh] appInfo
 # mod-url-scheme
 tap id:case-mod-url-scheme
 # the domain claims `compat`: no link opened it, and the listener stops.
+# The app's own `setUrl` is no change of the address it did not make.
 expect Links: none
 expect Listener: listening
 expect Address: null
+expect Changes: none
 tap id:set-url
-expect Address: compat://orders/42, wrong TypeError TypeError
+expect Address: compat://orders/43, wrong TypeError TypeError TypeError
+expect Changes: none
 tap id:stop-links
 expect Listener: stopped
 covers [nsh] UrlScheme

@@ -1485,6 +1485,11 @@ impl NshView {
     /// are reported as the window's ([`crate::window`]).
     pub(crate) fn set_window_of(&self, surface: Weak<Surface>) {
         *self.ivars().window.borrow_mut() = surface;
+        // The root may already be attached: viewDidMoveToWindow ran
+        // before it belonged to this surface's window.
+        if self.ivars().window.borrow().strong_count() > 0 {
+            self.0.install_tracking();
+        }
     }
 
     /// From an AppKit view of ours, if it is one.

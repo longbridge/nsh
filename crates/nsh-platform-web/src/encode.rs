@@ -1203,6 +1203,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .num(options.fade_ms.unwrap_or(0.0))
                 // CSS's `object-position`; empty for the center.
                 .str(&object_position(options.position))
+                // `svg()`'s text color, for its `currentColor`.
+                .opt_str(options.current_color.map(css_color).as_deref())
                 .end();
         }
         MountItem::ScrollConfig {
@@ -1471,6 +1473,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         Command::Back => out.item("cmd").num(id).str("back").end(),
         Command::ExitApp => out.item("cmd").num(id).str("exitApp").end(),
         Command::SetAppUrl(url) => out.item("cmd").num(id).str("setAppUrl").str(url).end(),
+        Command::PushAppUrl(url) => out.item("cmd").num(id).str("pushAppUrl").str(url).end(),
         Command::Announce(text) => out.item("cmd").num(id).str("announce").str(text).end(),
         Command::AccessibilityFocus => out.item("cmd").num(id).str("a11yFocus").end(),
         Command::Seek(t) => out.item("cmd").num(id).str("seek").num(*t).end(),
