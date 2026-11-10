@@ -314,6 +314,7 @@ impl AppView {
             surface.set_stats(true);
         }
         surface.entity.set(Some(cx.entity_id()));
+        surface.main_window.set(Some(window.window_handle()));
         *surface.text_system.borrow_mut() = Some(cx.text_system().clone());
         surface.native.set_components(options.components.clone());
         crate::system::watch_environment(&surface, window, cx);
@@ -890,6 +891,8 @@ fn initial_environment() -> Environment {
         file_requests: true,
         // wry, in builds with it.
         web_views: cfg!(feature = "webview"),
+        // wgpu, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }

@@ -6,8 +6,8 @@ use super::host::{HostCx, HostInput, HostList, HostValue, field};
 use crate::{
     AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
     CellSlot, EdgeInsets, ImageScales, ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop,
-    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, ScrollProp,
-    StatusBarSetting, StatusBarStyle, Viewability,
+    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop,
+    RevealOptions, ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
     element::TsTypes,
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
@@ -70,6 +70,49 @@ impl HostValue for ImageSource {
 
     fn ts_type(_: &mut TsTypes) -> String {
         "string | ImageAsset".into()
+    }
+}
+
+/// `ref.reveal(options)`: `{ vertical?, horizontal?, animated? }`, each
+/// missing one its default. None for an alignment that is not one, so the
+/// call throws rather than scrolling somewhere the app did not ask for.
+impl HostValue for RevealOptions {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        let mut options = RevealOptions::default();
+        if input.is_nullish() {
+            return Some(options);
+        }
+        if !input.is_object() {
+            return None;
+        }
+        let mut alignment = |key: &str, default: ScrollAlignment| match input.field(key) {
+            Some(value) if !value.is_nullish() => {
+                <ScrollAlignment as HostValue>::decode(&value, cx)
+            }
+            _ => Some(default),
+        };
+        options.vertical = alignment("vertical", options.vertical)?;
+        options.horizontal = alignment("horizontal", options.horizontal)?;
+        if let Some(animated) = input.field("animated").and_then(|a| a.as_bool()) {
+            options.animated = animated;
+        }
+        Some(options)
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let alignment = <ScrollAlignment as HostValue>::ts_type(types);
+        types.declare("RevealOptions", |_| {
+            format!(
+                "/** How `reveal` places a view in the scroll views around it. */\n\
+                 export interface RevealOptions {{\n  \
+                 /** Along vertical scroll views; `\"start\"` by default. */\n  \
+                 vertical?: {alignment};\n  \
+                 /** Along horizontal scroll views; `\"nearest\"` by default. */\n  \
+                 horizontal?: {alignment};\n  \
+                 /** Animate the scrolls; `true` by default. */\n  \
+                 animated?: boolean;\n}}"
+            )
+        })
     }
 }
 

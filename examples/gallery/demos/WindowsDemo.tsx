@@ -280,7 +280,7 @@ function WindowRow(props: { win: WindowRef; first: boolean }) {
           }}
           hoverStyle={hovered()}
           activeStyle={{ backgroundColor: alpha(colors.text, 0.08) }}
-          focusStyle={focusRing()}
+          focusVisibleStyle={focusRing()}
         >
           <IconTile name={info().icon} size={size.tile} />
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>

@@ -18,7 +18,7 @@ export { controlSize, density, insetSurface, listRow, plainRow, RowDivider, RowL
 export { CheckboxMark, checkboxLook, choiceTileLook, MARK_WEIGHT, RadioRing, type CheckboxLook, type CheckboxMarkKind, type ChoiceOptions, type ChoiceTileLook, type ChoiceTileOptions } from "./look/choice";
 export { segmentedLook, TabTitle, tabsLook, underlineTabsLook, type SegmentedLookOptions, type SegmentedSize, type TabLook, type TabState } from "./look/tabs";
 export { fieldLook, fieldSize, fieldText, inputLook, numberInputClasses, numberInputSteps, numberInputText, NumberStep, otpCellLook, otpCells, timeFieldClass, type FieldLookOptions, type FieldTextOptions, type OtpCellOptions } from "./look/field";
-export { calendarLook, CalendarItem, Chevron, clearButtonLook, ComboToggle, comboboxLook, datePickerLook, ListboxEmpty, listboxFooter, ListboxHeader, listboxPopup, listboxProps, listboxSearch, OptionRow, optionClass, Picker, pickerLook, TimeSegment, type ClearButtonOptions, type ComboboxLookOptions, type DatePickerLookOptions, type ListboxPopupOptions, type PickerLookOptions } from "./look/listbox";
+export { calendarLook, CalendarItem, Chevron, clearButtonLook, ComboToggle, comboboxLook, datePickerLook, DateTrigger, ListboxEmpty, listboxFooter, ListboxHeader, listboxPopup, listboxProps, listboxSearch, OptionRow, optionClass, Picker, pickerLook, TimeSegment, type ClearButtonOptions, type ComboboxLookOptions, type CalendarItemProps, type DatePickerLookOptions, type ListboxPopupOptions, type PickerLookOptions, type PickerProps } from "./look/listbox";
 export { progressFill, progressGlide, progressLook, progressRail, progressRemaining, progressSweep, type ProgressLookOptions, type ProgressSweep } from "./look/meter";
 export { DisclosureChevron, disclosurePanel, disclosureTriggerLook, type DisclosurePanelOptions, type DisclosureTriggerOptions } from "./look/disclosure";
 export { carouselArrowLook, CarouselDot, carouselDotItemLook, carouselPaginationLook, carouselSizes, linkColor, linkLook, linkSize, LinkText, paginationArrows, paginationItemClass, type CarouselArrowOptions, type LinkState } from "./look/nav";
@@ -32,9 +32,10 @@ export { scrollbarTheme } from "./scrollbar-theme";
  * off a disabled control. */
 export const hoverFill = () => ({ backgroundColor: tint(ui().text, 0.05) });
 
-/** The keyboard focus (`focusStyle`), one for every control: the edge
- * turns the theme's `ring` and a 3-point halo of it lies around the view,
- * outside its edge (`focusRing(offset)` moves the halo further out). */
+/** The keyboard focus (`focusVisibleStyle`: not after a click or a tap),
+ * one for every control: the edge turns the theme's `ring` and a 3-point
+ * halo of it lies around the view, outside its edge (`focusRing(offset)`
+ * moves the halo further out). */
 export { focusRing } from "./theme";
 
 /** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it

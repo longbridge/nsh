@@ -1925,6 +1925,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Styles while focused and showing it (Tailwind's `focus-visible:`;
+    /// TS: `focusVisibleStyle`): the keyboard moved the focus there, or it
+    /// is an input that edits. Focus a press gave shows [`Self::focus`]'s
+    /// styles only: the ring for keyboard users goes here.
+    fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::FOCUS_VISIBLE, s);
+        self
+    }
+
     /// Styles while it or an element inside it is focused (Tailwind's
     /// `focus-within:`; TS: `focusWithinStyle`): a field's frame ringed
     /// while the input in it edits. An overlay's content is inside the
@@ -2575,6 +2585,14 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
+    /// Styles while its root has focus and shows it (`focus-visible:`):
+    /// the keyboard moved the focus there.
+    pub fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS_VISIBLE, s);
+        self
+    }
+
     /// Styles while its root or an element inside it has focus
     /// (`focus-within:`).
     pub fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
@@ -2739,6 +2757,14 @@ pub trait ComponentBuilder: Element {
     fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.node().style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root has focus and shows it (`focus-visible:`):
+    /// the keyboard moved the focus there.
+    fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS_VISIBLE, s);
         self
     }
 

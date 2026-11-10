@@ -64,6 +64,75 @@ impl PackageTarget {
     }
 }
 
+/// The processors a macOS package runs on (`--arch`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Arch {
+    /// Apple silicon.
+    #[value(name = "arm64", alias = "aarch64")]
+    Arm64,
+    /// Intel.
+    #[value(name = "x86_64")]
+    X86_64,
+    /// Apple silicon and Intel: one universal executable of both builds.
+    Universal,
+}
+
+/// The Rust target of macOS on Apple silicon.
+const MACOS_ARM64: &str = "aarch64-apple-darwin";
+/// The Rust target of macOS on Intel.
+const MACOS_X86_64: &str = "x86_64-apple-darwin";
+
+impl Arch {
+    /// The Rust targets of its builds, one per architecture.
+    fn macos_triples(self) -> &'static [&'static str] {
+        match self {
+            Arch::Arm64 => &[MACOS_ARM64],
+            Arch::X86_64 => &[MACOS_X86_64],
+            Arch::Universal => &[MACOS_ARM64, MACOS_X86_64],
+        }
+    }
+}
+
+/// The Rust target of macOS on this machine's processor.
+fn host_macos_triple() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        MACOS_ARM64
+    } else {
+        MACOS_X86_64
+    }
+}
+
+/// What cargo builds the runner for `triple` with: nothing for this
+/// machine's processor, so the build is the one `nsh run` and every other
+/// package share (`target/release`), else `--target triple`
+/// (`target/<triple>/release`).
+fn macos_build_triple(triple: &'static str) -> Option<&'static str> {
+    (triple != host_macos_triple()).then_some(triple)
+}
+
+/// The architecture of a macOS `triple` as `lipo` names it.
+fn lipo_arch(triple: &str) -> &str {
+    match triple.split('-').next() {
+        Some("aarch64") => "arm64",
+        Some(arch) => arch,
+        None => triple,
+    }
+}
+
+/// The updater's names of the platforms a macOS package for `arch` runs on
+/// (`None`: this machine's), which its update archives are named after: a
+/// universal package is the archive of either.
+fn macos_update_platforms(arch: Option<Arch>) -> Vec<String> {
+    match arch {
+        None => vec![nsh_updater::platform()],
+        Some(arch) => arch
+            .macos_triples()
+            .iter()
+            .map(|triple| format!("macos-{}", triple.split('-').next().unwrap_or(triple)))
+            .collect(),
+    }
+}
+
 /// App metadata: `nsh.json` next to the entry, overridden by flags.
 ///
 /// Keys it does not know, here or in its sections, are warned of and
@@ -103,9 +172,14 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde_json::Value>,
-    /// The languages whose data the app ships (read by the bundler).
-    #[serde(default, rename = "locales")]
-    _locales: Option<serde_json::Value>,
+    /// The languages whose data the app ships (checked by the bundler).
+    #[serde(default)]
+    locales: Option<serde_json::Value>,
+    /// The locales the app ships (`locales`, else its translations'
+    /// languages: `nsh_i18n::app_locales`), which Apple packages declare
+    /// (`CFBundleLocalizations`) so that system UI shows in them.
+    #[serde(skip)]
+    pub(crate) localizations: Vec<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "resolve")]
     _resolve: Option<serde_json::Value>,
@@ -129,6 +203,13 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// The app runs once (`"singleInstance": true`, Windows and Linux): a
+    /// second launch hands its arguments and working directory to the
+    /// running instance (`Application.on("secondInstance", ...)`) and exits
+    /// before it opens a window. Written into `app.json`, where the
+    /// release runner reads it; macOS runs one instance of an app already.
+    #[serde(default)]
+    pub(crate) single_instance: bool,
     /// The main window's launch-time options (`"window"`, checked by
     /// [`read_config`]): written into `app.json` and the dev server's app
     /// info, where the runners read them before the app's code runs.
@@ -273,6 +354,9 @@ pub(crate) fn desktop_app_json(
     if let Some(window) = &config.window {
         info["window"] = window.clone();
     }
+    if config.single_instance {
+        info["singleInstance"] = true.into();
+    }
     info
 }
 
@@ -370,6 +454,8 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) abis: &'a [String],
     /// Android: an APK or an App Bundle.
     pub(crate) format: crate::android::Format,
+    /// macOS: the processors the app runs on (`None`: this Mac's).
+    pub(crate) arch: Option<Arch>,
     /// Install and launch in the simulator or on the device afterwards
     /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
     /// the browser).
@@ -383,7 +469,10 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let dir = entry.parent().unwrap_or(Path::new("."));
     let path = dir.join("nsh.json");
     let Ok(text) = fs::read_to_string(&path) else {
-        return Ok(AppConfig::default());
+        return Ok(AppConfig {
+            localizations: app_localizations(dir, None),
+            ..AppConfig::default()
+        });
     };
     let (mut config, mut ignored) =
         parse_config(&text).with_context(|| format!("invalid {}", path.display()))?;
@@ -415,7 +504,45 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     config.macos.check()?;
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
+    config.localizations = app_localizations(dir, config.locales.as_ref());
     Ok(config)
+}
+
+/// The locales of the app in `dir` ([`nsh_i18n::app_locales`]), from
+/// `nsh.json`'s `locales` (its tags; the bundler warns of other values)
+/// or `locales/`'s translations (the bundler reports one it cannot read).
+fn app_localizations(dir: &Path, locales: Option<&serde_json::Value>) -> Vec<String> {
+    let locales = locales.and_then(serde_json::Value::as_array).map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    });
+    let translations = match locales {
+        Some(_) => Default::default(),
+        None => nsh_i18n::read_translations(dir).unwrap_or_default(),
+    };
+    nsh_i18n::app_locales(&translations, locales.as_deref())
+}
+
+/// Declares the app's locales to Apple's systems (`CFBundleLocalizations`,
+/// English, the development region, first): system UI, such as AppKit's and
+/// UIKit's menus, shows in the language the app does, which without it is
+/// English whatever the user's.
+fn bundle_localizations(d: &mut plist::Dictionary, config: &AppConfig) {
+    if config.localizations.is_empty() {
+        return;
+    }
+    let mut list = vec!["en".to_owned()];
+    for locale in &config.localizations {
+        if !list.contains(locale) {
+            list.push(locale.clone());
+        }
+    }
+    d.insert(
+        "CFBundleLocalizations".into(),
+        plist::Value::Array(list.into_iter().map(plist::Value::String).collect()),
+    );
 }
 
 /// `nsh.json`'s text as an [`AppConfig`], with what it left out: keys it
@@ -615,6 +742,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     }
     if !options.abis.is_empty() && options.target != PackageTarget::Android {
         bail!("--abi only applies to --target android");
+    }
+    if options.arch.is_some() && options.target != PackageTarget::Macos {
+        bail!("--arch only applies to --target macos");
     }
     if options.format != crate::android::Format::Apk {
         if options.target != PackageTarget::Android {
@@ -1064,7 +1194,7 @@ fn package_macos(
         id,
         executable,
     } = *app;
-    let runner = runtime::file(Platform::MacOs, true)?;
+    let runners = macos_runners(options.arch)?;
     let app = options.out.join(format!("{name}.app"));
     let step = ui::Step::start(format!("packaging {}", ui::path(&app)));
     if app.exists() {
@@ -1076,8 +1206,7 @@ fn package_macos(
     let nsh = resources.join("nsh");
     fs::create_dir_all(&macos)?;
     fs::create_dir_all(&nsh)?;
-    fs::copy(&runner, macos.join(executable))
-        .with_context(|| format!("copy {}", runner.display()))?;
+    install_macos_runner(&runners, &macos.join(executable))?;
     // A Rust app has no bundle: the runner mounts its root.
     if !built.rust_root {
         fs::write(nsh.join("bundle.nshc"), &built.bytecode)?;
@@ -1140,7 +1269,13 @@ fn package_macos(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    crate::updater::archive_macos_app(config, name, &app, options.out)?;
+    crate::updater::archive_macos_app(
+        config,
+        name,
+        &app,
+        options.out,
+        &macos_update_platforms(options.arch),
+    )?;
     step.done(format!("packaged {}", ui::path(&app)));
     if options.run {
         let status = Command::new("open")
@@ -1153,6 +1288,127 @@ fn package_macos(
         ui::done(format!("launched {name}"));
     }
     Ok(())
+}
+
+/// A macOS release runner a package is made of.
+struct MacRunner {
+    path: PathBuf,
+    /// The architecture taken from it (`None`: the file as it is).
+    arch: Option<&'static str>,
+    /// Whether the file holds other architectures besides.
+    fat: bool,
+}
+
+/// The macOS release runners of a package for `arch` (`None`: this Mac's):
+/// one per architecture, each built for its Rust target (this Mac's own
+/// with no `--target`).
+fn macos_runners(arch: Option<Arch>) -> anyhow::Result<Vec<MacRunner>> {
+    let Some(arch) = arch else {
+        let path = runtime::file(Platform::MacOs, true)?;
+        return Ok(vec![MacRunner {
+            path,
+            arch: None,
+            fat: false,
+        }]);
+    };
+    let mut runners = Vec::new();
+    for &triple in arch.macos_triples() {
+        let path = runtime::file_for(Platform::MacOs, true, macos_build_triple(triple))?;
+        let wanted = lipo_arch(triple);
+        // A prebuilt runner (an installed nsh's, `NSH_RUNTIME`) is built
+        // for the processor of the machine that built it.
+        let archs = lipo_archs(&path)?;
+        if !archs.iter().any(|arch| arch == wanted) {
+            bail!(
+                "the macOS release runner {} is built for {}, not {wanted}: an installed nsh has the runner of its own processor, \
+                 so package for {wanted} with the nsh of that processor, or with a nsh checkout, which builds the runner for any",
+                path.display(),
+                archs.join(" and ")
+            );
+        }
+        runners.push(MacRunner {
+            path,
+            arch: Some(wanted),
+            fat: archs.len() > 1,
+        });
+    }
+    Ok(runners)
+}
+
+/// The architectures of the executable `path` (`lipo -archs`): `arm64`,
+/// `x86_64`.
+fn lipo_archs(path: &Path) -> anyhow::Result<Vec<String>> {
+    let output = Command::new("lipo")
+        .arg("-archs")
+        .arg(path)
+        .output()
+        .context("run lipo")?;
+    if !output.status.success() {
+        bail!(
+            "lipo -archs {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Runs `lipo` with `args`.
+fn lipo(args: &[&std::ffi::OsStr]) -> anyhow::Result<()> {
+    let output = Command::new("lipo")
+        .args(args)
+        .output()
+        .context("run lipo")?;
+    if !output.status.success() {
+        bail!(
+            "lipo failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// Writes the package's executable `to` from `runners`: one runner's file,
+/// its architecture taken out of a universal file, or the runners of
+/// several architectures in one universal file.
+fn install_macos_runner(runners: &[MacRunner], to: &Path) -> anyhow::Result<()> {
+    let mut thin = Vec::new();
+    let mut extracted = Vec::new();
+    for runner in runners {
+        match runner.arch {
+            Some(arch) if runner.fat => {
+                let part = to.with_extension(arch);
+                lipo(&[
+                    runner.path.as_os_str(),
+                    "-thin".as_ref(),
+                    arch.as_ref(),
+                    "-output".as_ref(),
+                    part.as_os_str(),
+                ])?;
+                extracted.push(part.clone());
+                thin.push(part);
+            }
+            _ => thin.push(runner.path.clone()),
+        }
+    }
+    let result = match thin.as_slice() {
+        [one] => fs::copy(one, to)
+            .map(|_| ())
+            .with_context(|| format!("copy {}", one.display())),
+        several => {
+            let mut args: Vec<&std::ffi::OsStr> = vec!["-create".as_ref(), "-output".as_ref()];
+            args.push(to.as_os_str());
+            args.extend(several.iter().map(|path| path.as_os_str()));
+            lipo(&args)
+        }
+    };
+    for part in extracted {
+        let _ = fs::remove_file(part);
+    }
+    result
 }
 
 /// Converts `icon` (a PNG) to `icns`: an iconset of every size macOS
@@ -1239,6 +1495,7 @@ fn macos_info_plist(
         d.insert("LSUIElement".into(), true.into());
     }
     config.usage_descriptions(&mut d);
+    bundle_localizations(&mut d, config);
     // The app's own keys, over NSH's defaults (never over its reserved ones).
     d.extend(config.macos.info_plist()?);
     Ok(d)
@@ -1319,6 +1576,7 @@ fn info_plist(
     );
     d.insert("LSRequiresIPhoneOS".into(), true.into());
     config.usage_descriptions(&mut d);
+    bundle_localizations(&mut d, config);
     // A launch screen entry opts into the full screen (no letterboxing).
     d.insert(
         "UILaunchScreen".into(),
@@ -1549,6 +1807,112 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// Each processor is a build for its Rust target, this Mac's own
+    /// without `--target` (the build `nsh run` shares), named as `lipo`
+    /// and the updater name it.
+    #[test]
+    fn macos_packages_build_a_runner_per_processor() {
+        assert_eq!(Arch::Arm64.macos_triples(), ["aarch64-apple-darwin"]);
+        assert_eq!(Arch::X86_64.macos_triples(), ["x86_64-apple-darwin"]);
+        assert_eq!(
+            Arch::Universal.macos_triples(),
+            ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+        );
+        let (here, other) = if cfg!(target_arch = "aarch64") {
+            ("aarch64-apple-darwin", "x86_64-apple-darwin")
+        } else {
+            ("x86_64-apple-darwin", "aarch64-apple-darwin")
+        };
+        assert_eq!(macos_build_triple(here), None);
+        assert_eq!(macos_build_triple(other), Some(other));
+        assert_eq!(lipo_arch("aarch64-apple-darwin"), "arm64");
+        assert_eq!(lipo_arch("x86_64-apple-darwin"), "x86_64");
+        assert_eq!(macos_update_platforms(None), [nsh_updater::platform()]);
+        assert_eq!(macos_update_platforms(Some(Arch::X86_64)), ["macos-x86_64"]);
+        assert_eq!(
+            macos_update_platforms(Some(Arch::Universal)),
+            ["macos-aarch64", "macos-x86_64"]
+        );
+    }
+
+    #[test]
+    fn only_macos_packages_take_an_arch() {
+        for target in [
+            PackageTarget::Linux,
+            PackageTarget::Windows,
+            PackageTarget::Ios,
+            PackageTarget::Android,
+            PackageTarget::Web,
+        ] {
+            let error = package(PackageOptions {
+                entry: Path::new("App.tsx"),
+                target,
+                out: Path::new(".nsh/out"),
+                config: AppConfig::default(),
+                sign: None,
+                profile: None,
+                keystore: None,
+                abis: &[],
+                format: crate::android::Format::Apk,
+                arch: Some(Arch::X86_64),
+                run: false,
+                asset_url: None,
+            })
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "--arch only applies to --target macos",
+                "{target:?}"
+            );
+        }
+    }
+
+    /// A universal package's executable is one file of both runners; an
+    /// architecture is taken out of a universal runner.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_runners_merge_into_one_universal_executable() {
+        let dir = std::env::temp_dir().join(format!("nsh-macos-runner-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("main.c");
+        fs::write(&source, "int main(void) { return 0; }\n").unwrap();
+        let compile = |arch: &str| {
+            let out = dir.join(format!("runner-{arch}"));
+            let status = Command::new("cc")
+                .args(["-arch", arch, "-o"])
+                .arg(&out)
+                .arg(&source)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            out
+        };
+        let (arm, intel) = (compile("arm64"), compile("x86_64"));
+        let runner = |path: &Path, arch: &'static str| MacRunner {
+            path: path.to_owned(),
+            arch: Some(arch),
+            fat: lipo_archs(path).unwrap().len() > 1,
+        };
+
+        let universal = dir.join("App");
+        install_macos_runner(
+            &[runner(&arm, "arm64"), runner(&intel, "x86_64")],
+            &universal,
+        )
+        .unwrap();
+        let mut archs = lipo_archs(&universal).unwrap();
+        archs.sort();
+        assert_eq!(archs, ["arm64", "x86_64"]);
+
+        let thin = dir.join("Thin");
+        install_macos_runner(&[runner(&universal, "x86_64")], &thin).unwrap();
+        assert_eq!(lipo_archs(&thin).unwrap(), ["x86_64"]);
+        // The part taken out is not left beside the executable.
+        assert!(!dir.join("Thin.x86_64").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn an_apk_takes_the_phones_abis_and_the_devices() {
         let abis = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -1630,6 +1994,42 @@ mod tests {
     }
 
     #[test]
+    fn apple_packages_declare_the_apps_languages() {
+        let dir = std::env::temp_dir().join(format!("nsh-localizations-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("locales")).unwrap();
+        fs::write(dir.join("App.tsx"), "").unwrap();
+        fs::write(dir.join("locales/en.yml"), "hello: Hello\n").unwrap();
+        fs::write(dir.join("locales/zh-CN.yml"), "hello: 你好\n").unwrap();
+        let declared = |config: &AppConfig| {
+            let macos = macos_info_plist("A", "com.a", "a", config, false).unwrap();
+            let ios = info_plist("A", "com.a", "a", config, "iphoneos").unwrap();
+            assert_eq!(
+                macos.get("CFBundleLocalizations"),
+                ios.get("CFBundleLocalizations")
+            );
+            macos.get("CFBundleLocalizations").map(|list| {
+                list.as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // The translations' languages, English (the development region) first...
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "zh-CN"]);
+        // ...or exactly those `locales` lists, as the bundle carries them.
+        fs::write(dir.join("nsh.json"), r#"{ "locales": ["ja", "zh-TW", 7] }"#).unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(declared(&config).unwrap(), ["en", "ja", "zh-TW"]);
+        // An app without either declares nothing: English, as before.
+        assert_eq!(declared(&AppConfig::default()), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn apps_claim_their_url_schemes_in_the_package() {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["MyApp", "myapp-dev"] }"#).unwrap();
@@ -1696,6 +2096,15 @@ mod tests {
         // An app without them has none.
         let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
         assert!(info.get("window").is_none());
+    }
+
+    #[test]
+    fn single_instance_apps_say_so_in_app_json() {
+        let config: AppConfig = serde_json::from_str(r#"{ "singleInstance": true }"#).unwrap();
+        let info = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(info["singleInstance"], serde_json::json!(true));
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("singleInstance").is_none());
     }
 
     #[test]

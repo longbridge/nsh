@@ -96,7 +96,7 @@
   gets the values then, and bindings that change are handed over again. While bound, a static value of the same name is
   kept but not sent; unbinding (JS: the prop is a plain value again) sends it, or `None`. The C ABI takes the callbacks
   through `nsh_app_register_component_with_animation` (`NshComponentAnimationCallbacks`); `nsh_app_register_component` is
-  unchanged and its components get the values as `set_prop` JSON. GPUI delivers them with the next frame, as props;
+  unchanged and its components get the values as `set_prop` JSON. GPUI delivers them with the next frame;
   the web has no registered components and ignores them.
   On the GPUI backend (`nsh-platform-gpui`, `native.rs`) a component renders a GPUI element
   (`NativeComponent::render(window, cx) -> Option<AnyElement>`, any GPUI / GPUI Kit element or `Entity` view): the
@@ -107,8 +107,10 @@
   then the app's `keymap` bindings (as while a text field is focused, so a binding whose `when` is `auto` leaves
   typing keys to the component) and the menu's shortcuts, and nothing else of NSH's (`input::component_key`); one that returns its widget's
   handle from `NativeComponent::focus_handle` is a Tab stop among the text fields (in tree order, in the newest modal's
-  scope). Props and commands reach it with the next frame, before `render`, with the window and `App` (`set_prop(name,
-  value, window, cx)`, `command(name, args, window, cx)`), so it can update its entities. `render` is also called while
+  scope). Props and commands reach it soon after they arrive, in a main-thread task of their own (never inside a frame),
+  before the next `render`, with its window and `App` (`set_prop(name, value, window, cx)`, `command(name, args, window,
+  cx)`), so it can update its entities; they do not wait for a frame, so a host that hides the view or a window in the
+  background still gets them, in order and once (a frame that comes first delivers them itself). `render` is also called while
   the box is empty, so a component can size itself. Content masks are
   rectangles: rounded corners do not cut a component (videos follow them).
   `crates/gpui/nsh-platform-gpui/examples/embed.rs` runs `examples/embedded` with its badge as a GPUI element.

@@ -70,6 +70,7 @@ use nsh_core::{
         SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
         laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -670,6 +671,29 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
     })
 }
 
+/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
+/// view `view` that sets no cursor of its own: the pointer there wins over
+/// the I-beam of selectable text and the arrow of plain text, as on the
+/// other desktops (#759).
+fn over_link(view: &NshView, x: f32, y: f32) -> bool {
+    {
+        let s = view.state();
+        if css_cursor(s.style.cursor).is_some()
+            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
+        {
+            return false;
+        }
+    }
+    let (lx, ly) = local(view, x, y);
+    let s = view.state();
+    let Some(text) = s.text.as_ref() else {
+        return false;
+    };
+    crate::text::char_at(&s, lx, ly)
+        .and_then(|i| text.text.link_at(i))
+        .is_some_and(|link| has_press(link.events))
+}
+
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
@@ -684,6 +708,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         {
             return c;
         }
+    }
+    if over_link(&hit.view, x, y) {
+        return Cursor::Hand;
     }
     let mut view = Some(hit.view);
     while let Some(v) = view {
@@ -836,6 +863,11 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if event.kind == PointerKind::Down {
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -1049,6 +1081,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     let input = &surface.input;
     if MODIFIER_KEYS.contains(&event.vk) && !event.repeat {
         modifiers_changed(surface, event.modifiers);
+    } else if event.down {
+        // Before the key acts: the focus it moves shows (`focus-visible:`).
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
     }
     if !event.down {
         // `DefWindowProc` opens the window menu when Alt is released after
@@ -1650,6 +1685,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: point(Points(p.x), Points(p.y)),
                     location: point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()

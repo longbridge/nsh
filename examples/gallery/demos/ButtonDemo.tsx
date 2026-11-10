@@ -171,7 +171,7 @@ export function ButtonDemo() {
             onPress={() => void openUrl("https://nsh.dev/docs/design-guides").then(({ opened }) => last.set(opened ? "opened the guidelines" : "No app opens links"))}
             hoverStyle={{ opacity: 0.8 }}
             activeStyle={{ opacity: 0.6 }}
-            focusStyle={focusRing()}
+            focusVisibleStyle={focusRing()}
             style={{ cursor: "pointer", flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 4, transitionProperty: "opacity", transitionDuration: 120 }}
           >
             <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.accent, textDecorationLine: "underline" }}>

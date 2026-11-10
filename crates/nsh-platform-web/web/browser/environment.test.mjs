@@ -36,7 +36,7 @@ const engine = (changes = {}) => ({
   window: { width: 390, height: 844 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
   colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
-  locale: "de-AT", host: false, lifecycle: "active", localeSettings: settings(),
+  locale: "de-AT", host: false, lifecycle: "active", shaders: true, localeSettings: settings(),
   platform: { os: "web", version: "0.0", idiom: "desktop", desktop: true, appleKeyboard: false },
   ...changes,
 });
@@ -94,6 +94,16 @@ test("the lifecycle is the engine's", () => {
   assert.equal(env.api.lifecycle(), "background");
   env.update(engine({ lifecycle: "inactive" }));
   assert.equal(env.api.lifecycle(), "inactive");
+});
+
+test("whether shaders draw is the engine's", () => {
+  const { env } = environment();
+  // Before the engine reports, the native environment's default.
+  assert.equal(env.api.shadersAvailable(), true);
+  env.update(engine());
+  assert.equal(env.api.shadersAvailable(), true);
+  env.update(engine({ shaders: false }));
+  assert.equal(env.api.shadersAvailable(), false);
 });
 
 test("the locale settings are the engine's", () => {

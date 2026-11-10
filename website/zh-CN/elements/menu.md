@@ -14,7 +14,7 @@ demo: el-menu
 
 选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，在触摸屏上由手指按住触发元素打开，或在触发元素下方由浏览器和 Linux 上的键盘、macOS 和 Windows 上的读屏软件打开。
 
-在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目；在桌面上，之后按 Down 或 Home 键聚焦第一个可用的条目，按 Up 或 End 键聚焦最后一个。
+在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目；在桌面上，之后按 Down 或 Home 键聚焦第一个可用的条目，按 Up 或 End 键聚焦最后一个。Page Down 移到视图里最后一个可用的条目，Page Up 移到第一个，到头停住（`MenuList` 每次翻一屏，见[长列表](#长列表)）。在桌面上，指针移到某个条目上时它获得键盘焦点，按键从指针下的条目接着走；给条目的 `focus:` 状态设和 `hover:` 一样的样式。
 在桌面和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。指针打开的子菜单，在方向键把焦点移到所在菜单的另一个条目时关闭。
 
 ```rust tabs
@@ -53,7 +53,7 @@ import { Menu, MenuItem, MenuSeparator, Submenu } from "nsh/base";
 
 function Item(props: { label: string; onSelect: () => void }) {
   return (
-    <MenuItem onSelect={props.onSelect} class="rounded-md px-3 py-2 hover:bg-gray-100 active:bg-gray-200">
+    <MenuItem onSelect={props.onSelect} class="rounded-md px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 active:bg-gray-200">
       <Text>{props.label}</Text>
     </MenuItem>
   );
@@ -180,7 +180,7 @@ function ViewMenu() {
         indicatorClass={part}
         indicator={<Text>✓</Text>}
         onSelect={() => sidebar.set(!sidebar())}
-        class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100"
+        class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 focus:bg-gray-100"
       >
         <Text>Show sidebar</Text>
       </MenuItem>
@@ -192,7 +192,7 @@ function ViewMenu() {
             indicatorClass={part}
             indicator={<Text>✓</Text>}
             onSelect={() => sort.set(by())}
-            class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 checked:font-semibold"
+            class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 checked:font-semibold"
           >
             <Text>{by()}</Text>
           </MenuItem>
@@ -247,7 +247,7 @@ const recent = signal<string[] | null>(null);
 
 ## 长列表
 
-条目很多、或条数由数据决定（模型、账号、最近的文件）的菜单，把它们放进 `MenuList`（Rust）：一个虚拟化列表，只建出视口附近的行。它的行是菜单的条目，与前后的条目排在一起：Up、Down、Home 和 End 在列表的每一行之间移动，先滚到某一行再聚焦它，并跳过禁用的行，然后接着走到列表前后的条目，包括 `Submenu` 的条目。`render_item` 按行号画出每一行，每行一个 `MenuItem` 或 `Submenu`；请给列表设一个高度。
+条目很多、或条数由数据决定（模型、账号、最近的文件）的菜单，把它们放进 `MenuList`（Rust）：一个虚拟化列表，只建出视口附近的行。它的行是菜单的条目，与前后的条目排在一起：Up、Down、Home 和 End 在列表的每一行之间移动，先滚到某一行再聚焦它，并跳过禁用的行，然后接着走到列表前后的条目，包括 `Submenu` 的条目。Page Down 和 Page Up 每次让列表滚动一屏。`render_item` 按行号画出每一行，每行一个 `MenuItem` 或 `Submenu`；请给列表设一个高度。
 
 ```rust
 use nsh_base::{MenuListEntry, menu, menu_item, menu_list, submenu};

@@ -65,6 +65,7 @@ use nsh_core::{
         self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, VelocityTracker, ZOOM_IDLE, has_press, laid_out,
         latch_holds, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
@@ -150,6 +151,10 @@ pub(crate) struct Input {
     js_block: Cell<bool>,
     /// Where the mouse last was (root coordinates), while over the root.
     last: Cell<Option<(f32, f32)>>,
+    /// The cursor this surface last set (`None`: another may show, a
+    /// hosted view's or another app's) — `NSCursor::currentCursor` is
+    /// another object than the one set when the pointer is customized.
+    cursor: Cell<Option<Cursor>>,
     /// Hovered views and the cursor are picked again on the main queue
     /// (what is under the mouse moved).
     repick: Cell<bool>,
@@ -513,9 +518,8 @@ fn update_cursor(surface: &Surface, x: f32, y: f32) {
 /// [`update_cursor`]; unless `always`, only when the app's cursor is
 /// another one. `-[NSCursor set]` costs milliseconds even for the cursor
 /// already set (with a customized pointer size or color it renders the
-/// cursor image again: ~3 ms on macOS 26), so what calls it while the mouse
-/// is still (batches, scroll steps, AppKit's cursor updates) skips it; a
-/// mouse that moves sets it, as it may come from another app's cursor.
+/// cursor image again: ~3 ms on macOS 26), so only the mouse coming in
+/// (it may bring another app's cursor) and a press's end set it always.
 fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     if surface.input.pointer.borrow().is_some() {
         // A drag keeps the cursor it began with.
@@ -530,7 +534,8 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
         y,
     );
     let cursor = match hit {
-        Some(hit) if hit.native => return,
+        // the hosted view sets its own: the next one is set again
+        Some(hit) if hit.native => return surface.input.cursor.set(None),
         Some(hit) => {
             if over_link(surface, &hit.view, x, y) {
                 Cursor::Pointer
@@ -540,10 +545,17 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
         }
         None => Cursor::Default,
     };
-    let cursor = ns_cursor(cursor);
-    if always || NSCursor::currentCursor() != cursor {
-        cursor.set();
+    if let Some(cursor) = cursor_to_set(always, surface.input.cursor.get(), cursor) {
+        ns_cursor(cursor).set();
+        surface.input.cursor.set(Some(cursor));
     }
+}
+
+/// The cursor to set where the app's is `cursor`, after this surface last
+/// set `set` (`None`: another may show, a hosted view's or another app's):
+/// none when it shows already, unless `always`.
+fn cursor_to_set(always: bool, set: Option<Cursor>, cursor: Cursor) -> Option<Cursor> {
+    (always || set != Some(cursor)).then_some(cursor)
 }
 
 /// The mouse at `(x, y)` (root coordinates) is over `view` (none: off the
@@ -601,10 +613,13 @@ fn refresh_cursor(surface: &Surface) {
 }
 
 /// AppKit asks the view under the mouse for its cursor (`cursorUpdate:`,
-/// after views moved or were added): NSH's, which AppKit's default (the
-/// arrow, set again on every update) would replace.
+/// after views moved or were added, or the pointer left a window edge's
+/// resize cursor): NSH's, which AppKit's default (the arrow, set again on
+/// every update) would replace. Set always: AppKit may have shown another.
 pub(crate) fn cursor_update(surface: &Surface) {
-    refresh_cursor(surface);
+    if let Some((x, y)) = surface.input.last.get() {
+        set_cursor_at(surface, x, y, true);
+    }
 }
 
 /// A repick waits this long after the last content move (ms): each repick
@@ -718,14 +733,17 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     ) {
         input.last.set(Some((x, y)));
     }
-    // A press in a window gives it the keyboard (AppKit does it itself, but
-    // for an app in the background).
     if matches!(
         ty,
         NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
-    ) && let Some(window) = event.window(surface.mtm)
-    {
-        crate::window::became_key(surface, &window);
+    ) {
+        // Before the press acts: the focus it moves does not show.
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+        // A press in a window gives it the keyboard (AppKit does it itself,
+        // but for an app in the background).
+        if let Some(window) = event.window(surface.mtm) {
+            crate::window::became_key(surface, &window);
+        }
     }
     match ty {
         // Control-click is the secondary click on macOS.
@@ -787,11 +805,16 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
             hover(surface, x, y, mouse);
             mouse_moved(surface, x, y, mouse);
             reveal_indicators(surface, x, y);
-            update_cursor(surface, x, y);
+            // Set always as the mouse comes in (it may bring another app's
+            // cursor); while it moves, only when it changes: setting it
+            // on every move kept a customized pointer re-rendering
+            // (~95% of the main thread's time over a chat's rows).
+            set_cursor_at(surface, x, y, ty == NSEventType::MouseEntered);
         }
         NSEventType::MouseExited => {
             // The views it leaves hear where it was last over them.
             let (x, y) = input.last.take().unwrap_or((x, y));
+            input.cursor.set(None);
             if input.pointer.borrow().is_none() {
                 set_hovered(surface, Vec::new(), x, y, Mouse::of(event));
                 hover_link(surface, None, x, y);
@@ -837,6 +860,10 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
         if input {
             return;
         }
+        if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
+            crate::text::context_menu(surface);
+            return;
+        }
     }
 }
 
@@ -849,6 +876,11 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
 /// move that way. Fields keep their keys (they reach the root only when
 /// they do not use them).
 pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
+    // Before the key acts: the focus it moves shows (`focus-visible:`).
+    // A modifier alone is a `flagsChanged`, never a key down.
+    if down {
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
             activate(surface, &view, "keyboard");
@@ -1471,6 +1503,10 @@ fn down(
     };
     let input = &surface.input;
     input.js_block.set(false);
+    // A press stops the momentum a trackpad flick left running, wherever
+    // it lands; the press still registers (`catch` below is for the app's
+    // own glides on views under the pointer, and swallows it).
+    end_momentum(surface);
     let native = hit.native;
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
@@ -1987,6 +2023,7 @@ fn report(surface: &Surface, phase: TouchPhase, p: &Pointer, activated: Option<N
         page: point(Points(p.x), Points(p.y)),
         location: point(Points(lx), Points(ly)),
         changed: true,
+        pointer_type: nsh_core::PointerType::Mouse,
     };
     let event = TouchEvent {
         phase,
@@ -3047,6 +3084,31 @@ mod tests {
         let vertical = Candidate::Pan { x: false, y: true };
         assert!(vertical.accepts(1.0, -7.0));
         assert!(!vertical.accepts(-7.0, 1.0));
+    }
+
+    #[test]
+    fn the_cursor_is_set_only_when_it_changes() {
+        // A move over views of the same cursor sets nothing.
+        assert_eq!(
+            cursor_to_set(false, Some(Cursor::Pointer), Cursor::Pointer),
+            None
+        );
+        // A move onto another cursor sets it.
+        assert_eq!(
+            cursor_to_set(false, Some(Cursor::Pointer), Cursor::Text),
+            Some(Cursor::Text)
+        );
+        // After a hosted view's or another app's cursor, it is set again.
+        assert_eq!(
+            cursor_to_set(false, None, Cursor::Pointer),
+            Some(Cursor::Pointer)
+        );
+        // The mouse coming in, a press's end and AppKit's cursor updates set
+        // it always.
+        assert_eq!(
+            cursor_to_set(true, Some(Cursor::Pointer), Cursor::Pointer),
+            Some(Cursor::Pointer)
+        );
     }
 
     #[test]

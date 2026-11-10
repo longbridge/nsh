@@ -286,9 +286,23 @@ Things that were found the hard way. Read the section of the area you change bef
   reads the element's value as soon as the call returns, while the new value comes from the engine thread in a later
   batch: a step whose value arrives after VoiceOver read the old one announces the new one (`NshView::late_step_value`),
   one that arrives before it asked is read by VoiceOver itself.
+- **iOS, a `UIVisualEffectView` takes its shape through `maskView` only**: UIKit's documentation of
+  `UIVisualEffectView` says a mask on the layer of an effect view, or of one of its superviews, breaks the effect.
+  UIKit copies the mask view when it is set, so changing the mask view's geometry afterwards does nothing: a new size
+  or shape needs the mask view set again. A backdrop blur or glass with unequal corner radii gets a new mask view,
+  configured whole before it is set, whenever its size or radii change (`visual.rs` `set_backdrop`); one with a
+  single radius uses the layer's corners. A view with `overflow: hidden` and unequal radii still masks its own layer
+  (`decor.rs`), which is its effect view's superview: the case the documentation names, not changed yet.
 
 ## Android
 
+- **Android, responders inside pressable views**: a view that takes no press of its own (a `RichEditor`'s selection
+  handle) leaves the touch to the nearest pressable ancestor, which keeps tracking it: it raised its long press while a
+  finger held the handle and its press on the lift. `SetJsResponder` with a block ends the presses of the ancestors
+  (`Box.cancelPress`, `Pressable.cancel`), as iOS cancels their `PressRecognizer`s. A floating `ActionMode` keeps its
+  content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
+  caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
+  root view (`InputBox.openEditMenu`).
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
   a local frame (`java::with_env`), or local references pile up.
 - **Android, text**: `StaticLayout` ignores `maxLines` without an ellipsis (clip mode counts lines itself and the view clips);
@@ -715,6 +729,11 @@ Things that were found the hard way. Read the section of the area you change bef
   "Progressive blur", inside continuous-cornered cards). Either one alone is fine, as are circular corners. A clipping
   view with continuous corners (`nsh-curve-clip`) takes circular corners of its radius while a backdrop-filtered view
   (`nsh-backdrop`) is inside it (`nsh.js`, `placeCorners`).
+- **The async clipboard writes only PNG images**: a `ClipboardItem` of `image/jpeg` or `image/webp` is rejected
+  (Chrome 156; the clipboard kept what it held), and Safari writes only within the user's gesture, which an `await`
+  before `clipboard.write` loses. `writeClipboardImage` (`nsh.js`) starts the write at once with a promise of the
+  PNG, the image encoded again when it is another format, and logs a failure with a warning. It decodes a `data:` URI
+  itself: the `connect-src` of a published page whose app restricts `network` refuses `fetch` of `data:` URIs.
 - **Canvas `measureText` gives color emoji their 1x advance, the DOM draws them at the screen's pixel ratio**:
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of

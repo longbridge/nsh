@@ -259,7 +259,7 @@ export function ToggleDemo() {
         style={{ width: terminal ? undefined : seg, height: terminal ? undefined : seg - 2 * inset, alignItems: "center", justifyContent: "center", borderRadius: 7, ...transition() }}
         hoverStyle={view() === value ? undefined : hovered()}
         activeStyle={{ transform: [{ scale: 0.9 }] }}
-        focusStyle={focusRing(1)}
+        focusVisibleStyle={focusRing(1)}
       >
         {glyph(view() === value ? colors.text : colors.muted)}
       </Toggle>
@@ -349,7 +349,7 @@ export function ToggleDemo() {
         style={{ flexDirection: "row", alignItems: "center", gap: 6, height: terminal ? undefined : pointer ? 28 : 36, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent", ...transition() }}
         pressedStyle={{ backgroundColor: alpha(colors.accent, 0.12), borderColor: alpha(colors.accent, 0.3) }}
         hoverStyle={props.on ? undefined : hovered()}
-        focusStyle={focusRing(1)}
+        focusVisibleStyle={focusRing(1)}
       >
         {/* A terminal's star is a glyph, filled when on. */}
         <If when={terminal}>

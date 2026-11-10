@@ -160,6 +160,13 @@ pub struct AppOptions {
     /// and hands each URL to the app (`UrlScheme.on("open", ...)`). An app
     /// embedding a view hands URLs in with [`AppView::open_url`].
     pub schemes: Vec<String>,
+    /// The app runs once (nsh.json `singleInstance`), for [`run_app`]: a
+    /// second launch hands its arguments and working directory to the
+    /// first (GApplication's `command-line`, over D-Bus, keyed on
+    /// [`app_id`](Self::app_id)) and exits before it opens a window; the
+    /// first brings its window forward and tells the app
+    /// (`Application.on("secondInstance", ...)`).
+    pub single_instance: bool,
 }
 
 impl Default for AppOptions {
@@ -180,6 +187,7 @@ impl Default for AppOptions {
             notifications: false,
             host: nsh_engine::HostChannel::default(),
             schemes: Vec::new(),
+            single_instance: false,
         }
     }
 }
@@ -426,6 +434,8 @@ fn initial_environment() -> Environment {
         audio: true,
         // WebKitGTK, in builds with it.
         web_views: cfg!(feature = "webview"),
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -488,17 +498,26 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     // An app that opens URLs runs once: a second launch hands its URL to
     // the first (GApplication's `open`) and ends.
     let links = !options.schemes.is_empty();
+    // A single-instance app runs once too: a second launch hands its whole
+    // command line to the first (`command-line`) and ends.
+    let single = options.single_instance;
     let app = gtk::Application::builder()
         .application_id(&options.app_id)
-        .flags(if links {
+        .flags(if single {
+            gtk::gio::ApplicationFlags::HANDLES_COMMAND_LINE
+        } else if links {
             gtk::gio::ApplicationFlags::HANDLES_OPEN
         } else {
             gtk::gio::ApplicationFlags::NON_UNIQUE
         })
         .build();
     STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
-    let args: Vec<String> = if links {
+    if links {
         crate::links::register(&options.app_id, &options.title, &options.schemes);
+    }
+    let args: Vec<String> = if single {
+        std::env::args().collect()
+    } else if links {
         crate::links::launch_args(&options.schemes)
     } else {
         Vec::new()
@@ -523,6 +542,47 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             }
             window.present();
         }
+    });
+    let shown_line = shown.clone();
+    let launch_line = launch_links.clone();
+    let schemes = options.schemes.clone();
+    app.connect_command_line(move |app, line| {
+        let mut args: Vec<String> = line
+            .arguments()
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        // The program's path.
+        if !args.is_empty() {
+            args.remove(0);
+        }
+        let urls: Vec<String> = args
+            .iter()
+            .filter(|arg| crate::links::is_link(arg, &schemes))
+            .cloned()
+            .collect();
+        // This process's own launch: it opens the window.
+        if shown_line.borrow().is_none() {
+            launch_line.borrow_mut().extend(urls);
+            app.activate();
+            return gtk::glib::ExitCode::SUCCESS;
+        }
+        if let Some((window, view)) = &*shown_line.borrow() {
+            let cwd = line
+                .cwd()
+                .map(|cwd| cwd.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            view.surface.event(
+                nsh_core::ROOT_ID,
+                nsh_core::EventKind::SecondInstance,
+                nsh_core::single_instance::SecondInstance::new(args, cwd).to_payload(),
+            );
+            for url in urls {
+                view.open_url(&url);
+            }
+            window.present();
+        }
+        gtk::glib::ExitCode::SUCCESS
     });
     let source = RefCell::new(Some(source));
     app.connect_activate(move |app| {
