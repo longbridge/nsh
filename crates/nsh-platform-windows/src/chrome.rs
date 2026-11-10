@@ -52,7 +52,7 @@ use windows::{
                 BI_RGB, BITMAPINFO, BITMAPINFOHEADER, COLOR_GRAYTEXT, COLOR_MENUTEXT,
                 CreateDIBSection, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_HIDEPREFIX,
                 DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, FillRect, GetMonitorInfoW,
-                GetSysColor, GetWindowDC, HBITMAP, HDC, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+                GetSysColor, GetWindowDC, HBITMAP, HDC, MONITOR_DEFAULTTONEAREST, MONITORINFO,
                 MonitorFromWindow, ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
             },
         },
@@ -600,28 +600,32 @@ pub(crate) fn nc_max_size(hwnd: HWND, info: &mut MINMAXINFO) {
     if !frameless(hwnd) {
         return;
     }
-    let work = unsafe {
-        // SAFETY: plain calls with a local out value.
-        let mut monitor = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        let m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        if !GetMonitorInfoW(m, &mut monitor).as_bool() {
-            return;
-        }
-        monitor.rcWork
+    let mut monitor = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
     };
+    // SAFETY: plain calls with a local out value.
+    let ok = unsafe {
+        let m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(m, &mut monitor).as_bool()
+    };
+    if !ok {
+        return;
+    }
+    let (work, origin) = (monitor.rcWork, monitor.rcMonitor);
     let inset = frame_thickness(hwnd);
+    // `ptMaxPosition` is relative to the monitor's origin, not the
+    // virtual screen: the system places it on the monitor the window
+    // maximizes on. The track sizes stay `track_sizes`', so a user can
+    // still drag the window across monitors.
     info.ptMaxPosition = POINT {
-        x: work.left - inset,
-        y: work.top - inset,
+        x: work.left - origin.left - inset,
+        y: work.top - origin.top - inset,
     };
     info.ptMaxSize = POINT {
         x: (work.right - work.left) + inset * 2,
         y: (work.bottom - work.top) + inset * 2,
     };
-    info.ptMaxTrackSize = info.ptMaxSize;
 }
 
 /// The visible border the system draws along a window's top edge, in
