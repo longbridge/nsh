@@ -40,6 +40,8 @@ pub(crate) struct Host {
     density: Density,
     trace: bool,
     engine: Mutex<Option<Engine>>,
+    /// Fences WebView completions from engines replaced on this surface.
+    web_generation: AtomicU64,
     /// The running engine's control, for answers the sink gives itself
     /// (never locked while an engine stops, unlike `engine`).
     answers: Mutex<Option<EngineControl>>,
@@ -187,7 +189,11 @@ impl Host {
         }
         // Stop the old engine first: its batches must not reach the new app.
         *self.answers.lock().expect("answers") = None;
-        let old = self.engine.lock().expect("engine").take();
+        let (old, web_generation) = {
+            let mut engine = self.engine.lock().expect("engine");
+            let generation = self.web_generation.fetch_add(1, Ordering::Relaxed) + 1;
+            (engine.take(), generation)
+        };
         if let Some(old) = old {
             drop(old);
             // No `Delete` follows for its views: its native components
@@ -240,7 +246,7 @@ impl Host {
             windows: None,
         };
         let density = self.density.clone();
-        let sink = Sink(self.clone());
+        let sink = Sink(self.clone(), web_generation);
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
@@ -437,7 +443,7 @@ fn register_inline_images(host: &Host, batch: &MountBatch) {
 
 /// Hands commits to the UI thread: one `NshView.submit(bytes, objects, seq)`
 /// call per batch.
-struct Sink(Arc<Host>);
+struct Sink(Arc<Host>, u64);
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
@@ -448,7 +454,7 @@ impl MountSink for Sink {
         }
         answer_clipboard_reads(host, &batch);
         register_inline_images(host, &batch);
-        let mut encoded = encode::encode(batch);
+        let mut encoded = encode::encode(batch, self.1);
         if let Some(keymap) = encoded.keymap.take() {
             host.keymap
                 .lock()
@@ -621,6 +627,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         density: Density::new(density),
         trace: trace != 0,
         engine: Mutex::new(None),
+        web_generation: AtomicU64::new(0),
         answers: Mutex::new(None),
         pending: Mutex::new(None),
         viewport: Mutex::new(Size::new(px(0.0), px(0.0))),
@@ -629,6 +636,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            web_evaluate: true,
             // wgpu on Vulkan or GLES, in builds with it, until it finds no
             // GPU.
             shaders: nsh_engine::shader::LINKED,
@@ -1474,6 +1482,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 page: point(px(c[i * 4]), px(c[i * 4 + 1])),
                 location: point(px(c[i * 4 + 2]), px(c[i * 4 + 3])),
                 changed: flags[i] != 0,
+                pointer_type: nsh_core::PointerType::Touch,
             }
         })
         .collect();
@@ -1721,6 +1730,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "canGoBack" => "canGoBack",
                 "canGoForward" => "canGoForward",
                 "data" => "data",
+                "generation" => "generation",
                 "message" => "message",
                 "code" => "code",
                 "duration" => "duration",
@@ -1776,6 +1786,27 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             EventPayload::Map(fields)
         }
     };
+    if kind == EventKind::WebEvaluation {
+        let generation = match &payload {
+            EventPayload::Map(fields) => fields.iter().find_map(|(key, value)| match value {
+                PayloadValue::Str(value) if *key == "generation" => value.parse::<u64>().ok(),
+                _ => None,
+            }),
+            _ => None,
+        };
+        // Check and capture the control under the same lock load() uses
+        // to replace it: a late callback can only reach its own engine.
+        let control = {
+            let engine = host.engine.lock().expect("engine");
+            (generation == Some(host.web_generation.load(Ordering::Relaxed)))
+                .then(|| engine.as_ref().map(Engine::control))
+                .flatten()
+        };
+        if let Some(control) = control {
+            control.dispatch_event(id as NodeId, kind, payload);
+        }
+        return;
+    }
     match host.control() {
         Some(control) => control.dispatch_event(id as NodeId, kind, payload),
         // A link before the app runs (the launch intent's): the engine

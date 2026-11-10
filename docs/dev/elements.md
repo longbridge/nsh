@@ -525,3 +525,21 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
 - **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.
+
+## WebView evaluation
+
+`WebViewRef.evaluate(script, { timeout })` (TS, `nsh-js` `components.rs`) and Rust's
+`ElementRef::evaluate(script, EvaluateOptions)` run through the same request table in
+`core/web_evaluation.rs`: it checks `Environment::web_evaluate`, the `webview` grant and
+the limits, keeps each request's deadline (`timeout`; it sends `Command::CancelEvaluate`
+when it passes), and settles the request from the internal `WebEvaluation` event a
+platform replies with, never from page messages. `platform/web_evaluation.rs` and
+`web_evaluation.js` hold the page wrapper (JSON result contract, polling of returned
+Promises, cleanup) that every platform runs. iOS and macOS share
+`nsh-platform-apple`'s `web_evaluation.rs` (WKWebView completions); Android runs it in
+`WebBox.java` (`evaluateJavascript`). The platforms abort requests on a new-document
+navigation, explicit navigation commands, a reloading source, renderer loss and
+disposal; page-initiated same-document history updates keep them. Platforms that leave
+`web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
+`WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
+

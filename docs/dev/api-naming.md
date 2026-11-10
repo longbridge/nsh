@@ -102,6 +102,9 @@ go elsewhere under these rules rather than into them.
   Apple platforms, the Windows / Super key elsewhere), as GPUI's `MouseMoveEvent { position, modifiers, pressed_button }`
   (decided by the user, 2026-10-21; the mouse events' `MouseEvent` adds `pressedButton`, 2026-10-27). The frozen
   responder events keep React Native's `locationX` / `pageX`.
+- **Sides and runs**: which side of something a thing goes on is a `placement` (`Popover`'s, the tray's
+  `titlePlacement`: `"right"` / `"left"`), never a `position`, which is a `Point`. Text in one style is a *run*
+  (GPUI's `TextRun`: `TrayTitleRun { text, color? }`, `TerminalRun`); a *part* is a component's part.
 - **Units**: one unit per quantity, everywhere, React Native's modules included. A length is points, an image's or a
   video's own size pixels (`PixelSize`, never `Size`: `onLoad`, `Image.getSize`, the clipboard's and the picker's
   images), a time milliseconds (`duration`, `delay`, `timeout`, `keyboardFrame().duration`), a velocity points per

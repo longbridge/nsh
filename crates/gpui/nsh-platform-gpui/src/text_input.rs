@@ -788,6 +788,7 @@ fn move_focus(surface: &Rc<Surface>, view: Option<&NshView>, old: Option<&NshVie
     if let Some(view) = view
         && let Some(input) = input_of(view)
     {
+        crate::key_focus::clear(surface);
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = Some(view.clone()));
         surface.window_focus_requested.set(true);
         input.focused.set(true);

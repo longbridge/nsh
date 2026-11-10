@@ -375,6 +375,7 @@ An app without `"capabilities"` in nsh.json may open windows of every kind excep
 const Application: {
   quit(): void;
   restart(): void;
+  on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
 };
 ```
 
@@ -382,6 +383,7 @@ const Application: {
 |---|---|---|
 | `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
 | `restart()` | `restart()` | Quits the app as `quit()` does, then starts it again with the same arguments. |
+| `on("secondInstance", listener)` | `next_second_instance()` | The app was launched again while it runs ([Single instance](#single-instance)). |
 
 `Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
 update. The app stops as when its last window closes, then its run ends, also when closing the window alone would
@@ -407,6 +409,41 @@ async function changeLanguage(language: string) {
   if (await confirmRestart()) Application.restart();
 }
 ```
+
+### Single instance
+
+A desktop app usually runs once: opening it again brings the running app forward. An app opts in with
+`"singleInstance": true` in nsh.json. A second launch then hands its command line to the running app and exits before it
+opens a window or starts its engine; the running app brings its main window forward (shown when it was hidden, as a
+tray app's) and reports the launch as `secondInstance`, with the arguments (the program's path not included) and the
+directory it was started in:
+
+```json
+{ "singleInstance": true }
+```
+
+```tsx
+import { Application } from "nsh/desktop";
+
+Application.on("secondInstance", ({ args, cwd }) => {
+  const file = args.find((arg) => !arg.startsWith("-"));
+  if (file) openDocument(resolve(cwd, file));
+});
+```
+
+Rust code awaits `next_second_instance()` of `nsh_core::prelude`, a `SecondInstance` with `args` and `cwd`. A launch that
+comes while nothing listens waits for the next listener (up to 16, the oldest dropped). Anyone can start the app with
+any arguments, so check them as any other input. Links of the app's [schemes](nsh.md#urlscheme) among the arguments
+also come through `UrlScheme.on("open")`.
+
+| Platform | How the app runs once |
+| --- | --- |
+| Windows | A mutex named after the app's id; the second launch sends its arguments and working directory to the running app's window (`WM_COPYDATA`) |
+| Linux | GApplication's uniqueness on the session bus, by the app's id; the second launch's command line goes to the running app |
+| macOS | Launch Services runs one instance of an app bundle and activates it when it is opened again, so `secondInstance` is not reported; files and links come through `UrlScheme` |
+| iOS, Android, web | The system runs the app once; `secondInstance` is not reported |
+
+The release runners of `nsh package` read the setting; `nsh run` starts its development host as before.
 
 ## A title bar of your own
 
@@ -802,6 +839,8 @@ interface TrayModule {
 | --- | --- |
 | `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
 | `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
+| `title` | Text beside the icon, as runs `{ text, color? }`, each in its own color (a CSS color; without one, the menu bar's text color): what the app keeps in sight, such as a price. macOS's menu bar shows it in the menu bar's font. Linux's panels that show AppIndicator labels (GNOME's AppIndicator extension, Unity, MATE, Budgie) show its text right of the icon, in the panel's color; Plasma, Waybar and Windows' notification area show the icon alone. |
+| `titlePlacement` | Which side of the icon the title shows on: `"right"` (the default) or `"left"`. macOS only; Linux's panels always draw the title right of the icon. |
 | `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
 | `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too), with `{ bounds }`: where the icon is ([below](#a-window-at-the-icon)). |
 
@@ -820,6 +859,26 @@ Tray.set({
     { type: "separator" },
     { role: "quit" },
   ],
+});
+```
+
+A title keeps something in sight beside the icon in macOS's menu bar, such as a price, its change in a color of the app's theme. A run's color is fixed when `set` is called; set the tray inside an `effect` that reads the color scheme for a theme color to follow light and dark:
+
+```rust tabs
+use nsh_core::desktop::TrayTitleRun;
+
+set_tray(tray().icon(icon).title([
+    TrayTitleRun::new("AAPL 228.00 "),
+    TrayTitleRun::new("+1.33%").color(color(tokens().color("up").unwrap())),
+]));
+```
+
+```tsx tabs
+import { token } from "nsh";
+
+Tray.set({
+  icon,
+  title: [{ text: "AAPL 228.00 " }, { text: "+1.33%", color: token("up") }],
 });
 ```
 
@@ -866,7 +925,7 @@ function atIcon(icon: Bounds, size: Size): Point {
 }
 ```
 
-In Rust, `set_tray(tray()...)` is the same (`None` removes it): `tray()` is a builder with `.icon(..)`, `.tooltip(..)`, `.menu(items)` (the same `MenuItem`s as `set_application_menu`) and `.on_click(|e| ..)`, whose `TrayClickEvent` carries `bounds: Option<Bounds<Points>>`. Its handlers run under the owner that set it, while that owner lives; in an `effect` it follows the signals it reads. One tray per app, shared with TSX: the last set wins.
+In Rust, `set_tray(tray()...)` is the same (`None` removes it): `tray()` is a builder with `.icon(..)`, `.tooltip(..)`, `.title(runs)` (`TrayTitleRun::new(text)`, with `.color(..)`), `.title_placement(..)` (`TrayTitlePlacement`), `.menu(items)` (the same `MenuItem`s as `set_application_menu`) and `.on_click(|e| ..)`, whose `TrayClickEvent` carries `bounds: Option<Bounds<Points>>`. Its handlers run under the owner that set it, while that owner lives; in an `effect` it follows the signals it reads. One tray per app, shared with TSX: the last set wins.
 
 ```rust
 use nsh_core::element::desktop::{MenuItem, main_window, quit, set_tray, tray};

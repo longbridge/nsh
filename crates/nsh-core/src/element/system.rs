@@ -559,6 +559,13 @@ pub mod codes {
     /// The embedding app answered a `host.call` with an error (its handler
     /// failed, or it handles no such name); the message is the host's.
     pub const HOST_ERROR: &str = "ERR_NSH_HOST_ERROR";
+    /// A web view's script failed: it threw, its Promise rejected, its
+    /// result is not JSON, or the page runs no scripts (`evaluate`).
+    pub const WEBVIEW_SCRIPT: &str = "ERR_NSH_WEBVIEW_SCRIPT";
+    /// A web view's `evaluate` was given up before its script answered:
+    /// the page navigated, the web view went away or its web content
+    /// process ended.
+    pub const WEBVIEW_ABORTED: &str = "ERR_NSH_WEBVIEW_ABORTED";
 }
 
 /// An I/O error as Node reports it: `Error` with the message and the

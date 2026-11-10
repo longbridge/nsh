@@ -67,7 +67,6 @@ cap-std.workspace = true
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true
-webpki-roots.workspace = true
 # The image disk cache (`image/cache.rs`).
 httpdate.workspace = true
 # The image loader's downloads (`image/loader.rs`, feature `loader`).
@@ -79,6 +78,14 @@ nsh-updater.workspace = true
 # `process`'s children: their process groups and exits (`runtime/process.rs`);
 # the names of Unix error numbers (`element/system.rs`). Emscripten is wasm32
 # and `unix` both, so it needs libc for the `cfg(unix)` code too.
+# WebSocket TLS roots: the system trust store, except on Android, whose
+# verifier needs a JNI init the host does not run; there the bundled roots.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+rustls-platform-verifier.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+webpki-roots.workspace = true
+
 [target.'cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))'.dependencies]
 libc.workspace = true
 
