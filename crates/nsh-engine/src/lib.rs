@@ -1545,6 +1545,9 @@ pub struct Engine {
     host: HostChannel,
     /// Interrupts running JS when the engine stops.
     stop: Arc<std::sync::atomic::AtomicBool>,
+    /// The app has quit listeners (`on_app_quit`, `Application.on("quit")`):
+    /// a drop gives them [`QUIT_TIMEOUT`] before interrupting JS.
+    quit_listeners: Arc<std::sync::atomic::AtomicBool>,
     /// The app's disk cache of downloaded images.
     image_cache: Option<nsh_core::image::DiskCache>,
 }
@@ -1585,16 +1588,29 @@ impl Engine {
         let engine_tx = tx.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_stop = stop.clone();
+        let quit_listeners = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let engine_quit_listeners = quit_listeners.clone();
         let host = config.host.clone();
         let thread = std::thread::Builder::new()
             .name("nsh-engine".into())
             .stack_size(ENGINE_STACK_SIZE)
-            .spawn(move || run(config, make_text_engine(), sink, engine_tx, rx, engine_stop))?;
+            .spawn(move || {
+                run(
+                    config,
+                    make_text_engine(),
+                    sink,
+                    engine_tx,
+                    rx,
+                    engine_stop,
+                    engine_quit_listeners,
+                )
+            })?;
         Ok(Engine {
             control: EngineControl { tx, modality },
             thread: Some(thread),
             host,
             stop,
+            quit_listeners,
             image_cache,
         })
     }
@@ -1616,7 +1632,20 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         // Dropped on the platform's main thread: a script still running is
-        // aborted rather than waited for.
+        // aborted rather than waited for, after the app's quit listeners
+        // had their time (GPUI's shutdown waits for its quit observers so).
+        if self
+            .quit_listeners
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            self.host.request_shutdown(&self.control.tx);
+            let deadline = Instant::now() + QUIT_TIMEOUT + QUIT_GRACE;
+            while self.thread.as_ref().is_some_and(|t| !t.is_finished())
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         self.host.shutdown(&self.control.tx, &self.stop);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -1636,6 +1665,15 @@ fn raise_thread_priority() {
     }
 }
 
+/// How long the engine runs the app's quit listeners at most.
+#[cfg(not(target_arch = "wasm32"))]
+use nsh_core::element::desktop::QUIT_TIMEOUT;
+
+/// What the dropping [`Engine`] waits past [`QUIT_TIMEOUT`] for the engine
+/// to finish its last turn before interrupting JS.
+#[cfg(not(target_arch = "wasm32"))]
+const QUIT_GRACE: Duration = Duration::from_millis(20);
+
 /// A resize this soon after the last is one of a burst, a window being
 /// dragged; this long after the last the burst is over ([`Core::set_resizing`]).
 const RESIZE_BURST_GAP: Duration = Duration::from_millis(120);
@@ -1648,6 +1686,7 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     tx: Sender<Message>,
     rx: Receiver<Message>,
     stop: Arc<std::sync::atomic::AtomicBool>,
+    quit_listeners: Arc<std::sync::atomic::AtomicBool>,
 ) {
     raise_thread_priority();
     // The thread's time is the engine's from its first line of JS on.
@@ -1656,7 +1695,10 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
+    driver.quit_listeners = quit_listeners;
+    driver.sync_quit_listeners();
     drive(&mut driver, &rx);
+    driver.quit(&rx);
     // Stopped on purpose (a crash never gets here): a trial is over.
     if let Some(trial) = &driver.trial {
         trial.healthy();
@@ -1893,6 +1935,11 @@ struct Driver<M: TextEngine + 'static> {
     /// that way; WebAssembly has no such stop.
     #[cfg(not(target_arch = "wasm32"))]
     trial: Option<Arc<dyn Trial>>,
+    /// Tells the dropping [`Engine`] whether the app has quit listeners.
+    quit_listeners: Arc<std::sync::atomic::AtomicBool>,
+    /// The quit listeners run ([`Driver::quit`]): frames are not submitted
+    /// any more.
+    quitting: bool,
 }
 
 impl<M: TextEngine + 'static> Driver<M> {
@@ -2152,6 +2199,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             _host: config.host.attach(host_tx, rx.clone()),
             #[cfg(not(target_arch = "wasm32"))]
             trial: trial.clone(),
+            quit_listeners: Arc::default(),
+            quitting: false,
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
@@ -2488,7 +2537,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         // renders in the commit.
         let tasks = turn_start.map(|s| s.elapsed());
         state.load_fonts(script, assets.as_deref(), &**sink);
-        if let Some(batch) = state.commit(script) {
+        let batch = state.commit(script);
+        if let Some(batch) = batch.filter(|_| !self.quitting) {
             sink.submit(batch);
             if let (Some(start), Some(tasks)) = (turn_start, tasks) {
                 log::info!(
@@ -2508,6 +2558,56 @@ impl<M: TextEngine + 'static> Driver<M> {
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         self.check_stopped();
+        self.sync_quit_listeners();
+    }
+
+    /// Tells the [`Engine`] whether the app has quit listeners now.
+    fn sync_quit_listeners(&self) {
+        self.quit_listeners.store(
+            self.state.core.has_quit_listeners(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// The engine stops: runs the app's quit listeners and what they wait
+    /// for, [`QUIT_TIMEOUT`] at most (the dropping [`Engine`] interrupts JS
+    /// then). Their frames are not submitted; the embedding app's events
+    /// stay queued behind the shutdown, for the next app.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn quit(&mut self, rx: &Receiver<Message>) {
+        if !self.state.core.has_quit_listeners() {
+            return;
+        }
+        let deadline = Instant::now() + QUIT_TIMEOUT;
+        self.quitting = true;
+        self.state.core.start_quit();
+        let mut kept = Vec::new();
+        loop {
+            self.turn();
+            if !self.state.core.quit_pending() || self.stopped {
+                break;
+            }
+            let wake = self.deadline().map_or(deadline, |at| at.min(deadline));
+            match rx.recv_deadline(wake) {
+                Ok(Message::Shutdown) => {}
+                Ok(message @ Message::HostEvent(..)) => kept.push(message),
+                Ok(message) => {
+                    self.handle(message, rx);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+            }
+            if Instant::now() >= deadline {
+                log::warn!(
+                    "the app's quit listeners did not finish in {} ms",
+                    QUIT_TIMEOUT.as_millis()
+                );
+                break;
+            }
+        }
+        for message in kept {
+            let _ = self.state.net.tx.send(message);
+        }
     }
 
     /// When the next idle collection may run: a second after the last, once

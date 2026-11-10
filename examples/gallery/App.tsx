@@ -2,8 +2,8 @@ import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, 
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
-import { titleBar } from "nsh/desktop";
-import { Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
+import { Application, isAvailable as desktopWindows, Menu as AppMenu, titleBar } from "nsh/desktop";
+import { AlertDialog, Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
 import { Icon, LucideIcon, type LucideIconName } from "./icons";
@@ -826,8 +826,62 @@ function rememberDemo() {
   });
 }
 
+const SIDEBAR_OPEN = "sidebarOpen";
+
+/**
+ * The gallery's Quit on the desktop: its own item in the application menu
+ * with the quit key, which asks first, as an app with unsaved work does;
+ * then `Application.quit()`. However the app quits (this item, the Dock's
+ * Quit, the last window closing), `Application.on("quit")` saves whether
+ * the sidebar was open, read again at the next launch.
+ */
+function quitWithConfirmation() {
+  if (!desktopWindows) return;
+  const mac = platform.os === "macos";
+  const quitItem = { label: mac ? "Quit NSH Gallery" : "Exit", shortcut: "mod+q", onSelect: () => void confirmQuit() };
+  AppMenu.setApplicationMenu([
+    mac && {
+      label: "NSH Gallery",
+      submenu: [{ role: "about" }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "showAll" }, { type: "separator" }, quitItem],
+    },
+    !mac && { label: "File", submenu: [quitItem] },
+    {
+      label: "Edit",
+      submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }],
+    },
+    { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "toggleFullScreen" }, { type: "separator" }, { role: "close" }] },
+  ]);
+  Storage.getItem(SIDEBAR_OPEN).then((open) => {
+    if (open != null) sidebarOpen.set(open === "true");
+  });
+  Application.on("quit", () => Storage.setItem(SIDEBAR_OPEN, String(untracked(sidebarOpen))));
+}
+
+let confirming = false;
+
+/** Asks before quitting; the quit key pressed again while it asks does nothing. */
+async function confirmQuit() {
+  if (confirming) return;
+  confirming = true;
+  try {
+    const { action } = await AlertDialog.show({
+      title: "Quit NSH Gallery?",
+      description: "The demo you have open is opened again at the next launch.",
+      actions: [
+        { label: "Cancel", role: "cancel", id: "cancel" },
+        { label: "Quit", id: "quit" },
+      ],
+      closeOnEscape: true,
+    });
+    if (action === "quit") Application.quit();
+  } finally {
+    confirming = false;
+  }
+}
+
 function App() {
   rememberDemo();
+  quitWithConfirmation();
   // Every scroll view and list draws the gallery's bar.
   Scrollbar.setTheme(scrollbarTheme);
   return (

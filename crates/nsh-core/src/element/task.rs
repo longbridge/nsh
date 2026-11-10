@@ -409,6 +409,10 @@ pub(crate) struct Executor {
     derived: RefCell<super::animated::Derived>,
     /// The components' listeners of the back button.
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
+    /// What runs as the app quits ([`super::desktop::on_app_quit`]).
+    pub(crate) quit: Rc<RefCell<super::quit::QuitListeners>>,
+    /// The quit listeners' work still running ([`crate::Core::start_quit`]).
+    pub(crate) quitting: Rc<std::cell::Cell<usize>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
     /// The views' menus' handlers.
