@@ -338,6 +338,33 @@ function Editor() {
 
 它接受[选项](#选项)中的 `defaultSize`、`defaultPosition`、`display` 和 `defaultMode`，以及所有[属性](#属性)。应用运行时，任何 `<Window>` 之外的 `currentWindow()`（或 `Window.get("main")`）就是主窗口，它的 `set()` 修改同样的属性。
 
+`"defaultVisible": false` 让应用启动时主窗口处于隐藏状态：窗口照常创建，应用在其中运行，只是看不见，也不占用键盘，直到应用用 `show()` 或 `focus()` 显示它，比如[托盘](#tray)应用在图标被点击时这样做。在此之前 `state()` 报告它是隐藏的；第一次显示时，它按 `defaultMode` 打开。应用运行期间打开它的 [URL scheme](./nsh.md#urlscheme) 链接也会显示它；在 macOS 上，再次打开应用（点 Dock 图标、在访达中打开）也一样。`nsh run` 和 `nsh test --target` 同样以隐藏状态启动它。开发宿主打开窗口的方式和运行其他应用时一样：`--target windows`（`nsh run` 在 Windows 上的默认值）按应用的 `defaultSize` 和 `defaultMode` 打开，`--target macos`、`linux` 或 `gpui` 按宿主的大小、以普通模式打开；GPUI 在 Linux 上一打开窗口就会显示，所以在 Linux 上用 `--target gpui` 时窗口会显示。在 `nsh run` 下出错时会显示它，好让错误被看到。
+
+```json
+{
+  "window": {
+    "title": "Focus",
+    "closeOnPress": false,
+    "defaultVisible": false
+  }
+}
+```
+
+```tsx
+import { currentWindow, Tray } from "nsh/desktop";
+import icon from "./tray.svg";
+
+function App() {
+  const win = currentWindow();
+  // 关闭按钮只隐藏窗口：应用继续在托盘中运行。
+  win.on("closePress", () => win.hide());
+  Tray.set({ icon, onClick: () => win.focus(), menu: [{ role: "quit" }] });
+  return <Timer />;
+}
+```
+
+[`examples/tray`](https://github.com/longbridge/nsh/tree/main/examples/tray) 就是这样做的托盘应用。
+
 ### 权限
 
 nsh.json 中没有 `"capabilities"` 的应用可以打开除浮层（overlay）外所有种类的窗口。声明了权限的应用，在 `capabilities.windows` 允许时才能打开自己的窗口（[沙箱与权限](../docs/sandbox-and-capabilities.md#windows)）。浮层和点击穿透的窗口（`pointerEvents: "none"`）只有声明后才会授予。对于不允许的窗口，`Window.open` 和 `<Window>` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"windows"`，`resource` 为窗口的 id；`set()` 中不允许的属性保持不变，并给出警告。

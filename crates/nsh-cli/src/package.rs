@@ -278,6 +278,29 @@ pub(crate) fn window_json(entry: &Path) -> Option<String> {
     read_config(&entry).ok()?.window.map(|w| w.to_string())
 }
 
+/// Says, once per app, that the main window of the app at `entry` starts
+/// hidden (`nsh.json` `window.defaultVisible: false`): the desktop hosts of
+/// `nsh run` and `nsh test --target` open it so, as its package does, and
+/// only the app shows it.
+pub(crate) fn note_hidden_main_window(entry: &Path) {
+    static NOTED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    let Ok(entry) = dunce::canonicalize(entry) else {
+        return;
+    };
+    let hidden = read_config(&entry)
+        .ok()
+        .and_then(|config| config.window)
+        .and_then(|window| nsh_core::desktop::MainWindowOptions::from_json(&window).ok())
+        .is_some_and(|window| !window.visible_at_launch());
+    let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
+    if hidden && !noted.contains(&entry) {
+        noted.push(entry);
+        crate::ui::note(
+            "the main window starts hidden (nsh.json window.defaultVisible: false) until the app shows it",
+        );
+    }
+}
+
 /// Declares the URL schemes the app claims in an Apple `Info.plist`
 /// (`CFBundleURLTypes`), so the system opens the app for their links.
 fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {

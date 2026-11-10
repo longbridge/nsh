@@ -251,6 +251,12 @@ pub(crate) struct Surface {
     composed: RefCell<Vec<Rc<dyn Hosted>>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// A top-level window that has not shown yet: its first show paints it
+    /// before DWM composites it ([`crate::app::show_main`]).
+    pub(crate) main_unshown: Cell<bool>,
+    /// The mode the top-level window takes when it first shows (nsh.json
+    /// `window`, [`AppView::place_main_window`](crate::AppView)).
+    pub(crate) main_opening_mode: Cell<Option<nsh_core::desktop::WindowMode>>,
     /// Called after the surface is resized (development overlays).
     pub(crate) on_resized: RefCell<Vec<ResizeHandler>>,
     /// The engine missed the deadline of a resize ([`RESIZE_WAIT`]): later
@@ -329,6 +335,8 @@ impl Surface {
             windows: RefCell::default(),
             input_root: RefCell::default(),
             chrome: Default::default(),
+            main_unshown: Cell::new(true),
+            main_opening_mode: Cell::new(None),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);

@@ -134,6 +134,11 @@ pub struct Bundle {
     /// The URL schemes the app claims (`nsh.json` `schemes`,
     /// checked, in lower case).
     pub url_schemes: Vec<String>,
+    /// The main window's launch options (`nsh.json` `window`), as
+    /// `app.json` carries them: JSON, `None` without them or when they
+    /// are not valid ([`main_window`]).
+    #[doc(hidden)]
+    pub main_window: Option<String>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -202,6 +207,23 @@ pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
         .get("schemes")
         .map(nsh_core::url_scheme::schemes_from_json)
         .unwrap_or_default())
+}
+
+/// The `"window"` of the `nsh.json` in `dir`, the main window's launch
+/// options, as JSON: `None` without it, and when it is not valid
+/// ([`nsh_core::desktop::MainWindowOptions::from_json`]; the CLI's
+/// `read_config` warns of it).
+#[doc(hidden)]
+pub fn main_window(dir: &std::path::Path) -> Result<Option<String>, BundleError> {
+    let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+        return Ok(None);
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    Ok(config
+        .get("window")
+        .filter(|window| nsh_core::desktop::MainWindowOptions::from_json(window).is_ok())
+        .map(serde_json::Value::to_string))
 }
 
 /// How bare imports resolve: the `"resolve"` of the `nsh.json` next to the
@@ -539,6 +561,10 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     let tailwind = tailwind_setup(&app, options.development, &options.app)?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
+    // Beside the entry, as `app.json`, `nsh run` and `nsh test`'s
+    // real-window hosts read it (the CLI's `read_config`): an app a test
+    // opens below its app's root starts alike headless and in a window.
+    let main_window = main_window(&cwd)?;
     let resolve = ResolveSetup::read(&app)?;
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
@@ -655,6 +681,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         chunk_native_use,
         capabilities,
         url_schemes,
+        main_window,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
 }
@@ -1536,6 +1563,40 @@ mod tests {
         std::fs::create_dir_all(&inner).unwrap();
         std::fs::write(inner.join("App.tsx"), code).unwrap();
         assert_eq!(app_dir(&inner), inner);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The main window's launch options are the `window` beside the entry,
+    /// as `app.json`, `nsh run` and `nsh test`'s real-window hosts read it:
+    /// an app a test opens below its app's root (`tests/MenuApp.tsx`) does
+    /// not start hidden because its app does, headless or in a window.
+    #[test]
+    fn an_entry_takes_the_window_beside_it() {
+        let dir = std::env::temp_dir().join(format!("nsh-window-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "window": { "defaultVisible": false } }"#,
+        )
+        .unwrap();
+        let code = "import { mount, View } from \"nsh\";\nmount(() => <View />);\n";
+        std::fs::write(dir.join("App.tsx"), code).unwrap();
+        std::fs::write(dir.join("tests/MenuApp.tsx"), code).unwrap();
+        let build = |entry: &str| {
+            bundle(&BundleOptions {
+                entry: dir.join(entry),
+                minify: false,
+                split: false,
+                ui_sets: Vec::new(),
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            build("App.tsx").main_window.as_deref(),
+            Some(r#"{"defaultVisible":false}"#)
+        );
+        assert_eq!(build("tests/MenuApp.tsx").main_window, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

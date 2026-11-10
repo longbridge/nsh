@@ -201,7 +201,14 @@ impl Native for LinuxNative {
                     .then(|| crate::window::root_view(s, target))
                     .flatten()
                     .unwrap_or_else(|| s.root.clone());
-                (root.width() as f32, root.height() as f32)
+                if root.width() > 0 && root.height() > 0 {
+                    (root.width() as f32, root.height() as f32)
+                } else {
+                    // A main window not shown yet: the size its app is laid
+                    // out at (`window::launch_hidden`).
+                    let size = root.state().frame.size;
+                    (size.width.0, size.height.0)
+                }
             })
             .unwrap_or((0.0, 0.0));
         Size::new(Points(width), Points(height))
