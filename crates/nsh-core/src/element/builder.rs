@@ -1,12 +1,12 @@
 //! The elements a view is made of ([`view`], [`text`], [`image`], other
 //! components, slots and children).
 
-use std::{any::Any, fmt, marker::PhantomData, rc::Rc, sync::Arc};
+use std::{any::Any, cell::RefCell, fmt, marker::PhantomData, rc::Rc, sync::Arc};
 
 use super::{
     Component, ComponentSpec, Event, IntoReactive, JsValue, PropError, Reactive, SharedString,
     component::AnyInstance,
-    component_styles::component_style_of,
+    component_styles::{ComponentStyle, component_style_of, has_component_style},
     events::{self, GestureEvent, PanEvent},
     style::{StyleRefinement, Styled, Variant},
 };
@@ -961,7 +961,7 @@ pub trait Element: IntoElement + Sized {
         variant: impl IntoReactive<Option<SharedString>>,
         size: impl IntoReactive<Option<SharedString>>,
     ) -> Self {
-        if super::untracked(|| component_style_of(component)).is_none() {
+        if !has_component_style(component) {
             return self;
         }
         let variant = shared_reactive(variant.into_reactive());
@@ -974,16 +974,37 @@ pub trait Element: IntoElement + Sized {
             let (variant, size) = (picked_variant(), picked_size());
             let (variant, size) = (variant.as_deref(), size.as_deref());
             style.warn_undeclared(component, variant, size);
-            for look in style.resolve(variant, size).0 {
+            for look in style.typed_looks(variant, size) {
                 s.extend_as(
                     Variant::default(),
                     look(StyleRefinement::default()).resolved(),
                 );
             }
         });
+        // The classes last made, kept while the merged look (one shared
+        // copy until a declaration is written), the variant and the size
+        // stay the same.
+        type Made = (
+            Rc<ComponentStyle>,
+            Option<SharedString>,
+            Option<SharedString>,
+            Option<SharedString>,
+        );
+        let made: RefCell<Option<Made>> = RefCell::new(None);
         self.app_class(move || {
             let style = component_style_of(component)?;
-            style.resolve(variant().as_deref(), size().as_deref()).1
+            let (variant, size) = (variant(), size());
+            let mut made = made.borrow_mut();
+            if let Some((was, v, z, classes)) = made.as_ref()
+                && Rc::ptr_eq(was, &style)
+                && *v == variant
+                && *z == size
+            {
+                return classes.clone();
+            }
+            let classes = style.classes(variant.as_deref(), size.as_deref());
+            *made = Some((style, variant, size, classes.clone()));
+            classes
         })
     }
 }

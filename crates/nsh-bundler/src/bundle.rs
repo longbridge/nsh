@@ -459,7 +459,9 @@ fn tailwind_setup(
 /// JSON for the runtime, and a line naming each class taken out. The rest
 /// of its form the core checks when it reads it (keys of a newer NSH are
 /// left as they are); `None` when it is not an object. TSX apps' bundles
-/// and Rust apps' generated roots both carry what it returns.
+/// and Rust apps' generated roots both carry what it returns (the CLI's;
+/// not API).
+#[doc(hidden)]
 pub fn checked_components(
     theme: &nsh_core::tailwind::Theme,
     components: &serde_json::Value,

@@ -29,22 +29,6 @@ pub(crate) struct Look {
     pub(crate) classes: Option<SharedString>,
 }
 
-impl Look {
-    fn typed(f: impl Fn(StyleRefinement) -> StyleRefinement + 'static) -> Self {
-        Self {
-            typed: Some(Rc::new(f)),
-            classes: None,
-        }
-    }
-
-    fn classes(classes: &str) -> Self {
-        Self {
-            typed: None,
-            classes: Some(classes.to_owned().into()),
-        }
-    }
-}
-
 /// How one component looks: a base look and looks per named variant and
 /// size, with the variant and size used when the page picks none.
 #[derive(Clone, Default)]
@@ -75,7 +59,7 @@ impl ComponentStyle {
         name: &str,
         f: impl Fn(StyleRefinement) -> StyleRefinement + 'static,
     ) -> Self {
-        self.variants.entry(name.to_owned()).or_default().typed = Look::typed(f).typed;
+        self.variants.entry(name.to_owned()).or_default().typed = Some(Rc::new(f));
         self
     }
 
@@ -85,25 +69,25 @@ impl ComponentStyle {
         name: &str,
         f: impl Fn(StyleRefinement) -> StyleRefinement + 'static,
     ) -> Self {
-        self.sizes.entry(name.to_owned()).or_default().typed = Look::typed(f).typed;
+        self.sizes.entry(name.to_owned()).or_default().typed = Some(Rc::new(f));
         self
     }
 
     /// The Tailwind classes every instance has.
     pub fn base_classes(mut self, classes: &str) -> Self {
-        self.base.classes = Look::classes(classes).classes;
+        self.base.classes = Some(classes.to_owned().into());
         self
     }
 
     /// The Tailwind classes of the variant `name`.
     pub fn variant_classes(mut self, name: &str, classes: &str) -> Self {
-        self.variants.entry(name.to_owned()).or_default().classes = Look::classes(classes).classes;
+        self.variants.entry(name.to_owned()).or_default().classes = Some(classes.to_owned().into());
         self
     }
 
     /// The Tailwind classes of the size `name`.
     pub fn size_classes(mut self, name: &str, classes: &str) -> Self {
-        self.sizes.entry(name.to_owned()).or_default().classes = Look::classes(classes).classes;
+        self.sizes.entry(name.to_owned()).or_default().classes = Some(classes.to_owned().into());
         self
     }
 
@@ -121,28 +105,65 @@ impl ComponentStyle {
 
     /// The looks of an instance, in the order they apply: the base look,
     /// the look of `variant` (the default variant when `None`), the look of
-    /// `size` (likewise): the typed closures in that order and the class
-    /// strings joined with spaces. A name nothing declares adds nothing.
-    pub(crate) fn resolve(
+    /// `size` (likewise). A name nothing declares adds nothing.
+    fn looks<'a>(
+        &'a self,
+        variant: Option<&'a str>,
+        size: Option<&'a str>,
+    ) -> impl Iterator<Item = &'a Look> {
+        let variant = variant.or(self.default_variant.as_deref());
+        let size = size.or(self.default_size.as_deref());
+        [
+            Some(&self.base),
+            variant.and_then(|n| self.variants.get(n)),
+            size.and_then(|n| self.sizes.get(n)),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// The typed closures of an instance's looks ([`Self::looks`]), in the
+    /// order they apply.
+    pub(crate) fn typed_looks<'a>(
+        &'a self,
+        variant: Option<&'a str>,
+        size: Option<&'a str>,
+    ) -> impl Iterator<Item = &'a Refine> {
+        self.looks(variant, size)
+            .filter_map(|look| look.typed.as_ref())
+    }
+
+    /// The class strings of an instance's looks ([`Self::looks`]) joined
+    /// with spaces; a single string is shared, not copied.
+    pub(crate) fn classes(
+        &self,
+        variant: Option<&str>,
+        size: Option<&str>,
+    ) -> Option<SharedString> {
+        let mut strings = self
+            .looks(variant, size)
+            .filter_map(|look| look.classes.as_ref());
+        let first = strings.next()?;
+        let Some(second) = strings.next() else {
+            return Some(first.clone());
+        };
+        let mut joined = format!("{} {}", &**first, &**second);
+        for more in strings {
+            joined.push(' ');
+            joined.push_str(more);
+        }
+        Some(joined.into())
+    }
+
+    /// [`Self::typed_looks`] and [`Self::classes`] at once.
+    #[cfg(test)]
+    fn resolve(
         &self,
         variant: Option<&str>,
         size: Option<&str>,
     ) -> (Vec<Refine>, Option<SharedString>) {
-        let variant = variant.or(self.default_variant.as_deref());
-        let size = size.or(self.default_size.as_deref());
-        let looks = [
-            Some(&self.base),
-            variant.and_then(|n| self.variants.get(n)),
-            size.and_then(|n| self.sizes.get(n)),
-        ];
-        let mut typed = Vec::new();
-        let mut classes: Vec<&str> = Vec::new();
-        for look in looks.into_iter().flatten() {
-            typed.extend(look.typed.clone());
-            classes.extend(look.classes.as_deref());
-        }
-        let classes = (!classes.is_empty()).then(|| classes.join(" ").into());
-        (typed, classes)
+        let typed = self.typed_looks(variant, size).cloned().collect();
+        (typed, self.classes(variant, size))
     }
 
     /// Warns, once per surface for each component and name, of a variant
@@ -230,11 +251,34 @@ impl ComponentStyle {
     }
 }
 
-/// The surface's declared looks, by component.
+/// The surface's declared looks, by component: the Rust declarations, the
+/// nsh.json ones, and the two merged, made again only when either is
+/// written, so a component's reads share one copy.
 #[derive(Clone, Default)]
 struct Store {
     typed: BTreeMap<String, ComponentStyle>,
     classes: BTreeMap<String, ComponentStyle>,
+    merged: BTreeMap<String, Rc<ComponentStyle>>,
+}
+
+impl Store {
+    /// Makes `component`'s merged look again from both declarations.
+    fn merge(&mut self, component: &str) {
+        let merged = match (self.typed.get(component), self.classes.get(component)) {
+            (None, None) => None,
+            (Some(typed), None) => Some(typed.clone()),
+            (None, Some(json)) => Some(json.clone()),
+            (Some(rust), Some(json)) => Some(rust.merged(json)),
+        };
+        match merged {
+            Some(style) => {
+                self.merged.insert(component.to_owned(), Rc::new(style));
+            }
+            None => {
+                self.merged.remove(component);
+            }
+        }
+    }
 }
 
 /// The undeclared names already warned of on the surface: a set behind a
@@ -243,25 +287,27 @@ struct Store {
 struct Warned(Rc<RefCell<BTreeSet<(String, &'static str, String)>>>);
 
 /// Declares how `component` (a component's name, `"button"`) looks, in
-/// typed styles. It replaces the typed looks declared for it before, and
-/// the components showing it update.
+/// typed styles. It replaces the typed looks declared for it before.
+/// Declare before the first render: a later declaration reaches the
+/// components built while a look was declared for `component` (they
+/// update), not those built when none was, which take no declared look.
 pub fn set_component_style(component: &'static str, style: ComponentStyle) {
     global::<Store>().update(|store| {
         store.typed.insert(component.to_owned(), style);
+        store.merge(component);
     });
 }
 
-/// The looks declared for `component` (typed and classes), subscribing the
-/// reader to changes.
-pub(crate) fn component_style_of(component: &str) -> Option<ComponentStyle> {
-    global::<Store>().with(|store| {
-        match (store.typed.get(component), store.classes.get(component)) {
-            (None, None) => None,
-            (Some(typed), None) => Some(typed.clone()),
-            (None, Some(json)) => Some(json.clone()),
-            (Some(rust), Some(json)) => Some(rust.merged(json)),
-        }
-    })
+/// The looks declared for `component` (typed and classes, merged),
+/// subscribing the reader to changes: one shared copy until either
+/// declaration is written again.
+pub(crate) fn component_style_of(component: &str) -> Option<Rc<ComponentStyle>> {
+    global::<Store>().with(|store| store.merged.get(component).cloned())
+}
+
+/// Whether any look is declared for `component`, without subscribing.
+pub(crate) fn has_component_style(component: &str) -> bool {
+    global::<Store>().with_untracked(|store| store.merged.contains_key(component))
 }
 
 /// Replaces every class look with those of `json`, the `components` of
@@ -286,7 +332,16 @@ pub(crate) fn set_component_classes(json: &str) -> Vec<String> {
         Ok(_) => warnings.push("components: expected an object".into()),
         Err(e) => warnings.push(format!("components: {e}")),
     }
-    global::<Store>().update(|store| store.classes = classes);
+    global::<Store>().update(|store| {
+        let old = std::mem::replace(&mut store.classes, classes);
+        let touched: BTreeSet<String> = old
+            .into_keys()
+            .chain(store.classes.keys().cloned())
+            .collect();
+        for component in touched {
+            store.merge(&component);
+        }
+    });
     warnings
 }
 
@@ -440,6 +495,25 @@ mod tests {
         set_component_style("button", ComponentStyle::new().base_classes("x"));
         assert_eq!((runs.get(), seen.get()), (2, true));
         owner.dispose();
+    }
+
+    #[test]
+    fn reads_share_one_merged_look_until_a_write() {
+        run(|| {
+            set_component_style("button", ComponentStyle::new().base_classes("rust"));
+            set_component_classes(r#"{"button":{"base":"json"}}"#);
+            let first = component_style_of("button").unwrap();
+            let second = component_style_of("button").unwrap();
+            assert!(Rc::ptr_eq(&first, &second));
+            assert!(has_component_style("button"));
+            assert_eq!(first.classes(None, None).as_deref(), Some("rust json"));
+
+            set_component_classes("{}");
+            let third = component_style_of("button").unwrap();
+            assert!(!Rc::ptr_eq(&first, &third));
+            assert_eq!(third.classes(None, None).as_deref(), Some("rust"));
+            assert!(!has_component_style("chip"));
+        });
     }
 
     #[test]
