@@ -1182,7 +1182,7 @@ pub struct CarouselControlProps {
 /// A button that moves to the previous slide, in the [`Carousel`];
 /// disabled on the first unless the carousel loops. Its look and place are
 /// the app's: `class` and `style` (beside the content, or `absolute` over
-/// its edge), `hover:`, `active:`, `focus:` and `disabled:`; its children
+/// its edge), `hover:`, `active:`, `focus-visible:` and `disabled:`; its children
 /// are the icon.
 #[component]
 pub fn CarouselPrevious(props: CarouselControlProps, _cx: Scope<NoEvent>) -> impl IntoElement {
@@ -1334,7 +1334,7 @@ pub struct CarouselPaginationItemProps {
 /// styles apply, and `group-selected:` classes under `group` in its
 /// `class`). A change of slide updates the two items it concerns only. Its
 /// look is the app's: `class`, `style`, `selectedStyle`, `hover:`,
-/// `active:`, `focus:`; its children are the dot or the thumbnail.
+/// `active:`, `focus-visible:`; its children are the dot or the thumbnail.
 #[component]
 pub fn CarouselPaginationItem(
     props: CarouselPaginationItemProps,

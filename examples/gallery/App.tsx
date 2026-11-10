@@ -610,7 +610,7 @@ function SettingsMenu() {
   const trigger = terminal ? (
     <Text style={{ color: colors.text }}>Menu</Text>
   ) : (
-    <View accessibilityLabel="Settings menu" hoverStyle={hovered()} activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }} style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}>
+    <View accessibilityLabel="Settings menu" hoverStyle={hovered()} activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }} focusVisibleStyle={focusRing()} style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}>
       <LucideIcon name="settings" size={16} tint={colors.muted} />
     </View>
   );

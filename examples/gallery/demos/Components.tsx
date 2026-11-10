@@ -117,7 +117,7 @@ function PressableSheet() {
         onPress={() => sheet.set(true)}
         role="button"
         style={{ boxShadow: finish.accent.boxShadow }}
-        class="h-12 flex-row items-center justify-center gap-2 rounded-[12px] bg-primary transition motion-reduce:transition-none active:scale-[0.97] active:opacity-85 focus:outline-2 focus:outline-ring"
+        class="h-12 flex-row items-center justify-center gap-2 rounded-[12px] bg-primary transition motion-reduce:transition-none active:scale-[0.97] active:opacity-85 focus-visible:outline-2 focus-visible:outline-ring"
       >
         <Text style={{ fontSize: 15, fontWeight: "600", color: colors.onAccent }}>Open a sheet</Text>
       </View>

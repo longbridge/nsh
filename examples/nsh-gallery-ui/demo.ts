@@ -32,9 +32,10 @@ export { scrollbarTheme } from "./scrollbar-theme";
  * off a disabled control. */
 export const hoverFill = () => ({ backgroundColor: tint(ui().text, 0.05) });
 
-/** The keyboard focus (`focusStyle`), one for every control: the edge
- * turns the theme's `ring` and a 3-point halo of it lies around the view,
- * outside its edge (`focusRing(offset)` moves the halo further out). */
+/** The keyboard focus (`focusVisibleStyle`: not after a click or a tap),
+ * one for every control: the edge turns the theme's `ring` and a 3-point
+ * halo of it lies around the view, outside its edge (`focusRing(offset)`
+ * moves the halo further out). */
 export { focusRing } from "./theme";
 
 /** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it
