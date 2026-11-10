@@ -39,11 +39,22 @@ token。十六进制、RGBA、HSLA 等颜色字面量集中在 token 定义中�
 
 组合页面之前，先在 `nsh/base` 之上建立应用自己的风格组件层，覆盖应用需要的按钮、输入、选择控件、导航、表面、菜单、对话框和
 反馈组件及其部件。统一变体、尺寸、密度，以及悬停、按下、焦点、选中、禁用、加载和校验状态。页面组合这些组件，各页面不再
-独立给基础控件设计一套样式。组件库随应用的实际需要扩展；一个功能用到的控件应该完整，而不必预先实现无关的组件目录。
+独立给基础控件设计一套样式。先建立下面的核心组件集，再随应用的需要扩展；每个控件都应该完整。
 
 NSH 的分层与 GPUI Kit 对应：`nsh-core` 对应 GPUI，`nsh-base` 对应 [`gpui-base`](https://gpui-kit.com/base)，提供行为、状态、焦点和无障碍。
 对应 [`gpui-component`](https://gpui-kit.com/component) 的风格组件层由应用或社区组件库提供。默认主题提供起始 token，应用自己的风格组件把它们组织成完整的
 视觉系统。见[编码指南](./coding-guides.md#先建立应用的界面基础再编写页面)。
+
+### 应用的 `ui` 层
+
+GPUI Kit 应用之所以一致，很大程度上是因为 `gpui-component` 只给它们有限的 API：`Button` 接受一个 variant、一个 size 和少数状态，所以用它构建的每个屏幕行为和外观都一样。NSH 只有没有外观的 `nsh/base`，没有自己组件层的应用会逐渐走样：每个屏幕各自给按钮、行和弹层加样式，功能变多后，设计、交互和行为不再一致。因此每个 NSH 应用在创建之初就建立自己的 `ui` 层，并用它构建所有功能。
+
+- **位置。** 与功能模块并列的 `ui` 模块（Rust 为 `src/ui/`，TSX 为 `ui/` 或 `src/ui/`），每个组件或组件家族一个文件（`button`、`input`、`menu` 等），连同它的 token（`tokens`、`motion`）和图标。功能放在自己的模块中，从 `ui` 导入。
+- **先建一组核心组件**，在第一个屏幕之前完成，让功能开发永远不必临时发挥：`Icon`；`Button` 与 `IconButton`（primary、secondary、ghost、outline、danger 等 variant；多个 size）；`Input`、`Textarea` 和 `Field`（标签、控件、说明、错误）；`Checkbox`、`Switch`、`Select`；`Tabs` 或分段控件；`Menu`、`Popover`、`Tooltip`；`Dialog`、`AlertDialog`、`Sheet`；`Toast`；`ListItem` / 行；`Surface` 或卡片；`Badge`；`Avatar`；`Separator`；`Empty`、`Skeleton`、`Spinner`。其他组件（数据表格、日期选择器、工具栏）在第一个功能需要时按同样标准加入。
+- **像 `gpui-component` 一样的有限 API。** 每个组件只暴露按含义变化的部分：`variant`、`size`、状态（`selected`、`disabled`、`loading`、`invalid`）、内容 slot（标签、图标、children）和事件。它的外观、hover、按下、焦点和动效都在组件内部，来自 token。它从调用方接受布局（宽度、flex、margin、对齐），从不接受颜色、圆角、padding 或字体：功能需要的新外观成为 `ui` 中的新 variant 或 size，供所有屏幕使用，而不是在某一处覆盖。
+- **功能组合 `ui`，不写样式。** 功能代码使用 `ui` 组件和布局原语（`View`、`Text`、`Scroll`、`List`，配合间距 class 和文字 token）。不直接从 `nsh/base` 导入控件，不写颜色、圆角或字号，也不用可按下的 view 手搭控件。`ui` 缺少某样东西时，先把它加进 `ui`，再使用。
+- **一致性来自结构。** 一个 `Button` 意味着处处同样的按下反馈、焦点环和禁用外观；一个 `Menu` 意味着每个菜单都以同样方式打开、移动和关闭。修好一个组件就修好了每个屏幕。
+- **把它展示出来。** 保留一个页面（调试页或应用自己的 gallery），以浅色和深色展示每个 `ui` 组件的所有 variant、size 和状态；新组件先在那里评审，再给功能使用。
 
 ### 为应用的目标平台设计
 
@@ -1105,6 +1116,11 @@ AI 输出只有在人能够解释 hierarchy、density、component choice 与所�
 - [ ] 按下状态覆盖整个点击区域，标签保持可读，不改变布局。
 - [ ] 在外部松开会取消且不触发；拥有菜单的控件在菜单关闭前保持打开状态。
 - [ ] 禁用的控件既没有 hover 也没有按下反馈。
+
+**`ui` 层**
+- [ ] 应用有包含核心组件集的 `ui` 模块，并在一个页面上展示每个 variant、size 和状态。
+- [ ] 功能代码只使用 `ui` 组件和布局原语：不从 `nsh/base` 导入控件，不写颜色、圆角、padding 或字号，不用可按下的 view 手搭控件。
+- [ ] 功能需要的每个新外观或行为都以 variant、size 或组件的形式加入了 `ui`。
 
 **组件标准**
 - [ ] 每个样式化控件只接受一个 `size`，由它同时决定高度、padding、字号、图标和圆角；同一尺寸的按钮、输入框、select 和工具栏高度与 padding 一致。

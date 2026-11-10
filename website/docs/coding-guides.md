@@ -27,7 +27,9 @@ Use this development order:
 1. Identify the app's Desktop, Mobile, Web and TUI targets and their input, navigation and density requirements.
 2. Define the app's semantic color roles and light/dark values in its theme file (`nsh.json` `"theme"`), together
    with the typography, spacing, radius and size scales the components use.
-3. Wrap and compose `nsh/base` into the app's styled controls, including visible parts, variants and interaction
+3. Create the app's `ui` module (`src/ui/`) and wrap and compose `nsh/base` into its core set of styled controls
+   ([The app's `ui` layer](./design-guides.md#the-apps-ui-layer)): each takes `variant`, `size`, states and slots,
+   never colors or radii. Build them including visible parts, variants and interaction
    states. Verify a representative composition on the supported targets before replicating it across pages.
 4. Compose pages from that layer. Add a missing token or shared variant in its owning layer first, then use it in
    pages; changes to a shared control should update all its consumers consistently.

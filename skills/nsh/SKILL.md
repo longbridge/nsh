@@ -21,8 +21,9 @@ Define theme colors centrally and consume semantic tokens throughout pages,
 components and states: `theme()` in Rust; token classes or `token()` in TSX.
 Do not introduce raw hex, RGBA/HSLA or palette classes in presentation code. Add
 missing roles to the theme first. User-selected or data colors remain data.
-Build complete styled controls for the feature's needs, then compose pages from
-them; extend shared variants instead of restyling base controls per screen.
+Create the app's `ui` layer (`src/ui/`) with the core set of styled controls
+before the first screen, then compose pages only from it; extend shared variants
+instead of restyling controls per screen.
 
 Motion is part of the foundations, not polish added later. Define the app's
 motion tokens (durations, easings, distances, scales) beside its theme, and build
@@ -146,7 +147,12 @@ A floor, not a substitute for the guides.
   store with private signals. In Rust with TSX, one side owns each piece of state.
 - **The look is the app's.** `nsh_base` / `nsh/base` has behavior and no look, and NSH
   has no styled component library. Draw with theme tokens: `theme().primary` in Rust,
-  `bg-primary` in TSX. Wrap each base component once in the app's own UI module.
+  `bg-primary` in TSX.
+- **Features are built from the app's `ui` layer.** Create `src/ui/` with the core
+  set (Design Guides, "The app's `ui` layer") before the first screen. Its components
+  take `variant`, `size`, states and slots, never colors or radii; features import
+  them, never controls from `nsh/base`, and never style controls themselves. A look
+  `ui` lacks becomes a new variant there first.
 - **Parts draw nothing until styled.** A switch with no track and thumb style shows no
   switch, and a test still passes. Style every part, and look at the result.
 - **Use the semantic component.** Button, Menu, Popover, Sheet, Dialog and Select bring

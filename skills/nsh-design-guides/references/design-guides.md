@@ -63,13 +63,45 @@ named after a role such as `warning` communicates more than a palette name such 
 Build an app-owned styled layer on `nsh/base` before composing pages. Cover the controls and their parts needed by
 the app: buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback. Give them coherent
 variants, sizes, density and hover, pressed, focus, selected, disabled, loading and validation states. Pages compose
-these components; they should not restyle base controls independently. Grow this library with the app's actual
-needs, keeping every control used in a feature complete rather than prebuilding an unrelated catalog.
+these components; they should not restyle base controls independently. Start it with the core set below and grow it
+with the app's needs, keeping every control complete.
 
 NSH's layering parallels GPUI Kit: `nsh-core` corresponds to GPUI and `nsh-base` to [`gpui-base`](https://gpui-kit.com/base), providing behavior,
 state, focus and accessibility. The styled layer corresponding to [`gpui-component`](https://gpui-kit.com/component) belongs to the app or a community
 library. The default theme supplies starting tokens; the app's styled components turn them into a complete visual
 system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-before-pages).
+
+### The app's `ui` layer
+
+GPUI Kit apps are consistent largely because `gpui-component` gives them a limited API: a `Button` takes a variant,
+a size and a few states, so every screen built with it behaves and looks the same. NSH has only `nsh/base`, which has
+no look, so an app without its own component layer drifts: each screen restyles its own buttons, rows and popups, and
+as features grow their design, interaction and behavior stop agreeing. Every NSH app therefore creates its own `ui`
+layer when it is created, and builds every feature from it.
+
+- **Where.** A `ui` module beside the features (`src/ui/` in Rust, `ui/` or `src/ui/` in TSX), one file per
+  component or family (`button`, `input`, `menu`, ...), with its tokens (`tokens`, `motion`) and icons. Features live
+  in their own modules and import from `ui`.
+- **Start with a core set**, before the first screen, so features never need to improvise: `Icon`; `Button` and
+  `IconButton` (variants such as primary, secondary, ghost, outline, danger; sizes); `Input`, `Textarea` and a `Field`
+  (label, control, description, error); `Checkbox`, `Switch`, `Select`; `Tabs` or a segmented control; `Menu`,
+  `Popover`, `Tooltip`; `Dialog`, `AlertDialog`, `Sheet`; `Toast`; a `ListItem` / row; a `Surface` or card; `Badge`;
+  `Avatar`; `Separator`; `Empty`, `Skeleton`, `Spinner`. Add others (a data table, a date picker, a toolbar) as the
+  first feature needs them, built to the same standard.
+- **A limited API, like `gpui-component`'s.** Each component exposes what varies by meaning: `variant`, `size`,
+  states (`selected`, `disabled`, `loading`, `invalid`), content slots (label, icon, children) and events. Its look,
+  hover, pressed, focus and motion are inside it, from tokens. It takes layout from its caller (width, flex, margin,
+  alignment), never colors, radii, paddings or fonts: a look a feature needs becomes a new variant or size in `ui`,
+  for every screen, not an override on one.
+- **Features compose `ui`, they do not style.** Feature code uses `ui` components and layout primitives (`View`,
+  `Text`, `Scroll`, `List` with spacing classes and text tokens). It does not import controls from `nsh/base`
+  directly, write colors, radii or font sizes, or hand-build a control from a pressable view. When `ui` lacks
+  something, add it to `ui` first, then use it.
+- **Consistency by construction.** One `Button` means one press feedback, one focus ring and one disabled look
+  everywhere; one `Menu` means every menu opens, moves through items and closes the same way. Fixing a component
+  fixes every screen.
+- **Show it.** Keep a page (a debug screen or the app's own gallery) that shows every `ui` component in every
+  variant, size and state, in light and dark; review new components there before features use them.
 
 ### Design for the platforms the app targets
 
@@ -1518,6 +1550,12 @@ report each group as passed or as what was fixed. A group not checked is not pas
 - [ ] The pressed state covers the whole hit area, keeps the label readable, and does not shift layout.
 - [ ] Releasing outside cancels without firing; a control owning a menu stays visibly open until the menu closes.
 - [ ] Disabled controls show neither hover nor pressed.
+
+**The `ui` layer**
+- [ ] The app has a `ui` module with the core set, shown in every variant, size and state on one page.
+- [ ] Feature code uses only `ui` components and layout primitives: no controls imported from `nsh/base`, no colors,
+  radii, paddings or font sizes, no controls hand-built from pressable views.
+- [ ] Every new look or behavior a feature needed was added to `ui` as a variant, size or component.
 
 **Component standards**
 - [ ] Each styled control takes one `size` that sets its height, padding, text, icon and radius together; heights
