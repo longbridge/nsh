@@ -916,6 +916,8 @@ struct VideoHost {
     /// The props applied (`None` before the first).
     props: Option<VideoProps>,
     repeat: Rc<Cell<bool>>,
+    /// The item played to its end (and does not loop).
+    ended: Rc<Cell<bool>>,
 }
 
 impl VideoHost {
@@ -931,6 +933,7 @@ impl VideoHost {
             status: Rc::default(),
             props: None,
             repeat: Rc::default(),
+            ended: Rc::default(),
         }
     }
 
@@ -955,7 +958,7 @@ impl VideoHost {
         if let Some(player) = &self.player {
             // Played from the end, a video starts over: a seek the app
             // makes in the same turn arrives after these props.
-            if !p.paused && old.paused && at_end(player) {
+            if !p.paused && old.paused && self.ended.replace(false) {
                 seek_exactly(player, 0.0);
             }
             // SAFETY: AVPlayer's documented API.
@@ -989,6 +992,7 @@ impl VideoHost {
     fn open(&mut self, source: Option<&str>, base: Option<&AssetBase>) {
         self.close();
         self.status = Rc::default();
+        self.ended.set(false);
         let Some(source) = source else { return };
         let url = match locate(source, base) {
             Some(Location::Uri(uri)) => NSURL::URLWithString(&NSString::from_str(&uri)),
@@ -1010,10 +1014,15 @@ impl VideoHost {
         // The end of the item: report it, and loop if asked.
         // SAFETY: AVPlayer's documented API.
         let item: Option<Retained<AnyObject>> = unsafe { msg_send![&player, currentItem] };
-        let (emitter, repeat) = (self.emitter.clone(), self.repeat.clone());
+        let (emitter, repeat, ended) = (
+            self.emitter.clone(),
+            self.repeat.clone(),
+            self.ended.clone(),
+        );
         let weak_player = objc2::rc::Weak::from_retained(&player);
         let block = RcBlock::new(move |_: NonNull<NSNotification>| {
             emitter.emit(EventKind::End, || EventPayload::None);
+            ended.set(!repeat.get());
             if repeat.get()
                 && let Some(player) = weak_player.load()
             {
@@ -1132,18 +1141,14 @@ impl VideoHost {
     fn seek(&self, seconds: f64) {
         let Some(player) = &self.player else { return };
         seek_exactly(player, seconds);
-        // The player pauses itself at the end; a video the app has not
+        // The player stopped itself at the end; a video the app has not
         // paused plays on from where it was sought.
-        if let Some(props) = &self.props
+        if self.ended.replace(false)
+            && let Some(props) = &self.props
             && !props.paused
         {
             // SAFETY: AVPlayer's documented API.
-            unsafe {
-                let rate: f32 = msg_send![player, rate];
-                if rate == 0.0 {
-                    let _: () = msg_send![player, setRate: props.rate];
-                }
-            }
+            let _: () = unsafe { msg_send![player, setRate: props.rate] };
         }
     }
 }
@@ -1160,14 +1165,6 @@ fn seek_exactly(player: &AnyObject, seconds: f64) {
             toleranceAfter: zero
         ]
     };
-}
-
-/// Whether `player` stands at the end of its item.
-fn at_end(player: &AnyObject) -> bool {
-    let duration = item_duration(player);
-    // SAFETY: AVPlayer's documented getter.
-    let now: CMTime = unsafe { msg_send![player, currentTime] };
-    duration.is_finite() && duration > 0.0 && now.seconds() >= duration - 0.001
 }
 
 impl Drop for VideoHost {

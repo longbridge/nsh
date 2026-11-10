@@ -1,5 +1,6 @@
 // A 3-second clip (`clip.mp4`) played by AVPlayer, with the buttons apps
 // restart a video with. `Video.test.tsx` runs it on the macOS host.
+// clip.mp4: `ffmpeg -f lavfi -i testsrc=duration=3:size=64x64:rate=10 -c:v libx264 -profile:v baseline -pix_fmt yuv420p clip.mp4`
 import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
 import { Button } from "nsh/base";
 

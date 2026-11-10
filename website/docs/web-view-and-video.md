@@ -523,7 +523,7 @@ function Player() {
 mount(Player);
 ```
 
-Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. The ref has `seek(seconds)`.
+Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. Unpausing a video that played to its end plays it again from the start. The ref has `seek(seconds)`.
 
 In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `object_fit(ResizeMode::Contain)` (the `objectFit` style), `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
 
