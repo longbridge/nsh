@@ -490,6 +490,9 @@ fn shader_role(tag: Tag) -> Option<crate::shader::ShaderRole> {
 struct ImageState {
     source: Option<ImageSource>,
     options: crate::mount::ImageOptions,
+    /// An `svg()` the platform draws as an image: its mount item carries the
+    /// text color ([`crate::mount::ImageOptions::current_color`]).
+    svg_current_color: bool,
 }
 
 struct Node {
@@ -659,6 +662,10 @@ struct Node {
     /// still shows its last row, so it is hidden from sight, touches and
     /// assistive technology ([`Core::set_spare`]).
     spare: bool,
+    /// An attachment of a text inside a hidden span (`visibility:
+    /// "hidden"`): hidden with the span's characters, from sight, touches
+    /// and assistive technology ([`Core::hide_attachments`]).
+    hidden_in_text: bool,
     /// `android={{ elevation }}`.
     elevation: Points,
     /// `ios={{ backdropMaterial }}`.
@@ -758,7 +765,7 @@ impl Node {
         if self.list.as_ref().is_some_and(|l| l.parent) {
             style.overflow_hidden = true;
         }
-        if self.spare {
+        if self.spare || self.hidden_in_text {
             style.hidden = true;
         }
         if let Some(sides) = self.cell_border {
@@ -808,7 +815,7 @@ impl Node {
         if self.states & crate::tailwind::state::DISABLED != 0 {
             props.accessibility.state.disabled = true;
         }
-        if self.spare {
+        if self.spare || self.hidden_in_text {
             props.accessibility.hidden = true;
         }
         if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
@@ -912,6 +919,7 @@ impl Node {
             emitted: None,
             escapes: false,
             spare: false,
+            hidden_in_text: false,
         }
     }
 }
@@ -3919,6 +3927,10 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
                 Kind::Text | Kind::RawText | Kind::Input => {}
+                // An `svg()` drawn as an image paints `currentColor` too.
+                _ if node.image.as_ref().is_some_and(|i| i.svg_current_color) => {
+                    self.mark(k, dirty::IMAGE);
+                }
                 _ => stack.extend_from_slice(&self.nodes[k as usize].children),
             }
         }
@@ -4656,6 +4668,7 @@ impl<M: TextEngine> Core<M> {
                         }
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
+                        ImageProp::SvgCurrentColor(on) => image.svg_current_color = on,
                     }
                     flags |= dirty::IMAGE;
                 }
@@ -5655,6 +5668,11 @@ impl<M: TextEngine> Core<M> {
             None => p.children.len(),
         };
         self.set_inline(child, inline);
+        if !inline {
+            // An attachment hidden with its span leaves the text: shown
+            // where it goes (in a text, its block decides again).
+            self.set_hidden_in_text(child, false);
+        }
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.tree_order_changed |= self.track_tree_order;
@@ -6260,6 +6278,7 @@ impl<M: TextEngine> Core<M> {
             || node.macos_backdrop.is_some()
             || parent_list
             || node.spare
+            || node.hidden_in_text
         {
             flags |= dirty::VIEW;
         }
@@ -6300,7 +6319,11 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
-        if node.props.is_some() || node.spare || node.list.as_ref().is_some_and(|l| l.parent) {
+        if node.props.is_some()
+            || node.spare
+            || node.hidden_in_text
+            || node.list.as_ref().is_some_and(|l| l.parent)
+        {
             flags |= dirty::VIEW_PROPS;
         }
         match kind {
@@ -6427,6 +6450,7 @@ impl<M: TextEngine> Core<M> {
                         blur_radius: image.options.blur_radius,
                         fade_ms: image.options.fade_ms,
                         position: node.view_style.object_position,
+                        current_color: image.svg_current_color.then(|| self.resolved_paint(key).1),
                     },
                 });
             }
@@ -6897,6 +6921,7 @@ impl<M: TextEngine> Core<M> {
         let inserted = self.update_attachments(key);
         let mut alignments = crate::AttachmentAlignments::default();
         self.collect_text(key, base, &mut text, &mut alignments, false);
+        self.hide_attachments(key, false);
         if multiplier != 1.0 {
             for span in &mut text.spans {
                 span.style = scaled(span.style, multiplier);
@@ -8459,6 +8484,47 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Hides the attachments of text `key` (views and images inside it) that
+    /// are inside a hidden span, `hidden` when `key` is one, and shows the
+    /// others: nothing of a hidden span is drawn or takes presses.
+    fn hide_attachments(&mut self, key: Key, hidden: bool) {
+        let count = self.nodes[key as usize].children.len();
+        for i in 0..count {
+            let c = self.nodes[key as usize].children[i];
+            let child = &self.nodes[c as usize];
+            if child.is_overlay() {
+                continue;
+            }
+            match child.kind {
+                Kind::RawText | Kind::Overlay => {}
+                Kind::Text => {
+                    let hidden = hidden || child.view_style.hidden;
+                    self.hide_attachments(c, hidden);
+                }
+                _ if child.layout.is_some() => self.set_hidden_in_text(c, hidden),
+                _ => {}
+            }
+        }
+    }
+
+    /// Hides attachment `key` with the hidden span it is in, or shows it
+    /// again; sent at once, as [`Core::set_spare`].
+    fn set_hidden_in_text(&mut self, key: Key, hidden: bool) {
+        let node = &mut self.nodes[key as usize];
+        if node.hidden_in_text == hidden {
+            return;
+        }
+        node.hidden_in_text = hidden;
+        if !node.created {
+            // Its new view gets both (`ensure_created`).
+            return;
+        }
+        let (id, props) = (node.id, node.mounted_props());
+        let style = self.mounted_view_style(key);
+        self.mount.push(MountItem::ViewStyle { id, style });
+        self.mount.push(MountItem::ViewProps { id, props });
+    }
+
     /// Hides list cell `key`, which has no item but still shows its last
     /// row (`visibility: hidden` and `accessibilityElementsHidden`), or
     /// shows it again as its list places it. Sent at once: this round's
@@ -8564,9 +8630,12 @@ impl<M: TextEngine> Core<M> {
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
         list.offset += anchor;
+        // A splice above the viewport already moved the offset, to keep
+        // the visible rows in place: like measurements, that says nothing
+        // about where the user is.
+        let spliced = list.take_splice_anchor();
+        anchor += spliced;
         let kept = anchor;
-        // A splice above the viewport already moved the offset.
-        anchor += list.take_splice_anchor();
         // Inverted lists keep their distance from the end instead;
         // `maintainVisibleContentPosition` follows the end near it.
         anchor += list.anchor_end(kept);

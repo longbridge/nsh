@@ -29,7 +29,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use gtk4::{self as gtk, glib, prelude::*};
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
-use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
+use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink};
 use rustc_hash::FxHashMap;
 
 use crate::{animation::UiAnimation, mount::Mounter, text::PangoTextEngine, view::NshView};
@@ -40,6 +40,9 @@ enum Message {
     Error(String),
     Frame,
     HotUpdateFailed,
+    /// A function the app runs on the main thread
+    /// ([`MountSink::run_on_main_thread`]), after the batches before it.
+    Run(MainThreadTask),
 }
 
 thread_local! {
@@ -93,6 +96,10 @@ impl MountSink for Sink {
 
     fn hot_update_failed(&self) {
         self.send(Message::HotUpdateFailed);
+    }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
     }
 }
 
@@ -559,6 +566,7 @@ impl Surface {
                         f();
                     }
                 }
+                Message::Run(task) => task.run(),
             }
         }
         if applied {

@@ -667,6 +667,8 @@ fn selected_text(surface: u64, area: Option<&NshView>) -> Option<String> {
         let texts = Texts::of(&current.area);
         current.model.text(&texts)
     });
+    // A selection of hidden characters only copies nothing.
+    let text = text.filter(|t| !t.is_empty());
     put(current);
     text
 }
