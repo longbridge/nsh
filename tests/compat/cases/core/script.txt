@@ -47,6 +47,10 @@ expect Sum is a node: true
 expect Interpolation is a node: true
 # A node, the same for the same options, another without `snap`.
 expect Snapping diffClamp: true true true
+# Below the views whose frames the steps check, so they keep their place.
+expect Spring without stiffness rests at: 1.00
+expect Overdamped spring stays finite: yes
+expect Overdamped spring rests at: 1.00
 expect Composite: function/function/function
 expect Preset duration: 300
 expect Created: 250 linear opacity

@@ -37,8 +37,8 @@ use taffy::NodeId as LayoutId;
 
 use super::{Core, Key, Kind, NO_KEY, definite};
 use crate::{
-    EventKind, EventPayload, NodeId, PayloadValue, Prop, ROOT_ID, Tag, TextEngine, TouchEvent,
-    TouchPhase,
+    ContextMenuEvent, EventKind, EventPayload, NodeId, PayloadValue, PointerType, Prop, ROOT_ID,
+    Tag, TextEngine, TouchEvent, TouchPhase,
     element::{
         HintReason,
         task::{Action, Task, act_after},
@@ -1129,33 +1129,61 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         for point in touch.points.iter().filter(|p| p.changed) {
-            for i in 0..self.overlays.len() {
-                let key = self.overlays[i];
-                let node = &self.nodes[key as usize];
-                let Some(state) = self.overlay(key) else {
-                    continue;
-                };
-                if state.host.is_none() || !node.events.contains(EventKind::PressOutside) {
-                    continue;
-                }
-                let id = node.id;
-                let anchor = anchor_node(state);
-                let inside = point.path.iter().any(|&p| {
-                    p == id
-                        || Some(p) == anchor
-                        || self.key(p).is_ok_and(|k| {
-                            self.nodes[k as usize].is_overlay() && self.is_ancestor(key, k)
-                        })
-                });
-                if inside {
-                    continue;
-                }
-                self.events.push(crate::element::JsEvent::Event(
-                    id,
-                    EventKind::PressOutside,
-                    EventPayload::Map(vec![("pagePosition", PayloadValue::Point(point.page))]),
-                ));
+            self.press_outside(point.page, &point.path);
+        }
+    }
+
+    /// A context menu asked for on `id`: a secondary click goes down as a
+    /// press does, so the shown overlays it is outside of hear
+    /// `onPressOutside` (a menu open elsewhere closes as a new one opens).
+    /// The platforms send no touch for a secondary click; a menu asked for
+    /// by the keyboard or an assistive technology is no press, nor is a
+    /// long press, whose touch went down already.
+    pub(super) fn overlay_context_menu(&mut self, id: NodeId, event: &ContextMenuEvent) {
+        if event.pointer_type != Some(PointerType::Mouse) || self.overlay_state.watched.is_empty() {
+            return;
+        }
+        let Ok(mut key) = self.key(id) else {
+            return;
+        };
+        let mut path = Vec::new();
+        while key != NO_KEY {
+            path.push(self.nodes[key as usize].id);
+            key = self.nodes[key as usize].parent;
+        }
+        self.press_outside(event.page_position, &path);
+    }
+
+    /// A press at `page` on the views of `path` (the one pressed first):
+    /// `onPressOutside` of the shown overlays watching presses that it is
+    /// outside of, their anchors and the overlays inside them.
+    fn press_outside(&mut self, page: Point<Points>, path: &[NodeId]) {
+        for i in 0..self.overlays.len() {
+            let key = self.overlays[i];
+            let node = &self.nodes[key as usize];
+            let Some(state) = self.overlay(key) else {
+                continue;
+            };
+            if state.host.is_none() || !node.events.contains(EventKind::PressOutside) {
+                continue;
             }
+            let id = node.id;
+            let anchor = anchor_node(state);
+            let inside = path.iter().any(|&p| {
+                p == id
+                    || Some(p) == anchor
+                    || self.key(p).is_ok_and(|k| {
+                        self.nodes[k as usize].is_overlay() && self.is_ancestor(key, k)
+                    })
+            });
+            if inside {
+                continue;
+            }
+            self.events.push(crate::element::JsEvent::Event(
+                id,
+                EventKind::PressOutside,
+                EventPayload::Map(vec![("pagePosition", PayloadValue::Point(page))]),
+            ));
         }
     }
 

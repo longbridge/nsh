@@ -84,7 +84,7 @@ pub(crate) fn package(
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let info = crate::package::desktop_app_json(config, name, id, version);
     fs::write(resources.join("app.json"), info.to_string())?;
-    if let Some(icon) = &config.icon {
+    if let Some(icon) = config.icon(crate::package::PackageTarget::Windows) {
         let images = icon_images(icon)?;
         fs::write(resources.join("icon.ico"), icon_file(&images))?;
         set_icon(&exe, &images)
@@ -318,7 +318,7 @@ pub(crate) fn host_args(entry: &Path, work: &Path) -> Vec<OsString> {
     let config = crate::package::read_config(entry).unwrap_or_default();
     let (name, _) = crate::package::name_and_id(entry, &config);
     let mut args = vec!["--name".into(), name.into()];
-    if let Some(icon) = &config.icon {
+    if let Some(icon) = config.icon(crate::package::PackageTarget::Windows) {
         let ico = work.join("windows").join("icon.ico");
         match host_icon(icon, &ico) {
             Ok(()) => args.extend(["--icon".into(), ico.into_os_string()]),

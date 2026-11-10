@@ -1930,7 +1930,7 @@ for (const { file } of picked) {
 
 | Platform | Picker | Filters |
 |---|---|---|
-| macOS | `NSOpenPanel` sheet | All the extensions at once |
+| macOS | `NSOpenPanel`: a sheet of the app's window, or, while that window is out of sight (a tray app's hidden main window), a panel of its own in front | All the extensions at once |
 | Windows | `IFileOpenDialog` | One choice per filter, shown by its name |
 | Linux | `GtkFileDialog` (the portal's where there is one) | One choice per filter, shown by its name |
 | iOS | `UIDocumentPickerViewController`, as copies | All the extensions at once |
@@ -2076,7 +2076,7 @@ An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.op
 const UrlScheme: {
   on(event: "open", listener: (event: { url: string }) => void): () => void;
   /** The address moved without the app moving it (the web's back and forward, an address the user typed). */
-  on(event: "change", listener: (event: { url: string; cause: "back" | "forward" | "address" }) => void): () => void;
+  on(event: "change", listener: (event: { url: string; reason: "back" | "forward" | "address" }) => void): () => void;
   /** The app's address, or null when it has none. */
   url(): string | null;
   /** Sets the address of the page shown; the app's pages stay as they are. */
@@ -2169,7 +2169,7 @@ address and what moved it. `url()` reads the address already, and the app shows 
 UrlScheme.on("change", ({ url }) => tab.set(tabOf(url)));
 ```
 
-| `cause` | When (on the web, the app the whole page) |
+| `reason` | When (on the web, the app the whole page) |
 | --- | --- |
 | `"back"`, `"forward"` | The browser's back or forward went to an entry of the same pages with another address (an address the user typed), or a back popped pages and left an address the app did not set as it answered (no `onChange` sets one) |
 | `"address"` | The user gave the page an address of the app's, a `#fragment` typed in the address bar: a new entry after the current one, with the app's pages as they are |
@@ -2178,7 +2178,7 @@ What the stack accounts for stays as it is: a back that pops pages is the stack'
 stack no longer has is `open`, and the app's own `setUrl` is no `change`. Moves that come while nothing listens are not
 kept: `url()` has them. The native platforms, GPUI hosts and terminals have no history of addresses, so `change` comes
 only on the web. Rust code awaits `next_app_url_change()` of `nsh_core::prelude`, an `AppUrlChange` with the `url` and
-its `cause`.
+its `reason`.
 
 ## Speech
 

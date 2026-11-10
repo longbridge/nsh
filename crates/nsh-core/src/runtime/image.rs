@@ -186,15 +186,43 @@ fn failed(call: &str, error: String) -> JsError {
     JsError::Error(error)
 }
 
-/// Whether the app may load the image at `url`: why not when it may not.
+/// The VM's roots its local images are read under, resolved the first time
+/// a call names a source ([`crate::access::MediaFiles`]).
+#[derive(Default)]
+struct Files(std::cell::OnceCell<crate::access::MediaFiles>);
+
+impl crate::element::Local for Files {}
+
+/// Whether the app may load the image at `url`, as the core checks the
+/// `Command::ImageInfo` it sends (against the same base): why not when it
+/// may not.
 fn granted(sys: &System, url: &str) -> Result<(), JsError> {
-    if sys.access.allows_media(url) {
+    // An app without capabilities reads local files unchecked: no roots to
+    // resolve (`media_url` answers it before it looks at them).
+    let files = (!sys.access.is_unrestricted()).then(|| sys.locals.get::<Files>());
+    let files = files.as_ref().map(|files| {
+        files.0.get_or_init(|| {
+            let available = crate::access::native_files(sys.os);
+            crate::access::MediaFiles::new(
+                &sys.access,
+                sys.data_dir.as_deref(),
+                &sys.paths,
+                available,
+            )
+        })
+    });
+    if sys
+        .access
+        .media_url(url, sys.base_url.as_deref(), files)
+        .is_some()
+    {
         return Ok(());
     }
-    let advice = crate::access::grant_advice(url, "network");
+    let base = sys.base_url.as_deref();
+    let advice = crate::access::media_grant_advice(url, base);
     Err(JsError::access_denied(
         format!("Image.getSize / prefetch of {url} is not granted: {advice}"),
-        "network",
+        crate::access::media_capability(url, base),
         url,
     ))
 }

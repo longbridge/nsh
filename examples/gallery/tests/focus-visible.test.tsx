@@ -2,8 +2,9 @@
 // press gave (as a browser's `:focus-visible`): a press that moves the
 // focus (the app's `focus()`, a date picker's calendar opening at today)
 // leaves the ring off, Tab and the keys put it on, and a key typed while
-// the focus is unseen shows it. On a desktop, where Tab stops at the views
-// that take presses.
+// the focus is unseen shows it; a tree's cursor, which the tree projects
+// while it keeps the focus, shows it the same way. On a desktop, where Tab
+// stops at the views that take presses.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -58,4 +59,16 @@ test("a date picker opened with the keyboard rings today", async () => {
     await app.wait(50);
   }
   await app.waitFor("today ring");
+});
+
+test("a press on a tree's row puts the cursor there without a ring, an arrow key then rings it", async () => {
+  await app.press("role:treeitem[Alpha]");
+  await app.waitFor("Alpha cursor");
+  await app.wait(50);
+  expect(app.shows("Alpha ring")).toBe(false);
+  // The keys move the cursor: the tree's focus shows, and so does the row.
+  await app.keyboard.press("down");
+  await app.waitFor("Beta ring");
+  expect(app.shows("Beta cursor")).toBe(true);
+  expect(app.shows("Alpha ring")).toBe(false);
 });

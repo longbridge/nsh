@@ -1194,6 +1194,43 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Whether something runs as the app quits ([`crate::element::desktop::on_app_quit`],
+    /// `Application.on("quit")`): the engine gives it time to.
+    pub fn has_quit_listeners(&self) -> bool {
+        !self.components.executor.quit.borrow().is_empty()
+    }
+
+    /// The app quits: starts each quit listener's work, oldest first, as
+    /// tasks the engine runs ([`Core::run_component_tasks`]) until
+    /// [`Core::quit_pending`] is false or
+    /// [`QUIT_TIMEOUT`](crate::element::desktop::QUIT_TIMEOUT) has passed.
+    /// Whether any started.
+    pub fn start_quit(&mut self) -> bool {
+        let _entered = self.components.runtime.enter();
+        let executor = self.components.executor.clone();
+        let listeners = executor.quit.borrow().all();
+        for listener in listeners {
+            match caught(|| listener()) {
+                Ok(future) => {
+                    let pending = crate::element::quit::Pending::new(&executor.quitting);
+                    // Detached: it runs until it ends or the engine stops.
+                    drop(crate::element::task::spawn_future(&executor, async move {
+                        future.await;
+                        drop(pending);
+                    }));
+                }
+                Err(message) => log::error!(target: "js", "a quit listener failed: {message}"),
+            }
+        }
+        self.apply_actions();
+        self.quit_pending()
+    }
+
+    /// Whether the work quit listeners started is still running.
+    pub fn quit_pending(&self) -> bool {
+        self.components.executor.quitting.get() > 0
+    }
+
     /// Runs the closures that waited for the app's answer to the events
     /// handed to JS before this commit ([`crate::element::after_answer`]),
     /// each under its owner; one whose owner went is dropped unrun.
@@ -4906,6 +4943,10 @@ impl<M: TextEngine> Core<M> {
             }
             return false;
         }
+        // A secondary click is a press for the overlays it is outside of.
+        if let EventPayload::ContextMenu(event) = payload {
+            self.overlay_context_menu(id, event);
+        }
         // Hints follow the pointer on their anchors, whoever else listens.
         if matches!(kind, EventKind::MouseEnter | EventKind::MouseLeave) {
             let at = match payload {
@@ -5177,7 +5218,7 @@ impl<M: TextEngine> Core<M> {
         url: String,
         page: bool,
         quiet: bool,
-        change: Option<crate::url_scheme::AppUrlChangeCause>,
+        change: Option<crate::url_scheme::AppUrlChangeReason>,
     ) {
         let links = &mut self.components.url_schemes;
         let checked = if page {
@@ -5194,11 +5235,11 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let links = &mut self.components.url_schemes;
-        if let Some(cause) = change {
+        if let Some(reason) = change {
             if !links.hears_changes {
                 return;
             }
-            let change = crate::url_scheme::AppUrlChange { url, cause };
+            let change = crate::url_scheme::AppUrlChange { url, reason };
             if let Some(answer) = links.next_change.take() {
                 answer.borrow_mut().deliver(change);
                 return;
@@ -5381,7 +5422,7 @@ impl<M: TextEngine> Core<M> {
                 answer.borrow_mut().deliver(available);
                 return;
             }
-            AudioAction::Open { command, sink } => {
+            AudioAction::Open { mut command, sink } => {
                 debug_assert!(matches!(
                     command,
                     AudioCommand::Load { .. }
@@ -5401,16 +5442,33 @@ impl<M: TextEngine> Core<M> {
                     );
                     return;
                 }
+                // A sound loads what the check granted (`Access::media_url`).
                 if let AudioCommand::Open { src, .. } | AudioCommand::LoadUrl { url: src, .. } =
-                    &command
-                    && !self.access.allows_media(src)
+                    &mut command
                 {
-                    sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
-                    sink.close();
-                    self.deny(format!(
-                        "`{src}` is not granted by capabilities.network in nsh.json"
-                    ));
-                    return;
+                    match self.media_source(src) {
+                        Some(granted) => {
+                            if let Some(url) = granted {
+                                *src = url.to_string();
+                            }
+                        }
+                        None => {
+                            let base = self.base_url.as_deref();
+                            let capability = crate::access::media_capability(src, base);
+                            let advice = crate::access::media_grant_advice(src, base);
+                            // Worded without the app's text: the player's
+                            // error names the capability from it.
+                            sink.send(failed(
+                                AudioError::NotAllowed,
+                                &format!("{}{capability}", super::SOURCE_NOT_GRANTED),
+                            ));
+                            sink.close();
+                            self.deny(format!(
+                                "`{src}` is not granted by capabilities.{capability}: {advice}"
+                            ));
+                            return;
+                        }
+                    }
                 }
                 if self.audio.is_none() && !self.components.environment.audio {
                     sink.send(failed(AudioError::Unavailable, "nothing plays sound here"));
@@ -6202,17 +6260,17 @@ impl<M: TextEngine> Core<M> {
                 let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
                 let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
                 // An address move the app did not make (the web's back or
-                // forward), by its cause; one of a newer platform's causes
+                // forward), by its reason; one of a newer platform's reasons
                 // is still the address, quietly.
                 let change = entries.iter().find_map(|(k, v)| match v {
                     crate::PayloadValue::Str(s) if *k == crate::url_scheme::CHANGE => {
-                        Some(crate::url_scheme::AppUrlChangeCause::parse(s))
+                        Some(crate::url_scheme::AppUrlChangeReason::parse(s))
                     }
                     _ => None,
                 });
                 let (quiet, change) = match change {
                     Some(None) => (true, None),
-                    Some(cause) => (quiet, cause),
+                    Some(reason) => (quiet, reason),
                     None => (quiet, None),
                 };
                 // The page's base URL (the web), which Rust's `set_app_url`

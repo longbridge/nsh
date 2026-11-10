@@ -63,6 +63,8 @@ pub(crate) struct Host {
     granted: Mutex<Option<nsh_engine::Capabilities>>,
     /// The VM limits of loaded apps (`NshView.setLimits`).
     limits: Mutex<nsh_engine::Limits>,
+    /// The embedding app's runtime for apps loaded from now on.
+    runtime: Mutex<Option<tokio::runtime::Handle>>,
     /// Where loaded apps keep their data, each in a directory named by its
     /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
     pub(crate) data_dir: Option<std::path::PathBuf>,
@@ -229,7 +231,7 @@ impl Host {
             header_heights: (nsh_core::Points(56.0), nsh_core::Points(56.0)),
             limits: *self.limits.lock().expect("limits"),
             ui_sets: crate::ui_sets(),
-            runtime: None,
+            runtime: self.runtime.lock().expect("runtime").clone(),
             data_dir: self.data_dir.clone(),
             cache,
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
@@ -649,6 +651,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         epoch: Instant::now(),
         granted: Mutex::new(None),
         limits: Mutex::new(nsh_engine::Limits::default()),
+        runtime: Mutex::new(None),
         data_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
@@ -1143,6 +1146,25 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     #[cfg(not(feature = "js"))]
     let _ = updater;
     host.load(bundle);
+}
+
+/// Sets the runtime for apps loaded next in one `NshView`.
+///
+/// Call before loading an app or connecting a dev server. Later changes
+/// apply from the next load, including an app waiting for its first size;
+/// a running engine keeps its runtime. `None` restores NSH's shared runtime.
+/// The embedding app owns the runtime and must keep it running until its
+/// engines stop. Destroying the view does not shut the runtime down.
+///
+/// # Safety
+///
+/// `handle` must be the live native handle of a `NshView` from this linked
+/// library (its `handle` field). Call on the view's UI thread, before it is
+/// destroyed, so destruction cannot invalidate the handle during this call.
+pub unsafe fn set_runtime(handle: jlong, runtime: Option<tokio::runtime::Handle>) {
+    // SAFETY: the caller guarantees a live handle that cannot be destroyed.
+    let host = unsafe { host(handle) };
+    *host.runtime.lock().expect("runtime") = runtime;
 }
 
 /// Runs a Rust app's root in the `NshView` with native handle `handle`

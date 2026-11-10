@@ -1919,14 +1919,24 @@ test("a forward the app shows goes on from the entry the browser is at", () => {
  * the browser gives them: `go(n)` lands at once (the player's own pops are
  * ignored), `user(n)` is the browser's back (-1) or forward (1). `depth` is
  * the app's back depth; `calls` what reaches the history and the core. */
-function historyPlayer(t, { href = "https://a.test/inbox" } = {}) {
+/** `before`: the page's own state-less entries before the app's first (a
+ * `#fragment` followed while the app loaded, the host page's `pushState`).
+ * `navigation`: whether the browser has the Navigation API. */
+function historyPlayer(t, { href = "https://a.test/inbox", before = [], navigation = true } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const calls = [];
-  const saved = { history: globalThis.history, location: globalThis.location, window: globalThis.window, document: globalThis.document };
+  const saved = {
+    history: globalThis.history,
+    location: globalThis.location,
+    window: globalThis.window,
+    document: globalThis.document,
+    navigation: globalThis.navigation,
+  };
   t.after(() => Object.assign(globalThis, saved));
-  const entries = [{ state: null, url: href }];
+  const entries = [...before.map((url) => ({ state: null, url })), { state: null, url: href }];
   globalThis.document = { baseURI: href };
-  let at = 0;
+  let at = entries.length - 1;
+  globalThis.navigation = navigation ? { get currentEntry() { return { index: at }; } } : undefined;
   globalThis.location = { href, origin: "https://a.test" };
   globalThis.window = { addEventListener() {} };
   const land = () => {
@@ -1990,6 +2000,39 @@ test("an address the user types is an entry of the app's, and back and forward b
   assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox#archive", page: true, change: "forward" }]]);
   // Its pages stayed: the app's back from a page pushed there goes back to it.
   assert.equal(player.historyDepth, 0);
+});
+
+test("a back to the page's own entry before the app's first is a back past the first entry, not a typed address", (t) => {
+  const { player, calls, app, user } = historyPlayer(t, { before: ["https://a.test/inbox#intro"] });
+  app.depth = 1;
+  player.syncHistory();
+  calls.splice(0);
+  // Back twice from the page: past the app's first entry, to the page's own.
+  user(-2);
+  // The app goes back to its start, and hears no change.
+  assert.equal(app.depth, 0);
+  assert.deepEqual(calls.splice(0), []);
+  assert.equal(player.historyIndex, 0);
+});
+
+test("a forward from the page's own entry back to the app's first is no back", (t) => {
+  const { calls, user } = historyPlayer(t, { before: ["https://a.test/inbox#intro"] });
+  user(-1);
+  assert.deepEqual(calls.splice(0), []);
+  user(1);
+  assert.ok(
+    calls.every(([kind, , payload]) => kind !== "event" || payload?.change !== "back"),
+    JSON.stringify(calls),
+  );
+});
+
+test("without the Navigation API a state-less entry is an address the user typed", (t) => {
+  const { calls, type } = historyPlayer(t, { navigation: false });
+  type("https://a.test/inbox#archive");
+  assert.deepEqual(calls.splice(0), [
+    ["replace", 0, 1],
+    ["event", "onUrlScheme", { url: "https://a.test/inbox#archive", page: true, change: "address" }],
+  ]);
 });
 
 test("an address typed over a pushed page stays at its depth, and the app's own back goes over it", (t) => {

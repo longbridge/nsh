@@ -57,6 +57,7 @@ pub(crate) mod module;
 mod once;
 pub mod palette;
 mod prop;
+pub(crate) mod quit;
 pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
@@ -215,7 +216,7 @@ pub use crate::{
     PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent,
     ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScrollAlignment, SnapAlignment,
     StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent,
-    TransformKind, TransformOrigin, Viewability,
+    TransformKind, TransformOrigin, Viewability, WheelDelta, WheelEvent,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

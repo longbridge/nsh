@@ -41,7 +41,7 @@ const TONES: { tone: EmojiSkinTone; hand: string; label: string }[] = [
 /** The classes of the picker's parts. */
 export const emojiPickerClasses = {
   searchBar: `flex-row items-center gap-2 rounded-lg bg-raised ${desktop ? "mx-2.5 mt-2 h-8 pl-2.5 pr-1" : "mx-3 mt-1 h-10 pl-3 pr-1.5"}`,
-  search: `flex-1 ${desktop ? "text-[13px]" : "text-base"} text-foreground placeholder:text-faint`,
+  search: `flex-1 ${desktop ? "text-[13px]" : "text-base"} text-foreground placeholder:text-muted-foreground`,
   list: "mt-1 flex-1",
   /** Eight points each side: some glyphs (🫡) reach past their cell. */
   row: "px-2",

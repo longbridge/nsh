@@ -83,10 +83,12 @@ final class Native {
     static final int DOWNLOAD = 71;
     static final int NOTIFICATION = 72;
     static final int URL_SCHEME = 73;
-    static final int AUDIO = 74;
-    static final int WINDOW = 75;
-    static final int EDIT_ACTION = 76;
-    static final int WEB_EVALUATION = 77;
+    static final int SECOND_INSTANCE = 74;
+    static final int AUDIO = 75;
+    static final int WINDOW = 76;
+    static final int EDIT_ACTION = 77;
+    static final int WHEEL = 78;
+    static final int WEB_EVALUATION = 79;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

@@ -195,7 +195,7 @@ export function HoverCardDemo() {
             {words("the order ticket uses the same card.")}
           </Comment>
         </View>
-        <Caption label={hint("A tap outside closes it", "The pointer away from both for 300 ms closes it; Escape at once")} />
+        <Caption label={hint("A tap outside closes it", "Leave for 300 ms, or press Escape, to close")} />
       </Card>
     );
   }
@@ -239,7 +239,7 @@ export function HoverCardDemo() {
 
   function Links() {
     return (
-      <Card icon="link" title="A link preview" subtitle="The page behind a link, before going there: the link still opens on a press">
+      <Card icon="link" title="A link preview" subtitle="The page behind a link; a press still opens it">
         <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 4, rowGap: 4 }}>
           {words("Layout runs on")}
           {attached(<Preview site={sites.taffy} label="Taffy" />, ",")}
@@ -353,7 +353,7 @@ export function HoverCardDemo() {
 
   function Tickers() {
     return (
-      <Card icon="chart" title="A stock ticker" subtitle="A live quote behind each symbol: it ticks only while its card is open (onOpen to onClose)">
+      <Card icon="chart" title="A stock ticker" subtitle="A live quote behind each symbol, ticking only while open">
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <Ticker quote={quotes.AAPL} />
           <Ticker quote={quotes.NVDA} />
@@ -369,13 +369,21 @@ export function HoverCardDemo() {
     const close = signal("300");
     const side = signal<PopupSide>("bottom");
     return (
-      <Card icon="sliders" title="Delays and placement" subtitle="openDelay keeps it from flashing open; closeDelay leaves time to reach it">
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontSize: 12, color: colors.muted }}>openDelay</Text>
-          <Segmented size="small" options={[{ value: "0", label: "0" }, { value: "300", label: "300" }, { value: "600", label: "600" }, { value: "1200", label: "1200" }]} value={open()} onChange={(v) => open.set(v)} />
-          <Text style={{ fontSize: 12, color: colors.muted }}>closeDelay</Text>
-          <Segmented size="small" options={[{ value: "0", label: "0" }, { value: "300", label: "300" }, { value: "1000", label: "1000" }]} value={close()} onChange={(v) => close.set(v)} />
-          <Segmented size="small" options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]} value={side()} onChange={(v) => side.set(v)} />
+      <Card icon="sliders" title="Delays and placement" subtitle="A wait before opening, and time to reach the card">
+        {/* Each label close over its control, the groups further apart, so a label reads with the control under it. */}
+        <View style={{ gap: 12 }}>
+          <View style={{ gap: 4 }}>
+            <Text style={{ fontSize: 12, color: colors.text }}>Open delay (ms)</Text>
+            <Segmented size="small" options={[{ value: "0", label: "0" }, { value: "300", label: "300" }, { value: "600", label: "600" }, { value: "1200", label: "1200" }]} value={open()} onChange={(v) => open.set(v)} />
+          </View>
+          <View style={{ gap: 4 }}>
+            <Text style={{ fontSize: 12, color: colors.text }}>Close delay (ms)</Text>
+            <Segmented size="small" options={[{ value: "0", label: "0" }, { value: "300", label: "300" }, { value: "1000", label: "1000" }]} value={close()} onChange={(v) => close.set(v)} />
+          </View>
+          <View style={{ gap: 4 }}>
+            <Text style={{ fontSize: 12, color: colors.text }}>Side</Text>
+            <Segmented size="small" options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]} value={side()} onChange={(v) => side.set(v)} />
+          </View>
         </View>
         <View style={{ alignItems: "center", paddingVertical: pointer ? 36 : 24 }}>
           <HoverCard
@@ -409,7 +417,7 @@ export function HoverCardDemo() {
     const open = signal(false);
     const pinned = signal(false);
     return (
-      <Card icon="components" title="Controlled" subtitle="The app owns open: pinned, it stays whatever the pointer does">
+      <Card icon="components" title="Controlled" subtitle="The app owns open: pinned, it stays">
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <HoverCard
             {...exit}
@@ -444,7 +452,7 @@ export function HoverCardDemo() {
           <View style={{ flex: 1 }} />
           {/* The switch's name in sight, as the gallery's other switches have
               theirs: alone, a terminal's `[ ]` would say nothing. */}
-          <Text style={{ fontSize: small, color: colors.muted }}>Pin open</Text>
+          <Text style={{ fontSize: small, color: colors.text }}>Pin open</Text>
           <Toggle label="Pin open" value={pinned()} onChange={(v) => pinned.set(v)} />
         </View>
         <Caption label={pinned() ? "Pinned: onOpenChange still reports, the app keeps it open" : "Pin it, then move away"} />

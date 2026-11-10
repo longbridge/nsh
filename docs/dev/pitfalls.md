@@ -409,6 +409,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Linux, GTK
 
+- **OpenGL on NVIDIA's driver gives wgpu an adapter but no device**: wgpu 29 makes a compute pipeline for its
+  validation of indirect calls when it opens a device, and the GL context it gets lacks compute shaders, so the device
+  fails (`Features(BUFFER_STORAGE | COMPUTE_SHADER | DYNAMIC_ARRAY_SIZE)`); with that validation off it opens, but
+  reads its uniforms and pictures as zero. `nsh_engine::shader::Renderer::new` goes on to Vulkan, which draws them
+  (`nsh-engine`'s shader tests, an RTX 3060 Ti on 615.78).
 - **inotify reports reads** (`Access` events), FSEvents does not: file watchers (`nsh dev`, `cargo run`'s xtask) ignore
   `Access` events, or the build's own reads of the sources start the next build, forever. inotify also reports paths
   under the watched one as given: watch a canonical path (a `..` in it makes every path look like a dot entry).
@@ -534,6 +539,12 @@ Things that were found the hard way. Read the section of the area you change bef
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
   binding and older systems no property.
+
+- **TextKit 2 has no rect for text it has not laid out**: an `NSTextView` lays out only the text near its visible part,
+  and `firstRectForCharacterRange:actualRange:` answers `NSZeroRect` for the rest, so input methods open their
+  candidates at the screen's bottom-left corner (macOS 27.2, a standalone probe). A point-wide input, as the editors'
+  sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
+  (`text_input.rs`).
 
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn

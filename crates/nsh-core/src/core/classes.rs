@@ -196,6 +196,11 @@ impl<M: TextEngine> Core<M> {
         }
         let changed = (if env.dark != self.class_env.dark { deps::DARK } else { 0 })
             | (if env.reduce_motion != self.class_env.reduce_motion { deps::MOTION } else { 0 })
+            | (if env.pointer != self.class_env.pointer || env.terminal != self.class_env.terminal {
+                deps::DEVICE
+            } else {
+                0
+            })
             // `ios:` / `android:` never change at run time, but a new
             // platform must reach classes resolved before it was known.
             | (if env.platform != self.class_env.platform { u16::MAX } else { 0 });
@@ -304,6 +309,7 @@ impl<M: TextEngine> Core<M> {
         if target == self.focus_visible_on {
             return;
         }
+        let flipped = target.is_some() != self.focus_visible_on.is_some();
         if let Some(old) = self.focus_visible_on.take()
             && alive(self, old)
         {
@@ -321,6 +327,39 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.focus_visible_on = target;
+        if flipped {
+            self.restyle_projected_focus();
+        }
+    }
+
+    /// The states `key` is styled by: its own and those it shows as a
+    /// part of a control, with `FOCUS_VISIBLE` on a part projected focused
+    /// while the focus shows. Virtual focus is projected while its control
+    /// has the focus, so on its rows `focus:` is the cursor and
+    /// `focus-visible:` the cursor the keyboard is on.
+    pub(super) fn styled_states(&self, key: Key) -> u16 {
+        let node = &self.nodes[key as usize];
+        let states = node.states | node.projected;
+        if node.projected & state::FOCUSED != 0 && self.focus_visible_on.is_some() {
+            states | state::FOCUS_VISIBLE
+        } else {
+            states
+        }
+    }
+
+    /// Restyles the parts projected focused: the focus started or stopped
+    /// showing. Those released since are dropped.
+    fn restyle_projected_focus(&mut self) {
+        let mut parts = std::mem::take(&mut self.projected_focus);
+        parts.retain(|&(k, id)| {
+            self.nodes
+                .get(k as usize)
+                .is_some_and(|n| n.id == id && n.projected & state::FOCUSED != 0)
+        });
+        for &(k, _) in &parts {
+            self.states_changed(k);
+        }
+        self.projected_focus = parts;
     }
 
     /// Puts `focus-within` on the focus and the views around it, and takes
@@ -467,10 +506,20 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn set_projected_states(&mut self, key: Key, states: u16) {
         let node = &mut self.nodes[key as usize];
         if node.projected != states {
+            let focus_changed = (node.projected ^ states) & state::FOCUSED != 0;
             node.projected = states;
+            let id = node.id;
             if self.mount_projected && node.created {
-                let id = node.id;
                 self.mount.push(MountItem::ProjectStates { id, states });
+            }
+            if focus_changed {
+                // The key's entry before, and those released since, go.
+                let nodes = &self.nodes;
+                self.projected_focus
+                    .retain(|&(k, i)| k != key && nodes.get(k as usize).is_some_and(|n| n.id == i));
+                if states & state::FOCUSED != 0 {
+                    self.projected_focus.push((key, id));
+                }
             }
             self.states_changed(key);
         }
@@ -1086,7 +1135,7 @@ impl<M: TextEngine> Core<M> {
                 .as_ref()
                 .is_some_and(|c| c.groups().iter().any(|g| **g == *name))
             {
-                return node.states | node.projected;
+                return self.styled_states(k);
             }
             k = node.parent;
         }
@@ -1344,7 +1393,7 @@ impl<M: TextEngine> Core<M> {
                 // detached takes the root's), so its sided classes land
                 // right the first time.
                 rtl: self.resolved_rtl(key),
-                states: node.states | node.projected,
+                states: self.styled_states(key),
                 position: pos,
                 group: &group,
             };

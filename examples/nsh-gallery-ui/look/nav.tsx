@@ -63,7 +63,7 @@ export function carouselArrowLook(o?: CarouselArrowOptions) {
     get focusVisibleStyle(): ViewStyle {
       return focusRing(2);
     },
-    disabledStyle: { opacity: 0.3 } as ViewStyle,
+    disabledStyle: { opacity: 0.5 } as ViewStyle,
   };
 }
 
@@ -192,7 +192,7 @@ export function LinkText(props: LinkState & { label: string; color: string; size
 const pageItem =
   "flex-row items-center justify-center gap-1 px-2 rounded-md text-sm text-foreground " +
   "transition-colors duration-200 motion-reduce:transition-none hover:bg-hover active:opacity-70 " +
-  "selected:bg-primary selected:text-primary-foreground disabled:opacity-35 focus-visible:outline-2 focus-visible:outline-ring";
+  "selected:bg-primary selected:text-primary-foreground disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-ring";
 
 /**
  * A `Pagination`'s `itemClass`, over the component's own numbers and

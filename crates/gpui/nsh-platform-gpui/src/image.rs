@@ -155,6 +155,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
         access: surface.access.borrow().clone(),
+        media_files: Arc::default(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -2078,8 +2079,10 @@ fn draw_one(
     if Rc::ptr_eq(&texture, &picture.texture) && !picture.drawn.replace(true) {
         picture.count(picture.bytes() as isize);
     }
-    let boxed = cx.rect(0.0, 0.0, w, h);
-    let placed = cx.rect(x, y, fw, fh);
+    // GPUI cannot turn a sprite: a rotated or skewed image is drawn
+    // upright at its own size rather than stretched over its bounding box.
+    let boxed = cx.upright(0.0, 0.0, w, h);
+    let placed = cx.upright(x, y, fw, fh);
     // GPUI rounds the sprite itself: the corners of the innermost rounded
     // clip (the view's own, or a rounded parent's) that the part shown
     // reaches.
