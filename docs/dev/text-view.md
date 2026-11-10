@@ -210,7 +210,8 @@ build without syntect. Without the feature, code blocks the app does not highlig
 With `options.streaming`, `markdown/streaming.rs` repairs the last block of the text before parsing (the blocks before
 it are complete; a text ending inside a fenced code or `$$` block needs nothing): emphasis, strong, strikethrough
 (`**`, `*`, `__`, `_`, `~~`), inline code and formulas left open are closed in the reverse order they opened, a marker
-with nothing after it yet is removed; `[text` and `[text](partial` show as their text, `![alt` and `![alt](partial`
+with nothing after it yet is removed (so is half a formula closer, `\[1\` reads as `\[1\]`, which escaped brackets
+around a reference number keep as text); `[text` and `[text](partial` show as their text, `![alt` and `![alt](partial`
 are removed; an HTML tag being typed (`<di`, `<a href="x`) is removed; a table's header followed by the start of its
 delimiter row is completed to a table (and a lone `-` under it is no heading). So a reply never flashes literal `**`
 or `[` while the next chunk is on its way. The repair is a `Cow`: text with nothing open is parsed as it is.
