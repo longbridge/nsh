@@ -865,6 +865,7 @@ fn header_heights(mtm: MainThreadMarker) -> (Points, Points) {
 
 /// Options of a [`Surface`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SurfaceOptions {
     /// Log per-commit timings.
     pub trace: bool,
