@@ -793,6 +793,7 @@ pub struct Registry {
     submodules: Arc<Vec<Registry>>,
     /// What each engine serving the set runs once ([`Registry::setup`]).
     setups: Arc<Vec<Setup>>,
+    plugins: Arc<Vec<super::plugin::Definition>>,
 }
 
 /// A function each engine serving a set runs once ([`Registry::setup`]).
@@ -1119,6 +1120,17 @@ impl Registry {
     pub fn setup(&mut self, f: impl Fn() + Send + Sync + 'static) -> &mut Self {
         Arc::make_mut(&mut self.setups).push(Arc::new(f));
         self
+    }
+
+    /// Installs one runtime instance of `P` in every VM serving this set.
+    /// Its dependencies start first; its resources stop before theirs.
+    pub fn plugin<P: super::Plugin>(&mut self) -> &mut Self {
+        Arc::make_mut(&mut self.plugins).push(super::plugin::Definition::of::<P>());
+        self
+    }
+
+    pub(crate) fn plugins(&self) -> &[super::plugin::Definition] {
+        &self.plugins
     }
 
     /// Runs the functions [`Registry::setup`] gave the set (a merged set's:

@@ -34,3 +34,30 @@ reads.
 How each kind of export runs, crosses and is typed: [Building with Rust](../../website/docs/rust.md) and, for
 NSH's developers, `docs/dev/rust-classes.md` (classes, module functions, callbacks) and `docs/dev/components.md`
 (components). `examples/gallery-rs` is a whole app written in Rust.
+
+## A user runtime plugin
+
+`Workspace.tsx` uses a user plugin to choose a workspace palette. `WorkspaceTheme` in
+[`native/src/workspace.rs`](native/src/workspace.rs) implements `Plugin`, declares its dependency on the official
+`nsh.theme` contract, and retains that engine's `ThemePlugin` when it starts. Its `stop` releases the dependency.
+The crate registers it alongside its generated module:
+
+```rust
+registry.plugin::<WorkspaceTheme>().module::<Workspace>();
+```
+
+The generated `Workspace` module gives TSX synchronous calls to the plugin. `Workspace.select("ocean")` selects
+the app's palette, `Workspace.current()` reads the accepted selection, and `Workspace.select("built")` restores
+the theme from `nsh.json`. The module uses the shared theme service, so the next `token("workspace-accent")`
+read sees the new value before the call returns, and `text-workspace-accent` follows in the commit. The same
+Rust implementation supplies native and WebAssembly hosts.
+
+```sh
+./target/debug/nsh run examples/rust-exports/Workspace.tsx
+./target/debug/nsh run examples/rust-exports/Workspace.tsx --target web
+./target/debug/nsh test examples/rust-exports/Workspace.test.tsx --trace
+cargo test -p rust-exports-native --test rust_exports workspace::
+```
+
+The tests check immediate reads, rendered colors, dark appearance and built-theme reset. The Rust test also
+opens two engines, changes each workspace independently, and closes one while the other keeps working.

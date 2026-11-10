@@ -32,11 +32,13 @@ mod picker;
 mod process;
 mod speech;
 mod storage;
+mod theme;
 mod updater;
 mod url_scheme;
 mod websocket;
 mod webview;
 
+pub use theme::ThemePlugin;
 pub use updater::{PackageVersion, UpdaterHost, UpdaterSink};
 
 /// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`
@@ -56,6 +58,8 @@ pub fn registries() -> &'static [Registry] {
         // `nsh`'s modules written in Rust; the rest of `nsh` is `nsh-js`'s.
         let mut nsh = Registry::runtime("nsh");
         nsh.module::<crate::element::Keyboard>()
+            .plugin::<ThemePlugin>()
+            .module::<theme::ThemeRuntime>()
             .module::<image::Image>()
             .module::<device::Device>()
             .module::<fonts::Fonts>()

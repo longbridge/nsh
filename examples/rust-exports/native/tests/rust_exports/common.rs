@@ -9,7 +9,7 @@ use nsh_testing::Headless;
 
 /// The sets the app's hosts serve: the mobile UI, then the crate's
 /// (`nsh.json` `"rust"`), as `nsh` passes them.
-fn ui_sets() -> Vec<Registry> {
+pub(crate) fn ui_sets() -> Vec<Registry> {
     vec![nsh_base::registry(), rust_exports_native::registry()]
 }
 
@@ -25,9 +25,14 @@ fn app() -> Bundle {
 
 /// The app on a phone-sized headless engine, once it shows `ready`.
 pub(crate) fn start(ready: &str) -> Headless {
+    start_bundle(app(), ready)
+}
+
+/// A bundled entry on the same app host and registered sets.
+pub(crate) fn start_bundle(bundle: Bundle, ready: &str) -> Headless {
     let mut app = Headless::start(EngineConfig {
         ui_sets: ui_sets(),
-        ..EngineConfig::new(app())
+        ..EngineConfig::new(bundle)
     })
     .expect("the engine starts");
     app.wait_for(ready).unwrap();

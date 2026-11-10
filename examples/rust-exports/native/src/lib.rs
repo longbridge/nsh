@@ -6,12 +6,15 @@
 //! `.nsh/types/rust-exports/native.d.ts`. On the desktops the crate also
 //! registers a native component (`meter.rs`), which `App.tsx` declares with
 //! `nativeComponent`.
+//! `Workspace.tsx` uses the same set's `Workspace` module and its
+//! [`WorkspaceTheme`] plugin, a consumer of the official theme service.
 
 mod account;
 mod gauge;
 mod ledger;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod meter;
+mod workspace;
 
 use nsh_core::prelude::*;
 
@@ -19,6 +22,7 @@ pub use crate::{
     account::Account,
     gauge::{Gauge, GaugeElement, GaugeEvent, GaugeProps, gauge},
     ledger::Ledger,
+    workspace::{Workspace, WorkspacePalette, WorkspaceTheme},
 };
 
 /// The crate's UI set: what `App.tsx` imports from `rust-exports/native`.
@@ -27,6 +31,8 @@ fn native(registry: &mut Registry) {
     registry
         .register::<Gauge>()
         .module::<Ledger>()
+        .plugin::<WorkspaceTheme>()
+        .module::<Workspace>()
         .class::<Account>();
 }
 

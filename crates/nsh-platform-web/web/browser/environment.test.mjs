@@ -69,12 +69,13 @@ test("the environment serves every export of nsh/device and nsh/accessibility", 
   }
 });
 
-test("setTheme hands the theme to the engine and reads the tokens again once it took", () => {
+test("setTheme relies on the engine's token notification and propagates refusal", () => {
   const calls = [];
   const theme = { cssVars: { light: { brand: "#e11d48" } } };
   const { env, writes } = environment((op, args) => {
     calls.push([op, args]);
     if (op === 406 && args[0]?.cssVars?.light?.brand === "#zz") throw new TypeError("setTheme: `brand`: #zz is no color");
+    if (op === 406) env.changedTokens();
   });
   env.api.setTheme(theme);
   env.api.setTheme(null);

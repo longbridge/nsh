@@ -452,6 +452,26 @@ pub fn Quote(props: QuoteProps) -> impl IntoElement {
 `TextView` in `nsh/base` is built this way: its `renderCodeBlock`, `renderMath`, ... are render functions, and its
 `classes` are the app's classes by part ([TextView](../elements/text-view.md)).
 
+## Runtime plugins (prototype)
+
+The prototype composes official and app-owned capability plugins when a TSX engine starts. A Rust `Plugin`
+declares its identity, contract version and dependencies. `Registry::plugin` registers its definition alongside
+the module that exports its functions; `System::plugin` reads that engine's initialized instance. Dependencies
+start first, and instances release their work once, in reverse order, when the engine stops.
+
+The [workspace example](../../examples/rust-exports/Workspace.tsx) uses an app plugin that depends on the official
+theme provider. Its generated `Workspace.select("ocean")` function changes the palette, and the next `token()`
+read sees it immediately; `Workspace.select("built")` restores the built theme. The
+[Rust implementation](../../examples/rust-exports/native/src/workspace.rs) registers both parts:
+
+```rust
+registry.plugin::<WorkspaceTheme>().module::<Workspace>();
+```
+
+Composition lasts for the engine's lifetime; adding or removing providers takes an engine restart. Existing
+`setTheme(theme | null)` calls use the official provider by default and need no migration. See the
+[architecture proposal](../../docs/dev/runtime-plugins.md) for the shared contract and the prototype's scope.
+
 ## Testing
 
 A Rust app's tests run it headless, in `cargo test` or in `nsh test`, with the same driver: on the real engine,

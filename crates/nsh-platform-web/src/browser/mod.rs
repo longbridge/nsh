@@ -38,13 +38,7 @@ struct Runtime {
     gestures: gesture::Gestures,
     timers: timers::Timers,
     fetches: fetch::Fetches,
-    listener: RefCell<Option<Value>>,
     registries: RefCell<Vec<nsh_core::element::Registry>>,
-    tokens: RefCell<Option<std::sync::Arc<nsh_core::element::Tokens>>>,
-    theme: RefCell<Option<nsh_core::element::ThemeTokens>>,
-    /// The theme file the app was built with (`setup`), which
-    /// `setTheme(null)` gives back.
-    built_theme: RefCell<Option<String>>,
     host: RefCell<Option<Rc<dyn nsh_core::host_channel::HostBridge>>>,
     wake: RefCell<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
     fonts: RefCell<Vec<String>>,
@@ -66,11 +60,7 @@ impl Default for Runtime {
             gestures: gesture::Gestures::default(),
             timers: timers::Timers::default(),
             fetches: fetch::Fetches::default(),
-            listener: RefCell::default(),
             registries: RefCell::default(),
-            tokens: RefCell::default(),
-            theme: RefCell::default(),
-            built_theme: RefCell::default(),
             host: RefCell::default(),
             wake: RefCell::default(),
             fonts: RefCell::default(),
@@ -171,7 +161,12 @@ impl Runtime {
                 use nsh_core::element::Token;
                 let name = args.index(0)?.as_string().unwrap_or_default();
                 let dark = args.index(1)?.truthy();
-                let token = self.tokens.borrow().as_ref().and_then(|t| t.get(&name));
+                let token = self
+                    .bindings
+                    .tokens
+                    .borrow()
+                    .as_ref()
+                    .and_then(|t| t.get(&name));
                 match token {
                     Some(Token::Number(n)) => Ok(Value::number(n.into())),
                     Some(Token::Font(f)) => Value::string(&f),
@@ -185,48 +180,39 @@ impl Runtime {
             403 => {
                 let json = args.index(0)?.as_string().unwrap_or_default();
                 let tokens = self
+                    .bindings
                     .theme
                     .borrow()
                     .as_ref()
                     .and_then(|theme| theme.of(&json));
                 if let Some(tokens) = tokens {
-                    *self.tokens.borrow_mut() = Some(std::sync::Arc::new(tokens));
+                    *self.bindings.tokens.borrow_mut() = Some(std::sync::Arc::new(tokens));
                 }
-                *self.built_theme.borrow_mut() = Some(json);
+                let system = self.bindings.system.borrow().clone();
+                system
+                    .plugin::<nsh_core::runtime::ThemePlugin>()
+                    .map_err(|error| self.throw(error))?
+                    .remember_built(&json);
                 Ok(Value(0))
             }
-            // `setTheme(theme)`, as nsh-js's (`env.rs`): the theme read whole
-            // or a `TypeError` naming what is not; `null`, the one the app
-            // was built with. The page reads `token()` from here at once.
+            // The original browser opcode remains a facade over the shared plugin.
             406 => {
-                use nsh_core::element::JsError;
                 let value = args.index(0)?;
-                let theme = self.theme.borrow();
-                let (json, tokens) = if value.is_nullish() {
-                    let built = self.built_theme.borrow().clone();
-                    let json = built.unwrap_or_else(|| r#"{"cssVars":{}}"#.to_owned());
-                    let tokens = theme.as_ref().and_then(|t| t.of(&json));
-                    (json, tokens)
-                } else if value.is_object() {
-                    let json = protocol::to_json(&compat::Value::new(value))?.to_string();
-                    match theme.as_ref().and_then(|t| t.checked(&json)) {
-                        Some(Err(what)) => {
-                            return Err(self.throw(JsError::Type(format!("setTheme: {what}"))));
-                        }
-                        Some(Ok(tokens)) => (json, Some(tokens)),
-                        None => (json, None),
-                    }
+                let json = if value.is_nullish() {
+                    None
                 } else {
-                    let message = "setTheme: expected a theme ({ cssVars }) or null";
-                    return Err(self.throw(JsError::Type(message.into())));
+                    Some(protocol::to_json(&compat::Value::new(value))?)
                 };
-                self.bindings.ops.borrow_mut().push(nsh_core::Op::SetProp {
-                    id: nsh_core::ROOT_ID,
-                    prop: nsh_core::Prop::UiTheme(json.into()),
-                });
-                if let Some(tokens) = tokens {
-                    *self.tokens.borrow_mut() = Some(std::sync::Arc::new(tokens));
-                }
+                let system = self.bindings.system.borrow().clone();
+                system
+                    .plugin::<nsh_core::runtime::ThemePlugin>()
+                    .and_then(|theme| {
+                        theme.set(
+                            json.as_ref(),
+                            nsh_core::element::CallCx::new(&*self.bindings),
+                        )
+                    })
+                    .map_err(|error| self.throw(error))?;
                 Ok(Value(0))
             }
             // `nsh:rt`'s `i18n(json)`: the core's components translate with
@@ -294,7 +280,7 @@ impl Runtime {
             }
             400 => {
                 let listener = args.index(0)?;
-                *self.listener.borrow_mut() = Some(listener);
+                *self.bindings.listener.borrow_mut() = Some(listener);
                 Ok(Value(0))
             }
             206 => {
@@ -416,17 +402,7 @@ pub(crate) extern "C" fn nsh_browser_initialize() {
     drop(previous);
     #[cfg(feature = "browser-tests")]
     REACTIVE.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .unwrap()
-            .registries
-            .borrow_mut()
-            .extend(
-                nsh_core::runtime::registries()
-                    .iter()
-                    .cloned()
-                    .chain([fixtures::registry()]),
-            );
+        fixtures::initialize(slot.borrow().as_ref().unwrap());
     });
 }
 

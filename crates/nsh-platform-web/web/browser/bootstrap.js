@@ -5276,7 +5276,6 @@
 				},
 				setTheme(theme) {
 					invoke(406, [theme]);
-					tokens.update((value) => value + 1);
 				}
 			},
 			insets,

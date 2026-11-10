@@ -407,6 +407,24 @@ pub fn Quote(props: QuoteProps) -> impl IntoElement {
 
 `nsh/base` 中的 `TextView` 就是这样构建的：它的 `renderCodeBlock`、`renderMath` 等是渲染函数，它的 `classes` 是应用按部件给出的类（[TextView](../elements/text-view.md)）。
 
+## 运行时插件（原型）
+
+原型在 TSX 引擎启动时组合官方与应用自己的能力插件。Rust 的 `Plugin` 声明标识、契约版本和依赖。
+`Registry::plugin` 注册插件定义，模块导出它的函数；`System::plugin` 取得当前引擎已初始化的实例。
+依赖先启动；引擎退出时，实例按相反顺序释放工作，每个实例只清理一次。
+
+[工作区示例](../../../examples/rust-exports/Workspace.tsx) 使用一个依赖官方主题提供者的应用插件。
+生成的 `Workspace.select("ocean")` 函数切换配色，紧接着的 `token()` 就能读到新值；
+`Workspace.select("built")` 恢复构建时的主题。[Rust 实现](../../../examples/rust-exports/native/src/workspace.rs)
+同时注册插件和模块：
+
+```rust
+registry.plugin::<WorkspaceTheme>().module::<Workspace>();
+```
+
+组合在引擎存续期间固定，添加或移除提供者通过重启引擎生效。现有 `setTheme(theme | null)` 调用默认使用官方提供者，
+应用无需迁移。共同契约和原型范围见[架构提案](../../../docs/dev/runtime-plugins.md)。
+
 ## 测试
 
 Rust 应用的测试以无界面方式运行它，可以在 `cargo test` 中，也可以在 `nsh test` 中，使用同一个驱动：运行在真实的引擎上，没有窗口，以

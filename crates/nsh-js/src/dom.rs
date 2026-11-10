@@ -309,21 +309,13 @@ impl Dom {
 
     /// Queues `op`; `Err` (with a thrown error) over the VM's limit.
     fn push(&self, cx: *mut JsContext, op: Op) -> Result<(), JsValue> {
-        let mut ops = self.shared.ops.borrow_mut();
-        if ops.len() >= self.shared.limits.max_op_values {
-            drop(ops);
-            let reason = format!(
-                "the app made more than {} changes at once and was stopped",
-                self.shared.limits.max_op_values
-            );
-            self.shared.stop(reason.clone());
+        if let Err(reason) = self.shared.queue_op(op) {
             // SAFETY: throws on a live context.
             return Err(unsafe {
                 let message = std::ffi::CString::new(reason).unwrap_or_default();
                 qjs::JS_ThrowRangeError(cx, c"%s".as_ptr(), message.as_ptr())
             });
         }
-        ops.push(op);
         Ok(())
     }
 

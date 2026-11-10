@@ -115,7 +115,6 @@ pub(crate) struct NativeModule {
 /// `nsh`: the API apps write against.
 const NSH: &[Item] = &[
     crate::env::TOKEN_EXPORT,
-    crate::env::SET_THEME_EXPORT,
     crate::env::APP_INFO_EXPORT,
     (
         "signal",

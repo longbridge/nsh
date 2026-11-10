@@ -99,6 +99,24 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    pub(crate) fn queue_op(&self, op: Op) -> Result<(), String> {
+        if let Some(reason) = &*self.fatal.borrow() {
+            return Err(reason.clone());
+        }
+        let mut ops = self.ops.borrow_mut();
+        if ops.len() >= self.limits.max_op_values {
+            drop(ops);
+            let reason = format!(
+                "the app made more than {} changes at once and was stopped",
+                self.limits.max_op_values
+            );
+            self.stop(reason.clone());
+            return Err(reason);
+        }
+        ops.push(op);
+        Ok(())
+    }
+
     /// Stops the VM for `reason` (the first reason wins).
     pub(crate) fn stop(&self, reason: String) {
         self.fatal.borrow_mut().get_or_insert(reason);
@@ -123,6 +141,7 @@ pub struct Host {
     budget: Budget,
     evaluations: RefCell<Vec<Persistent<Promise<'static>>>>,
     entry_depth: Cell<usize>,
+    plugin_sets: Vec<nsh_core::element::Registry>,
 }
 
 /// How a VM is set up.
@@ -210,6 +229,11 @@ impl Host {
             budget,
             evaluations: RefCell::new(Vec::new()),
             entry_depth: Cell::new(0),
+            plugin_sets: nsh_core::runtime::registries()
+                .iter()
+                .cloned()
+                .chain(options.ui_sets)
+                .collect(),
         })
     }
 
@@ -365,9 +389,19 @@ impl Host {
         self.on_rejection = Some(handler);
     }
 
+    fn start_plugins(&self) -> Result<(), JsError> {
+        self.cx.with(|cx| {
+            let host = crate::classes::host_outside_calls(cx.as_raw().as_ptr());
+            nsh_core::element::JsHost::system(&host)
+                .start_plugins(&self.plugin_sets)
+                .map_err(JsError::new)
+        })
+    }
+
     /// Evaluates a bundle given as source.
     pub fn eval_source(&self, source: &str) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
+            self.start_plugins()?;
             let promise = self
                 .cx
                 .with(|cx| -> Result<_, JsError> {
@@ -435,6 +469,7 @@ impl Host {
     }
 
     fn eval_script_unguarded(&self, name: &str, source: &str) -> Result<bool, JsError> {
+        self.start_plugins()?;
         let applied = self.cx.with(|cx| -> Result<bool, JsError> {
             let mut options = rquickjs::context::EvalOptions::default();
             options.global = true;
@@ -454,6 +489,7 @@ impl Host {
     /// Evaluates a bundle compiled with [`crate::compile_bytecode`].
     pub fn eval_bytecode(&self, bytecode: &[u8]) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
+            self.start_plugins()?;
             let promise = self
                 .cx
                 .with(|cx| -> Result<_, JsError> {
@@ -1717,6 +1753,223 @@ mod tests {
     };
 
     use super::*;
+
+    #[derive(Default)]
+    struct ThemeConsumer {
+        theme: RefCell<Option<Rc<nsh_core::runtime::ThemePlugin>>>,
+        changes: Cell<u32>,
+    }
+
+    impl nsh_core::element::Plugin for ThemeConsumer {
+        const ID: &'static str = "test.theme-consumer";
+        const REQUIRES: &'static [nsh_core::element::PluginDependency] =
+            &[nsh_core::element::PluginDependency::new("nsh.theme", 1)];
+
+        fn start(&self, system: &nsh_core::element::System) -> Result<(), String> {
+            self.theme
+                .replace(Some(system.plugin().map_err(|e| e.message().to_owned())?));
+            Ok(())
+        }
+
+        fn stop(&self) {
+            self.theme.take();
+        }
+    }
+
+    #[nsh_core::element::module]
+    struct UserTheme;
+
+    #[nsh_core::element::module]
+    impl UserTheme {
+        pub(crate) fn apply(
+            theme: nsh_core::JsonValue,
+            system: nsh_core::element::System,
+            cx: nsh_core::element::CallCx<'_>,
+        ) -> Result<(), nsh_core::element::JsError> {
+            let plugin = system.plugin::<ThemeConsumer>()?;
+            let theme_service = plugin.theme.borrow().as_ref().unwrap().clone();
+            theme_service.set(Some(&theme), cx)?;
+            plugin.changes.set(plugin.changes.get() + 1);
+            Ok(())
+        }
+    }
+
+    fn theme_host(limits: Limits) -> Host {
+        let base = nsh_base::registry();
+        let mut user = nsh_core::element::Registry::ui_set("test/theme-plugin");
+        user.plugin::<ThemeConsumer>().module::<UserTheme>();
+        let mut core = nsh_core::Core::new(nsh_core::ApproxTextEngine, Default::default());
+        core.set_components(base.clone());
+        let host = Host::with_options(HostOptions {
+            ui_sets: vec![base, user],
+            limits,
+            ..Default::default()
+        })
+        .unwrap();
+        host.set_theme_tokens(core.theme_tokens());
+        host
+    }
+
+    fn theme_consumer(host: &Host) -> Rc<ThemeConsumer> {
+        host.cx.with(|cx| {
+            use nsh_core::element::JsHost;
+            crate::classes::host_outside_calls(cx.as_raw().as_ptr())
+                .system()
+                .plugin::<ThemeConsumer>()
+                .unwrap()
+        })
+    }
+
+    #[test]
+    fn official_and_user_plugins_share_the_theme_service_and_dispose_with_the_vm() {
+        let first = theme_host(Limits::default());
+        let second = theme_host(Limits::default());
+        let setup = r##"
+            import { setup } from "nsh:rt";
+            import { setTheme, token } from "nsh";
+            import { UserTheme } from "test/theme-plugin";
+            setup(null, '{"cssVars":{"light":{"brand":"#123456"}}}');
+            Object.assign(globalThis, { setTheme, token, UserTheme });
+        "##;
+        first.eval_source(setup).unwrap();
+        second.eval_source(setup).unwrap();
+        ops(&first);
+        ops(&second);
+        first
+            .eval_source(
+                r##"
+            UserTheme.apply({ cssVars: { light: { brand: "#00ff00" } } });
+            if (token("brand") !== "#00ff00ff") throw new Error("late plugin token");
+            setTheme({ cssVars: { light: { brand: "#0000ff" } } });
+            if (token("brand") !== "#0000ffff") throw new Error("late official token");
+        "##,
+            )
+            .unwrap();
+        second
+            .eval_source(
+                r##"
+            if (token("brand") !== "#123456ff") throw new Error("shared VM state");
+        "##,
+            )
+            .unwrap();
+        let first_plugin = theme_consumer(&first);
+        let second_plugin = theme_consumer(&second);
+        assert_eq!(first_plugin.changes.get(), 1);
+        assert_eq!(second_plugin.changes.get(), 0);
+        assert!(!Rc::ptr_eq(&first_plugin, &second_plugin));
+        let theme = first_plugin.theme.borrow().as_ref().unwrap().clone();
+        second.cx.with(|cx| {
+            let host = crate::classes::host_outside_calls(cx.as_raw().as_ptr());
+            let error = theme
+                .set(None, nsh_core::element::CallCx::new(&host))
+                .unwrap_err();
+            assert_eq!(
+                error.code(),
+                Some(nsh_core::element::codes::PLUGIN_UNAVAILABLE)
+            );
+        });
+        drop(first);
+        assert!(first_plugin.theme.borrow().is_none());
+        second.cx.with(|cx| {
+            let host = crate::classes::host_outside_calls(cx.as_raw().as_ptr());
+            assert!(
+                theme
+                    .set(None, nsh_core::element::CallCx::new(&host))
+                    .is_err()
+            );
+        });
+        assert!(ops(&second).is_empty());
+    }
+
+    #[test]
+    fn user_plugin_validation_keeps_tokens_and_the_operation_queue() {
+        let host = theme_host(Limits::default());
+        host.eval_source(
+            r##"
+            import { token } from "nsh";
+            import { UserTheme } from "test/theme-plugin";
+            UserTheme.apply({ cssVars: { light: { brand: "#00ff00" } } });
+            Object.assign(globalThis, { token, UserTheme });
+        "##,
+        )
+        .unwrap();
+        ops(&host);
+        host.eval_source(
+            r##"
+            let refused = false;
+            try { UserTheme.apply({ cssVars: { light: { brand: "#zz" } } }); }
+            catch (e) { if (!(e instanceof TypeError)) throw e; refused = true; }
+            if (!refused || token("brand") !== "#00ff00ff") throw new Error("partial theme");
+        "##,
+        )
+        .unwrap();
+        assert!(ops(&host).is_empty());
+        assert_eq!(theme_consumer(&host).changes.get(), 1);
+    }
+
+    #[test]
+    fn runtime_publication_refuses_tokens_when_the_operation_queue_is_full() {
+        let mut limits = Limits::default();
+        limits.max_op_values = 1;
+        let host = theme_host(limits);
+        host.eval_source(
+            r##"
+            import { token, setTheme } from "nsh";
+            Object.assign(globalThis, { token, setTheme });
+            setTheme({ cssVars: { light: { brand: "#00ff00" } } });
+        "##,
+        )
+        .unwrap();
+        assert_eq!(host.shared.ops.borrow().len(), 1);
+        // Inspect inside the native entry, before the guard retires a fatal VM.
+        host.cx.with(|cx| {
+            use nsh_core::element::JsHost;
+            let call = crate::classes::host_outside_calls(cx.as_raw().as_ptr());
+            let theme = call
+                .system()
+                .plugin::<nsh_core::runtime::ThemePlugin>()
+                .unwrap();
+            let candidate =
+                serde_json::from_str(r##"{"cssVars":{"light":{"brand":"#0000ff"}}}"##).unwrap();
+            assert!(
+                theme
+                    .set(Some(&candidate), nsh_core::element::CallCx::new(&call))
+                    .is_err()
+            );
+            let update = nsh_core::element::RuntimeUpdate::default()
+                .tokens(Arc::new(nsh_core::element::Tokens::default()));
+            assert!(call.apply_runtime(update).is_err());
+            assert_eq!(cx.eval::<String, _>("token('brand')").unwrap(), "#00ff00ff");
+        });
+        assert_eq!(host.shared.ops.borrow().len(), 1);
+        assert!(host.fatal().is_some());
+    }
+
+    #[test]
+    fn theme_reactive_errors_are_reported_at_the_publishing_call_boundary() {
+        for apply in ["setTheme", "UserTheme.apply"] {
+            let host = theme_host(Limits::default());
+            host.eval_source(&format!(r##"
+                import {{ token, setTheme, effect }} from "nsh";
+                import {{ UserTheme }} from "test/theme-plugin";
+                effect(() => {{
+                    if (token("brand") === "#00ff00ff") throw new Error("theme effect failed");
+                }});
+                let caught = false;
+                try {{ {apply}({{ cssVars: {{ light: {{ brand: "#00ff00" }} }} }}); }}
+                catch (error) {{
+                    if (error.message !== "theme effect failed") throw error;
+                    caught = true;
+                }}
+                if (!caught) throw new Error("the theme call lost its reactive error");
+                if (token("brand") !== "#00ff00ff") throw new Error("an accepted theme was rolled back");
+                setTheme(null);
+            "##)).unwrap();
+            if apply == "UserTheme.apply" {
+                assert_eq!(theme_consumer(&host).changes.get(), 1);
+            }
+        }
+    }
 
     #[test]
     fn strings_outside_a_text_are_reported_once_per_element() {

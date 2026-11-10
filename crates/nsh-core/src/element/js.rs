@@ -317,6 +317,19 @@ pub trait JsHost {
         super::System::default()
     }
 
+    /// How the runtime reads the app's theme, including host overrides.
+    fn theme_tokens(&self) -> super::ThemeTokens {
+        super::ThemeTokens::default()
+    }
+
+    /// Publishes a plugin's synchronous state after accepting its UI work.
+    fn apply_runtime(&self, _update: super::RuntimeUpdate) -> Result<(), super::JsError> {
+        Err(
+            super::JsError::Error("runtime updates are unavailable".into())
+                .with_code(super::codes::PLUGIN_UNAVAILABLE),
+        )
+    }
+
     /// Starts `task` as a task of the core, in order with the ops JS sent
     /// before the call (`CallCx::start`); a host without a core drops it.
     fn start_task(&self, task: super::TaskStart) {

@@ -7,7 +7,7 @@
 
 use std::{
     any::{Any, TypeId},
-    cell::RefCell,
+    cell::{Cell, RefCell},
     fmt,
     future::Future,
     path::PathBuf,
@@ -173,17 +173,23 @@ pub trait Local: Default + 'static {
 
 type Entry = (TypeId, Rc<dyn Any>, fn(&dyn Any));
 
+#[derive(Default)]
+struct LocalStates {
+    entries: RefCell<Vec<Entry>>,
+    closed: Cell<bool>,
+}
+
 /// One VM's states of the runtime modules ([`Local`]), one per type: the
 /// host keeps one per VM, hands it to every [`System`] and closes it when
 /// the VM goes.
 #[derive(Clone, Default)]
-pub struct Locals(Rc<RefCell<Vec<Entry>>>);
+pub struct Locals(Rc<LocalStates>);
 
 impl Locals {
     /// The VM's `T`, made the first time.
     pub fn get<T: Local>(&self) -> Rc<T> {
         let id = TypeId::of::<T>();
-        if let Some((_, local, _)) = self.0.borrow().iter().find(|(t, ..)| *t == id) {
+        if let Some((_, local, _)) = self.0.entries.borrow().iter().find(|(t, ..)| *t == id) {
             return local
                 .clone()
                 .downcast()
@@ -195,14 +201,19 @@ impl Locals {
                 local.close();
             }
         };
-        self.0.borrow_mut().push((id, local.clone(), close));
+        self.0.entries.borrow_mut().push((id, local.clone(), close));
         local
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.0.closed.get()
     }
 
     /// Closes every state, in the order they were made, and forgets them
     /// (the host, when its VM goes).
     pub fn close_all(&self) {
-        let locals = std::mem::take(&mut *self.0.borrow_mut());
+        self.0.closed.set(true);
+        let locals = std::mem::take(&mut *self.0.entries.borrow_mut());
         for (_, local, close) in &locals {
             close(&**local);
         }
@@ -223,6 +234,10 @@ impl<'a> CallCx<'a> {
         Self { host }
     }
 
+    pub(crate) fn system(&self) -> System {
+        self.host.system()
+    }
+
     /// Runs `work` as a task of the core, started in order with what JS
     /// sent before this call (nothing waits for it).
     pub fn start(&self, work: impl Future<Output = ()> + 'static) {
@@ -232,6 +247,17 @@ impl<'a> CallCx<'a> {
                 Ok(Box::new(()) as Box<dyn super::ToJs>)
             })
         }));
+    }
+
+    /// The theme reader configured by the engine, with host overrides.
+    pub fn theme_tokens(&self) -> super::ThemeTokens {
+        self.host.theme_tokens()
+    }
+
+    /// Accepts the update's operation and publishes its tokens in the same
+    /// call. A refused operation leaves the synchronous state unchanged.
+    pub fn apply_runtime(&self, update: super::RuntimeUpdate) -> Result<(), JsError> {
+        self.host.apply_runtime(update)
     }
 
     /// Runs `f` when what owns the call in JS goes: the reactive owner it
@@ -566,6 +592,8 @@ pub mod codes {
     /// the page navigated, the web view went away or its web content
     /// process ended.
     pub const WEBVIEW_ABORTED: &str = "ERR_NSH_WEBVIEW_ABORTED";
+    /// The requested runtime plugin is absent or its instance has stopped.
+    pub const PLUGIN_UNAVAILABLE: &str = "ERR_NSH_PLUGIN_UNAVAILABLE";
 }
 
 /// An I/O error as Node reports it: `Error` with the message and the

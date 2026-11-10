@@ -52,3 +52,18 @@ fn rust_notes_under_a_heading_stay_out_of_ts() {
     );
     assert!(!ts.contains("cx"), "the `# Rust` section is Rust's:\n{ts}");
 }
+
+#[test]
+fn the_plugin_module_has_typed_synchronous_exports() {
+    let ts = declarations();
+    assert!(ts.contains("export interface WorkspaceModule {"), "{ts}");
+    assert!(
+        ts.contains("export type WorkspacePalette = \"built\" | \"ocean\" | \"orchid\";"),
+        "{ts}"
+    );
+    assert!(
+        ts.contains("select(palette: WorkspacePalette): void;"),
+        "{ts}"
+    );
+    assert!(ts.contains("current(): WorkspacePalette;"), "{ts}");
+}

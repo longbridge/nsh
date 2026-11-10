@@ -16,21 +16,7 @@ use super::{
 };
 impl Runtime {
     pub(super) fn notify(&self, name: &str, args: impl IntoIterator<Item = Value>) {
-        if self.bindings.stopped.get() {
-            return;
-        }
-        let listener = self.listener.borrow().clone();
-        let result = (|| {
-            let Some(listener) = listener else {
-                return Ok::<(), nsh_core::element::PropError>(());
-            };
-            let args = Value::array([Value::string(name)?, Value::array(args)?])?;
-            listener.call(&Value(0), &args)?;
-            Ok(())
-        })();
-        if let Err(error) = result {
-            invoke(42, 0, error.0.as_ptr() as u32, error.0.len() as u32, 0.0);
-        }
+        self.bindings.notify(name, args);
     }
     fn event(&self, name: &str, args: Result<Vec<Value>, nsh_core::element::PropError>) {
         match args {
@@ -50,13 +36,15 @@ impl Host for Runtime {
             .cloned()
             .chain(services.registries)
             .collect();
-        *self.tokens.borrow_mut() = Some(services.tokens);
-        *self.theme.borrow_mut() = Some(services.theme);
+        *self.bindings.tokens.borrow_mut() = Some(services.tokens);
+        *self.bindings.theme.borrow_mut() = Some(services.theme);
         *self.host.borrow_mut() = Some(services.host);
         *self.wake.borrow_mut() = Some(services.wake);
         self.timers.set_clock(services.clock);
         self.set_environment(&services.environment);
-        Ok(())
+        let system = self.bindings.system.borrow().clone();
+        let registries = self.registries.borrow().clone();
+        system.start_plugins(&registries)
     }
     fn take_ops(&self, out: &mut Vec<Op>) {
         out.append(&mut self.bindings.ops.borrow_mut());
@@ -237,11 +225,10 @@ impl Host for Runtime {
         );
     }
     fn set_tokens(&self, tokens: Arc<Tokens>) {
-        *self.tokens.borrow_mut() = Some(tokens);
-        self.notify("tokens", []);
+        self.bindings.set_tokens(tokens);
     }
     fn set_theme_tokens(&self, theme: ThemeTokens) {
-        *self.theme.borrow_mut() = Some(theme);
+        *self.bindings.theme.borrow_mut() = Some(theme);
     }
     fn take_fonts(&self, out: &mut Vec<String>) {
         out.append(&mut self.fonts.borrow_mut());

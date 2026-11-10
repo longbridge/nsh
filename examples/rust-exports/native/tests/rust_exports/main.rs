@@ -5,6 +5,7 @@
 
 mod common;
 mod declarations;
+mod workspace;
 
 use common::{press, start};
 use nsh_core::Command;

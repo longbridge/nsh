@@ -38,6 +38,9 @@ pub(super) struct Bindings {
     pub(super) ops: RefCell<Vec<Op>>,
     pub(super) posts: RefCell<Posts>,
     pub(super) system: RefCell<System>,
+    pub(super) tokens: RefCell<Option<std::sync::Arc<nsh_core::element::Tokens>>>,
+    pub(super) theme: RefCell<Option<nsh_core::element::ThemeTokens>>,
+    pub(super) listener: RefCell<Option<Value>>,
     pub(super) classes: RefCell<Vec<&'static ClassDef>>,
     instances: RefCell<Vec<Option<Rc<dyn ClassInstance>>>>,
     callbacks: RefCell<HashMap<u32, Weak<BrowserCallback>>>,
@@ -59,6 +62,9 @@ impl Bindings {
             ops: RefCell::default(),
             posts: RefCell::new(Posts::new()),
             system: RefCell::default(),
+            tokens: RefCell::default(),
+            theme: RefCell::default(),
+            listener: RefCell::default(),
             classes: RefCell::default(),
             instances: RefCell::default(),
             callbacks: RefCell::default(),
@@ -85,6 +91,48 @@ impl Bindings {
         let _guard = FrameGuard(self);
         call(self)
     }
+    pub(super) fn notify(&self, name: &str, args: impl IntoIterator<Item = Value>) {
+        if let Err(error) = self.try_notify(name, args) {
+            invoke(42, 0, error.0.as_ptr() as u32, error.0.len() as u32, 0.0);
+        }
+    }
+
+    fn try_notify(
+        &self,
+        name: &str,
+        args: impl IntoIterator<Item = Value>,
+    ) -> Result<(), PropError> {
+        if self.stopped.get() {
+            return Ok(());
+        }
+        let listener = self.listener.borrow().clone();
+        let Some(listener) = listener else {
+            return Ok(());
+        };
+        let args = Value::array([Value::string(name)?, Value::array(args)?])?;
+        listener.call(&Value(0), &args)?;
+        Ok(())
+    }
+
+    fn replace_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) -> bool {
+        if self
+            .tokens
+            .borrow()
+            .as_ref()
+            .is_some_and(|old| **old == *tokens)
+        {
+            return false;
+        }
+        self.tokens.replace(Some(tokens));
+        true
+    }
+
+    pub(super) fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
+        if self.replace_tokens(tokens) {
+            self.notify("tokens", []);
+        }
+    }
+
     pub(super) fn call_id(&self) -> u32 {
         let id = self.next_call.get();
         self.next_call
@@ -159,6 +207,7 @@ impl Bindings {
         let instances = self.instances.take();
         let functions = self.functions.take();
         let ops = self.ops.take();
+        let listener = self.listener.take();
         // Externally retained callbacks may outlive this app. Release their
         // arena handles now, before a later run installs a different arena.
         let callbacks = self.callbacks.take();
@@ -171,7 +220,7 @@ impl Bindings {
             let value = callback.value.borrow_mut().take();
             drop(value);
         }
-        drop((pending, instances, functions, ops));
+        drop((pending, instances, functions, ops, listener));
     }
     fn keep_callback(&self, raw: JsRaw) -> Rc<BrowserCallback> {
         if !matches!(
@@ -555,6 +604,31 @@ impl JsHost for Bindings {
     }
     fn system(&self) -> System {
         self.system.borrow().clone()
+    }
+    fn theme_tokens(&self) -> nsh_core::element::ThemeTokens {
+        self.theme.borrow().clone().unwrap_or_default()
+    }
+    fn apply_runtime(
+        &self,
+        update: nsh_core::element::RuntimeUpdate,
+    ) -> Result<(), nsh_core::element::JsError> {
+        if self.stopped.get() {
+            return Err(
+                nsh_core::element::JsError::Error("the app was disposed".into())
+                    .with_code(nsh_core::element::codes::PLUGIN_UNAVAILABLE),
+            );
+        }
+        if let Some(op) = update.op {
+            self.ops.borrow_mut().push(op);
+        }
+        if let Some(tokens) = update.tokens
+            && self.replace_tokens(tokens)
+        {
+            // The publication succeeded. Leave a reader's exception pending
+            // for nsh_browser_call, after the plugin finishes its own state.
+            let _ = self.try_notify("tokens", []);
+        }
+        Ok(())
     }
     fn start_task(&self, task: TaskStart) {
         self.ops.borrow_mut().push(Op::Rust(RustOp {

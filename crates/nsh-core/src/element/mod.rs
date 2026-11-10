@@ -56,6 +56,7 @@ pub(crate) mod menus;
 pub(crate) mod module;
 mod once;
 pub mod palette;
+mod plugin;
 mod prop;
 pub mod reactive;
 pub(crate) mod renderer;
@@ -162,6 +163,7 @@ pub use self::{
         ModuleCx, ModuleFuture, ModuleParam, ModuleSpec, Overload, OverloadSpec, SyncCall,
     },
     once::Scope,
+    plugin::{Plugin, PluginDependency, RuntimeUpdate},
     prop::{IntoProp, Prop},
     reactive::{
         IntoReactive, Memo, Owner, Reactive, ReadSignal, Runtime, Signal, SignalEquals, Stored,

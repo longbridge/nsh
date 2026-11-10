@@ -598,6 +598,9 @@ pub(crate) struct CallHost<'a> {
     args: js::Args<'a>,
     /// A JS exception is pending (from an operation that threw).
     pending: Cell<bool>,
+    /// Runtime publication ran the reactive graph; finish it at the call
+    /// boundary, after the plugin has recorded its accepted state.
+    runtime_updated: Cell<bool>,
     /// The array items and fields read so far: a call reads at most
     /// [`crate::protocol::JSON_ENTRIES`], as JSON conversion does.
     entries: Cell<usize>,
@@ -611,6 +614,7 @@ impl<'a> CallHost<'a> {
             new_target,
             args,
             pending: Cell::new(false),
+            runtime_updated: Cell::new(false),
             entries: Cell::new(0),
         }
     }
@@ -661,7 +665,14 @@ impl<'a> CallHost<'a> {
             .unwrap_or_else(|payload| Err(Thrown::Error(panic_message(payload))));
         let depth = &classes(self.cx).depth;
         depth.set(depth.get() - 1);
-        self.finish(result)
+        let value = self.finish(result);
+        // Keep an existing exception, especially an uncatchable interrupt.
+        // SAFETY: an inline value-tag check.
+        if self.runtime_updated.get() && !unsafe { qjs::JS_IsException(value) } {
+            crate::reactive::finish_value(self.cx, value)
+        } else {
+            value
+        }
     }
 
     /// Sends the call `make` converts this call's values into as an op
@@ -1208,6 +1219,30 @@ impl JsHost for CallHost<'_> {
         .with_app_url(shared.system_app_url.borrow().clone())
         // SAFETY: a short read of the live renderer state.
         .with_os(unsafe { (*crate::state::state(self.cx)).dom.os() })
+    }
+
+    fn theme_tokens(&self) -> nsh_core::element::ThemeTokens {
+        crate::env::theme_tokens(self.cx)
+    }
+
+    fn apply_runtime(
+        &self,
+        update: nsh_core::element::RuntimeUpdate,
+    ) -> Result<(), nsh_core::element::JsError> {
+        if let Some(reason) = &*crate::dom::shared(self.cx).fatal.borrow() {
+            return Err(nsh_core::element::JsError::Error(reason.clone())
+                .with_code(nsh_core::element::codes::PLUGIN_UNAVAILABLE));
+        }
+        if let Some(op) = update.op {
+            crate::dom::shared(self.cx)
+                .queue_op(op)
+                .map_err(nsh_core::element::JsError::Range)?;
+        }
+        self.runtime_updated.set(true);
+        if let Some(tokens) = update.tokens {
+            crate::env::set_tokens(self.cx, tokens);
+        }
+        Ok(())
     }
 
     fn image_blob(&self, url: &str) -> Option<(std::sync::Arc<str>, nsh_core::ImageData)> {
