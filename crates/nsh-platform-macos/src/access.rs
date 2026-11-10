@@ -222,7 +222,7 @@ fn gather_name(view: &NSView, out: &mut String) {
                 .label
                 .as_deref()
                 .map(str::to_owned)
-                .or_else(|| s.text.as_ref().map(|t| t.text.shown_text().into_owned())),
+                .or_else(|| s.text.as_ref().map(|t| t.text.visible_text().into_owned())),
         };
         drop(s);
         match own {
@@ -441,7 +441,7 @@ pub(crate) fn text_changed(view: &NshView) {
         match old {
             Some(old)
                 if Arc::ptr_eq(&old, &drawn.text)
-                    || old.shown_text() == drawn.text.shown_text() =>
+                    || old.visible_text() == drawn.text.visible_text() =>
             {
                 return;
             }
@@ -526,7 +526,7 @@ fn update(view: &NshView) -> bool {
         let a = &s.props.accessibility;
         let pressable = is_pressable(s.events);
         // Hidden runs are not read.
-        let text = s.text.as_ref().map(|t| t.text.shown_text());
+        let text = s.text.as_ref().map(|t| t.text.visible_text());
         let mut spec = spec_for(a, s.kind, pressable, text.as_deref(), s.style.hidden);
         if let Some(control) = s.props.window_control
             && !spec.hidden
@@ -958,7 +958,7 @@ fn announce_live(view: &NshView) {
                 .state()
                 .text
                 .as_ref()
-                .map(|t| t.text.shown_text().into_owned());
+                .map(|t| t.text.visible_text().into_owned());
             if let Some(text) = text {
                 announce(view.ns(), &text, priority(live));
             }

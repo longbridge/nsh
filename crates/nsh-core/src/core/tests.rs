@@ -1221,12 +1221,12 @@ fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
     assert_eq!(visible.links.len(), 1);
     assert_eq!(text.uniform_color(), None);
     // Copies and screen readers leave them out.
-    assert_eq!(text.shown_text(), "a  d");
+    assert_eq!(text.visible_text(), "a  d");
     assert_eq!(text.copied_text(0..6), "a  d");
     assert_eq!(text.copied_text(2..4), "");
     assert_eq!(text.copied_text(1..5), "  ");
     assert_eq!(visible.copied_text(1..5), " bc ");
-    assert_eq!(visible.shown_text(), "a bc d");
+    assert_eq!(visible.visible_text(), "a bc d");
 
     // Shown again: drawn again, without measuring or moving anything.
     apply(
@@ -1259,7 +1259,7 @@ fn copied_text_skips_hidden_runs_and_attachments() {
     // a 😀(2) b c ￼ d 😀(2) e: 10 UTF-16 units.
     assert_eq!(t.len_utf16(), 10);
     assert_eq!(t.copied_text(0..10), "a\u{1F600}d\u{1F600}e");
-    assert_eq!(t.shown_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
+    assert_eq!(t.visible_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
     assert_eq!(t.copied_text(1..4), "\u{1F600}");
     assert_eq!(t.copied_text(3..7), "d");
     // A range past the end is clamped; one inside a surrogate pair starts

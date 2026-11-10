@@ -115,7 +115,7 @@
   text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring),
   they are drawn transparent with no background, and they make no links. What leaves the text through the user goes
   through `AttributedText::copied_text` (copies: hidden runs and attachments' placeholders left out) and
-  `shown_text` (screen readers, the test model's texts); selectable views copy through `SelectionTexts::copied`. The
+  `visible_text` (screen readers, the test model's texts); selectable views copy through `SelectionTexts::copied`. The
   web gives the runs `visibility: hidden`, which its copy handler and the browser's accessibility tree skip. Android
   draws them transparent; its copies and TalkBack still take the whole text.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own

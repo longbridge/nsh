@@ -245,7 +245,7 @@ impl ResolvedTextStyle {
     /// The style hidden ([`Self::hidden`]): nothing of it is drawn, glyphs,
     /// decoration lines and background alike, and its metrics stay.
     #[must_use]
-    pub fn hide(self) -> Self {
+    pub(crate) fn hide(self) -> Self {
         Self {
             color: Color::TRANSPARENT,
             decoration_color: None,
@@ -572,7 +572,7 @@ impl AttributedText {
 
     /// The text a screen reader reads: all of it but its hidden runs
     /// ([`ResolvedTextStyle::hidden`]); borrowed when none is.
-    pub fn shown_text(&self) -> std::borrow::Cow<'_, str> {
+    pub fn visible_text(&self) -> std::borrow::Cow<'_, str> {
         if !self.has_hidden() {
             return std::borrow::Cow::Borrowed(&self.text);
         }

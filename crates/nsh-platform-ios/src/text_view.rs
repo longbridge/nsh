@@ -201,7 +201,7 @@ define_class!(
         fn is_accessibility_element(&self) -> bool {
             // SAFETY: calling the superclass implementation.
             let explicit: bool = unsafe { msg_send![super(self), isAccessibilityElement] };
-            explicit || (!self.hidden_from_accessibility() && self.has_shown_text())
+            explicit || (!self.hidden_from_accessibility() && self.has_visible_text())
         }
 
         #[unsafe(method_id(accessibilityLabel))]
@@ -210,7 +210,7 @@ define_class!(
             let explicit: Option<Retained<NSString>> = unsafe { msg_send![super(self), accessibilityLabel] };
             explicit.or_else(|| {
                 // Hidden runs are not read.
-                self.ivars().text.borrow().as_ref().map(|t| NSString::from_str(&t.shown_text()))
+                self.ivars().text.borrow().as_ref().map(|t| NSString::from_str(&t.visible_text()))
             })
         }
 
@@ -716,12 +716,12 @@ impl TextView {
     }
 
     /// Whether some of the text is not hidden: what a screen reader reads.
-    fn has_shown_text(&self) -> bool {
+    fn has_visible_text(&self) -> bool {
         self.ivars()
             .text
             .borrow()
             .as_ref()
-            .is_some_and(|t| !t.shown_text().is_empty())
+            .is_some_and(|t| !t.visible_text().is_empty())
     }
 
     fn hidden_from_accessibility(&self) -> bool {
