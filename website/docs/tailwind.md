@@ -290,8 +290,8 @@ The names are typed: NSH writes the app's tokens into `.nsh/types/nsh/tokens.d.t
 
 ## Component styles
 
-An app declares the looks of `nsh/base`'s controls once, and every page names them: `"components"` in `nsh.json`
-holds, per component, a base look, looks per named variant and size, and the variant and size a control that names
+An app declares the looks of the `nsh/base` controls that take `variant` and `size` (`Button`) once, and every page
+names them: `"components"` in `nsh.json` holds, per component, a base look, looks per named variant and size, and the variant and size a control that names
 none takes. Each look is a class string, with its states as variants (`hover:`, `active:`, `focus:`, `disabled:`).
 In Rust the same declaration is typed, `set_component_style` with the style methods; a page in either language picks
 a look with `variant` and `size`:

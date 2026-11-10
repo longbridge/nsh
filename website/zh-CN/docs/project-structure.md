@@ -131,7 +131,7 @@ mount(App);
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
 | `locales` | string[] | 每次构建 | 应用除英语外格式化数字和日期所用的语言（`["de", "zh-CN"]`），bundle 会携带它们的数据。默认：`locales/` 中翻译所包含的语言（[I18n](./i18n.md#数字和日期)）。 |
 | `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
-| `components` | object | 每次构建 | 应用为 `nsh/base` 控件声明一次的外观，按组件划分：`base` 类名串、`variants` 和 `sizes`（按名称的类名串）以及 `defaults`（`variant`、`size`），页面用 `variant` 和 `size` 选取（[组件样式](./tailwind.md#组件样式)）。 |
+| `components` | object | 每次构建 | 应用为接受 `variant` 和 `size` 的 `nsh/base` 控件（`Button`）声明一次的外观，按组件划分：`base` 类名串、`variants` 和 `sizes`（按名称的类名串）以及 `defaults`（`variant`、`size`），页面用 `variant` 和 `size` 选取（[组件样式](./tailwind.md#组件样式)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
 | `window` | object | 每次构建、`package` | 桌面平台上主窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`），以及 `defaultVisible`（为 `false` 时启动时隐藏，像托盘应用那样）（[主窗口](../modules/nsh-desktop.md#主窗口)）。 |

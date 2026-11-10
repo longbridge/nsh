@@ -33,9 +33,9 @@ Use this development order:
    included, once in the app's own shared components, and compose controls there where a pattern needs more than
    one. Verify a representative composition on the supported targets before replicating it across pages.
 4. Compose pages by naming variants and sizes (`.variant("primary")` in Rust, `variant="primary"` in TSX) and by
-   using the shared components. Pages do not restyle base controls: when a page needs a look the declarations lack, add the variant, size or token to
-   the declaration first, then name it in the page. A change to a declaration updates every use of the control
-   consistently.
+   using the shared components. Pages do not restyle base controls: when a page needs a look the declarations lack,
+   add the variant, size or token to the declaration first, then name it in the page. A change to a declaration
+   updates every use of the control consistently.
 
 A declaration is theme data: NSH applies it to every instance, Rust and TSX pages name the same variants, and a
 control with no declaration keeps the look its use site gives it. Declare before the first render, in the root

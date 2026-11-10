@@ -13,9 +13,9 @@ When neither is specified, prefer Rust for an app shipped in its binary.
 
 Before building feature screens, read the Design and Coding Guides and establish
 or reuse the app's design standards, semantic Theme Tokens and component styles:
-the looks of `nsh/base`'s controls by variant and size, declared once in the app's
-Rust theme code (`set_component_style`) or `nsh.json` `"components"`. Keep them in
-the app repository. `nsh-base` (`nsh/base`) supplies unstyled
+the looks of the controls that take `variant` and `size` (today `Button`), declared
+once in the app's Rust theme code (`set_component_style`) or `nsh.json`
+`"components"`. Keep them in the app repository. `nsh-base` (`nsh/base`) supplies unstyled
 behavior, as [`gpui-base`](https://gpui-kit.com/base) does; the styled layer analogous to [`gpui-component`](https://gpui-kit.com/component)
 belongs to the app or its chosen community library.
 
