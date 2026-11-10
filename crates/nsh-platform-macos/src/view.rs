@@ -1590,13 +1590,12 @@ impl NshView {
         if let Some(c) = &*self.ivars().container.borrow() {
             let f = self.state().frame;
             let origin = crate::scroll::bounds_origin(self);
-            let zoom = crate::scroll::zoom(self);
-            c.setFrame(ns_rect(0.0, 0.0, f.size.width.0, f.size.height.0));
-            c.setBounds(ns_rect(
-                origin.0,
-                origin.1,
-                f.size.width.0 / zoom,
-                f.size.height.0 / zoom,
+            let zoom = CGFloat::from(crate::scroll::zoom(self));
+            let frame = ns_rect(0.0, 0.0, f.size.width.0, f.size.height.0);
+            c.setFrame(frame);
+            c.setBounds(NSRect::new(
+                NSPoint::new(origin.0 as CGFloat, origin.1 as CGFloat),
+                CGSize::new(frame.size.width / zoom, frame.size.height / zoom),
             ));
             if let Some(layer) = c.layer() {
                 layer.setSublayerTransform(IDENTITY);
@@ -1637,9 +1636,13 @@ impl NshView {
     /// they are there.
     pub(crate) fn commit_bounds(&self, x: f32, y: f32) {
         let c = self.ensure_container();
-        let zoom = crate::scroll::zoom(self);
+        // In AppKit's floats: unzoomed, the bounds' size is the frame's.
+        let zoom = CGFloat::from(crate::scroll::zoom(self));
         let size = c.frame().size;
-        let bounds = ns_rect(x, y, size.width as f32 / zoom, size.height as f32 / zoom);
+        let bounds = NSRect::new(
+            NSPoint::new(x as CGFloat, y as CGFloat),
+            CGSize::new(size.width / zoom, size.height / zoom),
+        );
         if c.bounds() != bounds {
             c.setBounds(bounds);
         }
