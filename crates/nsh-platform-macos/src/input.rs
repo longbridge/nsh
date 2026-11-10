@@ -133,6 +133,9 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The scroll under way has no scroll view of this surface under it:
+    /// it goes to the view the surface is in (an embedded app's host).
+    forward_scroll: Cell<bool>,
     /// Views that track `HOVERED` or listen to the mouse's events
     /// (`onMouseEnter`, `onMouseLeave`, `onMouseMove`).
     hover_tracked: RefCell<FxHashSet<NodeId>>,
@@ -2631,6 +2634,64 @@ fn gesture_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option
             .into_iter()
             .find(|v| crate::scroll::can_bounce(v, dx, dy))
     })
+}
+
+/// Whether `event` belongs to a scroll this surface does not take, so its
+/// view passes it up the responder chain: the app is embedded in another
+/// view's content ([`embedded`]) and no scroll view of it that can move
+/// ([`crate::scroll::movable`]: enabled, with content overflowing its
+/// viewport) is under the pointer when the scroll begins. The host then
+/// scrolls, as a page scrolls under an iframe that cannot; an embedded
+/// app whose scroll view is switched off or whose content fits takes no
+/// scroll either. Decided when a gesture begins (or per mouse wheel notch
+/// with nothing latched) and kept for the gesture's changes, end and
+/// momentum.
+pub(crate) fn forwards_scroll(surface: &Rc<Surface>, event: &NSEvent) -> bool {
+    let input = &surface.input;
+    let phase = event.phase();
+    let momentum = event.momentumPhase();
+    let starts = if momentum.is_empty() {
+        if phase.is_empty() {
+            input.latch.borrow().is_none()
+        } else {
+            phase.intersects(NSEventPhase::MayBegin | NSEventPhase::Began)
+        }
+    } else {
+        false
+    };
+    if starts {
+        // The root of the window the scroll came to: the app's own, or
+        // one of the windows it opened.
+        let root = event_root(surface);
+        let p = root
+            .ns()
+            .convertPoint_fromView(event.locationInWindow(), None);
+        let forward = embedded(root.ns())
+            && !pick(&root, p.x as f32, p.y as f32).is_some_and(|hit| {
+                chain(&hit.view)
+                    .into_iter()
+                    .any(|v| v.kind() == ViewKind::Scroll && crate::scroll::movable(&v))
+            });
+        if forward {
+            // Fingers on the trackpad stop what moves, as in
+            // `gesture_event`: the momentum of an earlier flick here would
+            // otherwise wait for events that now go to the host.
+            end_momentum(surface);
+        }
+        input.forward_scroll.set(forward);
+    }
+    input.forward_scroll.get()
+}
+
+/// Whether `root`'s app is in another view's content: its view
+/// ([`crate::AppView::view`]) is not its window's content view, so a
+/// view above it can take the scrolls it passes on. A window's own app
+/// keeps them all (its views still bounce where their content fits).
+fn embedded(root: &objc2_app_kit::NSView) -> bool {
+    let Some(window) = root.window() else {
+        return false;
+    };
+    crate::view::superview(root).is_some_and(|app| window.contentView().as_ref() != Some(&app))
 }
 
 /// A `scrollWheel:` event at `(x, y)`.
