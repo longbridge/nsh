@@ -120,44 +120,53 @@ impl Renderer {
     /// `None` when there is none, which the log says. The platform then
     /// tells its engine ([`crate::EngineControl::shaders_unavailable`]).
     pub fn new(format: PixelFormat) -> Option<Renderer> {
-        let mut found = None;
+        // The first backend that gives a device: an adapter found may still
+        // refuse its device, and the next backend then gets its turn. On
+        // NVIDIA's driver OpenGL does (wgpu's validation of indirect calls
+        // needs compute shaders its GL context lacks), and Vulkan opens.
+        let mut opened = None;
         let mut last = None;
         for backends in backend_order() {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends,
                 ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
-            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                ..Default::default()
-            })) {
-                Ok(adapter) => {
-                    found = Some(adapter);
-                    break;
-                }
-                Err(e) => last = Some(e),
-            }
-        }
-        let Some(adapter) = found else {
-            let e = last.map_or_else(String::new, |e| e.to_string());
-            log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
-            NO_GPU.store(true, Ordering::Relaxed);
-            return None;
-        };
-        let (device, queue) =
+            let adapter =
+                match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    ..Default::default()
+                })) {
+                    Ok(adapter) => adapter,
+                    Err(e) => {
+                        last = Some(format!("no GPU adapter ({e})"));
+                        continue;
+                    }
+                };
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("nsh shaders"),
                 required_limits:
                     wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
                 ..Default::default()
             })) {
-                Ok(device) => device,
-                Err(e) => {
-                    log::warn!("shaders: no GPU device ({e}); shader views draw nothing");
-                    NO_GPU.store(true, Ordering::Relaxed);
-                    return None;
+                Ok((device, queue)) => {
+                    opened = Some((adapter, device, queue));
+                    break;
                 }
-            };
+                Err(e) => {
+                    let backend = adapter.get_info().backend;
+                    log::debug!(
+                        "shaders: no GPU device on {backend} ({e}); trying the next backend"
+                    );
+                    last = Some(format!("no GPU device on {backend} ({e})"));
+                }
+            }
+        }
+        let Some((adapter, device, queue)) = opened else {
+            let e = last.unwrap_or_default();
+            log::warn!("shaders: {e}; shader views draw nothing");
+            NO_GPU.store(true, Ordering::Relaxed);
+            return None;
+        };
         // What validation missed is a warning, never a panic of the app.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| {
             log::warn!("shaders: {e}");
