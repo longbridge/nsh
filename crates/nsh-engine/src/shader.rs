@@ -96,7 +96,8 @@ pub struct Renderer {
     pipelines: std::cell::RefCell<Pipelines>,
 }
 
-/// The backends to open a device on, in order (`WGPU_BACKEND` overrides).
+/// The backends to open a device on, in order: the renderer takes the
+/// first whose device opens, so no setting chooses one.
 ///
 /// Linux tries OpenGL first: frames come back to the CPU every display
 /// frame, and Vulkan drivers there (Mesa's ANV on Intel, among others) offer
@@ -105,9 +106,6 @@ pub struct Renderer {
 /// milliseconds of the main thread (a 2000×300 frame: 8–17 ms against
 /// 0.2 ms through OpenGL). Elsewhere the platform's own API first.
 fn backend_order() -> Vec<wgpu::Backends> {
-    if let Some(env) = wgpu::Backends::from_env() {
-        return vec![env];
-    }
     if cfg!(all(target_os = "linux", not(target_os = "android"))) {
         vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
     } else {
