@@ -22,7 +22,7 @@ import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
+import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
 loadSounds({
@@ -255,7 +255,7 @@ function Phone() {
   if (untracked(wasDesktop)) nav.setRoutes([untracked(nav.routes)[0], { name: "demo", demo: untracked(selected) }]);
   effect(() => shownDemo.set(nav.routes().find((r) => r.name === "demo")?.demo ?? null));
   return (
-    <NavStack state={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1, direction: demoDirection() }}>
       {(route) => {
         switch (route.name) {
           case "home":
@@ -293,11 +293,12 @@ const select = (demo: DemoEntry) => {
   selected.set(demo);
 };
 
-/** The sound and theme switches, side by side. */
+/** The sound, direction and theme switches, side by side. */
 function Toggles(props: { bar?: boolean }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: props.bar ? 0 : 2 }}>
       <SoundToggle bar={props.bar} />
+      <DirectionToggle bar={props.bar} />
       <ThemeToggle bar={props.bar} />
     </View>
   );
@@ -596,7 +597,7 @@ function SettingItem(props: { label: string; icon: JSX.Element; checked: boolean
   );
 }
 
-/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds and the appearance. */
+/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds, the appearance and the demos' direction. */
 function SettingsMenu() {
   const flipSounds = () => {
     if (soundsOn()) {
@@ -620,6 +621,7 @@ function SettingsMenu() {
         <SettingItem label="Performance monitor" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
         <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
         <SettingItem label="Dark appearance" icon={<LucideIcon name="moon" size={16} tint={colors.muted} />} checked={isDark()} onSelect={() => setColorScheme(isDark() ? "light" : "dark")} />
+        <SettingItem label="Right to left" icon={<LucideIcon name="pilcrow" size={16} tint={colors.muted} />} checked={rtl()} onSelect={() => rtl.set(!rtl())} />
       </MenuPanel>
     </Menu>
   );
@@ -689,7 +691,7 @@ function Desktop() {
   return (
     <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
       <Sidebar />
-      <NavStack state={nav} style={{ flex: 1 }}>
+      <NavStack state={nav} style={{ flex: 1, direction: demoDirection() }}>
         {(route) => {
           if (route.name !== "page") {
             return (
