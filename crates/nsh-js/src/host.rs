@@ -1909,8 +1909,10 @@ mod tests {
 
     #[test]
     fn runtime_publication_refuses_tokens_when_the_operation_queue_is_full() {
-        let mut limits = Limits::default();
-        limits.max_op_values = 1;
+        let limits = Limits {
+            max_op_values: 1,
+            ..Default::default()
+        };
         let host = theme_host(limits);
         host.eval_source(
             r##"
