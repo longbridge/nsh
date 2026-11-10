@@ -5282,7 +5282,7 @@ function App() {
         items={items}
         defaultValue="rice"
         accessibilityLabel="Own"
-        trigger={<View><Text>Own</Text></View>}
+        trigger={<View accessibilityState={{ invalid: true }}><Text>Own</Text></View>}
       />
       <Text>{`Changes: ${changes().join(",")}`}</Text>
     </View>
@@ -5295,7 +5295,8 @@ mount(App);
 /// `nsh/base`'s `Select` through its JS face: `value={null}` is nothing
 /// chosen (the app's), a left-out `value` the select's own from
 /// `defaultValue`; the items' objects, the app's `renderItem` and
-/// `renderGroup`, and `onChange` with the chosen value.
+/// `renderGroup`, and `onChange` with the chosen value; the app's
+/// `invalid` on its trigger kept beside the select's own states.
 #[test]
 fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
     use nsh_core::{AccessibilityRole, ViewProps};
@@ -5339,6 +5340,13 @@ fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
         Some("Rice"),
         "its own, from defaultValue"
     );
+    let state = own.accessibility.state;
+    assert!(state.invalid, "the app's invalid state");
+    assert!(
+        state.has_popup && state.expanded == Some(false),
+        "{state:?}"
+    );
+    assert!(!trigger.accessibility.state.invalid);
 
     // The list, its rows drawn by the app.
     engine

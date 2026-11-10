@@ -188,6 +188,10 @@ pub struct AccessibilityState {
     /// an `expanded` element without it is a disclosure, which shows its
     /// content in place (a collapsible's or an accordion's trigger).
     pub has_popup: bool,
+    /// The content does not pass the app's checks (ARIA's
+    /// `aria-invalid`): a field whose text was rejected, a select left
+    /// empty that must not be.
+    pub invalid: bool,
 }
 
 /// The value of a range or textual element (`accessibilityValue`).

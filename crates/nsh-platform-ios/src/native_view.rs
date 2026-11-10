@@ -533,8 +533,8 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
 }
 
 /// The spoken value: an explicit `accessibilityValue`, plus checked,
-/// mixed pressed, expanded and current states (UIKit has no traits for
-/// those).
+/// mixed pressed, expanded, current and invalid states (UIKit has no
+/// traits for those).
 fn accessibility_value(props: &ViewProps) -> Option<String> {
     let a = &props.accessibility;
     let mut parts: Vec<String> = Vec::new();
@@ -579,6 +579,10 @@ fn accessibility_value(props: &ViewProps) -> Option<String> {
             }
             .into(),
         );
+    }
+    // ARIA's `aria-invalid`, read after the value as WebKit reads it.
+    if a.state.invalid {
+        parts.push("invalid data".into());
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }

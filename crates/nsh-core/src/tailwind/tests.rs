@@ -1409,8 +1409,8 @@ fn data_variants() {
     assert_eq!(s.view.background_color, Color(0xffff_ffff));
 }
 
-/// `aria-pressed:`, `aria-busy:`, `aria-checked:` and `aria-selected:`
-/// as Tailwind v4 has them (`&[aria-pressed="true"]`, ...): the core's
+/// `aria-pressed:`, `aria-busy:`, `aria-checked:`, `aria-invalid:` and
+/// `aria-selected:` as Tailwind v4 has them (`&[aria-pressed="true"]`, ...): the core's
 /// states from the accessibility state, ordered by their names after the
 /// pseudo-classes.
 #[test]
@@ -1419,8 +1419,8 @@ fn aria_state_variants() {
     let list = parse(
         &theme,
         "aria-pressed:bg-black aria-busy:opacity-50 aria-checked:p-1 aria-selected:p-2 \
-         group-aria-pressed:rotate-180 group-aria-busy:opacity-0 group-aria-checked:p-3 \
-         group-aria-selected:p-4",
+         aria-invalid:p-5 group-aria-pressed:rotate-180 group-aria-busy:opacity-0 \
+         group-aria-checked:p-3 group-aria-selected:p-4 group-aria-invalid:p-6",
     );
     assert!(list.unknown().is_empty(), "{:?}", list.unknown());
     assert!(list.deps() & deps::STATE != 0 && list.deps() & deps::GROUP != 0);
@@ -1460,19 +1460,31 @@ fn aria_state_variants() {
         pressed,
     );
     assert_eq!(s.view.background_color, Color(0x0000_00ff));
-    // Among themselves, by their names: busy, checked, expanded, pressed,
-    // selected.
-    let all =
-        state::BUSY | state::CHECKED | state::EXPANDED | state::ARIA_PRESSED | state::SELECTED;
+    // Among themselves, by their names: busy, checked, expanded, invalid,
+    // pressed, selected.
+    let all = state::BUSY
+        | state::CHECKED
+        | state::EXPANDED
+        | state::INVALID
+        | state::ARIA_PRESSED
+        | state::SELECTED;
     let order = [
         ("aria-busy", Color(0xfb2c_36ff)),
         ("aria-checked", Color(0x0000_00ff)),
         ("aria-expanded", Color(0xffff_ffff)),
+        ("aria-invalid", Color(0xe4e4_e7ff)),
         ("aria-pressed", Color(0x00bc_7dff)),
         ("aria-selected", Color(0x2b7f_ffff)),
     ];
     let classes = |order: &[(&str, Color)]| {
-        let names = ["red-500", "black", "white", "emerald-500", "blue-500"];
+        let names = [
+            "red-500",
+            "black",
+            "white",
+            "zinc-200",
+            "emerald-500",
+            "blue-500",
+        ];
         order
             .iter()
             .zip(names)
@@ -1482,14 +1494,15 @@ fn aria_state_variants() {
     let mut reversed = classes(&order);
     reversed.reverse();
     let (s, _) = styled_with(&reversed.join(" "), env, at, all);
-    assert_eq!(s.view.background_color, order[4].1);
-    for i in 0..4 {
+    assert_eq!(s.view.background_color, order[5].1);
+    for i in 0..5 {
         let below = order[..=i].iter().fold(0, |states, (v, _)| {
             states
                 | match *v {
                     "aria-busy" => state::BUSY,
                     "aria-checked" => state::CHECKED,
                     "aria-expanded" => state::EXPANDED,
+                    "aria-invalid" => state::INVALID,
                     "aria-pressed" => state::ARIA_PRESSED,
                     _ => state::SELECTED,
                 }

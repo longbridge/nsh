@@ -89,7 +89,8 @@ use gpui::{
     A11ySubtreeBuilder, AnyElement, App, AvailableSpace, FocusHandle, InteractiveElement,
     IntoElement, StatefulInteractiveElement, Styled, Window,
     accesskit::{
-        self, Action, ActionData, AriaCurrent, CustomAction, Live, Node, Role, ScrollUnit, Toggled,
+        self, Action, ActionData, AriaCurrent, CustomAction, Invalid, Live, Node, Role, ScrollUnit,
+        Toggled,
     },
     div, point, px, size,
 };
@@ -518,6 +519,9 @@ fn describe(
     }
     if state.busy {
         node.set_busy();
+    }
+    if state.invalid {
+        node.set_invalid(Invalid::True);
     }
     let range = range_of(a, role);
     if let Some((min, max, now)) = range {
@@ -1682,7 +1686,17 @@ mod tests {
                 ..Default::default()
             },
         );
-        let field = view(6, ViewKind::Input, labelled("Password"));
+        let field = view(
+            6,
+            ViewKind::Input,
+            Accessibility {
+                state: AccessibilityState {
+                    invalid: true,
+                    ..Default::default()
+                },
+                ..labelled("Password")
+            },
+        );
         slider.insert_before(&root, None);
         off.insert_before(&root, None);
         field.insert_before(&root, None);
@@ -1700,6 +1714,7 @@ mod tests {
         assert_eq!(s.value(), Some("3 of 10"));
         assert_eq!(s.description(), Some("Volume"));
         assert!(s.is_busy());
+        assert_eq!(s.invalid(), None);
         assert_eq!(s.live(), Some(Live::Assertive));
         assert!(s.supports_action(Action::Increment));
         assert!(!s.supports_action(Action::Decrement));
@@ -1719,6 +1734,8 @@ mod tests {
         assert_eq!(f.label(), Some("Password"));
         assert_eq!(f.value(), None);
         assert!(f.supports_action(Action::SetValue));
+        // Its content rejected by the app (ARIA's `aria-invalid`).
+        assert_eq!(f.invalid(), Some(Invalid::True));
     }
 
     /// `visibility: hidden` takes the view and its subtree out of the tree,
