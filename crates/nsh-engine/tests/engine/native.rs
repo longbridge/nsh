@@ -72,6 +72,7 @@ fn start_in(
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let mut app = Bundle::source(bundle.code);

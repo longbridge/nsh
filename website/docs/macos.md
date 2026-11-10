@@ -105,7 +105,7 @@ Writes an app bundle:
   MacOS/<Name>               the executable: a Rust app's own runner, built with its crate; nsh's release runner for TSX
   Resources/nsh/bundle.nshc  a TSX app, compiled
   Resources/nsh/assets/…     the assets it imports (a Rust crate's `assets!()` too)
-  Resources/nsh/app.json     the window title, the app's appearance and its activation policy
+  Resources/nsh/app.json     the window title, the app's appearance, its activation policy and nsh.json's window options
   Resources/AppIcon.icns     the icon, when nsh.json names one (converted with sips)
 ```
 
@@ -133,8 +133,17 @@ The app is a menu bar app from launch, before its code runs, whichever way NSH s
 [`macos.infoPlist`](./packaging.md#infoplist-keys-and-entitlements)) and the policy into its `app.json`, which the
 runner reads. `nsh run --target macos` starts the development host with `--activation-policy accessory`, the flag to
 give the host when you start it yourself, and so does `nsh test --target macos --foreground`; tests in the background
-(the default) run as before. `cargo run` starts a Rust app's own `main`, which says so in `run_app`'s options:
-`AppOptions { activation_policy: ActivationPolicy::Accessory, ..Default::default() }`.
+(the default) run as before. `cargo run` starts a Rust app's own `main`, which says so in `run_app`'s options. The
+option is the macOS backend's, so a `main` that also builds for Windows and Linux, as `nsh init --template rust`
+writes it, sets it for macOS:
+
+```rust
+platform::AppOptions {
+    #[cfg(target_os = "macos")]
+    activation_policy: platform::ActivationPolicy::Accessory,
+    ..Default::default()
+}
+```
 
 The Dock's features come with its icon: `Notifications.setBadge`'s badge, `requestAttention()`'s bounce and reopening a
 hidden window from the Dock are a regular app's. A menu bar app shows its state in its tray (`Tray.set`'s icon and

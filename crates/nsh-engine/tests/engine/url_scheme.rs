@@ -64,6 +64,7 @@ fn bundle_of(app: &str, name: &str) -> Bundle {
         minify: false,
         split: false,
         ui_sets: ui_sets.iter().map(Into::into).collect(),
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(
@@ -298,5 +299,42 @@ fn address_moves_the_app_did_not_make_reach_change_with_their_cause() {
         "url: start:https://a.test/early later: address:https://a.test/inbox#archive \
          back:https://a.test/inbox forward:https://a.test/inbox#last \
          now:https://a.test/inbox#last done"
+    );
+}
+
+/// Sets its address with `history: "push"` and with a `history` it does
+/// not know; says what `url()` reads after each.
+const PUSH_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+function App() {
+  const said = signal("");
+  const note = (s: string) => said.set(`${said()} ${s}`);
+  UrlScheme.setUrl("myapp://tabs/live", { history: "push" });
+  note(`push:${UrlScheme.url()}`);
+  UrlScheme.setUrl("myapp://tabs/all", { history: "replace" });
+  note(`replace:${UrlScheme.url()}`);
+  try {
+    UrlScheme.setUrl("myapp://tabs/mine", { history: "sideways" as never });
+    note("wrong:none");
+  } catch (error) {
+    note(`wrong:${error instanceof TypeError ? "TypeError" : String(error)}:${UrlScheme.url()}`);
+  }
+  setTimeout(() => note("done"), 300);
+  return <Text>{`url:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
+#[test]
+fn a_pushed_address_reads_back_at_once_and_an_unknown_history_is_a_type_error() {
+    let text = run_app(
+        bundle_of(PUSH_APP, "nsh-app-url-push"),
+        &["myapp"],
+        &[],
+        |_| {},
+    );
+    assert_eq!(
+        text,
+        "url: push:myapp://tabs/live replace:myapp://tabs/all wrong:TypeError:myapp://tabs/all done"
     );
 }

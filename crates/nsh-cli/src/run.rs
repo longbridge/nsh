@@ -182,6 +182,12 @@ pub(crate) fn run(
         );
     }
     window.check(target, crate::rust_app::is_root(entry))?;
+    if matches!(
+        target,
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+    ) {
+        crate::package::note_hidden_main_window(entry);
+    }
     if release {
         // The app's crates and NSH's in the host, optimized as in a
         // package: a debug host measures debug code.
@@ -840,6 +846,7 @@ pub(crate) fn install_android_host(
                 target_sdk: android::DEFAULT_TARGET_SDK,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
+                cleartext: true,
                 notifications: true,
                 schemes: &[],
                 rust: false,

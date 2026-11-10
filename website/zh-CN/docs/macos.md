@@ -88,7 +88,7 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
   MacOS/<Name>               可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
   Resources/nsh/bundle.nshc  编译后的 TSX 应用
   Resources/nsh/assets/…     应用导入的资源（也包括 Rust crate 的 `assets!()`）
-  Resources/nsh/app.json     窗口标题、应用的外观和激活策略
+  Resources/nsh/app.json     窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置
   Resources/AppIcon.icns     图标（nsh.json 指定了图标时，用 sips 转换）
 ```
 
@@ -114,8 +114,16 @@ nsh.json 的 `macos.activationPolicy` 让应用成为菜单栏应用：
 写入包的 `Info.plist`（请设置 `macos.activationPolicy`，而不是在 [`macos.infoPlist`](./packaging.md#infoplist-键与-entitlements)
 中设置 `LSUIElement`），并把策略写入运行器读取的 `app.json`。`nsh run --target macos` 用 `--activation-policy accessory`
 启动开发宿主，自己启动宿主时也传这个参数；`nsh test --target macos --foreground` 同样如此，而在后台运行的测试（默认）
-和以前一样运行。`cargo run` 启动 Rust 应用自己的 `main`，由它在 `run_app` 的选项里设置：
-`AppOptions { activation_policy: ActivationPolicy::Accessory, ..Default::default() }`。
+和以前一样运行。`cargo run` 启动 Rust 应用自己的 `main`，由它在 `run_app` 的选项里设置。这个选项属于 macOS 后端，
+所以同时为 Windows 和 Linux 构建的 `main`（`nsh init --template rust` 生成的就是这样）只为 macOS 设置它：
+
+```rust
+platform::AppOptions {
+    #[cfg(target_os = "macos")]
+    activation_policy: platform::ActivationPolicy::Accessory,
+    ..Default::default()
+}
+```
 
 Dock 的功能跟着 Dock 图标走：`Notifications.setBadge` 的标记、`requestAttention()` 的弹跳以及从 Dock 重新打开隐藏的窗口
 属于普通应用。菜单栏应用用托盘展示自己的状态（`Tray.set` 的图标和提示），并从托盘打开窗口：

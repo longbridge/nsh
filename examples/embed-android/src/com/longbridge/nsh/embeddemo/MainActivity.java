@@ -102,7 +102,7 @@ public final class MainActivity extends Activity {
         frame.setPadding(Math.round(2 * d), Math.round(2 * d), Math.round(2 * d), Math.round(2 * d));
         nsh = new NshView(this);
         nsh.setErrorListener(error -> Log.e("embed-demo", error));
-        nsh.registerComponent("embed.badge", context -> new Badge(this, context));
+        nsh.registerComponent("embed.badge", Badge::new);
         nsh.watchScroll("embedded.scroll", new NshView.ScrollWatcher() {
             private final NshScrollListener follow = new NshScrollListener() {
                 @Override
@@ -168,8 +168,9 @@ public final class MainActivity extends Activity {
         private final float density;
         private int taps;
 
-        Badge(android.content.Context app, NshComponentContext context) {
+        Badge(NshComponentContext context) {
             this.context = context;
+            android.content.Context app = context.getContext();
             density = app.getResources().getDisplayMetrics().density;
             label = new TextView(app);
             label.setTextColor(Color.WHITE);

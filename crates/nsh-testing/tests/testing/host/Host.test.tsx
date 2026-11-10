@@ -49,3 +49,10 @@ test("the host's timers run on the app's clock", async () => {
   await app.clock!.runFor(200);
   await app.waitFor('text:result: "late"');
 });
+
+test("a module's stand-in leaves the calls to the page's host", async () => {
+  const app = await open("./App.tsx", { modules: { nsh: { "Image.prefetch": async () => true } } });
+  expect(app.shows("text:available: true")).toBe(true);
+  await app.press("label:echo");
+  await app.waitFor('text:result: {"n":1}');
+});

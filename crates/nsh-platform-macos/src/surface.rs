@@ -41,7 +41,8 @@ use crossbeam_channel::{Receiver, Sender};
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
 use nsh_engine::{
-    Chunk, Engine, EngineConfig, EngineControl, Environment, MountSink, perf::PerfMonitor,
+    Chunk, Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink,
+    perf::PerfMonitor,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
@@ -65,6 +66,9 @@ enum Message {
     /// The app imports chunk `id` (`import()` of a split bundle), which its
     /// bundle does not hold ([`MountSink::load_chunk`]).
     LoadChunk(String),
+    /// A function the app runs on the main thread
+    /// ([`MountSink::run_on_main_thread`]), after the batches before it.
+    Run(MainThreadTask),
 }
 
 /// How long the main thread waits for the layout at a new window size
@@ -140,6 +144,10 @@ impl MountSink for Sink {
 
     fn hot_update_failed(&self) {
         self.send(Message::HotUpdateFailed);
+    }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
     }
 
     fn resized(&self, size: Size<Points>) {
@@ -297,6 +305,10 @@ pub(crate) struct Surface {
     pub(crate) main_window: crate::window::Held,
     /// The window observed for its bounds ([`crate::window_state`]).
     pub(crate) window: crate::window_state::Watch,
+    /// The mode the standalone app's main window opens in, until it first
+    /// shows (hidden at launch: nsh.json `window.defaultVisible: false`)
+    /// ([`crate::window::launched_main`]).
+    pub(crate) main_open_mode: Cell<Option<nsh_core::desktop::WindowMode>>,
     /// Videos, web views and registered native components.
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
@@ -390,6 +402,7 @@ impl Surface {
             chrome: Default::default(),
             main_window: Default::default(),
             window: Default::default(),
+            main_open_mode: Cell::new(None),
             shaders: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
@@ -700,6 +713,7 @@ impl Surface {
                 }
             }
             Message::Resized(_) => self.resize_late.set(false),
+            Message::Run(task) => task.run(),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`
                 // (nsh-js) restricted it to a plain `<stem>.js`, so this

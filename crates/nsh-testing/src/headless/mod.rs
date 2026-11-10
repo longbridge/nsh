@@ -398,9 +398,19 @@ impl Headless {
             config.audio = Some(Arc::new(audio.clone()));
         }
         // A desktop's windows: the main one, focused, on one display, and
-        // those the app opens.
-        let windows = (config.environment.os.is_desktop() && config.windows.is_none())
-            .then(|| windows::Windows::new(config.viewport));
+        // those the app opens. The main one starts hidden when the app's
+        // nsh.json `window` says so, as a runner opens it.
+        let main_hidden = config
+            .app
+            .main_window()
+            .is_some_and(|options| !options.visible_at_launch());
+        let windows = (config.environment.os.is_desktop() && config.windows.is_none()).then(|| {
+            let mut windows = windows::Windows::new(config.viewport);
+            if main_hidden {
+                windows.start_hidden();
+            }
+            windows
+        });
         if let Some(windows) = &windows
             && config.environment.window_state.is_none()
         {
@@ -419,6 +429,9 @@ impl Headless {
         } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
+        if main_hidden && windows.is_some() {
+            screen.set_window_hidden(ROOT_ID, true);
+        }
         Ok(Headless {
             engine,
             batches,

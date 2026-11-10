@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`，见下文“目标 API 级别”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk` 和 `usesCleartextTraffic`，见下文“目标 API 级别”和“明文 HTTP”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -163,6 +163,19 @@ platform（`sdkmanager "platforms;android-36"`）：
 }
 ```
 
+### 明文 HTTP
+
+打包后的应用通过 HTTPS 发请求。对于没有 TLS 的服务器（比如局域网里的服务器），`android.usesCleartextTraffic`
+让应用也可以发普通的 `http://` 请求（[`android:usesCleartextTraffic`](https://developer.android.com/guide/topics/manifest/application-element#usesCleartextTraffic)）：
+
+```json
+{
+  "android": { "usesCleartextTraffic": true }
+}
+```
+
+开发构建（`nsh run --target android`）始终允许明文 HTTP：它们通过明文 HTTP 从开发服务器加载应用。
+
 ### Google Play：App Bundle
 
 Google Play 接收 Android App Bundle，而不是 APK。`--format aab` 用同一个应用写出 `.nsh/out/<Name>.aab` 代替 APK，不需要 Gradle 或
@@ -183,8 +196,8 @@ NSH_KEYSTORE_PASSWORD=… nsh package --target android --format aab \
 nsh package --target macos --run
 ```
 
-写出 `.nsh/out/<Name>.app`：可执行文件位于 `Contents/MacOS/`，`nsh/assets/…`、`nsh/app.json`（窗口标题、应用的外观和激活策略）以及 TSX 应用的
-`nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上；要分发它，请用 Developer ID 签名并进行公证。见
+写出 `.nsh/out/<Name>.app`：可执行文件位于 `Contents/MacOS/`，`nsh/assets/…`、`nsh/app.json`（窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置）以及
+TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上；要分发它，请用 Developer ID 签名并进行公证。见
 [macOS](./macos.md#打包)。
 
 ## Linux
@@ -193,7 +206,8 @@ nsh package --target macos --run
 nsh package --target linux --run
 ```
 
-写出 `.nsh/out/<Name>/`（可执行文件 `<Name>`、`nsh/assets/…`、包含窗口标题和应用 id 的 `nsh/app.json`、TSX 应用的 `nsh/bundle.nshc`、
+写出 `.nsh/out/<Name>/`（可执行文件 `<Name>`、`nsh/assets/…`、
+包含窗口标题、应用 id 和 nsh.json 中窗口设置的 `nsh/app.json`、TSX 应用的 `nsh/bundle.nshc`、
 `<id>.desktop` 和图标 `<id>.png`），以及同样内容的 `.nsh/out/<Name>.tar.gz`。请在 Linux 上打包：运行器是为构建它的机器构建的。运行应用的机器上必须装有
 GTK 4（4.14 及以上）、Pango 和 WebKitGTK 6.0（用于 Web 视图）。如何安装应用及其桌面条目：见 [Linux](./linux.md#打包)。
 
@@ -203,7 +217,7 @@ GTK 4（4.14 及以上）、Pango 和 WebKitGTK 6.0（用于 Web 视图）。如
 nsh package --target windows --run
 ```
 
-写出 `.nsh\out\<Name>\`（带应用图标的可执行文件 `<Name>.exe`、`nsh\assets\…`、包含窗口标题、应用 id、版本和外观的 `nsh\app.json`，以及
+写出 `.nsh\out\<Name>\`（带应用图标的可执行文件 `<Name>.exe`、`nsh\assets\…`、包含窗口标题、应用 id、版本、外观和 nsh.json 中窗口设置的 `nsh\app.json`，以及
 TSX 应用的 `nsh\bundle.nshc`），以及同样内容的 `.nsh\out\<Name>.zip`。TSX 应用不需要任何工具；Rust 应用的 runner 用 Visual Studio
 Build Tools 构建。请在 Windows 上打包：运行器是为构建它的机器构建的，而且只有
 Windows 能嵌入图标。应用可以从目录被复制到的任何位置运行。`nsh package` 还会写出 Inno Setup 脚本 `.nsh\out\<Name>.iss`，装有 Inno Setup 6

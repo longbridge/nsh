@@ -13,10 +13,11 @@ const NOT_IN_AN_ADDRESS = /[\p{White_Space}\p{Cc}]/u;
  * `base()`, what `history.replaceState` resolves against (the page's
  * `document.baseURI`); `origin`, the page's. `url()` reads the core's
  * address as it is, which has the page's from before the app's code runs.
+ * The options (`{ history }`) go to the core as they are, which checks them.
  */
 export function configureAddress(urlScheme, page) {
   const { setUrl } = urlScheme;
-  urlScheme.setUrl = (to) => {
+  urlScheme.setUrl = (to, ...options) => {
     // What every platform refuses is checked on what the app passed, not on
     // the URL it resolves to (which escapes spaces): the core throws.
     if (
@@ -24,7 +25,7 @@ export function configureAddress(urlScheme, page) {
       NOT_IN_AN_ADDRESS.test(to) ||
       new TextEncoder().encode(to).length > MAX_ADDRESS_BYTES
     ) {
-      return setUrl(to);
+      return setUrl(to, ...options);
     }
     let resolved;
     try {
@@ -35,6 +36,6 @@ export function configureAddress(urlScheme, page) {
     if (resolved.origin !== page.origin) {
       throw new TypeError(`UrlScheme.setUrl: ${resolved.href} is not of the page's origin`);
     }
-    setUrl(resolved.href);
+    setUrl(resolved.href, ...options);
   };
 }

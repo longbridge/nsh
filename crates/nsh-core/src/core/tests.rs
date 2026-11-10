@@ -257,6 +257,36 @@ fn a_call_into_rust_that_is_not_async_spawns_tasks_and_makes_signals() {
 }
 
 #[test]
+fn functions_for_the_main_thread_wait_for_the_engine_in_order() {
+    use std::sync::{Arc, Mutex};
+
+    use crate::element::{RustCall, RustOp, ToJs, run_on_main_thread, spawn};
+    let mut c = core();
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let (op, task) = (ran.clone(), ran.clone());
+    c.apply(Op::Rust(RustOp {
+        call: 0,
+        run: RustCall::Op(Box::new(move |cx| {
+            let first = op.clone();
+            drop(cx.run_on_main_thread(move || first.lock().unwrap().push("op")));
+            spawn(async move {
+                let _ = run_on_main_thread(move || task.lock().unwrap().push("task")).await;
+            });
+            Ok(Box::new(()) as Box<dyn ToJs>)
+        })),
+    }))
+    .unwrap();
+    c.run_component_tasks();
+    // Nothing runs in the core: the engine hands them to the platform.
+    assert!(ran.lock().unwrap().is_empty());
+    for task in c.take_main_thread_tasks() {
+        task.run();
+    }
+    assert_eq!(*ran.lock().unwrap(), ["op", "task"]);
+    assert!(c.take_main_thread_tasks().is_empty());
+}
+
+#[test]
 fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
     use crate::element::{JsHost, JsOwned, JsValue, PropError, RustCall, RustOp, ToJs, TsTypes};
     /// Panics as it drops.
@@ -810,6 +840,94 @@ fn a_clamped_column_is_as_tall_as_its_wrapped_text() {
         text.map(|f| (f.size.width.0, f.size.height.0)),
         Some((160.0, 48.0))
     );
+    // The same when the `flex: 1` item is in a slot holder laid out through.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 7,
+                tag: Tag::View,
+            },
+            style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &max),
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(6, &[("width", StyleValue::Number(40.0))]),
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::ComponentSlot("default".into()),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("flex", StyleValue::Number(1.0))]),
+            Op::CreateText {
+                id: 5,
+                text: "x".repeat(50),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 8,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 8,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 7,
+                child: 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 7,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    assert_eq!(
+        frame_of(&batch, 4).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 48.0))
+    );
     // Text alone: 400pt in 200pt is two lines.
     let (column, _) = max_width_column(&max, false, 50);
     assert_eq!(
@@ -1227,12 +1345,12 @@ fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
     assert_eq!(visible.links.len(), 1);
     assert_eq!(text.uniform_color(), None);
     // Copies and screen readers leave them out.
-    assert_eq!(text.shown_text(), "a  d");
+    assert_eq!(text.visible_text(), "a  d");
     assert_eq!(text.copied_text(0..6), "a  d");
     assert_eq!(text.copied_text(2..4), "");
     assert_eq!(text.copied_text(1..5), "  ");
     assert_eq!(visible.copied_text(1..5), " bc ");
-    assert_eq!(visible.shown_text(), "a bc d");
+    assert_eq!(visible.visible_text(), "a bc d");
 
     // Shown again: drawn again, without measuring or moving anything.
     apply(
@@ -1255,6 +1373,137 @@ fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
 }
 
 #[test]
+fn attachments_of_hidden_spans_are_hidden_with_them() {
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let size = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(20.0)),
+                ("height", StyleValue::Number(10.0)),
+            ],
+        )
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "ab".into(),
+            },
+            // A hidden span holding a view, and a span inside it holding
+            // an image.
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("visibility", StyleValue::Str("hidden"))]),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            size(6),
+            Op::Listen {
+                id: 6,
+                event: EventKind::Press,
+                enabled: true,
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::Text,
+            },
+            Op::Create {
+                id: 10,
+                tag: Tag::Image,
+            },
+            size(10),
+            // A view of the block itself stays.
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            size(12),
+            insert(8, 10),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 3),
+            insert(2, 4),
+            insert(2, 12),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(true), Some(true)));
+    assert_eq!(hidden_in(&batch, 10), (Some(true), Some(true)));
+    assert_eq!(hidden_in(&batch, 12), (None, None));
+    // They keep their place (laid out as when shown); a hidden view takes
+    // no presses.
+    assert!(frame_of(&batch, 6).is_some());
+    assert!(frame_of(&batch, 10).is_some());
+
+    // Shown again with the span.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("visibility", StyleValue::Str("visible"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(false), Some(false)));
+    assert_eq!(hidden_in(&batch, 10), (Some(false), Some(false)));
+
+    // Hidden again, then moved out of the text into a plain view: shown
+    // there.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("visibility", StyleValue::Str("hidden"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(true), Some(true)));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 14,
+                tag: Tag::View,
+            },
+            insert(ROOT_ID, 14),
+            Op::Remove {
+                parent: 4,
+                child: 6,
+            },
+            insert(14, 6),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(false), Some(false)));
+}
+
+#[test]
+fn visible_ranges_leave_hidden_runs_out() {
+    let plain = ResolvedTextStyle::default();
+    let mut t = AttributedText::default();
+    t.push("ab", plain);
+    t.push("cd", plain.hide());
+    t.push("ef", plain);
+    t.push("g", plain.hide());
+    assert_eq!(t.visible_ranges(0..7), vec![0..2, 4..6]);
+    assert_eq!(t.visible_ranges(1..5), vec![1..2, 4..5]);
+    assert_eq!(t.visible_ranges(2..4), Vec::<std::ops::Range<u32>>::new());
+    assert!(t.hidden_at(2) && t.hidden_at(6) && !t.hidden_at(4));
+    let mut shown = AttributedText::default();
+    shown.push("abc", plain);
+    assert_eq!(shown.visible_ranges(1..3), vec![1..3]);
+}
+
+#[test]
 fn copied_text_skips_hidden_runs_and_attachments() {
     let plain = ResolvedTextStyle::default();
     let mut t = AttributedText::default();
@@ -1265,7 +1514,7 @@ fn copied_text_skips_hidden_runs_and_attachments() {
     // a 😀(2) b c ￼ d 😀(2) e: 10 UTF-16 units.
     assert_eq!(t.len_utf16(), 10);
     assert_eq!(t.copied_text(0..10), "a\u{1F600}d\u{1F600}e");
-    assert_eq!(t.shown_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
+    assert_eq!(t.visible_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
     assert_eq!(t.copied_text(1..4), "\u{1F600}");
     assert_eq!(t.copied_text(3..7), "d");
     // A range past the end is clamped; one inside a surrogate pair starts
@@ -20877,6 +21126,62 @@ mod rust_windows {
         assert_eq!(kept, placement);
     }
 
+    #[test]
+    fn hidden_main_windows_keep_the_placement_the_user_left() {
+        use crate::desktop::{MainWindowOptions, WindowMode, WindowPlacement, WindowState};
+        let mut c = core();
+        let kept = |c: &Core<FakeEngine>| {
+            let _entered = c.components.runtime.enter();
+            crate::storage::Storage::get_item("nsh.window:main")
+                .map(|json| serde_json::from_str::<WindowPlacement>(&json).unwrap())
+        };
+        let state = |x: f32, mode: WindowMode, visible: bool| {
+            let bounds =
+                crate::geometry::Bounds::new(point(px(x), px(60.0)), size(px(640.0), px(480.0)));
+            let mut state = WindowState::new(bounds, WindowPlacement::new(mode, bounds));
+            state.visible = visible;
+            state
+        };
+        let report = |c: &mut Core<FakeEngine>, state: WindowState| {
+            c.set_environment(crate::element::Environment {
+                os: crate::platform::Os::MacOs,
+                window_state: Some(state),
+                ..Default::default()
+            });
+        };
+        // Hidden since launch (`defaultVisible: false`), in Normal mode
+        // until it shows in the mode it opens in: nothing kept yet, so the
+        // placement of the last run stays.
+        report(&mut c, state(0.0, WindowMode::Normal, false));
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            default_visible: Some(false),
+            ..Default::default()
+        });
+        report(&mut c, state(10.0, WindowMode::Normal, false));
+        assert_eq!(kept(&c), None);
+        let maximized = state(40.0, WindowMode::Maximized, true);
+        report(&mut c, maximized);
+        assert_eq!(kept(&c), Some(maximized.placement));
+        // Shown, it is where the user left it, hidden too: a window hidden
+        // right after a resize reports its new size only then (a tray
+        // app's close).
+        let resized = state(40.0, WindowMode::Normal, false);
+        report(&mut c, resized);
+        assert_eq!(kept(&c), Some(resized.placement));
+
+        // One that opens shown is where the user left it from the start,
+        // hidden reports included, as before `defaultVisible`.
+        let mut c = core();
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            ..Default::default()
+        });
+        let hidden = state(80.0, WindowMode::Normal, false);
+        report(&mut c, hidden);
+        assert_eq!(kept(&c), Some(hidden.placement));
+    }
+
     /// A window with no size of the app's, and one with a `defaultSize`,
     /// each filled by a view.
     #[component]
@@ -34739,4 +35044,56 @@ mod each_order {
         assert_eq!(&reordered[1..3], &[original[3], original[1]]);
         assert_eq!(MADE.with(Cell::get), 3);
     }
+}
+
+/// An `svg()` the platform draws as an image (the web) is sent with its text
+/// color, inherited, for its `currentColor`; an image is not (#1466).
+#[test]
+fn svg_drawn_as_an_image_carries_its_text_color() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-red-500");
+    let image = |c: &mut Core<FakeEngine>, id: NodeId, svg: bool| {
+        let mut ops = vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: "asset:/icon.svg".into(),
+                    ..Default::default()
+                })),
+            },
+        ];
+        if svg {
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::Image(ImageProp::SvgCurrentColor(true)),
+            });
+        }
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+        apply(c, ops);
+    };
+    image(&mut c, 3, true);
+    image(&mut c, 4, false);
+    let color_of = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Image { id: i, options, .. } if *i == id => Some(options.current_color),
+            _ => None,
+        })
+    };
+    let batch = c.commit().unwrap();
+    assert_eq!(color_of(&batch, 3), Some(Some(Color(0xfb2c_36ff))));
+    assert_eq!(color_of(&batch, 4), Some(None));
+    // The ancestor's color changes: the svg's is sent again.
+    c.apply(class_op(2, "text-blue-500")).unwrap();
+    let batch = c.commit().unwrap();
+    let blue = color_of(&batch, 3).flatten().unwrap();
+    assert_ne!(blue, Color(0xfb2c_36ff));
+    assert_eq!(color_of(&batch, 4), None);
 }

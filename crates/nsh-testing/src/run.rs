@@ -852,6 +852,12 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
             "the test plays the embedding app's handlers in headless runs: run the test without --target",
         );
     }
+    if launch.module_fakes {
+        return unsupported(
+            "modules",
+            "the test's stand-ins answer the app's calls in headless runs: run the test without --target",
+        );
+    }
     if launch.url_scheme.is_some() {
         return unsupported(
             "url",
@@ -1232,6 +1238,7 @@ mod tests {
             clock: None,
             host: nsh_engine::HostChannel::new(),
             host_handlers: false,
+            module_fakes: false,
             url_scheme: None,
         }
     }
@@ -1307,6 +1314,16 @@ mod tests {
         handlers.host_handlers = true;
         let error = check_launch("./App.tsx", &handlers, None).unwrap_err();
         assert_eq!(code_of(&error), Some(UNSUPPORTED), "{error}");
+
+        // So do the stand-ins of native modules.
+        let mut fakes = launch();
+        fakes.module_fakes = true;
+        let error = check(&fakes, &macos).unwrap_err();
+        assert!(
+            error.contains("`modules` is unsupported on --target macos"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
     }
 
     #[test]

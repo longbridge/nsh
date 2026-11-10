@@ -81,6 +81,7 @@ fn bundle(name: &str) -> nsh_bundler::Bundle {
         minify: true,
         split: true,
         ui_sets: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
     let _ = std::fs::remove_dir_all(&dir);

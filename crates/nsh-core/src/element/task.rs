@@ -79,6 +79,8 @@ pub(crate) enum Action {
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Runs a function on the platform's main thread, after the commit.
+    MainThread(crate::main_thread::MainThreadTask),
     /// Registers a font (TrueType, OpenType, WOFF or WOFF2 data); its family
     /// name, or why it is no font, resolves the slot.
     RegisterFont(Vec<u8>, AnswerSlot<Result<String, String>>),
@@ -123,8 +125,9 @@ pub(crate) enum Action {
     NextAppUrlChange(AnswerSlot<crate::url_scheme::AppUrlChange>),
     /// The app's address resolves the slot ([`crate::url_scheme`]).
     AppUrl(AnswerSlot<Option<String>>),
-    /// The app sets its address ([`crate::url_scheme`]).
-    SetAppUrl(String),
+    /// The app sets its address ([`crate::url_scheme`]), replacing the
+    /// history entry's or pushing one.
+    SetAppUrl(String, crate::url_scheme::HistoryBehavior),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here

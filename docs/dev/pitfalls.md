@@ -439,6 +439,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **GTK delivers pointer events by allocation**, ignoring NSH's clipping (`overflow: hidden` in `snapshot`), `hidden`
   and `pointerEvents`: a hosted widget (a web view's page) gets clicks and wheels outside what is drawn of it unless
   the root's capture controller stops them (`input.rs`'s `shields_page`).
+- **GTK sizes a window only as it shows it, and drops the size while it is hidden**: a window maps, and may take the
+  focus, a frame before it has a size (its width reads 0 until then), and showing it again need not allocate the
+  root again when its size is the one it had. The main window's state reads it shown once it is sized
+  (`window::report_once_sized`, from its `map`), and an app whose window starts hidden is laid out at the window's
+  default size (`window::launch_hidden`).
 - **Tiling window managers ignore the host's `--window-size`** (the window's default size): a test's screenshots have the size
   the window got, and so does `app.setViewport` (it resizes on X11 and floating windows).
 
@@ -638,6 +643,9 @@ Things that were found the hard way. Read the section of the area you change bef
   of frames a minute and CPU went up several times on NVIDIA and Intel. Microsoft calls the flag "not recommended for
   general use": it is meant for apps that call Direct3D from a single thread, which NSH does (video decoding takes
   Direct3D's multithread lock and stays valid; the flag changes no thread safety).
+- **A hidden window can stay the foreground window**: hiding the foreground window (`SW_HIDE`) leaves
+  `GetForegroundWindow` returning it until another window takes the foreground, so a window's state reads it focused
+  only while it is shown (`window_state.rs`).
 - **Win32 timers tick at ~15.6 ms** (the default timer resolution) and wake-ups come late on a loaded machine: tests
   must not assume two timers a few milliseconds apart run in separate turns (chain them instead), and a test's waits
   need slack.
@@ -742,3 +750,6 @@ Things that were found the hard way. Read the section of the area you change bef
   after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms
   (as in React Native); Android's stylus handwriting mode (on by default on recent
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.
+
+- **Windows RichEdit**: never set `TXTBIT_ADVANCEDINPUT` on a windowless RichEdit host; msftedit aborts (0x40000015) on focus. Enable TSF with `EM_SETEDITSTYLE SES_USECTF` instead.
+- **Windows RichEdit invalidates while it draws**: `TxDrawD2D` and the client-rectangle updates around it call `TxInvalidateRect` inside the window's `WM_PAINT`; a paint asked for there never comes back as another `WM_PAINT`, which left the surface waiting forever (typed text not shown until something else repainted). The field ignores what RichEdit invalidates while it is drawn (`Editor::drawing`), and `Surface::paint` asks again, once the frame is done, for what was requested during it.

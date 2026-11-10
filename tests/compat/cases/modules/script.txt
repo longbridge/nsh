@@ -127,6 +127,15 @@ expect Permission: unavailable unavailable
 expect Refused: RangeError RangeError
 expect Shown: false false
 covers [nsh] Notifications
+# mod-app-info
+tap id:case-mod-app-info
+# `nsh build --release` of an app whose nsh.json has a version and build:
+# a release build, its information there before any module runs.
+expect App: com.example.api-modules API Modules
+expect Version: 1.2.3 build 7
+expect Development: false
+expect Early: 1.2.3
+covers [nsh] appInfo
 # mod-url-scheme
 tap id:case-mod-url-scheme
 # the domain claims `compat`: no link opened it, and the listener stops.
@@ -136,7 +145,7 @@ expect Listener: listening
 expect Address: null
 expect Changes: none
 tap id:set-url
-expect Address: compat://orders/42, wrong TypeError TypeError
+expect Address: compat://orders/43, wrong TypeError TypeError TypeError
 expect Changes: none
 tap id:stop-links
 expect Listener: stopped

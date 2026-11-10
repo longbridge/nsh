@@ -356,7 +356,7 @@ pub(crate) fn text_changed(view: &NshView) {
         match old {
             Some(old)
                 if Arc::ptr_eq(&old, &drawn.text)
-                    || old.shown_text() == drawn.text.shown_text() =>
+                    || old.visible_text() == drawn.text.visible_text() =>
             {
                 return;
             }
@@ -383,7 +383,7 @@ fn update(view: &NshView) -> bool {
         // An app-drawn window button is a button, as the system's is.
         let pressable = has_press_role(s.events) || s.props.window_control.is_some();
         // Hidden runs are not read.
-        let text = s.text.as_ref().map(|t| t.text.shown_text());
+        let text = s.text.as_ref().map(|t| t.text.visible_text());
         let spec = spec_for(a, s.kind, pressable, text.as_deref(), s.style.hidden);
         if s.access.spec.as_deref() == Some(&spec) {
             return false;
@@ -731,7 +731,7 @@ fn announce_live(view: &NshView) {
         let live = v.state().props.accessibility.live_region;
         if live != LiveRegion::None {
             if let Some(t) = &view.state().text {
-                view.announce(&t.text.shown_text(), priority(live));
+                view.announce(&t.text.visible_text(), priority(live));
             }
             return;
         }
