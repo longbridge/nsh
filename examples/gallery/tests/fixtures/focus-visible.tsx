@@ -1,10 +1,18 @@
 // Focus rings drawn with `focus-visible:` (focus-visible.test.tsx): a view
 // that shows a marker only while its focus shows, a button that moves the
-// focus to it (`focus()`), and a date picker whose today shows the same
-// marker while the keyboard is on it. A view in `display: none` is not on
-// screen, so the markers tell the test what a ring would show.
+// focus to it (`focus()`), a date picker whose today shows the same
+// marker while the keyboard is on it, and a tree whose rows show one
+// marker at the cursor (`focus:`) and another while the cursor's focus
+// shows (`focus-visible:`). A view in `display: none` is not on screen, so
+// the markers tell the test what a ring would show.
 import { mount, Text, View, type ViewRef } from "nsh";
-import { DatePicker } from "nsh/base";
+import { DatePicker, Tree } from "nsh/base";
+
+const files = [
+  { id: "alpha", label: "Alpha" },
+  { id: "beta", label: "Beta" },
+  { id: "gamma", label: "Gamma" },
+];
 
 let target: ViewRef | undefined;
 
@@ -43,6 +51,19 @@ function App() {
             <Text>Pick a date</Text>
           </View>
         }
+      />
+      <Tree
+        items={files}
+        accessibilityLabel="Files"
+        style={{ width: 200, height: 120 }}
+        itemClass="group"
+        renderItem={(entry) => (
+          <View style={{ height: 32, flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <Text>{entry.label}</Text>
+            <Text class="hidden group-focus:flex">{`${entry.label} cursor`}</Text>
+            <Text class="hidden group-focus-visible:flex">{`${entry.label} ring`}</Text>
+          </View>
+        )}
       />
     </View>
   );

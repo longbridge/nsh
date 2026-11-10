@@ -1284,6 +1284,11 @@ pub struct Core<M: TextEngine> {
     /// `focus_visible` changed with the focus staying where it is: the
     /// next commit round moves the state.
     focus_visible_moved: bool,
+    /// The parts projected focused (`project_focused`: a tree's or a
+    /// list's cursor), by key and id: they show `focus-visible:` while the
+    /// focus does, restyled when it starts or stops showing
+    /// (`classes::styled_states`).
+    projected_focus: Vec<(Key, NodeId)>,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1485,6 +1490,7 @@ impl<M: TextEngine> Core<M> {
             focus_visible: false,
             focus_visible_on: None,
             focus_visible_moved: false,
+            projected_focus: Vec::new(),
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
