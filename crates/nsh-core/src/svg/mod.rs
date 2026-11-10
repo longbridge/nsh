@@ -800,10 +800,15 @@ impl<'a, 'input> TextScan<'a, 'input> {
                     let Some(kind) = ResourceKind::property(name) else {
                         continue;
                     };
-                    let Some(id) = func_iri(attribute.value()) else {
-                        continue;
-                    };
-                    out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+                    // A `filter` value is a list: `url(#a) url(#b)` converts
+                    // and lays out both.
+                    if kind == ResourceKind::Filter {
+                        for id in func_iris(attribute.value()) {
+                            out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+                        }
+                    } else if let Some(id) = func_iri(attribute.value()) {
+                        out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+                    }
                 }
             }
         }
@@ -826,10 +831,13 @@ impl<'a, 'input> TextScan<'a, 'input> {
             let Some(kind) = ResourceKind::property(name) else {
                 continue;
             };
-            let Some(id) = func_iri(value) else {
-                continue;
-            };
-            out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+            if kind == ResourceKind::Filter {
+                for id in func_iris(value) {
+                    out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+                }
+            } else if let Some(id) = func_iri(value) {
+                out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+            }
         }
         Ok(out)
     }

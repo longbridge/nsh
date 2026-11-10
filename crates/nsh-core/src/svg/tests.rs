@@ -764,6 +764,17 @@ fn svg_safety_text_in_masks_is_bounded() {
 }
 
 #[test]
+fn svg_safety_filter_lists_are_bounded() {
+    // A filter value is a list; both filters convert and lay out their
+    // `feImage` text.
+    let text = "a".repeat(40_000);
+    let doc = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><filter id="a"><feImage href="#t"/></filter><filter id="b"><feImage href="#t"/></filter><text id="t" x="0" y="9">{text}</text></defs><rect width="10" height="10" filter="url(#a) url(#b)"/></svg>"##
+    );
+    assert_eq!(size(doc.as_bytes()), Err(Error::TooMuchText));
+}
+
+#[test]
 fn svg_safety_text_in_filters_is_bounded_per_reference() {
     // A filter's units default to objectBoundingBox, so usvg converts it for
     // every element that references it, laying out its `feImage` text each
