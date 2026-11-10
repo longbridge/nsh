@@ -201,3 +201,44 @@ fn a_submenu_closes_once_its_item_scrolls_out_of_view() {
     // The menu stays open.
     assert!(app.shows("Item 10"));
 }
+
+// The tenth trigger starts exactly below the first viewport; scrolling back
+// to zero must close it just as scrolling past an item at the top does.
+#[component]
+fn SubmenuAtViewportBoundary() -> impl IntoElement {
+    let chose = signal(String::from("none"));
+    let mut m = menu().trigger(
+        view()
+            .test_id("open")
+            .w(px(80.0))
+            .h(px(30.0))
+            .child(text("Open")),
+    );
+    for i in 1..=9 {
+        m = m.child(item(chose, format!("Before {i}")));
+    }
+    m = m.child(
+        submenu()
+            .trigger(view().h(px(30.0)).child(text("Boundary More")))
+            .child(item(chose, "Boundary Sub A".into())),
+    );
+    for i in 1..=10 {
+        m = m.child(item(chose, format!("After {i}")));
+    }
+    view().child(m)
+}
+
+#[test]
+fn a_submenu_closes_when_scrolling_back_to_exactly_zero() {
+    let mut app = start(Root::of::<SubmenuAtViewportBoundary>(), 300.0);
+    app.press("id:open").unwrap();
+    app.wait_for("Before 1").unwrap();
+    for _ in 0..10 {
+        app.press_key("down").unwrap();
+    }
+    app.press_key("right").unwrap();
+    app.wait_for("Boundary Sub A").unwrap();
+    app.scroll("Boundary More", px(-1000.0)).unwrap();
+    app.wait_for_gone("Boundary Sub A", std::time::Duration::from_secs(2))
+        .unwrap();
+}

@@ -2287,9 +2287,8 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
             let Some(scroll) = items.scroll_of(level) else {
                 return;
             };
-            if scroll.offset.get() == Points::ZERO {
-                return;
-            }
+            // Returning to zero can hide a trigger at the viewport's end too.
+            scroll.offset.get();
             spawn(async move {
                 let (trigger, port) = (anchor.measure(), scroll.view.measure());
                 let (Some(trigger), Some(port)) = (trigger.await, port.await) else {
