@@ -756,3 +756,58 @@ fn a_tap_on_a_context_menus_trigger_still_presses() {
     app.app.wait_for("text:p1 u1 l0").unwrap();
     assert!(!app.app.shows("Rename"), "a tap opens no menu");
 }
+
+/// Holds a pointer of `pointer_type` still on the row for longer than a
+/// long press, as a platform reports it: a touch on the root with the row
+/// listening.
+fn hold_row(app: &mut App, pointer_type: nsh_core::PointerType) {
+    let row = app.seen.lock().unwrap().test_ids["row"];
+    let touch = |phase| {
+        EventPayload::Touch(Box::new(nsh_core::TouchEvent {
+            phase,
+            timestamp: 0.0,
+            points: vec![nsh_core::TouchPoint {
+                id: 1,
+                target: row,
+                path: if phase == nsh_core::TouchPhase::Start {
+                    vec![row]
+                } else {
+                    Vec::new()
+                },
+                page: point(px(10.0), px(110.0)),
+                location: point(px(10.0), px(10.0)),
+                changed: true,
+                pointer_type,
+            }],
+            activated: None,
+        }))
+    };
+    let control = app.app.engine().control();
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Touch,
+        touch(nsh_core::TouchPhase::Start),
+    );
+    app.app.wait(std::time::Duration::from_millis(600)).unwrap();
+}
+
+#[test]
+fn a_held_mouse_button_opens_no_context_menu() {
+    // Desktops report the mouse as a touch too: holding its button still
+    // is a slow click or the start of a drag, not a request for a menu.
+    let mut app = start_on(Root::of::<PressableRow>(), Os::Windows);
+    hold_row(&mut app, nsh_core::PointerType::Mouse);
+    assert!(
+        !app.app.shows("Rename"),
+        "a held mouse button opens no menu"
+    );
+}
+
+#[test]
+fn a_held_finger_or_pen_reported_as_a_touch_opens_the_menu() {
+    for pointer_type in [nsh_core::PointerType::Touch, nsh_core::PointerType::Pen] {
+        let mut app = start_on(Root::of::<PressableRow>(), Os::Windows);
+        hold_row(&mut app, pointer_type);
+        app.app.wait_for("Rename").unwrap();
+    }
+}

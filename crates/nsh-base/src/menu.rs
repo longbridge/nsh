@@ -20,7 +20,7 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityState, Checked, ContextMenuEvent, TouchEvent, TouchPhase,
+    AccessibilityState, Checked, ContextMenuEvent, PointerType, TouchEvent, TouchPhase,
     element::{OrderWatch, Style, watch_order},
     geometry::Axis,
     keymap::When,
@@ -1431,11 +1431,17 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                 // A held finger opens it on any touch screen, a desktop's
                 // too (a touch laptop, a browser with a mouse and a touch
                 // screen); opening again when the platform also raises a
-                // context menu for the hold changes nothing.
+                // context menu for the hold changes nothing. A held mouse
+                // button, which desktops also report as a touch, is a slow
+                // click or the start of a drag: it opens nothing (the
+                // secondary button does).
                 .on_touch(move |e: &TouchEvent| {
                     let at = e.points.first().map(|p| p.page);
                     match e.phase {
-                        TouchPhase::Start if e.points.len() == 1 => {
+                        TouchPhase::Start
+                            if e.points.len() == 1
+                                && e.points[0].pointer_type != PointerType::Mouse =>
+                        {
                             let on_hold = on_hold.clone();
                             let page = at.unwrap_or_default();
                             let task = set_timeout(HOLD, move || {

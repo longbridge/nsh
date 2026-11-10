@@ -1482,6 +1482,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 page: point(px(c[i * 4]), px(c[i * 4 + 1])),
                 location: point(px(c[i * 4 + 2]), px(c[i * 4 + 3])),
                 changed: flags[i] != 0,
+                pointer_type: nsh_core::PointerType::Touch,
             }
         })
         .collect();

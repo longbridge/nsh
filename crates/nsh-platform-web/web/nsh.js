@@ -8128,6 +8128,7 @@ class Player {
         x: p.x - left,
         y: p.y - top,
         changed: id === changedId,
+        pointerType: p.pointerType,
       });
     }
     if (!points.length) return;
@@ -8183,6 +8184,7 @@ class Player {
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const p = {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
+      pointerType: e.pointerType,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : this.linkPress(e.target, target) ?? chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       // What presses report: the modifier keys at the press and its clicks.

@@ -394,6 +394,10 @@ pub struct TouchPoint {
     /// This finger is one the event is about (it went down, moved or
     /// lifted).
     pub changed: bool,
+    /// What the pointer is: a finger, a pen, or the mouse, which desktops
+    /// also report as a touch (what a held finger does, such as opening a
+    /// context menu, a held mouse button does not).
+    pub pointer_type: PointerType,
 }
 
 /// Where the mouse is over a view ([`EventKind::MouseEnter`],

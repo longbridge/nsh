@@ -5070,6 +5070,7 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
                 page: nsh_core::geometry::point(px(150.0), px(10.0)),
                 location: nsh_core::geometry::point(px(150.0), px(10.0)),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     };
@@ -5188,6 +5189,7 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
                 page: at,
                 location: at,
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     };
