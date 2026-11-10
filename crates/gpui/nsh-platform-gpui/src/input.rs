@@ -1361,28 +1361,36 @@ fn focus_stop(surface: &Rc<Surface>, view: &NshView) {
 }
 
 /// The Tab stops shown under `view`, in tree order (a scroll view's
-/// content as it is on screen): enabled text fields and
+/// content as it is on screen; a shown overlay's content after the view it
+/// follows, [`input::tab_order`]): enabled text fields and
 /// the native components that take the keyboard.
 fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
-    {
+    let skipped = |view: &NshView| {
         let s = view.state();
-        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
-            return;
+        s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None
+    };
+    let order = input::tab_order(
+        view.clone(),
+        |view| {
+            if skipped(view) {
+                return Vec::new();
+            }
+            view.with_children_in_reading_order(<[NshView]>::to_vec)
+        },
+        NshView::id,
+        |view| view.state().props.tab_after,
+    );
+    out.extend(order.into_iter().filter(|view| {
+        if skipped(view) {
+            return false;
         }
-        let stop = match s.kind {
+        let s = view.state();
+        match s.kind {
             ViewKind::Input => !s.props.accessibility.state.disabled,
             ViewKind::Native => crate::native::focusable(surface, s.id),
             _ => false,
-        };
-        if stop {
-            out.push(view.clone());
         }
-    }
-    view.with_children_in_reading_order(|children| {
-        for child in children {
-            collect_stops(surface, child, out);
-        }
-    });
+    }));
 }
 
 // --- Hit testing --------------------------------------------------------------------

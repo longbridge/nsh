@@ -473,6 +473,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
     }
 
     /// View `key` is the placeholder of an `<Each>` row

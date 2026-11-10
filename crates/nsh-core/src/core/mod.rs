@@ -829,6 +829,11 @@ impl Node {
             .as_ref()
             .and_then(|root| root.overlay.as_ref())
             .and_then(|overlay| overlay.native_anchor);
+        props.tab_after = self
+            .root
+            .as_ref()
+            .and_then(|root| root.overlay.as_ref())
+            .and_then(|overlay| overlay.tab_after);
         if props.pointer_events == crate::props::PointerEvents::Auto {
             props.pointer_events = self.class_pointer;
         }
@@ -1233,6 +1238,9 @@ pub struct Core<M: TextEngine> {
     mount: Vec<MountItem>,
     track_tree_order: bool,
     tree_order_changed: bool,
+    /// The tree changed: the shown overlays' places in the Tab order are
+    /// found again ([`Core::order_overlays_for_tab`]).
+    tab_places_stale: bool,
     /// Mount the states nodes show as parts of a control
     /// ([`MountItem::ProjectStates`]).
     mount_projected: bool,
@@ -1503,6 +1511,7 @@ impl<M: TextEngine> Core<M> {
             mount: Vec::new(),
             track_tree_order: false,
             tree_order_changed: false,
+            tab_places_stale: false,
             mount_projected: false,
             batches: 0,
             commands: Vec::new(),
@@ -2857,6 +2866,9 @@ impl<M: TextEngine> Core<M> {
             // showed before them.
             let starts = std::mem::take(&mut self.transition_starts);
             self.mount.splice(0..0, starts);
+        }
+        if std::mem::take(&mut self.tab_places_stale) && !self.overlays.is_empty() {
+            self.order_overlays_for_tab();
         }
         if std::mem::take(&mut self.tree_order_changed) {
             let mut order = Vec::new();
@@ -5903,6 +5915,7 @@ impl<M: TextEngine> Core<M> {
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
         if self.nodes[child as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
             // The focus moved with it: the views around it now.
             self.focus_moved = true;
@@ -6038,6 +6051,7 @@ impl<M: TextEngine> Core<M> {
             .expect("child of parent");
         siblings.remove(pos);
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
             list.remove_cell(key);
         }
@@ -6393,6 +6407,7 @@ impl<M: TextEngine> Core<M> {
             .then_some(node.frame)
             .filter(|f| !f.origin.x.0.is_nan());
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
         if node.kind == Kind::Text {
             self.measure_for_real(key);
         }

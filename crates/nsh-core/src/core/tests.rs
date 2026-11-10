@@ -24854,6 +24854,90 @@ fn overlays_show_in_their_root_view_above_its_children() {
     );
 }
 
+/// The `tab_after` overlay `id`'s view was last mounted with in `batch`
+/// (`None` when its props were not mounted).
+fn tab_after_in(batch: &MountBatch, id: NodeId) -> Option<Option<NodeId>> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewProps { id: at, props } if *at == id => Some(props.tab_after),
+        _ => None,
+    })
+}
+
+#[test]
+fn shown_overlays_go_in_the_tab_order_after_what_comes_before_them() {
+    use StyleValue::Number;
+    let mut c = core();
+    let sized = [("height", Number(10.0))];
+    // A popover: its trigger (with a label), a backdrop overlay, then the
+    // popup overlay with a field; a button after the popover.
+    add(&mut c, 2, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::View, 2, &sized);
+    add(&mut c, 6, Tag::View, 4, &sized);
+    add(&mut c, 8, Tag::Overlay, 2, &[]);
+    add(&mut c, 10, Tag::Overlay, 2, &[]);
+    add(&mut c, 12, Tag::View, 10, &sized);
+    add(&mut c, 14, Tag::View, ROOT_ID, &sized);
+    let batch = c.commit().unwrap();
+    assert!(inserts(&batch).contains(&(ROOT_ID, 10, None)));
+    // After the trigger's label, not the backdrop.
+    assert_eq!(tab_after_in(&batch, 10), Some(Some(6)));
+    assert_eq!(tab_after_in(&batch, 8), Some(Some(6)));
+    // A commit that changes nothing around them mounts nothing.
+    apply(&mut c, vec![style_op(14, &[("height", Number(12.0))])]);
+    let batch = c.commit().unwrap();
+    assert_eq!(tab_after_in(&batch, 10), None);
+    // A view inserted between the trigger and the popup: after it.
+    add(&mut c, 16, Tag::View, 2, &sized);
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 2,
+            child: 16,
+            before: Some(8),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(tab_after_in(&batch, 10), Some(Some(16)));
+    // Nothing before it in its parent: after the parent.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 4,
+            },
+            Op::Remove {
+                parent: 2,
+                child: 16,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(tab_after_in(&batch, 10), Some(Some(2)));
+    // A menu (a list moving the focus with its own keys) keeps its place.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 18,
+                tag: Tag::Overlay,
+            },
+            Op::SetProp {
+                id: 18,
+                prop: Prop::Accessibility(AccessibilityProp::Role(crate::AccessibilityRole::Menu)),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 18,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(inserts(&batch).contains(&(ROOT_ID, 18, None)));
+    assert_eq!(tab_after_in(&batch, 18).flatten(), None);
+}
+
 /// The `available` the last `onPosition` of overlay `id` told it.
 fn told_room(
     events: &[(NodeId, EventKind, EventPayload)],

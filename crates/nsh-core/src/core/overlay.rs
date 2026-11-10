@@ -16,7 +16,10 @@
 //! their anchors and root views listen to touches while they are shown)
 //! and Escape / the back button (`onCancel`, to the top overlay listening:
 //! a binding of the root's table and the root's back listener while one
-//! is shown). Closing is the app's (`nsh-base`'s components).
+//! is shown). Closing is the app's (`nsh-base`'s components). A shown
+//! overlay's content goes in the Tab order where the app put it, after the
+//! view before it there ([`Core::order_overlays_for_tab`],
+//! [`crate::ViewProps::tab_after`]), not after its root view's children.
 //!
 //! A hint overlay ([`OverlayConfig::hint`]) is shown by the core: its
 //! anchor (its parent without one) listens to the pointer coming and going
@@ -102,6 +105,9 @@ pub(super) struct OverlayState {
     /// Where it was placed last, as `onPosition` reported it.
     pub(super) placed: Option<(Placed, Bounds<Points>)>,
     pub(super) native_anchor: Option<crate::overlay::PlacedAnchor>,
+    /// The view it follows in the Tab order while it is shown
+    /// ([`crate::ViewProps::tab_after`], [`Core::order_overlays_for_tab`]).
+    pub(super) tab_after: Option<NodeId>,
     /// A hint: the pointer rested on its anchor, and has not left or
     /// pressed it since.
     pub(super) hinted: bool,
@@ -183,6 +189,7 @@ impl<M: TextEngine> Core<M> {
                 host: None,
                 placed: None,
                 native_anchor: None,
+                tab_after: None,
                 hinted: false,
                 waiting: None,
                 focus_on: false,
@@ -486,6 +493,7 @@ impl<M: TextEngine> Core<M> {
                 root.laid_out = None;
             }
             self.needs_layout = true;
+            self.tab_places_stale = true;
             opened.push(key);
         }
         // Opened last, on top: in the order they were shown.
@@ -1704,6 +1712,93 @@ impl<M: TextEngine> Core<M> {
                 crate::AccessibilityRole::Listbox | crate::AccessibilityRole::Menu
             )
         })
+    }
+
+    /// Finds where each shown overlay goes in the Tab order and mounts it
+    /// where that changed ([`crate::ViewProps::tab_after`]): its native
+    /// view is at the end of its root view, but its content follows what
+    /// comes before it where the app put it, as WAI-ARIA's non-modal
+    /// popups have it (a popover's content right after its trigger). A list
+    /// of options or a menu keeps its place (a select's list, a menu: they
+    /// move the focus with their own keys, and Tab leaves them for the
+    /// control after their trigger).
+    pub(super) fn order_overlays_for_tab(&mut self) {
+        for i in 0..self.overlays.len() {
+            let key = self.overlays[i];
+            if self.overlay(key).is_none_or(|s| s.host.is_none())
+                || !self.nodes[key as usize].created
+            {
+                continue;
+            }
+            let after = if self.holds_options(key, 3) {
+                None
+            } else {
+                self.tab_predecessor(key)
+            };
+            let state = self.overlay_mut(key).expect("overlay");
+            if state.tab_after == after {
+                continue;
+            }
+            state.tab_after = after;
+            let node = &self.nodes[key as usize];
+            self.mount.push(MountItem::ViewProps {
+                id: node.id,
+                props: node.mounted_props(),
+            });
+        }
+    }
+
+    /// Whether `key` or a view of its own `depth` levels below it (not of
+    /// an overlay inside it) is a list of options or a menu.
+    fn holds_options(&self, key: Key, depth: usize) -> bool {
+        self.is_options(key)
+            || (depth > 0
+                && self.nodes[key as usize].children.iter().any(|&c| {
+                    !self.nodes[c as usize].is_overlay() && self.holds_options(c, depth - 1)
+                }))
+    }
+
+    /// The native view right before `key` in the app's tree, depth first:
+    /// the last one in the subtrees of the siblings before it, else its
+    /// parent's, going up. Other overlays' subtrees are not where they
+    /// are, so they are passed over.
+    fn tab_predecessor(&self, key: Key) -> Option<NodeId> {
+        let mut at = key;
+        loop {
+            let parent = self.nodes[at as usize].parent;
+            if parent == NO_KEY {
+                return None;
+            }
+            let siblings = &self.nodes[parent as usize].children;
+            let pos = siblings.iter().position(|&c| c == at)?;
+            if let Some(last) = siblings[..pos]
+                .iter()
+                .rev()
+                .find_map(|&s| self.last_native_in(s))
+            {
+                return Some(last);
+            }
+            let p = &self.nodes[parent as usize];
+            if p.created {
+                return Some(p.id);
+            }
+            at = parent;
+        }
+    }
+
+    /// The last native view in `key`'s subtree, depth first, overlays
+    /// passed over. A view without one has none below it either (a culled
+    /// one, a span).
+    fn last_native_in(&self, key: Key) -> Option<NodeId> {
+        let node = &self.nodes[key as usize];
+        if node.is_overlay() || !node.created {
+            return None;
+        }
+        node.children
+            .iter()
+            .rev()
+            .find_map(|&c| self.last_native_in(c))
+            .or(Some(node.id))
     }
 
     fn set_native_overlay_anchor(
