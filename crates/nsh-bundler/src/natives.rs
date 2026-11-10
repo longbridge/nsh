@@ -551,11 +551,12 @@ mod tests {
     #[test]
     fn merged_uses_are_those_of_both() {
         let mut a = uses(r#"import { Button } from "nsh/base"; import d from "zlib";"#);
-        let b =
-            uses(r#"import { Tabs } from "nsh/base"; import * as n from "nsh"; import("x" + y);"#);
+        let b = uses(
+            r#"import { Tabs } from "nsh/base"; import * as n from "nsh"; use(n); import("x" + y);"#,
+        );
         let mut whole = uses(
             r#"import { Button } from "nsh/base"; import d from "zlib";
-            import { Tabs } from "nsh/base"; import * as n from "nsh"; import("x" + y);"#,
+            import { Tabs } from "nsh/base"; import * as n from "nsh"; use(n); import("x" + y);"#,
         );
         a.merge(&b);
         assert_eq!(a, whole);
@@ -789,7 +790,7 @@ mod tests {
         let found = uses(
             r#"import * as base from "nsh/base"; import * as z from "zlib";
             import * as n from "nsh";
-            base.Button; z.gzipSync(data); use(n);"#,
+            base.Button; (0, z.gzipSync)(data); use(n);"#,
         );
         assert_eq!(found.imports.get("nsh/base"), Some(&names(&["Button"])));
         assert_eq!(found.imports.get("zlib"), Some(&names(&["gzipSync"])));
