@@ -919,7 +919,10 @@ program that describes them, builds the hosts and runners with them, and does ev
   dev-dependencies: `RustApp::watched`): a change to their `.rs` files, `Cargo.toml` or `assets/` ends the session
   with `rust_app::Restart` (the hosts it started are stopped with it), and the command starts again in the same
   process (`main.rs` `run`): the app is described again, the hosts are built again and start anew; JS and TSX edits
-  stay hot. After a restart a failing build reports the error and waits for the next change (`RustApp::wait_after`).
+  stay hot. A Rust change saved within the watcher's debounce after a TSX one (a checkout, a formatter) restarts too,
+  without building the TSX first: the new session builds it against the sets described anew
+  (`dev::rust_changed_until`). After a restart a failing build reports the error and waits for the next change
+  (`RustApp::wait_after`).
 - **Rust apps.** With `"root": "<path in the crate>"` in `nsh.json` (in the first crate `"rust"` lists), the app's
   directory resolves to its `nsh.json` (`entry::resolve`; a named `App.tsx` stays the TSX entry), and the app runs with
   no JS: `rust_app::RootConfig` (with `"theme"`, `"appearance"`, `"statusBar"` and `"id"`) adds the members `rust-linux`,
