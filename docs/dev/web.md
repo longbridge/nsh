@@ -931,7 +931,9 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   is the first image item as a `data:` URI the player encodes itself; the core measures it against
   `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it). An image written goes on the
   clipboard as a PNG, the image format browsers write: another format is decoded and encoded again (pitfalls.md
-  "Web, browsers"). A write that fails is a console warning; `writeImage` has resolved already.
+  "Web, browsers"), and also goes on as it is, as browsers' own Copy Image does: an `<img>` of it as `text/html`
+  (what a paste's `html` carries, `onPaste`) and, in Chromium, the web custom format `web <type>`, which an image read
+  takes before the PNG, so a GIF read back keeps its frames. A write that fails is a console warning; `writeImage` has resolved already.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
   runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `placeholder` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden

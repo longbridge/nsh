@@ -828,6 +828,8 @@ interface TrayModule {
 | --- | --- |
 | `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 和 Windows 上 SVG 是模板图标，用菜单栏或任务栏的文字颜色绘制。不设时 Windows 显示应用图标。 |
 | `tooltip` | 指针停在图标上时显示；不设时显示应用名。 |
+| `title` | 图标旁边的文字，由若干段文字 `{ text, color? }` 组成，每段可以有自己的颜色（CSS 颜色；不设时用菜单栏的文字颜色）：应用想让用户一直看得到的东西，比如价格。macOS 的菜单栏用菜单栏字体显示。Linux 上支持 AppIndicator 标签的面板（GNOME 的 AppIndicator 扩展、Unity、MATE、Budgie）在图标右边显示它的文字，颜色跟随面板；Plasma、Waybar 和 Windows 的通知区只显示图标。 |
+| `titlePlacement` | 文字显示在图标的哪一边：`"right"`（默认）或 `"left"`。仅 macOS 支持；Linux 的面板总是把文字放在图标右边。 |
 | `menu` | 图标的菜单，菜单项与 `Menu` 的相同。右键打开；没有 `onClick` 时左键也打开。 |
 | `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用），参数是 `{ bounds }`：图标在哪里（见[下文](#在图标旁打开窗口)）。 |
 
@@ -846,6 +848,26 @@ Tray.set({
     { type: "separator" },
     { role: "quit" },
   ],
+});
+```
+
+标题让 macOS 菜单栏里图标旁边一直显示一段文字，比如价格，涨跌幅用应用主题里的颜色。文字段的颜色在调用 `set` 时就固定下来；要让主题颜色跟随浅色和深色外观，就在读取配色方案的 `effect` 中设置托盘：
+
+```rust tabs
+use nsh_core::desktop::TrayTitleRun;
+
+set_tray(tray().icon(icon).title([
+    TrayTitleRun::new("AAPL 228.00 "),
+    TrayTitleRun::new("+1.33%").color(color(tokens().color("up").unwrap())),
+]));
+```
+
+```tsx tabs
+import { token } from "nsh";
+
+Tray.set({
+  icon,
+  title: [{ text: "AAPL 228.00 " }, { text: "+1.33%", color: token("up") }],
 });
 ```
 
@@ -891,7 +913,7 @@ function atIcon(icon: Bounds, size: Size): Point {
 }
 ```
 
-在 Rust 中，`set_tray(tray()...)` 与之相同（传 `None` 移除）：`tray()` 是一个 builder，有 `.icon(..)`、`.tooltip(..)`、`.menu(items)`（与 `set_application_menu` 相同的 `MenuItem`）和 `.on_click(|e| ..)`，它的 `TrayClickEvent` 带有 `bounds: Option<Bounds<Points>>`。处理函数在设置它的 owner 下运行，只在该 owner 存活期间有效；放在 `effect` 中会跟随读取的 signal 更新。每个应用只有一个托盘，与 TSX 共用：后设置的生效。
+在 Rust 中，`set_tray(tray()...)` 与之相同（传 `None` 移除）：`tray()` 是一个 builder，有 `.icon(..)`、`.tooltip(..)`、`.title(runs)`（`TrayTitleRun::new(text)`，可加 `.color(..)`）、`.title_placement(..)`（`TrayTitlePlacement`）、`.menu(items)`（与 `set_application_menu` 相同的 `MenuItem`）和 `.on_click(|e| ..)`，它的 `TrayClickEvent` 带有 `bounds: Option<Bounds<Points>>`。处理函数在设置它的 owner 下运行，只在该 owner 存活期间有效；放在 `effect` 中会跟随读取的 signal 更新。每个应用只有一个托盘，与 TSX 共用：后设置的生效。
 
 ```rust
 use nsh_core::element::desktop::{MenuItem, main_window, quit, set_tray, tray};

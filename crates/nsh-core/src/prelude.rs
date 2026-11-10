@@ -52,6 +52,8 @@ pub use crate::element::{
     Element,
     ElementRef,
     Environment,
+    EvaluateOptions,
+    Evaluation,
     Event,
     EventKind,
     EventPayload,
@@ -262,8 +264,8 @@ pub use crate::element::{
     set_app_url_with, set_badge, set_clipboard, set_clipboard_image, set_color_scheme,
     set_fps_enabled, set_interval, set_timeout, set_tokens, shaders_available, show_notification,
     signal, signal_with, spawn, speech_available, stored, text_metrics, timer, timer_until, tokens,
-    try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll, web_input_available,
-    web_view_available, when, window,
+    try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll,
+    web_evaluate_available, web_input_available, web_view_available, when, window,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};

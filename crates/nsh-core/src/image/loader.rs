@@ -1009,6 +1009,11 @@ mod http {
         (if direct { &DIRECT } else { &PROXIED }).get_or_init(|| {
             let config = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
+                .tls_config(
+                    ureq::tls::TlsConfig::builder()
+                        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                        .build(),
+                )
                 .http_status_as_error(false)
                 .max_redirects(0)
                 .max_redirects_will_error(false);

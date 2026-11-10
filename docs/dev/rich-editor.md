@@ -176,7 +176,8 @@ on Android) over the selection when the long press's finger lifts, after a sweep
 a tap on the selection, and at the caret after a long press on blank space or a tap on the caret. As gpui-kit's
 input, it offers Cut, Copy, Paste and Select All and leaves out what cannot apply (`touch::menu_actions`): Cut and
 Copy without a selection, Cut and Paste in a read-only editor, Select All when everything is selected. The bounds
-are the session's selection, which the view may not have rendered yet. Paste is the sink's own (its `onPaste`, with
+are the session's selection, which the view may not have rendered yet, grown by the knobs' room above and below
+while handles show, so the menu leaves them free to take a finger. Paste is the sink's own (its `onPaste`, with
 HTML and files); Cut, Copy and Select All come back as `EventKind::EditAction` and run as the keys' commands do.
 
 The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
@@ -314,7 +315,7 @@ JS describes.
 - **Events**: `revision` (the session's subscribers: `{ revision }` after every change, from any source), `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
   `delete`, `destroy`, posted to JS after the fact.
 - **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
-  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).
+  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`; `format: "html"` reads `content` and `setContent`, `getHTML()` writes), text (`renderText` per type).
 - **JS face** (`js/extension_api.rs`): `createRichEditor({ extensions: [StarterKit.configure({ heading: { levels:
   [1, 2, 3] } }), Underline], content, editable })`. The built-in extensions are classes whose statics make them
   (`configure`, `extend`); a class itself in `extensions` is the extension with its defaults (`ExtensionEntry` reads a

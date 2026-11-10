@@ -93,6 +93,7 @@ interface WebViewNavigation {
 | `goForward()` | 在历史记录中前进。 |
 | `stopLoading()` | 停止加载。 |
 | `injectJavaScript(script)` | 在页面中运行 `script`。 |
+| `evaluate(script, { timeout? })` | 在页面中执行 `script`，返回 `{ value }`，即其 JSON 结果；参见[执行脚本](#执行脚本)。 |
 | `postMessage(data)` | 向页面发送 `data`（字符串）：在 `window` 上触发 `message` 事件，`event.data` 即为 `data`。 |
 | `load({ src, headers? })` | 加载 `src`，只给页面自身的请求带上 `headers`（`Record<string, string>`），子资源、之后的导航和重新加载都不带；用于已登录的页面（`Authorization`）。主机必须是 `webview.hosts` 允许的。请求头无效时抛出 `TypeError`。浏览器后端不做任何事。见[已登录的页面](../docs/web-view-and-video.md#已登录的页面请求头)。 |
 
@@ -128,3 +129,58 @@ const message = signal("");
   }
 }
 ```
+
+## 执行脚本
+
+`await ref.evaluate(script, { timeout })` 在页面主文档中执行 `script`，返回
+`{ value }`，即脚本的完成值。脚本返回的 Promise 会被等待；要在脚本里使用
+`await`，返回一个 async 函数的调用。`timeout` 以毫秒计（默认 30 000）。脚本要读取
+已加载的文档时，在 `onLoad` 之后调用。
+
+```tsx
+const { value: title } = await web.evaluate("document.title");
+const { value: buttons } = await web.evaluate(`
+  Array.from(document.querySelectorAll("button")).map(button => ({
+    text: button.textContent,
+    disabled: button.disabled,
+  }))
+`);
+const { value } = await web.evaluate("(async () => await Promise.resolve(42))()", { timeout: 5000 });
+```
+
+`value` 是 JSON：字符串、有限数字、布尔值、`null`、数组和普通对象，最多嵌套
+64 层、总计 1 MiB。DOM 节点、日期和 Map 请在脚本中转换成这些类型，如上例所示。
+脚本最多 1 MiB，一个引擎同时最多执行 64 个求值。
+
+求值属于它开始时的文档：新的主文档导航、`load`、`reload`、`goBack`、`goForward`、
+重新加载的 source 属性，或 WebView 被移除，都会以 `ERR_NSH_WEBVIEW_ABORTED` 结束它。
+同一文档内的历史更新、子框架加载和被拒绝的导航不影响它。结果来自页面，应视为不可信
+输入。页面的内容安全策略（CSP）同样作用于脚本。`injectJavaScript(script)` 执行脚本而不等待。
+
+`WebView.evaluateAvailable()` 返回此平台能否在 WebView 中执行脚本：iOS、Android 和
+macOS 可以。失败时以带下列 `code` 的 `Error` 拒绝；参数错误以 `TypeError` 或
+`RangeError` 拒绝。
+
+| Code | 含义 |
+|---|---|
+| `ERR_NSH_WEBVIEW_SCRIPT` | 脚本抛出或拒绝、结果不是 JSON，或页面不执行脚本。 |
+| `ERR_NSH_WEBVIEW_ABORTED` | 文档发生导航，或 WebView 已被移除。 |
+| `ETIMEDOUT` | 脚本未在 `timeout` 内返回。 |
+| `ERR_NSH_QUOTA_EXCEEDED` | 脚本、结果或求值数量超出限制。 |
+| `ERR_ACCESS_DENIED` | 应用的 capabilities 未授予 `webview`。 |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | 此平台不在 WebView 中执行脚本。 |
+
+Rust 组件通过 WebView 的 element ref 执行：
+
+```rust
+let web = element_ref();
+// web_view("https://example.com").element_ref(&web)
+spawn(async move {
+    match web.evaluate("document.title", EvaluateOptions::default()).await {
+        Ok(evaluation) => log::info!("Page title: {}", evaluation.value),
+        Err(error) => log::warn!("Evaluation failed: {}", error.message()),
+    }
+});
+```
+
+它返回 `Result<Evaluation, JsError>`；`EvaluateOptions { timeout }` 是 `Duration`。
