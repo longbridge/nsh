@@ -138,7 +138,7 @@ is. Views out of sight stop rendering until they show again.
 | Platform | Ticks on | Shows a frame as | Out of sight |
 |---|---|---|---|
 | Linux (GTK 4) | each view's tick callback | a `GdkMemoryTexture` appended in the view's snapshot, after the background, under text, images and children | `reveal` on the frame clock's layout, for views outside a clipping ancestor or the window |
-| macOS (AppKit) | one frame callback of the surface's display link, at the window's backing scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children (`decor.rs` shapes it); a `CGImage` without Metal | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
+| macOS (AppKit) | one frame callback of the surface's display link while frames change with time, pictures are due or anything else wants frames; a view that only changed renders after the batch and shows its frame when the GPU says it is done (`Renderer::when_done`), without the display link; at the window's backing scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children (`decor.rs` shapes it); a `CGImage` without Metal | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
 | iOS | a `CADisplayLink` of its own, at the screen's scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children; a `CGImage` without Metal | views outside any window render once back in one |
 | Android | the UI-thread animator's `Choreographer`, kept ticking by `UiAnimation::outputs` while a view wants a frame | a bitmap of `Box.java`, filled by `NshView.shaderFrame` | — |
 | Windows | the surface's frame ticker (`Surface::on_frame`), at the window's scale | a Direct2D bitmap drawn under the children (made again after a device loss) | `reveal`: hidden, concealed or detached views |
@@ -438,7 +438,12 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
 - **A first frame is not an end.** A run's first frame comes back one or two display frames after it starts, and
   `ShaderView::frame()` is empty until then: a page's or a dialog's run ends on its clock, never on an empty frame.
 - **Readback latency.** Native frames arrive one or two display frames after `render`; a backend must keep ticking
-  while `ShaderView::pending()` is true, or the last frame of a change never shows.
+  while `ShaderView::pending()` is true, or be told when they are back (`Renderer::when_done`, on Apple's GPUs), or
+  the last frame of a change never shows.
+- **A display frame for one shader frame on macOS.** Resuming the surface's display link for a frame or two wakes
+  the process about as often as keeping it running at the screen's rate. A view that only changed
+  (`ShaderView::animates` false, no pictures) renders after the batch and is collected when the GPU tells, so the
+  display link stays paused.
 - **A CGImage per frame on macOS and iOS.** Read back, a frame became a `CGImage` in sRGB; Core Animation converted each one to
   the display's colour space (Display P3) on the main thread at commit (`CA::Render::copy_image`, vImage), and with
   the copy out of the read-back buffer a window-sized animated shader took 70 % of a core at 120 Hz. macOS and iOS

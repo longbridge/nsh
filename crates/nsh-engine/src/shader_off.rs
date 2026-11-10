@@ -31,6 +31,12 @@ impl Renderer {
     pub fn format(&self) -> PixelFormat {
         self.format
     }
+
+    /// `false`: there are no frames (`f` is dropped).
+    pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
+        drop(f);
+        false
+    }
 }
 
 /// One view's state, which never renders.
@@ -104,6 +110,16 @@ impl ShaderView {
 
     /// `false`: there are no frames.
     pub fn pending(&self) -> bool {
+        false
+    }
+
+    /// `false`: there are no frames.
+    pub fn due(&self) -> bool {
+        false
+    }
+
+    /// `false`: there are no frames.
+    pub fn animates(&self) -> bool {
         false
     }
 
