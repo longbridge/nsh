@@ -1902,6 +1902,8 @@ class Player {
       screenColor: typeof window.EyeDropper === "function",
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
+      // Shader views draw until the first one finds no WebGL 2 (`shaderGl`).
+      shaders: this._shaderGl !== null,
     };
   }
 
@@ -3671,6 +3673,8 @@ class Player {
     }
     this._shaderGl = gl;
     this._shaderPrograms = new Map();
+    // The app's `shadersAvailable()` turns false.
+    if (!gl) this.environmentChanged();
     return gl;
   }
 

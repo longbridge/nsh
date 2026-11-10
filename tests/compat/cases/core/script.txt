@@ -459,3 +459,7 @@ tap id:case-web-available
 expect Web views available: true
 expect No error
 covers [nsh] WebView
+# shaders-available
+tap id:case-shaders-available
+expect Shaders available: true
+covers [nsh] shadersAvailable

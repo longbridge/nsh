@@ -1053,6 +1053,20 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### shadersAvailable
+
+```ts
+const shadersAvailable: Accessor<boolean>;
+```
+
+平台能否绘制 shader 视图（`Shader`、`ShaderEffect`、`ShaderTransition`、`ScreenEffect`、`ScreenTransition`），响应式。在 iOS、Android、macOS、Windows、Linux、GPUI、Web 和无头测试中为 `true`；在终端中、以及关闭 `shader` 特性构建的应用中为 `false`。它从 `true` 开始，当第一个 shader 挂载、而 NSH 打不开这台机器的 GPU 时（例如浏览器没有 WebGL 2）变为 `false`，之后不再变回；所以在它为真时显示 shader，否则显示应用自己的绘制（见 [Shader](../elements/shader.md#shader-能否绘制)）。Rust：`shaders_available() -> bool`。
+
+```tsx
+<If when={shadersAvailable()} else={<Image src={backdrop} style={{ flex: 1 }} />}>
+  <Shader source={BACKDROP} style={{ flex: 1 }} />
+</If>
+```
+
 ### platform
 
 ```ts

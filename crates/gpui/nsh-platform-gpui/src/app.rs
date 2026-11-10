@@ -890,6 +890,8 @@ fn initial_environment() -> Environment {
         file_requests: true,
         // wry, in builds with it.
         web_views: cfg!(feature = "webview"),
+        // wgpu, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }

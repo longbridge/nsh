@@ -86,6 +86,7 @@ struct EnvSignals {
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
+    shaders: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -115,6 +116,7 @@ impl EnvSignals {
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
+                shaders: part!(shaders),
             }
         })
     }
@@ -295,6 +297,18 @@ pub fn reduce_motion() -> bool {
 /// A screen reader runs (TS: `screenReaderEnabled()`).
 pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
+}
+
+/// Whether the platform draws shader views ([`super::shader`] and the
+/// other shader elements; TS: `shadersAvailable()`), reading subscribes.
+/// `false` where the platform was built without a renderer, on a grid
+/// surface, or once the platform found no GPU; it starts `true` elsewhere
+/// and turns `false` (never back) when the first shader mounts on a
+/// machine without one, so an app shows a shader while this holds and
+/// its own drawing (a canvas, an image) otherwise. Whether a source
+/// compiles is [`crate::shader::Shader::compile`]'s answer.
+pub fn shaders_available() -> bool {
+    env(|e| e.shaders)
 }
 
 /// Whether the surface lays out right to left: the root's direction,

@@ -1481,6 +1481,7 @@ impl Mounter {
                 let scale = self.display_scale();
                 let was_screen = self.shaders.draws_screen(id);
                 let role = layer.as_ref().map(|l| l.role);
+                let mounted = layer.is_some();
                 let screen = matches!(
                     role,
                     Some(ShaderRole::Screen | ShaderRole::ScreenTransition)
@@ -1508,6 +1509,11 @@ impl Mounter {
                 {
                     self.shaders
                         .set(id, &host, children, &s.style, scale, layer);
+                    // No GPU: the app hears it (`shadersAvailable()`); the
+                    // engine takes the first report only.
+                    if mounted && self.shaders.without_device() {
+                        self.control.shaders_unavailable();
+                    }
                 }
                 if was_screen && !screen {
                     self.release_root_effect();

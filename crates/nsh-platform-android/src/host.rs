@@ -596,6 +596,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            // wgpu on Vulkan or GLES, in builds with it, until it finds no
+            // GPU.
+            shaders: nsh_engine::shader::LINKED,
             ..Environment::default()
         }),
         animation_queue: Mutex::new(VecDeque::new()),
@@ -1772,7 +1775,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_afterBatch(
         ui.apply(item);
     }
     finish(host, &mut ui);
-    floats(&env, &ui.outputs())
+    let unavailable = ui.shaders.take_unavailable();
+    let outputs = floats(&env, &ui.outputs());
+    drop(ui);
+    // No GPU for the shader views just mounted: the app hears it
+    // (`shadersAvailable()`).
+    if unavailable && let Some(control) = host.control() {
+        control.shaders_unavailable();
+    }
+    outputs
 }
 
 /// A `Choreographer` frame (nanoseconds).

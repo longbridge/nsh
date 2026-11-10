@@ -1225,6 +1225,9 @@ enum Message {
     /// environment is several times the size of every other message, and
     /// it changes rarely.
     Environment(Box<Environment>),
+    /// The platform found no GPU to draw shader views with
+    /// ([`EngineControl::shaders_unavailable`]).
+    ShadersUnavailable,
     /// The displays (desktops).
     Displays(Arc<[nsh_core::desktop::Display]>),
     RootSize(NodeId, Size<Points>, EdgeInsets),
@@ -1378,6 +1381,14 @@ impl EngineControl {
     /// appearance...).
     pub fn set_environment(&self, environment: Environment) {
         let _ = self.tx.send(Message::Environment(Box::new(environment)));
+    }
+
+    /// The platform has no GPU to draw shader views with
+    /// ([`shader::Renderer::new`] is `None`): the app's
+    /// `Environment::shaders` turns `false` now and stays so, whatever the
+    /// platform reports later. Telling it again does nothing.
+    pub fn shaders_unavailable(&self) {
+        let _ = self.tx.send(Message::ShadersUnavailable);
     }
 
     /// Reports the displays (desktops: on start, in
@@ -1854,6 +1865,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
+        drawn_shaders(&mut config.environment, false);
         let trial = match &config.app {
             App::Js(bundle) => bundle.trial.clone(),
             App::Rust(_) => None,
@@ -2035,6 +2047,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             events_reported: 0,
             pinned: config.pinned,
             environment: config.environment,
+            shaders_unavailable: false,
             app_locale: None,
             host: config.host.clone(),
             url_opens: Vec::new(),
@@ -2500,6 +2513,9 @@ struct State<M: TextEngine> {
     pinned: EnvironmentPins,
     /// The environment given last, before the app's language is applied.
     environment: Environment,
+    /// The platform found no GPU for shader views
+    /// ([`EngineControl::shaders_unavailable`]).
+    shaders_unavailable: bool,
     /// The language the app shows in whatever the user's (`setLocale`).
     app_locale: Option<nsh_core::platform::Locale>,
     /// A display frame was requested and has not begun yet.
@@ -3338,7 +3354,15 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         cell: env.cell,
         web_input: env.web_input,
         web_views: env.web_views,
+        shaders: env.shaders,
     }
+}
+
+/// `Environment::shaders` as the app sees it: the platform's, `false` on a
+/// grid surface (a terminal's Cells) and once the platform or this process
+/// found no GPU (`unavailable`: [`EngineControl::shaders_unavailable`]).
+fn drawn_shaders(env: &mut Environment, unavailable: bool) {
+    env.shaders &= env.cell.is_none() && !unavailable && !shader::no_gpu();
 }
 
 /// What class variants read from the environment.
@@ -3556,8 +3580,19 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::Wake => {}
         Message::Environment(mut env) => {
             state.pinned.apply(&mut env);
+            drawn_shaders(&mut env, state.shaders_unavailable);
             let env = state.window_state.report(*env, nsh_core::time::now());
             apply_environment(script, state, env);
+        }
+        Message::ShadersUnavailable => {
+            state.shaders_unavailable = true;
+            if state.environment.shaders {
+                let env = Environment {
+                    shaders: false,
+                    ..state.environment
+                };
+                apply_environment(script, state, env);
+            }
         }
         Message::Displays(displays) => {
             state.core.set_displays(displays.clone());

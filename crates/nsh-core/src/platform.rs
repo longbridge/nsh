@@ -300,6 +300,14 @@ pub struct Environment {
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
     /// when a web view starts reports that error itself.
     pub web_views: bool,
+    /// The platform draws shader views (`Shader`, `ShaderEffect`,
+    /// `ShaderTransition`, the screen's; TS: `shadersAvailable()`). `true`
+    /// by default. A platform built without a renderer sets `false` from
+    /// the start; one that finds no GPU when the first shader mounts
+    /// reports it then (`nsh_engine::EngineControl::shaders_unavailable`),
+    /// so it can turn `false` while the app runs, never back. A grid
+    /// surface ([`Environment::cell`]) draws none.
+    pub shaders: bool,
 }
 
 impl Environment {
@@ -357,6 +365,7 @@ impl Default for Environment {
             cell: None,
             web_input: false,
             web_views: true,
+            shaders: true,
         }
     }
 }
