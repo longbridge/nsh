@@ -289,6 +289,13 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Android
 
+- **Android, responders inside pressable views**: a view that takes no press of its own (a `RichEditor`'s selection
+  handle) leaves the touch to the nearest pressable ancestor, which keeps tracking it: it raised its long press while a
+  finger held the handle and its press on the lift. `SetJsResponder` with a block ends the presses of the ancestors
+  (`Box.cancelPress`, `Pressable.cancel`), as iOS cancels their `PressRecognizer`s. A floating `ActionMode` keeps its
+  content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
+  caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
+  root view (`InputBox.openEditMenu`).
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
   a local frame (`java::with_env`), or local references pile up.
 - **Android, text**: `StaticLayout` ignores `maxLines` without an ellipsis (clip mode counts lines itself and the view clips);
