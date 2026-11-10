@@ -25314,12 +25314,12 @@ fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
     js_events(&mut c);
 
     let menu = |pointer_type| {
-        EventPayload::ContextMenu(crate::ContextMenuEvent::new(
+        crate::ContextMenuEvent::new(
             point(px(1.0), px(2.0)),
             point(px(5.0), px(46.0)),
             Default::default(),
             pointer_type,
-        ))
+        )
     };
     let mouse = Some(crate::PointerType::Mouse);
     for (id, pointer_type, outside) in [
@@ -25335,11 +25335,10 @@ fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
         (10, None, false),
         (10, Some(crate::PointerType::Touch), false),
     ] {
-        c.component_event(id, EventKind::ContextMenu, &menu(pointer_type));
-        let events = js_events(&mut c);
-        let pressed = events.iter().find_map(|(at, kind, payload)| {
-            (*at == 4 && *kind == EventKind::PressOutside).then_some(payload)
-        });
+        let events = c.context_menu_presses_outside(id, &menu(pointer_type));
+        let pressed = events
+            .iter()
+            .find_map(|(at, payload)| (*at == 4).then_some(payload));
         assert_eq!(pressed.is_some(), outside, "{id} {pointer_type:?}");
         if let Some(payload) = pressed {
             assert_eq!(

@@ -1572,7 +1572,9 @@ pub struct ContextMenuProps {
 /// A menu about its trigger: the secondary button (a right click, a
 /// two-finger click) opens it where the pointer is on the desktops; a
 /// finger held on the trigger opens it as a sheet at the bottom of the
-/// screen on phones and tablets. Shift+F10 or the Menu key on the focused
+/// screen on phones and tablets. While it is open, a secondary click on
+/// the trigger opens it again where the pointer is (it reports closing,
+/// then opening); one elsewhere closes it. Shift+F10 or the Menu key on the focused
 /// trigger (the web, Linux) and a screen reader's "show menu" action (VoiceOver's
 /// VO-Shift-M on macOS, UI Automation's `ShowContextMenu` on Windows) open
 /// it below the trigger with the keyboard focus on its first enabled item,
