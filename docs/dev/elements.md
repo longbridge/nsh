@@ -179,6 +179,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
   / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included.
+  A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
+  (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
+  headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows
+  ("Kept rows" in `scrolling-and-lists.md`).
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
   recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows and GPUI
   move the focus between fields and native components only so far; iOS and Android move it between inputs.

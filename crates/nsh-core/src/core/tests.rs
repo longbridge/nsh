@@ -13799,6 +13799,82 @@ mod components {
         assert!(!bound(&c, 1) && !bound(&c, 2));
     }
 
+    /// A long list of its own rows, each a stop of Tab.
+    #[component]
+    fn FocusableRows() -> impl IntoElement {
+        virtual_list(500, move |at| {
+            view()
+                .h(px(40.0))
+                .focusable(true)
+                .child(text(move || format!("item {}", at.index())))
+        })
+        .estimated_item_size(px(40.0))
+        .flex_1()
+    }
+
+    /// The rows on either side of the one holding the keyboard focus stay
+    /// rendered with it, wherever the list scrolls: Tab and Shift+Tab find
+    /// the next stop in the list, not the view after it.
+    #[test]
+    fn virtual_lists_keep_the_rows_beside_the_focused_one() {
+        use crate::tailwind::state::FOCUSED;
+        // The focused row, the rows kept with it, rows that go. At the
+        // list's start there is no row before.
+        for (focused, kept, gone) in [(5, &[4, 5, 6][..], &[3, 7][..]), (0, &[0, 1], &[2])] {
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<FocusableRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let list = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Create { id, kind } if *kind == ViewKind::Scroll => Some(*id),
+                    _ => None,
+                })
+                .expect("a list");
+            let content = format!("item {focused}");
+            let row = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id, text, .. } if text.text == content => Some(*id),
+                    _ => None,
+                })
+                .map(|id| {
+                    let key = c.key(id).unwrap();
+                    c.nodes[c.nodes[key as usize].parent as usize].id
+                })
+                .unwrap_or_else(|| panic!("no text {content:?}"));
+            let bound = |c: &Core<FakeEngine>, row: u32| {
+                let key = c.key(list).unwrap();
+                let list = c.nodes[key as usize].list.as_ref().unwrap();
+                list.slots.iter().any(|s| s.index == Some(row))
+            };
+            let scroll = |c: &mut Core<FakeEngine>, y: f32, applied| {
+                c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+                for _ in 0..3 {
+                    let _ = c.commit();
+                }
+            };
+            c.set_states(row, FOCUSED);
+            let _ = c.commit();
+            scroll(&mut c, 12000.0, 1);
+            for &i in kept {
+                assert!(bound(&c, i), "row {i} stays with row {focused}");
+            }
+            for &i in gone {
+                assert!(!bound(&c, i), "row {i} goes");
+            }
+            // The focus leaves: they go too.
+            c.set_states(row, 0);
+            let _ = c.commit();
+            scroll(&mut c, 16000.0, 2);
+            for &i in kept {
+                assert!(!bound(&c, i), "row {i} goes");
+            }
+        }
+    }
+
     /// What a branch of `ScopedRows` provides to what it makes.
     #[derive(Clone)]
     struct BranchContext(&'static str);

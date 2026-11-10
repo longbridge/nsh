@@ -3090,6 +3090,84 @@ mod tests {
         assert_eq!(app.screen().tab_stops().len(), rows.len());
     }
 
+    /// A short list of 30 rows of its own, four on screen, each a button
+    /// that says when it has the focus, and a button after it.
+    #[component]
+    fn TabbedList() -> impl IntoElement {
+        let focused = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                virtual_list(30, move |at| {
+                    view()
+                        .h(px(40.0))
+                        .on_press(|| {})
+                        .on_focus(move || focused.set(format!("row {}", at.index())))
+                        .child(text(move || format!("Row {}", at.index())))
+                })
+                .test_id("list")
+                .estimated_item_size(px(40.0))
+                .h(px(160.0)),
+            )
+            .child(
+                view()
+                    .test_id("after")
+                    .h(px(40.0))
+                    .on_press(|| {})
+                    .on_focus(move || focused.set("after".into()))
+                    .child(text("After")),
+            )
+            .child(text(move || format!("Focused {}.", focused.get())))
+    }
+
+    /// Tab walks a list's rows one by one, those not rendered yet too, the
+    /// list scrolling each into view, and leaves it after its last row;
+    /// Shift+Tab walks them back.
+    #[test]
+    fn tab_walks_every_row_of_a_list() {
+        let mut config = EngineConfig::new(Root::of::<TabbedList>());
+        config.environment.os = nsh_core::platform::Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let list = id(&app, "id:list");
+        let shows = |app: &Headless| {
+            let view = app.screen().key_focus().expect("a focus");
+            let (Some(row), Some(list)) = (
+                app.screen().bounds_in_root(view),
+                app.screen().bounds_in_root(list),
+            ) else {
+                return false;
+            };
+            row.origin.y >= list.origin.y
+                && row.origin.y + row.size.height <= list.origin.y + list.size.height
+        };
+        let rows = (0..30).map(|i| format!("row {i}"));
+        for row in rows.clone() {
+            app.press_key("tab").unwrap();
+            app.wait_for(&format!("Focused {row}.")).unwrap();
+            assert!(shows(&app), "{row} is scrolled into view");
+        }
+        app.press_key("tab").unwrap();
+        app.wait_for("Focused after.").unwrap();
+        for row in rows.rev() {
+            app.press_key("shift+tab").unwrap();
+            app.wait_for(&format!("Focused {row}.")).unwrap();
+            assert!(shows(&app), "{row} is scrolled into view");
+        }
+        // Scrolled far from the focus, Tab goes on from it, to the row
+        // after it, not to the rows on screen.
+        app.scroll("id:list", px(900.0)).unwrap();
+        assert!(!shows(&app));
+        app.press_key("tab").unwrap();
+        app.wait_for("Focused row 1.").unwrap();
+        assert!(shows(&app), "row 1 is scrolled into view");
+    }
+
     #[cfg(feature = "js")]
     #[test]
     fn a_step_fails_when_the_app_throws() {
