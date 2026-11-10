@@ -8373,8 +8373,10 @@ fn a_part_projected_focused_shows_focus_visible_while_the_focus_does() {
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
     // The focus leaving the tree (its row still projected as it renders
-    // next) takes `focus-visible:` off at once.
+    // next) takes `focus-visible:` off as the focus goes: a lone blur
+    // lets go at the frame.
     c.set_states(2, 0);
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.75);
     // Never its own state: its events and accessibility do not see it.
