@@ -759,6 +759,12 @@ mod tests {
             "{}",
             refused.message
         );
+        // A relative path is a bundled file, which stays in the app's files.
+        assert_eq!(
+            load("sfx/click.wav").ok(),
+            Some("asset:/sfx/click.wav".to_owned())
+        );
+        assert!(load("../outside.wav").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

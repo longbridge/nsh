@@ -128,7 +128,9 @@ dot segments and `%2e` ones resolved (`Access::allows_http`), and what loads is 
 canvas images, videos, sounds, `Image.getSize` / `prefetch`) return the WHATWG serialization, which the core writes
 back over the source. A media source with no scheme that starts with `//` is resolved against the bundle's base URL
 (`Bundle::base_url`, the page's on the web; `Core::set_base_url`, `System::base_url`) and refused without one; other
-sources without a scheme, and `asset:`, `data:`, `blob:` (any case), stay as written. A local file (`file:`, or with
+sources without a scheme, and `asset:` (whose path stays in the app's files: `access::is_inside_assets`, which
+`fetch`'s `asset:` reads share; a media source is checked whole, query included), `data:`, `blob:` (any case),
+stay as written. A local file (`file:`, or with
 no base an absolute or drive path) is read under `capabilities.fs.read` (`MediaFiles`: the declared and granted roots,
 expanded and canonicalized once: the engine's for the core, `Core::set_media_files`, and the image loader's
 `Context::media_files`, a VM's own for `Image.getSize`), only where `fs/promises` has a file system; the path is

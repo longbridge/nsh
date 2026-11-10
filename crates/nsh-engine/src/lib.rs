@@ -2626,27 +2626,6 @@ fn is_asset(url: &str) -> bool {
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("asset:"))
 }
 
-/// Whether the bundled file `url` names stays inside the app's files
-/// whichever way a host maps `asset:/<path>` to its asset directory: the
-/// path is relative, and no segment is empty, `.` or `..` (encoded or not)
-/// or holds a backslash, a NUL or a colon (a Windows drive). Hosts join the
-/// path to their directory as it comes, so they never see one that
-/// escapes it.
-fn is_inside_assets(url: &str) -> bool {
-    let Some(path) = url.get(6..).and_then(|rest| rest.strip_prefix('/')) else {
-        return false;
-    };
-    path.split('/').all(|segment| {
-        let segment = segment.to_ascii_lowercase();
-        let named = !matches!(segment.replace("%2e", ".").as_str(), "" | "." | "..");
-        let plain = !segment.contains(['\\', '\0', ':'])
-            && !["%2f", "%5c", "%00", "%3a"]
-                .iter()
-                .any(|encoded| segment.contains(encoded));
-        named && plain
-    })
-}
-
 /// `url` (an `asset:/` URL) as its response answers at it, and as the
 /// rest of the engine reads it: the scheme in lower case, as URL parsers
 /// write it (schemes are case-insensitive, and JS's `fetch` parses the URL
@@ -2809,7 +2788,7 @@ impl Net {
         );
         // Failed here, before any host reads the file or serves it
         // ([`Assets::url`]): a request no host may answer reaches none.
-        let refused = if !is_inside_assets(&file) {
+        let refused = if !nsh_core::access::is_inside_assets(&file) {
             Some(format!(
                 "{}: bundled files are named by a path inside the app's files",
                 request.url

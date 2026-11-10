@@ -169,7 +169,9 @@ A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss:/
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
 `sockets` lists each host and port exactly, and only `sockets` grants them.
 
-`asset:` URIs (the app's own files) are always allowed; images, videos and sounds may also use `data:` and `blob:`
+`asset:` URIs (the app's own files) are always allowed while their path stays inside the app's files, as `fetch`'s
+do: no `..` or `.` segment, encoded or not, and no backslash or drive; images, videos and sounds may also use `data:`
+and `blob:`
 URIs and relative paths. A source that starts with `//` names a host: on the web it takes the page's scheme and is
 checked as that URL; in a native app it has no page to take a scheme from, so it loads nothing (write `https://…`).
 Any other source with a scheme is checked as a URL, and loads what was checked. A source that names a host only

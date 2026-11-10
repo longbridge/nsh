@@ -8188,6 +8188,8 @@ fn placeholders_load_the_url_the_check_granted() {
     };
     let mut ops = placeholder(2, "//docs.example.com/a/../p.png");
     ops.extend(placeholder(4, "//bank.example/p.png"));
+    ops.extend(placeholder(6, "asset:/../outside.png"));
+    ops.extend(placeholder(8, "asset:/inside.png"));
     apply(&mut c, ops);
     let batch = c.commit().unwrap();
     let placeholders: Vec<_> = batch
@@ -8205,6 +8207,8 @@ fn placeholders_load_the_url_the_check_granted() {
         [
             (2, Some("https://docs.example.com/p.png".to_owned())),
             (4, None),
+            (6, None),
+            (8, Some("asset:/inside.png".to_owned())),
         ]
     );
 }

@@ -663,6 +663,9 @@ pub(crate) fn grant_advice(url: &str, capability: &str) -> String {
 /// (`//host/…`) names the host it resolves to against `base`, the page's
 /// address, and without one has no scheme to load with.
 pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
+    if starts_with_ignoring_case(uri, "asset:") && !is_inside_assets(uri) {
+        return ASSET_ADVICE.to_owned();
+    }
     if media_capability(uri, base) == "fs" {
         return LOCAL_FILE_ADVICE.to_owned();
     }
@@ -683,10 +686,17 @@ pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
 /// [`Access::media_url`] reads it: `"fs"` for a local file (a `file:` URL;
 /// with no base, an absolute or drive path), else `"network"`.
 pub(crate) fn media_capability(uri: &str, base: Option<&str>) -> &'static str {
+    if starts_with_ignoring_case(uri, "asset:") {
+        return "fs";
+    }
     let local =
         (base.is_none() || starts_with_ignoring_case(uri, "file:")) && local_file(uri).is_some();
     if local { "fs" } else { "network" }
 }
+
+/// [`media_grant_advice`] for a bundled file whose path leaves the app's
+/// files, which no grant covers.
+const ASSET_ADVICE: &str = "bundled files are named by a path inside the app's files";
 
 /// [`media_grant_advice`] for a local file.
 const LOCAL_FILE_ADVICE: &str = "a local file is read under capabilities.fs.read in nsh.json: add a root that holds it (desktop apps)";
@@ -705,6 +715,54 @@ fn is_own_media(uri: &str) -> bool {
     ["asset:", "data:", "blob:"]
         .iter()
         .any(|prefix| starts_with_ignoring_case(uri, prefix))
+}
+
+/// Whether the bundled file `url` (`asset:/<path>`, as the host joins it to
+/// its asset directory) stays inside the app's files whichever way a host
+/// maps it: the path is relative, and no segment is empty, `.` or `..`
+/// (encoded or not) or holds a backslash, a NUL or a colon (a Windows
+/// drive), raw or percent-encoded, or an encoded `/`. Hosts join the path
+/// to their directory as it comes, so they never see one that escapes it.
+/// `fetch` checks the path a request reads (`nsh-engine`); a media source
+/// is checked whole, query included, since the image loader joins it as
+/// written.
+pub fn is_inside_assets(url: &str) -> bool {
+    let Some(path) = url.get(6..).and_then(|rest| rest.strip_prefix('/')) else {
+        return false;
+    };
+    path.split('/').all(|segment| {
+        let bytes = segment.as_bytes();
+        let encoded = |code: &[u8; 3]| bytes.windows(3).any(|w| w.eq_ignore_ascii_case(code));
+        !only_dots(bytes)
+            && !bytes.iter().any(|b| matches!(b, b'\\' | b'\0' | b':'))
+            && ![b"%2f", b"%5c", b"%00", b"%3a"]
+                .iter()
+                .any(|code| encoded(code))
+    })
+}
+
+/// Whether `segment` is empty, `.` or `..`, a dot written as itself or as
+/// `%2e` (any case).
+fn only_dots(segment: &[u8]) -> bool {
+    let (mut dots, mut at) = (0, 0);
+    while at < segment.len() {
+        if segment[at] == b'.' {
+            at += 1;
+        } else if segment[at..].len() >= 3
+            && segment[at] == b'%'
+            && segment[at + 1] == b'2'
+            && segment[at + 2].eq_ignore_ascii_case(&b'e')
+        {
+            at += 3;
+        } else {
+            return false;
+        }
+        dots += 1;
+        if dots > 2 {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether `text` starts with `prefix`, ignoring ASCII case.
@@ -1960,7 +2018,10 @@ impl Access {
         files: Option<&MediaFiles>,
     ) -> Option<Cow<'a, str>> {
         if is_own_media(uri) {
-            return Some(Cow::Borrowed(uri));
+            // A bundled file's path stays in the app's files, as `fetch`
+            // reads one; an app without capabilities reads what it names.
+            let inside = !starts_with_ignoring_case(uri, "asset:") || is_inside_assets(uri);
+            return (inside || self.is_unrestricted()).then_some(Cow::Borrowed(uri));
         }
         if self.is_unrestricted() {
             return media_as_written(uri, |url| self.allows_http("GET", url))
@@ -3385,6 +3446,60 @@ mod tests {
         symlink(root.join("secret.png"), root.join("allowed/image.png")).unwrap();
         assert_eq!(access.media_url(&src, None, Some(&files)), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A bundled file (`asset:`) stays inside the app's files, as `fetch`
+    /// reads one: a path that leaves them, however it is spelled, loads
+    /// nothing for an app with capabilities. The loaders join the path to
+    /// their directory as written, query included.
+    #[test]
+    fn bundled_files_stay_inside_the_app_files() {
+        let a = Access {
+            declared: caps(r#"{ "network": { "hosts": ["*"] } }"#),
+            granted: None,
+        };
+        for escape in [
+            "asset:/../outside.png",
+            "asset:/sub/../../outside.png",
+            "asset:/%2E%2e/outside.png",
+            "asset:/..%2Foutside.png",
+            "asset:/a%5c..%5c..%5coutside.png",
+            "asset:/a.png?/../../outside.png",
+            "asset:/a.png#/../../outside.png",
+            "asset://Users/a/outside.png",
+            "asset:/C:/outside.png",
+            "asset:/./a.png",
+            "asset:../outside.png",
+            "ASSET:/../outside.png",
+        ] {
+            assert_eq!(a.media_url(escape, None, None), None, "{escape}");
+            assert_eq!(
+                a.media_url(escape, Some("https://app.example/"), None),
+                None,
+                "{escape} on the web"
+            );
+            assert_eq!(media_grant_advice(escape, None), ASSET_ADVICE, "{escape}");
+            assert_eq!(media_capability(escape, None), "fs", "{escape}");
+        }
+        for inside in [
+            "asset:/a.png",
+            "asset:/@app/icons/a.png",
+            "asset:/a.png?v=2",
+            "asset:/a%20b.png",
+            "asset:/sub/a..b.png",
+            "ASSET:/a.png",
+        ] {
+            assert_eq!(
+                a.media_url(inside, None, None),
+                Some(Cow::Borrowed(inside)),
+                "{inside}"
+            );
+        }
+        // An app without capabilities reads what it names, as before.
+        assert_eq!(
+            Access::default().media_url("asset:/../outside.png", None, None),
+            Some(Cow::Borrowed("asset:/../outside.png"))
+        );
     }
 
     /// A symlink in a granted root whose target does not exist yet is
