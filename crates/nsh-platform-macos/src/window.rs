@@ -2138,6 +2138,18 @@ define_class!(
             Bool::new(close_press(&surface, id, window))
         }
 
+        // Before a zoom: the frame it returns to (`crate::window_state`).
+        #[unsafe(method(windowShouldZoom:toFrame:))]
+        fn window_should_zoom(&self, window: &NSWindow, _frame: NSRect) -> Bool {
+            let (key, id) = *self.ivars();
+            if let Some(surface) = Surface::with_key(key) {
+                with_watch(&surface, id, |watch| {
+                    crate::window_state::will_zoom(watch, window);
+                });
+            }
+            Bool::YES
+        }
+
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &objc2_foundation::NSNotification) {
             let (key, id) = *self.ivars();

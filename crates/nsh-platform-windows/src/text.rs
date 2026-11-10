@@ -19,9 +19,10 @@
 //! limit cut after exactly `numberOfLines` lines, and the lines are stacked
 //! again from the spans they hold.
 //!
-//! Colors and decorations are not part of a layout: the core reuses a
-//! layout for a text that only differs in them (`AttributedText::layout_eq`),
-//! so they are read from the drawn text's spans, per glyph cluster.
+//! Colors and decorations are not part of a layout: they are read from the
+//! drawn text's spans, per glyph cluster, so the core keeps a layout for a
+//! text that only differs in its colors
+//! (`TextEngine::draws_colors_from_text`).
 
 use std::{
     cell::{Cell, RefCell},
@@ -1632,6 +1633,11 @@ impl Default for DWriteTextEngine {
 
 impl TextEngine for DWriteTextEngine {
     type Prepared = Prepared;
+
+    fn draws_colors_from_text(&self) -> bool {
+        // Colors and decorations are read from the drawn text's spans.
+        true
+    }
 
     fn prepare(&self, t: &AttributedText) -> Prepared {
         self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())

@@ -22,7 +22,8 @@ Return, Space or Down on the focused trigger opens the menu with the keyboard fo
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused; on the desktops Down or Home then
 focuses the first enabled item and Up or End the last.
 On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
-its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item.
+its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item. A submenu
+the pointer opened closes when the arrow keys move the focus to another item of its menu.
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
@@ -249,8 +250,8 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 `"contextMenu"` or `"longPress"`.
 
 A `Submenu` keeps its own state, and reports each opening and closing the user asks for in `onOpenChange({ open,
-reason })`: `"hover"` (its item hovered, or another item of its menu), `"triggerPress"` (its item pressed, or Right,
-Return or Space on it), `"cancel"` (Left, Escape, back or its `back` row), or the menu's reason when the whole menu
+reason })`: `"hover"` (its item hovered, or another item of its menu), `"focus"` (the keyboard focus moved to another item of its
+menu), `"triggerPress"` (its item pressed, or Right, Return or Space on it), `"cancel"` (Left, Escape, back or its `back` row), or the menu's reason when the whole menu
 closes (`"select"`, `"pressOutside"`, ...). Its items are made as it opens, so an app can start loading them there the
 first time and show them as they arrive. When the app closes the menu itself, nothing is reported.
 

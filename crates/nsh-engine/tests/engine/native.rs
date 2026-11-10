@@ -453,6 +453,61 @@ fn web_view_input_available_needs_the_platform_and_the_grant() {
     assert_eq!(web_input_available(true, None), "web input false");
 }
 
+const WEB_VIEW_AVAILABLE_APP: &str = r#"import { mount, signal, Text, View, WebView } from "nsh";
+
+function App() {
+  const available = signal("asking");
+  const error = signal("no error");
+  WebView.available().then((v: boolean) => available.set(`web views ${v}`));
+  return (
+    <View>
+      <Text>{available()}</Text>
+      <Text>{error()}</Text>
+      <WebView html="<p>hi</p>" onError={(e) => error.set(`error ${e.code}`)} />
+    </View>
+  );
+}
+
+mount(App);
+"#;
+
+/// What the app above shows once `WebView.available()` resolved (and,
+/// where web views do not show, its web view's `onError` came), on a
+/// platform that does (`platform`) or does not show web views.
+fn web_view_available(platform: bool) -> Vec<String> {
+    let environment = nsh_core::platform::Environment {
+        web_views: platform,
+        ..Default::default()
+    };
+    let (_engine, rx) = start_in(WEB_VIEW_AVAILABLE_APP, None, environment);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut shown = Vec::new();
+    while std::time::Instant::now() < deadline {
+        let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) else {
+            continue;
+        };
+        shown.extend(texts(&batch));
+        let answered = shown.iter().any(|t| t.starts_with("web views"));
+        if answered && (platform || shown.iter().any(|t| t.starts_with("error"))) {
+            return shown;
+        }
+    }
+    panic!("not answered: {shown:?}");
+}
+
+#[test]
+fn web_views_say_when_the_platform_shows_none() {
+    let shown = web_view_available(true);
+    assert!(shown.contains(&"web views true".to_owned()), "{shown:?}");
+    assert!(!shown.iter().any(|t| t.starts_with("error")), "{shown:?}");
+    let shown = web_view_available(false);
+    assert!(shown.contains(&"web views false".to_owned()), "{shown:?}");
+    assert!(
+        shown.contains(&"error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM".to_owned()),
+        "{shown:?}"
+    );
+}
+
 const WEB_LOAD_APP: &str = r#"import { mount, View, WebView } from "nsh";
 
 function App() {

@@ -454,3 +454,8 @@ tap id:case-web-load
 tap id:load
 expect Loaded, invalid header: TypeError
 covers [nsh] WebView
+# web-available
+tap id:case-web-available
+expect Web views available: true
+expect No error
+covers [nsh] WebView

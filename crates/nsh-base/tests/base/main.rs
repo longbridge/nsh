@@ -35,6 +35,7 @@ mod popups;
 mod radio;
 mod resizable;
 mod rich_editor;
+mod rust_root;
 mod scrollbar;
 mod select;
 mod sheet;

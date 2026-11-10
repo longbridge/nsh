@@ -3131,7 +3131,30 @@ impl<M: TextEngine> Core<M> {
         self.nodes[key as usize].layout = Some(layout);
         self.sync_grid_role(key);
         self.became(key, style);
+        if kind == Kind::WebView && !self.components.environment.web_views {
+            self.web_view_unavailable(id);
+        }
         Ok(())
+    }
+
+    /// A web view on a platform that shows none fails at once (`onError`
+    /// with `code` `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). Always reported:
+    /// the `onError` listener is set after the node is made.
+    fn web_view_unavailable(&mut self, id: NodeId) {
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                (
+                    "message",
+                    PayloadValue::Str("web views are not available on this platform".into()),
+                ),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
+                ),
+            ]),
+        ));
     }
 
     /// Whether node `key` is a control: a view with a control's
@@ -6857,6 +6880,7 @@ impl<M: TextEngine> Core<M> {
         let layout = self.nodes[key as usize]
             .layout
             .expect("text block has layout");
+        let colors_at_draw = self.text_engine.draws_colors_from_text();
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         if *cx.text == text && cx.alignments == alignments {
@@ -6875,11 +6899,33 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
+        // Only colors changed, and the platform draws them from the text:
+        // its typesetting, measurements and final layout all stand; the new
+        // text is mounted with the layout drawn (a fitted text has a layout
+        // of its own text, made again).
+        if !inserted
+            && cx.alignments == alignments
+            && colors_at_draw
+            && cx
+                .laid_out
+                .as_ref()
+                .is_none_or(|l| Arc::ptr_eq(&l.text, &cx.text))
+            && cx.text.same_but_colors(&text)
+        {
+            let text = Arc::new(text);
+            if let Some(laid) = &mut cx.laid_out {
+                laid.text = text.clone();
+            }
+            cx.text = text;
+            cx.metadata_changed = true;
+            return true;
+        }
         cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
-        // Platform typesetting state embeds colors too: always rebuild it.
+        // Platform typesetting state embeds colors too (unless it draws
+        // them from the text, above): rebuild it.
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;

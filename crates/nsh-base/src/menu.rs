@@ -683,6 +683,24 @@ impl MenuContext {
     }
 }
 
+/// Closes the submenu of a level that is open unless it is `keep` (the
+/// submenu whose trigger the pointer or the keyboard focus came to): the
+/// pointer over another item of the level closes it, and so does the
+/// keyboard focus moving to one, as the desktops' menus do, so one item of
+/// the level is highlighted at a time.
+fn close_other_submenu(
+    open_sub: Signal<Option<u32>>,
+    why: Why,
+    keep: Option<u32>,
+    reason: OpenChangeReason,
+) {
+    let open = open_sub.get_untracked();
+    if open.is_some() && open != keep {
+        why.stamp(reason);
+        open_sub.set(None);
+    }
+}
+
 /// The parts and placement both kinds of menus take.
 #[derive(Clone, Copy)]
 struct Surface {
@@ -1376,6 +1394,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let hover = menu.clone();
     let chosen = menu.clone();
     let laid_out = menu.clone();
+    let moved = menu.clone();
     let sheet = menu.filter(|m| m.sheet);
     let (checked, disabled) = (props.checked, props.disabled);
     let node = element_ref();
@@ -1466,7 +1485,14 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)
-        .on_focus(move || focused.set(true))
+        .on_focus(move || {
+            focused.set(true);
+            // The keyboard on another item of its level closes a submenu
+            // of the level the pointer opened.
+            if let Some(m) = &moved {
+                close_other_submenu(m.open_sub, m.why, None, OpenChangeReason::Focus);
+            }
+        })
         .on_blur(move || focused.set(false))
         .when(terminal, |v| v.flex_row())
         .when_some(sheet, |v, m| {
@@ -1474,11 +1500,8 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         })
         // Over another item, a submenu of its level closes.
         .on_mouse_enter(move |_: &MouseEvent| {
-            if let Some(m) = &hover
-                && m.open_sub.get_untracked().is_some()
-            {
-                m.why.stamp(OpenChangeReason::Hover);
-                m.open_sub.set(None);
+            if let Some(m) = &hover {
+                close_other_submenu(m.open_sub, m.why, None, OpenChangeReason::Hover);
             }
         })
         .on_press(move || {
@@ -1629,11 +1652,11 @@ pub enum SubmenuEvent {
     /// It opened or closed as the user asked, with why: its trigger hovered
     /// (`"hover"`) or pressed, or Right, Return or Space on it
     /// (`"triggerPress"`); the pointer over another item of its menu
-    /// (`"hover"`); Left, Escape, back or its `back` row (`"cancel"`); the
-    /// whole menu closing (the menu's reason: `"select"`,
-    /// `"pressOutside"`, ...). Its items are made as it opens, so an app
-    /// can load them here the first time. Not when the app closes the menu
-    /// itself.
+    /// (`"hover"`), or the keyboard focus moved to one (`"focus"`); Left,
+    /// Escape, back or its `back` row (`"cancel"`); the whole menu closing
+    /// (the menu's reason: `"select"`, `"pressOutside"`, ...). Its items
+    /// are made as it opens, so an app can load them here the first time.
+    /// Not when the app closes the menu itself.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
 }
@@ -1764,6 +1787,12 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
     // trigger is in.
     let focused = signal(false);
     menu.items.bind_keys(item_key, focused);
+    // The keyboard on its trigger closes another submenu of its level
+    // that the pointer opened; its own stays as it is.
+    let focus_in = move || {
+        focused.set(true);
+        close_other_submenu(open_sub, why, Some(id), OpenChangeReason::Focus);
+    };
     {
         let (items, up) = (menu.items.clone(), menu.leave.clone());
         crate::keys::bind_while(
@@ -1817,7 +1846,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
                 has_popup: true,
                 ..AccessibilityState::default()
             })
-            .on_focus(move || focused.set(true))
+            .on_focus(focus_in)
             .on_blur(move || focused.set(false))
             .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
             .on_press(move || open_by(OpenChangeReason::TriggerPress))
@@ -1832,7 +1861,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
                     has_popup: true,
                     ..AccessibilityState::default()
                 })
-                .on_focus(move || focused.set(true))
+                .on_focus(focus_in)
                 .on_blur(move || focused.set(false))
                 .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
                 .on_press(move || open_by(OpenChangeReason::TriggerPress))

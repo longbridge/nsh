@@ -128,6 +128,9 @@ pub(crate) enum Action {
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.
     WebInputAvailable(AnswerSlot<bool>),
+    /// Whether a web view shows a page here: the platform shows web views
+    /// and the app holds `webview`; the answer resolves the slot.
+    WebViewAvailable(AnswerSlot<bool>),
     /// A request on local paths for the platform
     /// ([`crate::file_dialog`]); its answer resolves the slot.
     FileRequest(crate::file_dialog::FileRequest, FileAnswer),

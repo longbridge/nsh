@@ -182,7 +182,7 @@ belong to the app, which owns retention and its storage budget.
 
 | Area | Module | AppKit |
 |---|---|---|
-| Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn into the view's content layer (`drawLayer:inContext:`); decorations CoreText lacks drawn by hand (iOS); selectable text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears; selectable views (`selectable_view.rs`, `ViewProps::selectable_view`): the same gestures across the texts of an area's subtree in document order, driving `nsh_core::selection`'s model (frames from the views' origins and container offsets, hit tests on the drawn `CTLine`s), each text highlighting its part as a single text's selection; the texts are listed again after each batch while something is selected; a drag past the edge of a scroll view around the area scrolls it on the display link (0.4 pt per pt past the edge per 60 Hz frame, at most 40), held still too, extending the selection each frame; `fontFamily` lists (`nsh_core::font_families`): the first family CoreText has is the font, the others it has its cascade list (`kCTFontCascadeListAttribute`), iOS's engine too |
+| Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn into the view's content layer (`drawLayer:inContext:`); colors and decoration lines drawn per run from the drawn text's spans, so a layout is reused for texts that only differ in their colors; selectable text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears; selectable views (`selectable_view.rs`, `ViewProps::selectable_view`): the same gestures across the texts of an area's subtree in document order, driving `nsh_core::selection`'s model (frames from the views' origins and container offsets, hit tests on the drawn `CTLine`s), each text highlighting its part as a single text's selection; the texts are listed again after each batch while something is selected; a drag past the edge of a scroll view around the area scrolls it on the display link (0.4 pt per pt past the edge per 60 Hz frame, at most 40), held still too, extending the selection each frame; `fontFamily` lists (`nsh_core::font_families`): the first family CoreText has is the font, the others it has its cascade list (`kCTFontCascadeListAttribute`), iOS's engine too |
 | Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`), `mixBlendMode` as the layer's compositing filter; a backdrop as a subview: an `NSVisualEffectView` with `macos={{ backdrop }}`'s material, blending and state or the blur's popover material, or glass with `glassTintColor`, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
 | Images | `image.rs`, `blur.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): ImageIO thumbnails at the view's size bucket, in the process's image budget, downloaded with `NSURLSession` (the core loader's transport hook, so the system's proxies, authentication and ATS apply), leased by the views showing them; blur and color filters baked into variants in the same budget; `asset:/`, http(s), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
@@ -411,6 +411,20 @@ Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while
 hidden, a test's quit, and cleanup after run_app returns. Source implementation
 and CI compilation alone do not prove those runtime behaviors.
+
+## Activation policy
+
+`AppOptions::activation_policy` (`ActivationPolicy::Regular` by default, `Accessory` for a menu bar app) is what
+`run_app` gives `NSApplication.setActivationPolicy` before the app starts; `background` (Prohibited) takes precedence
+(`app.rs` `activation_policy`). nsh.json's `macos.activationPolicy` reaches it on every path that starts a standalone
+app, before the app's code runs: `nsh package` writes `LSUIElement` into the `Info.plist` (a key NSH reserves,
+`nsh-cli` `apple.rs`) and `activationPolicy` into `app.json`, which `nsh-macos-app` reads (packages, and Rust apps
+`nsh run` runs in place); `nsh run` and `nsh test` pass the development host `--activation-policy`
+(`MacosConfig::host_args`). A dev server or a hot reload never changes it, and an embedded `AppView` leaves it to its
+host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in_background`, the agent's
+`activate`): an accessory app's windows become key as a regular app's do. The Dock's features (the badge, the
+attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
+shows its window itself (`focus()` from its tray).
 
 ## Keyboard focus for views
 

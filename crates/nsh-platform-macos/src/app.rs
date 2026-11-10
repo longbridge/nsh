@@ -154,9 +154,17 @@ pub struct AppOptions {
     /// macos` sets it (the development host's `--background`) unless told
     /// `--foreground`: the test agent's input goes to the window directly.
     pub background: bool,
+    /// How [`run_app`]'s app takes part in the system's UI: a Dock icon and
+    /// the menu bar ([`Regular`](ActivationPolicy::Regular), the default)
+    /// or neither ([`Accessory`](ActivationPolicy::Accessory), a menu bar
+    /// app: `nsh.json` `macos.activationPolicy`). Set before the app's code
+    /// runs, so the Dock never shows an accessory app.
+    /// [`background`](Self::background) takes precedence.
+    pub activation_policy: ActivationPolicy,
     /// Hides the standalone window on close while retaining its engine.
-    /// Reopening from the Dock shows the same window. Quit still stops the app.
-    /// Only used by [`run_app`]; defaults to false.
+    /// Reopening from the Dock shows the same window (an accessory app,
+    /// which has no Dock icon, shows it itself: from its tray, say). Quit
+    /// still stops the app. Only used by [`run_app`]; defaults to false.
     pub keep_alive_on_close: bool,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
@@ -227,6 +235,7 @@ impl Default for AppOptions {
             display: None,
             keep_size: false,
             background: false,
+            activation_policy: ActivationPolicy::Regular,
             keep_alive_on_close: false,
             components: Default::default(),
             appearance: Appearance::System,
@@ -239,6 +248,33 @@ impl Default for AppOptions {
             host: nsh_engine::HostChannel::default(),
             transparent: false,
         }
+    }
+}
+
+/// How an app takes part in the system's UI ([`AppOptions::activation_policy`]),
+/// as GPUI's `ActivationPolicy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ActivationPolicy {
+    /// A Dock icon, the menu bar while the app is active, a place in the
+    /// app switcher.
+    #[default]
+    Regular,
+    /// None of them: a menu bar app (`LSUIElement`), whose windows show as a
+    /// regular app's.
+    Accessory,
+}
+
+/// The policy [`run_app`] gives the app: a background app is Prohibited
+/// (AppKit does not activate it; an Accessory app is not guaranteed to
+/// stay inactive when its window comes up), else the app's own.
+fn activation_policy(options: &AppOptions) -> NSApplicationActivationPolicy {
+    if options.background {
+        return NSApplicationActivationPolicy::Prohibited;
+    }
+    match options.activation_policy {
+        ActivationPolicy::Regular => NSApplicationActivationPolicy::Regular,
+        ActivationPolicy::Accessory => NSApplicationActivationPolicy::Accessory,
     }
 }
 
@@ -697,6 +733,22 @@ define_class!(
             }
         }
 
+        // Before a zoom: the frame it returns to (`crate::window_state`).
+        #[unsafe(method(windowShouldZoom:toFrame:))]
+        fn should_zoom(&self, window: &NSWindow, _frame: NSRect) -> bool {
+            let surface = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .filter(|running| &*running.window == window)
+                    .map(|running| running.view.surface().clone())
+            });
+            if let Some(surface) = surface {
+                crate::window_state::will_zoom(&surface.window, window);
+            }
+            true
+        }
+
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _notification: &NSNotification) {
             stop_running();
@@ -835,14 +887,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    // A background app is Prohibited: AppKit does not activate it. An
-    // Accessory app is not guaranteed to stay inactive when its window
-    // comes up.
-    app.setActivationPolicy(if options.background {
-        NSApplicationActivationPolicy::Prohibited
-    } else {
-        NSApplicationActivationPolicy::Regular
-    });
+    app.setActivationPolicy(activation_policy(&options));
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
@@ -1099,9 +1144,35 @@ fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
 
 #[cfg(test)]
 mod tests {
+    use objc2_app_kit::NSApplicationActivationPolicy;
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-    use super::secondary;
+    use super::{ActivationPolicy, AppOptions, activation_policy, secondary};
+
+    /// The app's policy, unless it runs in the background, which never
+    /// activates it.
+    #[test]
+    fn the_activation_policy_is_the_apps_unless_it_runs_in_the_background() {
+        let options = |background, activation_policy| AppOptions {
+            background,
+            activation_policy,
+            ..AppOptions::default()
+        };
+        assert_eq!(
+            activation_policy(&AppOptions::default()),
+            NSApplicationActivationPolicy::Regular
+        );
+        assert_eq!(
+            activation_policy(&options(false, ActivationPolicy::Accessory)),
+            NSApplicationActivationPolicy::Accessory
+        );
+        for policy in [ActivationPolicy::Regular, ActivationPolicy::Accessory] {
+            assert_eq!(
+                activation_policy(&options(true, policy)),
+                NSApplicationActivationPolicy::Prohibited
+            );
+        }
+    }
 
     fn frame(x: f64, y: f64, w: f64, h: f64) -> NSRect {
         NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))

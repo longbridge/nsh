@@ -246,6 +246,20 @@ impl WebHost {
     fn make(&mut self, p: &WebProps) {
         self.made = true;
         if !webkit() {
+            // No WKWebView: the app hears it and shows what it has instead.
+            self.handler.send(
+                EventKind::Error,
+                EventPayload::Map(vec![
+                    (
+                        "message",
+                        PayloadValue::Str("WebKit cannot be loaded".into()),
+                    ),
+                    (
+                        "code",
+                        PayloadValue::Str(nsh_core::element::codes::UNAVAILABLE.into()),
+                    ),
+                ]),
+            );
             return;
         }
         let handler = &self.handler;

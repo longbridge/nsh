@@ -672,8 +672,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::FileDragEnter,
         on::ALL,
-        "(e: { uris: string[] }) => void",
-        "A local file drag entered this desktop destination with its offered file URLs; GTK waits for its file-list preload.",
+        "(e: { uris: string[]; mimeTypes: string[] }) => void",
+        "A local file drag entered this desktop destination with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload.",
     ),
     (
         EventKind::FileDragLeave,
@@ -684,8 +684,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::FileDrop,
         on::ALL,
-        "(e: { uris: string[]; pagePosition?: { x: number; y: number } }) => void",
-        "Local file URLs dropped on this desktop destination; `pagePosition`: where, in the window's coordinates, on backends that know it (Linux).",
+        "(e: { uris: string[]; mimeTypes: string[]; pagePosition?: { x: number; y: number } }) => void",
+        "Local file URLs dropped on this desktop destination, with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux).",
     ),
     (
         EventKind::Layout,
@@ -782,7 +782,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Error,
         on::IMAGE | on::WEBVIEW | on::VIDEO,
         "(e: { message: string; code?: string }) => void",
-        "The source failed to load. `code` is `\"ERR_ACCESS_DENIED\"` when the app's capabilities do not grant it (an image's or video's URL: `network`; a web view's page or `html`: `webview`).",
+        "The source failed to load. `code` is `\"ERR_ACCESS_DENIED\"` when the app's capabilities do not grant it (an image's or video's URL: `network`; a web view's page or `html`: `webview`), and `\"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM\"` for a web view where the platform shows none (`WebView.available()`).",
     ),
     (
         EventKind::LoadEnd,
