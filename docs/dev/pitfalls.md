@@ -286,6 +286,13 @@ Things that were found the hard way. Read the section of the area you change bef
   reads the element's value as soon as the call returns, while the new value comes from the engine thread in a later
   batch: a step whose value arrives after VoiceOver read the old one announces the new one (`NshView::late_step_value`),
   one that arrives before it asked is read by VoiceOver itself.
+- **iOS, a `UIVisualEffectView` takes its shape through `maskView` only**: UIKit's documentation of
+  `UIVisualEffectView` says a mask on the layer of an effect view, or of one of its superviews, breaks the effect.
+  UIKit copies the mask view when it is set, so changing the mask view's geometry afterwards does nothing: a new size
+  or shape needs the mask view set again. A backdrop blur or glass with unequal corner radii gets a new mask view,
+  configured whole before it is set, whenever its size or radii change (`visual.rs` `set_backdrop`); one with a
+  single radius uses the layer's corners. A view with `overflow: hidden` and unequal radii still masks its own layer
+  (`decor.rs`), which is its effect view's superview: the case the documentation names, not changed yet.
 
 ## Android
 
