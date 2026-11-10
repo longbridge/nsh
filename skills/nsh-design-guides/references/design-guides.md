@@ -972,10 +972,60 @@ now, what scope does it affect, and what visible state changes after activation?
 
 ## Motion
 
-Motion explains change; it is not ambient decoration. Use short transitions for appearance, dismissal, expansion, and
-spatial continuity. Avoid animating large layout changes when opacity or transform communicates the same relationship.
-Honor reduced-motion preferences (`motion-reduce:`, `reduceMotion()`), never require animation to understand state,
-and do not add a default animation to every component.
+Motion explains change: where something came from, where it went, what the press did, what is live. It is part of an
+NSH app's quality, not an afterthought, and NSH runs it natively: transitions, motions, springs, layout animations
+and shaders play on the UI thread at the display's frame rate, with no JS per frame. Use them wherever they make a
+change easier to follow, and nowhere else. Motion is never ambient decoration, never needed to understand state, and
+never a default animation added to every component.
+
+### Choose the tool by what changes
+
+| What changes | Tool | Example |
+|---|---|---|
+| A state style: hover, press, selected, open, disabled, a color | Transitions: `transition` / `duration-*` / `ease-*` classes, `transition_*()` in Rust | A row's hover wash, a button pressing to 0.97 |
+| A view appears or leaves | A motion (`createMotion({ enter })`, `motion().entering(..)`), or a popup's `*StartingStyle` / `*EndingStyle` | A dialog rising 10pt, a menu growing out of its trigger |
+| Items arrive together | Motions with a capped, index-based delay, or `Animated.stagger` | A list's rows coming in as a wave |
+| One element moves between places | An animated value with `timing` | A tab or sidebar selection sliding to the chosen item |
+| The user throws, drags or releases | `spring` / `decay` with the gesture's velocity | A sheet snapping open, a card returning to rest |
+| A small playful acknowledgement | `spring` with low damping, or keyframes that overshoot | A like's heart popping |
+| Frames change because the layout changed | `LayoutAnimation` before that one update | A sidebar collapsing at a breakpoint, an item removed |
+| Something is live or continuous | A `Shader` with uniforms (animated values, `nsh.time`) | Playing bars, an audio-reactive glow, a loading shimmer |
+| The value follows a scroll offset or pointer | Animated values bound to it (`interpolate`, arithmetic) | A sticky header folding, a selection following a scrolled list |
+
+Pick the lightest tool that says the change: a transition before a motion, a motion before an animated value, an
+animated value before a shader. See [Animation](./animation.md) for the APIs and
+[Shader](../elements/shader.md) for shaders.
+
+### Define motion tokens once
+
+Like color and spacing, motion comes from the app's tokens, not from numbers written in components. Define one small
+set and use it everywhere (as Tailwind classes and as the options of motions and animations):
+
+| Token | Typical value | For |
+|---|---|---|
+| `instant` | 120ms | A hover wash, a color change |
+| `fast` | 180ms | A press, a control's state |
+| `base` | 240ms | Moving into place: a selection sliding, an icon swapping, a menu leaving |
+| `slow` | 360ms | Reveals: a menu or dialog opening, a pop |
+| `slower` | 500ms | Unhurried entrances: a list's wave |
+| Easings | ease-out entering, ease-in-out between two places, ease-in leaving; a soft settle `cubic-bezier(0.22, 1, 0.36, 1)` for presses | |
+| Distances | 4 / 8 / 16pt | A label rising / a popup sliding / items entering |
+| Scales | press 0.95–0.97, enter 0.9–0.97 | |
+
+Keep durations short (most under 300ms; desktop pointer feedback under 200ms). Leaving is faster than entering.
+Springs are for things the user throws or that should feel physical; time-based curves are for everything else.
+
+### Layered feedback on controls
+
+Every interactive control answers the pointer in layers, each small:
+
+- **Hover** brings a translucent wash in (120ms ease-out); it does not grow the control or move its neighbors.
+- **Press** scales the whole control to about 0.97 (an icon button to 0.95) on a soft settle, and deepens the wash.
+  Press feedback is the app's (`active:` / `activeStyle`); NSH draws none of its own.
+- **A changed glyph swaps**, it does not jump: play becomes pause by the old icon shrinking and fading while the new one
+  grows in (240ms). A glyph that only changes color fades.
+- **A changed label** fades in rising a few points, rather than replacing its text in place.
+- Cards do not lift or resize on hover: a wash, a cover growing about 1%, a revealed action rising is enough.
 
 ```rust tabs
 view()
@@ -989,16 +1039,100 @@ view()
 <View onPress={open} class="transition-transform duration-150 active:scale-[0.97] motion-reduce:active:scale-100" />
 ```
 
-Motion policy belongs to the application layer. `nsh/base` owns the lifecycle mechanism or geometry needed for a
-transition, but it does not decide that every product fades or slides. Give independently animated values stable
-identity, and make interruption reverse smoothly from the currently sampled value rather than restarting from an old
-endpoint.
+### Surfaces, lists and navigation
 
-Motion follows the continuity of the interaction. While a pointer or scroll position moves among related targets, keep
-the preview surface stable and update its content or position in place. Dismiss it only after the interaction ends;
-repeated fade-out and re-entry on each update reads as flicker.
+- **Popups grow from where they belong.** A menu or popover grows out of the corner nearest its trigger
+  (`transformOrigin`), slid a few points toward it, from about 0.97 scale and transparent; it leaves the same way,
+  faster and without overshoot. Use the popup's `popupStartingStyle` / `popupEndingStyle` so it animates both ways.
+- **Dialogs** rise about 10pt from 0.97 while the scrim fades; **toasts** slide in from the edge they live on.
+- **One selection, sliding.** For tabs, segmented controls and a sidebar's current item, draw one selection background
+  and slide it to the chosen item (an animated value with `timing`, ease-in-out), rather than one background per item
+  switching on and off. When the list scrolls, bind it to the scroll offset so it follows natively.
+- **Lists enter as a wave**, once per page entry: rows fade in from a few points away, about 50ms apart, the delay
+  capped at the first 10–12 rows so a long list never waits. A recycled cell, a re-render or a data tick plays
+  nothing; rows scrolled into view later come in on their own, quickly.
+- **Loading gives way, it does not pop.** A skeleton pulses slowly and fades out while the content fades in over it.
+- **Navigation follows history**: going back animates back, going forward animates forward; switching between sibling
+  sections cross-fades rather than sliding.
+- **Layout changes glide only when they are the user's doing** (a sidebar collapsing, an item added or removed, a
+  breakpoint): call `LayoutAnimation` before that update, not on every resize.
+
+### Springs and gestures
+
+What the user moves follows the pointer or finger 1:1 in the same frame: a dragged thumb, a scroll bar, a resizer, a
+swipe are set, never eased toward the pointer. When the user lets go, hand the gesture's velocity to a spring (or a
+decay) so the element continues the throw and settles; interrupting it picks up from the current value.
+
+```rust tabs
+let spring = |velocity| Spring { velocity: Some(velocity), ..Spring::default() };
+x.spring(0.0, spring(e.velocity_x));
+```
+
+```tsx tabs
+x.spring(0, { velocity: e.velocity.x });
+```
+
+Keep springs critically damped or nearly so for structural motion (sheets, drawers, snapping); save visible overshoot
+(stiffness about 180, damping under 12) for small, joyful acknowledgements such as a like.
+
+### Shaders for what is live
+
+Use a `Shader` when a surface shows something continuous or generated that styles cannot draw: a playing indicator, an
+audio- or data-reactive glow, a loading shimmer, a background that responds to the content's colors. A shader draws on
+the GPU under its children, so the controls on top stay as they are.
+
+- Feed changing data as animated values in its uniforms, so new values do not resend the view; read `nsh.time` only
+  for motion of its own.
+- Set `paused` whenever nothing is happening (paused media, offscreen, reduced motion): a shader that reads `nsh.time`
+  redraws every display frame while it runs.
+- Keep its colors from theme tokens and tame their brightness, so text and controls over it keep their contrast.
+- Give it a still fallback that reads the same at rest, and hide it from accessibility (`accessibilityElementsHidden`).
+
+### What NSH takes from web motion systems
+
+The web's best component and motion libraries agree on a few patterns; NSH apps adopt their intent, built on native
+motions instead of CSS:
+
+- **shadcn/ui**: every overlay animates by its open state, in and out, a short fade with a slight zoom (from 95%) and
+  a slide of a few points from the side it opens on, about 150–200ms. In NSH: a popup's `popupStartingStyle` /
+  `popupEndingStyle`, a dialog's motion.
+- **ReUI**: motion is part of a component's parts, not a wrapper around it: entrances, counters and indicators are
+  composed into the component and switched off together with reduced motion.
+- **AffectUI**: feedback is layered and tactile: a wash on hover, a whole-button press to 0.97 on a long soft settle
+  (`cubic-bezier(0.22, 1, 0.36, 1)`), an icon reacting once.
+- **transitions.dev**: motion is tokenized by kind (duration, easing, distance, scale, blur) and reused as named
+  patterns: a dropdown morphing out of its trigger, tabs with one sliding indicator, an icon swap (shrink to a
+  quarter, fade and blur out while the next grows in), a like button that squashes and springs past its size.
+
+Borrow the intent and the numbers, then check them on each target platform: a desktop pointer wants shorter feedback
+than a phone's finger, and iOS and Android system transitions stay the platform's.
+
+### Performance and correctness
+
+- **Create a motion once, in a component body**, and bind its style. A motion created inside a binding that re-runs
+  (a prop that ticks with playback, a style that reads a signal) plays again every time.
+- **Animate opacity and transform**, not width, height or position, when they say the same thing; animating layout
+  costs a layout per frame.
+- **Make only what moves.** Thousands of list cells each with a full motion cost native nodes; animate only the
+  channels you need, and create a motion lazily on a control that may never move.
+- **Interruptions reverse from where the value is**, never restart from an old endpoint; give independently animated
+  values stable identity.
+- **A continuous preview stays put.** While a pointer moves among related targets, update the preview's content or
+  position in place and dismiss it only when the interaction ends; repeated fade-out and re-entry reads as flicker.
+- Motion policy belongs to the app: `nsh/base` owns the lifecycle and geometry a transition needs, never a default
+  fade or slide.
+
+### Reduced motion
+
+Honor `motion-reduce:` and `reduceMotion()` everywhere: transitions become instant, waves and swaps do not play,
+popups appear at once, layout changes jump, and shaders rest (`paused`). Every state stays understandable with all
+motion off.
 
 ## Sound
+
+Sound is not a default. Most apps are best silent; but in an app it suits (media, messaging, timers, games, or
+controls meant to feel tactile), a touch of sound at one or two key moments can be the finishing detail: a message
+sent, a switch flipped, a task done. Decide first whether the app needs it, then add it sparingly by these rules.
 
 Sound confirms what the eye already sees; it never carries meaning alone. Keep a small set of short, quiet sounds of
 one family, each for one job, so the material says the kind of event before the user knows which one: a choice, a
@@ -1213,6 +1347,12 @@ composition, and keyboard and touch paths before generating code. It must not in
 or Shadcn examples or invent an NSH prop or method because the name seems plausible; `nsh check` and the build's class
 check report what does not exist.
 
+When it builds or changes an interactive surface, it plans the motion with the layout, not after it: for each state
+change on the screen (press, hover, selection, a glyph or label changing, a popup, arriving content, a drag released,
+something live) it picks the tool from "Motion" ("Choose the tool by what changes"), uses the app's motion tokens
+(defining them if the app has none), and honors reduced motion. A screen whose every change is an instant swap is
+unfinished; so is one that moves without a reason. Sound is added only where the app calls for it ("Sound").
+
 AI output is incomplete until a human can explain why the hierarchy, density, component choice, and exceptional
 literal values belong in this product. A visually plausible screenshot is not proof: keyboard and touch behavior,
 focus, dynamic content, themes, resizing, text size, and failure states are part of the design.
@@ -1252,5 +1392,8 @@ A review does not inventory components; it judges whether the interface made the
 7. **Does it remain usable in every state and constraint?** Verify keyboard, touch and focus behavior,
    empty/loading/failure/permission states, longer translations, larger text, right to left, both appearances,
    minimum window size, and reduced motion.
-8. **Has it been tested on real platforms?** Complete the task with real components, copy, and representative content
+8. **Does motion explain the change?** Do presses, swaps, popups, selections and arriving content move with the
+   app's motion tokens, natively, interruptibly, and not at all with reduced motion, while nothing moves without a
+   reason?
+9. **Has it been tested on real platforms?** Complete the task with real components, copy, and representative content
    on each platform it ships to (`nsh run --target …`, `nsh test --target …`)—not only an ideal screenshot.

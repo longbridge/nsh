@@ -1,6 +1,6 @@
 ---
 name: nsh-design-guides
-description: 'The normative Design Guides for Native Shell (NSH) apps. Read before designing or changing any screen, layout, spacing, visual hierarchy, color, density, component choice, interaction state, overlay, motion, data-heavy view or interface copy in an NSH app, in TSX or Rust, and before reviewing UI work for design quality. Also use when asked what the design rules are, or whether a UI decision follows them.'
+description: 'The normative Design Guides for Native Shell (NSH) apps. Read before designing or changing any screen, layout, spacing, visual hierarchy, color, density, component choice, interaction state, overlay, motion (transitions, springs, gestures, layout animation, shaders), data-heavy view or interface copy in an NSH app, in TSX or Rust, and before reviewing UI work for design quality. Also use when asked what the design rules are, or whether a UI decision follows them.'
 ---
 
 # NSH Design Guides
@@ -51,8 +51,8 @@ order (`grep -n '^## ' references/design-guides.md`):
 | Components and composition            | Picking a component, composing parts, when to build a new one          |
 | Interaction states                    | Hover, focus, pressed, selected, disabled, loading, validation, danger |
 | Feedback and overlays                 | Dialog, sheet, popover, menu, notification, tooltip, dismissal, focus  |
-| Motion                                | Any animation or transition                                            |
-| Sound                                 | Any sound effect: which sound for which job, when to stay silent       |
+| Motion                                | Any state change, animation, transition, spring, gesture release or shader; which tool, tokens, reduced motion |
+| Sound                                 | Whether the app needs sound at all (not a default), which sound for which job, when to stay silent |
 | Designing data-heavy interfaces       | Tables, lists, trees, dashboards, dense inspectors                     |
 | Interface language                    | Any user-facing text: labels, buttons, titles, errors, empty states    |
 | Internationalization and platform fit | Multi-locale copy, Chinese terminology, platform conventions           |
