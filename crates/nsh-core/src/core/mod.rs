@@ -8397,15 +8397,26 @@ impl<M: TextEngine> Core<M> {
                     )?;
                     Some(i + at)
                 });
-            if let Some(j) = queued {
+            // A scroll queued after it (a correction, or a jump) must
+            // still come before the new size.
+            let scrolled_since = queued.is_some_and(|j| {
+                self.mount[j + 1..].iter().any(|m| match m {
+                    MountItem::ScrollBy { id: s, .. } => *s == id,
+                    MountItem::Command {
+                        id: s,
+                        command: Command::ScrollTo { .. },
+                    } => *s == id,
+                    _ => false,
+                })
+            });
+            // Grown, the size it replaces lets those scrolls go further;
+            // shrunk, it would clamp them first, so it stays.
+            let shrunk = old.is_some_and(|o| size.width < o.width || size.height < o.height);
+            if let Some(j) = queued
+                && !(scrolled_since && shrunk)
+            {
                 self.mount[j] = MountItem::ScrollContent { id, size };
             }
-            // A scroll queued after it must still come before the new size.
-            let scrolled_since = queued.is_some_and(|j| {
-                self.mount[j + 1..]
-                    .iter()
-                    .any(|m| matches!(m, MountItem::ScrollBy { id: s, .. } if *s == id))
-            });
             if queued.is_none() || scrolled_since {
                 scroll.content_item = Some((batch, self.mount.len()));
                 self.mount.push(MountItem::ScrollContent { id, size });

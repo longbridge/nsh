@@ -112,6 +112,7 @@ touches and UI tests meet each row once.
 | `empty` | `.empty(el)` | `ListSlot` | | Shown instead of the items while `each` is empty. |
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | Between items (one column). |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | Scrolls to this item before the first frame. |
+| | `.initial_scroll_at_end()` | | | Scrolls to the end before the first frame and stays there while the rows in view are measured, so a chat opens at its newest message even when it is longer than the viewport; content shorter than the viewport stays at the top. |
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`, `item.id` or the index | The key of an item in viewability tokens. In Rust, the rows' identities, so rows keep their cells and sizes when rows come and go before them. In TSX, rows whose keys match are the same rows even when `each` holds new objects, so rebuilding the rows (say in a `computed`) keeps their sizes and the reader's place; without it, rows are compared by identity. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near: load more. |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | How close to the end (in viewports) `onLoadMore` fires. |
