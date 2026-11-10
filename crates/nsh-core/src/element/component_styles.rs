@@ -284,7 +284,11 @@ impl Store {
 /// The undeclared names already warned of on the surface: a set behind a
 /// shared cell, so recording one notifies nothing.
 #[derive(Clone, Default)]
-struct Warned(Rc<RefCell<BTreeSet<(String, &'static str, String)>>>);
+struct Warned(Rc<RefCell<BTreeSet<WarnedName>>>);
+
+/// One undeclared name warned of: the component, `"variant"` or `"size"`,
+/// and the name.
+type WarnedName = (String, &'static str, String);
 
 /// Declares how `component` (a component's name, `"button"`) looks, in
 /// typed styles. It replaces the typed looks declared for it before.
