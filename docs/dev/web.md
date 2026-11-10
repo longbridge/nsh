@@ -799,6 +799,28 @@ browsers' touches into what phones report:
   again, and when no page went the top one gets the address it showed (`shownUrl`). `page` events are checked as
   `http(s)` URLs (`check_page_url`) instead of against the app's schemes, and every address the app sets by
   `check_address` (length, no whitespace), where it calls.
+- **Address moves the app did not make** (`UrlScheme.on("change")`): each entry's state also has its place among this
+  load's entries (`nshIndex`), and the player mirrors each entry's depth (`historyIndex`, `historyDepths`), so a back
+  of the app's own goes to the newest earlier entry at most as deep (`entryAtDepth`) and a `popstate` knows which way
+  the user went. The root's `onUrlScheme` event with `change: "back" | "forward" | "address"` (`url_scheme::CHANGE`,
+  `AppUrlChangeCause`; another cause is the address alone, quietly) sets the address and queues an `AppUrlChange` for
+  `next_app_url_change()`, at most 16, and only once something listened (`hears_changes`: before it the address has
+  them); the TS module posts each to the listeners there are and keeps none. The player sends it for a traversal
+  between entries of one depth (`tellAddress(cause)`), for a `#fragment` the user typed (a state-less entry of the
+  page whose address is not the one shown: it gets this session's state at the depth shown and the next index, and the
+  app's pages stay; before, it sent the app back to its start), and for a back that popped pages when the entry's
+  address is not the one the app showed and the app set none as it answered: the player waits until the pages it
+  popped are dismissed (`dismissing`, `goBack`) and the app had a turn after their `onDismiss`, at most
+  `POP_ANSWER_MS` (1.5 s; a page's `onDismiss` follows its slide, `settlePop`). A forward to a depth the stack lost
+  stays `open`.
+- **Pushed addresses** (`setUrl(url, { history: "push" })`, `set_app_url_with(url, HistoryBehavior::Push)`): the core
+  sends the web root `Command::PushAppUrl` (`pushAppUrl`) instead of `SetAppUrl`, and `setPageUrl` marks the waiting
+  address a push (`pageUrlPush`; in one turn the last address wins and a push wins over a replace). `syncHistory`
+  pushes it as an entry of its own (`pushEntry(depth, url)`, which drops the mirror's forward entries as the browser
+  drops its own) when the turn pushed no page's entry (else the address goes on the new top entry, as a replace) and
+  it is not the landed entry's address; a turn that popped pages pushes it once its `history.go` lands. A new run
+  drops a push waiting (`resetHistory`). `browser/address.js` hands the options to the core as they are; the core
+  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL.
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web

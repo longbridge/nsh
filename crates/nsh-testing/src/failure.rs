@@ -27,7 +27,8 @@ pub(crate) const NO_BACK: &str = "ERR_NSH_TEST_NO_BACK";
 pub(crate) const TIMED_OUT: &str = nsh_core::element::codes::TIMED_OUT;
 /// `open` was given an option the platform of `nsh test --target` cannot
 /// honor (a size on a device's screen, a platform of another kind of
-/// device, the embedding app's handlers).
+/// device, the embedding app's handlers), or a step it cannot take
+/// (`forward` off the web).
 #[cfg(feature = "js")]
 pub(crate) const UNSUPPORTED: &str = "ERR_NSH_TEST_UNSUPPORTED";
 
@@ -103,6 +104,15 @@ pub(crate) fn refuse_connections() -> nsh_core::element::RefuseConnections {
 #[cfg(any(feature = "js", not(target_arch = "wasm32")))]
 pub(crate) const NOTHING_TO_GO_BACK_FROM: &str = "nothing to go back from";
 
+/// A step only the browser's history takes (`forward`), on another
+/// platform: `ERR_NSH_TEST_UNSUPPORTED`.
+#[cfg(any(feature = "js", feature = "agent"))]
+pub(crate) fn web_only(what: &str) -> String {
+    format!(
+        "`{what}` is unsupported here: only the browser's history goes forward; run the test with `--target web`"
+    )
+}
+
 /// The `code` of a step's failure `message`, made by this module's
 /// functions (with what is on screen after them); `None` for any other
 /// failure (the app threw, a selector that does not parse, ...).
@@ -129,7 +139,10 @@ pub(crate) fn code_of(message: &str) -> Option<&'static str> {
         Some(TIMED_OUT)
     } else if message.starts_with(NOTHING_TO_GO_BACK_FROM) {
         Some(NO_BACK)
-    } else if message.starts_with("open(") && message.contains("` is unsupported on --target ") {
+    } else if message.starts_with("open(") && message.contains("` is unsupported on --target ")
+        || quoted
+            && message.contains("` is unsupported here: only the browser's history goes forward")
+    {
         Some(UNSUPPORTED)
     } else {
         None
@@ -176,6 +189,7 @@ mod tests {
                 ),
                 Some(UNSUPPORTED),
             ),
+            (web_only("forward"), Some(UNSUPPORTED)),
             ("open(\"./App.tsx\"): the engine did not start".into(), None),
             ("`Pay` matches 2 pressable views".into(), None),
             (
