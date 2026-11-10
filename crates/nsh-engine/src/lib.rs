@@ -425,7 +425,10 @@ impl Bundle {
         self
     }
 
-    /// Sets the URL relative request URLs resolve against.
+    /// Sets the URL relative request URLs resolve against: the page's, for
+    /// an app on a web page. A base marks a page: with one, a media source
+    /// `/x` is the page's path, not a local file under `capabilities.fs`
+    /// ([`nsh_core::access::Access::media_url`]), so a native host sets none.
     pub fn with_base_url(mut self, url: impl Into<Arc<str>>) -> Self {
         self.base_url = Some(url.into());
         self

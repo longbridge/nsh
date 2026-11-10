@@ -8151,6 +8151,71 @@ fn media_sources_load_the_url_the_check_granted() {
     );
 }
 
+/// In a native app (no base), a relative image or video source loads
+/// nothing for an app with capabilities: the platforms read it against the
+/// working directory.
+#[test]
+fn relative_media_sources_load_nothing_in_a_native_app() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["*"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: "img/a.png".into(),
+                    size: None,
+                    scales: ImageScales::NONE,
+                    data: None,
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Video,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::Native(NativeProp::Src(Some("Users/a/clip.mp4".into()))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let image = batch.items.iter().find_map(|i| match i {
+        MountItem::Image { id: 2, source, .. } => Some(source.clone()),
+        _ => None,
+    });
+    assert_eq!(image, Some(None));
+    let video = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::NativeProps {
+            id: 4,
+            props: crate::NativeProps::Video(p),
+        } => Some(p.source.clone()),
+        _ => None,
+    });
+    assert_eq!(video.flatten(), None);
+}
+
 /// A placeholder loads the URL the check granted, as the image's source
 /// does, and shows nothing when its host is not granted.
 #[test]

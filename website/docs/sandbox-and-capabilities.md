@@ -169,14 +169,15 @@ A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss:/
 `http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
 `sockets` lists each host and port exactly, and only `sockets` grants them.
 
-`asset:` URIs (the app's own files) are always allowed while their path stays inside the app's files, as `fetch`'s
-do: no `..` or `.` segment, encoded or not, and no backslash or drive; images, videos and sounds may also use `data:`
-and `blob:`
-URIs and relative paths. A source that starts with `//` names a host: on the web it takes the page's scheme and is
-checked as that URL; in a native app it has no page to take a scheme from, so it loads nothing (write `https://…`).
-Any other source with a scheme is checked as a URL, and loads what was checked. A source that names a host only
-after the URL parser drops its leading or trailing spaces, or a tab or newline in it, is granted only by `*`, as other
-URLs that platforms read differently are (in a native app, one that starts with `//` then loads nothing).
+`asset:` URIs (the app's own files) are always allowed while their path stays inside the app's files, as `fetch`'s do:
+no empty, `.` or `..` segment, encoded or not, and no backslash, colon or encoded `/`. Images, videos and sounds may
+also use `data:` and `blob:` URIs. A relative path is the page's on the web; a native app has no page, so for an app
+with capabilities it loads nothing there (a sound's relative path is a bundled file). A source that starts with `//`
+names a host: on the web it takes the page's scheme and is checked as that URL; in a native app it has no page to take
+a scheme from, so it loads nothing (write `https://…`). Any other source with a scheme is checked as a URL, and loads
+what was checked. A source that platforms read differently, including one that names a host only after the URL parser
+drops its leading or trailing spaces or a tab or newline in it, is granted only by `*` and loads as written (in a
+native app, one that starts with `//` then loads nothing).
 
 A local file in a media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
 `C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, as

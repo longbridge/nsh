@@ -1617,6 +1617,8 @@ impl<M: TextEngine> Core<M> {
     /// scheme they take (the page's on the web, as `fetch`'s relative
     /// URLs). Without one such a source names no URL, and only an app
     /// without capabilities loads it ([`crate::access::Access::media_url`]).
+    /// A base marks a page: with one, `/x` and relative paths are the
+    /// page's, not local files, so only pages set one.
     pub fn set_base_url(&mut self, url: Option<Arc<str>>) {
         self.base_url = url;
     }

@@ -663,6 +663,9 @@ pub(crate) fn grant_advice(url: &str, capability: &str) -> String {
 /// (`//host/…`) names the host it resolves to against `base`, the page's
 /// address, and without one has no scheme to load with.
 pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
+    if native_relative(uri, base) {
+        return RELATIVE_ADVICE.to_owned();
+    }
     if starts_with_ignoring_case(uri, "asset:") && !is_inside_assets(uri) {
         return ASSET_ADVICE.to_owned();
     }
@@ -686,13 +689,16 @@ pub(crate) fn media_grant_advice(uri: &str, base: Option<&str>) -> String {
 /// [`Access::media_url`] reads it: `"fs"` for a local file (a `file:` URL;
 /// with no base, an absolute or drive path), else `"network"`.
 pub(crate) fn media_capability(uri: &str, base: Option<&str>) -> &'static str {
-    if starts_with_ignoring_case(uri, "asset:") {
+    if starts_with_ignoring_case(uri, "asset:") || native_relative(uri, base) {
         return "fs";
     }
     let local =
         (base.is_none() || starts_with_ignoring_case(uri, "file:")) && local_file(uri).is_some();
     if local { "fs" } else { "network" }
 }
+
+/// [`media_grant_advice`] for a relative path in a native app.
+const RELATIVE_ADVICE: &str = "a relative path names no file in a native app: name a bundled file as `asset:/…`, or import it";
 
 /// [`media_grant_advice`] for a bundled file whose path leaves the app's
 /// files, which no grant covers.
@@ -763,6 +769,26 @@ fn only_dots(segment: &[u8]) -> bool {
         }
     }
     true
+}
+
+/// Whether `uri`, read as WHATWG's parser reads it, names a host: it has
+/// a scheme or starts with `//` or a backslash ([`Access::media_url`]).
+fn names_host(uri: &str) -> bool {
+    let stripped = whatwg_stripped(uri);
+    scheme_of(&stripped).is_some()
+        || stripped.starts_with("//")
+        || stripped.starts_with('\\')
+        || stripped.starts_with("/\\")
+}
+
+/// Whether media source `uri` is a relative path in a native app (no
+/// `base`), which names no file of the app's ([`Access::media_url`]).
+fn native_relative(uri: &str, base: Option<&str>) -> bool {
+    base.is_none()
+        && !uri.trim().is_empty()
+        && !is_own_media(uri)
+        && local_file(uri).is_none()
+        && !names_host(uri)
 }
 
 /// Whether `text` starts with `prefix`, ignoring ASCII case.
@@ -1997,8 +2023,10 @@ impl Access {
     /// What a media source (image, video, canvas image, sound) loads, if the
     /// app may load it. `asset:` URIs are the app's own files; `data:` URIs
     /// and `blob:` URLs (`URL.createObjectURL`) are bytes the app already
-    /// has; a source with no scheme that does not start with `/` or a
-    /// backslash is relative, the app's own: these stay as written. A local
+    /// has: these stay as written. A source with no scheme that does not
+    /// start with `/` or a backslash is relative: the page's with a base,
+    /// and with none (a native app, whose players read it against the
+    /// working directory) it loads nothing. A local
     /// file (a `file:` URL; with no base, as in native apps, an absolute
     /// path; on the web `/…` is the page's) is read under `files`, the
     /// `capabilities.fs.read` roots ([`MediaFiles`]; `None`: none), and
@@ -2048,7 +2076,10 @@ impl Access {
             || stripped.starts_with(['\\'])
             || stripped.starts_with("/\\");
         if !names_host {
-            return Some(Cow::Borrowed(uri));
+            // A relative path is the page's on the web. A native app has no
+            // page: the platforms read one against the process's working
+            // directory (desktop videos, Android images) or not at all.
+            return (base.is_some() || uri.trim().is_empty()).then_some(Cow::Borrowed(uri));
         }
         // Only a source without a scheme takes the base's.
         let base = || base.and_then(|b| url::Url::parse(b).ok());
@@ -2803,7 +2834,8 @@ mod tests {
         assert!(!access.allows_http("GET", "https://example.com/"));
         assert!(!access.allows_media("https://example.com/a.png"));
         assert!(access.allows_media("asset:/logo.png"));
-        assert!(access.allows_media("logo.png"));
+        // A relative path names no file of the app's in a native app.
+        assert!(!access.allows_media("logo.png"));
         // Local files are `capabilities.fs.read`'s (#1180), which this
         // declaration does not grant.
         assert!(!access.allows_media("/home/a/logo.png"));
@@ -3301,13 +3333,15 @@ mod tests {
         // The app's own files and bytes it has stay its own.
         for uri in [
             "asset:/a.png",
-            "img/a.png",
             "data:image/png;base64,AAAA",
             "blob:https://app.example/1",
             "https://docs.example.com/x.png",
         ] {
             assert!(a.allows_media(uri), "{uri}");
         }
+        // A relative path names no file of the app's in a native app
+        // (`relative_paths_name_no_file_in_a_native_app`).
+        assert!(!a.allows_media("img/a.png"));
         // An app without capabilities is not checked, as before.
         assert!(Access::default().allows_media("//bank.example/x.png"));
     }
@@ -3500,6 +3534,47 @@ mod tests {
             Access::default().media_url("asset:/../outside.png", None, None),
             Some(Cow::Borrowed("asset:/../outside.png"))
         );
+    }
+
+    /// A relative path names no file of the app's in a native app: the
+    /// platforms read one against the process's working directory (desktop
+    /// videos, Android images) or not at all, so an app with capabilities
+    /// loads nothing from it. On the web it is the page's.
+    #[test]
+    fn relative_paths_name_no_file_in_a_native_app() {
+        let a = Access {
+            declared: caps(r#"{ "network": { "hosts": ["*"] } }"#),
+            granted: None,
+        };
+        for relative in [
+            "clip.mp4",
+            "./clip.mp4",
+            "Users/a/secret.mp4",
+            "../etc/x.png",
+            " /etc/x.png",
+        ] {
+            assert_eq!(a.media_url(relative, None, None), None, "{relative}");
+            assert_eq!(media_capability(relative, None), "fs", "{relative}");
+            assert_eq!(
+                media_grant_advice(relative, None),
+                RELATIVE_ADVICE,
+                "{relative}"
+            );
+            assert_eq!(
+                a.media_url(relative, Some("https://app.example/"), None),
+                Some(Cow::Borrowed(relative)),
+                "{relative} on the web"
+            );
+            assert_eq!(
+                Access::default().media_url(relative, None, None),
+                Some(Cow::Borrowed(relative)),
+                "{relative} without capabilities"
+            );
+        }
+        // No source is no refusal.
+        for empty in ["", "  "] {
+            assert_eq!(a.media_url(empty, None, None), Some(Cow::Borrowed(empty)));
+        }
     }
 
     /// A symlink in a granted root whose target does not exist yet is
