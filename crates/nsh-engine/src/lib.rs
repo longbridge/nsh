@@ -1550,6 +1550,8 @@ pub struct Engine {
     quit_listeners: Arc<std::sync::atomic::AtomicBool>,
     /// The app's disk cache of downloaded images.
     image_cache: Option<nsh_core::image::DiskCache>,
+    /// [`Engine::media_files`].
+    media_files: Arc<nsh_core::access::MediaFiles>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1579,6 +1581,7 @@ impl Engine {
         S: MountSink,
     {
         let image_cache = config.cache.open_images(config.app.app_id());
+        let media_files = Arc::new(media_files(&config, &app_access(&config.app)));
         let (tx, rx) = crossbeam_channel::unbounded();
         let modality = Arc::default();
         setup(&EngineControl {
@@ -1612,7 +1615,16 @@ impl Engine {
             stop,
             quit_listeners,
             image_cache,
+            media_files,
         })
+    }
+
+    /// The roots the app's local media files are read under
+    /// ([`nsh_core::access::MediaFiles::open`]). The platform's image
+    /// loader reads `<Image>` files through them, as the core's does, so a
+    /// link swapped in after the check is not followed out of them.
+    pub fn media_files(&self) -> Arc<nsh_core::access::MediaFiles> {
+        self.media_files.clone()
     }
 
     /// The disk cache of the images the app downloads
@@ -1964,11 +1976,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let host_bridge = config.host.bridge(tx.clone());
         let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
-        let access = Arc::new(match &config.app {
-            App::Js(bundle) => bundle.policy.access(),
-            // Native code is trusted: it reaches what the platform allows.
-            App::Rust(_) => Policy::default().access(),
-        });
+        let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
@@ -1997,19 +2005,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         }
         // The roots local media files are read under, as `fs/promises`
         // reads files (where it has a file system: the desktops).
-        let media_files = Arc::new(match &config.app {
-            App::Js(bundle) => nsh_core::access::MediaFiles::new(
-                &access,
-                config
-                    .data_dir
-                    .as_ref()
-                    .map(|root| root.join(app_dir_name(config.app.app_id())))
-                    .as_deref(),
-                &bundle_system_paths(bundle),
-                nsh_core::access::native_files(config.environment.os),
-            ),
-            _ => nsh_core::access::MediaFiles::default(),
-        });
+        let media_files = Arc::new(media_files(&config, &access));
         core.set_media_files(media_files.clone());
         #[cfg(not(target_arch = "wasm32"))]
         core.set_image_context(nsh_core::image::loader::Context {
@@ -4155,5 +4151,32 @@ mod tests {
             })
             .collect();
         assert_eq!(frames, [(6, 0.0), (4, 50.0)]);
+    }
+}
+
+/// What `app` may reach: a JS app its policy's grant; native code is
+/// trusted, it reaches what the platform allows.
+fn app_access(app: &App) -> Access {
+    match app {
+        App::Js(bundle) => bundle.policy.access(),
+        App::Rust(_) => Policy::default().access(),
+    }
+}
+
+/// The roots local media files are read under, as `fs/promises` reads
+/// files (where it has a file system: the desktops).
+fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::MediaFiles {
+    match &config.app {
+        App::Js(bundle) => nsh_core::access::MediaFiles::new(
+            access,
+            config
+                .data_dir
+                .as_ref()
+                .map(|root| root.join(app_dir_name(config.app.app_id())))
+                .as_deref(),
+            &bundle_system_paths(bundle),
+            nsh_core::access::native_files(config.environment.os),
+        ),
+        _ => nsh_core::access::MediaFiles::default(),
     }
 }
