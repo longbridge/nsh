@@ -3678,6 +3678,21 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if event == EventKind::Paste {
                 payload = payload.into_paste();
             }
+            // A secondary click goes down as a press does: the overlays it
+            // is outside of hear `onPressOutside` first, then the view its
+            // `onContextMenu`, so a context menu open on the view closes
+            // before the view asks for one again where the pointer is.
+            if let EventPayload::ContextMenu(menu) = &payload {
+                for (overlay, pressed) in state.core.context_menu_presses_outside(id, menu) {
+                    if !state
+                        .core
+                        .component_event(overlay, EventKind::PressOutside, &pressed)
+                        && let Some(script) = script
+                    {
+                        script.dispatch_event(overlay, EventKind::PressOutside, &pressed);
+                    }
+                }
+            }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {
                 return true;

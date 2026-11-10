@@ -62,6 +62,11 @@ pub enum OpenChangeReason {
 pub(crate) struct OpenState {
     controlled: Prop<Option<bool>>,
     own: Signal<bool>,
+    /// What was last reported to the app that controls it, until its
+    /// answer reached the popup: a request before then is a change from
+    /// that (a secondary click on an open context menu's trigger closes
+    /// it and opens it again, both reported).
+    asked: Stored<Option<bool>>,
 }
 
 impl OpenState {
@@ -69,6 +74,7 @@ impl OpenState {
         Self {
             controlled: open,
             own: signal(default_open.get_untracked()),
+            asked: stored(None),
         }
     }
 
@@ -90,12 +96,18 @@ impl OpenState {
     /// once where the popup has no motion (no ending look, reduced motion),
     /// and the app hears `onOpenChange` before them.
     pub(crate) fn request(self, open: bool, report: impl FnOnce()) {
-        if self.get_untracked() == open {
+        if self.asked.get().unwrap_or_else(|| self.get_untracked()) == open {
             return;
         }
         report();
         if self.controlled.get_untracked().is_none() {
             self.own.set(open);
+        } else {
+            self.asked.replace(Some(open));
+            let asked = self.asked;
+            after_answer(move || {
+                asked.replace(None);
+            });
         }
     }
 }

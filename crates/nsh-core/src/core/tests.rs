@@ -8198,8 +8198,10 @@ fn a_part_projected_focused_shows_focus_visible_while_the_focus_does() {
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
     // The focus leaving the tree (its row still projected as it renders
-    // next) takes `focus-visible:` off at once.
+    // next) takes `focus-visible:` off as the focus goes: a lone blur
+    // lets go at the frame.
     c.set_states(2, 0);
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.75);
     // Never its own state: its events and accessibility do not see it.
@@ -25314,12 +25316,12 @@ fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
     js_events(&mut c);
 
     let menu = |pointer_type| {
-        EventPayload::ContextMenu(crate::ContextMenuEvent::new(
+        crate::ContextMenuEvent::new(
             point(px(1.0), px(2.0)),
             point(px(5.0), px(46.0)),
             Default::default(),
             pointer_type,
-        ))
+        )
     };
     let mouse = Some(crate::PointerType::Mouse);
     for (id, pointer_type, outside) in [
@@ -25335,11 +25337,10 @@ fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
         (10, None, false),
         (10, Some(crate::PointerType::Touch), false),
     ] {
-        c.component_event(id, EventKind::ContextMenu, &menu(pointer_type));
-        let events = js_events(&mut c);
-        let pressed = events.iter().find_map(|(at, kind, payload)| {
-            (*at == 4 && *kind == EventKind::PressOutside).then_some(payload)
-        });
+        let events = c.context_menu_presses_outside(id, &menu(pointer_type));
+        let pressed = events
+            .iter()
+            .find_map(|(at, payload)| (*at == 4).then_some(payload));
         assert_eq!(pressed.is_some(), outside, "{id} {pointer_type:?}");
         if let Some(payload) = pressed {
             assert_eq!(
