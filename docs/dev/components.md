@@ -739,7 +739,8 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `indeterminate:` / `disabled:` in the part's class, and only the control's root is an accessibility element.
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
-  no active descendant, and the platform's focus stays where it is.
+  no active descendant, and the platform's focus stays where it is. While that focus shows the part shows
+  `focus-visible:` too: a tree's keyboard ring goes on `focus-visible:` and stays off after a click.
   What a part shows beyond the states screen readers hear is a boolean `data-*` attribute:
   `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
   with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes

@@ -165,7 +165,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
   presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus; it
   shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when the keyboard moved it
-  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`). Focus and presses are separate: `ViewProps::focus_stop` decides, from
+  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`); a part projected focused (a
+  tree's or a list's cursor) shows it too while the control's focus shows. Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
   `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.

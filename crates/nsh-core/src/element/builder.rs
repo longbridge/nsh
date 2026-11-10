@@ -2065,6 +2065,9 @@ pub trait Interactive: Element {
     /// that keeps the focus itself: the cell of a one-time-code input that
     /// takes the next character, the highlighted option of a list (NSH
     /// has no active descendant). The platform's focus stays where it is.
+    /// While the focus shows (the control's `focus-visible:`) the part
+    /// shows it too, so `focus-visible:` on it is the cursor the keyboard
+    /// moves and stays off after a press.
     fn project_focused(mut self, focused: impl IntoReactive<bool>) -> Self {
         self.node().bind_attr(focused, |a, focused| {
             project(a, crate::tailwind::state::FOCUSED, focused)

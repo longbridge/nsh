@@ -153,7 +153,9 @@
   `focus_shows`): an input that edits always shows its focus, any other view unless the last input was a pointer, so
   Tab, a group's arrows and a shortcut show it, a press or a tap does not, a move the app makes (`focus()`, a calendar
   or a dialog opening) shows it after a key and not after a press, and a key typed while the focus does not show
-  shows it. `focus:` is any focus.
+  shows it. `focus:` is any focus. A part projected focused (`project_focused`: a tree's or a list's cursor, the
+  control keeping the platform's focus) also shows `focus-visible:` while the focus shows, so on such a part
+  `focus:` is the cursor and `focus-visible:` the cursor the keyboard is on.
 - **Layout values**: `box-content` / `box-border` select Taffy's content-box / border-box sizing. Width and
   height accept `min-content`, `max-content` and `fit-content` (`w/h/size-min/max/fit`); min-content text measures
   each Unicode line-breaking segment with the platform text engine and caches the widest one. `flow-root` uses
