@@ -156,8 +156,9 @@
   `preferredAssetRepresentationMode` compatible (the system turns HEIC into JPEG) or current, ordered selection when
   several; each item's file is read inside `loadFileRepresentationForTypeIdentifier`'s completion (the file goes when it
   returns) and prepared with ImageIO (`picker.rs`: `CGImageSourceCreateThumbnailAtIndex` with the transform and the
-  longer side, `CGImageDestination` with `kCGImageDestinationLossyCompressionQuality`). macOS: an `NSOpenPanel` sheet
-  and the same ImageIO preparation (`nsh-platform-macos` `picker.rs`, tested with `sips`' HEIC). Android
+  longer side, `CGImageDestination` with `kCGImageDestinationLossyCompressionQuality`). macOS: an `NSOpenPanel`, a
+  sheet of the window while the user sees it, else a window of its own (`window::panel_window`, `macos.md`), and the
+  same ImageIO preparation (`nsh-platform-macos` `picker.rs`, tested with `sips`' HEIC). Android
   (`Picker.java`): `MediaStore.ACTION_PICK_IMAGES` (API 33+, or 30+ with SDK extension 2), else `ACTION_GET_CONTENT`
   for `image/*`, started by a headless retained `android.app.Fragment` added to the view's activity (the embedding app
   forwards no result); the bytes are read from the content resolver, sized with `BitmapFactory` bounds and the EXIF
