@@ -25,6 +25,7 @@ mod parts;
 mod render;
 mod session;
 mod table;
+mod touch;
 
 use std::collections::BTreeMap;
 

@@ -1690,9 +1690,22 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     /// Starts the app (its first frame goes to `sink` before this returns);
     /// `None` if it could not start (reported to `sink`).
     pub fn start<S: MountSink>(config: EngineConfig, text_engine: M, sink: S) -> Option<Self> {
+        Self::start_with(config, text_engine, sink, |_| {})
+    }
+
+    /// [`LocalEngine::start`], with `setup` sending input before the engine
+    /// starts, as [`Engine::start_with`]'s does: the link that launched the
+    /// app is there before its code runs.
+    pub fn start_with<S: MountSink>(
+        config: EngineConfig,
+        text_engine: M,
+        sink: S,
+        setup: impl FnOnce(&EngineControl),
+    ) -> Option<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let control = EngineControl { tx: tx.clone() };
+        setup(&control);
         let _clock = config.clock.enter();
         let _context = config.context.enter();
         let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
@@ -1895,6 +1908,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        // Every VM reads the core's address where it is (`UrlScheme.url()`).
+        #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
+        let app_url = core.app_url_cell();
         core.set_audio(config.audio.clone());
         core.set_window_backend(config.windows.clone());
         if let Some(window) = config.app.main_window() {
@@ -1968,7 +1984,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         // The embedding app's tokens sent before the start
         // (`Engine::start_with`) are there as the bundle evaluates, so its
         // first render reads them; the rest comes after it, in order.
-        // So are the displays, which the app reads as it first renders.
+        // So are the displays, which the app reads as it first renders,
+        // and the link that launched the app, which its first `url()` reads
+        // (the core keeps it for the first `open` listener too).
         let mut early = Vec::new();
         let mut displays: Arc<[nsh_core::desktop::Display]> = Arc::from(Vec::new());
         while let Ok(message) = rx.try_recv() {
@@ -1982,6 +2000,9 @@ impl<M: TextEngine + 'static> Driver<M> {
                 Message::Displays(list) => {
                     core.set_displays(list.clone());
                     displays = list;
+                }
+                Message::Event(nsh_core::ROOT_ID, EventKind::UrlScheme, payload) => {
+                    core.component_event(nsh_core::ROOT_ID, EventKind::UrlScheme, &payload);
                 }
                 message => early.push(message),
             }
@@ -2065,6 +2086,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             config.assets.clone(),
                             bundle,
                         ),
+                        app_url: app_url.clone(),
                         data_dir: config
                             .data_dir
                             .as_ref()
@@ -3299,6 +3321,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         rtl: env.rtl,
         pixel_ratio: env.pixel_ratio,
         os: env.os,
+        platform: env.platform,
         os_version: env.os_version,
         idiom: env.idiom,
         locale: env.locale,

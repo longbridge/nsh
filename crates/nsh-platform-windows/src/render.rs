@@ -1345,17 +1345,24 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    chain.set_background(crate::system::window_background(surface));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize the swap chain: {err}");
         *swap = None;
         return false;
     }
-    // A window that is resized draws now (never stretched pixels); the
-    // others wait until the compositor has room, so that no window's
-    // present holds the thread up for another's vblank. The damage stays.
-    if !resized && !chain.ready() {
+    // A window that is resized draws now, once its frame in flight is shown:
+    // a resize's frames presented faster than the display shows them would
+    // queue up, and the window would trail the pointer by all of them. That
+    // wait holds the thread up for a vblank at most, the one exception: the
+    // others wait until the compositor has room, so that no window's present
+    // holds the thread up for another's vblank. The damage stays.
+    let ready = if resized {
+        chain.wait_ready()
+    } else {
+        chain.ready()
+    };
+    if !ready {
         return true;
     }
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
@@ -1668,17 +1675,20 @@ pub(crate) fn window_frame(surface: &Rc<Surface>, frame: WindowFrame<'_>) -> boo
     let Some(chain) = swap.as_mut() else {
         return false;
     };
-    // Its own background (its scheme, see-through or not).
-    chain.set_background(crate::app_window::background(surface, root.id()));
     let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize a window's swap chain: {err}");
         *swap = None;
         return false;
     }
-    // As the main window's ([`frame`]): resized, it draws now; otherwise it
-    // waits until its swap chain has room.
-    if !resized && !chain.ready() {
+    // As the main window's ([`frame`]): resized, it draws once its frame in
+    // flight is shown; otherwise it waits until its swap chain has room.
+    let ready = if resized {
+        chain.wait_ready()
+    } else {
+        chain.ready()
+    };
+    if !ready {
         return true;
     }
     if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {
@@ -2296,5 +2306,83 @@ mod tests {
             s.style.transform.push(TransformKind::RotateY, 60.0);
         }
         assert!(drawn_area(&parent).is_none());
+    }
+
+    /// The painted extent (x0, y0, x1, y1) in pixels of what is red.
+    fn red_extent(data: &[u8], size: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+        let mut out: Option<(u32, u32, u32, u32)> = None;
+        for y in 0..size.1 {
+            for x in 0..size.0 {
+                let i = ((y * size.0 + x) * 4) as usize;
+                let (b, g, r) = (data[i], data[i + 1], data[i + 2]);
+                if r > 180 && g < 100 && b < 100 {
+                    out = Some(match out {
+                        None => (x, y, x + 1, y + 1),
+                        Some((a, b, c, d)) => (a.min(x), b.min(y), c.max(x + 1), d.max(y + 1)),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_tinted_image_fills_its_frame_at_any_scale() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        for scale in [1.0f32, 1.25, 1.75, 2.0] {
+            for (transformed, faded) in [(false, false), (true, false), (false, true)] {
+                let size = ((60.0 * scale).ceil() as u32, (60.0 * scale).ceil() as u32);
+                let surface = Surface::new(Default::default());
+                surface.resized(size, scale);
+                let root = surface.root.clone();
+                let button = view(Some(&root), 2, ViewKind::View, rect(10.0, 10.0, 40.0, 40.0));
+                button.state_mut().style.background_color = Color(0xddddddff);
+                if transformed {
+                    let mut s = button.state_mut();
+                    s.style.transform.push(TransformKind::TranslateY, -1.0);
+                }
+                if faded {
+                    // Drawn through a layer: the icon still shows red
+                    // enough over the light background.
+                    button.state_mut().style.opacity = 0.9;
+                }
+                let icon = view(
+                    Some(&button),
+                    4,
+                    ViewKind::Image,
+                    rect(11.0, 11.0, 18.0, 18.0),
+                );
+                {
+                    let mut s = icon.state_mut();
+                    s.style.tint_color = Some(Color(0xff0000ff));
+                    s.image = Some(crate::image::ImageState::loaded_for_test(
+                        (18.0 * scale).ceil() as u32,
+                        18.0,
+                    ));
+                }
+                let into = target(&gfx, size);
+                draw_into(&surface, &gfx, &into, scale, false, None, None, None).unwrap();
+                let got = red_extent(&read(&gfx, &into, size), size);
+                let dy = if transformed { -1.0 } else { 0.0 };
+                let want = (
+                    (21.0 * scale).round(),
+                    ((21.0 + dy) * scale).round(),
+                    (39.0 * scale).round(),
+                    ((39.0 + dy) * scale).round(),
+                );
+                eprintln!(
+                    "scale {scale} transformed {transformed} faded {faded}: got {got:?} want {want:?}"
+                );
+                let (x0, y0, x1, y1) = got.expect("the icon is drawn");
+                for (g, w) in [(x0, want.0), (y0, want.1), (x1, want.2), (y1, want.3)] {
+                    assert!(
+                        (g as f32 - w).abs() <= 1.0,
+                        "scale {scale}: {got:?} vs {want:?}"
+                    );
+                }
+            }
+        }
     }
 }

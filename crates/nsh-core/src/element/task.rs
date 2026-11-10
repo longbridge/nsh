@@ -118,6 +118,10 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The app's address resolves the slot ([`crate::url_scheme`]).
+    AppUrl(AnswerSlot<Option<String>>),
+    /// The app sets its address ([`crate::url_scheme`]).
+    SetAppUrl(String),
     /// A sound's or a player's request ([`crate::audio`]).
     Audio(AudioAction),
     /// Whether a web view's ref gives its page trusted input here
@@ -166,6 +170,10 @@ pub(crate) enum Action {
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),
+    /// Presses what a pointer at the press's page position would inside
+    /// the node, with the layout of the commit the action goes out with;
+    /// whether a view took it resolves the slot.
+    PressAt(NodeId, crate::PressEvent, AnswerSlot<bool>),
 }
 
 /// What a speech recognition session asks of the core

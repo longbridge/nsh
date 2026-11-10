@@ -360,9 +360,23 @@ function RemoteImage(props: { url: string }) {
 |---|---|---|---|
 | `.ttf`, `.otf`, `.woff`, `.woff2` | A `FontAsset` with its family name | The font's family name | [Fonts](./fonts.md) |
 | `.wav`, `.m4a`, `.aac`, `.mp3` | A `FileAsset` with its URI | The file's `asset:/` URL | [Sound](../modules/nsh.md#sound) |
-| `.json` and other files | A `FileAsset` with its URI | `.json`: the parsed value, bundled into the script | [Project structure](./project-structure.md#modules) |
+| `.mp4`, `.mov`, `.m4v`, `.webm` | A `FileAsset` with its URI | The file's `asset:/` URL | [Video](../modules/nsh-video.md) |
+| `.json` and other files | A `FileAsset` with its URI | `.json`: the parsed value, bundled into the script; any file with `?url`: its `asset:/` URL | [Project structure](./project-structure.md#modules) |
 
 Fonts are registered before the first frame in both.
+
+In TSX, `?url` at the end of an import path gives any file's `asset:/` URL, and the file ships with the app. The path
+is relative to the importing module:
+
+```tsx
+import model from "./data/model.bin?url";
+import cities from "./data/cities.json?url";
+
+const bytes = await (await fetch(model)).bytes();
+const list = await (await fetch(cities)).json();
+```
+
+A `.json` imported with `?url` stays a file the app reads when it needs it, instead of a value in the script.
 
 ### Reading a file at run time
 

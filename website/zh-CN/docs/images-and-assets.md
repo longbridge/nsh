@@ -351,9 +351,22 @@ function RemoteImage(props: { url: string }) {
 |---|---|---|---|
 | `.ttf`、`.otf`、`.woff`、`.woff2` | 带字体族名的 `FontAsset` | 字体的字体族名 | [字体](./fonts.md) |
 | `.wav`、`.m4a`、`.aac`、`.mp3` | 带 URI 的 `FileAsset` | 文件的 `asset:/` URL | [声音](../modules/nsh.md#sound) |
-| `.json` 及其他文件 | 带 URI 的 `FileAsset` | `.json`：解析后的值，打包进脚本 | [项目结构](./project-structure.md#模块) |
+| `.mp4`、`.mov`、`.m4v`、`.webm` | 带 URI 的 `FileAsset` | 文件的 `asset:/` URL | [视频](../modules/nsh-video.md) |
+| `.json` 及其他文件 | 带 URI 的 `FileAsset` | `.json`：解析后的值，打包进脚本；任何文件加 `?url`：它的 `asset:/` URL | [项目结构](./project-structure.md#模块) |
 
 两种方式下，字体都在第一帧之前注册。
+
+在 TSX 中，导入路径末尾加 `?url` 得到任何文件的 `asset:/` URL，文件随应用打包。路径相对于导入它的模块：
+
+```tsx
+import model from "./data/model.bin?url";
+import cities from "./data/cities.json?url";
+
+const bytes = await (await fetch(model)).bytes();
+const list = await (await fetch(cities)).json();
+```
+
+用 `?url` 导入的 `.json` 保持为文件，应用需要时再读取，而不是脚本里的一个值。
 
 ### 运行时读取文件
 

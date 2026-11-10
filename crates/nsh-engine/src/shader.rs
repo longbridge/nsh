@@ -81,26 +81,52 @@ pub struct Renderer {
     pipelines: std::cell::RefCell<Pipelines>,
 }
 
+/// The backends to open a device on, in order (`WGPU_BACKEND` overrides).
+///
+/// Linux tries OpenGL first: frames come back to the CPU every display
+/// frame, and Vulkan drivers there (Mesa's ANV on Intel, among others) offer
+/// no host-visible memory both coherent and cached, so wgpu maps its
+/// read-back buffers write-combined and reading a frame out costs several
+/// milliseconds of the main thread (a 2000×300 frame: 8–17 ms against
+/// 0.2 ms through OpenGL). Elsewhere the platform's own API first.
+fn backend_order() -> Vec<wgpu::Backends> {
+    if let Some(env) = wgpu::Backends::from_env() {
+        return vec![env];
+    }
+    if cfg!(all(target_os = "linux", not(target_os = "android"))) {
+        vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
+    } else {
+        vec![wgpu::Backends::PRIMARY | wgpu::Backends::GL]
+    }
+}
+
 impl Renderer {
     /// Opens a GPU device (blocking, once: adapters answer in milliseconds);
     /// `None` when there is none, which the log says.
     pub fn new(format: PixelFormat) -> Option<Renderer> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env()
-                .unwrap_or(wgpu::Backends::PRIMARY | wgpu::Backends::GL),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let adapter =
+        let mut found = None;
+        let mut last = None;
+        for backends in backend_order() {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends,
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
+            });
             match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 ..Default::default()
             })) {
-                Ok(adapter) => adapter,
-                Err(e) => {
-                    log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
-                    return None;
+                Ok(adapter) => {
+                    found = Some(adapter);
+                    break;
                 }
-            };
+                Err(e) => last = Some(e),
+            }
+        }
+        let Some(adapter) = found else {
+            let e = last.map_or_else(String::new, |e| e.to_string());
+            log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
+            return None;
+        };
         let (device, queue) =
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("nsh shaders"),
@@ -193,6 +219,21 @@ impl Renderer {
     /// The format of its frames.
     pub fn format(&self) -> PixelFormat {
         self.format
+    }
+
+    /// Calls `f`, on a thread of the GPU driver's, once the GPU finished
+    /// the frames rendered so far ([`ShaderView::render`]): a backend
+    /// collects them then instead of polling on every display frame while
+    /// they are [`ShaderView::pending`]. `false` (and `f` dropped) where the
+    /// device cannot tell: the backend polls.
+    pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
+        #[cfg(target_vendor = "apple")]
+        return crate::shader_surfaces::when_done(&self.queue, f);
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            drop(f);
+            false
+        }
     }
 
     fn pipeline(
@@ -659,13 +700,24 @@ impl ShaderView {
     /// Whether a call to [`Self::render`] has something to do: a frame to
     /// render (something changed, or its time runs) or one to collect.
     pub fn wants_frame(&self) -> bool {
+        self.due() || (self.layer.is_some() && self.pending())
+    }
+
+    /// Whether [`Self::render`] renders a new frame: something changed, or
+    /// its time runs ([`Self::animates`]). One that is only
+    /// [`Self::pending`] waits for the GPU ([`Renderer::when_done`]).
+    pub fn due(&self) -> bool {
+        self.layer.is_some() && (self.dirty || self.animates())
+    }
+
+    /// Whether its frames change with time alone: it reads `nsh.time` and
+    /// is not paused, or a transition runs. Such a view renders on every
+    /// display frame; one that does not, only when something changed.
+    pub fn animates(&self) -> bool {
         let Some(layer) = &self.layer else {
             return false;
         };
-        self.dirty
-            || (layer.shader.animated() && !layer.paused)
-            || self.transition.is_some()
-            || self.pending()
+        (layer.shader.animated() && !layer.paused) || self.transition.is_some()
     }
 
     /// Whether a frame is on its way back from the GPU.
@@ -1483,6 +1535,36 @@ mod tests {
             "left of the box: progress 1"
         );
         assert_eq!(pixel(&f, 2, 2), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn a_changed_view_renders_once_and_the_gpu_says_when_it_is_done() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        view.set_layer(Some(layer(
+            "struct Uniforms { a: f32 }\n\
+             fn shade(uv: vec2f) -> vec4f { return vec4f(uniforms.a, 0.0, 0.0, 1.0); }",
+            &[("a", UniformValue::Number(1.0))],
+        )));
+        assert!(view.due() && !view.animates(), "a new layer: one frame");
+        let _ = view.render(&renderer, Instant::now());
+        assert!(!view.due(), "rendered: nothing new until something changes");
+        let (tx, rx) = std::sync::mpsc::channel();
+        if !renderer.when_done(move || {
+            let _ = tx.send(());
+        }) {
+            eprintln!("the device does not say when it is done: skipped");
+            return;
+        }
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("told without polling");
+        assert!(view.collect_frame(&renderer), "the frame is back");
+        assert!(!view.wants_frame(), "nothing left to render or collect");
+        assert_eq!(pixel(view.frame(), 0, 0), [255, 0, 0, 255]);
     }
 
     #[test]

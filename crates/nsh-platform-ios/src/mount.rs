@@ -170,6 +170,27 @@ enum Refresh {
     },
 }
 
+/// Whether `refresh`, a scroll view's pull to refresh, is `control` itself
+/// (not merely a control in the same place).
+fn holds_refresh(refresh: Option<&Refresh>, control: &UIRefreshControl) -> bool {
+    matches!(refresh, Some(Refresh::Native(held)) if std::ptr::eq(&**held, control))
+}
+
+/// A refresh control for scroll view `id`. It names its scroll view itself
+/// ([`refresh_owner`]): UIKit may place it in a container of its own (iOS 26
+/// under a large title), so its superview is not the scroll view.
+fn refresh_control(id: NodeId, mtm: MainThreadMarker) -> Retained<UIRefreshControl> {
+    let control = UIRefreshControl::new(mtm);
+    control.setTag(id as isize);
+    control
+}
+
+/// The scroll view refresh control `control` was made for
+/// ([`refresh_control`]), wherever UIKit placed it.
+pub(crate) fn refresh_owner(control: &UIRefreshControl) -> NodeId {
+    control.tag() as NodeId
+}
+
 /// Lays UIKit's own content of `view` (controls, navigation bars, text
 /// fields) out right to left, or left to right.
 pub(crate) fn mirror(view: &UIView, rtl: bool) {
@@ -646,6 +667,10 @@ pub(crate) struct Mounter {
     sticky: rustc_hash::FxHashMap<NodeId, Vec<StickyCell>>,
     /// The native components the app registered.
     components: crate::component::Components,
+    /// The scroll views the embedding app watches, by `nativeID`
+    /// ([`crate::scroll_watch`]), and those of this surface it may watch.
+    scroll_watchers: crate::ScrollWatchers,
+    scrolls: crate::scroll_watch::SurfaceScrolls,
     /// Selectable views (`ViewProps::selectable_view`) and their selections.
     areas: Vec<(NodeId, Retained<crate::selectable_view::AreaResponder>)>,
     /// The performance monitor, while it measures ([`Mounter::measure`]).
@@ -676,7 +701,8 @@ impl Mounter {
         access: std::sync::Arc<nsh_engine::Access>,
         components: crate::component::Components,
     ) -> Self {
-        let target = EventTarget::new(mtm, control.clone(), shared.clone());
+        let scrolls = crate::scroll_watch::SurfaceScrolls::default();
+        let target = EventTarget::new(mtm, control.clone(), shared.clone(), scrolls.clone());
         let target_for_link = target.clone();
         let mut views = Vec::with_capacity(256);
         views.resize_with(2, || None);
@@ -742,6 +768,8 @@ impl Mounter {
             frames_applied: false,
             rtl: false,
             components,
+            scroll_watchers: crate::ScrollWatchers::default(),
+            scrolls,
             areas: Vec::new(),
             fps: None,
             mtm,
@@ -1090,6 +1118,7 @@ impl Mounter {
                 // must not find the id, which a new view may take.
                 self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
+                self.scrolls.remove(&self.scroll_watchers, id);
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
                     self.areas.remove(i).1.delete();
                 }
@@ -1345,6 +1374,7 @@ impl Mounter {
                     if vertical {
                         self.content_sizes.push((id, size.height));
                     }
+                    self.scrolls.resized(id);
                 }
             }
             MountItem::ScrollBy { id, dx, dy } => {
@@ -1753,6 +1783,23 @@ impl Mounter {
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
+            }
+            (Command::OpenEditMenu { bounds, actions }, Native::Input(input)) => {
+                let view = input.editor_view();
+                let rect = CGRect::new(
+                    CGPoint::new(bounds.origin.x.0.into(), bounds.origin.y.0.into()),
+                    CGSize::new(bounds.size.width.0.into(), bounds.size.height.0.into()),
+                );
+                // The bounds are in the root view (the surface's, or the
+                // modal's the input is in).
+                let rect = match self.root_view_of(view) {
+                    Some(root) => view.convertRect_fromView(rect, Some(&root)),
+                    None => rect,
+                };
+                crate::input::open_edit_menu(view, rect, actions);
+            }
+            (Command::CloseEditMenu, Native::Input(input)) => {
+                crate::input::close_edit_menu(input.editor_view())
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
@@ -2837,6 +2884,11 @@ impl Mounter {
 
     /// What the image loader reports.
     /// The disk cache the images it loads go through.
+    /// The scroll views the embedding app watches ([`crate::AppView::watch_scroll`]).
+    pub(crate) fn watch_scrolls(&mut self, watchers: crate::ScrollWatchers) {
+        self.scroll_watchers = watchers;
+    }
+
     pub(crate) fn set_image_cache(&mut self, cache: Option<nsh_core::image::DiskCache>) {
         self.images.set_disk_cache(cache);
     }
@@ -3174,7 +3226,7 @@ impl Mounter {
                 });
             }
             Some(None) => {
-                let control = UIRefreshControl::new(mtm);
+                let control = refresh_control(id, mtm);
                 // SAFETY: `handleRefresh:` is implemented by the target.
                 unsafe {
                     control.addTarget_action_forControlEvents(
@@ -3678,6 +3730,7 @@ impl Mounter {
     /// Touch, accessibility and test properties.
     fn set_view_props(&mut self, id: NodeId, props: ViewProps) {
         let (control, mtm) = (self.control.clone(), self.mtm);
+        let native_id = props.native_id.clone();
         let Some(s) = self.slot_mut(id) else { return };
         s.long_press_delay = props.long_press_delay;
         s.pan_scroll_handoff = props.pan_scroll_handoff;
@@ -3757,6 +3810,16 @@ impl Mounter {
                 }
             }
             _ => {}
+        }
+        // A scroll view the host may watch by its `nativeID`.
+        if let Some(Slot {
+            native: Native::Scroll(scroll),
+            ..
+        }) = self.slot(id)
+        {
+            let scroll = scroll.clone();
+            self.scrolls
+                .props(&self.scroll_watchers, id, &scroll, &self.target, native_id);
         }
     }
 
@@ -4291,6 +4354,18 @@ impl Mounter {
         }
     }
 
+    /// UIKit's refresh control `control`, made for scroll view `id`, was
+    /// pulled. Only the control that scroll view holds now refreshes it: one
+    /// left over from a deleted view (whose id a new view may take) or
+    /// replaced by another indicator reports nothing.
+    pub(crate) fn refresh_pulled(&self, id: NodeId, control: &UIRefreshControl) {
+        let held = self.slot(id).and_then(|s| s.gestures.refresh.as_ref());
+        if holds_refresh(held, control) {
+            self.control
+                .dispatch_event(id, EventKind::Refresh, EventPayload::None);
+        }
+    }
+
     /// Brings a list's sticky cells above its other cells (the cells of a
     /// list in the scroll view's viewport are in that list, where the core
     /// keeps them on top).
@@ -4462,6 +4537,8 @@ impl Mounter {
 
 impl Drop for Mounter {
     fn drop(&mut self) {
+        // The app stopped: the host's handles to its scroll views die.
+        self.scrolls.clear(&self.scroll_watchers);
         // The link retains its target; invalidating breaks the cycle.
         self.frame_link.invalidate();
     }
@@ -4889,6 +4966,49 @@ mod tests {
             settled_content_width(320.0, 500.0, reaches_beyond(&scroll, 320.5)),
             320.0
         );
+    }
+
+    /// iOS 26 moves a scroll view's refresh control under a large title into
+    /// an untagged container: the control still names its own scroll view,
+    /// never node 0 from the container.
+    #[test]
+    #[ignore = "requires a UIKit main-thread harness"]
+    fn a_reparented_refresh_control_names_its_scroll_view() {
+        let mtm = MainThreadMarker::new().expect(
+            "UIKit views need the main thread: run this test from a UIKit main-thread harness, not a plain `cargo test` thread",
+        );
+        let scroll = UIScrollView::new(mtm);
+        scroll.setTag(6);
+        let control = refresh_control(6, mtm);
+        scroll.setRefreshControl(Some(&control));
+        assert_eq!(refresh_owner(&control), 6);
+
+        let container = UIView::new(mtm);
+        scroll.addSubview(&container);
+        container.addSubview(&control);
+        assert_eq!(control.superview().map(|v| v.tag()), Some(0));
+        assert_eq!(refresh_owner(&control), 6);
+    }
+
+    /// Only the control a scroll view holds now refreshes it: one it replaced,
+    /// or one of a deleted view whose id a new view took, is not it.
+    #[test]
+    #[ignore = "requires a UIKit main-thread harness"]
+    fn only_the_held_refresh_control_refreshes() {
+        let mtm = MainThreadMarker::new().expect(
+            "UIKit views need the main thread: run this test from a UIKit main-thread harness, not a plain `cargo test` thread",
+        );
+        let (old, new) = (refresh_control(6, mtm), refresh_control(6, mtm));
+        let held = Refresh::Native(new.clone());
+        assert!(holds_refresh(Some(&held), &new));
+        assert!(!holds_refresh(Some(&held), &old));
+        // Deleted, or switched to a pull detected here.
+        assert!(!holds_refresh(None, &new));
+        let custom = Refresh::Custom {
+            spinner: None,
+            refreshing: false,
+        };
+        assert!(!holds_refresh(Some(&custom), &new));
     }
 }
 

@@ -10,7 +10,7 @@
   Native). Animated images: iOS decodes up to 600 frames into an animated `UIImage` (frames repeated by their delays' common
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
   (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur); a GIF below
-  API 30 plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
+  API 30 (from API 26) plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
   source's size in pixels on both platforms, whatever size the view decodes at. Downloads are shared per URI (also between
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core
@@ -131,8 +131,10 @@
   key another surface's image uses (the caches are per process). The access check lets `data:` and `blob:` through
   (bytes the app has); only `Image`'s `src` and `placeholder` and Rust components' image props (an `ImageSrc`,
   whose decoding asks `JsHost::image_blob`, which `nsh-js` answers with the same `blob::resolve_image_url`, so an
-  `Avatar`'s `src` and an `<Image>`'s of one URL share their key and bytes) resolve a `blob:` URL, and a video, a canvas image or
-  `getSize` / `prefetch` given one report the platform's error. A `data:` URI that does not decode becomes `data:,`
+  `Avatar`'s `src` and an `<Image>`'s of one URL share their key and bytes) resolve a `blob:` URL, and a video or a
+  canvas image given one report the platform's error. `Image.getSize` of a `blob:` URL reads the size from its bytes'
+  header in the core (`runtime/image.rs`, `picker::image_size`), with no platform request, so it answers in headless
+  runs too; `prefetch` of one resolves at once. A `data:` URI that does not decode becomes `data:,`
   (shows nothing, `onError`): an app writing a key itself never reaches another surface's cache entry. A `blob:`
   URL keeps the key and bytes it resolved to (`BlobUrls`), so setting it again hashes nothing and sends nothing new.
   iOS, macOS, Windows, Linux and GPUI decode `ImageSource::data` as they do a download's

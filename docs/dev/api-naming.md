@@ -47,6 +47,9 @@ go elsewhere under these rules rather than into them.
 - A Rust enum's variants are a string union of the same words (`DialogChangeReason::BackdropPress` →
   `"backdropPress"`).
 - One word stays one word: `readonly`, never `readOnly` (*guides* "readonly"; `docs/READONLY-NAMING-RESEARCH.md`).
+- A runtime module's member is a free function of `nsh_core::prelude` named for what it is, since Rust has no module
+  object to qualify it: `UrlScheme.url()` / `setUrl(url)` → `app_url()` / `set_app_url(url)` (the app's address; a bare
+  `url` would read as any URL), `UrlScheme.on("open", …)` → `next_url_scheme_open()`.
 
 ## Conventions
 
@@ -187,6 +190,27 @@ giving the trigger the focus back. The list itself (the highlight, search, secti
 be navigated by keyboard once open). So `nsh/base`'s `Select` owns that unstyled state machine
 (`crates/nsh-base/src/listbox.rs`, which `Combobox` will share) and keeps `gpui-component`'s names for its data
 (`SearchableListItem::title`, `SearchableGroup`'s sections) while its look stays the app's.
+
+`EmojiPicker` has no counterpart in `gpui-kit`: its name is that of `gpui-base`'s `*Picker`s (`ColorPicker`,
+`DatePicker`), its behavior and names `Command`'s (`onSelect`, `onHighlightChange({ highlighted })`,
+`onQueryChange`, `onCancel`, the `searchBar` / `search` / `list` / `item` / `group` parts, `renderItem`,
+`renderGroup`, `empty`), and its features those of frimousse and AndroidX's `EmojiPickerView` (rows of `columns`
+cells, a global skin tone, recent emoji the app keeps, a newest Emoji version). The groups' tabs and the skin tone
+choice are the app's `Tabs` and controls in its slots, with `onGroupChange` and `scrollToGroup`.
+Its own names are those the emoji pickers share: `EmojiPicker` as frimousse, emoji_picker_flutter and shadcn's
+registry name it (AndroidX `EmojiPickerView`, emoji-picker-element `<emoji-picker>`); `emojiVersion`, the newest
+Emoji version shown, as frimousse, emoji-mart and emoji-picker-element; `skinTone` and its values (`"mediumLight"`, ...)
+as frimousse's and CLDR's skin tone names; `columns` as frimousse and emoji_picker_flutter; `label` as frimousse's and
+emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.txt`, emojibase's `smileys-emotion`,
+...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
+entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
+
+`DataTable`'s column `fixed` uses `nsh_base::data_table::ColumnFixed`, scoped to its
+component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follows its
+`Left` / `Right` variants (`crates/component/src/table/column.rs`). TS uses `"left"` / `"right"`;
+`true` remains a shorthand for `"left"`, and `false` leaves the column scrolling. NSH's
+`ColumnFixed::None` represents the unfixed state that GPUI Kit stores as `Option::None`.
+Left-fixed columns lead the order and right-fixed columns close it.
 
 ## Shapes that can grow
 
@@ -773,6 +797,7 @@ and `Input`'s React Native names follow the rules as well.
 | `Select::open`, `on_open_change` | `open`, `defaultOpen`, `onOpenChange(open, reason)`, `onOpen`, `onClose`, `onCancel` | `Menu`'s (popups, below) | The keys that open it from the trigger (Down, Up, Return, Space) are presses of the trigger: reason `"triggerPress"`; a choice is `"select"` |
 | `SearchableList::searchable`, its search input's placeholder | `searchable`, `searchPlaceholder`; `searchClass` / `searchStyle` | `gpui-component` `Select::searchable`, `search_placeholder` | |
 | (the search input's name: `gpui-component`'s `Input` falls back to its placeholder, `input/input.rs:736-749`) | `searchAccessibilityLabel` (none by default) | `clearButtonAccessibilityLabel`; `Slider`'s `startAccessibilityLabel` | A placeholder is a hint shown while the field is empty, not its name (WAI-ARIA), so the app names the field in its own words; a part's label is the part's name + `AccessibilityLabel` |
+| (none: GPUI's tests find elements by their own handles) | `searchTestID` (none by default) | `testID`; `Combobox`'s `inputTestID` | UI tests find the search field, made by the select inside its popup, by the app's id; a part's id is the part's name + `TestID`, as its label is the part's name + `AccessibilityLabel` |
 | `Select::cleanable` (a clear button in place of the chevron while a value is chosen; `clean` sets none and emits `Confirm(None)`; `tab_stop(false)`) | `cleanable`; the part `clearButtonClass` / `clearButtonStyle`, the slot `clearButton`, `clearButtonAccessibilityLabel`; `onChange(null)` | `gpui-component` `select.rs:542`, `:472-476`, `:611-619`; `input/clear_button.rs` | The button is a sibling after the trigger, which is the app's element: inside it, a press would also open the list. Its label is the app's (`gpui-component`'s is `t!("Input.Clear")`; NSH has no built-in strings), as `handleAccessibilityLabel` is `ResizablePanel`'s |
 | `Select::placeholder`, `icon`, `title_prefix`, `appearance` | the app's `trigger` | `gpui-component` `select.rs:706-733`, `:771` | What the trigger shows is the app's element: it draws the placeholder, the chevron or icon and the title with any prefix |
 | `Select::menu_width`, `menu_max_h` | `popupClass` / `popupStyle` (`w-*`, `max-h-*`) | `gpui-component` `select.rs:694-704` | Sizes are styles of the popup part; it is at least as wide as the trigger |
@@ -787,6 +812,7 @@ and `Input`'s React Native names follow the rules as well.
 | `gpui-base`'s `Confirm { secondary: true }` (Cmd+Enter, Ctrl+Enter off macOS) | Mod+Return closes the list with `"select"` and confirms | `base/src/combobox.rs:18-31` | |
 | `query`, `set_query` (the state's) | `query` (controlled) + `onQueryChange({ query })`, `defaultQuery` | `combobox.rs:397`, `:402` | Value state again; each opening starts from `defaultQuery` (else empty), as `Select`'s search starts empty |
 | `searchable`, `search_placeholder`, `empty`, `disabled`, `cleanable` | the input is the search, always: `placeholder`, `inputClass` / `inputStyle`; `empty`, `disabled`, `cleanable` as `Select`'s (`cleanable` with the clear button's parts) | `combobox.rs:293`, `:811`, `:829`, `:823`, `:817` | shadcn/ui's combobox types into its trigger; a list without search is a `Select` |
+| (none) | `inputTestID` (none by default) | `Select`'s `searchTestID` | UI tests find the input, made by the combobox inside its root, by the app's id (`testID` names the root) |
 | `footer(fn)` (below a separator) | slot `footer`, part `footerClass` / `footerStyle` | `combobox.rs:857` | The separator is the app's look (a border on the footer part) |
 | `placeholder`, `icon`, `appearance`, `render_trigger` (`ComboboxTriggerContext`: selection, placeholder, open, disabled) | `placeholder`; the app's `triggerButton` (a chevron), `prefix` and `suffix` around the input; the field's look the root's `class` / `style` | `combobox.rs:48`, `:799`, `:840`, `:846`; `gpui-component` `input` `prefix` / `suffix` | The field is the component's row, every look the app's; what the context gives the app has (`value`, `open` or `onOpenChange`, `disabled`) |
 | `check_icon` | `renderItem`'s `selected` | `combobox.rs:805` | The row's look is the app's |

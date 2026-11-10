@@ -72,7 +72,7 @@ nsh package --target windows [--run]           # a Rust app, from its directory
 nsh package App.tsx --target windows [--run]   # a TSX app
 ```
 
-Writes a directory and the same as an archive:
+Writes a directory, the same as an archive, and an installer:
 
 ```text
 .nsh\out\<Name>\
@@ -81,10 +81,18 @@ Writes a directory and the same as an archive:
   nsh\assets\…           the assets it imports (a Rust crate's `assets!()` too)
   nsh\app.json           the window title, the app id, the version and the appearance
 .nsh\out\<Name>.zip
+.nsh\out\<Name>.iss        the Inno Setup script for the installer
+.nsh\out\<Name>-setup.exe  the installer, when Inno Setup 6 is installed
 ```
 
 The executable finds `nsh\` next to itself; copy the whole directory (or unpack the `.zip`) wherever the app should
-live: nothing is installed. The icon from `nsh.json` is embedded in the executable (Explorer and the taskbar show it)
+live, or ship the installer. `nsh package` also writes `.nsh\out\<Name>.iss`, an [Inno Setup](https://jrsoftware.org/isinfo.php)
+script, and compiles it to `.nsh\out\<Name>-setup.exe` when Inno Setup 6 is installed (`winget install
+JRSoftware.InnoSetup`). The installer needs no administrator rights: it installs for the current user in
+`%LOCALAPPDATA%\Programs\<Name>`, adds a Start menu shortcut (with the app id, which the taskbar and notifications use)
+and an entry in Installed apps that uninstalls it. Its AppId is the app id, so the installer of a newer version
+upgrades the installed one in place, closing the app first; the app's data is never touched, by upgrades or by the
+uninstaller. The icon from `nsh.json` is embedded in the executable (Explorer and the taskbar show it)
 without any extra tools; packaging on another system keeps the default icon. The app id groups the app's windows in
 the taskbar. `--run` launches the app after packaging it. The executable is not signed: sign it with your own
 certificate (`signtool`) to distribute it.

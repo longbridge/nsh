@@ -8,7 +8,7 @@ group: platforms
 # Packaging
 
 `nsh package` turns an app into something you can install: a `.app` for the iOS simulator, a signed `.ipa` for iOS
-devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, an ad hoc signed `.app` for macOS, a directory and `.tar.gz` for Linux, a directory and `.zip` for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
+devices, a signed `.apk` or `.aab` (Android App Bundle, for Google Play) for Android, an ad hoc signed `.app` for macOS, a directory and `.tar.gz` for Linux, a directory, `.zip` and installer (`<Name>-setup.exe`, with Inno Setup) for Windows, or a static site for the web. It needs no Xcode project and no Gradle.
 
 - **A Rust app** (`nsh.json` names its `"root"`) is packaged from its directory. `nsh` builds the target's runner in
   release mode with your crate compiled in and the root mounted, with no QuickJS: Cargo, the Rust target of the
@@ -150,7 +150,7 @@ without Gradle. Requirements:
   `libnsh.so`.
 
 The app targets API 35 (`targetSdkVersion`, what Google Play requires) unless `nsh.json` names another level, and
-needs API 28 (Android 9) or newer. It contains native code for the ABIs of phones,
+needs API 26 (Android 8) or newer. It contains native code for the ABIs of phones,
 `arm64-v8a` and `armeabi-v7a`; with `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
 yourself, for example `--abi arm64-v8a` for 64-bit phones only, the smallest APK:
 
@@ -229,7 +229,9 @@ nsh package --target windows --run
 Writes `.nsh\out\<Name>\` (the executable `<Name>.exe` with the app's icon, `nsh\assets\…`, `nsh\app.json` with the
 window title, the app id, the version and the appearance, and a TSX app's `nsh\bundle.nshc`) and the same as
 `.nsh\out\<Name>.zip`. A TSX app needs no tools; a Rust app's runner is built with Visual Studio Build Tools. Package on Windows: the runner is built for the machine it is built on, and only Windows can
-embed the icon. The app runs from wherever its directory is copied; nothing is installed. See
+embed the icon. The app runs from wherever its directory is copied. `nsh package` also writes the Inno Setup script
+`.nsh\out\<Name>.iss` and, when Inno Setup 6 is installed, compiles it to `.nsh\out\<Name>-setup.exe`: a per-user
+installer (no administrator rights) with a Start menu shortcut, an Installed apps entry, and in-place upgrades. See
 [Windows](./windows.md#packaging).
 
 ## Web

@@ -936,6 +936,8 @@ pub(crate) struct SearchField {
     pub(crate) placeholder: Prop<Option<SharedString>>,
     /// What screen readers call it.
     pub(crate) accessibility_label: Prop<Option<SharedString>>,
+    /// The id UI tests find it by.
+    pub(crate) test_id: Prop<Option<SharedString>>,
 }
 
 /// The part below the rows and what it holds.
@@ -1012,6 +1014,7 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
                         .unwrap_or_default()
                 })
                 .optional_label(field.accessibility_label)
+                .when_some(field.test_id.get_untracked(), |f, id| f.test_id(&id))
                 // The desktops type into it at once; a touch screen's
                 // keyboard comes when the user asks.
                 .auto_focus(!sheet)

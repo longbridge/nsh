@@ -293,16 +293,12 @@ impl Kind {
         }
     }
 
+    /// Whether its layout node's style is derived from the one JS set,
+    /// which the node then keeps too ([`Node::base_layout`]).
     fn derives_layout(self) -> bool {
         matches!(
             self,
-            Kind::Text
-                | Kind::Scroll
-                | Kind::List
-                | Kind::Cell
-                | Kind::Screen
-                | Kind::Modal
-                | Kind::Overlay
+            Kind::Scroll | Kind::List | Kind::Cell | Kind::Screen | Kind::Modal | Kind::Overlay
         )
     }
 }
@@ -506,7 +502,9 @@ struct Node {
     /// Layout node. Present exactly for nodes that render a native view.
     /// Raw text and spans have none.
     layout: Option<LayoutId>,
-    /// The style JS set, for kinds whose taffy style is derived from it.
+    /// The style JS set, for kinds whose taffy style is derived from it
+    /// and views made overlays by `position: fixed`; for a span, which has
+    /// no layout node, what a layout node takes when it is a block again.
     base_layout: Option<Box<taffy::Style>>,
     view_style: ViewStyle,
     text_style: TextStyle,
@@ -1792,7 +1790,9 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
         let mut dependents = false;
+        let mut moved = false;
         if let Some(scroll) = node.scroll.as_mut() {
+            moved = scroll.offset != (x, y);
             scroll.offset = (x, y);
             if !scroll.dependents.is_empty() {
                 scroll.pending.retain(|&(n, _)| n > applied);
@@ -1805,6 +1805,11 @@ impl<M: TextEngine> Core<M> {
         self.cull_moved(key);
         if dependents {
             self.dependents_dirty(key);
+        }
+        // A link's hint placed where the pointer came over it would be left
+        // behind by the content (`Core::overlay_scrolled`).
+        if moved && !self.overlays.is_empty() {
+            self.overlay_scrolled(key);
         }
     }
 
@@ -2386,6 +2391,14 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command {
+                id,
+                command: Command::CancelPress,
+            } => {
+                self.key(id)?;
+                self.cancel_press(id);
+                Ok(())
+            }
+            Op::Command {
                 command: Command::ClearJsResponder,
                 ..
             } => {
@@ -2850,6 +2863,18 @@ impl<M: TextEngine> Core<M> {
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
+        }
+        // Presses a component passes on, onto this commit's layout.
+        for (id, press, answer) in std::mem::take(&mut self.components.presses) {
+            let target = self.press_target(id, press.page_position);
+            if let Some((node, position)) = target {
+                self.events.push(crate::element::JsEvent::Event(
+                    node,
+                    EventKind::Press,
+                    EventPayload::Press(crate::PressEvent { position, ..press }),
+                ));
+            }
+            answer.borrow_mut().deliver(target.is_some());
         }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
@@ -3762,6 +3787,9 @@ impl<M: TextEngine> Core<M> {
         } else if let Some(l) = node.layout {
             self.layout.set_style(l, layout);
             self.needs_layout = true;
+        } else if node.kind == Kind::Text {
+            // A span: kept for when it is a block again.
+            node.base_layout = Some(Box::new(layout));
         }
         let mut flags = 0;
         if view_changed {
@@ -5061,6 +5089,13 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::WebElement(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.web_element != value {
+                    props.web_element = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::WindowDrag(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.window_drag != value {
@@ -5202,8 +5237,16 @@ impl<M: TextEngine> Core<M> {
                     if attached {
                         self.accessory_attached(key, true);
                     }
+                    return Ok(());
                 }
-                return Ok(());
+                // Other views: the embedding app finds them by it
+                // (`watchScroll`).
+                let value: Option<Arc<str>> = name.as_deref().map(Into::into);
+                let props = node.props.get_or_insert_default();
+                if props.native_id != value {
+                    props.native_id = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
             }
             Prop::Modal(prop) => {
                 if let Some(root) = node.root.as_mut() {
@@ -6013,8 +6056,12 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         if inline {
-            // Block -> span: spans have no layout node or native view.
+            // Block -> span: spans have no layout node or native view; the
+            // span keeps the style for when it is a block again.
             if let Some(l) = node.layout.take() {
+                if node.base_layout.is_none() {
+                    node.base_layout = Some(Box::new(self.layout.style(l).clone()));
+                }
                 self.layout.remove(l);
             }
             if node.created {
@@ -6022,7 +6069,14 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Delete { id: node.id });
             }
         } else {
-            let style = node.base_layout.as_deref().cloned().unwrap_or_default();
+            // A fixed text keeps its style: the layout node takes it with
+            // the position it is fixed at ([`Self::sync_layout_style`]).
+            let style = if node.fixed_view {
+                node.base_layout.as_deref().cloned()
+            } else {
+                node.base_layout.take().map(|b| *b)
+            }
+            .unwrap_or_default();
             let cx = LeafContext::Text(TextContext::new(Arc::default()));
             let layout = self.layout.new_leaf_with_context(style, cx);
             self.layout.set_tag(layout, key);
@@ -6794,7 +6848,7 @@ impl<M: TextEngine> Core<M> {
         let multiplier = node.paragraph.font_multiplier(self.font_scale);
         let inserted = self.update_attachments(key);
         let mut alignments = crate::AttachmentAlignments::default();
-        self.collect_text(key, base, &mut text, &mut alignments);
+        self.collect_text(key, base, &mut text, &mut alignments, false);
         if multiplier != 1.0 {
             for span in &mut text.spans {
                 span.style = scaled(span.style, multiplier);
@@ -6803,6 +6857,7 @@ impl<M: TextEngine> Core<M> {
         let layout = self.nodes[key as usize]
             .layout
             .expect("text block has layout");
+        let colors_at_draw = self.text_engine.draws_colors_from_text();
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         if *cx.text == text && cx.alignments == alignments {
@@ -6821,11 +6876,33 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
+        // Only colors changed, and the platform draws them from the text:
+        // its typesetting, measurements and final layout all stand; the new
+        // text is mounted with the layout drawn (a fitted text has a layout
+        // of its own text, made again).
+        if !inserted
+            && cx.alignments == alignments
+            && colors_at_draw
+            && cx
+                .laid_out
+                .as_ref()
+                .is_none_or(|l| Arc::ptr_eq(&l.text, &cx.text))
+            && cx.text.same_but_colors(&text)
+        {
+            let text = Arc::new(text);
+            if let Some(laid) = &mut cx.laid_out {
+                laid.text = text.clone();
+            }
+            cx.text = text;
+            cx.metadata_changed = true;
+            return true;
+        }
         cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
-        // Platform typesetting state embeds colors too: always rebuild it.
+        // Platform typesetting state embeds colors too (unless it draws
+        // them from the text, above): rebuild it.
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;
@@ -6853,12 +6930,15 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
+    /// The text of `key`'s children into `out`; `in_press`: inside a span
+    /// taking presses.
     fn collect_text(
         &self,
         key: Key,
         style: ResolvedTextStyle,
         out: &mut AttributedText,
         alignments: &mut crate::AttachmentAlignments,
+        in_press: bool,
     ) {
         for &c in &self.nodes[key as usize].children {
             let child = &self.nodes[c as usize];
@@ -6873,14 +6953,29 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
-                    self.collect_text(c, inner, out, alignments);
-                    if pressable(child.events) {
+                    let press = pressable(child.events);
+                    let hinted = child.overlay_watched & overlay::watch::HINT != 0;
+                    self.collect_text(c, inner, out, alignments, in_press || press);
+                    // A link with a hint (its URL) hears the pointer come
+                    // over its characters and leave them. A span that takes
+                    // no presses (a `RichEditor`'s link mark: the editor's
+                    // touches place the caret and open it) is one only for
+                    // its hint: no press, no stop of Tab. Inside a span that
+                    // takes presses it is none, so that span, the innermost
+                    // link there, keeps the press of those characters.
+                    if press || (hinted && !in_press) {
+                        let mut events = child.events;
+                        if hinted {
+                            events.set(EventKind::MouseEnter, true);
+                            events.set(EventKind::MouseLeave, true);
+                        }
                         out.links.push(crate::text::TextLink {
                             start,
                             end: out.len_utf16(),
                             node: child.id,
-                            events: child.events,
-                            focus_stop: child.props.as_ref().is_none_or(|p| p.focus_stop(true)),
+                            events,
+                            focus_stop: press
+                                && child.props.as_ref().is_none_or(|p| p.focus_stop(true)),
                         });
                     }
                     if let Some(test_id) = child.props.as_ref().and_then(|p| p.test_id.clone()) {
@@ -7941,6 +8036,19 @@ impl<M: TextEngine> Core<M> {
                 self.laid_follower(key, None, false, (0.0, 0.0));
             }
             self.set_frame(key, Bounds::default());
+            // An input's field would still show at its former content box
+            // where a platform does not clip a view's children (a browser),
+            // so it gets none either.
+            let node = &mut self.nodes[key as usize];
+            if let Some(input) = node.input.as_mut()
+                && input.content.is_some_and(|c| c != Bounds::default())
+            {
+                input.content = Some(Bounds::default());
+                self.mount.push(MountItem::InputContent {
+                    id: node.id,
+                    content: Bounds::default(),
+                });
+            }
             if self.nodes[key as usize].kind.is_container() {
                 let children = std::mem::take(&mut self.nodes[key as usize].children);
                 for &child in &children {

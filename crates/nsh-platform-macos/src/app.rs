@@ -529,6 +529,10 @@ thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
     /// Links that came before the app's engine started.
     static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// What [`run_app`] runs once launching finished: the link that launched
+    /// the app comes before (`application:openURLs:`), and reaches the
+    /// engine before the app's code runs.
+    static PENDING: RefCell<Option<AppSource>> = const { RefCell::new(None) };
     /// The app asked to start again when its run ends
     /// ([`DesktopCommand::Restart`](nsh_core::desktop::DesktopCommand)).
     static RESTART: Cell<bool> = const { Cell::new(false) };
@@ -539,6 +543,11 @@ thread_local! {
 /// the engine starts.
 fn url_scheme(url: String) {
     let mut url = Some(url);
+    // Before launching finished the app has not started: kept for its start.
+    if PENDING.with(|p| p.borrow().is_some()) {
+        URL_SCHEMES.with(|links| links.borrow_mut().extend(url.take()));
+        return;
+    }
     RUNNING.with(|running| {
         if let Some(running) = running.borrow().as_ref() {
             running.view.surface().control(|control| {
@@ -555,8 +564,36 @@ fn url_scheme(url: String) {
             });
         }
     });
-    if let Some(url) = url {
-        URL_SCHEMES.with(|links| links.borrow_mut().push(url));
+    let Some(url) = url else {
+        return;
+    };
+    // The app's view is there but its engine is not yet (a development
+    // session connecting): the link waits for the engine's start.
+    let view = RUNNING.with(|running| running.borrow().as_ref().map(|r| r.view.clone()));
+    match view {
+        Some(view) => view.surface().launch_links.borrow_mut().push(url),
+        None => URL_SCHEMES.with(|links| links.borrow_mut().push(url)),
+    }
+}
+
+/// Starts [`run_app`]'s app, with the links that came before it.
+fn start_pending() {
+    let Some(source) = PENDING.with(|p| p.borrow_mut().take()) else {
+        return;
+    };
+    let view = RUNNING.with(|running| running.borrow().as_ref().map(|r| r.view.clone()));
+    let Some(view) = view else {
+        return;
+    };
+    view.surface()
+        .launch_links
+        .borrow_mut()
+        .extend(URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())));
+    match source {
+        AppSource::Rust(root) => view.load(App::Rust(root)),
+        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        #[cfg(feature = "dev")]
+        AppSource::DevServer(url) => crate::dev::start(&view, url),
     }
 }
 
@@ -599,6 +636,12 @@ define_class!(
                 }
                 window.makeKeyAndOrderFront(None);
             }
+        }
+
+        // The app starts once the links it was launched with came.
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            start_pending();
         }
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -652,6 +695,22 @@ define_class!(
                 Some(surface) => crate::window::main_should_close(&surface, window),
                 None => true,
             }
+        }
+
+        // Before a zoom: the frame it returns to (`crate::window_state`).
+        #[unsafe(method(windowShouldZoom:toFrame:))]
+        fn should_zoom(&self, window: &NSWindow, _frame: NSRect) -> bool {
+            let surface = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .filter(|running| &*running.window == window)
+                    .map(|running| running.view.surface().clone())
+            });
+            if let Some(surface) = surface {
+                crate::window_state::will_zoom(&surface.window, window);
+            }
+            true
         }
 
         #[unsafe(method(windowWillClose:))]
@@ -885,13 +944,16 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     {
         center_on_display(&window, display);
     }
-    if let Some(app) = loaded {
-        view.load(app);
-    }
+    // The app starts once launching finished (`start_pending`), after the
+    // links it was launched with.
+    let pending = match loaded {
+        Some(App::Rust(root)) => Some(AppSource::Rust(root)),
+        Some(App::Js(bundle)) => Some(AppSource::Bundle(bundle)),
+        None => None,
+    };
     #[cfg(feature = "dev")]
-    if let Some(url) = dev_server {
-        crate::dev::start(&view, url);
-    }
+    let pending = pending.or(dev_server.map(AppSource::DevServer));
+    PENDING.with(|p| *p.borrow_mut() = pending);
     if options.background {
         // Shown without activating the app (it never is: its window is
         // never key, and the test agent's input goes to it directly).
@@ -915,9 +977,6 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     });
     // The mode it opens in, once it shows.
     crate::window::launched_main(&view_surface, kept.map(|p| p.mode).or(launch.default_mode));
-    for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
-        url_scheme(url);
-    }
     app.run();
     stop_running();
     app.setDelegate(None);

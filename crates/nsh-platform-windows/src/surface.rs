@@ -22,7 +22,9 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
+use nsh_core::{
+    Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size,
+};
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
 use rustc_hash::FxHashMap;
 use windows::Win32::Foundation::{HWND, RECT};
@@ -162,6 +164,9 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
+    /// The URL the app was launched with, for the next engine to start
+    /// ([`Surface::set_launch_link`]).
+    launch_link: RefCell<Option<String>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
     /// The window drawn into (shared with the engine's sink).
@@ -279,6 +284,7 @@ impl Surface {
             file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
+            launch_link: RefCell::new(None),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             hwnd: Arc::new(std::sync::atomic::AtomicIsize::new(0)),
@@ -457,14 +463,20 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
-        // The embedding app's theme overrides are in the first frame.
+        // The embedding app's theme overrides are in the first frame, and
+        // the launch URL is the app's address when its code first runs
+        // (`UrlScheme.url()`).
         let tokens = self.host_tokens.borrow().clone();
+        let launch = self.launch_link.take();
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
             }
             if let Some(displays) = displays {
                 control.set_displays(displays);
+            }
+            if let Some(url) = launch {
+                crate::linking::dispatch(control, url);
             }
         };
         match Engine::start_with(config, move || DWriteTextEngine::new(family), sink, setup) {
@@ -511,6 +523,12 @@ impl Surface {
         if let Some(control) = &*self.control.borrow() {
             f(control);
         }
+    }
+
+    /// Sets the URL the app was launched with (`EventKind::UrlScheme`), which
+    /// the next engine to start applies before the app's code first runs.
+    pub(crate) fn set_launch_link(&self, url: String) {
+        *self.launch_link.borrow_mut() = Some(url);
     }
 
     /// Sends an event to JS.
@@ -814,6 +832,20 @@ impl Surface {
                 item,
                 MountItem::Animation(_) | MountItem::AnimationBindings { .. }
             ) {
+                // A window command can paint before the batch ends (sizing
+                // a window sends `WM_SIZE`, where it draws at once; showing
+                // one can paint it): the views take the animated values set
+                // so far first, or one entering with a motion is drawn as
+                // its style is, then at the motion's start, and flashes.
+                if matches!(
+                    item,
+                    MountItem::Command {
+                        command: Command::Desktop(_),
+                        ..
+                    }
+                ) {
+                    self.anim.borrow_mut().write(&self.mounter.borrow());
+                }
                 self.mounter.borrow_mut().apply(self, item);
             }
         }
@@ -1127,7 +1159,7 @@ mod tests {
 
     use nsh_core::Cursor;
     use windows::Win32::{
-        Foundation::{LPARAM, POINT, WPARAM},
+        Foundation::{LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Gdi::ClientToScreen,
         UI::{
             Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture},
@@ -1306,5 +1338,172 @@ mod tests {
                 None => assert_eq!(info.flags.0 & CURSOR_SHOWING.0, 0, "cursor stayed visible"),
             }
         }
+    }
+
+    /// The opacity the animator has written into view `id`.
+    fn animated_opacity(surface: &Surface, id: NodeId) -> Option<f32> {
+        let view = surface.mounter.borrow().views.get(id).expect("the view");
+        view.state().anim.opacity
+    }
+
+    #[test]
+    fn window_commands_see_the_animated_values_set_before_them() {
+        use nsh_core::{
+            ViewKind,
+            animation::{AnimationOp, AnimationProp},
+            desktop::{DesktopCommand, WindowRequest},
+        };
+
+        let surface = Surface::new(Environment::default());
+        // What the core sends for a window that fits its content (with no
+        // window here, nothing is sized).
+        let fit = || MountItem::Command {
+            id: ROOT_ID,
+            command: Command::Desktop(Box::new(DesktopCommand::Request(
+                WindowRequest::SetContentSize {
+                    width: None,
+                    height: Some(Points(250.0)),
+                },
+            ))),
+        };
+        let set = |value| MountItem::Animation(AnimationOp::Set { node: 2, value });
+        // A view entering with a fade, a window command, then more of the
+        // batch: the command sees the value set before it.
+        surface.apply(&MountBatch {
+            items: vec![
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: 2,
+                    value: 0.25,
+                }),
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::AnimationBindings {
+                    id: 2,
+                    bindings: vec![(AnimationProp::Opacity, 2)],
+                },
+                fit(),
+                set(0.75),
+            ],
+        });
+        assert_eq!(animated_opacity(&surface, 2), Some(0.25));
+        // A value bound before moves with no bindings sent again.
+        surface.apply(&MountBatch {
+            items: vec![set(0.5), fit()],
+        });
+        assert_eq!(animated_opacity(&surface, 2), Some(0.5));
+        // Without a window command, the values are written once the
+        // batches are applied, as before.
+        surface.apply(&MountBatch {
+            items: vec![set(1.0)],
+        });
+        assert_eq!(animated_opacity(&surface, 2), Some(0.5));
+        surface.write_animations();
+        assert_eq!(animated_opacity(&surface, 2), Some(1.0));
+    }
+
+    thread_local! {
+        /// The root a test window's `WM_SIZE` looks under, and the opacity
+        /// its view 2 had at each one ([`observe_sizes`]).
+        static SIZED: RefCell<(Option<NshView>, Vec<Option<f32>>)> =
+            const { RefCell::new((None, Vec::new())) };
+        /// The window procedure [`observe_sizes`] wraps.
+        static WRAPPED: Cell<isize> = const { Cell::new(0) };
+    }
+
+    /// Notes the opacity view 2 has when the window is sized, which the
+    /// window draws it with in `WM_SIZE`, then hands the message on.
+    unsafe extern "system" fn observe_sizes(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_SIZE {
+            SIZED.with_borrow_mut(|(root, seen)| {
+                let view = root
+                    .as_ref()
+                    .and_then(|root| root.child_views().into_iter().find(|v| v.id() == 2));
+                seen.push(view.and_then(|v| v.state().anim.opacity));
+            });
+        }
+        // SAFETY: the window's own procedure, read from it before it was
+        // wrapped.
+        unsafe {
+            let wrapped = std::mem::transmute::<isize, WNDPROC>(WRAPPED.get());
+            CallWindowProcW(wrapped, hwnd, msg, wparam, lparam)
+        }
+    }
+
+    #[test]
+    fn a_window_command_draws_the_animated_values_set_before_it() {
+        use nsh_core::{
+            ViewKind,
+            animation::{AnimationOp, AnimationProp},
+            desktop::{DesktopCommand, WindowRequest},
+        };
+
+        let surface = Surface::new(Environment::default());
+        let hwnd =
+            crate::window::create(&surface, "NSH window command", (320, 240), None, false).unwrap();
+        SIZED.with_borrow_mut(|sized| *sized = (Some(surface.root.clone()), Vec::new()));
+        let observe: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT =
+            observe_sizes;
+        // SAFETY: the test's own window, wrapped until it is destroyed.
+        unsafe {
+            WRAPPED.set(GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, observe as usize as isize);
+        }
+        let fit = |height| MountItem::Command {
+            id: ROOT_ID,
+            command: Command::Desktop(Box::new(DesktopCommand::Request(
+                WindowRequest::SetContentSize {
+                    width: None,
+                    height: Some(Points(height)),
+                },
+            ))),
+        };
+        // Two commands that size the (hidden) window, which draws at once,
+        // with the value moved between them.
+        surface.apply(&MountBatch {
+            items: vec![
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: 2,
+                    value: 0.25,
+                }),
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::AnimationBindings {
+                    id: 2,
+                    bindings: vec![(AnimationProp::Opacity, 2)],
+                },
+                fit(250.0),
+                MountItem::Animation(AnimationOp::Set {
+                    node: 2,
+                    value: 0.75,
+                }),
+                fit(300.0),
+            ],
+        });
+        let seen = SIZED.with_borrow_mut(|(root, seen)| {
+            *root = None;
+            std::mem::take(seen)
+        });
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(hwnd) };
+        assert_eq!(seen, [Some(0.25), Some(0.75)]);
     }
 }

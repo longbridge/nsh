@@ -110,6 +110,7 @@ and take their look from the app.
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | A region whose content expands and collapses | [Collapsible](./collapsible.md) |
 | `<Command>` | `nsh_base::command()` | A command palette: a search field over commands filtered natively, a virtualized list, the keys of a Cmd+K palette | [Command](./command.md) |
+| `<EmojiPicker>` | `nsh_base::emoji_picker()` | An emoji picker: a search field over every emoji in groups, the app's recent ones and names, skin tones, a virtualized grid | [EmojiPicker](./emoji-picker.md) |
 | `<DataTable>` | `nsh_base::data_table()` | A table of rows and columns of any number, selectable, sortable, with resizable and movable columns | [DataTable](./data-table.md) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | The changes between two texts or of a patch, split or unified | [DiffView](./diff-view.md) |
@@ -435,6 +436,44 @@ view().on_press(open_page).child(
 | `nativeID` | `.native_id(id)` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
+
+### The page's markup
+
+On the web each view is an HTML element, the one its props say it is, so search engines and screen readers see the
+page's headings, paragraphs, links and landmarks; its layout, styles and events stay the view's. The other platforms
+draw the view as they always do.
+
+| What the view is | Element on the web |
+|---|---|
+| `role="header"` with `accessibilityLevel` 1 to 6 (Rust `.role(AccessibilityRole::Header)`, `.accessibility_level(n)`) | `h1` … `h6` (`h2` without a level) |
+| A [`Link`](./link.md) with an `href` | `a`, to the `href` |
+| `web={{ element }}` (Rust `.web_element(WebElement::P)`) | The element it names: `"p"`, `"nav"`, `"header"`, `"footer"`, `"main"`, `"article"`, `"section"`, `"aside"`, `"ul"`, `"ol"`, `"li"`, `"strong"`, `"em"`, `"blockquote"`, `"figure"`, `"figcaption"`, `"time"`, `"address"`; it wins over the role |
+| Anything else | `div` |
+
+A link is the `Link`'s to press: a plain click is its `onOpen` (with `openWith="app"`, the app navigates as it always
+does); crawlers follow the `href`, and a click with a modifier key or the middle button opens it as a browser link
+does.
+
+```rust tabs
+use nsh_base::{LinkOpenWith, link};
+use nsh_core::{WebElement, prelude::*};
+
+link()
+    .href("/notes/q3-earnings")
+    .open_with(LinkOpenWith::App)
+    .on_open(move |_: &SharedString| routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").role(AccessibilityRole::Header).accessibility_level(2))
+    .child(text("Revenue grew 12%.").web_element(WebElement::P))
+```
+
+```tsx tabs
+<Link href="/notes/q3-earnings" openWith="app" onOpen={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text role="header" accessibilityLevel={2}>Q3 earnings</Text>
+  <Text web={{ element: "p" }}>Revenue grew 12%.</Text>
+</Link>
+```
+
+[The web](../docs/web.md#search-engines) shows a whole site built this way.
 
 ### Gestures driving animated values
 

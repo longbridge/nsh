@@ -20,6 +20,8 @@ mod editor_completion;
 mod editor_definition;
 mod editor_diagnostics;
 mod editor_languages;
+#[cfg(feature = "emoji-picker")]
+mod emoji_picker;
 mod focus_within;
 mod hover_card;
 mod link;

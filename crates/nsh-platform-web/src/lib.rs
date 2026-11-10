@@ -84,6 +84,11 @@ thread_local! {
     static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The launch parameters of the next app the page starts
+    /// ([`nsh_set_host_params`]): its `host.params`.
+    static HOST_PARAMS: RefCell<serde_json::Map<String, serde_json::Value>> = RefCell::new(serde_json::Map::new());
+    /// The address the next app starts at ([`nsh_set_page_url`]).
+    static PAGE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// What the page reported last ([`nsh_environment`]), kept for the
     /// next start ([`nsh_start_rust`], `nsh_browser_start`).
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
@@ -225,6 +230,7 @@ base_parts!(
     toast => nsh_part_toast,
     pickers => nsh_part_pickers,
     color_picker => nsh_part_color_picker,
+    emoji_picker => nsh_part_emoji_picker,
     carousel => nsh_part_carousel,
     tree => nsh_part_tree,
     fields => nsh_part_fields,
@@ -706,7 +712,14 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
-        host: Default::default(),
+        host: {
+            let host = nsh_engine::HostChannel::new();
+            let params = HOST_PARAMS.with(|p| std::mem::take(&mut *p.borrow_mut()));
+            if !params.is_empty() {
+                host.set_params(params);
+            }
+            host
+        },
         picker: None,
         speech: None,
         audio: None,
@@ -720,7 +733,24 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         }
     });
     let text = Rc::new(WebTextEngine::default());
-    let Some(mut engine) = LocalEngine::start(config, text.clone(), Sink) else {
+    // The page's address, there before the app's code runs, with the page's
+    // base URL, which Rust's `set_app_url` resolves against as
+    // `history.replaceState` does.
+    let page = PAGE_URL.with(|u| u.borrow_mut().take()).map(|url| {
+        let base = BASE_URL
+            .with(|b| b.borrow().clone())
+            .unwrap_or_else(|| url.clone());
+        serde_json::json!({ "url": url, "page": true, "quiet": true, "base": base })
+    });
+    let Some(mut engine) = LocalEngine::start_with(config, text.clone(), Sink, |control| {
+        if let Some(payload) = page {
+            control.dispatch_event(
+                ROOT_ID,
+                EventKind::UrlScheme,
+                event::payload(EventKind::UrlScheme, payload),
+            );
+        }
+    }) else {
         return -1.0;
     };
     // A task woken by a browser callback (a WebSocket message in an app's
@@ -781,6 +811,19 @@ pub unsafe extern "C" fn nsh_after_gate(ptr: *const u8, len: usize) -> f64 {
     pump()
 }
 
+/// Sets the address the app started next starts at (`UrlScheme.url()`,
+/// `app_url`): the page's, when the app is the page.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_set_page_url(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let url = unsafe { string(ptr, len) };
+    PAGE_URL.with(|u| *u.borrow_mut() = Some(url));
+}
+
 /// Sets the page's URL (`document.baseURI`): relative request URLs
 /// (`fetch("/api")`) of the apps started next resolve against it.
 ///
@@ -792,6 +835,25 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
     // SAFETY: guaranteed by the caller.
     let url = unsafe { string(ptr, len) };
     BASE_URL.with(|b| *b.borrow_mut() = Some(url));
+}
+
+/// Sets the launch parameters of the next app the page starts (its
+/// `host.params`, a JSON object; anything else is none): what the page
+/// knows before the app runs, such as data it was served with, so the
+/// app's first frame shows it without asking for it again.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_set_host_params(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let json = unsafe { string(ptr, len) };
+    let params = match serde_json::from_str(&json) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    HOST_PARAMS.with(|p| *p.borrow_mut() = params);
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the

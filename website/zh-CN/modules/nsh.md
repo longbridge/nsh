@@ -1897,7 +1897,7 @@ await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", s
 
 ### Notifications.permission
 
-`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
 
 ## UrlScheme
 
@@ -1940,6 +1940,67 @@ scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小�
 
 嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
 `NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
+
+### UrlScheme.url
+
+`url()` 是应用的地址，`setUrl(url)` 设置它，应用借此在每个平台上给自己的页面分配地址：
+
+```ts
+const UrlScheme: {
+  on(event: "open", listener: (event: { url: string }) => void): () => void;
+  /** 应用的地址，没有时为 null。 */
+  url(): string | null;
+  /** 设置当前页面的地址；应用的页面保持不变。 */
+  setUrl(url: string): void;
+};
+```
+
+| 平台 | `url()` | `setUrl(url)` |
+| --- | --- | --- |
+| Web，应用占据整个页面 | 页面的地址：加载时的地址、`setUrl` 设置的地址，或浏览器后退回到的那条记录的地址 | 替换当前历史记录的地址，与 `history.replaceState` 一样解析（相对于页面的 `<base href>`），在同一轮压入或弹出的页面的历史记录之后生效 |
+| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL；把它交给系统（Handoff、App Links）由嵌入应用负责 |
+
+URL 不是字符串、超过 16 KiB 或含有空白字符时抛出 `TypeError`；在 Web 上应用占据整个页面时，不是页面同源 URL 的地址同样抛出 `TypeError`。
+应用只有一个地址，Rust 读的也是它，`url()` 直接读取它：链接、Rust 的 `set_app_url` 和 `setUrl` 的改动都立即可见。在上表的平台上，启动应用的链接在应用的代码运行之前就已到达，所以第一次调用 `url()` 就能读到它，它同时也作为第一个 `open` 到达（在 Web 上，页面的地址从一开始就在）。
+在 Web 上，正在显示的栈里压入的每个页面都有自己的历史记录，浏览器的后退就在应用内后退：栈的页面返回，地址变为那条记录的地址，
+和应用自己弹出页面一样不发 `open`（应用用 `popOnBack={false}` 或 `onBackPress` 留下的页面保留它的历史记录和地址）。前进到栈里已经没有的页面，以及回到页面上一次加载留下的历史记录（刷新会保留它们）时，这条记录的地址像链接一样作为 `open` 到达：应用显示它指向的页面（如下例），不处理它的应用停在原处。应用用 `url()` 构建最初的路由，在栈的
+[`onChange`](../elements/nav-stack.md) 里设置顶层页面的地址，并显示链接指向的页面，它的页面就在所有平台上都有了地址：
+
+```tsx
+import { UrlScheme } from "nsh";
+import { NavStack, createNavStack } from "nsh/base";
+
+// 路由是 ""（收件箱）或一条消息的 id：用字符串，同一个地址得到的路由就等于正在显示的路由。
+type Route = string;
+
+function routesOf(url: string | null): Route[] {
+  const id = url && new URL(url, "https://app.invalid/").searchParams.get("message");
+  return id ? ["", id] : [""];
+}
+
+// "." 是页面自己的路径，不带查询参数。
+const urlOf = (route: Route) => (route ? `?message=${encodeURIComponent(route)}` : ".");
+
+const nav = createNavStack<Route>(routesOf(UrlScheme.url()));
+
+// 链接，以及 Web 上靠后退到不了的前进。
+UrlScheme.on("open", ({ url }) => nav.setRoutes(routesOf(url)));
+
+export function App() {
+  return (
+    <NavStack
+      state={nav}
+      style={{ flex: 1 }}
+      onChange={({ routes }) => UrlScheme.setUrl(urlOf(routes[routes.length - 1]))}
+    >
+      {(route) => (route ? <Message id={route} /> : <Inbox onOpen={(id) => nav.push(id)} />)}
+    </NavStack>
+  );
+}
+```
+
+Rust 代码 await `nsh_core::prelude` 的 `app_url()`，调用 `set_app_url(url)`，与 `next_url_scheme_open()` 并列；它们和 `url()`、
+`setUrl` 是同一个地址，`setUrl` 会抛错的 URL，`set_app_url` 返回错误。在 Web 上它和 `setUrl` 一样按页面的基准地址解析 URL，与页面不同源的地址返回错误。
 
 ## Speech
 

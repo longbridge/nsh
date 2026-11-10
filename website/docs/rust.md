@@ -366,8 +366,8 @@ prop keeps its value and the rest of the component renders.
 A function or a member runs the way its Rust signature says. One that is not `async` runs inside the TSX call and
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
 `async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs). A module function
-taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar), and so does a
-component's ref method; their return type decides what TSX gets: one returning `()` gives `void`, with no reply
+taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and may `spawn` a
+task, which runs to its end. A component's ref method also reaches the platform in order with the UI; their return type decides what TSX gets: one returning `()` gives `void`, with no reply
 (TSX calls it and moves on); one returning `Result<(), E>` gives `Promise<void>`, which rejects with the `Err`'s
 message (the call runs with the UI's changes, after the TSX call returned, so the Promise carries its error; one
 nobody awaits or catches is logged as an [unhandled rejection](./dev-server-and-debugging.md#logs)); one

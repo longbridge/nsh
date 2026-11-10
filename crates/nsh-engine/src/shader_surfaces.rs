@@ -175,6 +175,37 @@ impl Surfaces {
     }
 }
 
+/// Calls `f` on a thread of Metal's once the GPU finished the work
+/// submitted to `queue` so far: an empty command buffer committed after it,
+/// which completes after the buffers before it on the queue. `false` (and
+/// `f` dropped) when the queue is not Metal's.
+pub(crate) fn when_done(queue: &wgpu::Queue, f: impl FnOnce() + Send + 'static) -> bool {
+    use std::sync::Mutex;
+
+    use objc2_metal::{MTLCommandBuffer, MTLCommandQueue};
+
+    // SAFETY: the raw queue is only used to commit a command buffer of its
+    // own, which wgpu does not track and which holds no resources.
+    let Some(hal) = (unsafe { queue.as_hal::<wgpu::hal::api::Metal>() }) else {
+        return false;
+    };
+    let Some(buffer) = hal.as_raw().commandBuffer() else {
+        return false;
+    };
+    // Metal copies the block, which it calls once.
+    let f = Mutex::new(Some(f));
+    let block = block2::RcBlock::new(move |_| {
+        if let Some(f) = f.lock().ok().and_then(|mut f| f.take()) {
+            f();
+        }
+    });
+    // SAFETY: a handler taking the command buffer, added before the buffer
+    // is committed.
+    unsafe { buffer.addCompletedHandler(block2::RcBlock::as_ptr(&block)) };
+    buffer.commit();
+    true
+}
+
 /// One surface and its texture on `device`.
 fn slot(device: &wgpu::Device, width: u32, height: u32) -> Option<Slot> {
     let surface = surface(width, height)?;
