@@ -16,7 +16,10 @@ use std::sync::{
 
 use nsh_base::{tab, tabs};
 use nsh_core::{
-    Color, LayoutCurve, MountItem, NodeId, Size, element::Root, platform::Os, prelude::*,
+    Color, LayoutCurve, MountItem, NodeId, Size,
+    element::{Root, Spring},
+    platform::Os,
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -490,7 +493,7 @@ fn a_selection_moves_only_the_indicator_with_a_spring() {
     assert_eq!(frame_of(&pressed, id), Some([158.0, 28.0, 100.0, 2.0]));
     assert_eq!(
         motion_of(&pressed, id),
-        Some(LayoutCurve::Spring { damping: 0.85 })
+        Some(LayoutCurve::Spring(Spring::new(280.0).damping_ratio(0.85)))
     );
     // Its frame alone moves, after its one layout animation; the rest is
     // the two tabs' states (selected, the focus stop).
@@ -509,7 +512,7 @@ fn a_selection_moves_only_the_indicator_with_a_spring() {
     assert_eq!(frame_of(&back, id), Some([10.0, 28.0, 60.0, 2.0]));
     assert_eq!(
         motion_of(&back, id),
-        Some(LayoutCurve::Spring { damping: 0.85 })
+        Some(LayoutCurve::Spring(Spring::new(280.0).damping_ratio(0.85)))
     );
 }
 
@@ -609,7 +612,7 @@ fn with_no_tab_selected_the_indicator_is_hidden_and_shows_at_once() {
     assert_eq!(frame_of(&moved, id), Some([158.0, 28.0, 100.0, 2.0]));
     assert_eq!(
         motion_of(&moved, id),
-        Some(LayoutCurve::Spring { damping: 0.85 })
+        Some(LayoutCurve::Spring(Spring::new(280.0).damping_ratio(0.85)))
     );
 }
 
@@ -625,7 +628,7 @@ fn with_several_tabs_selected_the_indicator_is_on_the_first() {
     assert_eq!(frame_of(&pressed, id), Some([10.0, 28.0, 60.0, 2.0]));
     assert_eq!(
         motion_of(&pressed, id),
-        Some(LayoutCurve::Spring { damping: 0.85 })
+        Some(LayoutCurve::Spring(Spring::new(280.0).damping_ratio(0.85)))
     );
 }
 
@@ -645,7 +648,10 @@ fn a_tab_that_grows_as_it_is_selected_takes_the_indicator_animated_once() {
     let animated: Vec<_> = moved.iter().filter(|m| m.1.is_some()).collect();
     assert_eq!(
         animated,
-        [&(id, Some(LayoutCurve::Spring { damping: 0.85 }))],
+        [&(
+            id,
+            Some(LayoutCurve::Spring(Spring::new(280.0).damping_ratio(0.85)))
+        )],
         "the indicator's frame alone springs, once; the tabs resize at once: {moved:?}"
     );
     let springs = (pressed.iter().flatten())

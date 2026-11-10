@@ -205,10 +205,11 @@ platform::HostEnvironment.font_scale                             # a font scale 
 props::AccessibilityValue.max                                    # an app-defined value
 props::AccessibilityValue.min                                    # an app-defined value
 props::AccessibilityValue.now                                    # an app-defined value
-props::LayoutCurve::Spring.damping                               # a rate or a physical constant of an animation
+props::LayoutCurve::FittedSpring.damping_ratio                   # a rate or a physical constant of an animation
 props::LayoutTransition.delay_ms                                 # time
 props::LayoutTransition.duration_ms                              # time
 props::LayoutTransition::new(duration_ms)                        # time
+props::LayoutTransition::run_ms ->                               # time
 props::ViewProps.long_press_delay                                # time
 scroll::KeyMove::Pages.0                                         # a number of viewports
 scroll::KeyMove::sign ->                                         # a direction, -1 or 1
@@ -322,6 +323,12 @@ element::animated::Animation::timing(to)                              # an anima
 element::animated::Spring.damping                                     # a rate or a physical constant of an animation
 element::animated::Spring.frame_rate                             # a frame rate (Hz)
 element::animated::Spring::frame_rate(hz)                        # a frame rate (Hz)
+element::animated::Spring::new(response_ms)                      # time
+element::animated::Spring::from_stiffness(stiffness)             # a rate or a physical constant of an animation
+element::animated::Spring::damping_ratio(ratio)                  # a rate or a physical constant of an animation
+element::animated::Spring::progress(ms)                          # time
+element::animated::Spring::progress ->                           # easing curve coordinates (unit square)
+element::animated::Spring::settle_ms ->                          # time
 element::animated::Spring.mass                                        # a rate or a physical constant of an animation
 element::animated::Spring.stiffness                                   # a rate or a physical constant of an animation
 element::animated::Spring.velocity                                    # a rate or a physical constant of an animation

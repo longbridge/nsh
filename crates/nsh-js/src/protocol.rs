@@ -1396,7 +1396,7 @@ mod tests {
         );
         assert_eq!(
             a.update.map(|u| u.curve),
-            Some(LayoutCurve::Spring { damping: 0.7 })
+            Some(LayoutCurve::FittedSpring { damping_ratio: 0.7 })
         );
         assert_eq!(a.delete, None);
         // Damping is held to 0.01..1; without a duration, 300 ms.
@@ -1404,7 +1404,7 @@ mod tests {
         assert_eq!(
             b.update,
             Some(LayoutTransition {
-                curve: LayoutCurve::Spring { damping: 1.0 },
+                curve: LayoutCurve::FittedSpring { damping_ratio: 1.0 },
                 property: LayoutProperty::Opacity,
                 duration_ms: 300.0,
                 delay_ms: 0.0,

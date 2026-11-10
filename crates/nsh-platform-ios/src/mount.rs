@@ -19,15 +19,16 @@ use nsh_engine::EngineControl;
 use objc2::{
     MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::ProtocolObject, sel,
 };
-use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, CGVector};
 use objc2_quartz_core::{CAAnimation, CALayer, CAMediaTiming, CATransform3D};
 use objc2_ui_kit::{
     UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents, UIDevice,
     UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
     UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
-    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
+    UISpringTimingParameters, UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimating,
+    UIViewAnimationOptions, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext, UIViewPropertyAnimator,
 };
 
 use crate::{
@@ -4820,7 +4821,7 @@ fn animate(
     f: impl Fn() + 'static,
 ) {
     let block = block2::RcBlock::new(f);
-    let (duration, delay) = (t.duration_ms as f64 / 1000.0, t.delay_ms as f64 / 1000.0);
+    let (duration, delay) = (t.run_ms() as f64 / 1000.0, t.delay_ms as f64 / 1000.0);
     let base = UIViewAnimationOptions::BeginFromCurrentState
         | UIViewAnimationOptions::AllowUserInteraction;
     match t.curve {
@@ -4835,17 +4836,35 @@ fn animate(
                 mtm,
             )
         }),
-        LayoutCurve::Spring { damping } => {
+        LayoutCurve::FittedSpring { damping_ratio } => {
             UIView::animateWithDuration_delay_usingSpringWithDamping_initialSpringVelocity_options_animations_completion(
                 duration,
                 delay,
-                damping as CGFloat,
+                damping_ratio as CGFloat,
                 0.0,
                 base,
                 &block,
                 None,
                 mtm,
             )
+        }
+        // UIKit's own spring of the same physics, which UIKit times by the
+        // physics (`duration`, the time it settles in, is left aside).
+        LayoutCurve::Spring(spring) => {
+            let timing = UISpringTimingParameters::initWithMass_stiffness_damping_initialVelocity(
+                UISpringTimingParameters::alloc(mtm),
+                spring.mass as CGFloat,
+                spring.stiffness as CGFloat,
+                spring.damping as CGFloat,
+                CGVector { dx: 0.0, dy: 0.0 },
+            );
+            let animator = UIViewPropertyAnimator::initWithDuration_timingParameters(
+                UIViewPropertyAnimator::alloc(mtm),
+                duration,
+                ProtocolObject::from_ref(&*timing),
+            );
+            animator.addAnimations(&block);
+            animator.startAnimationAfterDelay(delay);
         }
         curve => {
             let curve = match curve {
@@ -4892,7 +4911,7 @@ fn disappear(
         }
     });
     UIView::animateWithDuration_delay_options_animations_completion(
-        t.duration_ms as f64 / 1000.0,
+        t.run_ms() as f64 / 1000.0,
         t.delay_ms as f64 / 1000.0,
         UIViewAnimationOptions::BeginFromCurrentState,
         &block,

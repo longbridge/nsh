@@ -5,24 +5,18 @@
 
 use nsh_core::{
     AccessibilityState,
-    element::{LayoutCurve, LayoutTransition, Style},
+    element::{LayoutTransition, Spring, Style},
     prelude::*,
 };
 
 use crate::roving::{Pattern, Roving, member};
 
-/// How long the indicator takes to travel to another tab, in milliseconds:
-/// as long as `gpui-component`'s `spring_move` (a 280 ms response, a damping
-/// ratio of 0.85: `theme/motion.rs`) takes to come within a thousandth of
-/// its end, which is where a layout spring of that damping fitted into
-/// this duration does too (`nsh_core::transition`).
-/// `ln 1000 / (0.85 · 2π / 0.28 s)`.
-const INDICATOR_MS: f32 = 362.0;
-
 /// The indicator's travel to another tab: `gpui-component`'s tab bar
-/// indicator's `spring_move`, a little springy.
-const INDICATOR: LayoutTransition =
-    LayoutTransition::new(LayoutCurve::Spring { damping: 0.85 }, INDICATOR_MS);
+/// indicator's `spring_move` (a 280 ms response, a damping ratio of 0.85:
+/// `theme/motion.rs`), a little springy.
+fn indicator_motion() -> LayoutTransition {
+    LayoutTransition::spring(Spring::new(280.0).damping_ratio(0.85))
+}
 
 /// What a [`Tab`] finds of its [`Tabs`] through context.
 #[derive(Clone)]
@@ -176,7 +170,7 @@ fn indicator(list: Roving, class: Prop<Option<SharedString>>, style: Prop<Style>
         .accessibility_elements_hidden(true)
         .follow(move || list.current())
         .style_when(move || none.current().is_none(), |s| s.hidden())
-        .follow_transition(move || (!reduce_motion()).then_some(INDICATOR))
+        .follow_transition(move || (!reduce_motion()).then_some(indicator_motion()))
         .app_class(class)
         .inline_style(style)
 }
