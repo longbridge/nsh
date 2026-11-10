@@ -3590,6 +3590,19 @@ tap id:bad
 expect theme result refused TypeError
 expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
+# Malformed JSON shapes and colors leave the current theme in force.
+tap id:bad-structure
+expect theme result bad-structure refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-function
+expect theme result bad-function refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-length
+expect theme result bad-length refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
 tap id:built
 expect theme result built
 expect theme up #138a5aff
