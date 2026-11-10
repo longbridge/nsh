@@ -159,12 +159,14 @@ pub(crate) fn promise(cx: *mut JsContext, call: u32) -> JsValue {
     promise
 }
 
-/// `ref.evaluateJavaScript`: use the same engine task and error conversion
-/// as Rust calls, including rejected (rather than thrown) argument errors.
-pub(crate) fn evaluate_java_script(
+/// `ref.evaluate(script, { timeout })` of a web view: a promise the core
+/// settles with `{ value }` or the failure. A wrong argument rejects it too
+/// (a `TypeError` / `RangeError`), as every call that returns a promise.
+pub(crate) fn evaluate(
     cx: *mut JsContext,
     id: Option<u32>,
     script: JsValue,
+    options: JsValue,
 ) -> JsValue {
     use nsh_core::element::{IntoThrown, JsError};
     let call = next_call(cx);
@@ -173,41 +175,86 @@ pub(crate) fn evaluate_java_script(
     if unsafe { qjs::JS_IsException(promise) } {
         return promise;
     }
-    // SAFETY: checks the borrowed argument's tag; no user conversion runs.
-    let script = if unsafe { qjs::JS_IsString(script) } {
-        string_arg(cx, script).ok_or_else(|| JsError::Type("expected a script string".into()))
-    } else {
-        Err(JsError::Type(
-            "evaluateJavaScript expects a script string".into(),
-        ))
+    let reject = |error: JsError| {
+        let _ = settle(cx, call, Err(error.into_thrown()));
+        promise
     };
-    let script = match script {
-        Ok(script) => script,
-        Err(error) => {
-            let _ = settle(cx, call, Err(error.into_thrown()));
-            return promise;
-        }
+    // SAFETY: checks the borrowed argument's tag; no user conversion runs.
+    let script = match unsafe { qjs::JS_IsString(script) }
+        .then(|| string_arg(cx, script))
+        .flatten()
+    {
+        Some(script) => script,
+        None => return reject(JsError::Type("evaluate expects a script string".into())),
+    };
+    let timeout = match evaluate_timeout(cx, options) {
+        Ok(timeout) => timeout,
+        Err(error) => return reject(error),
     };
     let Some(id) = id else {
-        let _ = settle(
-            cx,
-            call,
-            Err(JsError::Type("nsh: not a node".into()).into_thrown()),
-        );
-        return promise;
+        return reject(JsError::Type("nsh: not a node".into()));
     };
-    if dom::push_op(cx, Op::EvaluateJavaScript { id, call, script }).is_err() {
-        // The op limit stops the engine; still reject this promise rather
-        // than throwing synchronously from an awaitable ref method.
-        // SAFETY: take the exception produced by push_op on this live VM.
-        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
-        let _ = settle(
-            cx,
+    if dom::push_op(
+        cx,
+        Op::Evaluate {
+            id,
             call,
-            Err(JsError::Error("the engine stopped before evaluation".into()).into_thrown()),
-        );
+            script,
+            timeout,
+        },
+    )
+    .is_err()
+    {
+        // The op limit stops the engine; the promise still rejects.
+        // SAFETY: take the exception push_op raised on this live VM.
+        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
+        return reject(JsError::Error(
+            "the engine stopped before evaluating".into(),
+        ));
     }
     promise
+}
+
+/// `evaluate`'s `options.timeout` (milliseconds, 30 seconds when absent).
+fn evaluate_timeout(
+    cx: *mut JsContext,
+    options: JsValue,
+) -> Result<std::time::Duration, nsh_core::element::JsError> {
+    use nsh_core::element::{EvaluateOptions, JsError};
+    // SAFETY: tag checks of a borrowed argument.
+    if unsafe { qjs::JS_IsUndefined(options) } {
+        return Ok(EvaluateOptions::default().timeout);
+    }
+    // SAFETY: as above.
+    if !unsafe { qjs::JS_IsObject(options) } {
+        return Err(JsError::Type("evaluate's options must be an object".into()));
+    }
+    // SAFETY: reads a property of a live object; the value is freed below.
+    let timeout = unsafe { qjs::JS_GetPropertyStr(cx, options, c"timeout".as_ptr()) };
+    // SAFETY: tag checks and a number conversion of the owned value.
+    let result = unsafe {
+        if qjs::JS_IsException(timeout) {
+            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+            Err(JsError::Type("evaluate's timeout could not be read".into()))
+        } else if qjs::JS_IsUndefined(timeout) {
+            Ok(EvaluateOptions::default().timeout)
+        } else if !qjs::JS_IsNumber(timeout) {
+            Err(JsError::Type("evaluate's timeout must be a number".into()))
+        } else {
+            let mut ms = 0f64;
+            qjs::JS_ToFloat64(cx, &mut ms, timeout);
+            if ms.is_finite() && ms > 0.0 && ms <= u32::MAX as f64 {
+                Ok(std::time::Duration::from_secs_f64(ms / 1000.0))
+            } else {
+                Err(JsError::Range(
+                    "evaluate's timeout must be a positive number of milliseconds".into(),
+                ))
+            }
+        }
+    };
+    // SAFETY: frees the owned property value.
+    unsafe { qjs::JS_FreeValue(cx, timeout) };
+    result
 }
 
 /// `ref.measure()`: a promise of where node `id` is after this turn's

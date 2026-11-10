@@ -1695,8 +1695,8 @@ impl Mounter {
                 | Command::GoBack
                 | Command::GoForward
                 | Command::StopLoading
-                | Command::EvaluateJavaScript { .. }
-                | Command::CancelJavaScript { .. }
+                | Command::Evaluate { .. }
+                | Command::CancelEvaluate { .. }
                 | Command::InjectJavaScript(_)
                 | Command::PostMessage(_)
                 | Command::Load(_)),

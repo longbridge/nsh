@@ -13952,6 +13952,47 @@ mod components {
         shown.last().unwrap().clone()
     }
 
+    /// Evaluates a script that never answers in a web view, with a short
+    /// timeout, and shows whether the platform evaluates and how it ended.
+    #[component]
+    fn EvaluateCheck() -> impl IntoElement {
+        let shown = signal(String::from("asking"));
+        let page = element_ref();
+        spawn(async move {
+            let available = web_evaluate_available().await;
+            let options = EvaluateOptions {
+                timeout: std::time::Duration::from_millis(5),
+            };
+            let code = match page.evaluate("new Promise(() => {})", options).await {
+                Ok(evaluation) => format!("value {}", evaluation.value),
+                Err(error) => error.code().unwrap_or("none").to_owned(),
+            };
+            shown.set(format!("evaluate {available} {code}"));
+        });
+        view()
+            .child(web_view("about:blank").element_ref(&page))
+            .child(text(move || shown.get()))
+    }
+
+    #[test]
+    fn evaluate_answers_by_its_timeout_where_the_platform_evaluates() {
+        let shown = |platform: bool| {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                web_evaluate: platform,
+                ..Default::default()
+            });
+            c.mount_root(&crate::element::Root::new::<EvaluateCheck>(|| ()));
+            let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("evaluate ")));
+            shown.last().unwrap().clone()
+        };
+        assert_eq!(shown(true), "evaluate true ETIMEDOUT");
+        assert_eq!(
+            shown(false),
+            "evaluate false ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
+    }
+
     #[test]
     fn web_input_is_available_where_the_platform_delivers_it_and_the_app_holds_the_grant() {
         let granted = || Some(serde_json::json!({ "webview": { "hosts": [], "input": true } }));
@@ -35774,11 +35815,14 @@ mod each_order {
     }
 }
 
+/// The default `evaluate` timeout.
+const T: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn evaluation_core() -> Core<FakeEngine> {
     let mut c = core();
     c.set_environment(crate::element::Environment {
         os: crate::platform::Os::Ios,
-        web_evaluation: true,
+        web_evaluate: true,
         ..Default::default()
     });
     apply(
@@ -35805,15 +35849,15 @@ fn web_evaluation_correlates_replies_and_ignores_late_or_foreign_replies() {
     let mut c = evaluation_core();
     let (one, a) = Answer::new();
     let (two, b) = Answer::new();
-    c.start_web_evaluation(2, "1".into(), a.clone());
-    c.start_web_evaluation(2, "2".into(), b.clone());
+    c.start_web_evaluation(2, "1".into(), T, a.clone());
+    c.start_web_evaluation(2, "2".into(), T, b.clone());
     let batch = c.commit().unwrap();
     let ids: Vec<_> = batch
         .items
         .iter()
         .filter_map(|item| match item {
             MountItem::Command {
-                command: Command::EvaluateJavaScript { request, .. },
+                command: Command::Evaluate { request, .. },
                 ..
             } => Some(*request),
             _ => None,
@@ -35833,17 +35877,17 @@ fn web_evaluation_correlates_replies_and_ignores_late_or_foreign_replies() {
     c.answer_web_evaluation(2, &reply(ids[1], 2));
     c.answer_web_evaluation(2, &reply(ids[0], 1));
     c.answer_web_evaluation(2, &reply(ids[0], 999));
-    assert_eq!(a.borrow_mut().value.take().unwrap().unwrap(), 1);
-    assert_eq!(b.borrow_mut().value.take().unwrap().unwrap(), 2);
+    assert_eq!(a.borrow_mut().value.take().unwrap().unwrap().value, 1);
+    assert_eq!(b.borrow_mut().value.take().unwrap().unwrap().value, 2);
     drop((one, two));
 }
 
 #[test]
-fn web_evaluation_disposal_timeout_and_dropped_waiters_release_requests() {
+fn web_evaluation_disposal_and_timeout_release_requests() {
     use crate::element::Answer;
     let mut c = evaluation_core();
     let (future, slot) = Answer::new();
-    c.start_web_evaluation(2, "new Promise(()=>{})".into(), slot.clone());
+    c.start_web_evaluation(2, "new Promise(()=>{})".into(), T, slot.clone());
     c.commit();
     c.timeout_web_evaluation(1);
     assert_eq!(
@@ -35853,32 +35897,19 @@ fn web_evaluation_disposal_timeout_and_dropped_waiters_release_requests() {
     assert!(c.commit().unwrap().items.iter().any(|i| matches!(
         i,
         MountItem::Command {
-            command: Command::CancelJavaScript { request: 1 },
+            command: Command::CancelEvaluate { request: 1 },
             ..
         }
     )));
     drop(future);
     let (future, slot) = Answer::new();
-    c.start_web_evaluation(2, "1".into(), slot.clone());
+    c.start_web_evaluation(2, "1".into(), T, slot.clone());
     c.apply(Op::Release { id: 2 }).unwrap();
     assert_eq!(
         slot.borrow_mut().value.take().unwrap().unwrap_err().code(),
-        Some("ERR_NSH_WEBVIEW_DISPOSED")
+        Some("ERR_NSH_WEBVIEW_ABORTED")
     );
     drop(future);
-    let mut c = evaluation_core();
-    let (future, slot) = Answer::new();
-    c.start_web_evaluation(2, "1".into(), slot);
-    c.commit();
-    drop(future);
-    c.forget_web_evaluations();
-    assert!(c.commit().unwrap().items.iter().any(|i| matches!(
-        i,
-        MountItem::Command {
-            command: Command::CancelJavaScript { .. },
-            ..
-        }
-    )));
 }
 
 #[test]
@@ -35887,19 +35918,21 @@ fn web_evaluation_preserves_order_with_injection_and_navigation_commands() {
     apply(
         &mut c,
         vec![
-            Op::EvaluateJavaScript {
+            Op::Evaluate {
                 id: 2,
                 call: 1,
                 script: "globalThis.x = 1; 1".into(),
+                timeout: T,
             },
             Op::Command {
                 id: 2,
                 command: Command::InjectJavaScript("globalThis.x = 2".into()),
             },
-            Op::EvaluateJavaScript {
+            Op::Evaluate {
                 id: 2,
                 call: 2,
                 script: "globalThis.x".into(),
+                timeout: T,
             },
             Op::Command {
                 id: 2,
@@ -35917,9 +35950,9 @@ fn web_evaluation_preserves_order_with_injection_and_navigation_commands() {
         })
         .collect();
     assert!(matches!(commands.as_slice(), [
-        Command::EvaluateJavaScript { script: first, .. },
+        Command::Evaluate { script: first, .. },
         Command::InjectJavaScript(injected),
-        Command::EvaluateJavaScript { script: second, .. },
+        Command::Evaluate { script: second, .. },
         Command::Reload,
     ] if first == "globalThis.x = 1; 1" && injected == "globalThis.x = 2" && second == "globalThis.x"));
 }
@@ -35933,7 +35966,7 @@ fn web_evaluation_requires_a_capable_host_even_with_a_mobile_environment() {
         ..Default::default()
     });
     let (future, slot) = Answer::new();
-    c.start_web_evaluation(2, "1".into(), slot.clone());
+    c.start_web_evaluation(2, "1".into(), T, slot.clone());
     assert_eq!(
         slot.borrow_mut().value.take().unwrap().unwrap_err().code(),
         Some("ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
@@ -35943,7 +35976,7 @@ fn web_evaluation_requires_a_capable_host_even_with_a_mobile_environment() {
             .is_some_and(|batch| batch.items.iter().any(|item| matches!(
                 item,
                 MountItem::Command {
-                    command: Command::EvaluateJavaScript { .. },
+                    command: Command::Evaluate { .. },
                     ..
                 }
             )))

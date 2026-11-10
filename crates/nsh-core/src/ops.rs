@@ -1979,17 +1979,20 @@ pub enum Command {
     StopLoading,
     /// Run JavaScript in a web view's page.
     InjectJavaScript(String),
-    /// Evaluates a script; the host answers on this node with
-    /// [`EventKind::WebEvaluation`] (`id`, `data`: a JSON envelope).
-    EvaluateJavaScript {
-        /// Engine-local request, echoed in the reply.
+    /// Run a script in a web view's page for its result
+    /// ([`crate::platform::web_evaluation`]); the platform answers on this
+    /// node with [`EventKind::WebEvaluation`] (`id`: the request, `data`:
+    /// the JSON envelope), once.
+    Evaluate {
+        /// The engine's request, echoed in the reply.
         request: u32,
-        /// Script evaluated in the main document's page world.
+        /// The app's script.
         script: String,
     },
-    /// Releases a pending native evaluation without reporting another reply.
-    CancelJavaScript {
-        /// Request to cancel.
+    /// Give up request `request` of [`Command::Evaluate`]: release what the
+    /// platform keeps for it, answering nothing.
+    CancelEvaluate {
+        /// The request.
         request: u32,
     },
     /// Send a message to a web view's page (`window.onmessage` data).
@@ -3085,14 +3088,17 @@ pub enum NativeProp {
 /// A mutation produced by the JS renderer.
 #[derive(Debug)]
 pub enum Op {
-    /// Starts an awaitable WebView evaluation, ordered with the UI's ops.
-    EvaluateJavaScript {
-        /// The app-owned WebView.
+    /// `ref.evaluate(script, { timeout })` of a web view, in order with
+    /// the UI's ops: JS promise `call` settles with its result.
+    Evaluate {
+        /// The web view.
         id: NodeId,
         /// The JS promise's call number.
         call: u32,
-        /// The page script, evaluated for its completion value.
+        /// The app's script.
         script: String,
+        /// How long the script may take to answer.
+        timeout: std::time::Duration,
     },
     /// What a canvas draws (replaces the previous drawing).
     Draw {

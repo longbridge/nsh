@@ -9,10 +9,13 @@ export function createDom(invoke, values, reactive, live, wake) {
   for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reveal", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "insertText", "sendInput", "load", "seek"]) {
     prototype[name] = function (argument) { const id = values.nodeIds.get(this); if (id === undefined) throw new TypeError("nsh: not a node"); return call(314, [id, name, argument]); };
   }
-  prototype.evaluateJavaScript = async function (script) {
-    if (typeof script !== "string") throw new TypeError("evaluateJavaScript expects a script string");
+  // A page's web view is an iframe whose document the app may not read:
+  // `evaluate` rejects here, as `WebView.evaluateAvailable()` says.
+  prototype.evaluate = async function (script, options) {
+    if (typeof script !== "string") throw new TypeError("evaluate expects a script string");
+    if (options !== undefined && (options === null || typeof options !== "object")) throw new TypeError("evaluate's options must be an object");
     if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
-    const error = new Error("WebView evaluation is available on iOS and Android");
+    const error = new Error("web views evaluate no scripts here");
     error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
     throw error;
   };

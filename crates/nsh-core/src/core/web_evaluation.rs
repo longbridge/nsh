@@ -1,4 +1,7 @@
-//! Per-engine correlation and lifetime of awaited WebView evaluations.
+//! A web view's `evaluate` in the core: each call is a request of this
+//! engine, sent to the platform ([`Command::Evaluate`]) and answered once,
+//! by the platform's reply ([`crate::EventKind::WebEvaluation`]), its
+//! deadline, or the web view going away.
 
 use std::{rc::Rc, time::Duration};
 
@@ -8,10 +11,10 @@ use super::{Core, Kind};
 use crate::{
     Command, EventPayload, NodeId, PayloadValue,
     element::{
-        Task,
+        Task, codes,
         task::{self, Action},
     },
-    web_evaluation::{self, Slot},
+    platform::web_evaluation::{self, Slot},
 };
 
 struct Pending {
@@ -27,10 +30,18 @@ pub(super) struct Evaluations {
 }
 
 impl<M: crate::TextEngine> Core<M> {
-    pub(super) fn start_js_web_evaluation(&mut self, node: NodeId, call: u32, script: String) {
+    /// `ref.evaluate(script, { timeout })`: settles JS promise `call` with
+    /// `{ value }` or the failure.
+    pub(super) fn start_js_web_evaluation(
+        &mut self,
+        node: NodeId,
+        call: u32,
+        script: String,
+        timeout: Duration,
+    ) {
         use crate::element::{Answer, IntoThrown, ToJs};
         let (answer, slot) = Answer::new();
-        self.start_web_evaluation(node, script, slot);
+        self.start_web_evaluation(node, script, timeout, slot);
         let executor = Rc::downgrade(&self.components.executor);
         task::spawn_raw(
             &self.components.executor,
@@ -38,7 +49,9 @@ impl<M: crate::TextEngine> Core<M> {
             Box::pin(async move {
                 let result = answer
                     .await
-                    .map(|value| Box::new(value) as Box<dyn ToJs>)
+                    .map(|evaluation| {
+                        Box::new(serde_json::json!({ "value": evaluation.value })) as Box<dyn ToJs>
+                    })
                     .map_err(IntoThrown::into_thrown);
                 if let Some(executor) = executor.upgrade() {
                     executor.act(Action::Return(call, result));
@@ -47,15 +60,21 @@ impl<M: crate::TextEngine> Core<M> {
         );
     }
 
-    pub(super) fn start_web_evaluation(&mut self, node: NodeId, script: String, answer: Slot) {
+    pub(super) fn start_web_evaluation(
+        &mut self,
+        node: NodeId,
+        script: String,
+        timeout: Duration,
+        answer: Slot,
+    ) {
         if Rc::strong_count(&answer) == 1 {
             return;
         }
         let node = self.native_id(node);
-        let refused = if !self.components.environment.web_evaluation {
+        let refused = if !self.components.environment.web_evaluate {
             Some(web_evaluation::error(
-                "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM",
-                "WebView evaluation is available on iOS and Android",
+                codes::UNAVAILABLE,
+                "web views evaluate no scripts here",
             ))
         } else if self
             .key(node)
@@ -63,14 +82,20 @@ impl<M: crate::TextEngine> Core<M> {
             .is_none_or(|key| self.nodes[key as usize].kind != Kind::WebView)
         {
             Some(web_evaluation::error(
-                "ERR_NSH_WEBVIEW_DISPOSED",
-                "the ref does not name a live WebView",
+                codes::WEBVIEW_ABORTED,
+                "the ref names no web view",
+            ))
+        } else if !self.access.allows_webviews() {
+            Some(crate::element::JsError::access_denied(
+                "the app's capabilities do not grant webview",
+                "webview",
+                "",
             ))
         } else if script.len() > web_evaluation::MAX_RESULT_BYTES
             || self.components.web_evaluations.pending.len() >= web_evaluation::MAX_PENDING
         {
             Some(web_evaluation::error(
-                "ERR_NSH_QUOTA_EXCEEDED",
+                codes::QUOTA_EXCEEDED,
                 "WebView evaluation exceeds the script or pending request limit",
             ))
         } else {
@@ -83,7 +108,7 @@ impl<M: crate::TextEngine> Core<M> {
         let requests = &mut self.components.web_evaluations;
         let Some(request) = requests.next.checked_add(1) else {
             answer.borrow_mut().deliver(Err(web_evaluation::error(
-                "ERR_NSH_QUOTA_EXCEEDED",
+                codes::QUOTA_EXCEEDED,
                 "WebView request ids exhausted",
             )));
             return;
@@ -92,7 +117,7 @@ impl<M: crate::TextEngine> Core<M> {
         let deadline = task::act_after(
             &self.components.executor,
             crate::ROOT_ID,
-            Duration::from_millis(web_evaluation::TIMEOUT_MS),
+            timeout,
             Action::WebEvaluationTimeout(request),
         );
         requests.pending.insert(
@@ -104,7 +129,7 @@ impl<M: crate::TextEngine> Core<M> {
             },
         );
         self.commands
-            .push((node, Command::EvaluateJavaScript { request, script }));
+            .push((node, Command::Evaluate { request, script }));
     }
 
     pub(super) fn answer_web_evaluation(&mut self, node: NodeId, payload: &EventPayload) {
@@ -148,8 +173,8 @@ impl<M: crate::TextEngine> Core<M> {
             })
             .unwrap_or_else(|| {
                 Err(web_evaluation::error(
-                    "ERR_NSH_WEBVIEW_RESULT",
-                    "missing native evaluation result",
+                    codes::WEBVIEW_SCRIPT,
+                    "the web view answered no result",
                 ))
             });
         pending.answer.borrow_mut().deliver(result);
@@ -161,27 +186,11 @@ impl<M: crate::TextEngine> Core<M> {
                 .answer
                 .borrow_mut()
                 .deliver(Err(web_evaluation::error(
-                    "ETIMEDOUT",
-                    "WebView evaluation exceeded 30 seconds",
+                    codes::TIMED_OUT,
+                    "the web view's script did not answer in time",
                 )));
             self.commands
-                .push((pending.node, Command::CancelJavaScript { request }));
-        }
-    }
-
-    pub(super) fn forget_web_evaluations(&mut self) {
-        let dropped: Vec<_> = self
-            .components
-            .web_evaluations
-            .pending
-            .iter()
-            .filter_map(|(&id, p)| (Rc::strong_count(&p.answer) == 1).then_some(id))
-            .collect();
-        for request in dropped {
-            if let Some(pending) = self.components.web_evaluations.pending.remove(&request) {
-                self.commands
-                    .push((pending.node, Command::CancelJavaScript { request }));
-            }
+                .push((pending.node, Command::CancelEvaluate { request }));
         }
     }
 
@@ -200,8 +209,8 @@ impl<M: crate::TextEngine> Core<M> {
                     .answer
                     .borrow_mut()
                     .deliver(Err(web_evaluation::error(
-                        "ERR_NSH_WEBVIEW_DISPOSED",
-                        "the WebView was disposed",
+                        codes::WEBVIEW_ABORTED,
+                        "the web view went away",
                     )));
                 false
             });

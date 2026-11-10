@@ -526,22 +526,20 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.
 
-## Awaitable WebView evaluation
+## WebView evaluation
 
-`WebViewRef.evaluateJavaScript(script)` and Rust's
-`ElementRef::evaluate_java_script(script)` share the per-engine request handling
-in `core/web_evaluation.rs`. The core bounds requests, correlates replies to the
-specific view, rejects disposal and timeouts, and cancels native work when a Rust
-future is dropped. `web_evaluation.rs` and `web_evaluation.js` define the strict
-JSON result contract and the shared evaluation/poll/cleanup scripts. Native
-completion callbacks carry internal `WebEvaluation` events, never page messages.
-iOS uses WKWebView completions; Android uses WebView callbacks. Both await
-returned Promises through bounded native polling, cancelling on new-document
-navigation start and explicit navigation commands, destruction or renderer loss.
-Page-initiated same-document history updates do not cancel. See the WebView module
-reference for limits, errors and examples. Other backends reject with
-`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; `injectJavaScript` keeps its behavior.
+`WebViewRef.evaluate(script, { timeout })` (TS, `nsh-js` `components.rs`) and Rust's
+`ElementRef::evaluate(script, EvaluateOptions)` run through the same request table in
+`core/web_evaluation.rs`: it checks `Environment::web_evaluate`, the `webview` grant and
+the limits, keeps each request's deadline (`timeout`; it sends `Command::CancelEvaluate`
+when it passes), and settles the request from the internal `WebEvaluation` event a
+platform replies with, never from page messages. `platform/web_evaluation.rs` and
+`web_evaluation.js` hold the page wrapper (JSON result contract, polling of returned
+Promises, cleanup) that every platform runs. iOS and macOS share
+`nsh-platform-apple`'s `web_evaluation.rs` (WKWebView completions); Android runs it in
+`WebBox.java` (`evaluateJavascript`). The platforms abort requests on a new-document
+navigation, explicit navigation commands, a reloading source, renderer loss and
+disposal; page-initiated same-document history updates keep them. Platforms that leave
+`web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
+`WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
 
-The native host opts into awaitable WebView evaluations with `Environment::web_evaluation`
-(default false), propagated to the component environment. iOS and Android report it;
-headless and other hosts reject immediately, independently of the emulated OS.

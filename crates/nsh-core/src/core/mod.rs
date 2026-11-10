@@ -2233,8 +2233,13 @@ impl<M: TextEngine> Core<M> {
     /// Applies one op as is (also for the nodes components expand).
     fn apply_op(&mut self, op: Op) -> Result<(), ApplyError> {
         match op {
-            Op::EvaluateJavaScript { id, call, script } => {
-                self.start_js_web_evaluation(id, call, script);
+            Op::Evaluate {
+                id,
+                call,
+                script,
+                timeout,
+            } => {
+                self.start_js_web_evaluation(id, call, script, timeout);
                 Ok(())
             }
             Op::Rust(op) => {

@@ -473,7 +473,7 @@ covers [nsh] WebView
 # web-evaluate (headless backend advertises deterministic unavailability)
 tap id:case-web-evaluate
 tap id:evaluate
-expect Evaluation: TypeError/ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Evaluation: false/TypeError,RangeError/ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
 # web-available
 tap id:case-web-available
 expect Web views available: true

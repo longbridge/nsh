@@ -93,7 +93,7 @@ interface WebViewNavigation {
 | `goForward()` | Goes forward in its history. |
 | `stopLoading()` | Stops loading. |
 | `injectJavaScript(script)` | Runs `script` in the page. |
-| `evaluateJavaScript(script)` | Resolves the script's strict JSON completion value; see [Awaiting JavaScript](#awaiting-javascript). |
+| `evaluate(script, { timeout? })` | Runs `script` in the page and resolves `{ value }`, its result as JSON; see [Evaluating scripts](#evaluating-scripts). |
 | `postMessage(data)` | Sends `data` (a string) to the page: a `message` event on `window`, with `data` as `event.data`. |
 | `load({ src, headers? })` | Loads `src` with `headers` (`Record<string, string>`) on the page's own request only, not on its subresources, later navigations or reloads; for a signed-in page (`Authorization`). The host must be one `webview.hosts` allows. An invalid header throws a `TypeError`. The browser backend does nothing. See [Signed-in pages](../docs/web-view-and-video.md#signed-in-pages-request-headers). |
 
@@ -130,80 +130,64 @@ When your app declares `capabilities` in `nsh.json`, a web view may only show an
 }
 ```
 
-## Awaiting JavaScript
+## Evaluating scripts
 
-`await ref.evaluateJavaScript(script)` evaluates a script in this WebView's
-main document and resolves its completion value. Call after `onLoad` when the
-operation needs the loaded document; evaluation itself does not wait for loading.
-A returned Promise or thenable is awaited on iOS and Android. To use `await`
-inside the script, return an async IIFE:
+`await ref.evaluate(script, { timeout })` runs `script` in the page's main
+document and resolves `{ value }`, the script's completion value. A Promise the
+script returns is awaited; to use `await` inside the script, return an async
+function's call. `timeout` is in milliseconds (30 000 by default). Call it after
+`onLoad` when the script reads the loaded document.
 
 ```tsx
-const title = await web.evaluateJavaScript("document.title");
-const buttons = await web.evaluateJavaScript(`
+const { value: title } = await web.evaluate("document.title");
+const { value: buttons } = await web.evaluate(`
   Array.from(document.querySelectorAll("button")).map(button => ({
     text: button.textContent,
-    disabled: button.disabled
+    disabled: button.disabled,
   }))
 `);
-const value = await web.evaluateJavaScript("(async () => await Promise.resolve(42))()");
+const { value } = await web.evaluate("(async () => await Promise.resolve(42))()", { timeout: 5000 });
 ```
 
-The value is strict JSON: strings, finite numbers, booleans, `null`, arrays and
-plain objects (including null-prototype objects). `undefined`, functions, symbols,
-BigInt, NaN/Infinity, circular values and nonplain objects such as DOM nodes,
-Date and Map reject, including when nested. Convert DOM content explicitly as in
-the example. Enumerable object properties and array entries are copied; getters
-run during copying. Serialization failures reject instead of silently dropping
-properties or substituting `null`. Results are limited to 1 MiB of serialized
-UTF-8, nesting to 64 levels, scripts to 1 MiB, and outstanding calls to 64 per
-engine. An evaluation has a 30-second deadline.
+`value` is JSON: strings, finite numbers, booleans, `null`, arrays and plain
+objects, nested up to 64 levels and 1 MiB in all. Convert DOM nodes, dates and
+maps to these in the script, as the example does. A script is up to 1 MiB, and an
+engine runs up to 64 evaluations at once.
 
-Pending calls reject when a new main-document navigation starts, even if that
-navigation later fails. Explicit `load`, `reload`, `goBack` and `goForward` cancel
-before issuing their native operation (including a history command that stays
-within one document). Prop changes that reload content also cancel. A blocked
-navigation, a subframe load, or a page-initiated same-document hash/history update
-keeps calls pending. Disposing the WebView or losing its renderer rejects calls;
-late callbacks cannot settle another call. Cancelling a call releases its native
-bookkeeping but does not undo JavaScript side effects or forcibly stop page code.
+An evaluation belongs to the document it started in: a new main-document
+navigation, `load`, `reload`, `goBack`, `goForward`, a source prop that loads
+again, or the web view going away ends it with `ERR_NSH_WEBVIEW_ABORTED`.
+Same-document history updates, subframe loads and refused navigations keep it
+running. Its result is the page's: treat it as untrusted input. The page's Content
+Security Policy applies to the script. `injectJavaScript(script)` runs a script
+without waiting for it.
 
-Failures reject with an `Error` carrying a stable `code`:
+`WebView.evaluateAvailable()` resolves whether this platform evaluates scripts
+in web views: iOS, Android and macOS do. A failure rejects with an `Error`
+carrying one of these codes; wrong arguments reject with a `TypeError` or
+`RangeError`.
 
 | Code | Meaning |
 |---|---|
-| `ERR_NSH_WEBVIEW_JAVASCRIPT` | Script exception, syntax error or Promise rejection. |
-| `ERR_NSH_WEBVIEW_RESULT` | Unsupported value, serialization failure or invalid result. |
-| `ERR_NSH_WEBVIEW_NAVIGATION` | Navigation invalidated the pending evaluation. |
-| `ERR_NSH_WEBVIEW_DISPOSED` | The ref no longer names a live WebView. |
-| `ERR_NSH_WEBVIEW_NATIVE` | Native evaluation, disabled scripting or renderer failure. |
-| `ERR_NSH_QUOTA_EXCEEDED` | Script, result or outstanding-request limit exceeded. |
-| `ETIMEDOUT` | The evaluation exceeded its deadline. |
-| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | Evaluation requested on another backend. |
+| `ERR_NSH_WEBVIEW_SCRIPT` | The script threw or rejected, its result is not JSON, or the page runs no scripts. |
+| `ERR_NSH_WEBVIEW_ABORTED` | The document navigated, or the web view went away. |
+| `ETIMEDOUT` | The script did not answer within `timeout`. |
+| `ERR_NSH_QUOTA_EXCEEDED` | The script, its result or the number of evaluations is over its limit. |
+| `ERR_ACCESS_DENIED` | The app's capabilities do not grant `webview`. |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | This platform evaluates no scripts in web views. |
 
-Wrong arguments reject with a `TypeError`; the method returns a Promise rather
-than throwing synchronously. iOS uses WKWebView's native completion handler;
-Android uses `evaluateJavascript`, with a shared wrapper to report exceptions
-that Android's native callback otherwise cannot distinguish from `null`. Returned
-Promises use bounded native polling. Replies are separate from `onMessage`.
-The page's Content Security Policy applies to the evaluated source; a blocked
-`eval` rejects with `ERR_NSH_WEBVIEW_JAVASCRIPT`.
-Page results remain untrusted. Existing WebView host restrictions and sandbox
-boundaries apply; evaluation is only in the app-owned WebView's page world.
-`injectJavaScript` remains the fire-and-forget method.
-
-Rust components use their existing element ref on the engine thread:
+Rust components evaluate through the web view's element ref:
 
 ```rust
 let web = element_ref();
-// Attach with web_view("https://example.com").element_ref(&web), then await from an event/task.
+// web_view("https://example.com").element_ref(&web)
 spawn(async move {
-    match web.evaluate_java_script("document.title").await {
-        Ok(value) => log::info!("Page title: {value}"),
+    match web.evaluate("document.title", EvaluateOptions::default()).await {
+        Ok(evaluation) => log::info!("Page title: {}", evaluation.value),
         Err(error) => log::warn!("Evaluation failed: {}", error.message()),
     }
 });
 ```
 
-The future returns `Result<nsh_core::JsonValue, nsh_core::element::JsError>`;
-dropping it cancels the request. Component tasks end with their owner.
+It resolves `Result<Evaluation, JsError>`; `EvaluateOptions { timeout }` is a
+`Duration`.

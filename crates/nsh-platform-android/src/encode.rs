@@ -566,16 +566,16 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     Command::GoBack => e.int(5),
                     Command::GoForward => e.int(6),
                     Command::StopLoading => e.int(7),
-                    Command::EvaluateJavaScript { request, script } => {
+                    Command::Evaluate { request, script } => {
                         e.int(51);
                         e.int(request as i32);
                         e.string(web_generation.to_string());
                         let key = format!("__nsh_evaluation_{id}_{request}");
-                        e.string(nsh_core::web_evaluation::start_script(&script, &key));
-                        e.string(nsh_core::web_evaluation::poll_script(&key));
-                        e.string(nsh_core::web_evaluation::cleanup_script(&key));
+                        e.string(nsh_core::platform::web_evaluation::start_script(&script, &key));
+                        e.string(nsh_core::platform::web_evaluation::poll_script(&key));
+                        e.string(nsh_core::platform::web_evaluation::cleanup_script(&key));
                     }
-                    Command::CancelJavaScript { request } => {
+                    Command::CancelEvaluate { request } => {
                         e.int(52);
                         e.int(request as i32);
                     }
@@ -1975,7 +1975,7 @@ mod tests {
             MountBatch {
                 items: vec![MountItem::Command {
                     id: 3,
-                    command: Command::EvaluateJavaScript {
+                    command: Command::Evaluate {
                         request: u32::MAX,
                         script: "42".into(),
                     },

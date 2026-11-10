@@ -942,6 +942,17 @@ pub fn web_input_available() -> Answer<bool> {
     answer
 }
 
+/// Whether a web view's ref runs scripts and answers with their results
+/// here (TS: `WebView.evaluateAvailable()`,
+/// [`ElementRef::evaluate`](super::ElementRef::evaluate)): the platform has
+/// it and the app's capabilities grant `webview`. Elsewhere `evaluate`
+/// fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To await in a task.
+pub fn web_evaluate_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebEvaluateAvailable(slot));
+    answer
+}
+
 /// Whether a web view shows a page here (TS: `WebView.available()`): the
 /// platform shows web views and the app's capabilities grant `webview`.
 /// Where it answers `false`, a web view reports `onError` (`code`

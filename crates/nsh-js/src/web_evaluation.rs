@@ -1,7 +1,7 @@
 //! Tests the shared WebView script contract with a real JavaScript engine.
 use nsh_core::{
     JsonValue,
-    web_evaluation::{cleanup_script, poll_script, start_script},
+    platform::web_evaluation::{cleanup_script, poll_script, start_script},
 };
 use rquickjs::{Context, Runtime};
 
@@ -58,7 +58,7 @@ fn web_evaluation_rejects_non_json_values_without_silent_coercion() {
         "new Map()",
         "(()=>{const x={};x.self=x;return x})()",
     ] {
-        assert_eq!(run(script)["code"], "ERR_NSH_WEBVIEW_RESULT", "{script}");
+        assert_eq!(run(script)["code"], "ERR_NSH_WEBVIEW_SCRIPT", "{script}");
     }
     assert_eq!(run("'x'.repeat(1048577)")["status"], "error");
     assert_eq!(
@@ -78,7 +78,7 @@ fn web_evaluation_awaits_promises_and_catches_throws_and_rejections() {
         "Promise.reject(new Error('boom'))",
         "(()",
     ] {
-        assert_eq!(run(script)["code"], "ERR_NSH_WEBVIEW_JAVASCRIPT");
+        assert_eq!(run(script)["code"], "ERR_NSH_WEBVIEW_SCRIPT");
     }
 }
 

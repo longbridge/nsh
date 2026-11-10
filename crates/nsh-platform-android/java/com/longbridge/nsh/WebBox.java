@@ -45,7 +45,7 @@ final class WebBox extends WidgetBox {
     private final class Evaluation {
         final int request;
         final String generation, pollScript, cleanupScript;
-        final Runnable poll, timeout;
+        final Runnable poll;
 
         Evaluation(int request, String generation, String pollScript, String cleanupScript) {
             this.request = request;
@@ -53,7 +53,6 @@ final class WebBox extends WidgetBox {
             this.pollScript = pollScript;
             this.cleanupScript = cleanupScript;
             poll = () -> runEvaluation(this, pollScript);
-            timeout = () -> failEvaluation(this, "ETIMEDOUT", "JavaScript evaluation timed out");
         }
     }
 
@@ -121,7 +120,7 @@ final class WebBox extends WidgetBox {
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             if (disposed || processGone) return;
-            cancelEvaluations("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
+            cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
             if (injectedBefore != null) view.evaluateJavascript(injectedBefore, null);
             state(Native.LOAD_START, url, true);
         }
@@ -145,7 +144,7 @@ final class WebBox extends WidgetBox {
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
             if (disposed || processGone) return true;
             processGone = true;
-            cancelEvaluations("ERR_NSH_WEBVIEW_NATIVE", "The web content process terminated");
+            cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web content process terminated");
             // A WebView with a lost renderer cannot be reused. Handling the
             // callback and destroying it keeps the embedding app alive.
             removeView(web);
@@ -167,7 +166,7 @@ final class WebBox extends WidgetBox {
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
             boolean scrollable, boolean javaScriptEnabled, boolean incognito) {
         if (disposed || processGone) return;
-        if (!javaScriptEnabled) cancelEvaluations("ERR_NSH_WEBVIEW_NATIVE", "JavaScript is disabled");
+        if (!javaScriptEnabled) cancelEvaluations("ERR_NSH_WEBVIEW_SCRIPT", "JavaScript is disabled");
         // Read with the first props: the core keeps it from changing.
         if (this.source == null && incognito) {
             WebSettings settings = web.getSettings();
@@ -189,7 +188,7 @@ final class WebBox extends WidgetBox {
         if (this.source == null || !java.util.Arrays.equals(source, this.source) || scriptsChanged) {
             this.source = source;
             if ((int) source[0] != 0) {
-                cancelEvaluations("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
+                cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
             }
             switch ((int) source[0]) {
                 case 1: web.loadUrl((String) source[1]); break;
@@ -203,7 +202,7 @@ final class WebBox extends WidgetBox {
     void command(int kind, String text) {
         if (disposed || processGone) return;
         if (kind >= 4 && kind <= 6) {
-            cancelEvaluations("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
+            cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
         }
         switch (kind) {
             case 4: web.reload(); break;
@@ -225,7 +224,7 @@ final class WebBox extends WidgetBox {
      */
     void load(String url, java.util.Map<String, String> headers) {
         if (disposed || processGone) return;
-        cancelEvaluations("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
+        cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
         web.loadUrl(url, headers);
     }
 
@@ -233,15 +232,15 @@ final class WebBox extends WidgetBox {
     void evaluate(int request, String generation, String start, String poll, String cleanup) {
         if (disposed) return;
         if (processGone || !web.getSettings().getJavaScriptEnabled()) {
-            evaluationError(request, generation, "ERR_NSH_WEBVIEW_NATIVE",
+            evaluationError(request, generation, processGone ? "ERR_NSH_WEBVIEW_ABORTED" : "ERR_NSH_WEBVIEW_SCRIPT",
                     processGone ? "The web content process terminated" : "JavaScript is disabled");
             return;
         }
         cancelEvaluation(request);
         Evaluation evaluation = new Evaluation(request, generation, poll, cleanup);
         evaluations.put(request, evaluation);
-        // Independent of the evaluation callback: it may never arrive.
-        evaluationHandler.postDelayed(evaluation.timeout, 30000);
+        // The core keeps the deadline: it cancels the request when the
+        // app's timeout passes.
         runEvaluation(evaluation, start);
     }
 
@@ -258,7 +257,7 @@ final class WebBox extends WidgetBox {
                     // Android JSON-encodes the string returned by the shared
                     // wrapper. Decode that one extra layer, not the result value.
                     if (encoded == null) {
-                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_NATIVE", "WebView returned an invalid evaluation response");
+                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
                         return;
                     }
                     if (encoded.length() > MAX_ENVELOPE_BYTES * 6 + 2) {
@@ -267,7 +266,7 @@ final class WebBox extends WidgetBox {
                     }
                     Object decoded = new JSONTokener(encoded).nextValue();
                     if (!(decoded instanceof String)) {
-                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_NATIVE", "WebView returned an invalid evaluation response");
+                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
                         return;
                     }
                     String envelope = (String) decoded;
@@ -281,14 +280,14 @@ final class WebBox extends WidgetBox {
                     } else if (status.equals("ok") || status.equals("error")) {
                         finishEvaluation(evaluation, envelope);
                     } else {
-                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_NATIVE", "WebView returned an invalid evaluation response");
+                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
                     }
                 } catch (org.json.JSONException error) {
-                    failEvaluation(evaluation, "ERR_NSH_WEBVIEW_NATIVE", "WebView returned an invalid evaluation response");
+                    failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
                 }
             });
         } catch (RuntimeException error) {
-            failEvaluation(evaluation, "ERR_NSH_WEBVIEW_NATIVE", "WebView could not evaluate JavaScript");
+            failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView could not evaluate JavaScript");
         }
     }
 
@@ -320,7 +319,6 @@ final class WebBox extends WidgetBox {
         Evaluation evaluation = evaluations.remove(request);
         if (evaluation == null) return;
         evaluationHandler.removeCallbacks(evaluation.poll);
-        evaluationHandler.removeCallbacks(evaluation.timeout);
         if (!disposed && !processGone) {
             try {
                 web.evaluateJavascript(evaluation.cleanupScript, null);
@@ -339,7 +337,7 @@ final class WebBox extends WidgetBox {
 
     void destroy() {
         if (disposed) return;
-        cancelEvaluations("ERR_NSH_WEBVIEW_DISPOSED", "The web view was disposed");
+        cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web view was disposed");
         disposed = true;
         evaluationHandler.removeCallbacksAndMessages(null);
         if (!processGone) {

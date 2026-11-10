@@ -5482,10 +5482,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
-            Action::EvaluateJavaScript(node, script, answer) => {
-                self.start_web_evaluation(node, script, answer)
+            Action::Evaluate(node, script, timeout, answer) => {
+                self.start_web_evaluation(node, script, timeout, answer)
             }
-            Action::ForgetWebEvaluations => self.forget_web_evaluations(),
             Action::WebEvaluationTimeout(request) => self.timeout_web_evaluation(request),
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
@@ -5705,6 +5704,11 @@ impl<M: TextEngine> Core<M> {
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
+                answer.borrow_mut().deliver(available);
+            }
+            Action::WebEvaluateAvailable(answer) => {
+                let available =
+                    self.components.environment.web_evaluate && self.access.allows_webviews();
                 answer.borrow_mut().deliver(available);
             }
             Action::WebViewAvailable(answer) => {

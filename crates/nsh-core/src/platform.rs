@@ -3,6 +3,7 @@
 //! data both Rust components and JS read, with or without a JS runtime.
 
 pub mod clipboard;
+pub mod web_evaluation;
 
 use crate::geometry::{Edges, Points, Size};
 
@@ -306,8 +307,8 @@ pub struct Environment {
     /// does nothing.
     pub web_input: bool,
     /// The platform answers awaitable WebView evaluations
-    /// ([`crate::Command::EvaluateJavaScript`]); false rejects as unavailable.
-    pub web_evaluation: bool,
+    /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
+    pub web_evaluate: bool,
     /// The platform shows web views (TS: `WebView.available()`). `true` by
     /// default; a platform that knows from the start that it shows none
     /// (built without a web engine, the system's failed to load) sets
@@ -379,7 +380,7 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
-            web_evaluation: false,
+            web_evaluate: false,
             web_views: true,
             shaders: true,
         }

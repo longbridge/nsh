@@ -5,14 +5,20 @@ export default function App() {
   let page!: WebViewRef;
   return <View style={{ flex: 1, paddingTop: 64 }}>
     <View testID="evaluate" onPress={async () => {
-      let argument = "none";
-      try { await page.evaluateJavaScript(123 as unknown as string); }
-      catch (error) { argument = error instanceof TypeError ? "TypeError" : "wrong error"; }
+      const available = await WebView.evaluateAvailable();
+      const failures: string[] = [];
+      for (const call of [
+        () => page.evaluate(123 as unknown as string),
+        () => page.evaluate("1", { timeout: -1 }),
+      ]) {
+        try { await call(); failures.push("resolved"); }
+        catch (error) { failures.push((error as Error).name); }
+      }
       let code = "resolved";
-      try { await page.evaluateJavaScript("1 + 2"); }
+      try { await page.evaluate("1 + 2", { timeout: 1000 }); }
       catch (error) { code = (error as Error & { code: string }).code; }
       page.injectJavaScript("globalThis.compat = true");
-      result.set(`Evaluation: ${argument}/${code}`);
+      result.set(`Evaluation: ${available}/${failures.join(",")}/${code}`);
     }}><Text>Evaluate</Text></View>
     <Text>{result()}</Text>
     <WebView ref={page} html="<title>Compat</title>" style={{ width: 200, height: 120 }} />

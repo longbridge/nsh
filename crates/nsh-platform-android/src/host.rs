@@ -636,7 +636,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
-            web_evaluation: true,
+            web_evaluate: true,
             // wgpu on Vulkan or GLES, in builds with it, until it finds no
             // GPU.
             shaders: nsh_engine::shader::LINKED,

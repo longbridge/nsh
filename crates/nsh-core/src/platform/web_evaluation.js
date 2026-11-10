@@ -50,22 +50,22 @@
     } catch (error) {
       return error === quota
         ? failure("ERR_NSH_QUOTA_EXCEEDED", "result exceeds 1 MiB")
-        : failure("ERR_NSH_WEBVIEW_RESULT", message(error));
+        : failure("ERR_NSH_WEBVIEW_SCRIPT", message(error));
     }
   };
   try {
     const value = (0, eval)(source);
     const then = value !== null && (typeof value === "object" || typeof value === "function") ? value.then : undefined;
     if (typeof then === "function") {
-      if (Object.prototype.hasOwnProperty.call(globalThis, key)) return failure("ERR_NSH_WEBVIEW_RESULT", "evaluation key is occupied");
+      if (Object.prototype.hasOwnProperty.call(globalThis, key)) return failure("ERR_NSH_WEBVIEW_SCRIPT", "evaluation key is occupied");
       const cell = { result: null };
       Object.defineProperty(globalThis, key, { value: cell, configurable: true });
       Promise.resolve({ then: (resolve, reject) => then.call(value, resolve, reject) }).then(
         result => { if (globalThis[key] === cell) cell.result = encode(result); },
-        error => { if (globalThis[key] === cell) cell.result = failure("ERR_NSH_WEBVIEW_JAVASCRIPT", message(error)); }
+        error => { if (globalThis[key] === cell) cell.result = failure("ERR_NSH_WEBVIEW_SCRIPT", message(error)); }
       );
       return '{"status":"pending"}';
     }
     return encode(value);
-  } catch (error) { return failure("ERR_NSH_WEBVIEW_JAVASCRIPT", message(error)); }
+  } catch (error) { return failure("ERR_NSH_WEBVIEW_SCRIPT", message(error)); }
 })()
