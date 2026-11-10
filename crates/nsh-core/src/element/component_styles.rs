@@ -71,7 +71,7 @@ impl ComponentStyle {
         name: &str,
         f: impl Fn(StyleRefinement) -> StyleRefinement + 'static,
     ) -> Self {
-        self.variants.insert(name.to_owned(), Look::typed(f));
+        self.variants.entry(name.to_owned()).or_default().typed = Look::typed(f).typed;
         self
     }
 
@@ -81,7 +81,7 @@ impl ComponentStyle {
         name: &str,
         f: impl Fn(StyleRefinement) -> StyleRefinement + 'static,
     ) -> Self {
-        self.sizes.insert(name.to_owned(), Look::typed(f));
+        self.sizes.entry(name.to_owned()).or_default().typed = Look::typed(f).typed;
         self
     }
 
@@ -100,7 +100,7 @@ impl ComponentStyle {
 
     /// The Tailwind classes of the size `name`.
     pub fn size_classes(mut self, name: &str, classes: &str) -> Self {
-        self.sizes.insert(name.to_owned(), Look::classes(classes));
+        self.sizes.entry(name.to_owned()).or_default().classes = Look::classes(classes).classes;
         self
     }
 
@@ -215,8 +215,8 @@ pub(crate) fn component_style_of(component: &str) -> Option<ComponentStyle> {
 
 /// Replaces every class look with those of `json`, the `components` of
 /// nsh.json: an object by component name, each with `base` (classes),
-/// `variants` and `sizes` (objects of classes by name), `defaultVariant`
-/// and `defaultSize`. Lenient: what does not fit is left out and named in
+/// `variants` and `sizes` (objects of classes by name) and `defaults`
+/// (`variant`, `size`). Lenient: what does not fit is left out and named in
 /// the warnings returned.
 pub(crate) fn set_component_classes(json: &str) -> Vec<String> {
     let mut warnings = Vec::new();
@@ -273,11 +273,23 @@ fn parse_component(
                     };
                 }
             }
-            "defaultVariant" | "defaultSize" => match value.as_str() {
-                Some(v) if key == "defaultVariant" => style = style.default_variant(v),
-                Some(v) => style = style.default_size(v),
-                None => warnings.push(format!("components.{name}.{key}: expected a string")),
-            },
+            "defaults" => {
+                let Some(map) = value.as_object() else {
+                    warnings.push(format!("components.{name}.defaults: expected an object"));
+                    continue;
+                };
+                for (entry, value) in map {
+                    match (entry.as_str(), value.as_str()) {
+                        ("variant", Some(v)) => style = style.default_variant(v),
+                        ("size", Some(v)) => style = style.default_size(v),
+                        ("variant" | "size", None) => warnings.push(format!(
+                            "components.{name}.defaults.{entry}: expected a string"
+                        )),
+                        _ => warnings
+                            .push(format!("components.{name}.defaults: unknown key `{entry}`")),
+                    }
+                }
+            }
             other => warnings.push(format!("components.{name}: unknown key `{other}`")),
         }
     }
@@ -387,9 +399,10 @@ mod tests {
             assert!(component_style_of("button").is_none());
 
             let warnings = set_component_classes(
-                r#"{"button":{"base":"a","variants":{"p":"b"},"defaultVariant":"p"}}"#,
+                r#"{"button":{"base":"a","variants":{"p":"b"},"defaults":{"variant":"p","sise":"x"}}}"#,
             );
-            assert!(warnings.is_empty());
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("sise"));
             let (_, classes) = component_style_of("button").unwrap().resolve(None, None);
             assert_eq!(classes.as_deref(), Some("a b"));
         });
