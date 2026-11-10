@@ -484,7 +484,15 @@ fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> anyhow::Res
             r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.longbridge.nsh">
     <uses-sdk android:minSdkVersion="{}" />
-    <uses-permission android:name="android.permission.INTERNET" />{}
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Text actions (Translate and the like) the selection menu offers,
+        as TextView's: Android 11+ hides other apps' activities otherwise. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>{}
 </manifest>
 "#,
             android::MIN_SDK,

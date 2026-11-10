@@ -2276,8 +2276,11 @@ final class Mounter {
                 boolean block = b.getInt() != 0;
                 clearJsResponder();
                 if (block && v != null) {
-                    // Scroll views around the responder stop taking its touches.
+                    // Scroll views around the responder stop taking its touches, and the presses around it
+                    // end: a handle held past the long press delay is no long press of the text around it.
                     for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
+                        if (p instanceof Box) ((Box) p).cancelPress();
+                        else if (p instanceof TextBox && ((TextBox) p).press != null) ((TextBox) p).press.cancel();
                         if (p instanceof ScrollBox) {
                             ((ScrollBox) p).jsBlocked = true;
                             blockedScrolls.add((ScrollBox) p);
