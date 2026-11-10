@@ -919,6 +919,8 @@ Tray.set({
 });
 ```
 
+A window the app shows or focuses in `onClick` or in a menu item's `onSelect` comes to the front, on Linux's Wayland desktops too, where the panel hands the app the activation token of the click.
+
 A title keeps something in sight beside the icon in macOS's menu bar, such as a price, its change in a color of the app's theme. A run's color is fixed when `set` is called; set the tray inside an `effect` that reads the color scheme for a theme color to follow light and dark:
 
 ```rust tabs
