@@ -436,7 +436,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   "Extensions").
 - **API shapes: one form per thing, shapes that can grow** (decided by the user before the freeze; details and
   examples in `docs/dev/api-naming.md` "Conventions", "Shapes that can grow" and "Units"; the API is being brought to
-  them). Names come from `gpui-base` / GPUI and the DOM; React Native is a reference only.
+  them). Names are short, accurate and neutral: the project's own word for a concept first, then `gpui-base` /
+  GPUI's and the DOM's (`CONTRIBUTING.md` "API design"); React Native is a reference only.
   - Units: one per quantity. Lengths are points; an image's or a video's own size is pixels, typed `PixelSize`
     (never `Size`); times are milliseconds; velocities points per second; shares fractions from 0 to 1 (no `Percent`
     in names). Only media time is seconds (HTML's `currentTime`) and a deceleration the velocity kept per
@@ -596,7 +597,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 
 ## CI
 
-Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+The checks run on pull requests and once a day on `main` (and on manual runs), not on every push to `main`: the
+pull request already ran them, and the daily run saves the dependencies' caches pull requests restore. Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
 It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow
@@ -622,7 +624,9 @@ CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` install
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
 `main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
-directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`.
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The release and the
+website's deployment run on the organization's self-hosted runners, never pull requests (`docs/dev/tooling.md`
+"Self-hosted runners").
 
 ## Parallel agents
 

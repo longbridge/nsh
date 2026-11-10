@@ -15,8 +15,8 @@
 //! it when the last reference (the cache's, the views') goes. SVG images
 //! (sniffed from their bytes) are drawn by [`nsh_core::svg`] at the
 //! bucket's size; their picture keeps their intrinsic size in points, which
-//! they are laid out with and report. Canvases draw bitmaps only
-//! ([`load_bitmap`]).
+//! they are laid out with and report. Canvases draw them as their
+//! rasterized bitmap ([`load_bitmap`]).
 //!
 //! Animated GIF and WebP images decode every frame (composited, at most
 //! [`MAX_FRAMES`] and [`MAX_ANIMATION_BYTES`]: larger ones show their first
@@ -541,8 +541,8 @@ fn fetch(
 
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the main thread, at its natural size; `done` runs on
-/// the main thread with the image (an animation's first frame). Canvases
-/// draw bitmaps: an SVG is an image that failed to load.
+/// the main thread with the image (an animation's first frame). An SVG is
+/// rasterized by the shared SVG renderer and handed over as its bitmap.
 ///
 /// A cached texture is handed over before this returns: callers must not
 /// hold a borrow of view state that `done` takes.
@@ -551,15 +551,7 @@ pub(crate) fn load_bitmap(
     uri: &str,
     done: impl FnOnce(Result<gdk::Texture, String>) + 'static,
 ) {
-    let name = uri.to_owned();
-    let done = move |result: Result<(Picture, Lease), String>| {
-        done(result.and_then(|(p, _)| match p.natural {
-            Natural::Vector(_) => Err(format!(
-                "{name} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-            )),
-            Natural::Pixels(..) => Ok(p.texture),
-        }));
-    };
+    let done = move |result: Result<(Picture, Lease), String>| done(result.map(|(p, _)| p.texture));
     let source = ImageSource {
         uri: uri.into(),
         size: None,

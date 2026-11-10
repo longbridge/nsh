@@ -21,6 +21,7 @@ impl Headless {
     pub fn right_click(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("rightClick({selector})"));
+        self.input_with(nsh_core::platform::InputModality::Pointer);
         if !self.environment.desktop() {
             return Err(
                 "a phone has no mouse to right-click with: open the app as a desktop (`platform`)"

@@ -211,6 +211,113 @@ fn home_and_end_reach_the_items_around_the_list() {
     choose(Root::of::<Models>(), &["end", "home"], "space", "Before");
 }
 
+#[test]
+fn page_down_goes_a_view_at_a_time_and_stops_at_the_end() {
+    // Five rows show: the first Page Down is the last row in view, then
+    // each goes five rows on, to rows the list had not made, and stops at
+    // the last.
+    choose(Root::of::<OnlyRows>(), &["pagedown"], "space", "Row 4");
+    choose(
+        Root::of::<OnlyRows>(),
+        &times("pagedown", 2),
+        "space",
+        "Row 9",
+    );
+    choose(
+        Root::of::<OnlyRows>(),
+        &times("pagedown", 6),
+        "space",
+        "Row 29",
+    );
+    choose(
+        Root::of::<OnlyRows>(),
+        &times("pagedown", 7),
+        "space",
+        "Row 29",
+    );
+}
+
+#[test]
+fn page_up_goes_a_view_at_a_time_and_stops_at_the_start() {
+    // Page Down six times: Row 29 at the bottom, 25 to 29 in view.
+    for (pages, chosen) in [(1, "Row 25"), (2, "Row 20"), (7, "Row 0")] {
+        let mut keys = times("pagedown", 6);
+        keys.extend(times("pageup", pages));
+        choose(Root::of::<OnlyRows>(), &keys, "space", chosen);
+    }
+}
+
+#[test]
+fn a_page_lands_on_the_enabled_row_nearest_its_edge() {
+    // Row 22 at the bottom: the next page ends at Row 27, disabled, so
+    // Row 26.
+    let mut keys = times("down", 22);
+    keys.push("pagedown");
+    choose(Root::of::<OnlyRows>(), &keys, "space", "Row 26");
+    // Row 7 at the bottom shows 3 to 7: Page Up's first row in view is 3,
+    // disabled, so Row 4.
+    let mut keys = times("down", 7);
+    keys.push("pageup");
+    choose(Root::of::<OnlyRows>(), &keys, "space", "Row 4");
+}
+
+#[test]
+fn pages_go_on_to_the_items_after_the_list() {
+    // Row 29 at the bottom of the list: More and After are in view, so
+    // the next page is After, where it stops.
+    choose(
+        Root::of::<Models>(),
+        &times("pagedown", 6),
+        "space",
+        "Row 29",
+    );
+    choose(
+        Root::of::<Models>(),
+        &times("pagedown", 7),
+        "space",
+        "After",
+    );
+    choose(
+        Root::of::<Models>(),
+        &times("pagedown", 8),
+        "space",
+        "After",
+    );
+}
+
+#[test]
+fn the_keys_start_at_the_row_the_pointer_is_on() {
+    for (keys, chosen) in [
+        // Row 2, then Down past Row 3 (disabled).
+        (&["down"][..], "Row 4"),
+        (&["up"][..], "Row 1"),
+        (&["pagedown"][..], "Row 4"),
+    ] {
+        let mut app = start(Root::of::<OnlyRows>());
+        app.press("id:open").unwrap();
+        app.wait_for("Row 0").unwrap();
+        app.hover("text:Row 2").unwrap();
+        for key in keys {
+            app.press_key(key).unwrap();
+        }
+        app.press_key("space").unwrap();
+        app.wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{keys:?}: {e}"));
+    }
+    // From the last row in view, Down and Page Down reach rows not made
+    // yet.
+    for (key, chosen) in [("down", "Row 5"), ("pagedown", "Row 9")] {
+        let mut app = start(Root::of::<OnlyRows>());
+        app.press("id:open").unwrap();
+        app.wait_for("Row 0").unwrap();
+        app.hover("text:Row 4").unwrap();
+        app.press_key(key).unwrap();
+        app.press_key("space").unwrap();
+        app.wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
+    }
+}
+
 /// Panics whose message says a prop outlived its owner, on any thread
 /// (the engine's: an event's handler panicking is caught there).
 static DISPOSED_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

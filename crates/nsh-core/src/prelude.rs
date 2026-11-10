@@ -150,10 +150,12 @@ pub use crate::element::{
     ResizeMode,
     ResponderEvent,
     ReturnKeyType,
+    RevealOptions,
     Rgba,
     Screen,
     ScreenAnimation,
     Scroll,
+    ScrollAlignment,
     ScrollEvent,
     Scrollable,
     Selection,
@@ -237,7 +239,8 @@ pub use crate::element::{
 };
 /// Sound ([`crate::audio`]).
 pub use crate::element::{
-    AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+    AudioFailure, AudioPlayer, PlayerState, Sound, SoundSource, audio_available, audio_player,
+    load_sound,
 };
 pub use crate::element::{
     Delay, Each, If, IntoElements, IntoReactive, KeyOptions, Memo, Owner, Prop, Reactive,
@@ -256,10 +259,10 @@ pub use crate::element::{
     register_font, request_animation_frame, request_notification_permission, resource,
     resource_with_value, reveal_path, round_to_nearest_pixel, run_on_main_thread, safe_area,
     screen_reader, set_app_url, set_app_url_with, set_badge, set_clipboard, set_clipboard_image,
-    set_color_scheme, set_fps_enabled, set_interval, set_timeout, set_tokens, show_notification,
-    signal, signal_with, spawn, speech_available, stored, text_metrics, timer, timer_until, tokens,
-    try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll, web_input_available,
-    web_view_available, when, window,
+    set_color_scheme, set_fps_enabled, set_interval, set_timeout, set_tokens, shaders_available,
+    show_notification, signal, signal_with, spawn, speech_available, stored, text_metrics, timer,
+    timer_until, tokens, try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll,
+    web_input_available, web_view_available, when, window,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};

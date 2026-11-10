@@ -256,6 +256,14 @@ impl ElementRef {
         });
     }
 
+    /// Scrolls the scroll views around the element so it shows, placed by
+    /// `options` (TS: `ref.reveal(options)`), with the layout of
+    /// the commit this call goes out with. Lists keep their rows' offsets
+    /// to `scroll_to_index`.
+    pub fn reveal(&self, options: crate::RevealOptions) {
+        self.send(Command::Reveal(options));
+    }
+
     /// Zooms a scroll view to `scale`, around `center` (in the content) or
     /// keeping the middle.
     pub fn zoom_to(&self, scale: f32, center: Option<Point<Points>>, animated: bool) {

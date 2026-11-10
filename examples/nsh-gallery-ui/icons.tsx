@@ -26,6 +26,7 @@ export type IconName =
   | "chat"
   | "smile"
   | "clock"
+  | "calendar"
   | "person"
   | "leaf"
   | "food"
@@ -405,6 +406,13 @@ const glyphs: Record<IconName, Draw> = {
   clock: (c) => {
     circle(c, 10, 10, 7);
     line(c, [10, 6, 10, 10, 12.8, 11.8]);
+  },
+  // Lucide's `calendar`, in the 20-unit box: the rings over a rounded page and the rule under its top.
+  calendar: (c) => {
+    rect(c, 2.5, 3.3, 15, 15, 1.7);
+    line(c, [6.7, 1.7, 6.7, 5]);
+    line(c, [13.3, 1.7, 13.3, 5]);
+    line(c, [2.5, 8.3, 17.5, 8.3]);
   },
   person: (c) => {
     circle(c, 10, 7, 3.2);

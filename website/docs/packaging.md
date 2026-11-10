@@ -93,6 +93,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
 | `--abi <abi>` | Android: the ABIs of the APK, repeated or separated by commas (default: `arm64-v8a` and `armeabi-v7a`). |
 | `--format <apk \| aab>` | Android: an APK (default), installed directly, or an Android App Bundle for Google Play ([below](#google-play-app-bundles)). |
+| `--arch <arm64 \| x86_64 \| universal>` | macOS: the processors the app runs on: Apple silicon, Intel, or both in one universal executable ([below](#macos)). Default: this Mac's. |
 | `--run` | Install and launch afterwards: in the iOS simulator, or on the Android device or emulator `adb` sees; macOS, Linux and Windows apps are launched on this machine; a web site is served on this machine and opened in the browser. Not for `--target ios`. |
 | `--asset-url <URL>` | Web: the http(s) URL the site's files are served from, a CDN, as the page names them; `index.html` and `manifest.webmanifest` stay at the page's address (named relatively, as without the flag), and the CDN answers with `Access-Control-Allow-Origin`. Default: next to the page, named relatively. `--run` serves the site from this machine as it is, so it goes without it. |
 
@@ -222,6 +223,14 @@ Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/asse
 title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
 `Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
 later; to distribute it, sign it with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
+
+The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel Macs, `arm64` for Apple silicon, or
+`universal` for both in one executable. A runner for another processor needs its Rust target:
+
+```sh
+rustup target add x86_64-apple-darwin
+nsh package --target macos --arch universal
+```
 
 ## Linux
 

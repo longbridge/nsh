@@ -53,6 +53,21 @@ use rustc_hash::FxHashMap;
 
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
+/// This build links the renderer: a platform reports
+/// `Environment::shaders` from it as it starts (`false` without the
+/// feature), and [`Renderer::new`] says whether a GPU answers.
+pub const LINKED: bool = true;
+
+/// [`Renderer::new`] found no GPU adapter or device in this process: the
+/// machine's answer, the same for every surface, so engines started after
+/// it report `Environment::shaders` `false` without asking again.
+static NO_GPU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether [`Renderer::new`] found no GPU in this process.
+pub(crate) fn no_gpu() -> bool {
+    NO_GPU.load(Ordering::Relaxed)
+}
+
 fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
     match format {
         PixelFormat::Rgba => wgpu::TextureFormat::Rgba8Unorm,
@@ -102,7 +117,8 @@ fn backend_order() -> Vec<wgpu::Backends> {
 
 impl Renderer {
     /// Opens a GPU device (blocking, once: adapters answer in milliseconds);
-    /// `None` when there is none, which the log says.
+    /// `None` when there is none, which the log says. The platform then
+    /// tells its engine ([`crate::EngineControl::shaders_unavailable`]).
     pub fn new(format: PixelFormat) -> Option<Renderer> {
         let mut found = None;
         let mut last = None;
@@ -125,6 +141,7 @@ impl Renderer {
         let Some(adapter) = found else {
             let e = last.map_or_else(String::new, |e| e.to_string());
             log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
+            NO_GPU.store(true, Ordering::Relaxed);
             return None;
         };
         let (device, queue) =
@@ -137,6 +154,7 @@ impl Renderer {
                 Ok(device) => device,
                 Err(e) => {
                     log::warn!("shaders: no GPU device ({e}); shader views draw nothing");
+                    NO_GPU.store(true, Ordering::Relaxed);
                     return None;
                 }
             };

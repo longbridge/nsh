@@ -120,6 +120,15 @@ impl Host {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
     }
 
+    /// The user gave the surface input with `modality` (a finger, a mouse
+    /// or a hardware key going down): told before it acts, so the focus
+    /// it moves shows or not (`focus-visible:`).
+    pub(crate) fn input_with(&self, modality: nsh_core::platform::InputModality) {
+        if let Some(control) = self.control() {
+            control.set_input_modality(modality);
+        }
+    }
+
     /// Hands event `kind` of node `id` to the running app.
     pub(crate) fn dispatch(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
         if let Some(control) = self.control() {
@@ -620,6 +629,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            // wgpu on Vulkan or GLES, in builds with it, until it finds no
+            // GPU.
+            shaders: nsh_engine::shader::LINKED,
             ..Environment::default()
         }),
         animation_queue: Mutex::new(VecDeque::new()),
@@ -1382,6 +1394,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_press(
     let Some(kind) = encode::kind_from(kind) else {
         return;
     };
+    if kind == EventKind::PressDown {
+        host.input_with(nsh_core::platform::InputModality::Pointer);
+    }
     let event = nsh_core::PressEvent {
         position: point(px(x), px(y)),
         page_position: point(px(page_x), px(page_y)),
@@ -1462,6 +1477,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
             }
         })
         .collect();
+    if phase == 0 {
+        host.input_with(nsh_core::platform::InputModality::Pointer);
+    }
     let phase = match phase {
         0 => nsh_core::TouchPhase::Start,
         1 => nsh_core::TouchPhase::Move,
@@ -1797,7 +1815,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_afterBatch(
         ui.apply(item);
     }
     finish(host, &mut ui);
-    floats(&env, &ui.outputs())
+    let unavailable = ui.shaders.take_unavailable();
+    let outputs = floats(&env, &ui.outputs());
+    drop(ui);
+    // No GPU for the shader views just mounted: the app hears it
+    // (`shadersAvailable()`).
+    if unavailable && let Some(control) = host.control() {
+        control.shaders_unavailable();
+    }
+    outputs
 }
 
 /// Runs the next function the app asked to run on the UI thread

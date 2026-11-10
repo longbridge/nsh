@@ -358,6 +358,10 @@ struct ScrollState {
     /// made (`ScrollBy` items and `ScrollTo` commands; lists count theirs in
     /// their state): platforms report how many they applied.
     issued: u32,
+    /// Where the last `ScrollTo` sent scrolls it, with its number in
+    /// `issued` (moved by the `ScrollBy`s after it), until a report shows
+    /// it applied: `reveal` starts from there.
+    target: Option<(u32, (f32, f32))>,
     /// The lists virtualized against this scroll view (`viewport="parent"`;
     /// empty for nearly every scroll view).
     dependents: Vec<Key>,
@@ -394,6 +398,7 @@ impl Default for ScrollState {
             zoom: 1.0,
             offset: (0.0, 0.0),
             issued: 0,
+            target: None,
             dependents: Vec::new(),
             pending: Vec::new(),
             asked: None,
@@ -1266,6 +1271,18 @@ pub struct Core<M: TextEngine> {
     /// The chain changed since the focus watches last looked
     /// (`ElementRef::on_focus_in`).
     focus_within_changed: bool,
+    /// What the user last gave the surface input with, as the platform
+    /// reports it (`classes::set_input_modality`); `None` before any.
+    modality: Option<crate::platform::InputModality>,
+    /// The focus shows (`focus-visible:`), decided when it was reported
+    /// (`classes::focus_shows`) and again when a key is typed.
+    focus_visible: bool,
+    /// The view in the `FOCUS_VISIBLE` state, by key and id
+    /// (`classes::update_focus_visible`).
+    focus_visible_on: Option<(Key, NodeId)>,
+    /// `focus_visible` changed with the focus staying where it is: the
+    /// next commit round moves the state.
+    focus_visible_moved: bool,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1463,6 +1480,10 @@ impl<M: TextEngine> Core<M> {
             focus_scratch: Vec::new(),
             focus_moved: false,
             focus_within_changed: false,
+            modality: None,
+            focus_visible: false,
+            focus_visible_on: None,
+            focus_visible_moved: false,
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -1807,6 +1828,9 @@ impl<M: TextEngine> Core<M> {
         if let Some(scroll) = node.scroll.as_mut() {
             moved = scroll.offset != (x, y);
             scroll.offset = (x, y);
+            if scroll.target.is_some_and(|(n, _)| n <= applied) {
+                scroll.target = None;
+            }
             if !scroll.dependents.is_empty() {
                 scroll.pending.retain(|&(n, _)| n > applied);
                 dependents = true;
@@ -2792,12 +2816,16 @@ impl<M: TextEngine> Core<M> {
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
         // share untouched.
+        let visible_moved = std::mem::take(&mut self.focus_visible_moved);
         if self.focus_moved {
             self.update_focus_within();
+            self.update_focus_visible();
             // The hints the focus came to or left.
             if !self.overlays.is_empty() {
                 self.focus_hints();
             }
+        } else if visible_moved {
+            self.update_focus_visible();
         }
         self.sync_colors();
         self.sync_ch();
@@ -2889,6 +2917,27 @@ impl<M: TextEngine> Core<M> {
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
+        }
+        // Into the scroll commands of the scroll views around, in place,
+        // with this commit's layout and the scrolls of the commands before.
+        if self
+            .commands
+            .iter()
+            .any(|(_, c)| matches!(c, Command::Reveal(_)))
+        {
+            let mut projected = Vec::new();
+            for (id, command) in std::mem::take(&mut self.commands) {
+                let commands = match command {
+                    Command::Reveal(options) => self.reveal_scrolls(id, options, &projected),
+                    command => vec![(id, command)],
+                };
+                for (id, command) in commands {
+                    if let Some(to) = self.scrolled_to(id, &command) {
+                        projected.push((id, to));
+                    }
+                    self.commands.push((id, command));
+                }
+            }
         }
         // Presses a component passes on, onto this commit's layout.
         for (id, press, answer) in std::mem::take(&mut self.components.presses) {
@@ -3063,6 +3112,9 @@ impl<M: TextEngine> Core<M> {
                     .is_some_and(|s| s.horizontal);
                 let to = if horizontal { x.0 } else { y.0 };
                 self.scroll_issued(key, PendingScroll::To(to));
+                if let Some(scroll) = self.nodes[key as usize].scroll.as_mut() {
+                    scroll.target = Some((scroll.issued, (x.0, y.0)));
+                }
             }
             self.mount.push(MountItem::Command { id, command });
         }
@@ -5109,6 +5161,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::FocusWithin, patch);
                 return Ok(());
             }
+            Prop::FocusVisibleStyle(patch) => {
+                self.set_part_style(key, classes::Part::FocusVisible, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
                 return Ok(());
@@ -6173,6 +6229,7 @@ impl<M: TextEngine> Core<M> {
             scroll.content = None;
             // The new native view counts the core's scrolls from zero.
             scroll.issued = 0;
+            scroll.target = None;
             scroll.pending.clear();
         }
         // A list in its parent's viewport is a plain view clipping its

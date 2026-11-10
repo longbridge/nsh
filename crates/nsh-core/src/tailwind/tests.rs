@@ -1178,6 +1178,35 @@ fn variants() {
 }
 
 #[test]
+fn focus_visible_is_the_shown_focus_not_any_focus() {
+    // `focus:` holds while the view has the focus, `focus-visible:` only
+    // while the core shows it (the keyboard moved it there).
+    let theme = themed();
+    let list = parse(&theme, "focus-visible:p-2 group-focus-visible:m-2");
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    // The platform reports `FOCUSED` alone: nothing more to track.
+    assert_eq!(list.tracked_states() & !state::FOCUS_VISIBLE, 0);
+    let pad = |states: u16| {
+        let (env, states) = cx(states);
+        styled_with(
+            "p-1 focus:p-3 focus-visible:p-5",
+            env,
+            (390.0, 844.0),
+            states,
+        )
+        .0
+        .layout
+        .padding
+        .top
+    };
+    let p = |n: f32| taffy::LengthPercentage::length(n);
+    assert_eq!(pad(0), p(4.0));
+    assert_eq!(pad(state::FOCUSED), p(12.0));
+    // After `focus:` in Tailwind's order: it wins while both hold.
+    assert_eq!(pad(state::FOCUSED | state::FOCUS_VISIBLE), p(20.0));
+}
+
+#[test]
 fn checked_variants() {
     let theme = themed();
     let list = parse(&theme, "checked:bg-black group-checked:translate-x-4");

@@ -106,8 +106,10 @@ final class Mounter {
 
     /** One part of a layout animation (`encode.rs` `layout_transition`). */
     private static final class Transition {
-        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring, 5 the keyboard's
+        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 fitted spring, 5 the keyboard's, 6 spring
         float damping;
+        /** A spring's progress (6), sampled evenly over the time it settles in (the duration), ending at 1. */
+        float[] samples;
         int property; // 0 opacity, 1 scale
         long duration, delay;
 
@@ -121,6 +123,16 @@ final class Mounter {
                     // React Native's spring interpolator.
                     float d = damping;
                     return t -> (float) (1 + Math.pow(2, -10 * t) * Math.sin((t - d / 4) * Math.PI * 2 / d));
+                }
+                case 6: {
+                    float[] p = samples;
+                    int last = p.length - 1;
+                    return t -> {
+                        if (t >= 1) return 1;
+                        float x = Math.max(t, 0) * last;
+                        int i = (int) x;
+                        return p[i] + (p[i + 1] - p[i]) * (x - i);
+                    };
                 }
                 default: return new AccelerateDecelerateInterpolator();
             }
@@ -640,6 +652,10 @@ final class Mounter {
         Transition t = new Transition();
         t.curve = b.getInt();
         t.damping = b.getFloat();
+        if (t.curve == 6) {
+            t.samples = new float[b.getInt()];
+            for (int i = 0; i < t.samples.length; i++) t.samples[i] = b.getFloat();
+        }
         t.property = b.getInt();
         t.duration = (long) b.getFloat();
         t.delay = (long) b.getFloat();
@@ -1653,26 +1669,21 @@ final class Mounter {
     }
 
     /** Applies `[animating, (view, prop, value)*]` from the animator. */
-    /** A canvas's drawing; loads the images it draws (bitmaps: an SVG is an image that failed to load). */
+    /** A canvas's drawing; loads the images it draws (an SVG as its rasterized bitmap). */
     private void drawing(CanvasBox canvas, int[] code, Object[] objects) {
         for (String uri : canvas.setDrawing(code, objects)) {
             if (canvas.images.containsKey(uri)) continue;
             // At their natural size: the drawing may scale them anyway.
             Images.Image cached = images.request(uri, 0, 0, (image, error) -> {
-                if (image != null && !image.vector) {
+                if (image != null) {
                     canvas.images.put(uri, image);
                     canvas.invalidate();
                 } else {
-                    android.util.Log.w("nsh", "canvas image failed: " + (image != null ? notABitmap(uri) : error));
+                    android.util.Log.w("nsh", "canvas image failed: " + error);
                 }
             });
-            if (cached != null && cached.vector) android.util.Log.w("nsh", "canvas image failed: " + notABitmap(uri));
-            else if (cached != null) canvas.images.put(uri, cached);
+            if (cached != null) canvas.images.put(uri, cached);
         }
-    }
-
-    private static String notABitmap(String uri) {
-        return uri + " is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)";
     }
 
     /** Canvas animated value slot `n` arrives as property `CANVAS_ARG + n` (`animation.rs`). */

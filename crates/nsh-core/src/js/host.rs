@@ -155,6 +155,7 @@ pub fn style_patch_prop(name: &str) -> Option<StylePatchProp> {
         "expandedStyle" => Prop::ExpandedStyle,
         "pressedStyle" => Prop::PressedStyle,
         "focusWithinStyle" => Prop::FocusWithinStyle,
+        "focusVisibleStyle" => Prop::FocusVisibleStyle,
         "headerStyle" => Prop::HeaderStyle,
         _ => return None,
     })
@@ -1009,12 +1010,14 @@ const GROUPS: &[(u32, &str, &str)] = &[
 /// The declarations of the host elements' props: the named types they use
 /// and one interface per element group and platform (`InputHostProps`,
 /// `IOSInputHostProps`, ...), which the element types and the components
-/// of `nsh` (`WebView`, `Video`, ...) extend.
+/// of `nsh` (`WebView`, `Video`, ...) extend, and the options the refs'
+/// methods take (`RevealOptions`).
 pub fn declarations() -> String {
     use std::fmt::Write as _;
     let mut types = TsTypes::default();
     let mut specs = Vec::new();
     <crate::Prop as HostProps>::specs(&mut types, &mut specs);
+    <crate::RevealOptions as HostValue>::ts_type(&mut types);
     let mut out = String::from(EVENT_TYPES);
     for declaration in types.declarations() {
         let _ = write!(out, "\n{declaration}\n");

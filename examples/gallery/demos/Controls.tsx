@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
+import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, DateTrigger, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -1855,7 +1855,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               cleanable
               clearButtonAccessibilityLabel="Clear the due date"
               {...clearButtonLook({ over: true })}
-              trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
+              trigger={<DateTrigger title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
           <View style={row(false)}>
@@ -1880,13 +1880,13 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               contentStyle={content}
               presetsStyle={calendarLook.presets}
               presetStyle={calendarLook.preset}
-              presetClass="enabled:hover:bg-accent active:opacity-70"
+              presetClass={calendarLook.presetClass}
               calendarStyle={calendar}
               headerStyle={header}
               bodyStyle={terminal ? undefined : { gap: monthGap }}
               itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
-              trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
+              trigger={<DateTrigger title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
             />
           </View>
           <View style={row(false)}>
@@ -1917,9 +1917,9 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               timeAccessibilityLabel="Meeting time"
               timeFieldClass={timeFieldClass}
               segmentClass={segmentClass}
-              separatorStyle={{ color: colors.faint, fontSize: size.label }}
+              separatorStyle={calendarLook.separator}
               renderSegment={(segment) => <TimeSegment label={segment.label} />}
-              trigger={<Picker title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
+              trigger={<DateTrigger title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
             />
           </View>
         </View>
@@ -1979,12 +1979,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       return sum;
     };
     const total = () => (nights() ? lodging() + CLEANING : 0);
-    /** One end of the stay in the trigger: a small heading over the day. */
+    /** One end of the stay in the trigger: a small muted heading over the day, the day in the text color or a muted prompt. */
     function End(props: { label: string; value: string | null }) {
       return (
         <View style={{ flex: 1, justifyContent: "center", gap: 1, paddingHorizontal: 12 }}>
-          <Text style={{ fontSize: 10, fontWeight: "600", letterSpacing: 0.6, color: colors.faint }}>{props.label.toUpperCase()}</Text>
-          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.value ? colors.text : colors.faint }}>{props.value ? dayTitle(props.value) : "Add a date"}</Text>
+          <Text style={{ fontSize: 10, fontWeight: "600", letterSpacing: 0.6, color: colors.muted }}>{props.label.toUpperCase()}</Text>
+          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.value ? colors.text : colors.muted }}>{props.value ? dayTitle(props.value) : "Add a date"}</Text>
         </View>
       );
     }
@@ -2030,6 +2030,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               activeStyle={pressed}
               focusStyle={focusRing()}
             >
+              {/* A date picker's trigger leads with the calendar, as `DateTrigger` does. */}
+              <If when={!terminal}>
+                <View style={{ justifyContent: "center", paddingLeft: 12, marginRight: -4 }}>
+                  <Icon name="calendar" size={pointer ? 16 : 18} tint={colors.muted} />
+                </View>
+              </If>
               <End label="Check-in" value={stay()?.[0] ?? null} />
               <View style={{ width: 1, marginVertical: 8, backgroundColor: colors.line }} />
               <End label="Check-out" value={stay()?.[1] ?? null} />
@@ -2105,15 +2111,15 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               contentStyle={content}
               presetsStyle={calendarLook.presets}
               presetStyle={calendarLook.preset}
-              presetClass="enabled:hover:bg-accent active:opacity-70"
+              presetClass={calendarLook.presetClass}
               renderItem={(item) => <CalendarItem item={item} />}
               {...clearProps("Clear the deadline")}
-              trigger={<Picker title={due() ? dayTitle(due()!) : "None"} open={open()} placeholder={!due()} clearable={due() !== null} />}
+              trigger={<DateTrigger title={due() ? dayTitle(due()!) : "None"} open={open()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
           <View style={row(false)}>
             <RowLabel label="Sprint start" detail="Locked once the sprint began" />
-            <DatePicker value={iso(addDays(today, -9))} disabled accessibilityLabel="Sprint start" trigger={<Picker title={dayTitle(iso(addDays(today, -9)))} open={false} disabled />} />
+            <DatePicker value={iso(addDays(today, -9))} disabled accessibilityLabel="Sprint start" trigger={<DateTrigger title={dayTitle(iso(addDays(today, -9)))} open={false} disabled />} />
           </View>
         </View>
       </Card>
@@ -2165,7 +2171,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             disabledMatcher={closed}
             {...calendarProps()}
             renderItem={(item) => <CalendarItem item={item} />}
-            trigger={<Picker title={day() ? dayTitle(day()!) : "Pick a day"} open={open()} placeholder={!day()} />}
+            trigger={<DateTrigger title={day() ? dayTitle(day()!) : "Pick a day"} open={open()} placeholder={!day()} />}
           />
         </View>
         <View style={settle(t)}>

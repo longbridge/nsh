@@ -550,6 +550,8 @@ fn initial_environment() -> Environment {
         notifications: true,
         audio: true,
         web_input: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }

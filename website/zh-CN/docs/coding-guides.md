@@ -23,11 +23,10 @@ Rust 组件、嵌入 NSH 的原生应用），以及在 `nsh/base` 之上构建�
 
 1. 明确应用支持的 Desktop、Mobile、Web、TUI 目标，以及各自的输入、导航和密度要求。
 2. 在主题文件（`nsh.json` 的 `"theme"`）中定义语义颜色角色与浅色、深色值，并确定组件使用的字体、间距、圆角和尺寸尺度。
-3. 在 `nsh/base` 之上封装、组合应用自己的风格控件，覆盖可见部件、变体和交互状态。在支持的目标上验证有代表性的组合，再铺开到页面。
+3. 创建应用的 `ui` 模块（`src/ui/`），在 `nsh/base` 之上封装、组合其核心风格控件（[应用的 `ui` 层](./design-guides.md#应用的-ui-层)）：每个控件只接受 `variant`、`size`、状态和 slot，不接受颜色或圆角；覆盖可见部件、变体和交互状态。在支持的目标上验证有代表性的组合，再铺开到页面。
 4. 用这一层组合页面。缺少 token 或共享变体时，先在所属层补充，再由页面使用；共享控件的修改应一致地作用于所有使用处。
 
-NSH 提供无样式的 `nsh-base` crate（TSX 中为 `nsh/base`），对应 [`gpui-base`](https://gpui-kit.com/base)；应用或社区组件库拥有对应
-[`gpui-component`](https://gpui-kit.com/component) 的风格层，`nsh-core` 则对应底层的 GPUI。普通界面应该导入应用自己的风格控件，把基础组件的组装与样式
+NSH 提供原语（`nsh-core`，TSX 中为 `nsh`）和无样式的 `nsh-base` crate（TSX 中为 `nsh/base`）；应用或社区组件库拥有其上的风格层。普通界面应该导入应用自己的风格控件，把基础组件的组装与样式
 保留在共享层中。适配各目标平台的外观时，保留基础组件的行为、焦点与无障碍能力。
 
 主题颜色必须通过语义 token 读取：Rust 使用 `theme().primary` 或 `theme().color("warning")`，TSX 使用 `bg-primary`、
@@ -888,8 +887,7 @@ const liked = signal<Set<number>>(new Set());
 
 ### 词汇是 API 的一部分
 
-在各个组件中，同一概念使用同一个词。在给 prop 或事件命名之前，先在 NSH 自己的 API 中寻找这个术语，然后是 GPUI Kit 的
-[`gpui-base`](https://gpui-kit.com/base)、GPUI 和 [`gpui-component`](https://gpui-kit.com/component)，再然后是各平台的控件。原语所显示的内容和全局 API 的名称取自 HTML、DOM 和 CSS
+在各个组件中，同一概念使用同一个词。在给 prop 或事件命名之前，先在 NSH 自己的 API 中寻找这个术语，然后是各平台的控件。原语所显示的内容和全局 API 的名称取自 HTML、DOM 和 CSS
 （`src`、`html`、`placeholder`）。Rust 名称是 `snake_case`，在 TSX 中转换为 `camelCase`（`on_open_change` 即
 `onOpenChange`）；一个词保持一个词（`readonly`、`multiline`）。
 
@@ -1050,7 +1048,7 @@ test("a tap counts", async () => {
 ## 编码代理规则
 
 修改前必须阅读与改动最相关的实现、测试、模块的公开导出和参考页面。必须在当前源码和 `.nsh/types` 中搜索签名，不能从
-React、React Native、CSS 或 GPUI 的示例类比翻译：NSH 的组件只运行一次，绑定跟随它们读取的 signal。
+React、React Native 或 CSS 的示例类比翻译：NSH 的组件只运行一次，绑定跟随它们读取的 signal。
 
 每项改动都应能回答：
 

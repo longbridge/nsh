@@ -67,6 +67,7 @@ use nsh_core::{
         self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, VelocityTracker, ZOOM_IDLE, has_press, laid_out,
         latch_holds, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
@@ -722,14 +723,17 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     ) {
         input.last.set(Some((x, y)));
     }
-    // A press in a window gives it the keyboard (AppKit does it itself, but
-    // for an app in the background).
     if matches!(
         ty,
         NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
-    ) && let Some(window) = event.window(surface.mtm)
-    {
-        crate::window::became_key(surface, &window);
+    ) {
+        // Before the press acts: the focus it moves does not show.
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+        // A press in a window gives it the keyboard (AppKit does it itself,
+        // but for an app in the background).
+        if let Some(window) = event.window(surface.mtm) {
+            crate::window::became_key(surface, &window);
+        }
     }
     match ty {
         // Control-click is the secondary click on macOS.
@@ -853,6 +857,11 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
 /// move that way. Fields keep their keys (they reach the root only when
 /// they do not use them).
 pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
+    // Before the key acts: the focus it moves shows (`focus-visible:`).
+    // A modifier alone is a `flagsChanged`, never a key down.
+    if down {
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
             activate(surface, &view, "keyboard");

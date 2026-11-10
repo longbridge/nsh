@@ -787,14 +787,14 @@ const remove = () => {
 | `easeInEaseOut(onEnd?)`, `linear(onEnd?)`, `spring(onEnd?)` | `animate_layout` with a preset | `configureNext` with a preset. |
 | `Types`, `Properties` | `LayoutCurve`, `LayoutProperty` | The names, for building configs. |
 
-A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"` or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::Spring { damping }`) sets the spring's overshoot.
+A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"` or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::FittedSpring { damping_ratio }`) sets the spring's overshoot.
 
 ```rust tabs
 use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
 
 animate_layout(LayoutAnimation {
     create: Some(LayoutTransition::new(LayoutCurve::EaseOut, 300.0)),
-    update: Some(LayoutTransition::new(LayoutCurve::Spring { damping: 0.8 }, 300.0)),
+    update: Some(LayoutTransition::new(LayoutCurve::FittedSpring { damping_ratio: 0.8 }, 300.0)),
     delete: Some(LayoutTransition {
         property: LayoutProperty::Scale,
         ..LayoutTransition::new(LayoutCurve::EaseIn, 300.0)
@@ -814,18 +814,27 @@ LayoutAnimation.configureNext({
 A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it. In a Rust component, animate only what one element's change moves with `ElementRef::animate_layout(transition)`: the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen). The update's other frames change at once. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content.
 
 ```rust
-use nsh_core::element::{LayoutCurve, LayoutTransition};
+use nsh_core::element::{LayoutTransition, Spring};
 
 let region = element_ref();
 let open = signal(false);
 let toggle = move || {
-    region.animate_layout(LayoutTransition::new(LayoutCurve::Spring { damping: 1.0 }, 265.0));
+    region.animate_layout(LayoutTransition::spring(Spring::new(180.0)));
     open.update(|o| *o = !*o);
 };
 view()
     .element_ref(&region)
     .overflow_hidden()
     .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
+```
+
+A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(spring)` with gpui-base's `Spring`: `Spring::new(response_ms)` (the period of the undamped spring, critically damped) or `Spring::from_stiffness(stiffness)` (a mass of 1), each shaped by `.damping_ratio(ζ)`. The animation lasts until the spring stays within a thousandth of its target (`Spring::settle_ms`), whatever duration the transition was given, and moves by the same physics on every platform (`LayoutCurve::Spring`). A `LayoutCurve::FittedSpring { damping_ratio }` is the spring JS configs name (`type: "spring"`): its stiffness is fitted to the transition's duration.
+
+```rust
+use nsh_core::element::{LayoutTransition, Spring};
+
+// Material 3 Expressive's fast spatial spring: stiffness 800, damping ratio 0.6.
+region.animate_layout(LayoutTransition::spring(Spring::from_stiffness(800.0).damping_ratio(0.6)));
 ```
 
 ## What runs where

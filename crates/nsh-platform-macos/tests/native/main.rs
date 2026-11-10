@@ -19,6 +19,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
+mod window_dialog;
+#[cfg(target_os = "macos")]
 mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_press;
@@ -34,6 +36,8 @@ fn main() {
                 mount::bench_alone();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
+            } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
+                window_dialog::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some() {
@@ -42,6 +46,7 @@ fn main() {
                 window_press::run();
                 window_hover::run();
                 title_bar::run();
+                window_dialog::run();
                 input_hidden::run();
                 zoom::run();
                 mount::run();

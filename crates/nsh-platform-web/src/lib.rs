@@ -487,7 +487,8 @@ fn page() -> Environment {
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
 /// shortcuts are Apple's), `host` (the page answers `nsh/host` calls:
 /// `createPlayer`'s `host`) and `screenColor` (the browser has an
-/// `EyeDropper`); missing keys keep their value. Called before the app starts
+/// `EyeDropper`) and `shaders` (`false` once a shader view found no
+/// WebGL 2); missing keys keep their value. Called before the app starts
 /// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
@@ -595,6 +596,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     env.notifications = flag("notifications").unwrap_or(env.notifications);
     env.audio = flag("audio").unwrap_or(env.audio);
+    env.shaders = flag("shaders").unwrap_or(env.shaders);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -612,6 +614,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.screen_color = env.screen_color;
         e.notifications = env.notifications;
         e.audio = env.audio;
+        e.shaders = env.shaders;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
         if rescaled && app.text.emoji_measured() {
@@ -1650,6 +1653,19 @@ pub extern "C" fn nsh_root_size(
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_states(id: u32, states: u32) -> f64 {
     send(|app| app.control.set_states(id, states as u16))
+}
+
+/// The user gave the page input with a pointer (`modality` 1: a mouse
+/// button, a pen or a finger going down) or the keyboard (0: a key that
+/// is not a modifier alone), before it acts: `focus-visible:` follows it.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_input_modality(modality: u32) -> f64 {
+    let modality = if modality == 1 {
+        nsh_core::platform::InputModality::Pointer
+    } else {
+        nsh_core::platform::InputModality::Keyboard
+    };
+    send(|app| app.control.set_input_modality(modality))
 }
 
 /// The surface was resized (points).
