@@ -59,7 +59,7 @@ impl Finished {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Node {
     Value {
         value: f32,
@@ -118,7 +118,7 @@ struct Snap {
 const MAX_DEPTH: u32 = 64;
 
 /// All animation nodes of one surface.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Graph {
     /// Indexed by node id (dense, assigned by JS).
     nodes: Vec<Option<Node>>,
@@ -148,7 +148,7 @@ pub struct Graph {
 }
 
 /// A running composite animation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Program {
     id: AnimationId,
     key: u32,
@@ -161,7 +161,7 @@ struct Program {
 }
 
 /// The state of one part of a composite animation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Step {
     Run {
         node: NodeId,
