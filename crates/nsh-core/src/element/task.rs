@@ -176,6 +176,12 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// Evaluates a WebView script, with its answer kept by the core.
+    EvaluateJavaScript(NodeId, String, crate::web_evaluation::Slot),
+    /// Cancels requests whose awaiting futures were dropped.
+    ForgetWebEvaluations,
+    /// Rejects a request that exceeded its deadline.
+    WebEvaluationTimeout(u32),
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),

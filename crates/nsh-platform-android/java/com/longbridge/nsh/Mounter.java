@@ -737,6 +737,7 @@ final class Mounter {
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+            if (v instanceof WebBox) ((WebBox) v).destroy();
             if (v instanceof ScrollBox) {
                 ((ScrollBox) v).unmounted = true;
                 unkeyScroll((ScrollBox) v);
@@ -2300,6 +2301,20 @@ final class Mounter {
                 float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
                 int actions = b.getInt();
                 if (v instanceof InputBox) ((InputBox) v).openEditMenu(x, y, w, h, actions);
+                break;
+            }
+            case 51: {
+                int request = b.getInt();
+                String generation = (String) objects[b.getInt()];
+                String start = (String) objects[b.getInt()];
+                String poll = (String) objects[b.getInt()];
+                String cleanup = (String) objects[b.getInt()];
+                if (v instanceof WebBox) ((WebBox) v).evaluate(request, generation, start, poll, cleanup);
+                break;
+            }
+            case 52: {
+                int request = b.getInt();
+                if (v instanceof WebBox) ((WebBox) v).cancelEvaluation(request);
                 break;
             }
             case 50:

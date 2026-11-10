@@ -299,6 +299,28 @@ impl ElementRef {
         self.send(Command::InjectJavaScript(script.into()));
     }
 
+    /// Evaluates a script in the WebView's main document, awaiting a returned
+    /// Promise. Resolves strict JSON or a coded error; a navigation start,
+    /// disposal or renderer loss rejects pending calls. The deadline is 30 s.
+    /// Await on the engine thread. Dropping the future cancels the request.
+    pub fn evaluate_java_script(
+        &self,
+        script: impl Into<String>,
+    ) -> crate::web_evaluation::Evaluation {
+        let script = script.into();
+        self.0
+            .with(|target| {
+                let node = target.node.get();
+                target
+                    .executor
+                    .upgrade()
+                    .filter(|_| node != 0)
+                    .map(|executor| crate::web_evaluation::request(&executor, node, script))
+            })
+            .flatten()
+            .unwrap_or_default()
+    }
+
     /// Sends `data` to a web view's page (a `message` event on `window`).
     pub fn post_message(&self, data: impl Into<String>) {
         self.send(Command::PostMessage(data.into()));

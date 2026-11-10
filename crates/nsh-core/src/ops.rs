@@ -258,6 +258,7 @@ events! {
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
     EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
 
+    WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -1978,6 +1979,19 @@ pub enum Command {
     StopLoading,
     /// Run JavaScript in a web view's page.
     InjectJavaScript(String),
+    /// Evaluates a script; the host answers on this node with
+    /// [`EventKind::WebEvaluation`] (`id`, `data`: a JSON envelope).
+    EvaluateJavaScript {
+        /// Engine-local request, echoed in the reply.
+        request: u32,
+        /// Script evaluated in the main document's page world.
+        script: String,
+    },
+    /// Releases a pending native evaluation without reporting another reply.
+    CancelJavaScript {
+        /// Request to cancel.
+        request: u32,
+    },
     /// Send a message to a web view's page (`window.onmessage` data).
     PostMessage(String),
     /// Give a web view's page input as the user's own (trusted events).
@@ -3071,6 +3085,15 @@ pub enum NativeProp {
 /// A mutation produced by the JS renderer.
 #[derive(Debug)]
 pub enum Op {
+    /// Starts an awaitable WebView evaluation, ordered with the UI's ops.
+    EvaluateJavaScript {
+        /// The app-owned WebView.
+        id: NodeId,
+        /// The JS promise's call number.
+        call: u32,
+        /// The page script, evaluated for its completion value.
+        script: String,
+    },
     /// What a canvas draws (replaces the previous drawing).
     Draw {
         /// The canvas.

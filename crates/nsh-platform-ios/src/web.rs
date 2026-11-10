@@ -2,7 +2,13 @@
 //! rather than linked, so apps without web views do not pay for it at
 //! launch.
 
-use std::{ffi::CStr, sync::OnceLock};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    ffi::CStr,
+    rc::Rc,
+    sync::OnceLock,
+};
 
 use nsh_core::{EventKind, EventPayload, NodeId, PayloadValue, WebProps, WebSource};
 use nsh_engine::EngineControl;
@@ -42,6 +48,7 @@ pub(crate) struct WebIvars {
     control: EngineControl,
     /// What the app may show (its `webview` capability).
     access: std::sync::Arc<nsh_engine::Access>,
+    evaluations: Rc<Evaluations>,
 }
 
 define_class!(
@@ -96,9 +103,17 @@ define_class!(
 
         #[unsafe(method(webView:didStartProvisionalNavigation:))]
         fn did_start(&self, web: &AnyObject, _navigation: Option<&AnyObject>) {
+            self.ivars().evaluations.process_gone.set(false);
+            self.ivars().evaluations.cancel_all("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
             let state = navigation_state(web, true);
             self.send(EventKind::LoadStart, state.clone());
             self.send(EventKind::NavigationStateChange, state);
+        }
+
+        #[unsafe(method(webViewWebContentProcessDidTerminate:))]
+        fn process_terminated(&self, _web: &AnyObject) {
+            self.ivars().evaluations.process_gone.set(true);
+            self.ivars().evaluations.cancel_all("ERR_NSH_WEBVIEW_NATIVE", "The web content process terminated");
         }
 
         #[unsafe(method(webView:didFinishNavigation:))]
@@ -126,11 +141,13 @@ impl WebHandler {
         id: NodeId,
         control: EngineControl,
         access: std::sync::Arc<nsh_engine::Access>,
+        evaluations: Rc<Evaluations>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(WebIvars {
             id,
             control,
             access,
+            evaluations,
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -203,6 +220,232 @@ fn js_string(s: &str) -> String {
     out
 }
 
+/// The callback blocks and delayed work hold only weak state, never the host.
+/// Membership and a per-request serial make late callbacks harmless after a
+/// navigation, cancellation, disposal, or a reused request id.
+struct Evaluations {
+    id: NodeId,
+    control: EngineControl,
+    web: RefCell<Option<objc2::rc::Weak<AnyObject>>>,
+    pending: RefCell<HashMap<u32, Evaluation>>,
+    serial: Cell<u64>,
+    process_gone: Cell<bool>,
+}
+
+struct Evaluation {
+    serial: u64,
+    poll: String,
+    cleanup: String,
+}
+
+impl Evaluations {
+    fn reply(&self, request: u32, data: String) {
+        self.control.dispatch_event(
+            self.id,
+            EventKind::WebEvaluation,
+            EventPayload::Map(vec![
+                ("id", PayloadValue::Number(request as f64)),
+                ("data", PayloadValue::Str(data)),
+            ]),
+        );
+    }
+
+    fn error(&self, request: u32, code: &str, message: &str) {
+        self.reply(
+            request,
+            serde_json::json!({ "status": "error", "code": code, "message": message }).to_string(),
+        );
+    }
+
+    fn web(&self) -> Option<Retained<AnyObject>> {
+        if self.process_gone.get() {
+            return None;
+        }
+        self.web.borrow().as_ref().and_then(|web| web.load())
+    }
+
+    fn active(&self, request: u32, serial: u64) -> bool {
+        self.pending
+            .borrow()
+            .get(&request)
+            .is_some_and(|entry| entry.serial == serial)
+    }
+
+    fn cleanup(&self, entry: Evaluation) {
+        if let Some(web) = self.web() {
+            // SAFETY: WebKit's documented API; cleanup has no result.
+            unsafe {
+                let _: () = msg_send![&web, evaluateJavaScript: &*NSString::from_str(&entry.cleanup), completionHandler: std::ptr::null::<AnyObject>()];
+            }
+        }
+    }
+
+    fn cancel(&self, request: u32) {
+        let entry = self.pending.borrow_mut().remove(&request);
+        if let Some(entry) = entry {
+            self.cleanup(entry);
+        }
+    }
+
+    fn cancel_all(&self, code: &str, message: &str) {
+        let pending = std::mem::take(&mut *self.pending.borrow_mut());
+        for (request, entry) in pending {
+            self.cleanup(entry);
+            self.error(request, code, message);
+        }
+    }
+
+    fn finish(&self, request: u32, serial: u64, data: String) {
+        if !self.active(request, serial) {
+            return;
+        }
+        self.cancel(request);
+        self.reply(request, data);
+    }
+
+    fn fail(&self, request: u32, serial: u64, code: &str, message: &str) {
+        self.finish(
+            request,
+            serial,
+            serde_json::json!({ "status": "error", "code": code, "message": message }).to_string(),
+        );
+    }
+
+    fn start(self: &Rc<Self>, request: u32, script: &str) {
+        self.cancel(request);
+        let serial = self.serial.get().wrapping_add(1);
+        self.serial.set(serial);
+        let key = format!("__nsh_evaluation_{}_{}_{}", self.id, request, serial);
+        self.pending.borrow_mut().insert(
+            request,
+            Evaluation {
+                serial,
+                poll: nsh_core::web_evaluation::poll_script(&key),
+                cleanup: nsh_core::web_evaluation::cleanup_script(&key),
+            },
+        );
+        // A native callback itself can fail to arrive, so the deadline is
+        // independent of the polling callbacks.
+        self.after(30_000_000_000, move |state| {
+            state.fail(
+                request,
+                serial,
+                "ETIMEDOUT",
+                "JavaScript evaluation timed out",
+            );
+        });
+        self.run(
+            request,
+            serial,
+            &nsh_core::web_evaluation::start_script(script, &key),
+        );
+    }
+
+    fn after(self: &Rc<Self>, delay: i64, f: impl FnOnce(Rc<Self>) + 'static) {
+        let mtm = MainThreadMarker::new().expect("main thread");
+        let work = dispatch2::MainThreadBound::new((Rc::downgrade(self), f), mtm);
+        dispatch2::DispatchQueue::main()
+            .after(dispatch2::DispatchTime::NOW.time(delay), move || {
+                let mtm = MainThreadMarker::new().expect("main queue");
+                let (state, f) = work.into_inner(mtm);
+                if let Some(state) = state.upgrade() {
+                    f(state);
+                }
+            })
+            .ok();
+    }
+
+    fn run(self: &Rc<Self>, request: u32, serial: u64, script: &str) {
+        if !self.active(request, serial) {
+            return;
+        }
+        let Some(web) = self.web() else {
+            self.fail(
+                request,
+                serial,
+                "ERR_NSH_WEBVIEW_NATIVE",
+                "The web view is unavailable",
+            );
+            return;
+        };
+        let state = Rc::downgrade(self);
+        let done = block2::RcBlock::new(move |result: *mut AnyObject, error: *mut AnyObject| {
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            if !state.active(request, serial) {
+                return;
+            }
+            if !error.is_null() {
+                state.fail(
+                    request,
+                    serial,
+                    "ERR_NSH_WEBVIEW_NATIVE",
+                    "WebKit could not evaluate JavaScript",
+                );
+                return;
+            }
+            // SAFETY: WebKit lends its result for the duration of this callback.
+            let text = unsafe { result.as_ref() }
+                .and_then(|value| value.downcast_ref::<NSString>())
+                .map(|value| value.to_string());
+            let Some(text) = text else {
+                state.fail(
+                    request,
+                    serial,
+                    "ERR_NSH_WEBVIEW_NATIVE",
+                    "WebKit returned an invalid evaluation response",
+                );
+                return;
+            };
+            if text.len() > nsh_core::web_evaluation::MAX_RESULT_BYTES + 1024 {
+                state.fail(
+                    request,
+                    serial,
+                    "ERR_NSH_QUOTA_EXCEEDED",
+                    "The JavaScript result is too large",
+                );
+                return;
+            }
+            match serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("status")
+                        .and_then(|status| status.as_str())
+                        .map(str::to_owned)
+                }) {
+                Some(status) if status == "pending" => {
+                    state.after(25_000_000, move |state| {
+                        let poll = state
+                            .pending
+                            .borrow()
+                            .get(&request)
+                            .filter(|entry| entry.serial == serial)
+                            .map(|entry| entry.poll.clone());
+                        if let Some(poll) = poll {
+                            state.run(request, serial, &poll);
+                        }
+                    });
+                }
+                Some(status) if status == "ok" || status == "error" => {
+                    state.finish(request, serial, text)
+                }
+                _ => state.fail(
+                    request,
+                    serial,
+                    "ERR_NSH_WEBVIEW_NATIVE",
+                    "WebKit returned an invalid evaluation response",
+                ),
+            }
+        });
+        // SAFETY: WebKit copies the completion block and calls it on the main thread.
+        unsafe {
+            let _: () = msg_send![&web, evaluateJavaScript: &*NSString::from_str(script), completionHandler: &*done];
+        }
+    }
+}
+
 /// A web view: a `NshView` placed by the core, holding the WKWebView.
 pub(crate) struct WebHost {
     pub(crate) view: Retained<NshView>,
@@ -212,6 +455,7 @@ pub(crate) struct WebHost {
     /// [`Self::make`] ran.
     made: bool,
     handler: Retained<WebHandler>,
+    evaluations: Rc<Evaluations>,
     /// Serves the URL schemes of the first props while the web view is
     /// here.
     schemes: Option<nsh_platform_apple::web_scheme::SchemeServer>,
@@ -226,12 +470,21 @@ impl WebHost {
         access: std::sync::Arc<nsh_engine::Access>,
     ) -> Self {
         let view = NshView::new(mtm);
-        let handler = WebHandler::new(mtm, id, control, access);
+        let evaluations = Rc::new(Evaluations {
+            id,
+            control: control.clone(),
+            web: RefCell::new(None),
+            pending: RefCell::new(HashMap::new()),
+            serial: Cell::new(0),
+            process_gone: Cell::new(false),
+        });
+        let handler = WebHandler::new(mtm, id, control, access, evaluations.clone());
         Self {
             view,
             web: None,
             made: false,
             handler,
+            evaluations,
             schemes: None,
             props: WebProps {
                 // Forces the first `configure` to load.
@@ -277,7 +530,8 @@ impl WebHost {
             let content: Retained<AnyObject> = msg_send![&config, userContentController];
             let _: () = msg_send![&content, addScriptMessageHandler: &**handler, name: &*NSString::from_str("nsh")];
             let alloc: Allocated<AnyObject> = msg_send![class(c"WKWebView"), alloc];
-            let web: Retained<AnyObject> = msg_send![alloc, initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::ZERO), configuration: &*config];
+            let web: Option<Retained<AnyObject>> = msg_send![alloc, initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::ZERO), configuration: &*config];
+            let Some(web) = web else { return };
             let _: () = msg_send![&web, setNavigationDelegate: &**handler];
             let ui: &UIView = &*(Retained::as_ptr(&web) as *const UIView);
             ui.setAutoresizingMask(
@@ -287,6 +541,7 @@ impl WebHost {
             self.view.addSubview(ui);
             web
         };
+        *self.evaluations.web.borrow_mut() = Some(objc2::rc::Weak::from_retained(&web));
         self.web = Some(web);
     }
 
@@ -296,7 +551,14 @@ impl WebHost {
             // once it is made.
             self.make(&p);
         }
-        let Some(web) = &self.web else { return };
+        let Some(web) = &self.web else {
+            self.props = p;
+            return;
+        };
+        if !p.javascript_enabled {
+            self.evaluations
+                .cancel_all("ERR_NSH_WEBVIEW_NATIVE", "JavaScript is disabled");
+        }
         // SAFETY: WebKit's documented API.
         unsafe {
             let scripts_changed = p.injected_js != self.props.injected_js
@@ -334,6 +596,10 @@ impl WebHost {
             let _: () =
                 msg_send![&prefs, setAllowsContentJavaScript: Bool::new(p.javascript_enabled)];
             if p.source != self.props.source || scripts_changed {
+                if p.source != WebSource::None {
+                    self.evaluations
+                        .cancel_all("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
+                }
                 match &p.source {
                     WebSource::Uri(uri) => {
                         if let Some(url) = NSURL::URLWithString(&NSString::from_str(uri)) {
@@ -359,6 +625,38 @@ impl WebHost {
     /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
     /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &nsh_core::Command) {
+        match command {
+            nsh_core::Command::EvaluateJavaScript { request, script } => {
+                if self.web.is_none() || self.evaluations.process_gone.get() {
+                    self.evaluations.error(
+                        *request,
+                        "ERR_NSH_WEBVIEW_NATIVE",
+                        "The web view is unavailable",
+                    );
+                } else if !self.props.javascript_enabled {
+                    self.evaluations.error(
+                        *request,
+                        "ERR_NSH_WEBVIEW_NATIVE",
+                        "JavaScript is disabled",
+                    );
+                } else {
+                    self.evaluations.start(*request, script);
+                }
+                return;
+            }
+            nsh_core::Command::CancelJavaScript { request } => {
+                self.evaluations.cancel(*request);
+                return;
+            }
+            nsh_core::Command::Reload
+            | nsh_core::Command::GoBack
+            | nsh_core::Command::GoForward
+            | nsh_core::Command::Load(_) => {
+                self.evaluations
+                    .cancel_all("ERR_NSH_WEBVIEW_NAVIGATION", "The document navigated");
+            }
+            _ => {}
+        }
         let Some(web) = &self.web else { return };
         let script = match command {
             nsh_core::Command::InjectJavaScript(js) => Some(js.clone()),
@@ -411,6 +709,9 @@ impl WebHost {
 
 impl Drop for WebHost {
     fn drop(&mut self) {
+        self.evaluations
+            .cancel_all("ERR_NSH_WEBVIEW_DISPOSED", "The web view was disposed");
+        *self.evaluations.web.borrow_mut() = None;
         let Some(web) = &self.web else { return };
         // SAFETY: breaks the cycle web view -> controller -> handler.
         unsafe {

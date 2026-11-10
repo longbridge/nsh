@@ -159,6 +159,57 @@ pub(crate) fn promise(cx: *mut JsContext, call: u32) -> JsValue {
     promise
 }
 
+/// `ref.evaluateJavaScript`: use the same engine task and error conversion
+/// as Rust calls, including rejected (rather than thrown) argument errors.
+pub(crate) fn evaluate_java_script(
+    cx: *mut JsContext,
+    id: Option<u32>,
+    script: JsValue,
+) -> JsValue {
+    use nsh_core::element::{IntoThrown, JsError};
+    let call = next_call(cx);
+    let promise = promise(cx, call);
+    // SAFETY: an inline tag check of the newly allocated promise.
+    if unsafe { qjs::JS_IsException(promise) } {
+        return promise;
+    }
+    // SAFETY: checks the borrowed argument's tag; no user conversion runs.
+    let script = if unsafe { qjs::JS_IsString(script) } {
+        string_arg(cx, script).ok_or_else(|| JsError::Type("expected a script string".into()))
+    } else {
+        Err(JsError::Type(
+            "evaluateJavaScript expects a script string".into(),
+        ))
+    };
+    let script = match script {
+        Ok(script) => script,
+        Err(error) => {
+            let _ = settle(cx, call, Err(error.into_thrown()));
+            return promise;
+        }
+    };
+    let Some(id) = id else {
+        let _ = settle(
+            cx,
+            call,
+            Err(JsError::Type("nsh: not a node".into()).into_thrown()),
+        );
+        return promise;
+    };
+    if dom::push_op(cx, Op::EvaluateJavaScript { id, call, script }).is_err() {
+        // The op limit stops the engine; still reject this promise rather
+        // than throwing synchronously from an awaitable ref method.
+        // SAFETY: take the exception produced by push_op on this live VM.
+        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
+        let _ = settle(
+            cx,
+            call,
+            Err(JsError::Error("the engine stopped before evaluation".into()).into_thrown()),
+        );
+    }
+    promise
+}
+
 /// `ref.measure()`: a promise of where node `id` is after this turn's
 /// layout, which the core answers on the root (`Command::Measure`).
 pub(crate) fn measure(cx: *mut JsContext, id: u32) -> JsValue {

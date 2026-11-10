@@ -525,3 +525,23 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
 - **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.
+
+## Awaitable WebView evaluation
+
+`WebViewRef.evaluateJavaScript(script)` and Rust's
+`ElementRef::evaluate_java_script(script)` share the per-engine request handling
+in `core/web_evaluation.rs`. The core bounds requests, correlates replies to the
+specific view, rejects disposal and timeouts, and cancels native work when a Rust
+future is dropped. `web_evaluation.rs` and `web_evaluation.js` define the strict
+JSON result contract and the shared evaluation/poll/cleanup scripts. Native
+completion callbacks carry internal `WebEvaluation` events, never page messages.
+iOS uses WKWebView completions; Android uses WebView callbacks. Both await
+returned Promises through bounded native polling, cancelling on new-document
+navigation start and explicit navigation commands, destruction or renderer loss.
+Page-initiated same-document history updates do not cancel. See the WebView module
+reference for limits, errors and examples. Other backends reject with
+`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; `injectJavaScript` keeps its behavior.
+
+The native host opts into awaitable WebView evaluations with `Environment::web_evaluation`
+(default false), propagated to the component environment. iOS and Android report it;
+headless and other hosts reject immediately, independently of the emulated OS.

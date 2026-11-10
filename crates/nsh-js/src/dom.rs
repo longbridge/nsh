@@ -453,6 +453,16 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         decl!("`WebView`: stops loading."),
     ),
     (
+        "evaluateJavaScript",
+        1,
+        decl!(
+            "(script: string): Promise<null | boolean | number | string | unknown[] | Record<string, unknown>>"
+        ),
+        decl!(
+            "`WebView`: evaluates a script's completion value, awaiting a returned Promise. Returns strict JSON; unsupported values and JavaScript/native failures reject. New-document navigation, disposal and renderer loss reject pending calls; deadline 30 s, result limit 1 MiB. iOS and Android; elsewhere rejects ERR_FEATURE_UNAVAILABLE_ON_PLATFORM. Does not wait for page load: call after onLoad when the document must be ready."
+        ),
+    ),
+    (
         "injectJavaScript",
         1,
         decl!("(script: string): void"),
@@ -504,6 +514,9 @@ unsafe extern "C" fn node_method(
     let Some(name) = to_string(cx, unsafe { *data }) else {
         return qjs::JS_EXCEPTION;
     };
+    if name == "evaluateJavaScript" {
+        return crate::components::evaluate_java_script(cx, node_id(cx, this), arg(argc, argv, 0));
+    }
     let Some(id) = node_id(cx, this) else {
         return throw_type(cx, "nsh: not a node");
     };
@@ -4795,6 +4808,21 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(reported(&host), [r#"["light","dark","dark"]"#]);
+    }
+
+    #[test]
+    fn web_evaluation_wrong_arguments_and_receivers_reject_promises() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(r#"{REPORT}
+            import {{ element }} from "nsh:rt";
+            const web = element("webview");
+            const results = [web.evaluateJavaScript(42), web.evaluateJavaScript.call(null, "1")];
+            report(results.every(value => value instanceof Promise));
+            Promise.all(results.map(value => value.catch(error => error instanceof TypeError))).then(report);
+            globalThis.keep = web;
+        "#)).unwrap();
+        host.run_jobs();
+        assert_eq!(reported(&host), ["true", "[true,true]"]);
     }
 
     #[test]

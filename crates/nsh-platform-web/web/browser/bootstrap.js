@@ -3371,6 +3371,13 @@
 				argument
 			]);
 		};
+		prototype.evaluateJavaScript = async function(script) {
+			if (typeof script !== "string") throw new TypeError("evaluateJavaScript expects a script string");
+			if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
+			const error = /* @__PURE__ */ new Error("WebView evaluation is available on iOS and Android");
+			error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+			throw error;
+		};
 		prototype.setSelection = function(start, end = start) {
 			return call(314, [
 				values.nodeIds.get(this),

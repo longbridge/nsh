@@ -9,6 +9,13 @@ export function createDom(invoke, values, reactive, live, wake) {
   for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reveal", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "insertText", "sendInput", "load", "seek"]) {
     prototype[name] = function (argument) { const id = values.nodeIds.get(this); if (id === undefined) throw new TypeError("nsh: not a node"); return call(314, [id, name, argument]); };
   }
+  prototype.evaluateJavaScript = async function (script) {
+    if (typeof script !== "string") throw new TypeError("evaluateJavaScript expects a script string");
+    if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
+    const error = new Error("WebView evaluation is available on iOS and Android");
+    error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+    throw error;
+  };
   prototype.setSelection = function (start, end = start) { return call(314, [values.nodeIds.get(this), "setSelection", { start: Number(start), end: Number(end) }]); };
   prototype.command = function (name, args) { return call(314, [values.nodeIds.get(this), "native", { name, args }]); };
   prototype.scrollToOffset = function (options) { return this.scrollTo({ x: options?.offset, y: options?.offset, animated: options?.animated }); };

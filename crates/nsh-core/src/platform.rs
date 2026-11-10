@@ -305,6 +305,9 @@ pub struct Environment {
     /// ([`crate::Command::SendInput`], macOS); without it, the command
     /// does nothing.
     pub web_input: bool,
+    /// The platform answers awaitable WebView evaluations
+    /// ([`crate::Command::EvaluateJavaScript`]); false rejects as unavailable.
+    pub web_evaluation: bool,
     /// The platform shows web views (TS: `WebView.available()`). `true` by
     /// default; a platform that knows from the start that it shows none
     /// (built without a web engine, the system's failed to load) sets
@@ -376,6 +379,7 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
+            web_evaluation: false,
             web_views: true,
             shaders: true,
         }
