@@ -314,7 +314,7 @@ JS describes.
 - **Events**: `revision` (the session's subscribers: `{ revision }` after every change, from any source), `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
   `delete`, `destroy`, posted to JS after the fact.
 - **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
-  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).
+  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`; `format: "html"` reads `content` and `setContent`, `getHTML()` writes), text (`renderText` per type).
 - **JS face** (`js/extension_api.rs`): `createRichEditor({ extensions: [StarterKit.configure({ heading: { levels:
   [1, 2, 3] } }), Underline], content, editable })`. The built-in extensions are classes whose statics make them
   (`configure`, `extend`); a class itself in `extensions` is the extension with its defaults (`ExtensionEntry` reads a
