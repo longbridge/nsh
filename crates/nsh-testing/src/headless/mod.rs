@@ -861,6 +861,15 @@ impl Headless {
         for item in &batch.items {
             self.animator.apply(item);
         }
+        for item in &batch.items {
+            if let MountItem::Command {
+                id,
+                command: Command::InsertText(text),
+            } = item
+            {
+                self.insert_text(*id, text);
+            }
+        }
         if let Some(windows) = &mut self.windows {
             for item in &batch.items {
                 match item {
@@ -1834,7 +1843,21 @@ impl Headless {
         {
             return;
         }
-        let mut text = nsh_core::text_edit::pasted(&content.text, input.config.multiline);
+        self.insert_text(id, &content.text);
+    }
+
+    /// `text` goes into input `id` as the user's edit (a paste, the app's
+    /// `insertText`): at the end, where the caret is here (a single line
+    /// takes line breaks as spaces; within `maxLength`), one `onChange`,
+    /// no keys.
+    pub(crate) fn insert_text(&mut self, id: NodeId, text: &str) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
+        if !input.config.editable {
+            return;
+        }
+        let mut text = nsh_core::text_edit::pasted(text, input.config.multiline);
         if let Some(max) = input.config.max_length {
             let room = (max as usize).saturating_sub(input.text.encode_utf16().count());
             let mut used = 0;

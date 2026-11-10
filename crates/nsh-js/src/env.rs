@@ -738,7 +738,7 @@ pub(crate) const ELEMENTS: &[Item] = &[(
     "Input",
     Export::Value(|cx| crate::dom::host_component(cx, "input", true)),
     Ts::function(
-        "A native text input (UITextField / UITextView, EditText); `ref` has\n`focus()`, `blur()` and `setSelection(start, end)`.",
+        "A native text input (UITextField / UITextView, EditText); `ref` has\n`focus()`, `blur()`, `setSelection(start, end)` and `insertText(text)`.",
         &["(props: InputProps): JSX.Element"],
     ),
 )];

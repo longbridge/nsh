@@ -434,6 +434,10 @@ impl Native for LinuxNative {
             K::Char('a') if m.ctrl && !m.alt && !m.cmd => {
                 self.with_key_window(|_, w| synth::select_all(w));
             }
+            K::Char('z') if m.ctrl && !m.alt && !m.cmd => {
+                let redo = m.shift;
+                self.with_key_window(move |_, w| synth::undo(w, redo));
+            }
             K::Char(c) if plain => {
                 let c = if m.shift { shifted(c) } else { c };
                 self.with_key_window(move |_, w| synth::type_text(w, &c.to_string()));
