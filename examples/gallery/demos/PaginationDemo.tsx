@@ -1,6 +1,6 @@
-import { platform, Scroll, signal, Text, View } from "nsh";
+import { platform, signal, Text, View } from "nsh";
 import { Menu, MenuItem, Pagination, type PaginationItemState } from "nsh/base";
-import { Appear, backdrop, Button, Caption, Card, colors, DemoPage, density, desktop, Icon, menuItemLabel, menuItemLook, MenuPanel, menuSheet, mono, Segmented, terminal, Toggle, paginationArrows, paginationItemClass } from "../ui";
+import { Appear, Button, Caption, Card, colors, DemoPage, density, desktop, Icon, menuItemLabel, menuItemLook, mono, Segmented, terminal, Toggle, paginationArrows, paginationItemClass, menuPopup } from "../ui"
 
 // `nsh/base`'s `Pagination` owns which pages show (the first and the last,
 // the current one's neighbours, ellipses for the rest), the presses,
@@ -50,8 +50,7 @@ function JumpMenu(props: { start: number; end: number; current: number; onPick: 
     <Menu
       offset={4}
       margin={8}
-      popupStyle={menuSheet()}
-      backdropStyle={backdrop()}
+      {...menuPopup({ minWidth: 80 })}
       trigger={
         <View
           accessibilityLabel={`Pages ${grouped(props.start)} to ${grouped(props.end - 1)}`}
@@ -62,11 +61,7 @@ function JumpMenu(props: { start: number; end: number; current: number; onPick: 
         </View>
       }
     >
-      <MenuPanel flush minWidth={80}>
-        <Scroll style={{ maxHeight: pointer ? 240 : 360 }} contentStyle={pointer ? { padding: 4 } : undefined}>
-          {list}
-        </Scroll>
-      </MenuPanel>
+      {list}
     </Menu>
   );
 }

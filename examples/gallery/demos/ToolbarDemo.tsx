@@ -1,6 +1,6 @@
 import { Canvas, cleanup, computed, createAnimatedValue, Easing, effect, Image, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Button as BaseButton, Link, Menu, MenuItem, MenuSeparator, Popover, Slider, Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator } from "nsh/base";
-import { alpha, backdrop, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemSize, MenuMark, MenuPanel, menuSeparator, menuSheet, mono, motion, photoUrl, PopIn, popoverLook, sliderFill, sliderLook, terminal, TERMINAL_GAP, Tip, Toggle as Switch, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, toggleSizes, toolbarRule, toolbarTrack } from "../ui";
+import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemSize, MenuMark, menuSeparator, mono, motion, photoUrl, PopIn, popoverLook, sliderFill, sliderLook, terminal, TERMINAL_GAP, Tip, Toggle as Switch, toggleGlyph, toggleLabel, toggleLook, type ToggleLookOptions, toggleSizes, toolbarRule, toolbarTrack, menuPopup } from "../ui"
 import { Field } from "./OverlayUi";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
@@ -310,8 +310,7 @@ export function ToolbarDemo() {
           <Menu
             offset={6}
             margin={8}
-            popupStyle={menuSheet()}
-            backdropStyle={backdrop()}
+            {...menuPopup({ minWidth: 190 })}
             onOpenChange={({ open }) => blockOpen.set(open)}
             trigger={
               <Trigger label={`Block: ${block()}`} tip={<Tip label="Turn into" />} open={blockOpen()} wide>
@@ -325,11 +324,9 @@ export function ToolbarDemo() {
               </Trigger>
             }
           >
-            <MenuPanel minWidth={190}>
-              <Each of={BLOCKS}>
-                {(b) => <Item label={b().value} icon={b().icon} checked={block() === b().value} onSelect={() => commit({ block: b().value }, `Block: ${b().value}`)} />}
-              </Each>
-            </MenuPanel>
+            <Each of={BLOCKS}>
+              {(b) => <Item label={b().value} icon={b().icon} checked={block() === b().value} onSelect={() => commit({ block: b().value }, `Block: ${b().value}`)} />}
+            </Each>
           </Menu>
           <Rule />
           {/* A toggle group inside the toolbar is one of its groups: its toggles are the toolbar's items. */}
@@ -393,8 +390,7 @@ export function ToolbarDemo() {
             align="end"
             offset={6}
             margin={8}
-            popupStyle={menuSheet()}
-            backdropStyle={backdrop()}
+            {...menuPopup({ minWidth: 190 })}
             onOpenChange={({ open }) => moreOpen.set(open)}
             trigger={
               <Trigger label="More formatting" tip={<Tip label="More" />} open={moreOpen()}>
@@ -402,30 +398,28 @@ export function ToolbarDemo() {
               </Trigger>
             }
           >
-            <MenuPanel minWidth={190}>
-              {/* What the bar folded: the history, the marks, then the alignment. */}
-              <If when={folded("redo")}>
-                <If when={folded("undo")}>
-                  <Item label="Undo" icon="undo-2" disabled={past().length === 0} onSelect={undo} />
-                </If>
-                <Item label="Redo" icon="redo-2" disabled={future().length === 0} onSelect={redo} />
-                <MenuSeparator style={menuSeparator()} />
+            {/* What the bar folded: the history, the marks, then the alignment. */}
+            <If when={folded("redo")}>
+              <If when={folded("undo")}>
+                <Item label="Undo" icon="undo-2" disabled={past().length === 0} onSelect={undo} />
               </If>
-              <If when={folded("strike")}>
-                <Each of={MARKS.filter((m) => folded(m.value))}>
-                  {(m) => <Item label={m().label} icon={m().icon} check checked={has(m().value)} onSelect={() => toggleMark(m(), !has(m().value))} />}
-                </Each>
-                <MenuSeparator style={menuSeparator()} />
-              </If>
-              <If when={compact()}>
-                <Each of={ALIGNS}>
-                  {(a) => <Item label={a().label} checked={state().align === a().value} onSelect={() => commit({ align: a().value }, `Align: ${a().value}`)} />}
-                </Each>
-                <MenuSeparator style={menuSeparator()} />
-              </If>
-              <Item label="Clear formatting" icon="x" disabled={state().marks.length === 0 && state().block === "Paragraph"} onSelect={() => commit({ marks: [], block: "Paragraph" }, "Clear formatting")} />
-              <Item label="Copy as Markdown" icon="copy" onSelect={() => last.set("Copied as Markdown")} />
-            </MenuPanel>
+              <Item label="Redo" icon="redo-2" disabled={future().length === 0} onSelect={redo} />
+              <MenuSeparator style={menuSeparator()} />
+            </If>
+            <If when={folded("strike")}>
+              <Each of={MARKS.filter((m) => folded(m.value))}>
+                {(m) => <Item label={m().label} icon={m().icon} check checked={has(m().value)} onSelect={() => toggleMark(m(), !has(m().value))} />}
+              </Each>
+              <MenuSeparator style={menuSeparator()} />
+            </If>
+            <If when={compact()}>
+              <Each of={ALIGNS}>
+                {(a) => <Item label={a().label} checked={state().align === a().value} onSelect={() => commit({ align: a().value }, `Align: ${a().value}`)} />}
+              </Each>
+              <MenuSeparator style={menuSeparator()} />
+            </If>
+            <Item label="Clear formatting" icon="x" disabled={state().marks.length === 0 && state().block === "Paragraph"} onSelect={() => commit({ marks: [], block: "Paragraph" }, "Clear formatting")} />
+            <Item label="Copy as Markdown" icon="copy" onSelect={() => last.set("Copied as Markdown")} />
           </Menu>
         </Toolbar>
         <View style={{ padding: 12, borderRadius: 8, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.line, borderLeftWidth: block() === "Quote" ? 3 : 1, borderLeftColor: block() === "Quote" ? colors.accent : colors.line }}>

@@ -4,7 +4,7 @@ import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMen
 import { openUrl, platform, windowSize } from "nsh";
 import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { backdrop, colors, handleThumb, inputLook, menuIndicator, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, MenuPanel, menuSeparator, menuSheet, popupSurface, Tip, toggleGlyph, toggleLabel, toggleLook } from "../ui";
+import { colors, handleThumb, inputLook, menuIndicator, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, menuSeparator, popupSurface, Tip, toggleGlyph, toggleLabel, toggleLook, menuPopup } from "../ui"
 import { SAMPLE } from "./lsp/sample";
 import { type CodeAction, type DocumentColor, LanguageServer, type Problem } from "./lsp/server";
 
@@ -650,8 +650,7 @@ export function EditorDemo() {
         <Menu
           offset={4}
           margin={8}
-          popupStyle={menuSheet()}
-          backdropStyle={backdrop()}
+          {...menuPopup({ minWidth: 220 })}
           onOpenChange={({ open }) => menuOpen.set(open ? "language" : null)}
           trigger={
             <View accessibilityLabel="Language" tooltip={<Tip label="Language" />} {...toggleLook({ on: () => menuOpen() === "language", text: true, style: { paddingHorizontal: 6 } })}>
@@ -660,21 +659,19 @@ export function EditorDemo() {
             </View>
           }
         >
-          <MenuPanel minWidth={220}>
-            <Each of={LANGUAGES}>
-              {(l) => (
-                <Item
-                  label={l().label}
-                  mark="dot"
-                  checked={language() === l().value}
-                  onSelect={() => {
-                    hover.set(null);
-                    language.set(l().value);
-                  }}
-                />
-              )}
-            </Each>
-          </MenuPanel>
+          <Each of={LANGUAGES}>
+            {(l) => (
+              <Item
+                label={l().label}
+                mark="dot"
+                checked={language() === l().value}
+                onSelect={() => {
+                  hover.set(null);
+                  language.set(l().value);
+                }}
+              />
+            )}
+          </Each>
         </Menu>
         <View class="flex-1" />
         <IconTool label="Find and replace" icon="search" on={finding()} onPress={() => (finding() ? closeFind() : openFind())} />
@@ -682,8 +679,7 @@ export function EditorDemo() {
           align="end"
           offset={4}
           margin={8}
-          popupStyle={menuSheet()}
-          backdropStyle={backdrop()}
+          {...menuPopup({ minWidth: 256 })}
           onOpenChange={({ open }) => menuOpen.set(open ? "options" : null)}
           trigger={
             <View accessibilityLabel="Editor options" tooltip={<Tip label="Editor options" />} {...toggleLook({ on: () => menuOpen() === "options" })}>
@@ -691,20 +687,18 @@ export function EditorDemo() {
             </View>
           }
         >
-          <MenuPanel minWidth={256}>
-            <Item label="Soft wrap" mark="check" checked={softWrap()} keepOpen onSelect={() => softWrap.set(!softWrap())} />
-            <Item label="Line numbers" mark="check" checked={lineNumbers()} keepOpen onSelect={() => lineNumbers.set(!lineNumbers())} />
-            <Item label="Problems" mark="check" checked={problemsShown()} onSelect={() => area?.toggleDock("bottom")} />
-            <Item label="Find and Replace" shortcut="mod+f" onSelect={openFind} />
-            <MenuSeparator style={menuSeparator()} />
-            {/* Under the items' labels, past the marks' lane. */}
-            <View style={{ paddingLeft: markLane() }}>
-              <MenuLabel text={typescript() ? "TypeScript language server" : "Keys"} />
-            </View>
-            <Each of={tips()}>
-              {(tip) => <Text style={{ ...menuItemNote(), color: colors.muted, paddingLeft: (terminal ? 0 : 8) + markLane(), paddingRight: terminal ? 0 : 8, paddingVertical: 2 }}>{tip()}</Text>}
-            </Each>
-          </MenuPanel>
+          <Item label="Soft wrap" mark="check" checked={softWrap()} keepOpen onSelect={() => softWrap.set(!softWrap())} />
+          <Item label="Line numbers" mark="check" checked={lineNumbers()} keepOpen onSelect={() => lineNumbers.set(!lineNumbers())} />
+          <Item label="Problems" mark="check" checked={problemsShown()} onSelect={() => area?.toggleDock("bottom")} />
+          <Item label="Find and Replace" shortcut="mod+f" onSelect={openFind} />
+          <MenuSeparator style={menuSeparator()} />
+          {/* Under the items' labels, past the marks' lane. */}
+          <View style={{ paddingLeft: markLane() }}>
+            <MenuLabel text={typescript() ? "TypeScript language server" : "Keys"} />
+          </View>
+          <Each of={tips()}>
+            {(tip) => <Text style={{ ...menuItemNote(), color: colors.muted, paddingLeft: (terminal ? 0 : 8) + markLane(), paddingRight: terminal ? 0 : 8, paddingVertical: 2 }}>{tip()}</Text>}
+          </Each>
         </Menu>
       </View>
 

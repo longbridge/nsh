@@ -11,7 +11,7 @@ export { ui, tint } from "./palette";
 export { buttonGlyph, buttonLabel, buttonLook, buttonSizes, iconButtonGlyph, iconButtonLook, type ButtonKind, type ButtonLookOptions, type ButtonSize, type IconButtonLookOptions } from "./look/button";
 export { switchHitSlop, switchLook, type SwitchLook, type SwitchSize } from "./look/switch";
 export { toggleGlyph, toggleLabel, toggleLook, toggleSizes, toolbarRule, toolbarTrack, type ToggleDimensions, type ToggleLookOptions, type ToggleSize, type ToolbarTrackOptions } from "./look/tool";
-export { menuHighlight, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, menuPressed, menuSeparator, menuSheet, MenuLabel, MenuPanel, SubmenuBack, SubmenuRow, type MenuItemDimensions, type MenuItemLookOptions, type MenuItemTextOptions } from "./look/menu";
+export { menuHighlight, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, menuPressed, menuSeparator, menuPopup, MenuLabel, SubmenuBack, SubmenuRow, type MenuItemDimensions, type MenuItemLookOptions, type MenuPopupOptions, type MenuItemTextOptions } from "./look/menu";
 export { backdrop, dialogCard, dialogText, dialogTitle, popoverLook, sheetGrabber, sheetPanel, toastActionLabel, toastActionLook, toastCloseLook, toastLook, toastText, toastTitle, tooltipLook, tooltipNote, tooltipText, type PopoverLookOptions, type SheetSide, type TooltipLookOptions } from "./look/overlay";
 export { pressSink } from "./look/press";
 export { controlSize, density, insetSurface, listRow, plainRow, RowDivider, RowLabel, sectionSurface, type ListRowLook, type ListRowOptions, type PlainRowOptions, type SectionSurfaceOptions } from "./look/surface";

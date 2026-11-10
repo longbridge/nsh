@@ -3,7 +3,7 @@ import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
 import { Icon, IconLabel, type IconName } from "../icons";
 import { play as sound } from "../../nsh-gallery-ui/sound";
-import { alpha, backdrop, Badge, Button, buttonLook, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, menuItemLook, MenuPanel, menuSheet, mono, motion, radius, Spinner, splitButtonLook, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
+import { alpha, Badge, Button, buttonLook, Caption, Card, colors, DemoPage, finish, focusRing, follow, iconButtonGlyph, iconButtonLook, menuItemLook, mono, motion, radius, Spinner, splitButtonLook, terminal, TERMINAL_GAP, tints, Tip, Toggle, menuPopup } from "../ui"
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
 // the button role; the look is the gallery's (`buttonLook` of
@@ -287,8 +287,7 @@ export function ButtonDemo() {
               margin={8}
               open={open()}
               onOpenChange={({ open: o }) => open.set(o)}
-              popupStyle={menuSheet()}
-              backdropStyle={backdrop()}
+              {...menuPopup({ minWidth: 260 })}
               trigger={
                 <View
                   role="button"
@@ -302,31 +301,29 @@ export function ButtonDemo() {
                 </View>
               }
             >
-              <MenuPanel minWidth={260}>
-                <Each of={strategies}>
-                  {(s) => (
-                    <MenuItem
-                      onSelect={() => {
-                        resize();
-                        strategy.set(s());
-                        last.set(`chose ${s().label}`);
-                      }}
-                      {...menuItemLook({ tall: true, style: { gap: terminal ? 8 : 10 } })}
-                    >
-                      <View style={{ flexGrow: 1, flexShrink: 1, gap: 2, paddingLeft: terminal ? 8 : 0 }}>
-                        <Text style={{ fontSize: pointer ? 13 : 16, fontWeight: "500", color: colors.text }}>{s().label}</Text>
-                        <Text style={{ fontSize: pointer ? 12 : 14, color: colors.muted }}>{s().note}</Text>
-                      </View>
-                      {/* The check at the trailing edge, as every menu's. */}
-                      <View style={{ width: 16, paddingTop: terminal ? 0 : 1, paddingRight: terminal ? 8 : 0, alignItems: "center" }}>
-                        <If when={strategy().value === s().value}>
-                          <Icon name="check" size={14} tint={colors.accent} weight={2} />
-                        </If>
-                      </View>
-                    </MenuItem>
-                  )}
-                </Each>
-              </MenuPanel>
+              <Each of={strategies}>
+                {(s) => (
+                  <MenuItem
+                    onSelect={() => {
+                      resize();
+                      strategy.set(s());
+                      last.set(`chose ${s().label}`);
+                    }}
+                    {...menuItemLook({ tall: true, style: { gap: terminal ? 8 : 10 } })}
+                  >
+                    <View style={{ flexGrow: 1, flexShrink: 1, gap: 2, paddingLeft: terminal ? 8 : 0 }}>
+                      <Text style={{ fontSize: pointer ? 13 : 16, fontWeight: "500", color: colors.text }}>{s().label}</Text>
+                      <Text style={{ fontSize: pointer ? 12 : 14, color: colors.muted }}>{s().note}</Text>
+                    </View>
+                    {/* The check at the trailing edge, as every menu's. */}
+                    <View style={{ width: 16, paddingTop: terminal ? 0 : 1, paddingRight: terminal ? 8 : 0, alignItems: "center" }}>
+                      <If when={strategy().value === s().value}>
+                        <Icon name="check" size={14} tint={colors.accent} weight={2} />
+                      </If>
+                    </View>
+                  </MenuItem>
+                )}
+              </Each>
             </Menu>
           </View>
           <If when={state() === "done"}>

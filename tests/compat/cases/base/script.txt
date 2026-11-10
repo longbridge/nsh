@@ -740,11 +740,11 @@ tap text:MenuTrigger
 expect NewItem
 expect Log: menu true triggerPress
 expect Life: menu open
-style parent:parent:text:NewItem backgroundColor #00ff00ff
-frame parent:text:NewItem 4 4 382 17
-style below:parent:parent:text:NewItem backgroundColor #000000ff
-style below:parent:parent:text:NewItem opacity 0.5
-frame id:separator 4 55 382 1
+style parent:parent:parent:text:NewItem backgroundColor #00ff00ff
+frame parent:text:NewItem 0 0 382 17
+style below:parent:parent:parent:text:NewItem backgroundColor #000000ff
+style below:parent:parent:parent:text:NewItem opacity 0.5
+frame id:separator 0 51 382 1
 prop parent:text:OffItem accessibilityState disabled=true
 prop parent:text:KeepItem accessibilityLabel Keep the menu
 tap text:KeepItem
@@ -800,10 +800,10 @@ touch end
 expect CopyItem
 expect Log: context true longPress
 expect Life: context open
-style parent:parent:text:CopyItem backgroundColor #ff0000ff
-frame parent:text:CopyItem 2 2 386 17
-style below:parent:parent:text:CopyItem backgroundColor #0000ffff
-style below:parent:parent:text:CopyItem opacity 0.25
+style parent:parent:parent:text:CopyItem backgroundColor #ff0000ff
+frame parent:text:CopyItem 0 0 386 17
+style below:parent:parent:parent:text:CopyItem backgroundColor #0000ffff
+style below:parent:parent:parent:text:CopyItem opacity 0.25
 tap text:CopyItem
 expect Log: context false select
 absent CopyItem
