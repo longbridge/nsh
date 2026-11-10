@@ -2134,12 +2134,16 @@ impl Access {
         }
         // Only a source without a scheme takes the base's.
         let base = || base.and_then(|b| url::Url::parse(b).ok());
-        let head = uri.split(['?', '#']).next().unwrap_or(uri);
-        // Loaders that do not strip it read another URL.
-        if stripped.len() != uri.len()
-            || head.contains('\\')
-            || uri.bytes().any(|b| b.is_ascii_control())
-            || matches!(read_url(uri), Err(Unread::Ambiguous(_)))
+        // Spaces and C0 controls around it, which WHATWG's parser drops,
+        // are dropped here too, and the loader gets the serialization, never
+        // the source as written. What other parsers read another way (a
+        // backslash, a control inside, tabs and newlines included, an odd
+        // host) is ambiguous (#979).
+        let trimmed = uri.trim_matches(|c: char| c <= ' ');
+        let head = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
+        if head.contains('\\')
+            || trimmed.bytes().any(|b| b.is_ascii_control())
+            || matches!(read_url(trimmed), Err(Unread::Ambiguous(_)))
         {
             let scheme = match scheme {
                 Some(scheme) => scheme.to_ascii_lowercase(),
@@ -2150,8 +2154,8 @@ impl Access {
                 .then_some(Cow::Borrowed(uri));
         }
         let parsed = match scheme {
-            Some(_) => url::Url::parse(uri),
-            None => base()?.join(uri),
+            Some(_) => url::Url::parse(trimmed),
+            None => base()?.join(trimmed),
         }
         .ok()?;
         self.allows_parsed("GET", parsed.as_str(), &parsed)
@@ -3449,6 +3453,42 @@ mod tests {
                 Some(Cow::Borrowed(own)),
                 "{own}"
             );
+        }
+    }
+
+    /// Spaces and C0 controls around a source, which WHATWG's parser drops,
+    /// are dropped before the check, and the loader gets the serialization:
+    /// a granted URL a CMS left a trailing space on loads (it did before
+    /// this branch), and no loader reads the source as written. A control
+    /// inside, tabs and newlines included, stays ambiguous (#979).
+    #[test]
+    fn whitespace_around_a_granted_url_loads_its_serialization() {
+        let a = Access {
+            declared: caps(r#"{ "network": { "hosts": ["docs.example.com"] } }"#),
+            granted: None,
+        };
+        let page = Some("https://app.example/index.html");
+        for (uri, base) in [
+            ("https://docs.example.com/x.png ", None),
+            (" https://docs.example.com/x.png", None),
+            ("\u{1}https://docs.example.com/x.png", None),
+            ("\t//docs.example.com/x.png", page),
+        ] {
+            assert_eq!(
+                a.media_url(uri, base, None),
+                Some(Cow::Owned("https://docs.example.com/x.png".into())),
+                "{uri:?}"
+            );
+        }
+        // A host it names is still checked, and a control inside stays
+        // ambiguous.
+        assert_eq!(a.media_url("https://bank.example/x.png ", None, None), None);
+        for inside in [
+            "https://docs.example.com/x\u{1}.png",
+            "https://docs.ex\tample.com/x.png",
+            "ht\ntps://docs.example.com/x.png",
+        ] {
+            assert_eq!(a.media_url(inside, None, None), None, "{inside:?}");
         }
     }
 

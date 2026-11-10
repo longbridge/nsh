@@ -122,31 +122,21 @@ one form) names a `host` pattern; every other key narrows it and is optional: `m
 (any of `http`, `https`, `ws`, `wss`), `port` (any; a URL without one has its scheme's default), `paths` (exact,
 without the query) and `pathPrefixes` / `pathPrefix` / `path_prefixes` (whole segments: `/v1` covers `/v1/x`, not
 `/v10`; a prefix ending in `/` covers what follows). Without paths or prefixes a rule covers every path, so
-`{host, methods}` means what it always did. Paths match the path WHATWG's parser (the `url` crate) sends,
-dot segments and `%2e` ones resolved (`Access::allows_http`), and what loads is what was checked:
-`Access::http_url` (the engine's requests, `registerFont` among them) and `Access::media_url` (images, placeholders,
-canvas images, videos, sounds, `Image.getSize` / `prefetch`) return the WHATWG serialization, which the core writes
-back over the source. A media source with no scheme that starts with `//` is resolved against the bundle's base URL
-(`Bundle::base_url`, the page's on the web; `Core::set_base_url`, `System::base_url`) and refused without one. A
-relative path is the page's with a base and refused without one, since desktop video players and Android's images read
-it against the working directory. `asset:` (whose path stays in the app's files: `access::is_inside_assets`, which
-`fetch`'s `asset:` reads share; a media source is checked whole, query included), `data:` and `blob:` (any case) stay
-as written. A local file (`file:`, or with
-no base an absolute or drive path) is read under `capabilities.fs.read` (`MediaFiles`: the declared and granted roots,
-expanded and canonicalized once: the engine's for the core, `Core::set_media_files`, and the image loader's
-`Context::media_files`, a VM's own for `Image.getSize`), only where `fs/promises` has a file system; the path is
-canonicalized at every check (each time, never remembered), since the platforms' loaders open what they get with
-nothing to confine them, and loads in the form it was written. A link made in a granted root between the check and the
-load, or later while the source stays set, is followed: unlike `fs/promises`, which works in the opened root, a loader
-has no root to work in. A link whose target does not exist is refused (`resolved_path`, as `authorize_file`). Whether a
-source names a host is read after WHATWG's stripping (spaces and C0 controls around it, tabs and newlines in it); one
-that stripping changed is ambiguous. The spellings of a key are merged and may appear together (gpui-shell's
+`{host, methods}` means what it always did. Paths match the path WHATWG's parser (the `url` crate) sends, and what
+loads is what was checked: `Access::http_url` (the engine's requests) and `Access::media_url` (every media source; the
+core writes the result back over it) return the checked URL's serialization. For media, `//` and relative paths take
+the bundle's base URL (the page's on the web) and are refused without one; `asset:` paths stay inside the app's files
+(`access::is_inside_assets`, shared with `fetch`); a local file (`file:`, or with no base an absolute path) is read
+under `capabilities.fs.read` (`MediaFiles`: held to the roots by its text, then resolved on every check, since the
+platforms' loaders open what they get); a source that platforms read differently is granted only by `*` (#979). The
+spellings of a key are merged and may appear together (gpui-shell's
 `scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot
 match is a parse error rather than a silent grant of nothing: a scheme outside the four, port 0, a path without a
 leading `/`, with `*`, `?` or `#`, or with a `.` or `..` segment, a method that is not a token. A rule's paths are kept
-as requests send them (`path_as_sent`: WHATWG's serialization, `/my photos` → `/my%20photos`). WebSockets (the global and the `websocket` module)
-go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
-`https` (or under their own scheme, for rules listing `ws` / `wss`), on the parsed URL the handshake then connects
+as requests send them (`path_as_sent`: WHATWG's serialization, `/my photos` → `/my%20photos`). WebSockets (the
+global and the `websocket` module) go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss`
+are checked as GETs over `http` / `https` (or under their own scheme, for rules listing `ws` / `wss`), on the parsed
+URL the handshake then connects
 to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). A
 `websocket` connection's unread messages are bounded by back pressure: it stops reading from the network while 8
 messages or 8 MiB wait (`runtime/websocket.rs`), so the native memory one keeps stays under 16 MiB. Raw TCP

@@ -178,9 +178,10 @@ also use `data:` and `blob:` URIs. A relative path is the page's on the web; a n
 with capabilities it loads nothing there (a sound's relative path is a bundled file). A source that starts with `//`
 names a host: on the web it takes the page's scheme and is checked as that URL; in a native app it has no page to take
 a scheme from, so it loads nothing (write `https://…`). Any other source with a scheme is checked as a URL, and loads
-what was checked. A source that platforms read differently, including one that names a host only after the URL parser
-drops its leading or trailing spaces or a tab or newline in it, is granted only by `*` and loads as written (in a
-native app, one that starts with `//` then loads nothing).
+what was checked. Spaces and control characters around a source are dropped, as the URL parser drops them, and the
+cleaned URL loads. A source that platforms read differently (a backslash, a control character, tab or newline inside
+it, an unusual host) is granted only by `*` and loads as written (in a native app, one that starts with `//` then loads
+nothing).
 
 A local file in a media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
 `C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, as
