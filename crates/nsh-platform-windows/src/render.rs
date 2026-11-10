@@ -2108,6 +2108,87 @@ mod tests {
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
     }
 
+    /// A canvas's animated change draws again only where it paints, and the
+    /// partial frame paints what a whole one does.
+    #[test]
+    fn an_animated_canvas_draws_only_its_changed_area() {
+        use std::sync::Arc;
+
+        use nsh_core::{
+            animation::AnimationValue,
+            canvas::{CanvasOp, Damage, Drawing, Num, Paint},
+        };
+
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let size = (240, 140);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let canvas = view(
+            Some(&root),
+            2,
+            ViewKind::Canvas,
+            rect(20.0, 20.0, 100.0, 60.0),
+        );
+        crate::canvas::create(&canvas);
+        // A square that moves with slot 0, on a canvas much larger than it.
+        crate::canvas::set(
+            &surface,
+            &canvas,
+            Arc::new(Drawing {
+                ops: vec![
+                    CanvasOp::FillStyle(Paint::Color(Color(0xcc2244ff))),
+                    CanvasOp::FillRect([
+                        Num::Slot(0),
+                        Num::Const(10.0),
+                        Num::Const(10.0),
+                        Num::Const(10.0),
+                    ]),
+                ],
+                slots: Vec::new(),
+                nodes: Vec::new(),
+                view_paints: Vec::new(),
+            }),
+        );
+
+        let back = target(&gfx, size);
+        draw_into(&surface, &gfx, &back, 1.0, false, None, None, None).unwrap();
+        assert!(surface.take_damage().is_none(), "the first frame is whole");
+
+        // The slot moves the square 40 points: only where it was and where
+        // it is now changes.
+        match crate::canvas::set_args(&canvas, &[(0, AnimationValue::Number(40.0))]) {
+            Damage::Rect(rect) => canvas.changed_rect(rect),
+            Damage::All => canvas.changed(),
+            Damage::None => panic!("the changed slot paints"),
+        }
+        let damage = surface.take_damage().expect("the changed area");
+        let areas: Vec<D2D_RECT_F> = merged(pixel_rects(&damage, 1.0, size))
+            .iter()
+            .map(|r| {
+                rect_f(
+                    r.left as f32,
+                    r.top as f32,
+                    (r.right - r.left) as f32,
+                    (r.bottom - r.top) as f32,
+                )
+            })
+            .collect();
+        let covered: f32 = areas
+            .iter()
+            .map(|r| (r.right - r.left) * (r.bottom - r.top))
+            .sum();
+        assert!(covered < 100.0 * 60.0, "smaller than the canvas: {areas:?}");
+        draw_into(&surface, &gfx, &back, 1.0, false, None, Some(&areas), None).unwrap();
+
+        let fresh = target(&gfx, size);
+        draw_into(&surface, &gfx, &fresh, 1.0, false, None, None, None).unwrap();
+        assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
+    }
+
     /// A change wholly outside the window leaves nothing to draw, which
     /// `frame` tells apart from `None`, the whole window.
     #[test]

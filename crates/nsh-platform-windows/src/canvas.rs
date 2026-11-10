@@ -47,14 +47,14 @@
 use std::{cell::RefCell, f64::consts::TAU, rc::Rc, sync::Arc};
 
 use nsh_core::{
-    Color, Corners, Points,
+    Bounds, Color, Corners, Points,
     animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
-        Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint, PathOp, arc_sweep,
-        fit_radii,
+        Damage, DamageScan, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint,
+        PathOp, arc_sweep, fit_radii,
     },
-    geometry::{Percentage, Radians, size},
+    geometry::{Percentage, Radians, point, size},
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -136,6 +136,11 @@ pub(crate) struct CanvasState {
     images: FxHashMap<Arc<str>, Option<Arc<Frame>>>,
     /// What was recorded (made while drawing, which only sees the state).
     cache: RefCell<Cache>,
+    /// Where the operations reading changed slots paint ([`DamageScan`]):
+    /// only that is drawn again.
+    scan: DamageScan,
+    /// The slots whose values changed in the last write (scratch space).
+    changed: Vec<u16>,
 }
 
 /// A canvas' recording and the device resources it draws with.
@@ -261,24 +266,93 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     view.changed();
 }
 
-/// Animated value slot `k` changed: draws again if the value did.
-pub(crate) fn set_arg(view: &NshView, k: u16, value: AnimationValue) {
-    {
-        let mut state = view.state_mut();
-        let Some(c) = state.canvas.as_mut() else {
-            return;
-        };
-        let k = k as usize;
-        if c.args.len() <= k {
-            c.args.resize(k + 1, None);
+/// Animated value slots changed (`(slot, value)`, every bound slot on each
+/// frame): what has to be drawn again. Only the operations reading a slot
+/// whose value changed are drawn again, where they were and where they are
+/// now ([`DamageScan`]).
+pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) -> Damage {
+    let mut state = view.state_mut();
+    let frame = state.frame;
+    let Some(canvas) = state.canvas.as_mut() else {
+        return Damage::None;
+    };
+    canvas.changed.clear();
+    for &(k, value) in values {
+        let i = k as usize;
+        if canvas.args.get(i).copied().flatten() != Some(value) {
+            canvas.changed.push(k);
         }
-        if c.args[k] == Some(value) {
-            return;
-        }
-        c.args[k] = Some(value);
-        c.stale_tail();
     }
-    view.changed();
+    if canvas.changed.is_empty() {
+        return Damage::None;
+    }
+    // The tail recorded the values it covered: record it again.
+    canvas.stale_tail();
+    let before = scan(canvas);
+    for &(k, value) in values {
+        let i = k as usize;
+        if canvas.args.len() <= i {
+            canvas.args.resize(i + 1, None);
+        }
+        canvas.args[i] = Some(value);
+    }
+    if before == Damage::All {
+        return Damage::All;
+    }
+    match before.union(scan(canvas)) {
+        Damage::Rect(rect) => {
+            let rect = within(rect, frame.size.width.0, frame.size.height.0);
+            if rect.size.width.0 > 0.0 && rect.size.height.0 > 0.0 {
+                Damage::Rect(rect)
+            } else {
+                Damage::None
+            }
+        }
+        other => other,
+    }
+}
+
+/// The area `state`'s operations reading a changed slot paint, with the
+/// values in its slots now.
+fn scan(state: &mut CanvasState) -> Damage {
+    let CanvasState {
+        drawing,
+        args,
+        scan,
+        changed,
+        ..
+    } = state;
+    let Some(drawing) = drawing.as_ref() else {
+        return Damage::None;
+    };
+    if drawing.ops.is_empty() {
+        return Damage::None;
+    }
+    let is_changed = |s: u16| changed.contains(&s);
+    scan.damage(&drawing.ops, |s| slot_number(args, s), is_changed)
+}
+
+/// The number in slot `s` (0 while unset).
+fn slot_number(args: &[Option<AnimationValue>], s: u16) -> f32 {
+    args.get(s as usize)
+        .copied()
+        .flatten()
+        .map_or(0.0, AnimationValue::number)
+}
+
+/// `rect` within a canvas `w` × `h` points large (it paints inside it).
+fn within(rect: Bounds<Points>, w: f32, h: f32) -> Bounds<Points> {
+    let x0 = rect.origin.x.0.max(0.0);
+    let y0 = rect.origin.y.0.max(0.0);
+    let x1 = (rect.origin.x.0 + rect.size.width.0).min(w);
+    let y1 = (rect.origin.y.0 + rect.size.height.0).min(h);
+    if x1 <= x0 || y1 <= y0 {
+        return Bounds::default();
+    }
+    Bounds {
+        origin: point(Points(x0), Points(y0)),
+        size: size(Points(x1 - x0), Points(y1 - y0)),
+    }
 }
 
 /// Draws a canvas: records it first if needed.
@@ -2472,6 +2546,30 @@ impl IDWriteTextRenderer_Impl for Outliner_Impl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_damage_area_stays_within_the_canvas() {
+        let area = Bounds {
+            origin: point(Points(-10.0), Points(-5.0)),
+            size: size(Points(120.0), Points(80.0)),
+        };
+        assert_eq!(
+            within(area, 100.0, 60.0),
+            Bounds {
+                origin: point(Points(0.0), Points(0.0)),
+                size: size(Points(100.0), Points(60.0)),
+            }
+        );
+        // What the canvas cannot show paints nothing.
+        let outside = Bounds {
+            origin: point(Points(150.0), Points(10.0)),
+            size: size(Points(10.0), Points(10.0)),
+        };
+        assert_eq!(
+            within(outside, 100.0, 60.0).size,
+            size(Points(0.0), Points(0.0))
+        );
+    }
 
     fn gradient(stops: &[(f32, u32)]) -> CanvasGradient {
         stops.iter().fold(
