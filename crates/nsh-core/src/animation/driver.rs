@@ -23,6 +23,8 @@ pub(crate) struct Running {
     velocity: f32,
     /// First frame time (seconds); set on the first step.
     start: Option<f64>,
+    /// The frame time (seconds) of the last step.
+    last: Option<f64>,
 }
 
 impl Running {
@@ -31,6 +33,12 @@ impl Running {
     pub(crate) fn starting_at(mut self, start: f64) -> Self {
         self.start = Some(start);
         self
+    }
+
+    /// The frame time (seconds) of its last step: where an animation that
+    /// replaces it starts, holding the value and velocity of that frame.
+    pub(crate) fn last_step(&self) -> Option<f64> {
+        self.last
     }
 
     pub(crate) fn new(id: AnimationId, driver: Driver, from: f32, velocity: f32) -> Self {
@@ -49,6 +57,7 @@ impl Running {
             from,
             velocity,
             start: None,
+            last: None,
         }
     }
 
@@ -105,6 +114,7 @@ impl Running {
     /// Advances to `now` (seconds). Returns `(value, velocity, finished)`.
     pub(crate) fn step(&mut self, now: f64) -> (f32, f32, bool) {
         let start = *self.start.get_or_insert(now);
+        self.last = Some(now);
         if let Driver::Decay {
             deceleration,
             clamp: Some(bounds),
