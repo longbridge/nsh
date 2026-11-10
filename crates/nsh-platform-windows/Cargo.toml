@@ -3,6 +3,7 @@ name = "nsh-platform-windows"
 description = "Windows backend (Win32, Direct2D, DirectWrite): view mounting, text engine, input, standalone app."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

@@ -497,6 +497,12 @@ impl Surface {
         }
     }
 
+    /// Lays the app out at `width` × `height` before GTK sizes the root,
+    /// which it does only as its window shows ([`crate::window::launch_hidden`]).
+    pub(crate) fn assume_size(&self, width: f32, height: f32) {
+        self.resized(width, height);
+    }
+
     fn resized(&self, width: f32, height: f32) {
         {
             let mut s = self.root.state_mut();

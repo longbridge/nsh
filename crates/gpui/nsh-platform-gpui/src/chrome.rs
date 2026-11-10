@@ -81,7 +81,7 @@ use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
     desktop::{
         CloseReason, DesktopCommand, Key, MenuBarMode, MenuItem, MenuRole, Shortcut, TitleBarStyle,
-        WindowAttributes,
+        WindowAttributes, WindowMode,
     },
     geometry::{Edges as Insets, Points},
 };
@@ -204,6 +204,10 @@ pub(crate) struct Chrome {
     standalone: Cell<bool>,
     /// Activation must work even while the window is not rendering.
     window: Cell<Option<AnyWindowHandle>>,
+    /// The mode the window opens in, while it waits hidden since it opened
+    /// (nsh.json `window.defaultVisible: false`): it takes it as it first
+    /// shows, as GPUI would show it to apply it ([`crate::open_app_window`]).
+    pub(crate) opening_mode: Cell<Option<WindowMode>>,
     style: Cell<TitleBarStyle>,
     /// The app's title bar's height (`titleBar.height`).
     height: Cell<Option<f32>>,

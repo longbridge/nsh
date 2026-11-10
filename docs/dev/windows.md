@@ -73,7 +73,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   the window's (the process is per-monitor DPI aware, v2).
 - **One hop per commit.** The engine runs on its own thread (`nsh_engine::Engine`); its sink queues each commit and
   posts one `WM_NSH_WAKE` to the window, and the main thread applies every queued batch in order (`surface.rs`,
-  `mount.rs`). The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
+  `mount.rs`). The animated values go into the views after those batches (`Surface::write_animations`) and before
+  each desktop command in one, which can paint its window before the batch ends (docs/dev/pitfalls.md, "Windows").
+  The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
   input and hosted items find views by id while a batch is being applied. Worker threads (image decoding, media
   callbacks, the dev client) run code back on a UI thread with `UiThread::invoke`: each UI thread has a message-only
   dispatcher window of its own, a surface records the `UiThread` it was made on (`Surface::ui_thread`), and work
@@ -122,6 +124,14 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   thread-locals are released at a plain thread exit. Released by the main thread's thread-local destructors instead,
   they would run inside `ExitProcess`, after the graphics DLLs are gone, and the process would end with a stray exit
   code. The UI thread sets per-monitor DPI awareness and `OleInitialize`s (clipboard, drag and drop, WIC).
+  With nsh.json `window.defaultVisible: false` the window is made and its app runs, unshown: the app's first
+  `show()` / `focus()`, or a link from a later launch (`linking.rs`), shows it as `AppView::show` does
+  (`app::show_main`: cloaked until its background and a frame are drawn, then in the mode it opens in,
+  `Surface::main_opening_mode`). A development host holds its first show until the first app came (`dev.rs`,
+  `DevUi::held`): a session's first bundle places the window as a runner does (`AppView::place_main_window`: its
+  size, place and the mode it opens in, which waits for the first show while the window is hidden), and the app's
+  `defaultVisible` decides whether it shows. An error shows the window while it is hidden (held, or hidden by the
+  app: a tray app whose startup failed), so it is seen; a reload leaves it as it is.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a window: a child of the embedding app's window, or top-level;
   the host's message loop runs it. `set_ui_sets` serves the UI sets beside the runtime's modules
   (`nsh/base` by default; an app with Rust components of its own passes `nsh_base::registry()` and its sets).

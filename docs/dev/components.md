@@ -292,6 +292,9 @@ reasons: `reactive-components.md`.
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
   can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
   the host itself (no view of its own); a region as the root goes in the host view.
+  The core reuses retained `each` rows in the same key order while their item bindings update the content
+  (`core/components.rs`). Region placement checks the actual child order before moving nodes
+  (`core/views.rs`), after updating anchors and slots.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; `.fill_style_from_view(initial)`, `.stroke_style_from_view(initial)`,
@@ -1085,7 +1088,7 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
 - **`onOpenChange({ open, reason })`**: every request to open or close (`OpenState::request`; not a request for what it
   already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
   `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"focus"` (a hover card's
-  trigger gained or lost the keyboard focus), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
+  trigger gained or lost the keyboard focus; the keyboard focus moved to another item of a submenu's menu), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
   motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
   closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `Tooltip` has these two and
@@ -1110,6 +1113,12 @@ indicator, as `Checkbox`'s: a view of its own around the slot, placed before the
 inside (`indicator`) follows them through `group-checked:` with `group` on the part, or is shown and hidden by the
 part's own `checked:` styles. A new value rebinds that item's state and its indicator's projection alone, so only the
 item and its indicator are sent (`crates/nsh-base/tests/base/menu.rs`).
+
+**Menu lists.** `MenuList` (Rust, `menu.rs`) puts a level's items in a virtualized list of the menu's own. The menu
+counts it as one place per row among the level's items, made or not, so its keys walk the rows by index: a row not
+made yet is scrolled to and focused once the list has made it, and a disabled row is passed over as an item is. A
+`virtual_list` of the app's own in a menu is no such list: its rows are made under the app's view, out of the menu's
+reach (`crates/nsh-base/tests/base/menu_list.rs`).
 
 **Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
 toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):

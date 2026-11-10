@@ -1897,7 +1897,8 @@ pub trait Interactive: Element {
         self
     }
 
-    /// The id inputs name an input accessory by (`nativeID`).
+    /// `nativeID`: names the view for others: inputs find an input accessory
+    /// by it, and the embedding app a scroll view it watches (`watchScroll`).
     fn native_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::NativeId(Some(id.into())));
         self
@@ -2801,6 +2802,7 @@ mod file_listener_tests {
             view().on_file_drag_enter(unit),
             view().on_file_drag_enter(move |e: &events::FileDragEvent| {
                 assert_eq!(e.uris, ["file:///tmp/a%20b.png"]);
+                assert_eq!(e.mime_types, ["image/png"]);
                 d.set(d.get() + 1);
             }),
         ];

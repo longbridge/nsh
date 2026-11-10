@@ -19,11 +19,11 @@
 use jni::objects::GlobalRef;
 use nsh_core::{
     AccessibilityCurrent, AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle,
-    Checked, Color, Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps,
-    KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation,
-    ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode,
-    ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior,
-    TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
+    Checked, Color, Command, DialogButtonStyle, EditAction, InputConfig, KeyboardDismissMode,
+    KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion,
+    ModalAnimation, ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents,
+    ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle,
+    SubmitBehavior, TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -631,6 +631,26 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.string(text);
                     }
                     Command::AccessibilityFocus => e.int(18),
+                    // `InputBox.openEditMenu`: the bounds in the root view,
+                    // then the actions' bits (cut 1, copy 2, paste 4,
+                    // select all 8).
+                    Command::OpenEditMenu { bounds, actions } => {
+                        e.int(49);
+                        e.float(bounds.origin.x.0);
+                        e.float(bounds.origin.y.0);
+                        e.float(bounds.size.width.0);
+                        e.float(bounds.size.height.0);
+                        e.int(actions.iter().fold(0, |bits, action| {
+                            bits | match action {
+                                EditAction::Cut => 1,
+                                EditAction::Copy => 2,
+                                EditAction::Paste => 4,
+                                EditAction::SelectAll => 8,
+                                _ => 0,
+                            }
+                        }));
+                    }
+                    Command::CloseEditMenu => e.int(50),
                     // `Mounter.haptic` reads the haptic in this order.
                     // API levels of the constants it maps to: CONFIRM /
                     // REJECT from 30 (else VIRTUAL_KEY / LONG_PRESS),
@@ -717,6 +737,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
+                    | Command::CancelPress
                     | Command::ScrollToIndex { .. }
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
@@ -730,6 +751,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
+                    // Not carried out on Android yet: the app's paste is
+                    // lost, so say so.
+                    Command::InsertText(_) => {
+                        log::warn!("insertText is not supported on Android yet; nothing inserted");
+                        e.int(-1);
+                    }
                     // `SystemUi.openPath`: the file at the path, a `content:`
                     // URI the app's FilesProvider serves, to the system's
                     // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs
@@ -1340,6 +1367,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         e.opt_string(action.label.as_deref());
     }
     e.opt_string(p.test_id.as_deref());
+    e.opt_string(p.native_id.as_deref());
     e.float(p.long_press_delay.unwrap_or(-1.0));
     match p.ripple {
         Some(r) => {

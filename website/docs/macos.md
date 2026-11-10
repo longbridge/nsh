@@ -105,12 +105,69 @@ Writes an app bundle:
   MacOS/<Name>               the executable: a Rust app's own runner, built with its crate; nsh's release runner for TSX
   Resources/nsh/bundle.nshc  a TSX app, compiled
   Resources/nsh/assets/…     the assets it imports (a Rust crate's `assets!()` too)
-  Resources/nsh/app.json     the window title and the app's appearance
+  Resources/nsh/app.json     the window title, the app's appearance, its activation policy and nsh.json's window options
   Resources/AppIcon.icns     the icon, when nsh.json names one (converted with sips)
 ```
 
 The `.app` is signed ad hoc, so it runs on the Mac that built it. To distribute it, sign it with a Developer ID and
 notarize it. `--run` opens the app after packaging it.
+
+## Menu bar apps
+
+A menu bar app lives in the menu bar as its [tray icon](../modules/nsh-desktop.md#tray), outside the Dock and the app
+switcher (Cmd+Tab). nsh.json's `macos.activationPolicy` makes an app one:
+
+```json
+{
+  "macos": { "activationPolicy": "accessory" }
+}
+```
+
+| `activationPolicy` | The app |
+|---|---|
+| `"regular"` (the default) | A Dock icon, the menu bar while the app is active, a place in the app switcher. |
+| `"accessory"` | A menu bar app. Its windows show as a regular app's; its application menu stays out of sight, and the menu's shortcuts (Cmd+W, Cmd+Q) work while one of its windows is active. |
+
+The app is a menu bar app from launch, before its code runs, whichever way NSH starts it. `nsh package --target macos` writes
+`LSUIElement` into the package's `Info.plist` (set `macos.activationPolicy` rather than `LSUIElement` in
+[`macos.infoPlist`](./packaging.md#infoplist-keys-and-entitlements)) and the policy into its `app.json`, which the
+runner reads. `nsh run --target macos` starts the development host with `--activation-policy accessory`, the flag to
+give the host when you start it yourself, and so does `nsh test --target macos --foreground`; tests in the background
+(the default) run as before. `cargo run` starts a Rust app's own `main`, which says so in `run_app`'s options. The
+option is the macOS backend's, so a `main` that also builds for Windows and Linux, as `nsh init --template rust`
+writes it, sets it for macOS:
+
+```rust
+platform::AppOptions {
+    #[cfg(target_os = "macos")]
+    activation_policy: platform::ActivationPolicy::Accessory,
+    ..Default::default()
+}
+```
+
+The Dock's features come with its icon: `Notifications.setBadge`'s badge, `requestAttention()`'s bounce and reopening a
+hidden window from the Dock are a regular app's. A menu bar app shows its state in its tray (`Tray.set`'s icon and
+tooltip) and opens its window from there:
+
+```tsx
+import { mount } from "nsh";
+import { currentWindow, Tray } from "nsh/desktop";
+import icon from "./tray.svg";
+
+function App() {
+  // Closing the window hides it: the app keeps running in the menu bar.
+  const main = currentWindow();
+  main.set({ closeOnPress: false });
+  main.on("closePress", () => main.hide());
+  Tray.set({ icon, onClick: () => main.focus(), menu: [{ role: "quit" }] });
+  return <Inbox />;
+}
+
+mount(App);
+```
+
+An app embedded with `AppView` takes part in the system's UI as its host app does (the host's `LSUIElement`, or
+`NSApplication.setActivationPolicy`).
 
 ## Embedding in a Mac app
 
@@ -161,7 +218,8 @@ the caller can then finish cleanup or restart its executable.
 
 Set `AppOptions { keep_alive_on_close: true, ..Default::default() }` to keep the
 standalone session alive when its window closes. Closing hides the window;
-reopening from the Dock shows that same window and engine. For an explicit Exit
+reopening from the Dock shows that same window and engine (a [menu bar app](#menu-bar-apps)
+shows it from its tray). For an explicit Exit
 or update restart, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
 The app's own code quits the same way with `nsh_core::element::desktop::quit()` (TS: `Application.quit()`), while

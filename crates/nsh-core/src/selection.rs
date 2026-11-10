@@ -67,6 +67,19 @@ pub trait SelectionTexts {
     /// Text `i`'s content (attachments are U+FFFC, left out of copies).
     fn content(&self, i: usize) -> &str;
 
+    /// The UTF-16 range `range` of text `i` as a copy gives it. By default
+    /// its content's characters without attachments' placeholders; a
+    /// backend that has the texts' runs gives
+    /// [`crate::AttributedText::copied_text`], which also leaves hidden
+    /// runs out (`visibility: "hidden"` on a span).
+    fn copied(&self, i: usize, range: Range<u32>) -> String {
+        let content = self.content(i);
+        content[byte_offset(content, range.start)..byte_offset(content, range.end)]
+            .chars()
+            .filter(|&c| c != OBJECT_REPLACEMENT)
+            .collect()
+    }
+
     /// Text `i`'s content box.
     fn frame(&self, i: usize) -> Bounds<Points>;
 
@@ -351,7 +364,8 @@ impl SelectionModel {
     }
 
     /// The selected text, as a copy gives it: each text's selected part,
-    /// attachments left out, a text that continues the one before it
+    /// attachments and hidden runs left out ([`SelectionTexts::copied`]),
+    /// a text that continues the one before it
     /// ([`SelectionTexts::continues`]) joined to it with nothing between,
     /// other texts on one row (their frames overlap vertically) joined by a
     /// tab, the others by a line break; an empty text inside the selection
@@ -380,9 +394,7 @@ impl SelectionModel {
                 out.push(if same_row { '\t' } else { '\n' });
             }
             previous = Some((i, frame));
-            let content = texts.content(i);
-            let part = &content[byte_offset(content, range.start)..byte_offset(content, range.end)];
-            out.extend(part.chars().filter(|&c| c != OBJECT_REPLACEMENT));
+            out.push_str(&texts.copied(i, range));
         }
         out
     }

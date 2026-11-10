@@ -214,6 +214,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | Verifies the package at a URL off the main thread, then runs it. Throws why it was refused; the running app stays. |
 | `connectDevServer(_ url: URL) throws` | Development: loads from a `nsh dev` server and reloads on every change. Throws with `NativeShell.xcframework`, which has no development support. |
 | `register(component:_:)` | Registers a [native component](./native-components.md). |
+| `watchScroll(_ nativeID: String, _ watcher: NshScrollWatcher?)` | Follows and drives the app's `<Scroll>` with that `nativeID` from the main thread, in the frame of the scroll ([Following a scroll view](#following-a-scroll-view)); `nil` stops watching. |
 | `params: [String: Any]` | The launch parameters of the apps loaded from now on: the app reads them at start as `host.params` ([`host`](../modules/nsh.md#host)). |
 | `send(_ name: String, _ data: Any? = nil)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. |
 | `handle(_ name: String, _ handler:)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the main thread: `{ data, reply in … }`, or an `async throws` function `{ data in … }` whose result answers the call. |
@@ -272,6 +273,46 @@ Handlers run on the main thread; a call waits for its answer in the app without 
 released unanswered fails the call, and a call of a name with no handler fails at once. Events of names the app does
 not listen to yet are kept until it does, and events sent while no app runs (before `loadBundle`, during a reload) go
 to the next one, so a notification tapped while the app starts still reaches it.
+## Following a scroll view
+
+Native UI of the host sometimes moves with the app's content in every frame: a sheet under the page that the end of
+the content pulls up, a header that collapses with it. Forwarding `onScroll` through JS to the host is a frame late,
+so the host watches the app's `<Scroll>` by its `nativeID` instead and gets an `NshScrollHandle` to it. Everything runs
+on the main thread, in the frame of the scroll, without JS. The API is the same on Android, in each platform's units.
+
+Give the `<Scroll>` a `nativeID` (it names the view for native code; `testID` stays for tests):
+
+```tsx
+<Scroll nativeID="page">…</Scroll>
+```
+
+```swift
+final class Sheet: NshScrollWatcher {
+    func onAttached(_ handle: NshScrollHandle) {      // at once when it is there; again after a reload
+        handle.onScroll { [weak self] scrollX, scrollY, dx, dy in self?.follow(handle) }
+        handle.onContentSizeChange { [weak self] contentWidth, contentHeight in self?.follow(handle) }
+    }
+
+    func onDetached() { reset() }                      // deleted, nativeID changed or the app stopped
+}
+
+app.watchScroll("page", sheet)
+```
+
+| `NshScrollHandle` | |
+|---|---|
+| `scrollX`, `scrollY` | The offset from the start of the content (insets not counted), in points. |
+| `contentWidth`, `contentHeight` | The content's size (at least the viewport's), in points. |
+| `viewportWidth`, `viewportHeight` | The visible size, inside the insets, in points. |
+| `contentView` | The view the app's content is laid out in: the positions of the app's views inside are relative to it. |
+| `scrollBy(dx:dy:animated:)` | Scrolls at once or with UIKit's animation, clamped to the content, as the user's scroll would: the app's `onScroll` hears it. |
+| `stopScrolling()` | Ends a fling or an animated scroll where it is; nothing at rest. |
+| `onScroll(_:)`, `onContentSizeChange(_:)` | `(scrollX, scrollY, dx, dy)` on every offset change; `(contentWidth, contentHeight)` when the content gets larger or smaller without a scroll. Each returns a function that stops it. |
+| `isAlive` | Whether the scroll view is still there with that `nativeID`; once it is not, reads give 0 and the rest does nothing. |
+
+With several scroll views of the same `nativeID`, the newest one is watched. The view keeps the watcher until it is
+replaced or removed (`nil`). Desktop and web apps are not embedded, so they have no such API.
+
 ## Theme overrides
 
 One app embedded in several branded host apps takes each host's brand: the host gives the tokens its brand changes,

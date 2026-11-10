@@ -9,9 +9,10 @@
 //! is what is drawn. Hinted metrics and rounded glyph positions are off on
 //! both sides, so measuring is resolution-independent.
 //!
-//! Colors and decorations are not part of a layout: the core reuses a
-//! layout for a text that only differs in them (`AttributedText::layout_eq`),
-//! so they are read from the drawn text's spans, per glyph cluster.
+//! Colors and decorations are not part of a layout: they are read from the
+//! drawn text's spans, per glyph cluster, so the core keeps a layout for a
+//! text that only differs in its colors
+//! (`TextEngine::draws_colors_from_text`).
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -23,9 +24,8 @@ use std::{
 
 use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
-    ATTACHMENT_CHAR, Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode,
-    EventKind, Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine,
-    TextPosition, TextSpan,
+    Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind, Points,
+    ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextPosition, TextSpan,
 };
 use rustc_hash::FxHashMap;
 
@@ -869,6 +869,11 @@ impl TextEngine for PangoTextEngine {
             width = width.min(max.max(0.0));
         }
         Size::new(Points(width), Points(from_pango(bottom).ceil()))
+    }
+
+    fn draws_colors_from_text(&self) -> bool {
+        // Colors and decorations are read from the drawn text's spans.
+        true
     }
 
     fn breaks_lines_greedily(&self) -> bool {
@@ -1902,14 +1907,11 @@ fn copy(view: &NshView) {
     }
 }
 
-/// The selected text, without attachments' placeholders.
+/// The selected text, without attachments' placeholders and hidden runs.
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    let s = state.text.as_ref()?.text.text.as_str();
-    let start = utf16_to_byte(s, (0, 0), a);
-    let end = utf16_to_byte(s, (start, a), b);
-    Some(s[start..end].replace(ATTACHMENT_CHAR, ""))
+    Some(state.text.as_ref()?.text.copied_text(a..b))
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.

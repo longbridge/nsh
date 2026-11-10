@@ -19,9 +19,10 @@
 //! limit cut after exactly `numberOfLines` lines, and the lines are stacked
 //! again from the spans they hold.
 //!
-//! Colors and decorations are not part of a layout: the core reuses a
-//! layout for a text that only differs in them (`AttributedText::layout_eq`),
-//! so they are read from the drawn text's spans, per glyph cluster.
+//! Colors and decorations are not part of a layout: they are read from the
+//! drawn text's spans, per glyph cluster, so the core keeps a layout for a
+//! text that only differs in its colors
+//! (`TextEngine::draws_colors_from_text`).
 
 use std::{
     cell::{Cell, RefCell},
@@ -34,9 +35,9 @@ use std::{
 };
 
 use nsh_core::{
-    ATTACHMENT_CHAR, Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode,
-    EventKind, FontFamily, Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout,
-    TextLine, TextPosition, TextSpan, geometry::px,
+    Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind, FontFamily,
+    Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextPosition,
+    TextSpan, geometry::px,
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -1633,6 +1634,11 @@ impl Default for DWriteTextEngine {
 impl TextEngine for DWriteTextEngine {
     type Prepared = Prepared;
 
+    fn draws_colors_from_text(&self) -> bool {
+        // Colors and decorations are read from the drawn text's spans.
+        true
+    }
+
     fn prepare(&self, t: &AttributedText) -> Prepared {
         self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())
     }
@@ -2895,13 +2901,12 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
     );
 }
 
-/// The selected text of `view`, without attachments' placeholders.
+/// The selected text of `view`, without attachments' placeholders and
+/// hidden runs.
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    let text: Vec<u16> = state.text.as_ref()?.text.text.encode_utf16().collect();
-    let part = text.get(a as usize..(b as usize).min(text.len()))?;
-    Some(String::from_utf16_lossy(part).replace(ATTACHMENT_CHAR, ""))
+    Some(state.text.as_ref()?.text.copied_text(a..b))
 }
 
 /// Keys for the text selection (Ctrl+C, Ctrl+A, Escape); true when

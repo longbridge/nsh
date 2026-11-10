@@ -302,6 +302,36 @@ brand("#e11d48");
 setTheme(null); // 恢复应用的主题
 ```
 
+## appInfo
+
+```ts
+function appInfo(): AppInfo;
+
+interface AppInfo {
+  readonly id: string | null;
+  readonly name: string | null;
+  readonly version: string | null;
+  readonly build: number | null;
+  readonly development: boolean;
+}
+```
+
+应用构建时的信息：id、名称、版本号、构建号，以及是否为开发构建。打包产物报告的是 `nsh package`、`nsh publish` 给包的
+名称和版本（包括 `--id`、`--name`、`--version`、`--build`），没有给出时版本为 `1.0.0`、构建号为 `1`；其他构建报告
+`nsh.json` 的 `"id"`、`"name"`、`"version"` 和 `"build"`，没有的项为 `null`。`nsh run`、`nsh dev`、`nsh test` 和不带
+`--release` 的 `nsh build` 是开发构建；`nsh package`、`nsh publish` 和 `nsh build --release` 不是。在任何平台、任何模块中
+都能读取，包括模块顶层的代码：构建会在应用的模块运行之前把这些信息交给运行时。
+
+安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。
+
+```tsx
+import { appInfo, Text } from "nsh";
+
+const { version, build, development } = appInfo();
+
+export const About = () => <Text>{`${version} (${build})${development ? " · dev" : ""}`}</Text>;
+```
+
 ## View、Text、Scroll、Overlay
 
 ```ts
@@ -1897,7 +1927,7 @@ await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", s
 
 ### Notifications.permission
 
-`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。
+`permission()` 只查询不询问，`requestPermission()` 首次会显示系统提示。两者的结果都是 `"default"`（尚未询问）、`"granted"`、`"denied"`（只能在系统设置里更改）或 `"unavailable"`。在 Apple 平台上，`requestPermission()` 询问之后按系统设置里的权限返回：用户关掉了通知的应用得到 `"denied"`。
 
 ## UrlScheme
 

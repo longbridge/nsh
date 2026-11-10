@@ -25,9 +25,9 @@
 //! The final layout ([`GpuiLayout`]) is plain data: per line its metrics,
 //! its clusters' boxes (hit testing, selections, decorations) and glyphs
 //! (font, id, size, position). Colors and decorations are not part of it:
-//! the core reuses a layout for text that only differs in them
-//! (`AttributedText::layout_eq`), so [`draw`] reads them from the drawn
-//! text's spans.
+//! [`draw`] reads them from the drawn text's spans, so the core keeps a
+//! layout for text that only differs in its colors
+//! (`TextEngine::draws_colors_from_text`).
 //!
 //! Selectable text follows desktop conventions, as on Windows and Linux
 //! ([`Selection`]).
@@ -1257,6 +1257,11 @@ impl Builder<'_> {
 
 impl TextEngine for GpuiTextEngine {
     type Prepared = Prepared;
+
+    fn draws_colors_from_text(&self) -> bool {
+        // Colors and decorations are read from the drawn text's spans.
+        true
+    }
 
     fn prepare(&self, t: &AttributedText) -> Prepared {
         self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())
@@ -2878,13 +2883,12 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
     );
 }
 
-/// The selected text of `view`, without attachments' placeholders.
+/// The selected text of `view`, without attachments' placeholders and
+/// hidden runs.
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    let text: Vec<u16> = state.text.as_ref()?.text.text.encode_utf16().collect();
-    let part = text.get(a as usize..(b as usize).min(text.len()))?;
-    Some(String::from_utf16_lossy(part).replace(ATTACHMENT_CHAR, ""))
+    Some(state.text.as_ref()?.text.copied_text(a..b))
 }
 
 /// Selects all of `view`'s text.

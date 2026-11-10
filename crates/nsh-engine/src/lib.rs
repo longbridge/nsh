@@ -3358,6 +3358,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         audio: env.audio,
         cell: env.cell,
         web_input: env.web_input,
+        web_views: env.web_views,
     }
 }
 

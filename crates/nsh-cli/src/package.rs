@@ -16,7 +16,7 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::{
-    apple::{AppleConfig, ApplePlatform},
+    apple::{ActivationPolicy, AppleConfig, ApplePlatform, MacosConfig},
     runtime::{self, Platform},
     ui,
 };
@@ -136,9 +136,10 @@ pub(crate) struct AppConfig {
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
-    /// What macOS packages add to their `Info.plist` and entitlements.
+    /// What macOS packages add to their `Info.plist` and entitlements, and
+    /// how the app takes part in the system's UI.
     #[serde(default)]
-    pub(crate) macos: AppleConfig,
+    pub(crate) macos: MacosConfig,
     /// What Android packages set in their manifest.
     #[serde(default)]
     pub(crate) android: AndroidConfig,
@@ -154,6 +155,11 @@ pub(crate) struct AndroidConfig {
     ///
     /// [`android::DEFAULT_TARGET_SDK`]: crate::android::DEFAULT_TARGET_SDK
     pub(crate) target_sdk: Option<u32>,
+    /// The app may make plain HTTP requests
+    /// (`android:usesCleartextTraffic`): servers on a local network without
+    /// TLS. Off by default, as Android has it from API 28 on.
+    #[serde(default)]
+    pub(crate) uses_cleartext_traffic: bool,
 }
 
 impl AndroidConfig {
@@ -250,11 +256,54 @@ pub(crate) fn app_json(
     info.to_string()
 }
 
+/// The `app.json` of a desktop package (Linux, Windows), which its runner
+/// reads before the app runs: the app's name (the window's title), id and
+/// version, the appearance its window opens in, and `nsh.json` `"window"`,
+/// the main window's options (`Bundle::read_trusted`).
+pub(crate) fn desktop_app_json(
+    config: &AppConfig,
+    name: &str,
+    id: &str,
+    version: &str,
+) -> serde_json::Value {
+    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
+    if let Some(appearance) = &config.appearance {
+        info["appearance"] = appearance.as_str().into();
+    }
+    if let Some(window) = &config.window {
+        info["window"] = window.clone();
+    }
+    info
+}
+
 /// `nsh.json` `"window"` of the app at `entry` (checked), as JSON: the
 /// dev server's app info carries it.
 pub(crate) fn window_json(entry: &Path) -> Option<String> {
     let entry = dunce::canonicalize(entry).ok()?;
     read_config(&entry).ok()?.window.map(|w| w.to_string())
+}
+
+/// Says, once per app, that the main window of the app at `entry` starts
+/// hidden (`nsh.json` `window.defaultVisible: false`): the desktop hosts of
+/// `nsh run` and `nsh test --target` open it so, as its package does, and
+/// only the app shows it.
+pub(crate) fn note_hidden_main_window(entry: &Path) {
+    static NOTED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    let Ok(entry) = dunce::canonicalize(entry) else {
+        return;
+    };
+    let hidden = read_config(&entry)
+        .ok()
+        .and_then(|config| config.window)
+        .and_then(|window| nsh_core::desktop::MainWindowOptions::from_json(&window).ok())
+        .is_some_and(|window| !window.visible_at_launch());
+    let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
+    if hidden && !noted.contains(&entry) {
+        noted.push(entry);
+        crate::ui::note(
+            "the main window starts hidden (nsh.json window.defaultVisible: false) until the app shows it",
+        );
+    }
 }
 
 /// Declares the URL schemes the app claims in an Apple `Info.plist`
@@ -363,7 +412,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     }
     warn_ignored(&path, &ignored);
     config.ios.check(ApplePlatform::Ios)?;
-    config.macos.check(ApplePlatform::Macos)?;
+    config.macos.check()?;
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
@@ -599,11 +648,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let mut built = if crate::rust_app::is_root(&entry) {
         crate::build::rust_root()
     } else {
-        let compile = match options.target {
-            PackageTarget::Web => crate::build::compile_split,
-            _ => crate::build::compile,
-        };
-        let built = compile(&entry, true).map_err(|e| e.into_error(&entry))?;
+        let split = matches!(options.target, PackageTarget::Web);
+        let built = crate::build::compile_package(&entry, split, config)
+            .map_err(|e| e.into_error(&entry))?;
         ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
         built
     };
@@ -870,6 +917,7 @@ fn package_android(
             target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            cleartext: config.android.uses_cleartext_traffic,
             notifications: config.notifications(),
             schemes: &config.schemes,
             rust: built.rust_root,
@@ -913,8 +961,8 @@ fn package_android(
 
 /// A directory `<out>/<name>`: the release runner as `<executable>`, the
 /// bundle and assets in `nsh/` (where the runner looks, next to itself),
-/// `nsh/app.json` (the window's title, the application id and the app's
-/// appearance, which the window opens in), a
+/// `nsh/app.json` (the window's title, the application id, the app's
+/// appearance, which the window opens in, and the main window's options), a
 /// `<id>.desktop` entry and the icon; then the same as `<name>.tar.gz`.
 fn package_linux(
     options: &PackageOptions<'_>,
@@ -952,15 +1000,8 @@ fn package_linux(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({
-        "name": name,
-        "id": id,
-        "version": version,
-        "schemes": config.schemes,
-    });
-    if let Some(appearance) = &config.appearance {
-        info["appearance"] = appearance.as_str().into();
-    }
+    let mut info = desktop_app_json(config, name, id, version);
+    info["schemes"] = serde_json::json!(config.schemes);
     fs::write(resources.join("app.json"), info.to_string())?;
     if let Some(icon) = &config.icon {
         fs::copy(icon, dir.join(format!("{id}.png")))
@@ -1056,6 +1097,7 @@ fn package_macos(
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
+    config.macos.add_to_app_json(&mut info);
     let schemes = config.url_schemes();
     fs::write(
         nsh.join("app.json"),
@@ -1073,7 +1115,7 @@ fn package_macos(
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
-    let entitlements = config.macos.entitlements(ApplePlatform::Macos)?;
+    let entitlements = config.macos.entitlements()?;
     for key in entitlements.keys() {
         if crate::apple::needs_profile(key) {
             ui::warn(format!(
@@ -1192,9 +1234,13 @@ fn macos_info_plist(
     if icon {
         d.insert("CFBundleIconFile".into(), s("AppIcon"));
     }
+    // A menu bar app is one from launch: the Dock never shows it.
+    if config.macos.activation_policy == ActivationPolicy::Accessory {
+        d.insert("LSUIElement".into(), true.into());
+    }
     config.usage_descriptions(&mut d);
     // The app's own keys, over NSH's defaults (never over its reserved ones).
-    d.extend(config.macos.info_plist(ApplePlatform::Macos)?);
+    d.extend(config.macos.info_plist()?);
     Ok(d)
 }
 
@@ -1547,6 +1593,23 @@ mod tests {
     }
 
     #[test]
+    fn android_cleartext_traffic_is_off_unless_asked_for() {
+        let cleartext = |json: serde_json::Value| {
+            serde_json::from_value::<AppConfig>(json)
+                .unwrap()
+                .android
+                .uses_cleartext_traffic
+        };
+        assert!(!cleartext(serde_json::json!({})));
+        assert!(!cleartext(
+            serde_json::json!({ "android": { "targetSdk": 36 } })
+        ));
+        assert!(cleartext(
+            serde_json::json!({ "android": { "usesCleartextTraffic": true } })
+        ));
+    }
+
+    #[test]
     fn apps_that_may_recognize_speech_explain_it() {
         let usage = |capabilities: Option<serde_json::Value>| {
             let config = AppConfig {
@@ -1611,6 +1674,31 @@ mod tests {
     }
 
     #[test]
+    fn desktop_packages_carry_the_main_windows_options() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false } }"#,
+        )
+        .unwrap();
+        let info = desktop_app_json(&config, "Focus", "com.a", "1.0.0");
+        assert_eq!(
+            info,
+            serde_json::json!({
+                "name": "Focus",
+                "id": "com.a",
+                "version": "1.0.0",
+                "appearance": "dark",
+                "window": { "title": "Focus", "closeOnPress": false },
+            })
+        );
+        // The runner opens the main window with them (`Bundle::read_trusted`).
+        let window = nsh_core::desktop::MainWindowOptions::from_json(&info["window"]).unwrap();
+        assert_eq!(window.attributes.title.as_deref(), Some("Focus"));
+        // An app without them has none.
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("window").is_none());
+    }
+
+    #[test]
     fn apps_add_their_own_info_plist_keys() {
         let config: AppConfig = serde_json::from_value(serde_json::json!({
             "ios": {
@@ -1651,6 +1739,21 @@ mod tests {
             plist::Value::String("public.app-category.finance".into())
         );
         assert!(!macos.contains_key("ITSAppUsesNonExemptEncryption"));
+        assert!(!macos.contains_key("LSUIElement"));
+    }
+
+    /// A menu bar app's package launches as one (`LSUIElement`).
+    #[test]
+    fn menu_bar_apps_launch_as_one() {
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "macos": { "activationPolicy": "accessory" }
+        }))
+        .unwrap();
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(macos["LSUIElement"], plist::Value::Boolean(true));
+        // iOS has no counterpart.
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert!(!ios.contains_key("LSUIElement"));
     }
 
     #[test]
@@ -1663,7 +1766,7 @@ mod tests {
                 "updater": { "github": "acme/orders", "channel": "beta" },
                 "android": { "targetSdk": 35, "futureAndroidKey": 1 },
                 "tui": { "futureTuiKey": "x" },
-                "ios": { "futureIosKey": {} }
+                "ios": { "futureIosKey": {}, "activationPolicy": "accessory" }
             }"#,
         )
         .unwrap();
@@ -1681,6 +1784,7 @@ mod tests {
             [
                 "unknown key `android.futureAndroidKey`",
                 "unknown key `futureKey`",
+                "unknown key `ios.activationPolicy`",
                 "unknown key `ios.futureIosKey`",
                 "unknown key `tui.futureTuiKey`",
                 "unknown key `updater.channel`",
@@ -1698,7 +1802,11 @@ mod tests {
                 "icon": { "light": "a.png", "dark": "b.png" },
                 "schemes": ["orders", { "scheme": "x" }],
                 "web": { "base": "/orders/", "connect": ["a.com", 1] },
-                "android": { "targetSdk": "latest" }
+                "android": { "targetSdk": "latest" },
+                "macos": {
+                    "activationPolicy": "dock",
+                    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" }
+                }
             }"#,
         )
         .unwrap();
@@ -1709,6 +1817,14 @@ mod tests {
         assert_eq!(config.web.base.as_deref(), Some("/orders/"));
         assert_eq!(config.web.connect, ["a.com"]);
         assert_eq!(config.android.target_sdk, None);
+        // The rest of a section applies without the value it left out.
+        assert_eq!(config.macos.activation_policy, ActivationPolicy::Regular);
+        assert!(
+            config
+                .macos
+                .info_plist
+                .contains_key("LSApplicationCategoryType")
+        );
         let mut at: Vec<&str> = ignored
             .iter()
             .map(|m| m.split_once(':').unwrap().0)
@@ -1720,6 +1836,7 @@ mod tests {
                 "android.targetSdk",
                 "build",
                 "icon",
+                "macos.activationPolicy",
                 "schemes[1]",
                 "web.connect[1]"
             ]
@@ -1727,6 +1844,43 @@ mod tests {
         // Text that is no JSON object is still an error.
         assert!(parse_config("not json").is_err());
         assert!(parse_config("[]").is_err());
+    }
+
+    #[test]
+    fn an_activation_policy_of_another_form_is_left_out() {
+        // Objects are the form serde's own enums also take: one would pick
+        // a policy, the other fail where the reader cannot leave it out.
+        for policy in [
+            serde_json::json!({ "accessory": null }),
+            serde_json::json!({ "accessory": true }),
+            serde_json::json!(1),
+        ] {
+            let text = serde_json::json!({
+                "macos": {
+                    "activationPolicy": policy,
+                    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" }
+                }
+            })
+            .to_string();
+            let (config, ignored) = parse_config(&text).unwrap();
+            assert_eq!(
+                config.macos.activation_policy,
+                ActivationPolicy::Regular,
+                "{policy}"
+            );
+            assert!(
+                config
+                    .macos
+                    .info_plist
+                    .contains_key("LSApplicationCategoryType"),
+                "{policy}"
+            );
+            assert_eq!(ignored.len(), 1, "{policy}: {ignored:?}");
+            assert!(
+                ignored[0].starts_with("macos.activationPolicy: "),
+                "{policy}: {ignored:?}"
+            );
+        }
     }
 
     #[test]
