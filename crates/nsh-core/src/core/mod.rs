@@ -1266,6 +1266,18 @@ pub struct Core<M: TextEngine> {
     /// The chain changed since the focus watches last looked
     /// (`ElementRef::on_focus_in`).
     focus_within_changed: bool,
+    /// What the user last gave the surface input with, as the platform
+    /// reports it (`classes::set_input_modality`); `None` before any.
+    modality: Option<crate::platform::InputModality>,
+    /// The focus shows (`focus-visible:`), decided when it was reported
+    /// (`classes::focus_shows`) and again when a key is typed.
+    focus_visible: bool,
+    /// The view in the `FOCUS_VISIBLE` state, by key and id
+    /// (`classes::update_focus_visible`).
+    focus_visible_on: Option<(Key, NodeId)>,
+    /// `focus_visible` changed with the focus staying where it is: the
+    /// next commit round moves the state.
+    focus_visible_moved: bool,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1463,6 +1475,10 @@ impl<M: TextEngine> Core<M> {
             focus_scratch: Vec::new(),
             focus_moved: false,
             focus_within_changed: false,
+            modality: None,
+            focus_visible: false,
+            focus_visible_on: None,
+            focus_visible_moved: false,
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -2792,12 +2808,16 @@ impl<M: TextEngine> Core<M> {
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
         // share untouched.
+        let visible_moved = std::mem::take(&mut self.focus_visible_moved);
         if self.focus_moved {
             self.update_focus_within();
+            self.update_focus_visible();
             // The hints the focus came to or left.
             if !self.overlays.is_empty() {
                 self.focus_hints();
             }
+        } else if visible_moved {
+            self.update_focus_visible();
         }
         self.sync_colors();
         self.sync_ch();
@@ -5107,6 +5127,10 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::FocusWithinStyle(patch) => {
                 self.set_part_style(key, classes::Part::FocusWithin, patch);
+                return Ok(());
+            }
+            Prop::FocusVisibleStyle(patch) => {
+                self.set_part_style(key, classes::Part::FocusVisible, patch);
                 return Ok(());
             }
             Prop::ProjectedStates(states) => {

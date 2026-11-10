@@ -124,10 +124,21 @@ fn keystroke(key: &AnyObject) -> Option<Keystroke> {
     Some(Keystroke { modifiers, key })
 }
 
+/// Tells the core a hardware key went down (`focus-visible:`), unless
+/// `presses` are modifiers alone (HID usages Caps Lock and 0xE0 to 0xE7,
+/// the Control, Shift, Option and Command keys).
+fn keyboard_input(target: &EventTarget, presses: &AnyObject) {
+    let modifier = |code: isize| code == 0x39 || (0xE0..=0xE7).contains(&code);
+    if keys(presses).iter().any(|key| !modifier(code(key))) {
+        target.input_with(nsh_core::platform::InputModality::Keyboard);
+    }
+}
+
 /// `pressesBegan:withEvent:` of a responder of the surface: whether the
 /// table consumed `presses` (then the responder neither handles them nor
 /// passes them on). `editing`: a text input or hosted view has the focus.
 pub(crate) fn began(target: &EventTarget, presses: &AnyObject, editing: bool) -> bool {
+    keyboard_input(target, presses);
     let state = target.keymap();
     if !state.active() {
         return false;
@@ -260,6 +271,7 @@ pub(crate) fn input_ended(view: &UIView, presses: &AnyObject) -> bool {
 /// text.
 pub(crate) fn root_began(target: &EventTarget, presses: &AnyObject) -> bool {
     use objc2::ProtocolType;
+    keyboard_input(target, presses);
     // SAFETY: as in `keys`; `responder` is UIPress's.
     let responder: Option<Retained<AnyObject>> = unsafe {
         let all: Retained<NSArray<AnyObject>> = msg_send![presses, allObjects];

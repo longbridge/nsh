@@ -1655,6 +1655,19 @@ pub extern "C" fn nsh_states(id: u32, states: u32) -> f64 {
     send(|app| app.control.set_states(id, states as u16))
 }
 
+/// The user gave the page input with a pointer (`modality` 1: a mouse
+/// button, a pen or a finger going down) or the keyboard (0: a key that
+/// is not a modifier alone), before it acts: `focus-visible:` follows it.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_input_modality(modality: u32) -> f64 {
+    let modality = if modality == 1 {
+        nsh_core::platform::InputModality::Pointer
+    } else {
+        nsh_core::platform::InputModality::Keyboard
+    };
+    send(|app| app.control.set_input_modality(modality))
+}
+
 /// The surface was resized (points).
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_resize(width: f32, height: f32) -> f64 {

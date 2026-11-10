@@ -80,10 +80,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 
 ## Interaction and the environment
 
-- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `focusWithinStyle`,
+- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`,
   `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`, `pressedStyle` (and a `Button`'s
   `selectedStyle`) on any view (declared in `StateStyleProps`), the same as the `active:` / `hover:` / `focus:` /
-  `focus-within:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` / `aria-expanded:` / `aria-pressed:`
+  `focus-visible:` / `focus-within:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` / `aria-expanded:` / `aria-pressed:`
   classes: the core restyles the view while the platform reports it pressed, hovered or focused, while the focus is on
   it or a view inside it (the content of an overlay is inside the view the overlay is in; `docs/dev/styles.md`), and
   while its accessibility state is selected, checked, mixed,
@@ -151,8 +151,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   so a menu opened below it starts where the view does; `ContextMenu` puts the keyboard focus on its first enabled
   item then.
 - **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
-  presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus, and
-  `focus-visible:` is the same variant. Focus and presses are separate: `ViewProps::focus_stop` decides, from
+  presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus; it
+  shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when the keyboard moved it
+  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`). Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
   `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.

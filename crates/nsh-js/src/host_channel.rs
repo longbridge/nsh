@@ -705,7 +705,10 @@ Image.getSize("b.png", {{ at: 2 }}).then((s) => report("size " + s.width));
         ))
         .unwrap();
         host.run_jobs();
-        assert_eq!(reported(&host), ["batch 42", "prefetch ready", "typo false"]);
+        assert_eq!(
+            reported(&host),
+            ["batch 42", "prefetch ready", "typo false"]
+        );
         assert!(bridge.calls.borrow().is_empty());
         let calls = bridge.fake_calls.borrow().clone();
         assert_eq!(calls.len(), 1);
