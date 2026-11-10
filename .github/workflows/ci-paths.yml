@@ -38,7 +38,10 @@ jobs:
   check:
     # Nothing for drafts or a pull request being closed.
     if: github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)
-    runs-on: ubuntu-24.04
+    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
+    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-24.04' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Check the workflows' paths

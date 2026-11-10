@@ -88,7 +88,10 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    runs-on: ubuntu-24.04
+    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
+    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-24.04' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
     timeout-minutes: 45
     env:
       # Wry embeds GTK 3 web views in X11 child windows. Mesa's software
@@ -104,6 +107,7 @@ jobs:
           echo "TMPDIR=$RUNNER_TEMP/tmp" >> "$GITHUB_ENV"
 
       - name: Install GPUI, Vulkan and Xvfb dependencies
+        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -151,7 +155,10 @@ jobs:
       name: ci-debounce
       deployment: false
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs.
-    runs-on: ubuntu-24.04
+    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
+    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-24.04' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -161,6 +168,7 @@ jobs:
       # decodes and mixes sounds; its base and good plug-ins are what the
       # sound tests decode (WAV) and mix with.
       - name: Install clang, GTK 4, WebKitGTK and GStreamer
+        if: runner.environment == 'github-hosted'
         run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb xauth at-spi2-core python3 libxtst6 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - name: Setup Rust

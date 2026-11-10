@@ -99,7 +99,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
+    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && matrix.os || fromJSON(matrix.os == 'macos-15' && '["self-hosted", "macOS", "ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted", "Windows"]' || '["self-hosted", "Linux", "Packager"]') }}
     defaults:
       run:
         shell: bash
@@ -113,7 +116,7 @@ jobs:
         if: runner.os == 'Windows'
         run: echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
       - name: Install GTK 4 and GStreamer
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -153,7 +156,10 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    runs-on: ubuntu-24.04
+    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
+    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-24.04' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up temporary files
@@ -164,6 +170,7 @@ jobs:
       # C code (zstd) clang and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
       - name: Install clang, LLVM, GTK 4 and GStreamer
+        if: runner.environment == 'github-hosted'
         run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
