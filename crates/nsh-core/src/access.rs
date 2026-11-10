@@ -394,33 +394,16 @@ pub(crate) fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -
 /// (which narrows them), their anchors (`${dataDir}`, `${pluginDir}`,
 /// `${homeDir}`) expanded and resolved once, when they are made
 /// ([`Access::media_url`]).
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct MediaFiles {
-    /// The declared roots' canonical forms.
-    declared: Vec<PathBuf>,
+    /// The declared roots, expanded and canonical (`/var/…` and
+    /// `/private/var/…` on macOS).
+    declared: Vec<(PathBuf, PathBuf)>,
     /// The host grant's, when it has one.
-    granted: Option<Vec<PathBuf>>,
-    /// Paths checked already, by their lexical form: their canonical form
-    /// if the roots hold them. A canvas checks its images on every draw;
-    /// resolving a path costs system calls.
-    checked: std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, Option<PathBuf>>>,
+    granted: Option<Vec<(PathBuf, PathBuf)>>,
 }
-
-impl Clone for MediaFiles {
-    fn clone(&self) -> Self {
-        Self {
-            declared: self.declared.clone(),
-            granted: self.granted.clone(),
-            checked: Default::default(),
-        }
-    }
-}
-
-/// The most paths [`MediaFiles`] remembers; past it, it starts over.
-#[cfg(not(target_arch = "wasm32"))]
-const CHECKED_PATHS: usize = 1024;
 
 impl MediaFiles {
     /// `access`'s read roots, expanded against `data_dir` and `paths`.
@@ -450,14 +433,14 @@ impl MediaFiles {
                     .iter()
                     .filter_map(|root| {
                         let expanded = lexical(&paths.resolve_root(root, &data).ok()?);
-                        resolved(&expanded).ok()
+                        let canonical = resolved(&expanded).ok()?;
+                        Some((expanded, canonical))
                     })
                     .collect()
             };
             Self {
                 declared: roots(&access.declared),
                 granted: access.granted.as_ref().map(roots),
-                checked: Default::default(),
             }
         }
     }
@@ -477,23 +460,37 @@ impl MediaFiles {
             if !absolute(path) || self.declared.is_empty() {
                 return None;
             }
+            // By its text first, as `fs/promises` checks: a path outside
+            // the roots is refused with no disk work on the engine thread.
             let path = lexical(path);
-            let mut checked = self.checked.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(known) = checked.get(&path) {
-                return known.clone();
+            let within = |roots: &[(PathBuf, PathBuf)]| {
+                roots.iter().any(|root| in_root(&path, root).is_some())
+            };
+            if !within(&self.declared) || !self.granted.as_deref().is_none_or(within) {
+                return None;
             }
-            let real = resolved(&path).ok().filter(|real| {
-                let holds =
-                    |roots: &[PathBuf]| roots.iter().any(|root| inside(real, root).is_some());
-                holds(&self.declared) && self.granted.as_deref().is_none_or(holds)
-            });
-            if checked.len() >= CHECKED_PATHS {
-                checked.clear();
-            }
-            checked.insert(path, real.clone());
-            real
+            // Then resolved, on every check (a path granted once may be a
+            // link out of the root by the next), as `authorize_file`
+            // resolves: a link whose target does not exist is refused, not
+            // taken for a file to come.
+            #[cfg(test)]
+            RESOLVES.with(|n| n.set(n.get() + 1));
+            let real = resolved_path(&path).ok()?;
+            let holds = |roots: &[(PathBuf, PathBuf)]| {
+                roots
+                    .iter()
+                    .any(|(_, canonical)| inside(&real, canonical).is_some())
+            };
+            (holds(&self.declared) && self.granted.as_deref().is_none_or(holds)).then_some(real)
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many local media paths this thread resolved on the disk (a
+    /// test's evidence that a path outside the roots was not).
+    static RESOLVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Virtual browser paths use Unix roots. `Path::is_absolute` on
@@ -2265,6 +2262,8 @@ mod tests {
             ]
         );
     }
+    use std::cell::Cell;
+
     use super::*;
 
     fn caps(json: &str) -> Capabilities {
@@ -3307,6 +3306,122 @@ mod tests {
         }
     }
 
+    /// A local file is held to the roots by its text first, as
+    /// `fs/promises` does: a path outside them is refused with no disk work
+    /// on the engine thread (a hung mount, or a Windows share it would
+    /// connect to), and only one inside is resolved to see that no link
+    /// leads out.
+    #[cfg(unix)]
+    #[test]
+    fn paths_outside_the_roots_are_refused_without_disk_work() {
+        let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let root = base.join(format!("media-text-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("allowed")).unwrap();
+        std::fs::create_dir_all(root.join("elsewhere")).unwrap();
+        std::fs::write(root.join("allowed/a.png"), b"png").unwrap();
+        // A link outside the root into it: its text is outside.
+        std::os::unix::fs::symlink(root.join("allowed"), root.join("elsewhere/in")).unwrap();
+        let allowed = root.join("allowed");
+        let access = Access {
+            declared: Capabilities::from_json(
+                &serde_json::json!({ "fs": { "read": [allowed.to_str().unwrap()] } }),
+            )
+            .unwrap(),
+            granted: None,
+        };
+        let files = MediaFiles::new(&access, None, &TrustedPaths::default(), true);
+        let resolves = || RESOLVES.with(Cell::get);
+        let before = resolves();
+        for outside in [
+            root.join("elsewhere/x.png"),
+            root.join("elsewhere/in/a.png"),
+            PathBuf::from("/Volumes/hung/x.png"),
+        ] {
+            assert_eq!(files.readable(&outside), None, "{}", outside.display());
+        }
+        assert_eq!(
+            resolves(),
+            before,
+            "outside the roots, nothing was resolved"
+        );
+        // Under the root's expanded or canonical form, it is resolved.
+        assert!(files.readable(&allowed.join("a.png")).is_some());
+        assert!(
+            files
+                .readable(&canonicalize(&allowed).unwrap().join("a.png"))
+                .is_some()
+        );
+        assert_eq!(resolves(), before + 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every check of a local file resolves it again: a file granted once
+    /// and then replaced by a symlink out of the root is refused (#1417's
+    /// review), never answered from an earlier check.
+    #[cfg(unix)]
+    #[test]
+    fn a_granted_file_replaced_by_a_symlink_is_refused() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let root = base.join(format!("media-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("allowed")).unwrap();
+        let root = canonicalize(&root).unwrap();
+        std::fs::write(root.join("allowed/image.png"), b"public").unwrap();
+        std::fs::write(root.join("secret.png"), b"secret").unwrap();
+        let allowed = root.join("allowed").to_str().unwrap().to_owned();
+        let access = Access {
+            declared: Capabilities::from_json(
+                &serde_json::json!({ "fs": { "read": [allowed.clone()] } }),
+            )
+            .unwrap(),
+            granted: None,
+        };
+        let files = MediaFiles::new(&access, None, &TrustedPaths::default(), true);
+        let src = format!("{allowed}/image.png");
+        assert!(access.media_url(&src, None, Some(&files)).is_some());
+        std::fs::remove_file(root.join("allowed/image.png")).unwrap();
+        symlink(root.join("secret.png"), root.join("allowed/image.png")).unwrap();
+        assert_eq!(access.media_url(&src, None, Some(&files)), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A symlink in a granted root whose target does not exist yet is
+    /// refused: it names no file to resolve, and the loader would follow it
+    /// out of the root once the target appears.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_in_a_granted_root_is_refused() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let root = base.join(format!("media-dangling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("allowed")).unwrap();
+        let root = canonicalize(&root).unwrap();
+        symlink(root.join("secret.png"), root.join("allowed/link.png")).unwrap();
+        let allowed = root.join("allowed").to_str().unwrap().to_owned();
+        let access = Access {
+            declared: Capabilities::from_json(
+                &serde_json::json!({ "fs": { "read": [allowed.clone()] } }),
+            )
+            .unwrap(),
+            granted: None,
+        };
+        let files = MediaFiles::new(&access, None, &TrustedPaths::default(), true);
+        assert_eq!(
+            access.media_url(&format!("{allowed}/link.png"), None, Some(&files)),
+            None
+        );
+        // A file that does not exist yet, and no link, is still the root's.
+        let missing = format!("{allowed}/later.png");
+        assert_eq!(
+            access.media_url(&missing, None, Some(&files)),
+            Some(Cow::Borrowed(missing.as_str()))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A local file in a media source (an absolute path, a `file:` URL) is
     /// read under `capabilities.fs.read`, as `fs/promises` reads it, and
     /// loads as its canonical path, so a symlink in a granted root cannot
@@ -3409,7 +3524,7 @@ mod tests {
                 "{local}"
             );
         }
-        // A path checked again answers the same, from what was checked.
+        // A path checked again answers the same.
         let files = MediaFiles::new(&access, Some(&data), &TrustedPaths::default(), true);
         for _ in 0..2 {
             let again = |uri: &str| {

@@ -132,9 +132,10 @@ sources without a scheme, and `asset:`, `data:`, `blob:` (any case), stay as wri
 no base an absolute or drive path) is read under `capabilities.fs.read` (`MediaFiles`: the declared and granted roots,
 expanded and canonicalized once: the engine's for the core, `Core::set_media_files`, and the image loader's
 `Context::media_files`, a VM's own for `Image.getSize`), only where `fs/promises` has a file system; the path is
-canonicalized at the check (remembered per path, at most 1024), since the platforms' loaders open what they get with
+canonicalized at every check (each time, never remembered), since the platforms' loaders open what they get with
 nothing to confine them, and loads in the form it was written. A link made in a granted root between the check and the
-load is followed: unlike `fs/promises`, which works in the opened root, a loader has no root to work in. Whether a
+load, or later while the source stays set, is followed: unlike `fs/promises`, which works in the opened root, a loader
+has no root to work in. A link whose target does not exist is refused (`resolved_path`, as `authorize_file`). Whether a
 source names a host is read after WHATWG's stripping (spaces and C0 controls around it, tabs and newlines in it); one
 that stripping changed is ambiguous. The spellings of a key are merged and may appear together (gpui-shell's
 `scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot

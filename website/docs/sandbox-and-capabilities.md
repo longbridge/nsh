@@ -174,12 +174,13 @@ URIs and relative paths. A source that starts with `//` names a host: on the web
 checked as that URL; in a native app it has no page to take a scheme from, so it loads nothing (write `https://…`).
 Any other source with a scheme is checked as a URL, and loads what was checked. A source that names a host only
 after the URL parser drops its leading or trailing spaces, or a tab or newline in it, is granted only by `*`, as other
-URLs that platforms read differently are.
+URLs that platforms read differently are (in a native app, one that starts with `//` then loads nothing).
 
 A local file in a media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
 `C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, as
 `fs/promises` reads files, and so only on the desktops. Its symlinks are resolved when the source is set, and the
-platform loads the resolved path, so a link inside a granted root then does not lead out of it. On the web, `/x.png` is the page's
+platform loads the resolved path, so a link inside a granted root then does not lead out of it; a link made there
+later is followed while the source stays set. On the web, `/x.png` is the page's
 own path. An app without `capabilities` loads local files as before.
 
 ### `webview`
