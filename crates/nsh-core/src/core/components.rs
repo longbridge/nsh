@@ -537,6 +537,7 @@ struct SpeechSession {
 
 /// The core's component state.
 pub(super) struct Components {
+    pub(super) web_evaluations: super::web_evaluation::Evaluations,
     registry: Registry,
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
@@ -752,6 +753,7 @@ impl Default for Components {
             url_schemes: UrlScheme::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
+            web_evaluations: Default::default(),
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
             next_fetch: 1,
@@ -5480,6 +5482,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
+            Action::Evaluate(node, script, timeout, answer) => {
+                self.start_web_evaluation(node, script, timeout, answer)
+            }
+            Action::WebEvaluationTimeout(request) => self.timeout_web_evaluation(request),
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
@@ -5698,6 +5704,11 @@ impl<M: TextEngine> Core<M> {
             Action::WebInputAvailable(answer) => {
                 let available =
                     self.components.environment.web_input && self.access.allows_web_input();
+                answer.borrow_mut().deliver(available);
+            }
+            Action::WebEvaluateAvailable(answer) => {
+                let available =
+                    self.components.environment.web_evaluate && self.access.allows_webviews();
                 answer.borrow_mut().deliver(available);
             }
             Action::WebViewAvailable(answer) => {
@@ -6065,6 +6076,10 @@ impl<M: TextEngine> Core<M> {
                     id: crate::ROOT_ID,
                     command: Command::Back,
                 });
+                true
+            }
+            EventKind::WebEvaluation => {
+                self.answer_web_evaluation(id, payload);
                 true
             }
             EventKind::ImageInfo if id == crate::ROOT_ID => {
