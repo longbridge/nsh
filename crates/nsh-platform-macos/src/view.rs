@@ -778,8 +778,7 @@ define_class!(
             }
         }
 
-        /// The Services menu (and Look Up / Translate in a selection's
-        /// context menu) can take the selected text as plain text.
+        /// AppKit Services can take the selected text as plain text.
         #[unsafe(method(validRequestorForSendType:returnType:))]
         fn valid_requestor(
             &self,

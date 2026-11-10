@@ -2249,9 +2249,14 @@ pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String
 }
 
 /// A secondary click on selectable text or in a selectable view: Copy
-/// (with a selection), Select All, and what macOS adds for selected text
-/// (Look Up, Translate, Services), which the root view serves through
-/// `validRequestorForSendType:returnType:`. Returns once it closed.
+/// (with a selection), Select All and, for selected text, Look Up, titled
+/// in AppKit's own words ([`appkit_title`]). The root view is a Services
+/// requestor for the selection (`validRequestorForSendType:returnType:`),
+/// available to AppKit Services. Context-menu plugins are enabled by
+/// default; their presentation depends on AppKit. Translate is not
+/// offered: `NSTextView`'s comes from a private framework, and the public
+/// translation UI is SwiftUI's only (`translationPresentation`). Returns
+/// once the menu closed.
 pub(crate) fn context_menu(surface: &crate::surface::Surface) {
     use nsh_core::desktop::MenuRole;
     use objc2::{MainThreadMarker, MainThreadOnly, sel};
@@ -2267,7 +2272,7 @@ pub(crate) fn context_menu(surface: &crate::surface::Surface) {
     };
     // SAFETY: an immutable AppKit constant.
     let kind = unsafe { NSPasteboardTypeString };
-    // What the Services menu (and Translate) may ask the root view for.
+    // What the Services in the menu may ask the root view for.
     app.registerServicesMenuSendTypes_returnTypes(&NSArray::from_slice(&[kind]), &NSArray::new());
     let root = crate::input::event_root(surface);
     let menu = NSMenu::new(mtm);
@@ -2276,11 +2281,12 @@ pub(crate) fn context_menu(surface: &crate::surface::Surface) {
         (MenuRole::Copy, sel!(copy:), can_copy(surface)),
         (MenuRole::SelectAll, sel!(selectAll:), true),
     ] {
+        let title = appkit_title(role.label(), role.label());
         // SAFETY: a new item with a valid selector.
         let item = unsafe {
             NSMenuItem::initWithTitle_action_keyEquivalent(
                 NSMenuItem::alloc(mtm),
-                &NSString::from_str(role.label()),
+                &NSString::from_str(&title),
                 Some(action),
                 &NSString::new(),
             )
@@ -2291,21 +2297,14 @@ pub(crate) fn context_menu(surface: &crate::surface::Surface) {
         menu.addItem(&item);
     }
     // Look Up (dictionary, Wikipedia, Siri Knowledge), the same panel as
-    // Force Click / Ctrl+Cmd+D. Translate and Services are added by AppKit
-    // because the root view is a valid Services requestor.
+    // Force Click / Ctrl+Cmd+D.
     if let Some(text) = selection_text(surface).filter(|t| !t.trim().is_empty()) {
-        let word: String = text.trim().chars().take(24).collect();
-        let more = if text.trim().chars().count() > 24 {
-            "…"
-        } else {
-            ""
-        };
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         // SAFETY: a new item with a selector the root view implements.
         let item = unsafe {
             NSMenuItem::initWithTitle_action_keyEquivalent(
                 NSMenuItem::alloc(mtm),
-                &NSString::from_str(&format!("Look Up \u{201c}{word}{more}\u{201d}")),
+                &NSString::from_str(&look_up_title(&text, appkit_title)),
                 Some(sel!(nshLookUp:)),
                 &NSString::new(),
             )
@@ -2315,6 +2314,56 @@ pub(crate) fn context_menu(surface: &crate::surface::Surface) {
         menu.addItem(&item);
     }
     NSMenu::popUpContextMenu_withEvent_forView(&menu, &event, root.ns());
+}
+
+/// The characters of a selection a Look Up title quotes, as many as
+/// `NSTextView`'s Look Up quotes.
+const LOOK_UP_QUOTED: usize = 30;
+
+/// The Look Up item's title for `text` (trimmed, its first
+/// [`LOOK_UP_QUOTED`] characters, then an ellipsis): AppKit's
+/// `Look Up “%@”` / `Look Up “%@…”`, which `localize` (key, English) turns
+/// into the app's language with the quote where that language puts it
+/// (Japanese: `“%@”を調べる`).
+fn look_up_title(text: &str, localize: impl Fn(&str, &str) -> String) -> String {
+    let text = text.trim();
+    let quoted: String = text.chars().take(LOOK_UP_QUOTED).collect();
+    // AppKit's keys spell the quotes and the ellipsis as `\U` escapes.
+    let (key, english) = if text.chars().count() > LOOK_UP_QUOTED {
+        (
+            "Look Up \\U201C%@\\U2026\\U201D",
+            "Look Up \u{201c}%@\u{2026}\u{201d}",
+        )
+    } else {
+        ("Look Up \\U201C%@\\U201D", "Look Up \u{201c}%@\u{201d}")
+    };
+    let template = localize(key, english);
+    let template = if template.contains("%@") {
+        template
+    } else {
+        english.to_owned()
+    };
+    template.replacen("%@", &quoted, 1)
+}
+
+/// An item title in AppKit's own words: its `MenuCommands` string for
+/// `key`, in the language AppKit shows the app's menus in (the app's
+/// localizations against the user's languages, as for `NSTextView`'s menu),
+/// or `english` where AppKit has none. Only the public `NSBundle` lookup.
+fn appkit_title(key: &str, english: &str) -> String {
+    use objc2_foundation::{NSBundle, NSString};
+    let english = NSString::from_str(english);
+    let Some(appkit) = NSBundle::bundleWithIdentifier(&NSString::from_str("com.apple.AppKit"))
+    else {
+        return english.to_string();
+    };
+    appkit
+        .localizedStringForKey_value_table(
+            &NSString::from_str(key),
+            Some(&english),
+            Some(&NSString::from_str("MenuCommands")),
+        )
+        .to_string()
 }
 
 /// Whether [`copy`] has a selection to copy.
@@ -3065,6 +3114,66 @@ mod tests {
             assert!(top >= lines[0].y.0 + lines[0].height.0 - 0.5, "{chip}");
             assert!(top + chip <= lines[2].y.0 + 0.5, "{chip}");
         }
+    }
+}
+
+#[cfg(test)]
+mod selection_menu {
+    use super::{appkit_title, look_up_title};
+
+    /// The selection menu's keys are AppKit's: each one is in its
+    /// `MenuCommands` strings (a missing key would answer the fallback),
+    /// here in English, the test binary's only localization.
+    #[test]
+    fn the_selection_menu_titles_are_appkits_own() {
+        for (key, english) in [
+            ("Copy", "Copy"),
+            ("Select All", "Select All"),
+            ("Look Up \\U201C%@\\U201D", "Look Up \u{201c}%@\u{201d}"),
+            (
+                "Look Up \\U201C%@\\U2026\\U201D",
+                "Look Up \u{201c}%@\u{2026}\u{201d}",
+            ),
+        ] {
+            assert_eq!(appkit_title(key, "<none>"), english, "{key}");
+        }
+        assert_eq!(appkit_title("No Such Menu Command", "Fallback"), "Fallback");
+        assert_eq!(
+            look_up_title("  hello  ", appkit_title),
+            "Look Up \u{201c}hello\u{201d}"
+        );
+    }
+
+    /// Look Up quotes the first 30 characters, then an ellipsis, in the
+    /// order the language's template puts the quote.
+    #[test]
+    fn look_up_quotes_the_start_of_the_selection_where_the_language_puts_it() {
+        let japanese = |key: &str, _: &str| {
+            if key.contains("U2026") {
+                "\u{201c}%@\u{2026}\u{201d}を調べる".to_owned()
+            } else {
+                "\u{201c}%@\u{201d}を調べる".to_owned()
+            }
+        };
+        assert_eq!(
+            look_up_title("辞書", japanese),
+            "\u{201c}辞書\u{201d}を調べる"
+        );
+        let long = "abcdefghijklmnopqrstuvwxyz0123456789";
+        assert_eq!(
+            look_up_title(long, japanese),
+            "\u{201c}abcdefghijklmnopqrstuvwxyz0123\u{2026}\u{201d}を調べる"
+        );
+        let english = |_: &str, english: &str| english.to_owned();
+        assert_eq!(
+            look_up_title(&"x".repeat(30), english),
+            format!("Look Up \u{201c}{}\u{201d}", "x".repeat(30))
+        );
+        // A template without its placeholder keeps the English one.
+        assert_eq!(
+            look_up_title("word", |_: &str, _: &str| "Look Up".to_owned()),
+            "Look Up \u{201c}word\u{201d}"
+        );
     }
 }
 
