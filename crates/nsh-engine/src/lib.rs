@@ -3957,6 +3957,33 @@ fn release_spare_ops(ops: &mut Vec<Op>) {
     }
 }
 
+/// What `app` may reach: a JS app its policy's grant; native code is
+/// trusted, it reaches what the platform allows.
+fn app_access(app: &App) -> Access {
+    match app {
+        App::Js(bundle) => bundle.policy.access(),
+        App::Rust(_) => Policy::default().access(),
+    }
+}
+
+/// The roots local media files are read under, as `fs/promises` reads
+/// files (where it has a file system: the desktops).
+fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::MediaFiles {
+    match &config.app {
+        App::Js(bundle) => nsh_core::access::MediaFiles::new(
+            access,
+            config
+                .data_dir
+                .as_ref()
+                .map(|root| root.join(app_dir_name(config.app.app_id())))
+                .as_deref(),
+            &bundle_system_paths(bundle),
+            nsh_core::access::native_files(config.environment.os),
+        ),
+        _ => nsh_core::access::MediaFiles::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -4151,32 +4178,5 @@ mod tests {
             })
             .collect();
         assert_eq!(frames, [(6, 0.0), (4, 50.0)]);
-    }
-}
-
-/// What `app` may reach: a JS app its policy's grant; native code is
-/// trusted, it reaches what the platform allows.
-fn app_access(app: &App) -> Access {
-    match app {
-        App::Js(bundle) => bundle.policy.access(),
-        App::Rust(_) => Policy::default().access(),
-    }
-}
-
-/// The roots local media files are read under, as `fs/promises` reads
-/// files (where it has a file system: the desktops).
-fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::MediaFiles {
-    match &config.app {
-        App::Js(bundle) => nsh_core::access::MediaFiles::new(
-            access,
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id())))
-                .as_deref(),
-            &bundle_system_paths(bundle),
-            nsh_core::access::native_files(config.environment.os),
-        ),
-        _ => nsh_core::access::MediaFiles::default(),
     }
 }
