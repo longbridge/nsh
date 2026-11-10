@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there.
 
 ```rust tabs
 use nsh_core::{
@@ -868,7 +868,23 @@ function atIcon(icon: Bounds, size: Size): Point {
 }
 ```
 
-TSX only for now; Rust components have no tray yet.
+In Rust, `set_tray(tray()...)` is the same (`None` removes it): `tray()` is a builder with `.icon(..)`, `.tooltip(..)`, `.menu(items)` (the same `MenuItem`s as `set_application_menu`) and `.on_click(|e| ..)`, whose `TrayClickEvent` carries `bounds: Option<Bounds<Points>>`. Its handlers run under the owner that set it, while that owner lives; in an `effect` it follows the signals it reads. One tray per app, shared with TSX: the last set wins.
+
+```rust
+use nsh_core::element::desktop::{MenuItem, main_window, quit, set_tray, tray};
+
+set_tray(
+    tray()
+        .icon("tray.svg")
+        .tooltip("Mail")
+        .on_click(|_| main_window().focus())
+        .menu([
+            MenuItem::new("New Message").on_select(compose),
+            MenuItem::separator(),
+            MenuItem::new("Quit").on_select(quit),
+        ]),
+);
+```
 
 ## GlobalShortcut
 
@@ -892,4 +908,17 @@ On Linux, shortcuts go through the desktop portal (`org.freedesktop.portal.Globa
 import { GlobalShortcut, Window } from "nsh/desktop";
 
 const ok = await GlobalShortcut.register("mod+shift+space", () => Window.get("main")?.focus());
+```
+
+In Rust, `register_global_shortcut(keystroke, on_press)` returns an `Answer<bool>`, awaited in a task or left alone; it panics on a keystroke that is not one, as `MenuItem::shortcut` does. `unregister_global_shortcut(keystroke)` and `unregister_all_global_shortcuts()` give them back, and a shortcut is also given back when the owner that registered it goes.
+
+```rust
+use nsh_core::element::desktop::{main_window, register_global_shortcut};
+
+let taken = register_global_shortcut("mod+shift+space", || main_window().focus());
+spawn(async move {
+    if !taken.await {
+        log::warn!("mod+shift+space is taken");
+    }
+});
 ```

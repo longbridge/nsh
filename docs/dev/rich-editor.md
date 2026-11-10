@@ -176,7 +176,8 @@ on Android) over the selection when the long press's finger lifts, after a sweep
 a tap on the selection, and at the caret after a long press on blank space or a tap on the caret. As gpui-kit's
 input, it offers Cut, Copy, Paste and Select All and leaves out what cannot apply (`touch::menu_actions`): Cut and
 Copy without a selection, Cut and Paste in a read-only editor, Select All when everything is selected. The bounds
-are the session's selection, which the view may not have rendered yet. Paste is the sink's own (its `onPaste`, with
+are the session's selection, which the view may not have rendered yet, grown by the knobs' room above and below
+while handles show, so the menu leaves them free to take a finger. Paste is the sink's own (its `onPaste`, with
 HTML and files); Cut, Copy and Select All come back as `EventKind::EditAction` and run as the keys' commands do.
 
 The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
