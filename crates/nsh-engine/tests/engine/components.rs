@@ -2430,7 +2430,7 @@ const TRAY_TITLE: &str = r##"import { mount, signal, Text } from "nsh";
 import { Tray } from "nsh/desktop";
 
 const log = signal([]);
-Tray.set({ tooltip: "Quotes", title: [{ text: "AAPL " }, { text: "228.00 +1.33%", color: "#d92d20" }], titlePosition: "left", onClick: () => log.set([...log(), "click"]) });
+Tray.set({ tooltip: "Quotes", title: [{ text: "AAPL " }, { text: "228.00 +1.33%", color: "#d92d20" }], titlePlacement: "left", onClick: () => log.set([...log(), "click"]) });
 
 const errors = [];
 for (const title of ["AAPL", [{ color: "#d92d20" }], [{ text: 228 }], [{ text: "AAPL", color: "not a color" }]]) {
@@ -2441,7 +2441,7 @@ for (const title of ["AAPL", [{ color: "#d92d20" }], [{ text: 228 }], [{ text: "
   }
 }
 try {
-  Tray.set({ title: [{ text: "AAPL" }], titlePosition: "top", onClick: () => log.set([...log(), "wrong click"]) });
+  Tray.set({ title: [{ text: "AAPL" }], titlePlacement: "top", onClick: () => log.set([...log(), "wrong click"]) });
 } catch (e) {
   errors.push(e instanceof TypeError);
 }
@@ -2452,7 +2452,7 @@ mount(() => <Text>{`errors ${errors.join(",")} ${log().join(",")}`}</Text>);
 /// A tray's title reaches the platform as its runs, each with its color
 /// (`None` for the panel's text color), and the side it shows on; a title of another shape, a run
 /// without its text, a text that is not a string, a color that is not one or
-/// a `titlePosition` other than `"right"` and `"left"` throws a `TypeError` and changes nothing: the tray shown keeps its click.
+/// a `titlePlacement` other than `"right"` and `"left"` throws a `TypeError` and changes nothing: the tray shown keeps its click.
 #[test]
 fn tray_titles_reach_the_platform_with_their_colors() {
     use nsh_core::{EventKind, EventPayload, PayloadValue, color::Hsla, desktop::DesktopCommand};
@@ -2492,8 +2492,8 @@ fn tray_titles_reach_the_platform_with_their_colors() {
     let red: Hsla = "#d92d20".parse().unwrap();
     assert_eq!(runs, [("AAPL ", None), ("228.00 +1.33%", Some(red))]);
     assert_eq!(
-        tray.title_position,
-        nsh_core::desktop::TrayTitlePosition::Left
+        tray.title_placement,
+        nsh_core::desktop::TrayTitlePlacement::Left
     );
 
     // The failed sets left the first tray's click in place.

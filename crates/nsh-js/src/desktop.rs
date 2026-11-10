@@ -16,7 +16,7 @@ use nsh_core::{
     Command, EventKind, ImageSource, Op, ROOT_ID,
     desktop::{
         DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray,
-        TrayTitlePosition, TrayTitleRun,
+        TrayTitlePlacement, TrayTitleRun,
     },
     geometry::{Points, point},
     keymap::When,
@@ -649,13 +649,13 @@ unsafe extern "C" fn set_tray(
         Ok(title) => title,
         Err(message) => return throw(cx, &message),
     };
-    let title_position = match string(cx, options, c"titlePosition").as_deref() {
-        None | Some("right") => TrayTitlePosition::Right,
-        Some("left") => TrayTitlePosition::Left,
+    let title_placement = match string(cx, options, c"titlePlacement").as_deref() {
+        None | Some("right") => TrayTitlePlacement::Right,
+        Some("left") => TrayTitlePlacement::Left,
         Some(_) => {
             return throw(
                 cx,
-                "nsh/desktop: the tray's `titlePosition` is \"right\" or \"left\"",
+                "nsh/desktop: the tray's `titlePlacement` is \"right\" or \"left\"",
             );
         }
     };
@@ -687,7 +687,7 @@ unsafe extern "C" fn set_tray(
     tray.icon = icon;
     tray.tooltip = string(cx, options, c"tooltip").unwrap_or_default();
     tray.title = title;
-    tray.title_position = title_position;
+    tray.title_placement = title_placement;
     tray.menu = items;
     tray.click = click;
     listen(cx)
@@ -1309,7 +1309,7 @@ export interface TrayOptions {
   title?: readonly TrayTitleRun[];
   /** Which side of the icon the title shows on: `"right"` (the default) or
    * `"left"`. macOS only: Linux's panels draw the title right of the icon. */
-  titlePosition?: "right" | "left";
+  titlePlacement?: "right" | "left";
   /** Its menu, opened by a secondary click (and a primary one without
    * `onClick`). */
   menu?: readonly (MenuItem | null | undefined | false)[];
