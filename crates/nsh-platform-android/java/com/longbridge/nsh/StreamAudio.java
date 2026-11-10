@@ -150,7 +150,7 @@ final class StreamAudio {
     void set(boolean paused, boolean muted, float volume) {
         this.paused = paused;
         this.muted = muted;
-        this.volume = Math.max(0, Math.min(1, volume));
+        this.volume = StreamFormats.volume(volume);
         synchronized (lock) {
             if (track != null) track.setVolume(this.volume);
             if (paused || muted) silence();

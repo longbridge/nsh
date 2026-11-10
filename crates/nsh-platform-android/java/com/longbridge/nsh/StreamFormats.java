@@ -48,6 +48,15 @@ final class StreamFormats {
     }
 
     /**
+     * A video's {@code volume} as its audio track takes it: 0 to 1, NaN 0
+     * ({@code AudioTrack.setVolume} throws for NaN; every platform plays
+     * NaN as silence).
+     */
+    static float volume(float volume) {
+        return Float.isNaN(volume) ? 0 : Math.max(0, Math.min(1, volume));
+    }
+
+    /**
      * The frames a video's audio track holds at {@code sampleRate}: about
      * {@link #MAX_QUEUED_MS} of sound, or the device's minimum
      * ({@code minFrames}) when that is more. A non-blocking write drops

@@ -149,9 +149,14 @@ impl StreamAudio {
         }
     }
 
-    /// The video's `volume` (main thread), 0 to 1.
+    /// The video's `volume` (main thread), 0 to 1 (NaN is 0, as on every
+    /// platform; the `volume` element refuses it).
     pub(crate) fn set_volume(&self, volume: f32) {
-        let volume = volume.clamp(0.0, 1.0);
+        let volume = if volume.is_nan() {
+            0.0
+        } else {
+            volume.clamp(0.0, 1.0)
+        };
         self.volume.store(volume.to_bits(), Ordering::Release);
         if let Some(element) = &*self
             .volume_element

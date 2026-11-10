@@ -46,6 +46,10 @@ public final class StreamFormatsTest {
         check("a track holds 200 ms at 48 kHz", StreamFormats.trackFrames(48000, 1024) == 9600);
         check("a track holds the device's minimum when it is more",
                 StreamFormats.trackFrames(8000, 4096) == 4096);
+        check("a volume in 0 to 1 stays", StreamFormats.volume(0.5f) == 0.5f);
+        check("a volume past 1 is 1", StreamFormats.volume(3) == 1);
+        check("a negative volume is 0", StreamFormats.volume(-1) == 0);
+        check("a NaN volume is 0", StreamFormats.volume(Float.NaN) == 0);
         System.out.println("StreamFormatsTest: ok");
     }
 

@@ -726,7 +726,9 @@ stream.pushPcm(samples, 2, 48_000);
 
 Each video keeps at most about 200 ms of sound queued. On every platform a name
 nothing registered shows nothing, logged once, as an unregistered component does; a video that names a stream before
-it is registered shows it once it is; `end()` blanks the videos until the name is registered again.
+it is registered shows it once it is; `end()` blanks the videos until the name is registered again. Registering a
+name again replaces the earlier registration: its handle pushes nothing from then on, and ending or dropping it leaves
+the new one playing.
 
 Every development host (`nsh run`, `nsh test --target`) registers one stream, `nsh/test-pattern`, a 320×180 test
 pattern at 30 frames a second, so an app's tests can play a stream on every platform without a host of their own

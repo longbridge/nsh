@@ -14,7 +14,9 @@
 //! them), delivered with one hop to the main thread per batch; `paused`
 //! sinks keep their last frame, but one with no frame yet still takes the
 //! first that comes, as a paused `<video>` shows its first frame; the end of
-//! a registration blanks the videos until the name is registered again; a
+//! a registration blanks the videos until the name is registered again
+//! (registering a name again replaces the earlier registration: its handle
+//! pushes nothing, and dropping or ending it leaves the new one playing); a
 //! frame whose bytes do not fit its size is logged once and shows nothing;
 //! and while no video shows the stream a push costs nothing: the bytes are
 //! not copied and the main thread is not woken.
@@ -265,8 +267,10 @@ struct Shared<F> {
     pending: Mutex<Option<F>>,
     /// A delivery is queued on the main thread for `pending`.
     scheduled: AtomicBool,
-    /// Whether a registration is live (frames may come).
-    registered: AtomicBool,
+    /// The live registration's number (frames may come), 0 for none: a
+    /// handle acts only while it holds this number, so one replaced by a
+    /// later registration neither pushes nor ends it.
+    registration: AtomicU64,
     /// A wrong push was reported (once per stream).
     warned: AtomicBool,
     /// A wrong audio push was reported (once per stream).
@@ -289,7 +293,7 @@ impl<F: Send + 'static> Shared<F> {
             hop,
             pending: Mutex::new(None),
             scheduled: AtomicBool::new(false),
-            registered: AtomicBool::new(false),
+            registration: AtomicU64::new(0),
             warned: AtomicBool::new(false),
             audio_warned: AtomicBool::new(false),
             audio: Arc::default(),
@@ -302,16 +306,34 @@ impl<F: Send + 'static> Shared<F> {
     /// Whether frames are wanted: a registration is live and a video shows
     /// the stream.
     fn wanted(&self) -> bool {
-        self.registered.load(Ordering::Acquire) && self.attached.load(Ordering::Acquire) > 0
+        self.registered() && self.attached.load(Ordering::Acquire) > 0
     }
 
-    /// Keeps `frame` for the next delivery, in place of one not delivered
-    /// yet, and queues the delivery.
-    fn push(self: &Arc<Self>, frame: F) {
-        if !self.wanted() {
+    /// Whether a registration is live.
+    fn registered(&self) -> bool {
+        self.registration.load(Ordering::Acquire) != 0
+    }
+
+    /// Whether `registration` is the live one.
+    fn is_live(&self, registration: u64) -> bool {
+        self.registration.load(Ordering::Acquire) == registration
+    }
+
+    /// Keeps `frame` of `registration` for the next delivery, in place of
+    /// one not delivered yet, and queues the delivery.
+    fn push(self: &Arc<Self>, registration: u64, frame: F) {
+        if !self.is_live(registration) || self.attached.load(Ordering::Acquire) == 0 {
             return;
         }
-        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(frame);
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        // Checked again under the lock `end` clears `pending` under: a
+        // registration that ended after the check above has cleared it, or
+        // clears it after this, so no frame shows after the end.
+        if !self.is_live(registration) {
+            return;
+        }
+        *pending = Some(frame);
+        drop(pending);
         self.schedule();
     }
 
@@ -366,8 +388,16 @@ impl<F: Send + 'static> Shared<F> {
     /// The registration ended: the videos show nothing until another. When
     /// the hop cannot take the job (the main thread is not up), the end
     /// waits for the next delivery that reaches it.
-    fn end(self: &Arc<Self>) {
-        self.registered.store(false, Ordering::Release);
+    fn end(self: &Arc<Self>, registration: u64) {
+        // Only the live registration ends: a handle replaced by a later
+        // registration leaves it playing.
+        if self
+            .registration
+            .compare_exchange(registration, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
         self.pending
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -389,6 +419,8 @@ impl<F: Send + 'static> Shared<F> {
 #[non_exhaustive]
 pub struct StreamHandle<F: Send + 'static> {
     shared: Arc<Shared<F>>,
+    /// Its registration's number ([`Shared::registration`]); never 0.
+    registration: u64,
 }
 
 impl<F: Send + 'static> std::fmt::Debug for StreamHandle<F> {
@@ -409,7 +441,7 @@ impl<F: Send + 'static> StreamHandle<F> {
     /// the registration is live. A host that makes its frames at a cost
     /// may skip them while this is `false`.
     pub fn wanted(&self) -> bool {
-        self.shared.wanted()
+        self.shared.is_live(self.registration) && self.shared.wanted()
     }
 
     /// Shows `frame` in the videos playing the stream (the newest wins):
@@ -418,7 +450,7 @@ impl<F: Send + 'static> StreamHandle<F> {
     /// takes its pixel size from it for the video's `onLoad`. A frame that
     /// costs something to make is best made only while [`Self::wanted`].
     pub fn push(&self, frame: F) {
-        self.shared.push(frame);
+        self.shared.push(self.registration, frame);
     }
 
     /// Plays `samples` in the videos playing the stream: interleaved `f32`
@@ -444,7 +476,7 @@ impl<F: Send + 'static> StreamHandle<F> {
         }
         if samples.is_empty()
             || shared.audio.count.load(Ordering::Acquire) == 0
-            || !shared.registered.load(Ordering::Acquire)
+            || !shared.is_live(self.registration)
         {
             return;
         }
@@ -457,7 +489,7 @@ impl<F: Send + 'static> StreamHandle<F> {
     /// and an output is attached. A host that decodes or resamples its
     /// audio at a cost may skip it while this is `false`.
     pub fn wants_audio(&self) -> bool {
-        self.shared.registered.load(Ordering::Acquire)
+        self.shared.is_live(self.registration)
             && self.shared.audio.count.load(Ordering::Acquire) > 0
     }
 
@@ -487,7 +519,7 @@ impl<F: Send + 'static> StreamHandle<F> {
             return;
         }
         // No video shows the stream: the bytes are not even copied.
-        if !self.shared.wanted() {
+        if !self.wanted() {
             return;
         }
         let Some(frame) = make(width, height, stride, bytes) else {
@@ -499,19 +531,20 @@ impl<F: Send + 'static> StreamHandle<F> {
             }
             return;
         };
-        self.shared.push(frame);
+        self.shared.push(self.registration, frame);
     }
 
     /// Ends the stream: the videos playing it show nothing from now on,
-    /// until the name is registered again.
+    /// until the name is registered again. Nothing once a later
+    /// registration of the name replaced this one.
     pub fn end(&self) {
-        self.shared.end();
+        self.shared.end(self.registration);
     }
 }
 
 impl<F: Send + 'static> Drop for StreamHandle<F> {
     fn drop(&mut self) {
-        self.shared.end();
+        self.shared.end(self.registration);
     }
 }
 
@@ -624,8 +657,9 @@ impl<F: Send + 'static> Streams<F> {
         shared
     }
 
-    /// Registers stream `name` (replacing an earlier registration): the
-    /// handle takes its frames and audio. The videos whose `srcObject`
+    /// Registers stream `name` (replacing an earlier registration, whose
+    /// handle then pushes nothing and ends nothing): the handle takes its
+    /// frames and audio. The videos whose `srcObject`
     /// names it, now or later, play it. A name starting with `nsh/` is
     /// NSH's own ([`RESERVED_PREFIX`]): it is refused, logged, and the
     /// handle plays nothing (its pushes cost nothing).
@@ -635,10 +669,12 @@ impl<F: Send + 'static> Streams<F> {
                 "stream `{name}` is not registered: names starting with `{RESERVED_PREFIX}` are \
                  NSH's own"
             );
-            // An entry of its own, outside the registry: never registered,
-            // no video attaches to it.
+            // An entry of its own, outside the registry: never registered
+            // (no number of a live registration is `u64::MAX`), no video
+            // attaches to it.
             return StreamHandle {
                 shared: Shared::new(name.into(), self.hop.clone()),
+                registration: u64::MAX,
             };
         }
         self.register_reserved(name)
@@ -650,9 +686,13 @@ impl<F: Send + 'static> Streams<F> {
     #[doc(hidden)]
     pub fn register_reserved(&self, name: &str) -> StreamHandle<F> {
         let shared = self.entry(name);
-        shared.registered.store(true, Ordering::Release);
+        let registration = NEXT_KEY.fetch_add(1, Ordering::Relaxed);
+        shared.registration.store(registration, Ordering::Release);
         self.missing.borrow_mut().remove(name);
-        StreamHandle { shared }
+        StreamHandle {
+            shared,
+            registration,
+        }
     }
 
     /// Attaches `output`, a video's, to stream `name`'s audio: it hears the
@@ -677,9 +717,7 @@ impl<F: Send + 'static> Streams<F> {
     /// not delivered yet shows in the video at once.
     pub fn attach(&self, name: &str, sink: Sink<F>) -> Attached<F> {
         let shared = self.entry(name);
-        if !shared.registered.load(Ordering::Acquire)
-            && self.missing.borrow_mut().insert(shared.name.clone())
-        {
+        if !shared.registered() && self.missing.borrow_mut().insert(shared.name.clone()) {
             log::warn!(
                 target: "js",
                 "no stream is registered as `{name}`: the video shows nothing"
@@ -857,11 +895,72 @@ mod tests {
         let shared = handle.shared.clone();
         drop(handle);
         drain(&rx);
-        assert!(!shared.registered.load(Ordering::Acquire));
+        assert!(!shared.registered());
         assert_eq!(*heard.borrow(), [0]);
         let again = streams.register("cam");
         assert!(Arc::ptr_eq(&again.shared, &shared));
         assert!(again.wanted());
+    }
+
+    #[test]
+    fn a_replaced_handle_neither_pushes_nor_ends_the_new_registration() {
+        let (streams, rx) = streams();
+        let (sink, heard) = recorder();
+        let _attached = streams.attach("cam", sink);
+        let speaker = Arc::new(Speaker::default());
+        let _audio = streams.attach_audio("cam", speaker.clone());
+        let old = streams.register("cam");
+        // Registered again before the old handle goes, as
+        // `self.cam = streams.register("cam")` does.
+        let new = streams.register("cam");
+        assert!(!old.wanted() && !old.wants_audio());
+        old.push_bgra(1, 1, 4, &[1, 0, 0, 255], copy);
+        old.push_pcm(&[0.5], 1, 16_000);
+        assert_eq!(drain(&rx), 0);
+        assert!(speaker.heard().is_empty());
+        old.end();
+        drop(old);
+        assert_eq!(drain(&rx), 0);
+        assert_eq!(speaker.ends.load(Ordering::Relaxed), 0);
+        // The new registration plays on.
+        assert!(new.wanted() && new.wants_audio());
+        new.push_bgra(1, 1, 4, &[2, 0, 0, 255], copy);
+        new.push_pcm(&[0.25], 1, 16_000);
+        drain(&rx);
+        assert_eq!(*heard.borrow(), [102]);
+        assert_eq!(speaker.heard().len(), 1);
+        // Its own end still ends it, once.
+        drop(new);
+        drain(&rx);
+        assert_eq!(*heard.borrow(), [102, 0]);
+        assert_eq!(speaker.ends.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_frame_pushed_as_the_registration_ends_does_not_show_after_the_end() {
+        let (streams, rx) = streams();
+        let (sink, heard) = recorder();
+        let _attached = streams.attach("cam", sink);
+        let handle = streams.register("cam");
+        let shared = handle.shared.clone();
+        let registration = handle.registration;
+        // The end takes `pending`'s lock: held here while a push on another
+        // thread passes its first check and waits for the lock.
+        let mut pending = shared.pending.lock().unwrap();
+        let pusher = {
+            let shared = shared.clone();
+            std::thread::spawn(move || shared.push(registration, vec![9, 0, 0, 255]))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // What `end` does under the lock: no registration, nothing pending.
+        shared.registration.store(0, Ordering::Release);
+        pending.take();
+        drop(pending);
+        pusher.join().unwrap();
+        // The push checked again under the lock and kept nothing.
+        assert!(shared.pending.lock().unwrap().is_none());
+        assert_eq!(drain(&rx), 0);
+        assert!(heard.borrow().is_empty());
     }
 
     #[test]
@@ -911,12 +1010,7 @@ mod tests {
         drop(refused);
         drain(&rx);
         assert!(heard.borrow().iter().all(|&b| b == 0));
-        assert!(
-            !streams
-                .entry("nsh/test-pattern")
-                .registered
-                .load(Ordering::Acquire)
-        );
+        assert!(!streams.entry("nsh/test-pattern").registered());
         // NSH's hosts register it as reserved.
         let pattern = streams.register_reserved("nsh/test-pattern");
         assert!(pattern.wanted());
@@ -924,13 +1018,7 @@ mod tests {
         drain(&rx);
         assert_eq!(heard.borrow().last(), Some(&102));
         // Other names are the host's.
-        assert!(
-            streams
-                .register("nshx/cam")
-                .shared
-                .registered
-                .load(Ordering::Acquire)
-        );
+        assert!(streams.register("nshx/cam").shared.registered());
     }
 
     /// An audio output recording what it hears: (channels, rate, samples)

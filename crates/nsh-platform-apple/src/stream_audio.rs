@@ -10,7 +10,10 @@
 //! ([`StreamAudio::set_paused`], [`StreamAudio::set_sound`]) and apply at
 //! once: paused or muted, what is queued stops (the node is stopped, the
 //! backlog reset) and new samples are dropped; the volume is the player
-//! node's, never baked into the scheduled samples. At most
+//! node's, never baked into the scheduled samples. Setting them never
+//! waits for the device: while the pushing thread holds it (opening the
+//! engine takes a while), the main thread leaves its request in flags the
+//! pushing thread applies before it lets go. At most
 //! [`MAX_QUEUED_MS`] wait for the device: past that the newest samples are
 //! dropped, so a host pushing ahead of real time, or a device that stalls,
 //! never builds up delay. The engine restarts after the system stopped it
@@ -22,8 +25,8 @@
 use std::{
     ptr,
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        Arc, Mutex, MutexGuard, TryLockError,
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering, fence},
     },
 };
 
@@ -332,40 +335,74 @@ pub(crate) struct StreamAudio {
     device: Mutex<Option<Device>>,
     /// Playing failed (logged): silent until the end.
     failed: AtomicBool,
+    /// The main thread asked to stop what is queued, not applied yet.
+    halt: AtomicBool,
+    /// The main thread changed the volume, not applied to the node yet.
+    stale_volume: AtomicBool,
 }
 
 impl StreamAudio {
-    fn device(&self) -> std::sync::MutexGuard<'_, Option<Device>> {
+    fn device(&self) -> MutexGuard<'_, Option<Device>> {
         self.device.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The device if no other thread holds it: the main thread never waits.
+    fn try_device(&self) -> Option<MutexGuard<'_, Option<Device>>> {
+        match self.device.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(TryLockError::Poisoned(e)) => Some(e.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        }
     }
 
     /// Main thread: pausing stops what is queued at once.
     pub(crate) fn set_paused(&self, paused: bool) {
         if self.gate.set_paused(paused) {
-            self.flush();
+            self.halt.store(true, Ordering::Release);
+            self.apply_soon();
         }
     }
 
     /// Main thread: muting stops what is queued at once; the volume applies
     /// to it at once.
     pub(crate) fn set_sound(&self, muted: bool, volume: f32) {
-        let silenced = self.gate.set_sound(muted, volume);
-        let device = self.device();
-        if let Some(device) = device.as_ref() {
-            device.set_volume(self.gate.volume());
+        if self.gate.set_sound(muted, volume) {
+            self.halt.store(true, Ordering::Release);
         }
-        if silenced {
-            drop(device);
-            self.flush();
+        self.stale_volume.store(true, Ordering::Release);
+        self.apply_soon();
+    }
+
+    /// Whether the main thread left a request to apply.
+    fn requested(&self) -> bool {
+        self.halt.load(Ordering::Acquire) || self.stale_volume.load(Ordering::Acquire)
+    }
+
+    /// Applies the main thread's requests now if the device is free, else
+    /// the pushing thread holding it does before it lets go.
+    fn apply_soon(&self) {
+        // Pairs with the fence in `write`: either this sees the lock free or
+        // the pushing thread sees the request after letting go of it.
+        fence(Ordering::SeqCst);
+        if let Some(mut device) = self.try_device() {
+            self.apply(&mut device);
         }
     }
 
-    fn flush(&self) {
-        let device = self.device();
-        if let Some(device) = device.as_ref() {
-            device.flush();
+    /// Applies the main thread's requests (short calls only), with the
+    /// device held: the volume, then stopping what is queued.
+    fn apply(&self, device: &mut Option<Device>) {
+        if self.stale_volume.swap(false, Ordering::AcqRel)
+            && let Some(device) = device.as_ref()
+        {
+            device.set_volume(self.gate.volume());
         }
-        self.backlog.reset();
+        if self.halt.swap(false, Ordering::AcqRel) {
+            if let Some(device) = device.as_ref() {
+                device.flush();
+            }
+            self.backlog.reset();
+        }
     }
 
     /// Logs `why` once and silences the output until the end.
@@ -378,6 +415,36 @@ impl StreamAudio {
 
 impl AudioOutput for StreamAudio {
     fn write(&self, samples: &[f32], channels: u16, sample_rate: u32) {
+        self.play(samples, channels, sample_rate);
+        // A request the main thread left while this thread held the device
+        // (after the last `apply` under it): applied now, waiting for the
+        // device here rather than there, checked again after each letting
+        // go, so none is left until the next push.
+        loop {
+            fence(Ordering::SeqCst);
+            if !self.requested() {
+                break;
+            }
+            self.apply(&mut self.device());
+        }
+    }
+
+    fn end(&self) {
+        let device = self.device().take();
+        autoreleasepool(|_| drop(device));
+        self.backlog.reset();
+        self.halt.store(false, Ordering::Release);
+        self.stale_volume.store(false, Ordering::Release);
+        // A new registration tries again.
+        self.failed.store(false, Ordering::Release);
+    }
+}
+
+impl StreamAudio {
+    /// `write`'s work: schedules the samples on the device, made or
+    /// restarted first, and applies the main thread's requests before
+    /// letting go of it.
+    fn play(&self, samples: &[f32], channels: u16, sample_rate: u32) {
         if !self.gate.audible() || self.failed.load(Ordering::Acquire) {
             return;
         }
@@ -393,7 +460,7 @@ impl AudioOutput for StreamAudio {
             // Checked again under the lock a flush takes: samples are never
             // scheduled after a pause or mute stopped the queue.
             if !self.gate.audible() {
-                return;
+                return self.apply(&mut device);
             }
             if device.is_none() {
                 *device = Device::new(shape, self.gate.volume());
@@ -415,15 +482,10 @@ impl AudioOutput for StreamAudio {
                 *device = None;
                 self.fail("AVAudioPCMBuffer refused the samples");
             }
+            // A pause, mute or volume the main thread set while this held
+            // the device, including one that came after the check above.
+            self.apply(&mut device);
         });
-    }
-
-    fn end(&self) {
-        let device = self.device().take();
-        autoreleasepool(|_| drop(device));
-        self.backlog.reset();
-        // A new registration tries again.
-        self.failed.store(false, Ordering::Release);
     }
 }
 
@@ -462,6 +524,26 @@ mod tests {
         assert_eq!(gate.volume(), 0.0);
         gate.set_sound(false, 0.25);
         assert_eq!(gate.volume(), 0.25);
+    }
+
+    #[test]
+    fn the_main_thread_never_waits_for_the_device() {
+        let audio = StreamAudio::default();
+        // The pushing thread holds the device (opening the engine).
+        let held = audio.device();
+        // Returns at once, leaving its requests.
+        audio.set_sound(true, 0.5);
+        audio.set_paused(true);
+        assert!(audio.requested());
+        assert_eq!(audio.gate.volume(), 0.5);
+        drop(held);
+        // The pushing thread applies them as it lets go, even for samples
+        // it drops.
+        audio.write(&[0.0; 2], 2, 48_000);
+        assert!(!audio.requested());
+        // With the device free, a request applies at once.
+        audio.set_sound(true, 0.25);
+        assert!(!audio.requested());
     }
 
     #[test]
