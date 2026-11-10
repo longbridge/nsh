@@ -34884,3 +34884,55 @@ mod each_order {
         assert_eq!(MADE.with(Cell::get), 3);
     }
 }
+
+/// An `svg()` the platform draws as an image (the web) is sent with its text
+/// color, inherited, for its `currentColor`; an image is not (#1466).
+#[test]
+fn svg_drawn_as_an_image_carries_its_text_color() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-red-500");
+    let image = |c: &mut Core<FakeEngine>, id: NodeId, svg: bool| {
+        let mut ops = vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: "asset:/icon.svg".into(),
+                    ..Default::default()
+                })),
+            },
+        ];
+        if svg {
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::Image(ImageProp::SvgCurrentColor(true)),
+            });
+        }
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+        apply(c, ops);
+    };
+    image(&mut c, 3, true);
+    image(&mut c, 4, false);
+    let color_of = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Image { id: i, options, .. } if *i == id => Some(options.current_color),
+            _ => None,
+        })
+    };
+    let batch = c.commit().unwrap();
+    assert_eq!(color_of(&batch, 3), Some(Some(Color(0xfb2c_36ff))));
+    assert_eq!(color_of(&batch, 4), Some(None));
+    // The ancestor's color changes: the svg's is sent again.
+    c.apply(class_op(2, "text-blue-500")).unwrap();
+    let batch = c.commit().unwrap();
+    let blue = color_of(&batch, 3).flatten().unwrap();
+    assert_ne!(blue, Color(0xfb2c_36ff));
+    assert_eq!(color_of(&batch, 4), None);
+}

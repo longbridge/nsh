@@ -2958,8 +2958,31 @@ mod tests {
             kept += l.measured(i, size);
         }
         l.offset += kept;
-        l.offset += l.take_splice_anchor();
-        l.anchor_end(kept);
+        // As the core: the splice already moved the offset.
+        let spliced = l.take_splice_anchor();
+        l.anchor_end(kept + spliced);
+    }
+
+    #[test]
+    fn follow_end_list_near_its_start_keeps_a_page_prepended_above() {
+        // #1459: a chat that loads older pages at its start, with
+        // `maintainVisibleContentPosition`, must not follow the end when a
+        // page lands above the reader.
+        let mut l = list(12, 66.0, 449.0);
+        l.follow_end = Some(100.0);
+        lay_out(&mut l, &(0..12).map(|i| (i, 66.0)).collect::<Vec<_>>());
+        l.reported(30.0, 0);
+        lay_out(&mut l, &[]);
+        let before = l.to_content(l.item_at(0), 66.0) - l.offset;
+        l.splice(0, 0, 6);
+        lay_out(&mut l, &(0..6).map(|i| (i, 66.0)).collect::<Vec<_>>());
+        let end = l.content_len() - l.viewport;
+        assert!(
+            l.offset < end - 100.0,
+            "offset {} followed the end {end}",
+            l.offset
+        );
+        assert_eq!(l.to_content(l.item_at(6), 66.0) - l.offset, before);
     }
 
     fn on_screen(l: &ListState, i: u32) -> f32 {

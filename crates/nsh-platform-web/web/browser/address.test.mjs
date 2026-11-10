@@ -10,11 +10,11 @@ function urlScheme() {
   const set = [];
   const scheme = {
     url: () => null,
-    setUrl(url) {
+    setUrl(url, ...options) {
       if (typeof url !== "string") throw new TypeError("not a string");
       if (/[\p{White_Space}\p{Cc}]/u.test(url)) throw new TypeError("an address has no whitespace or control characters");
       if (new TextEncoder().encode(url).length > 16 * 1024) throw new TypeError("an address has at most 16384 bytes");
-      set.push(url);
+      set.push(options.length ? [url, ...options] : url);
     },
   };
   configureAddress(scheme, {
@@ -39,4 +39,11 @@ test("setUrl refuses what every platform refuses before resolving it", () => {
   }
   assert.throws(() => scheme.setUrl("https://b.test/"), /not of the page's origin/);
   assert.deepEqual(set, []);
+});
+
+test("setUrl hands its options to the core as they are", () => {
+  const { scheme, set } = urlScheme();
+  scheme.setUrl("?tab=live", { history: "push" });
+  scheme.setUrl("?tab=all");
+  assert.deepEqual(set, [["https://a.test/app/?tab=live", { history: "push" }], "https://a.test/app/?tab=all"]);
 });

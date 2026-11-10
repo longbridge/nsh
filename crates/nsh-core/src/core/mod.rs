@@ -490,6 +490,9 @@ fn shader_role(tag: Tag) -> Option<crate::shader::ShaderRole> {
 struct ImageState {
     source: Option<ImageSource>,
     options: crate::mount::ImageOptions,
+    /// An `svg()` the platform draws as an image: its mount item carries the
+    /// text color ([`crate::mount::ImageOptions::current_color`]).
+    svg_current_color: bool,
 }
 
 struct Node {
@@ -3919,6 +3922,10 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
                 Kind::Text | Kind::RawText | Kind::Input => {}
+                // An `svg()` drawn as an image paints `currentColor` too.
+                _ if node.image.as_ref().is_some_and(|i| i.svg_current_color) => {
+                    self.mark(k, dirty::IMAGE);
+                }
                 _ => stack.extend_from_slice(&self.nodes[k as usize].children),
             }
         }
@@ -4656,6 +4663,7 @@ impl<M: TextEngine> Core<M> {
                         }
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
+                        ImageProp::SvgCurrentColor(on) => image.svg_current_color = on,
                     }
                     flags |= dirty::IMAGE;
                 }
@@ -6427,6 +6435,7 @@ impl<M: TextEngine> Core<M> {
                         blur_radius: image.options.blur_radius,
                         fade_ms: image.options.fade_ms,
                         position: node.view_style.object_position,
+                        current_color: image.svg_current_color.then(|| self.resolved_paint(key).1),
                     },
                 });
             }
@@ -8564,9 +8573,12 @@ impl<M: TextEngine> Core<M> {
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
         list.offset += anchor;
+        // A splice above the viewport already moved the offset, to keep
+        // the visible rows in place: like measurements, that says nothing
+        // about where the user is.
+        let spliced = list.take_splice_anchor();
+        anchor += spliced;
         let kept = anchor;
-        // A splice above the viewport already moved the offset.
-        anchor += list.take_splice_anchor();
         // Inverted lists keep their distance from the end instead;
         // `maintainVisibleContentPosition` follows the end near it.
         anchor += list.anchor_end(kept);

@@ -745,6 +745,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Desktop(_)
                     // The web's history entries; the core sends it there only.
                     | Command::SetAppUrl(_)
+                    | Command::PushAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }

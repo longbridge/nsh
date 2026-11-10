@@ -561,6 +561,16 @@ impl Native for WebNative {
             .map(drop)
     }
 
+    fn forward(&self) -> Result<(), String> {
+        // The browser's forward button.
+        self.page
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": "history.forward()" }),
+            )
+            .map(drop)
+    }
+
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String> {
         let [x, y] = self.query::<[f32; 2]>(SceneQuery::DialogPoint {
             button: button.map(str::to_owned),
