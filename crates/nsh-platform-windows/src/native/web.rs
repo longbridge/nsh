@@ -214,13 +214,15 @@ mod rules;
 /// before it is cancelled and reported failed (nothing is written).
 const PENDING_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
+type RuleCache = HashMap<Vec<(Arc<str>, Arc<str>)>, Arc<Blocker>>;
+type DocumentScripts = (Option<Arc<str>>, Option<Arc<str>>);
+
 thread_local! {
     /// Compiled content blockers by the rules they were compiled from:
     /// browser panes with the same rules share one, and a set compiles
     /// once. The key is the lists' id and JSON, so a changed list never
     /// reuses another's rules.
-    static BLOCKERS: RefCell<HashMap<Vec<(Arc<str>, Arc<str>)>, Arc<Blocker>>> =
-        RefCell::default();
+    static BLOCKERS: RefCell<RuleCache> = RefCell::default();
 }
 
 /// Lets pages talk to the app: `window.nsh.postMessage(data)`.
@@ -516,7 +518,7 @@ pub(crate) struct WebItem {
     /// The ids of the app's document scripts (removed when they change).
     scripts: Rc<RefCell<Vec<String>>>,
     /// The script pair actually installed now (`None, None` when inert).
-    scripts_installed: RefCell<(Option<Arc<str>>, Option<Arc<str>>)>,
+    scripts_installed: RefCell<DocumentScripts>,
     /// Counts script installs/clears: a late registration for an older
     /// desired state is removed instead of restored.
     scripts_gen: Rc<Cell<u64>>,
@@ -2038,11 +2040,10 @@ impl WebItem {
                 *item.blocker.borrow_mut() = Some(desired.clone());
                 // SAFETY: WebView2 calls on the live web view.
                 unsafe {
-                    if let Some(old) = item.cosmetic_script.borrow_mut().take() {
-                        if let Some(webview) = item.webview.borrow().clone() {
-                            let _ =
-                                webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(old));
-                        }
+                    if let Some(old) = item.cosmetic_script.borrow_mut().take()
+                        && let Some(webview) = item.webview.borrow().clone()
+                    {
+                        let _ = webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(old));
                     }
                 }
                 if let Some(slot) = slot.upgrade() {

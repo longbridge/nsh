@@ -626,10 +626,10 @@ impl Condition {
         if self.unless_top_url.iter().any(|f| f.matches(top)) {
             return false;
         }
-        if let Some(first_party) = self.load_type {
-            if is_first_party(&target.host, &top.host) != first_party {
-                return false;
-            }
+        if let Some(first_party) = self.load_type
+            && is_first_party(&target.host, &top.host) != first_party
+        {
+            return false;
         }
         self.filter.matches(target)
     }

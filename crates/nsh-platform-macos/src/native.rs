@@ -323,7 +323,7 @@ impl NativeState {
 /// What a native view holds.
 enum Host {
     Video(VideoHost),
-    Web(WebHost),
+    Web(Box<WebHost>),
     /// A registered component; `None` until named, or when unknown.
     Component(Option<Box<dyn NativeComponent>>),
 }
@@ -363,7 +363,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         ViewKind::WebView => {
             let access = surface.native.access.borrow().clone();
             let downloads = surface.native.downloads.borrow().clone();
-            Host::Web(WebHost::new(surface, view, access, downloads))
+            Host::Web(Box::new(WebHost::new(surface, view, access, downloads)))
         }
         _ => Host::Component(None),
     };
@@ -574,10 +574,10 @@ pub(crate) fn web_focused(surface: &Surface) -> bool {
         return false;
     };
     hosts.values().any(|host| match host {
-        Host::Web(WebHost { web: Some(web), .. }) => {
+        Host::Web(host) => host.web.as_ref().is_some_and(|web| {
             // SAFETY: a WKWebView is an NSView.
             focused.isDescendantOf(unsafe { as_view(web) })
-        }
+        }),
         _ => false,
     })
 }
@@ -3113,7 +3113,7 @@ fn compile_content_rules(
                     } else {
                         // SAFETY: WebKit passes an NSError on failure.
                         let described: Retained<NSString> = msg_send![error, localizedDescription];
-                        format!("content rules {log_id}: {}", described.to_string())
+                        format!("content rules {log_id}: {described}")
                     };
                     let mut failed = pending.failed.lock().unwrap_or_else(|e| e.into_inner());
                     if failed.is_none() {
@@ -3595,7 +3595,7 @@ fn get_cookies(
             .unwrap_or_default();
         let list: Vec<WebCookie> = cookies
             .iter()
-            .map(|cookie| web_cookie(&**cookie))
+            .map(|cookie| web_cookie(cookie))
             .filter(|cookie| scope.as_ref().is_none_or(|scope| scope.matches(cookie)))
             .collect();
         let result = serde_json::to_value(list).map_err(|error| error.to_string());

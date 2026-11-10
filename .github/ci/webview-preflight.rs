@@ -83,6 +83,14 @@ fn destination(id: &str, path: PathBuf) -> WebDownloadDestination {
     value
 }
 
+// Use host navigation for repeated transfer decisions. Script-triggered
+// automatic downloads are independently subject to the browser's permissions.
+fn start_download(web: &ElementRef, page: &str, path: &str) -> Result<(), String> {
+    let origin = page.strip_suffix("/page").ok_or("fixture page URL")?;
+    web.load(nsh_core::WebLoad::new(&format!("{origin}{path}"), Vec::new()).ok_or("fixture download URL")?);
+    Ok(())
+}
+
 #[component]
 fn Smoke() -> impl IntoElement {
     let url = std::env::var("SMOKE_URL").expect("SMOKE_URL");
@@ -175,7 +183,7 @@ fn Smoke() -> impl IntoElement {
 
             mode.set(WebDownloadBehavior::Manual);
             primary.measure().await;
-            primary.inject_java_script("location.href='/download?mode=manual'");
+            start_download(&primary, &run_url, "/download?mode=manual")?;
             until("pending manual download", || !pending.get().is_empty()).await?;
             let first = pending.get()[0].clone();
             require(!downloads.get().iter().any(|d| d.id == first.id), "manual download started without acceptance")?;
@@ -188,14 +196,14 @@ fn Smoke() -> impl IntoElement {
             println!("PASS manual accept, content and duplicate-id rejection");
 
             let previous = pending.get().len();
-            primary.inject_java_script("location.href='/download?mode=reject-overwrite'");
+            start_download(&primary, &run_url, "/download?mode=reject-overwrite")?;
             until("second pending download", || pending.get().len() > previous).await?;
             let second = pending.get().last().unwrap().clone();
             require(primary.accept_download(destination(&second.id, dest.clone())).await.is_err(), "existing destination overwritten without permission")?;
             require(std::fs::read(&dest).map_err(|e| e.to_string())? == CONTENT, "failed acceptance changed existing file")?;
             let _ = primary.cancel_download(second.id.clone()).await;
             let previous = pending.get().len();
-            primary.inject_java_script("location.href='/download?mode=cancel'");
+            start_download(&primary, &run_url, "/download?mode=cancel")?;
             until("cancel candidate", || pending.get().len() > previous).await?;
             let cancelled = pending.get().last().unwrap().clone();
             primary.cancel_download(cancelled.id.clone()).await?;
@@ -204,7 +212,7 @@ fn Smoke() -> impl IntoElement {
             println!("PASS no-overwrite policy and explicit cancellation");
 
             let before_pending = pending.get().len();
-            primary.inject_java_script("location.href='/slow-download?mode=active-cancel'");
+            start_download(&primary, &run_url, "/slow-download?mode=active-cancel")?;
             until("active cancellation candidate", || pending.get().len() > before_pending).await?;
             let active = pending.get().last().unwrap().clone();
             let active_path = output.join("active-cancel.txt");
@@ -233,7 +241,7 @@ fn Smoke() -> impl IntoElement {
             println!("PASS failed filter replacement retention and clearing");
 
             let before_pending = pending.get().len();
-            primary.inject_java_script("location.href='/slow-download?mode=teardown'");
+            start_download(&primary, &run_url, "/slow-download?mode=teardown")?;
             until("download pending before teardown", || pending.get().len() > before_pending).await?;
             mounted.set(false);
             timer(Duration::from_millis(300)).await;
