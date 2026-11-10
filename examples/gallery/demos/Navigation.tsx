@@ -429,7 +429,8 @@ function ModalBody(props: { title: string; note: string; body: string; fullScree
  * (`#/messages/Invoice`), opens at `UrlScheme.url()`, gives each page its
  * address as the stack changes (`onChange` → `UrlScheme.setUrl`, the
  * browser's back included, which pops the stack) and hears links
- * (`UrlScheme.on("open")`). Only the web shows the address. */
+ * (`UrlScheme.on("open")`) and the moves the stack does not account for
+ * (`UrlScheme.on("change")`). Only the web shows the address. */
 function Addressed() {
   const prefix = "#/messages/";
   const opened = (UrlScheme.url() ?? "").split("#")[1] ?? "";
@@ -442,6 +443,9 @@ function Addressed() {
     opens.set(opens() + 1);
     address.set(url);
   });
+  // A back or forward between entries of the same pages, or an address the
+  // user typed (the web): the stack stays, the address shown follows.
+  UrlScheme.on("change", ({ url }) => address.set(url));
   // The address without the app's part, then the open message's.
   const addressOf = (top: string) => `${(UrlScheme.url() ?? "").split("#")[0]}${top === "Inbox" ? "" : prefix + encodeURIComponent(top)}`;
   // The app's part of an address: the same on the web (the page's address

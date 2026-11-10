@@ -419,6 +419,14 @@ function newHistorySession() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 }
 
+/** The current entry's place in the tab's history (the Navigation API's
+ * `navigation.currentEntry.index`), `null` where the browser has no
+ * Navigation API. */
+function navigationIndex() {
+  const index = globalThis.navigation?.currentEntry?.index;
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 /** The offset of local time at `ms` (since the epoch) in seconds east of UTC. */
 function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
@@ -5347,10 +5355,24 @@ class Player {
     this.historyIndex = 0;
     this.historyDepths = [0];
     history.replaceState(this.historyState(0), "");
+    // The app's first entry's place in the tab's history, where the
+    // browser says (`navigationIndex`): a state-less entry before it is the
+    // page's own, from before the player, not an address the user typed.
+    this.historyBase = navigationIndex();
     // The address of the app's first entry, where every run starts, and of
     // the entry shown (a page the app keeps on a back keeps it).
     this.firstUrl = this.shownUrl = location.href;
     window.addEventListener("popstate", (e) => this.popState(e));
+  }
+
+  /** Whether the entry the user went to is before the app's first: the
+   * page's own (a `#fragment` followed while the app loaded, a `pushState`
+   * of the host page's), which looks to `popstate` like an address the user
+   * typed. Only the Navigation API tells them apart; without it a
+   * state-less entry is taken as typed. */
+  beforeFirstEntry() {
+    const index = navigationIndex();
+    return index != null && this.historyBase != null && index < this.historyBase;
   }
 
   historyState(depth, index = this.historyIndex) {
@@ -5490,7 +5512,7 @@ class Player {
     this.endPopAnswer();
     const have = this.historyDepth;
     if (e.state?.nshSession !== this.historySession) {
-      if (e.state?.nsh == null && location.href !== this.shownUrl) {
+      if (e.state?.nsh == null && location.href !== this.shownUrl && !this.beforeFirstEntry()) {
         // An address the user gave the page (a `#fragment` typed in the
         // address bar): an entry after the current one, at its depth, as
         // if the app had pushed it. The app's pages stay; it shows what
@@ -5517,6 +5539,7 @@ class Player {
       this.historySession = newHistorySession();
       this.historyDepths = [0];
       history.replaceState(this.historyState(0), "");
+      this.historyBase = navigationIndex();
       this.firstUrl = location.href;
       this.tellAddress(true);
       return;
@@ -5524,7 +5547,7 @@ class Player {
     const at = e.state.nsh ?? 0;
     // This load's entries all have their place; which way the user went.
     const index = Number.isInteger(e.state.nshIndex) ? e.state.nshIndex : at;
-    const cause = index < this.historyIndex ? "back" : "forward";
+    const reason = index < this.historyIndex ? "back" : "forward";
     this.historyIndex = index;
     this.historyDepths[index] = at;
     if (at > have) {
@@ -5542,7 +5565,7 @@ class Player {
       // pages are as the entry has them, and it shows what the address
       // names.
       if (!index) this.firstUrl = location.href;
-      this.tellAddress(location.href !== this.shownUrl ? cause : false);
+      this.tellAddress(location.href !== this.shownUrl ? reason : false);
       return;
     }
     // A pop the app hears at once (no motion, a modal) may give the address
@@ -5576,11 +5599,11 @@ class Player {
     // hears an entry's address that differs from the one it had
     // (`change`), once the pages it popped are dismissed: it answers the
     // dismissal after their slide, and an address it sets then wins.
-    if (location.href !== before) this.awaitPopAnswer({ sets, url: location.href, cause });
+    if (location.href !== before) this.awaitPopAnswer({ sets, url: location.href, reason });
   }
 
   /** Waits for the app's answer to a back that popped its pages (`popped`:
-   * `sets`, `url`, `cause`), at most `POP_ANSWER_MS`. */
+   * `sets`, `url`, `reason`), at most `POP_ANSWER_MS`. */
   awaitPopAnswer(popped) {
     this.popAnswer = popped;
     popped.timer = setTimeout(() => {
@@ -5597,7 +5620,7 @@ class Player {
     if (!popped || (this.dismissing > 0 && !popped.expired)) return;
     this.endPopAnswer();
     if (this.pageUrlSets !== popped.sets || location.href !== popped.url) return;
-    this.tellAddress(popped.cause);
+    this.tellAddress(popped.reason);
   }
 
   endPopAnswer() {
@@ -5607,7 +5630,7 @@ class Player {
 
   /** Tells the core the entry's address: with `open` when the app is handed
    * it from outside (`true`), as a move the app did not make when `how` is
-   * its cause (`"back"`, `"forward"`, `"address"`: `change`), else as the
+   * its reason (`"back"`, `"forward"`, `"address"`: `change`), else as the
    * address only (`quiet`). */
   tellAddress(how) {
     this.shownUrl = location.href;
