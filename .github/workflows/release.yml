@@ -423,11 +423,13 @@ jobs:
           # What `nsh update nightly` compares its revision with.
           version=$(gh api "repos/$GH_REPO/contents/Cargo.toml?ref=$SHA" --jq .content | base64 -d |
             sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
-          jq -n --arg version "$version" --arg commit "$SHA" '{version: $version, commit: $commit}' \
+          date=$(date -u +%Y-%m-%d)
+          jq -n --arg version "$version" --arg commit "$SHA" --arg date "$date" \
+            '{version: $version, commit: $commit, date: $date}' \
             > assets/nsh-release.json
           cat assets/nsh-release.json
           notes=$(cat <<NOTES
-          The latest \`main\`, built $(date -u +%Y-%m-%d) from [\`$short\`](https://github.com/$GH_REPO/commit/$SHA). It is rebuilt every night that \`main\` changes.
+          The latest \`main\`, built $date from [\`$short\`](https://github.com/$GH_REPO/commit/$SHA). It is rebuilt every night that \`main\` changes.
 
           \`\`\`sh
           curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
@@ -438,4 +440,4 @@ jobs:
           )
           gh release delete nightly --cleanup-tag --yes 2> /dev/null || true
           gh release create nightly assets/* --target "$SHA" --prerelease --latest=false \
-            --title "nsh nightly ($short)" --notes "$notes"
+            --title "nsh nightly $date ($short)" --notes "$notes"
