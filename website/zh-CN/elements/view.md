@@ -152,7 +152,7 @@ view()
 | `onMouseEnter` / `onMouseLeave` | `.on_mouse_enter` / `.on_mouse_leave` | `MouseEvent` | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口（见[悬停](./index.md#悬停)）；`onMouseLeave` 的位置是鼠标最后所在之处。 |
 | `onMouseMove` | `.on_mouse_move` | `MouseEvent` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键：`position`、`pagePosition`（`Point`）、`modifiers` 和 `pressedButton`（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"` 或 `null`）；每帧最多一次。 |
 | `onWheel` | `.on_wheel` | `WheelEvent` | 鼠标滚轮或触控板在视图（或其内部的视图）上滚动：`position`、`pagePosition`、`delta`、`deltaMode`（`"lines"` 或 `"points"`）和 `modifiers`；比指针下方滚动视图更近的监听者接管滚轮（见[滚轮](./index.md#滚轮)）。 |
-| `onMouseUp` | `.on_mouse_up` | `MouseButtonEvent` | 鼠标按键在视图（或其内部的视图）上松开：`button`、`position`、`pagePosition` 和 `modifiers`；桌面平台、终端和 Web 支持，iOS 和 Android 不报告。 |
+| `onMouseUp` | `.on_mouse_up` | `MouseButtonEvent` | 鼠标按键在视图（或其内部的视图）上松开：`button`、`position`、`pagePosition` 和 `modifiers`；桌面平台、终端和 Web 支持，iOS 和 Android 不报告。视图外松开不会报告（没有指针捕获）。 |
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | 在视图上请求了上下文菜单：辅助按钮、浏览器中的键盘，或 macOS 和 Windows 上的读屏软件（见[上下文菜单](./index.md#上下文菜单)）。 |
 | `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }`（`FileDragEvent`） | 本地文件进入当前桌面拖放目标，附带文件列表及其类型。 |
 | `onFileDragLeave` | `.on_file_drag_leave` | 无 | 本地文件离开当前桌面拖放目标。 |

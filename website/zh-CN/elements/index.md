@@ -211,7 +211,7 @@ view()
 | `onMouseEnter` | `.on_mouse_enter(..)` | `(e: MouseEvent) => void` | 鼠标移到视图或其内部的视图上（DOM 的 `mouseenter`）。 |
 | `onMouseMove` | `.on_mouse_move(..)` | `(e: MouseEvent) => void` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键（DOM 的 `mousemove`）。 |
 | `onMouseLeave` | `.on_mouse_leave(..)` | `(e: MouseEvent) => void` | 鼠标离开视图及其内部的视图，或离开窗口；`e` 是鼠标最后所在的位置（DOM 的 `mouseleave`）。 |
-| `onMouseUp` | `.on_mouse_up(..)` | `(e: MouseButtonEvent) => void` | 鼠标按键在视图或其内部的视图上松开（DOM 的 `mouseup`）：`button` 是松开的按键（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"`），另有 `position`、`pagePosition` 和 `modifiers`。指针下视图外围所有监听的视图由内向外都会收到。主按键松开时同时报告 `onPressUp`。桌面平台（Windows、macOS、Linux、GPUI）、终端和 Web 支持；iOS 和 Android 不报告。 |
+| `onMouseUp` | `.on_mouse_up(..)` | `(e: MouseButtonEvent) => void` | 鼠标按键在视图或其内部的视图上松开（DOM 的 `mouseup`）：`button` 是松开的按键（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"`），另有 `position`、`pagePosition` 和 `modifiers`。指针下视图外围所有监听的视图由内向外都会收到。主按键松开时同时报告 `onPressUp`。视图外松开不会报告（没有指针捕获）。桌面平台（Windows、macOS、Linux、GPUI）、终端和 Web 支持；iOS 和 Android 不报告。 |
 
 与 CSS 的 `:hover` 和 DOM 的 `mouseenter` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onMouseEnter`（由外向内；`onMouseLeave` 由内向外）。事件在发生之后才通知应用，触摸从不触发。从鼠标下方移除的视图会收到 `onMouseLeave`，在 Linux 和 Windows 上要等到鼠标下一次移动。
 

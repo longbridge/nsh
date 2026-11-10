@@ -152,7 +152,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the view under the pointer, as a move does, and every listener hears it; iOS and Android never report it (an iPad
   or Android mouse included). On macOS a Control-click's release is the secondary button's (`"right"`), as its press
   is; a right click's release
-  is what completes it, so an app that waits for it can open its menu without a timer or a press guess. The headless
+  is what completes it, so an app that waits for it can open its menu without a timer or a press guess. Only a release
+  over the view (or a view inside it) is reported: the event has no pointer capture, so a release after the pointer
+  leaves the view or the window is not heard. The headless
   driver's `rightClick` and the desktop test agents (Linux's included) release the secondary button too.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
