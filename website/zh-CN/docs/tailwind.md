@@ -288,6 +288,69 @@ import { Canvas, token } from "nsh";
 
 名称带有类型：NSH 根据主题把应用的令牌写入 `.nsh/types/nsh/tokens.d.ts`，所以主题中有 `"up"` 后 `token("up")` 的类型是 `string`，主题中没有的名称是类型错误。
 
+## 组件样式
+
+应用把 `nsh/base` 控件的外观声明一次，每个页面按名称使用：`nsh.json` 中的 `"components"` 为每个组件保存一个基础外观、按名称
+区分的各变体和尺寸的外观，以及控件没有指名时使用的变体和尺寸。每个外观是一串类名，状态写成变体（`hover:`、`active:`、
+`focus:`、`disabled:`）。在 Rust 中，同样的声明是类型化的：用样式方法调用 `set_component_style`；两种语言的页面都用
+`variant` 和 `size` 选取外观：
+
+```rust tabs
+use nsh_base::{button, theme};
+
+// Declared once, before the first render (in the root component).
+set_component_style(
+    "button",
+    ComponentStyle::new()
+        .base(|s| s.flex_row().items_center().gap_2().rounded(theme().radius))
+        .variant("primary", |s| {
+            let t = theme();
+            s.bg(t.primary)
+                .text_color(t.primary_foreground)
+                .hover(|s| s.bg(t.primary.opacity(0.9)))
+        })
+        .variant("ghost", |s| s.hover(|s| s.bg(theme().accent)))
+        .size("sm", |s| s.h(px(32.0)).px_2())
+        .size("md", |s| s.h(px(36.0)).px_3())
+        .default_variant("primary")
+        .default_size("md"),
+);
+
+// Any page.
+button().variant("ghost").size("sm").child(text("Later"))
+```
+
+```tsx tabs
+// nsh.json
+// "components": {
+//   "button": {
+//     "base": "flex-row items-center gap-2 rounded-(--radius)",
+//     "variants": {
+//       "primary": "bg-primary text-primary-foreground hover:bg-primary/90",
+//       "ghost": "hover:bg-accent"
+//     },
+//     "sizes": { "sm": "h-8 px-2", "md": "h-9 px-3" },
+//     "defaults": { "variant": "primary", "size": "md" }
+//   }
+// }
+
+// Any page.
+<Button variant="ghost" size="sm">
+  <Text>Later</Text>
+</Button>
+```
+
+- **哪些组件。** 接受 `variant` 和 `size` 的组件会应用它的声明：`"button"` 对应 [`Button`](../elements/button.md)。
+- **顺序。** 在控件上，先应用基础外观，再应用变体的，然后是尺寸的，最后是使用处控件自己的 `class`、`style` 和状态样式。
+  “后者优先”只在同一类规则之间成立，所以声明中的 `hover:` 外观仍会盖过使用处的普通 `bg-*`；使用处要改变某个状态，就写同一个
+  变体（`hover:bg-*`）。
+- **Rust 与 `nsh.json` 一起生效。** 同一个名称的类型化外观和类名都会应用，类型化的在前；两边都设置默认值时，以 `nsh.json`
+  的 `"defaults"` 为准。Rust 应用同样读取它的 `nsh.json` 中的 `"components"`。
+- **在首次渲染之前。** `nsh.json` 中的声明在第一帧之前生效。Rust 在根组件中、控件构建之前声明。
+- **像其他类名一样检查。** NSH 不认识的类名，或应用的 `"theme"` 中没有的 token，构建时给出警告并被去掉
+  （``nsh.json: components: button.variants.primary: unknown class `bg-acme`, ignored``）。声明中没有的 `variant` 或 `size`
+  不应用任何外观，并记录一次警告。
+
 ## 类名检查
 
 `nsh build`、`nsh dev`、`nsh run` 和 `nsh test` 会用运行时相同的解析器和主题检查 JSX 中的静态类名（`class` 中的字符串字面量以及 `classList` 的键），并对不存在的类发出警告：

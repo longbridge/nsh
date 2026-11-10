@@ -482,6 +482,10 @@ fn the_module_formats_money() {
 `nsh_base` 的 `theme()`，所以一个文件就能改变应用中所有组件的样式。每种颜色都有浅色和深色两个值；系统切换外观时，
 `.bg(move || theme().primary)` 这样的绑定会原生地改变颜色，不需要重新渲染。
 
+在主题之上，crate 把控件的外观作为组件样式声明一次：在根组件中调用 `set_component_style("button", ..)`（或在 `nsh.json` 中写
+`"components"`），为每个变体和尺寸给出类型化的样式与状态；页面按名称使用它们，`button().variant("primary").size("sm")`，
+Rust 与 TSX 都一样（[组件样式](./tailwind.md#组件样式)）。
+
 主题采用 [shadcn/ui](https://ui.shadcn.com/docs/theming) 的设计令牌，默认主题是 shadcn 的 `neutral` 主题：黑白配色，圆角 10 点。
 要使用自己的主题，在 `nsh.json` 中把 `"theme"` 设为主题文件的路径（相对于 `nsh.json`），或者直接写入主题内容：
 

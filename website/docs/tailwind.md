@@ -288,6 +288,73 @@ import { Canvas, token } from "nsh";
 
 The names are typed: NSH writes the app's tokens into `.nsh/types/nsh/tokens.d.ts` from its theme, so `token("up")` is a `string` once `"up"` is in the theme, and a name the theme lacks is a type error.
 
+## Component styles
+
+An app declares the looks of `nsh/base`'s controls once, and every page names them: `"components"` in `nsh.json`
+holds, per component, a base look, looks per named variant and size, and the variant and size a control that names
+none takes. Each look is a class string, with its states as variants (`hover:`, `active:`, `focus:`, `disabled:`).
+In Rust the same declaration is typed, `set_component_style` with the style methods; a page in either language picks
+a look with `variant` and `size`:
+
+```rust tabs
+use nsh_base::{button, theme};
+
+// Declared once, before the first render (in the root component).
+set_component_style(
+    "button",
+    ComponentStyle::new()
+        .base(|s| s.flex_row().items_center().gap_2().rounded(theme().radius))
+        .variant("primary", |s| {
+            let t = theme();
+            s.bg(t.primary)
+                .text_color(t.primary_foreground)
+                .hover(|s| s.bg(t.primary.opacity(0.9)))
+        })
+        .variant("ghost", |s| s.hover(|s| s.bg(theme().accent)))
+        .size("sm", |s| s.h(px(32.0)).px_2())
+        .size("md", |s| s.h(px(36.0)).px_3())
+        .default_variant("primary")
+        .default_size("md"),
+);
+
+// Any page.
+button().variant("ghost").size("sm").child(text("Later"))
+```
+
+```tsx tabs
+// nsh.json
+// "components": {
+//   "button": {
+//     "base": "flex-row items-center gap-2 rounded-(--radius)",
+//     "variants": {
+//       "primary": "bg-primary text-primary-foreground hover:bg-primary/90",
+//       "ghost": "hover:bg-accent"
+//     },
+//     "sizes": { "sm": "h-8 px-2", "md": "h-9 px-3" },
+//     "defaults": { "variant": "primary", "size": "md" }
+//   }
+// }
+
+// Any page.
+<Button variant="ghost" size="sm">
+  <Text>Later</Text>
+</Button>
+```
+
+- **Which components.** A component that takes `variant` and `size` applies its declaration: `"button"` is
+  [`Button`](../elements/button.md).
+- **Order.** On the control, the base look applies first, then the variant's, then the size's, then the control's
+  own `class`, `style` and state styles at the use site. "Later wins" holds within one kind of rule, so a declared
+  `hover:` look still shows over a plain `bg-*` at the use site; the use site changes a state with the same variant
+  (`hover:bg-*`).
+- **Rust and `nsh.json` together.** For one name, the typed look and the classes both apply, the typed one first;
+  `nsh.json`'s `"defaults"` decide when both set them. Rust apps read `"components"` from their `nsh.json` too.
+- **Before the first render.** `nsh.json`'s declarations apply before the first frame. Rust declares in the root
+  component, before the controls are built.
+- **Checked like other classes.** A class NSH does not know, or a token the app's `"theme"` lacks, is a warning when
+  building and is left out (``nsh.json: components: button.variants.primary: unknown class `bg-acme`, ignored``). A
+  `variant` or `size` the declaration lacks applies nothing and logs a warning once.
+
 ## The class check
 
 `nsh build`, `nsh dev`, `nsh run` and `nsh test` check the static class names in your JSX (string literals in `class` and the keys of `classList`) with the same parser and theme the runtime uses, and warn about classes that do not exist:

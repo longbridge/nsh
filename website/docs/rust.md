@@ -535,6 +535,11 @@ your crate is the styled layer on top, the app's own component library ([Three l
 when the system switches appearance, a binding such as `.bg(move || theme().primary)` changes color natively, with no
 render.
 
+On the theme, the crate declares its controls' looks once, as component styles: `set_component_style("button", ..)`
+in the root component (or `"components"` in `nsh.json`) gives each variant and size its typed styles and states, and
+pages name them, `button().variant("primary").size("sm")`, in Rust and TSX alike
+([Component styles](./tailwind.md#component-styles)).
+
 The theme has the design tokens of [shadcn/ui](https://ui.shadcn.com/docs/theming), and its default is shadcn's
 `neutral` theme, a black-and-white palette with a 10 pt corner radius. To use your own, set `"theme"` in `nsh.json`
 to the path of a theme file, relative to `nsh.json`, or to the theme's content inline:

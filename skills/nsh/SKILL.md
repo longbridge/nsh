@@ -12,8 +12,10 @@ When neither is specified, prefer Rust for an app shipped in its binary.
 ## Establish the App's Design System First
 
 Before building feature screens, read the Design and Coding Guides and establish
-or reuse the app's design standards, semantic Theme Tokens and styled component
-library. Keep them in the app repository. `nsh-base` (`nsh/base`) supplies unstyled
+or reuse the app's design standards, semantic Theme Tokens and component styles:
+the looks of `nsh/base`'s controls by variant and size, declared once in the app's
+Rust theme code (`set_component_style`) or `nsh.json` `"components"`. Keep them in
+the app repository. `nsh-base` (`nsh/base`) supplies unstyled
 behavior, as [`gpui-base`](https://gpui-kit.com/base) does; the styled layer analogous to [`gpui-component`](https://gpui-kit.com/component)
 belongs to the app or its chosen community library.
 
@@ -21,8 +23,9 @@ Define theme colors centrally and consume semantic tokens throughout pages,
 components and states: `theme()` in Rust; token classes or `token()` in TSX.
 Do not introduce raw hex, RGBA/HSLA or palette classes in presentation code. Add
 missing roles to the theme first. User-selected or data colors remain data.
-Build complete styled controls for the feature's needs, then compose pages from
-them; extend shared variants instead of restyling base controls per screen.
+Declare complete component styles for the feature's controls, then compose pages
+by naming variants and sizes (`variant="primary" size="sm"`). Pages do not restyle
+base controls: add a missing look to the declaration as a variant, not to the page.
 
 Choose the app's Desktop, Mobile, Web and TUI targets explicitly. Adapt density,
 navigation, input and overlays to those targets, preserving shared semantics.
@@ -96,7 +99,7 @@ first, then the section for the change (`grep -n '^## ' references/coding-guides
 
 | Section                                       | Read when                                                     |
 | --------------------------------------------- | ------------------------------------------------------------- |
-| Build the app's UI foundations before pages | Always; design standards, tokens, styled controls, target platforms |
+| Build the app's UI foundations before pages | Always; design standards, tokens, component styles, target platforms |
 | Architecture at a glance                      | Always; layers, an app's files, the store                     |
 | Bootstrap and root ownership                  | `mount`, the root, what one surface is                        |
 | Understand what runs once and what runs again | Always; components, bindings, owners, context                 |
@@ -133,7 +136,9 @@ A floor, not a substitute for the guides.
   store with private signals. In Rust with TSX, one side owns each piece of state.
 - **The look is the app's.** `nsh_base` / `nsh/base` has behavior and no look, and NSH
   has no styled component library. Draw with theme tokens: `theme().primary` in Rust,
-  `bg-primary` in TSX. Wrap each base component once in the app's own UI module.
+  `bg-primary` in TSX. Declare each base control's looks once (component styles) and
+  name them in pages with `variant` / `size`; compose patterns of several controls in
+  the app's own UI module.
 - **Parts draw nothing until styled.** A switch with no track and thumb style shows no
   switch, and a test still passes. Style every part, and look at the result.
 - **Use the semantic component.** Button, Menu, Popover, Sheet, Dialog and Select bring

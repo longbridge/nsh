@@ -44,9 +44,9 @@ decoration should support them rather than compete with them.
 
 ## Establish the app's design system first
 
-Before implementing screens in a new app, establish its own design standards, theme tokens and styled component
-library. For an existing app, inspect and extend those foundations first; a small change uses the established system.
-Keep the standards in the app repository so people and coding agents use the same decisions.
+Before implementing screens in a new app, establish its own design standards, theme tokens and component styles.
+For an existing app, inspect and extend those foundations first; a small change uses the established system. Keep
+the standards in the app repository so people and coding agents use the same decisions.
 
 The standards should name the product's visual language, typography and spacing scales, density, radii, icons,
 interaction states and supported platforms. Define semantic tokens for surfaces, foregrounds, borders, actions,
@@ -55,16 +55,21 @@ come from these tokens throughout screens, reusable components, overlays and int
 RGBA or HSLA values belong in the token definitions; when a role is missing, add it there before using it. A token
 named after a role such as `warning` communicates more than a palette name such as `amber-500`.
 
-Build an app-owned styled layer on `nsh/base` before composing pages. Cover the controls and their parts needed by
-the app: buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback. Give them coherent
-variants, sizes, density and hover, pressed, focus, selected, disabled, loading and validation states. Pages compose
-these components; they should not restyle base controls independently. Grow this library with the app's actual
-needs, keeping every control used in a feature complete rather than prebuilding an unrelated catalog.
+Declare the app's component styles before composing pages: the looks of the `nsh/base` controls the app needs,
+once per control, in the app's Rust theme code or in `nsh.json` `"components"`. Cover the controls and their parts
+needed by the app: buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback. Controls
+that take `variant` and `size` (`Button`) are declared by name; the app composes the others into its own components
+from the same tokens. Give them coherent variants, sizes, density and hover, pressed, focus, selected, disabled,
+loading and validation states.
+Pages compose controls by naming their variants and sizes; they do not restyle base controls. When a screen needs a
+look the declarations lack, add the variant or size to the declaration, then name it in the screen. Grow the
+declarations with the app's actual needs, keeping every control used in a feature complete rather than prebuilding
+an unrelated catalog.
 
 NSH's layering parallels GPUI Kit: `nsh-core` corresponds to GPUI and `nsh-base` to [`gpui-base`](https://gpui-kit.com/base), providing behavior,
 state, focus and accessibility. The styled layer corresponding to [`gpui-component`](https://gpui-kit.com/component) belongs to the app or a community
-library. The default theme supplies starting tokens; the app's styled components turn them into a complete visual
-system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-before-pages).
+library: its component styles and the components it composes from base controls. The default theme supplies
+starting tokens; the app's component styles turn them into a complete visual system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-before-pages).
 
 ### Design for the platforms the app targets
 

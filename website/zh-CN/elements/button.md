@@ -7,7 +7,7 @@ demo: el-button
 
 # Button
 
-按钮是一个按压目标。它负责行为：按压、通过应用的状态样式呈现的按压反馈、禁用和选中状态、键盘焦点，以及它对屏幕阅读器而言的角色。外观由应用决定：`Button` 没有自己的颜色、尺寸、内边距或文字，所以同一个组件可以按你给它的样式和子元素，成为主按钮、图标按钮、菜单的触发按钮或列表的一行。
+按钮是一个按压目标。它负责行为：按压、通过应用的状态样式呈现的按压反馈、禁用和选中状态、键盘焦点，以及它对屏幕阅读器而言的角色。外观由应用决定：`Button` 没有自己的颜色、尺寸、内边距或文字，所以同一个组件可以按你给它的样式和子元素，成为主按钮、图标按钮、菜单的触发按钮或列表的一行。应用把按钮的外观按变体和尺寸声明一次，页面用 `variant` 和 `size` 选取（[样式](#styling)）。
 
 ```rust tabs
 use nsh_base::button;
@@ -58,6 +58,8 @@ mount(App);
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
+| `variant` | `.variant(..)` | `string` | 声明的默认值 | 应用为按钮声明的外观中的变体（[样式](#styling)）；声明中没有的名称不应用任何外观，并记录警告。 |
+| `size` | `.size(..)` | `string` | 声明的默认值 | 应用为按钮声明的外观中的尺寸，与 `variant` 相同。在 Rust 中，按钮的 `.size(..)` 就是这个属性；它的宽和高用 `.w(..)` 和 `.h(..)`。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不响应按压，也没有按压反馈；`disabled:` 样式生效，屏幕阅读器会报告它不可用。 |
 | `selected` | `.selected(..)` | `boolean` | `false` | 选中：当前项（文件夹、筛选条件）或菜单打开期间的触发按钮。开或关的东西用 `Toggle`。屏幕阅读器会报告。值由应用持有，样式也由应用决定。 |
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | `selected` 且未禁用时的样式，与 `selected:` 类相同。 |
@@ -92,69 +94,82 @@ button()
 
 ## 样式
 
-按钮的外观属于你的应用：什么是主按钮、什么是次按钮，由应用决定。用两个小组件就能把这个决定集中在一处：
+按钮的外观属于你的应用：什么是主按钮、什么是幽灵按钮，由应用决定，并且只声明一次：写在应用的 Rust 主题代码中
+（`set_component_style("button", ..)`），或写在 `nsh.json` 的 `"components"` 中。一份声明包含基础外观、按名称区分的各变体和
+尺寸的外观及其状态，以及没有指名的按钮使用的默认值。之后页面用 `variant` 和 `size` 指名想要的外观：
 
 ```rust tabs
-use nsh_base::button;
+use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
-/// A filled button, darker while pressed.
-fn primary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
-    button()
-        .on_press(on_press)
-        .items_center()
-        .rounded_lg()
-        .px_4()
-        .py_3()
-        .bg(rgb(0x2563eb))
-        .active(|s| s.bg(rgb(0x1d4ed8)))
-        .disabled_style(|s| s.opacity(0.4))
-        .child(text(label).text_color(white()).font_weight(FontWeight::SEMIBOLD))
+/// The app's buttons, declared once before the first render (in the root component).
+fn declare_buttons() {
+    set_component_style(
+        "button",
+        ComponentStyle::new()
+            .base(|s| s.items_center().justify_center().rounded_lg())
+            .variant("primary", |s| {
+                let t = theme();
+                s.bg(t.primary)
+                    .text_color(t.primary_foreground)
+                    .active(|s| s.bg(t.primary.opacity(0.85)))
+                    .disabled_style(|s| s.opacity(0.4))
+            })
+            .variant("outline", |s| {
+                let t = theme();
+                s.border_1().border_color(t.border).hover(|s| s.bg(t.accent))
+            })
+            .size("sm", |s| s.px_3().py_2())
+            .size("md", |s| s.px_4().py_3())
+            .default_variant("primary")
+            .default_size("md"),
+    );
 }
 
-/// An outlined button.
-fn secondary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
-    button()
-        .on_press(on_press)
-        .items_center()
-        .rounded_lg()
-        .px_4()
-        .py_3()
-        .border_1()
-        .border_color(rgb(0xd4d4d4))
-        .hover(|s| s.bg(rgb(0xfafafa)))
-        .active(|s| s.bg(rgb(0xf5f5f5)))
-        .child(text(label).text_color(rgb(0x171717)))
+/// A page names the looks.
+fn actions(save: impl Fn() + 'static, cancel: impl Fn() + 'static) -> impl IntoElement {
+    view()
+        .flex_row()
+        .gap_2()
+        .child(button().on_press(save).child(text("Save")))
+        .child(button().variant("outline").size("sm").on_press(cancel).child(text("Cancel")))
 }
 ```
 
 ```tsx tabs
-import { Text } from "nsh";
+// nsh.json
+// "components": {
+//   "button": {
+//     "base": "items-center justify-center rounded-lg",
+//     "variants": {
+//       "primary": "bg-primary text-primary-foreground active:bg-primary/85 disabled:opacity-40",
+//       "outline": "border border-border hover:bg-accent"
+//     },
+//     "sizes": { "sm": "px-3 py-2", "md": "px-4 py-3" },
+//     "defaults": { "variant": "primary", "size": "md" }
+//   }
+// }
+import { Text, View } from "nsh";
 import { Button } from "nsh/base";
 
-function Primary(props: { label: string; onPress: () => void; disabled?: boolean }) {
+function Actions(props: { onSave: () => void; onCancel: () => void }) {
   return (
-    <Button
-      onPress={props.onPress}
-      disabled={props.disabled}
-      class="items-center rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700 disabled:opacity-40"
-    >
-      <Text class="font-semibold text-white">{props.label}</Text>
-    </Button>
-  );
-}
-
-function Secondary(props: { label: string; onPress: () => void }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      class="items-center rounded-lg border border-neutral-300 px-4 py-3 active:bg-neutral-100 hover:bg-neutral-50"
-    >
-      <Text class="text-neutral-900">{props.label}</Text>
-    </Button>
+    <View class="flex-row gap-2">
+      <Button onPress={props.onSave}>
+        <Text>Save</Text>
+      </Button>
+      <Button variant="outline" size="sm" onPress={props.onCancel}>
+        <Text>Cancel</Text>
+      </Button>
+    </View>
   );
 }
 ```
+
+声明的外观按顺序应用：先是基础外观，然后是变体的，再是尺寸的，都在按钮自己的 `class`、`style` 和状态样式之前，后者用于少数
+例外并优先生效。页面需要声明中没有的外观时，在声明中补充变体或尺寸。同一个名称的 Rust 外观和 `nsh.json` 外观一起生效，类型化的
+在前（[Tailwind](../docs/tailwind.md#组件样式)）。应用在首次渲染之前声明外观：在所属组件有声明之前构建的按钮，保持使用处给它的
+外观。
 
 状态变体在原生侧应用：按下时按钮在主线程上变暗，不需要运行任何 JS 或 Rust。在 Rust 中，状态方法就是这些变体：`.active(..)`、`.hover(..)`、`.focus(..)`、`.selected_style(..)` 和 `.disabled_style(..)` 跟随按钮自身的状态。主题颜色的用法相同：TSX 中写 `bg-primary`，Rust 中写 `theme().primary`（见[主题 token](../docs/tailwind.md#主题-token)）。
 
@@ -230,7 +245,8 @@ fn close(open: Signal<bool>) -> impl IntoElement {
         .hit_slop(EdgeInsets::all(px(12.0)))
         .accessibility_label("Close")
         .on_press(move || open.set(false))
-        .size(px(20.0))
+        .w(px(20.0))
+        .h(px(20.0))
         .items_center()
         .justify_center()
         .child(text("×"))

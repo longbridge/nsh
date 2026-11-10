@@ -18,7 +18,7 @@ declarations in `.nsh/types` remain authoritative for exact signatures.
 
 ## Build the app's UI foundations before pages
 
-For a new app, establish the design standards, theme tokens and app-owned styled components before implementing
+For a new app, establish the design standards, theme tokens and the app's component styles before implementing
 feature pages. For an existing app, locate and reuse these first. Keep the standards and shared UI code in the app's
 repository; the [Design Guides](./design-guides.md#establish-the-apps-design-system-first) describe their contents.
 
@@ -27,15 +27,85 @@ Use this development order:
 1. Identify the app's Desktop, Mobile, Web and TUI targets and their input, navigation and density requirements.
 2. Define the app's semantic color roles and light/dark values in its theme file (`nsh.json` `"theme"`), together
    with the typography, spacing, radius and size scales the components use.
-3. Wrap and compose `nsh/base` into the app's styled controls, including visible parts, variants and interaction
-   states. Verify a representative composition on the supported targets before replicating it across pages.
-4. Compose pages from that layer. Add a missing token or shared variant in its owning layer first, then use it in
-   pages; changes to a shared control should update all its consumers consistently.
+3. Declare the component styles: the looks of `nsh/base`'s controls, once per control, by variant and size, with
+   their interaction states. Declare them in the app's Rust theme code (`set_component_style`) or in `nsh.json`
+   `"components"`. Compose controls into the app's own components where a pattern needs more than one control.
+   Verify a representative composition on the supported targets before replicating it across pages.
+4. Compose pages by naming variants and sizes (`.variant("primary")` in Rust, `variant="primary"` in TSX). Pages
+   do not restyle base controls: when a page needs a look the declarations lack, add the variant, size or token to
+   the declaration first, then name it in the page. A change to a declaration updates every use of the control
+   consistently.
+
+A declaration is theme data: NSH applies it to every instance, Rust and TSX pages name the same variants, and a
+control with no declaration keeps the look its use site gives it. Declare before the first render, in the root
+component or in `nsh.json`:
+
+```rust tabs
+use nsh_base::{button, theme};
+
+#[component]
+pub fn App() -> impl IntoElement {
+    // The app's buttons, declared once.
+    set_component_style(
+        "button",
+        ComponentStyle::new()
+            .base(|s| s.flex_row().items_center().justify_center().gap_2().rounded_md())
+            .variant("primary", |s| {
+                let t = theme();
+                s.bg(t.primary)
+                    .text_color(t.primary_foreground)
+                    .hover(|s| s.bg(t.primary.opacity(0.9)))
+                    .disabled_style(|s| s.opacity(0.5))
+            })
+            .variant("ghost", |s| s.hover(|s| s.bg(theme().accent)))
+            .size("sm", |s| s.h(px(32.0)).px_3())
+            .size("md", |s| s.h(px(36.0)).px_4())
+            .default_variant("primary")
+            .default_size("md"),
+    );
+    view()
+        .flex_1()
+        .bg(theme().background)
+        .child(button().size("sm").child(text("Buy")))
+        .child(button().variant("ghost").child(text("Later")))
+}
+```
+
+```tsx tabs
+// nsh.json declares the buttons:
+// "components": {
+//   "button": {
+//     "base": "flex-row items-center justify-center gap-2 rounded-md",
+//     "variants": {
+//       "primary": "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50",
+//       "ghost": "hover:bg-accent"
+//     },
+//     "sizes": { "sm": "h-8 px-3", "md": "h-9 px-4" },
+//     "defaults": { "variant": "primary", "size": "md" }
+//   }
+// }
+import { Text, View } from "nsh";
+import { Button } from "nsh/base";
+
+export function Checkout() {
+  return (
+    <View class="flex-1 bg-background">
+      <Button size="sm">
+        <Text>Buy</Text>
+      </Button>
+      <Button variant="ghost">
+        <Text>Later</Text>
+      </Button>
+    </View>
+  );
+}
+```
 
 NSH provides the unstyled `nsh-base` crate (`nsh/base` in TSX), analogous to [`gpui-base`](https://gpui-kit.com/base). The app or a community
-library owns the styled layer analogous to [`gpui-component`](https://gpui-kit.com/component); `nsh-core` is the underlying GPUI counterpart. App code
-should import its own styled controls for ordinary UI, keeping base-component assembly and styling in the shared
-layer. Preserve base behavior, focus and accessibility while adapting presentation for each supported platform.
+library owns the styled layer analogous to [`gpui-component`](https://gpui-kit.com/component): its component styles and the components it
+composes; `nsh-core` is the underlying GPUI counterpart. App code names the declared variants and imports its own
+composed components for ordinary UI, keeping looks in the declarations and the shared layer. Preserve base behavior,
+focus and accessibility while adapting presentation for each supported platform.
 
 Theme colors must be read through semantic tokens: `theme().primary` or `theme().color("warning")` in Rust,
 `bg-primary`, `text-warning` or `token("warning")` in TSX. Define raw hex, RGB/RGBA and HSL/HSLA values in the theme

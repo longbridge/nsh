@@ -339,8 +339,8 @@ reloads (one that finds none, a session still starting, connects again). Neither
 A Rust app (`nsh.json` `"root"`: `rust_app::RootConfig`, its entry the `nsh.json`, `rust_app::is_root`) has no JS
 at all: its member `rust-web` is `nsh-platform-web` **without the feature `browser-core`** (no browser host, the
 engine without `js`) and `nsh_platform_web::rust_app!(sets, app_root())`, whose `nsh_app_init` also registers the
-root (`set_root`); `app_root()` is generated from `"root"`, `"theme"` (compiled in with `include_str!`) and
-`"appearance"` (`Root::appearance`). Its `sets` take `nsh/base`'s core part only
+root (`set_root`); `app_root()` is generated from `"root"`, `"theme"` and `"components"` (compiled in with
+`include_str!`, `Root::components_json`) and `"appearance"` (`Root::appearance`). Its `sets` take `nsh/base`'s core part only
 (`nsh_base::registry_of([parts::core])`, `RustApp::rust_web_sets`), not `nsh_base::registry()`: with no JS, nothing
 makes a component by its registered name, the root makes each component by type (`nsh_base::select()`), which links
 that component where it is used, and the set gives the theme's tokens and the built-in scroll bars. Registering every

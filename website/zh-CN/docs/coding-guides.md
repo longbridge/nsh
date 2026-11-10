@@ -16,19 +16,86 @@ Rust 组件、嵌入 NSH 的原生应用），以及在 `nsh/base` 之上构建�
 
 ## 先建立应用的界面基础，再编写页面
 
-新应用在实现功能页面之前，先建立设计标准、Theme Tokens 和应用自己的风格组件。已有应用先找到并复用这些基础。标准与共享
+新应用在实现功能页面之前，先建立设计标准、Theme Tokens 和应用的组件样式。已有应用先找到并复用这些基础。标准与共享
 界面代码保存在应用仓库中；具体内容见[设计指南](./design-guides.md#先建立应用自己的设计系统)。
 
 按以下顺序开发：
 
 1. 明确应用支持的 Desktop、Mobile、Web、TUI 目标，以及各自的输入、导航和密度要求。
 2. 在主题文件（`nsh.json` 的 `"theme"`）中定义语义颜色角色与浅色、深色值，并确定组件使用的字体、间距、圆角和尺寸尺度。
-3. 在 `nsh/base` 之上封装、组合应用自己的风格控件，覆盖可见部件、变体和交互状态。在支持的目标上验证有代表性的组合，再铺开到页面。
-4. 用这一层组合页面。缺少 token 或共享变体时，先在所属层补充，再由页面使用；共享控件的修改应一致地作用于所有使用处。
+3. 声明组件样式：`nsh/base` 控件的外观，每个控件声明一次，按变体（variant）和尺寸（size）划分，并包含交互状态。声明写在应用的
+   Rust 主题代码中（`set_component_style`），或写在 `nsh.json` 的 `"components"` 中。某个模式需要多个控件时，把它们组合成应用
+   自己的组件。在支持的目标上验证有代表性的组合，再铺开到页面。
+4. 页面通过指名变体和尺寸来组合（Rust 中 `.variant("primary")`，TSX 中 `variant="primary"`）。页面不重新设置基础控件的样式：
+   页面需要声明中没有的外观时，先在声明中补充变体、尺寸或 token，再在页面中指名使用。修改声明会一致地作用于该控件的所有使用处。
+
+声明是主题数据：NSH 把它应用到每个实例上，Rust 页面和 TSX 页面指名同样的变体；没有声明的控件保持使用处给它的外观。在首次渲染
+之前声明，写在根组件或 `nsh.json` 中：
+
+```rust tabs
+use nsh_base::{button, theme};
+
+#[component]
+pub fn App() -> impl IntoElement {
+    // 应用的按钮，声明一次。
+    set_component_style(
+        "button",
+        ComponentStyle::new()
+            .base(|s| s.flex_row().items_center().justify_center().gap_2().rounded_md())
+            .variant("primary", |s| {
+                let t = theme();
+                s.bg(t.primary)
+                    .text_color(t.primary_foreground)
+                    .hover(|s| s.bg(t.primary.opacity(0.9)))
+                    .disabled_style(|s| s.opacity(0.5))
+            })
+            .variant("ghost", |s| s.hover(|s| s.bg(theme().accent)))
+            .size("sm", |s| s.h(px(32.0)).px_3())
+            .size("md", |s| s.h(px(36.0)).px_4())
+            .default_variant("primary")
+            .default_size("md"),
+    );
+    view()
+        .flex_1()
+        .bg(theme().background)
+        .child(button().size("sm").child(text("Buy")))
+        .child(button().variant("ghost").child(text("Later")))
+}
+```
+
+```tsx tabs
+// nsh.json 声明按钮：
+// "components": {
+//   "button": {
+//     "base": "flex-row items-center justify-center gap-2 rounded-md",
+//     "variants": {
+//       "primary": "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50",
+//       "ghost": "hover:bg-accent"
+//     },
+//     "sizes": { "sm": "h-8 px-3", "md": "h-9 px-4" },
+//     "defaults": { "variant": "primary", "size": "md" }
+//   }
+// }
+import { Text, View } from "nsh";
+import { Button } from "nsh/base";
+
+export function Checkout() {
+  return (
+    <View class="flex-1 bg-background">
+      <Button size="sm">
+        <Text>Buy</Text>
+      </Button>
+      <Button variant="ghost">
+        <Text>Later</Text>
+      </Button>
+    </View>
+  );
+}
+```
 
 NSH 提供无样式的 `nsh-base` crate（TSX 中为 `nsh/base`），对应 [`gpui-base`](https://gpui-kit.com/base)；应用或社区组件库拥有对应
-[`gpui-component`](https://gpui-kit.com/component) 的风格层，`nsh-core` 则对应底层的 GPUI。普通界面应该导入应用自己的风格控件，把基础组件的组装与样式
-保留在共享层中。适配各目标平台的外观时，保留基础组件的行为、焦点与无障碍能力。
+[`gpui-component`](https://gpui-kit.com/component) 的风格层，即它的组件样式和它组合出的组件，`nsh-core` 则对应底层的 GPUI。普通界面指名声明好的变体，
+并导入应用自己组合的组件，把外观保留在声明和共享层中。适配各目标平台的外观时，保留基础组件的行为、焦点与无障碍能力。
 
 主题颜色必须通过语义 token 读取：Rust 使用 `theme().primary` 或 `theme().color("warning")`，TSX 使用 `bg-primary`、
 `text-warning` 或 `token("warning")`。十六进制、RGB/RGBA、HSL/HSLA 原始值定义在主题源中，页面与组件的样式中不直接写，

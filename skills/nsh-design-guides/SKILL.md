@@ -17,10 +17,12 @@ verbatim copy of that page, so a link in it such as `./coding-guides.md` means
 `../elements/index.md` means `https://nsh.dev/elements/index.md`.
 
 For a new app, establish its own design standards, semantic Theme Tokens and
-styled component library before screens. For an existing app, inspect and extend
-those foundations first. Theme colors in presentation code must come from tokens;
-raw color values belong in theme definitions. Style the parts and states of
-`nsh/base` in app-owned reusable controls, then compose pages from them. This is
+component styles before screens. For an existing app, inspect and extend those
+foundations first. Theme colors in presentation code must come from tokens; raw
+color values belong in theme definitions. Declare the looks of `nsh/base`'s
+controls once, by variant and size with their states (the app's Rust theme code or
+`nsh.json` `"components"`), then compose pages by naming them; a page needing a new
+look adds a variant to the declaration. This is
 the layer corresponding to [`gpui-component`](https://gpui-kit.com/component) above [`gpui-base`](https://gpui-kit.com/base). Plan for the app's
 Desktop, Mobile, Web and TUI targets, adapting input, density, navigation and
 popups while sharing semantics and tokens.
@@ -43,7 +45,7 @@ order (`grep -n '^## ' references/design-guides.md`):
 | Section                               | Read when                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------- |
 | Design thesis                         | Always                                                                 |
-| Establish the app's design system first | Always; app standards, token-only theme colors, styled controls and platform targets |
+| Establish the app's design system first | Always; app standards, token-only theme colors, component styles and platform targets |
 | Learning from Shadcn                  | Choosing what to borrow from web component libraries                   |
 | Start from the task                   | Always; task hierarchy, what to leave out                              |
 | Visual language                       | Color, typography, spacing, radius, borders, elevation, density, icons |

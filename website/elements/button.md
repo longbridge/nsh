@@ -9,7 +9,9 @@ demo: el-button
 
 A button is a press target. It owns the behavior: presses, press feedback through the app's state styles, the
 disabled and selected states, keyboard focus, and its role for screen readers. The look is the app's: a `Button` has no colors, sizes, paddings or label of its own, so one component becomes a primary button,
-an icon button, a menu's trigger or the row of a list, depending on the styles and children you give it.
+an icon button, a menu's trigger or the row of a list, depending on the styles and children you give it. An app
+declares its buttons' looks once, by variant and size, and pages pick them with `variant` and `size`
+([Styling](#styling)).
 
 ```rust tabs
 use nsh_base::button;
@@ -63,6 +65,8 @@ the typed style methods (`.px_4()`, `.bg(..)`) for its look, the state methods (
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
+| `variant` | `.variant(..)` | `string` | the declared default | The variant of the looks the app declared for buttons ([Styling](#styling)); a name the declarations lack applies none and logs a warning. |
+| `size` | `.size(..)` | `string` | the declared default | The size of the looks the app declared for buttons, as `variant`. In Rust `.size(..)` on a button is this prop; its width and height are `.w(..)` and `.h(..)`. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No presses and no press feedback; `disabled:` styles apply and screen readers say it is dimmed. |
 | `selected` | `.selected(..)` | `boolean` | `false` | Selected: the current item (a folder, a filter) or the trigger of an open menu. Something on or off is a `Toggle`. Screen readers say so. The app owns the value and styles it. |
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | none | The style while `selected` and not disabled, as `selected:` classes. |
@@ -94,70 +98,84 @@ styles do not express. A disabled button reports none of them.
 
 ## Styling
 
-The look of a button is your app's: the app decides what a primary or a secondary button is. A pair of small components keeps
-that decision in one place:
+The look of a button is your app's: the app decides what a primary or a ghost button is, and declares it once, in
+its Rust theme code (`set_component_style("button", ..)`) or in `nsh.json` `"components"`. A declaration has a base
+look, looks per named variant and size, their states, and the defaults a button that names none takes. Pages then
+name what they want with `variant` and `size`:
 
 ```rust tabs
-use nsh_base::button;
+use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
-/// A filled button, darker while pressed.
-fn primary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
-    button()
-        .on_press(on_press)
-        .items_center()
-        .rounded_lg()
-        .px_4()
-        .py_3()
-        .bg(rgb(0x2563eb))
-        .active(|s| s.bg(rgb(0x1d4ed8)))
-        .disabled_style(|s| s.opacity(0.4))
-        .child(text(label).text_color(white()).font_weight(FontWeight::SEMIBOLD))
+/// The app's buttons, declared once before the first render (in the root component).
+fn declare_buttons() {
+    set_component_style(
+        "button",
+        ComponentStyle::new()
+            .base(|s| s.items_center().justify_center().rounded_lg())
+            .variant("primary", |s| {
+                let t = theme();
+                s.bg(t.primary)
+                    .text_color(t.primary_foreground)
+                    .active(|s| s.bg(t.primary.opacity(0.85)))
+                    .disabled_style(|s| s.opacity(0.4))
+            })
+            .variant("outline", |s| {
+                let t = theme();
+                s.border_1().border_color(t.border).hover(|s| s.bg(t.accent))
+            })
+            .size("sm", |s| s.px_3().py_2())
+            .size("md", |s| s.px_4().py_3())
+            .default_variant("primary")
+            .default_size("md"),
+    );
 }
 
-/// An outlined button.
-fn secondary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
-    button()
-        .on_press(on_press)
-        .items_center()
-        .rounded_lg()
-        .px_4()
-        .py_3()
-        .border_1()
-        .border_color(rgb(0xd4d4d4))
-        .hover(|s| s.bg(rgb(0xfafafa)))
-        .active(|s| s.bg(rgb(0xf5f5f5)))
-        .child(text(label).text_color(rgb(0x171717)))
+/// A page names the looks.
+fn actions(save: impl Fn() + 'static, cancel: impl Fn() + 'static) -> impl IntoElement {
+    view()
+        .flex_row()
+        .gap_2()
+        .child(button().on_press(save).child(text("Save")))
+        .child(button().variant("outline").size("sm").on_press(cancel).child(text("Cancel")))
 }
 ```
 
 ```tsx tabs
-import { Text } from "nsh";
+// nsh.json
+// "components": {
+//   "button": {
+//     "base": "items-center justify-center rounded-lg",
+//     "variants": {
+//       "primary": "bg-primary text-primary-foreground active:bg-primary/85 disabled:opacity-40",
+//       "outline": "border border-border hover:bg-accent"
+//     },
+//     "sizes": { "sm": "px-3 py-2", "md": "px-4 py-3" },
+//     "defaults": { "variant": "primary", "size": "md" }
+//   }
+// }
+import { Text, View } from "nsh";
 import { Button } from "nsh/base";
 
-function Primary(props: { label: string; onPress: () => void; disabled?: boolean }) {
+function Actions(props: { onSave: () => void; onCancel: () => void }) {
   return (
-    <Button
-      onPress={props.onPress}
-      disabled={props.disabled}
-      class="items-center rounded-lg bg-blue-600 px-4 py-3 active:bg-blue-700 disabled:opacity-40"
-    >
-      <Text class="font-semibold text-white">{props.label}</Text>
-    </Button>
-  );
-}
-
-function Secondary(props: { label: string; onPress: () => void }) {
-  return (
-    <Button
-      onPress={props.onPress}
-      class="items-center rounded-lg border border-neutral-300 px-4 py-3 active:bg-neutral-100 hover:bg-neutral-50"
-    >
-      <Text class="text-neutral-900">{props.label}</Text>
-    </Button>
+    <View class="flex-row gap-2">
+      <Button onPress={props.onSave}>
+        <Text>Save</Text>
+      </Button>
+      <Button variant="outline" size="sm" onPress={props.onCancel}>
+        <Text>Cancel</Text>
+      </Button>
+    </View>
   );
 }
 ```
+
+The declared looks apply in order: the base look, the variant's, then the size's, all before the button's own
+`class`, `style` and state styles, which win for the rare exception. When a page needs a look the declarations
+lack, add a variant or size to the declaration. Rust and `nsh.json` looks of one name apply together, the typed
+ones first ([Tailwind](../docs/tailwind.md#component-styles)). An app declares its looks before the first render:
+a button built before its component has a declaration keeps the look of its use site.
 
 The state variants are applied natively: a press darkens the button on the main thread with no JS or Rust running.
 In Rust the state methods are the same variants: `.active(..)`, `.hover(..)`, `.focus(..)`, `.selected_style(..)` and
@@ -238,7 +256,8 @@ fn close(open: Signal<bool>) -> impl IntoElement {
         .hit_slop(EdgeInsets::all(px(12.0)))
         .accessibility_label("Close")
         .on_press(move || open.set(false))
-        .size(px(20.0))
+        .w(px(20.0))
+        .h(px(20.0))
         .items_center()
         .justify_center()
         .child(text("×"))

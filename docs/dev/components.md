@@ -800,6 +800,37 @@ surface its own (`Core::set_host_tokens`, `EngineControl::set_tokens`; sent from
 are in the first frame and JS's first render): they win over the app's until cleared, and the app's names they lack
 stay, so an embedded app looks like its host (`embedding.md`, "GPUI and GPUI Kit apps").
 
+## Component styles
+
+An app declares the looks of `nsh-base`'s components once, per component, and pages name them (`Button`'s `variant`
+and `size`). NSH declares none: a component nothing is declared for has no look, as before. The store
+(`element/component_styles.rs`) is a per-surface global signal holding two maps by component name: typed looks
+(`set_component_style("button", ComponentStyle::new().base(..).variant("primary", ..).size("sm", ..))`, the app's
+Rust code, `Styled` closures that may declare states with `.hover(..)` / `.active(..)` / `.focus(..)` /
+`.focus_within(..)` / `.disabled_style(..)`) and class looks (nsh.json `"components"`, read by
+`set_component_classes`: a TSX app's bundle sends them to the root as `componentStyles` before the first render, a
+Rust app's root carries them, `Root::components_json`, which the engine sets with `Core::set_component_styles`; the
+bundler and the CLI take out unknown classes with a warning, the core leaves out what it cannot read).
+`set_component_style` replaces one component's typed looks and `set_component_classes` every class look, never the
+other map, so Rust and nsh.json looks of one name apply together: the typed closures, then the classes, Rust's
+string before nsh.json's (at equal rank the later wins); the defaults (`defaults.variant` / `size`) are nsh.json's
+when it has them.
+
+A component applies them with `Element::declared_style(component, variant, size)` on its root (`builder.rs`): the
+base look, then the variant's (the default variant when the page picks none), then the size's. On the root the order
+is the component's own styles, then the declared typed looks (one bound style part), then the declared classes
+(through the root's `app_class`), then the use site's `class` / `style` / state styles, which win. A name nothing
+declares applies nothing and is warned of once per surface.
+
+- **Cost.** A component with no declaration when its element is built gets no binding at all, so an app that
+  declares nothing sends exactly what it sent before. Declarations therefore come before the first render (nsh.json,
+  or the Rust root component's body). A declared component has two bindings; each subscribes to the whole store
+  (one signal per surface), and each run clones that component's `ComponentStyle` (its maps of looks) and resolves
+  it: a change to any declaration runs every declared component's bindings again, which is rare (a brand or density
+  switch). Typed closures run inside the binding, so the theme tokens they read restyle on a theme change.
+- **`app_class`.** `declared_style` sets the root's `app_class` for the declared classes, so a component whose root
+  takes the app's part classes through `app_class` itself cannot also use `declared_style` on that root yet.
+
 ## The host node and ids
 
 In JS a component is a view (the host element `view`) with a `component` prop naming it (its registered name,

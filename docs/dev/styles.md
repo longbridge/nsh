@@ -127,6 +127,12 @@
   element child but the last, as Tailwind's `:where(& > :not(:last-child))`: the parent's `ClassProps::space`, which
   the core applies to a child's style before its classes and inline style (`classes.rs` `space_of`), so the child's
   own margins win. An important space utility is applied after normal child styles and before the child's important classes; an insert or removal restyles only the children whose last-ness changed (`spacing_changed`).
+- **Component styles** (the looks an app declares for `nsh-base`'s components: `docs/dev/components.md`) apply on a
+  component's root in this order: the component's own styles, the declared base look, the variant's, the size's
+  (typed looks before classes, Rust's classes before nsh.json's), then the use site's `class`, `style` and state
+  styles. "Later wins" holds within one rank only, so a declared `hover:` / `active:` rule outranks a plain class at
+  the use site: a page that sets `bg-*` still shows the declared hover background. The use site overrides a state by
+  naming the same state (`hover:bg-*`).
 - **`ch`**: `w-/min-w-/max-w-prose` are Tailwind's `65ch`, the advance of the node's font's `0` (`Decl::Ch`; the core
   measures it with the text engine, cached per font, `Core::zero_advance`): the font it inherits, or its own once its
   classes set one. Such classes depend on `deps::CH`; a font change around them restyles them (`mark_inheriting_text`),
