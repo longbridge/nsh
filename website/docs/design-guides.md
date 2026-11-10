@@ -996,6 +996,47 @@ Pick the lightest tool that says the change: a transition before a motion, a mot
 animated value before a shader. See [Animation](./animation.md) for the APIs and
 [Shader](../elements/shader.md) for shaders.
 
+### Motion inventory (required)
+
+Motion that is left to judgment gets skipped. Every screen an app adds or changes therefore has a written motion
+inventory, kept in the app's design document (`DESIGN.md`) or the pull request, written **before** the screen's code
+and checked **before** the work is called done.
+
+1. **List every state change on the screen**, going through these kinds one by one and writing "none" only for a
+   kind the screen truly lacks:
+   - press and hover on each control;
+   - a glyph or label that changes (play / pause, send / stop, a count, a status);
+   - a selection that moves (tabs, a sidebar's current item, a segmented control);
+   - content that arrives or leaves (a page, a list's rows, a message, a result, a toast);
+   - a surface that opens or closes (a menu, popover, dialog, sheet, panel);
+   - a layout that changes by the user's action (a sidebar collapsing, an item added or removed);
+   - a drag, swipe or throw that is released;
+   - loading and progress (a skeleton, a streaming reply, a spinner);
+   - something live or continuous (playback, recording, a reply being written, data that updates).
+2. **For each, name the tool and the tokens** ("Choose the tool by what changes"): for example "send / stop: glyph swap,
+   `base`, ease-in-out", "current chat: one sliding selection, `base`", "new message: rise 8pt and fade, `slow`,
+   ease-out", "streaming: a breathing caret, paused at rest".
+3. **Mark what reduced motion does** for each line.
+4. **Verify each line in the running app** before finishing, and say which ones were checked.
+
+An inventory in which every line is "fade in" or "hover color" is not done: it is the default the inventory exists
+to replace. A line may say "no motion" with a reason (a value that updates many times a second, a dense data cell).
+
+A chat screen, as an example:
+
+| Change | Motion |
+|---|---|
+| Send button pressed | Scale 0.95, `fast`, soft settle |
+| Send ↔ Stop while streaming | Glyph swap (shrink and fade out, grow in), `base` |
+| User message sent | Rises 8pt and fades in from the composer, `slow`, ease-out |
+| Reply streaming | Caret or thinking mark breathing; paused when idle |
+| Reply finished | Actions (copy, retry) fade in under it, `fast` |
+| Current conversation changes | One selection background slides to it, `base`, ease-in-out |
+| Sidebar collapses | `LayoutAnimation` for that update, `base` |
+| Conversation menu opens | Grows from the trigger's corner, slides 8pt, `slow`; leaves in `base` |
+| A conversation opens | Its messages cross-fade in; the list keeps the reader's position |
+| Reduced motion | All of the above instant; the caret rests |
+
 ### Define motion tokens once
 
 Like color and spacing, motion comes from the app's tokens, not from numbers written in components. Define one small
@@ -1349,7 +1390,7 @@ check report what does not exist.
 
 When it builds or changes an interactive surface, it plans the motion with the layout, not after it: for each state
 change on the screen (press, hover, selection, a glyph or label changing, a popup, arriving content, a drag released,
-something live) it picks the tool from "Motion" ("Choose the tool by what changes"), uses the app's motion tokens
+something live) it writes the screen's motion inventory ("Motion inventory") before the code, picks each tool from "Motion", uses the app's motion tokens
 (defining them if the app has none), and honors reduced motion. A screen whose every change is an instant swap is
 unfinished; so is one that moves without a reason. Sound is added only where the app calls for it ("Sound").
 
@@ -1373,6 +1414,56 @@ Before considering a screen complete, verify that:
 - content remains usable with longer translations, right to left, and larger text;
 - touch targets are at least 44 × 44 points, and pointer targets are comfortably sized even in a dense layout.
 
+## Finishing checklist
+
+The review checklist below asks whether the design made the right decisions; this one checks the execution, item by
+item, on the running app. Run it on every screen the work added or changed, against screenshots in light and dark, and
+report each group as passed or as what was fixed. A group not checked is not passed.
+
+**Radius**
+- [ ] Every radius comes from the theme's scale (`rounded-(--radius)`, the app's named tokens, `rounded-sm` …
+  `rounded-2xl`); no one-off values.
+- [ ] The scale has a clear order: the largest surfaces (a composer, a card, a sheet) softest, controls next, small
+  parts (badges, icons, checkboxes) tightest; small buttons do not become pills.
+- [ ] Nested shapes are concentric: inner radius ≈ outer radius − gap.
+- [ ] `rounded-full` only on intentional circles and pills; no rectangle has a radius near half its height by accident.
+- [ ] Children, selection fills and scrolled content stay inside the rounded corners.
+
+**Typography**
+- [ ] Every size is a step of the type scale (`text-xs` … `text-xl` and the app's display sizes); no literal font sizes.
+- [ ] Hierarchy uses at most three or four sizes and two weights per screen; bold and color stay scarce.
+- [ ] The UI font for interface text, monospace only for code, identifiers, shortcuts and aligned numbers.
+- [ ] Secondary text uses `muted-foreground`, not a smaller size alone; nothing below 12pt for reading.
+- [ ] Long text truncates or wraps on purpose; it works at a larger text size.
+
+**Spacing and gaps**
+- [ ] Every gap and padding is a step of the spacing scale; no literal points except audited exceptions.
+- [ ] Gaps grow with the distance of the relationship: parts of a control < related controls < one group < groups in
+  a section < sections. Equal gaps mean equal relationships.
+- [ ] Padding belongs to the component, gaps to the parent; no doubled insets.
+- [ ] Peers share alignment spines; repeated rows keep their columns; leading and trailing written as start / end.
+
+**Color and surfaces**
+- [ ] Every color is a theme token; no raw hex, RGB or palette classes in presentation code.
+- [ ] One primary action per surface; strong color, badges and alerts scarce.
+- [ ] Popups share one surface treatment; shadows only on what floats; base regions separated by background and hairlines.
+- [ ] Light and dark are balanced; no leftover colors of an earlier palette.
+
+**Controls and states**
+- [ ] Every interactive control shows hover (desktop), pressed, focus-visible, disabled and, where it applies,
+  selected and loading, all distinct and from the app's styled controls.
+- [ ] Icon-only buttons are square, the same size within a group, and have an accessibility label.
+- [ ] One icon family, one stroke weight, sizes from the scale.
+
+**Motion and sound**
+- [ ] The screen's motion inventory exists and every line was verified in the running app ("Motion inventory").
+- [ ] Durations and easings come from the app's motion tokens; nothing moves without a reason; reduced motion checked.
+- [ ] Sound only if the app calls for it, at completed changes, quiet, and the screen works silent.
+
+**Platforms and states of content**
+- [ ] Empty, loading, error and long-content states designed, not left blank.
+- [ ] Checked at the minimum window size or a phone width, at a larger text size, and on each target platform.
+
 ## Design review checklist
 
 A review does not inventory components; it judges whether the interface made the right decisions. Ask, in order:
@@ -1392,7 +1483,7 @@ A review does not inventory components; it judges whether the interface made the
 7. **Does it remain usable in every state and constraint?** Verify keyboard, touch and focus behavior,
    empty/loading/failure/permission states, longer translations, larger text, right to left, both appearances,
    minimum window size, and reduced motion.
-8. **Does motion explain the change?** Do presses, swaps, popups, selections and arriving content move with the
+8. **Does motion explain the change?** Is there a motion inventory for every changed screen, each line verified? Do presses, swaps, popups, selections and arriving content move with the
    app's motion tokens, natively, interruptibly, and not at all with reduced motion, while nothing moves without a
    reason?
 9. **Has it been tested on real platforms?** Complete the task with real components, copy, and representative content

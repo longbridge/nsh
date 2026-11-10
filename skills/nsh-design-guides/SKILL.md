@@ -58,4 +58,9 @@ order (`grep -n '^## ' references/design-guides.md`):
 | Internationalization and platform fit | Multi-locale copy, Chinese terminology, platform conventions           |
 | Guidance for AI-generated interfaces  | Always when an agent produces UI                                       |
 | Accessibility checklist               | Before finishing                                                       |
+| Finishing checklist                   | Before finishing; run every item on the running app and report each group |
 | Design review checklist               | Before finishing; run every item against the work                      |
+
+Before writing a screen, write its motion inventory ("Motion inventory"). Finish by
+running the Finishing checklist on the running app, in light and dark, reporting each
+group as passed or what was fixed, then the Design review checklist.

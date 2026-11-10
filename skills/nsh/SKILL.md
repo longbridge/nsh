@@ -31,6 +31,11 @@ popups growing from their trigger, a sliding selection. Plan each screen's state
 changes with its layout and pick the native tool from the Design Guides' "Motion"
 section (transitions, motions, springs, `LayoutAnimation`, `Shader`), honoring
 reduced motion. A screen whose every change is an instant swap is unfinished.
+Before writing a screen's code, write its motion inventory (Design Guides,
+"Motion inventory") in the app's `DESIGN.md`; before finishing, verify every
+line in the running app and report it. Finish every UI change by running the
+Design Guides' "Finishing checklist" (radius, typography, spacing, color,
+states, motion) on screenshots in light and dark, and report each group.
 
 Choose the app's Desktop, Mobile, Web and TUI targets explicitly. Adapt density,
 navigation, input and overlays to those targets, preserving shared semantics.
@@ -155,6 +160,9 @@ A floor, not a substitute for the guides.
   `close_on_escape`, `disabled`), never a callback returning a boolean.
 - **Do not change NSH to fit an app.** Solve it in the app first: its own components, a
   Rust crate, or a native component.
+- **Every screen has a motion inventory.** Written before its code, every state
+  change named with its tool and tokens, each line verified in the running app
+  before the work is called done (Design Guides, "Motion inventory").
 - **TSX has no DOM, no Node and no npm UI.** Standard modules are exactly `buffer`,
   `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`,
   `zlib`.
