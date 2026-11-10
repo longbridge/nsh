@@ -358,6 +358,15 @@ pub fn os() -> Os {
         .with_untracked(|e| e.os)
 }
 
+/// The platform's name (TS: `platform.name`): the OS's on NSH's own
+/// platforms (`"ios"`, `"web"`, ...), a platform built outside NSH's own
+/// (`"miniprogram"`), whose OS is [`os`]; it does not change.
+pub fn platform_name() -> &'static str {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.platform_name())
+}
+
 /// [`os`] where an engine runs (its thread, while it runs Rust code),
 /// else `None`: for code that also runs outside an engine (a unit test of
 /// a component's model).
@@ -869,6 +878,20 @@ pub(crate) fn set_app_url_from_js(url: String) {
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view shows a page here (TS: `WebView.available()`): the
+/// platform shows web views and the app's capabilities grant `webview`.
+/// Where it answers `false`, a web view reports `onError` (`code`
+/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform shows none,
+/// `ERR_ACCESS_DENIED` where `webview` is not granted). A web engine that
+/// fails only when a web view starts (Windows without the WebView2
+/// runtime) answers `true` and reports the error on the web view. To
+/// await in a task.
+pub fn web_view_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebViewAvailable(slot));
     answer
 }
 

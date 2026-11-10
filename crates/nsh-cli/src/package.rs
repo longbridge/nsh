@@ -16,7 +16,7 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::{
-    apple::{AppleConfig, ApplePlatform},
+    apple::{ActivationPolicy, AppleConfig, ApplePlatform, MacosConfig},
     runtime::{self, Platform},
     ui,
 };
@@ -136,9 +136,10 @@ pub(crate) struct AppConfig {
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
-    /// What macOS packages add to their `Info.plist` and entitlements.
+    /// What macOS packages add to their `Info.plist` and entitlements, and
+    /// how the app takes part in the system's UI.
     #[serde(default)]
-    pub(crate) macos: AppleConfig,
+    pub(crate) macos: MacosConfig,
     /// What Android packages set in their manifest.
     #[serde(default)]
     pub(crate) android: AndroidConfig,
@@ -295,6 +296,11 @@ pub(crate) struct WebConfig {
     /// (`/apps/counter/sports/football`). Without it the page's URLs are
     /// relative to the page.
     pub(crate) base: Option<String>,
+    /// Whether pushed pages and open dialogs are entries of the browser's
+    /// history (`createPlayer`'s `history`), on the packaged page and the
+    /// dev server's; by default only where the app is the whole page, not
+    /// in an iframe.
+    pub(crate) history: Option<bool>,
 }
 
 /// Options of `nsh package`.
@@ -358,7 +364,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     }
     warn_ignored(&path, &ignored);
     config.ios.check(ApplePlatform::Ios)?;
-    config.macos.check(ApplePlatform::Macos)?;
+    config.macos.check()?;
     config.icon = config.icon.map(|icon| dir.join(icon));
     config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
@@ -1051,6 +1057,7 @@ fn package_macos(
     if let Some(appearance) = &config.appearance {
         info["appearance"] = appearance.as_str().into();
     }
+    config.macos.add_to_app_json(&mut info);
     let schemes = config.url_schemes();
     fs::write(
         nsh.join("app.json"),
@@ -1068,7 +1075,7 @@ fn package_macos(
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
-    let entitlements = config.macos.entitlements(ApplePlatform::Macos)?;
+    let entitlements = config.macos.entitlements()?;
     for key in entitlements.keys() {
         if crate::apple::needs_profile(key) {
             ui::warn(format!(
@@ -1187,9 +1194,13 @@ fn macos_info_plist(
     if icon {
         d.insert("CFBundleIconFile".into(), s("AppIcon"));
     }
+    // A menu bar app is one from launch: the Dock never shows it.
+    if config.macos.activation_policy == ActivationPolicy::Accessory {
+        d.insert("LSUIElement".into(), true.into());
+    }
     config.usage_descriptions(&mut d);
     // The app's own keys, over NSH's defaults (never over its reserved ones).
-    d.extend(config.macos.info_plist(ApplePlatform::Macos)?);
+    d.extend(config.macos.info_plist()?);
     Ok(d)
 }
 
@@ -1646,6 +1657,21 @@ mod tests {
             plist::Value::String("public.app-category.finance".into())
         );
         assert!(!macos.contains_key("ITSAppUsesNonExemptEncryption"));
+        assert!(!macos.contains_key("LSUIElement"));
+    }
+
+    /// A menu bar app's package launches as one (`LSUIElement`).
+    #[test]
+    fn menu_bar_apps_launch_as_one() {
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "macos": { "activationPolicy": "accessory" }
+        }))
+        .unwrap();
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(macos["LSUIElement"], plist::Value::Boolean(true));
+        // iOS has no counterpart.
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert!(!ios.contains_key("LSUIElement"));
     }
 
     #[test]
@@ -1658,7 +1684,7 @@ mod tests {
                 "updater": { "github": "acme/orders", "channel": "beta" },
                 "android": { "targetSdk": 35, "futureAndroidKey": 1 },
                 "tui": { "futureTuiKey": "x" },
-                "ios": { "futureIosKey": {} }
+                "ios": { "futureIosKey": {}, "activationPolicy": "accessory" }
             }"#,
         )
         .unwrap();
@@ -1676,6 +1702,7 @@ mod tests {
             [
                 "unknown key `android.futureAndroidKey`",
                 "unknown key `futureKey`",
+                "unknown key `ios.activationPolicy`",
                 "unknown key `ios.futureIosKey`",
                 "unknown key `tui.futureTuiKey`",
                 "unknown key `updater.channel`",
@@ -1693,7 +1720,11 @@ mod tests {
                 "icon": { "light": "a.png", "dark": "b.png" },
                 "schemes": ["orders", { "scheme": "x" }],
                 "web": { "base": "/orders/", "connect": ["a.com", 1] },
-                "android": { "targetSdk": "latest" }
+                "android": { "targetSdk": "latest" },
+                "macos": {
+                    "activationPolicy": "dock",
+                    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" }
+                }
             }"#,
         )
         .unwrap();
@@ -1704,6 +1735,14 @@ mod tests {
         assert_eq!(config.web.base.as_deref(), Some("/orders/"));
         assert_eq!(config.web.connect, ["a.com"]);
         assert_eq!(config.android.target_sdk, None);
+        // The rest of a section applies without the value it left out.
+        assert_eq!(config.macos.activation_policy, ActivationPolicy::Regular);
+        assert!(
+            config
+                .macos
+                .info_plist
+                .contains_key("LSApplicationCategoryType")
+        );
         let mut at: Vec<&str> = ignored
             .iter()
             .map(|m| m.split_once(':').unwrap().0)
@@ -1715,6 +1754,7 @@ mod tests {
                 "android.targetSdk",
                 "build",
                 "icon",
+                "macos.activationPolicy",
                 "schemes[1]",
                 "web.connect[1]"
             ]
@@ -1722,6 +1762,43 @@ mod tests {
         // Text that is no JSON object is still an error.
         assert!(parse_config("not json").is_err());
         assert!(parse_config("[]").is_err());
+    }
+
+    #[test]
+    fn an_activation_policy_of_another_form_is_left_out() {
+        // Objects are the form serde's own enums also take: one would pick
+        // a policy, the other fail where the reader cannot leave it out.
+        for policy in [
+            serde_json::json!({ "accessory": null }),
+            serde_json::json!({ "accessory": true }),
+            serde_json::json!(1),
+        ] {
+            let text = serde_json::json!({
+                "macos": {
+                    "activationPolicy": policy,
+                    "infoPlist": { "LSApplicationCategoryType": "public.app-category.finance" }
+                }
+            })
+            .to_string();
+            let (config, ignored) = parse_config(&text).unwrap();
+            assert_eq!(
+                config.macos.activation_policy,
+                ActivationPolicy::Regular,
+                "{policy}"
+            );
+            assert!(
+                config
+                    .macos
+                    .info_plist
+                    .contains_key("LSApplicationCategoryType"),
+                "{policy}"
+            );
+            assert_eq!(ignored.len(), 1, "{policy}: {ignored:?}");
+            assert!(
+                ignored[0].starts_with("macos.activationPolicy: "),
+                "{policy}: {ignored:?}"
+            );
+        }
     }
 
     #[test]

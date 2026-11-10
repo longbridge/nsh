@@ -229,6 +229,7 @@ mount(App);
 | `searchable` | `.searchable(..)` | `boolean` | `false` | 条目上方的搜索框按标题筛选条目。 |
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | 无 | 搜索框的占位文字。 |
 | `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对搜索框的称呼：它搜索的是什么。 |
+| `searchTestID` | `.search_test_id(..)` | `string` | 无 | UI 测试查找搜索框所用的 id（`nsh/test` 的 `id:`），与 `testID` 指向选择框自己的视图一样。 |
 | `cleanable` | `.cleanable(..)` | `boolean` | `false` | 有选中条目时显示清除按钮；按下会清空值（`onChange({ value: null })`）。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 保持关闭：触发元素不接受按压和键盘焦点，并应用 `disabled:` 样式。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对它的称呼：这次选择是关于什么的。 |
@@ -287,7 +288,7 @@ mount(App);
 | 清除按钮 | 选择框的视图，触发元素之后（`cleanable`，有选中条目时） | `clearButtonClass`、`clearButtonStyle`；内容 `clearButton` |
 | 弹出层或 sheet | 位于所有内容之上，在触发元素处（桌面）或屏幕底部（触摸屏） | `popupClass`、`popupStyle` |
 | 背景层 | sheet 后面（触摸屏） | `backdropClass`、`backdropStyle` |
-| 搜索框 | 弹出层中的第一个（`searchable`） | `searchClass`、`searchStyle`、`searchPlaceholder`、`searchAccessibilityLabel` |
+| 搜索框 | 弹出层中的第一个（`searchable`） | `searchClass`、`searchStyle`、`searchPlaceholder`、`searchAccessibilityLabel`、`searchTestID` |
 | 列表 | 弹出层中，搜索框之后 | `listClass`、`listStyle` |
 | 分组标题 | 列表中，分组的条目之前 | `groupClass`、`groupStyle`、`renderGroup` |
 | 条目的行 | 列表中 | `itemClass`、`itemStyle`、`renderItem`（其中用 `group-focus:`、`group-selected:`、`group-disabled:`，`itemClass` 里加 `group`） |

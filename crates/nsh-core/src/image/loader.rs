@@ -997,19 +997,37 @@ mod http {
         image::{CacheHeaders, Fetched},
     };
 
-    /// The HTTP agent all downloads share. It never follows redirects: each
-    /// hop is checked before it is requested.
-    fn agent() -> &'static ureq::Agent {
-        static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-        AGENT.get_or_init(|| {
-            ureq::Agent::config_builder()
+    /// The HTTP agents all downloads share. They never follow redirects:
+    /// each hop is checked before it is requested. Loopback hosts (the dev
+    /// server's `127.0.0.1` assets) skip the environment's proxy: a proxy
+    /// such as `HTTP_PROXY=http://127.0.0.1:7890` would otherwise carry the
+    /// request, or refuse it when it is not running.
+    fn agent(url: &str) -> &'static ureq::Agent {
+        static PROXIED: OnceLock<ureq::Agent> = OnceLock::new();
+        static DIRECT: OnceLock<ureq::Agent> = OnceLock::new();
+        let direct = is_loopback(url);
+        (if direct { &DIRECT } else { &PROXIED }).get_or_init(|| {
+            let config = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
                 .http_status_as_error(false)
                 .max_redirects(0)
-                .max_redirects_will_error(false)
-                .build()
-                .into()
+                .max_redirects_will_error(false);
+            let config = if direct { config.proxy(None) } else { config };
+            config.build().into()
         })
+    }
+
+    /// Whether `url` names this machine: `localhost` or a loopback address.
+    pub(super) fn is_loopback(url: &str) -> bool {
+        let Ok(url) = url::Url::parse(url) else {
+            return false;
+        };
+        match url.host() {
+            Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        }
     }
 
     /// GETs `url` with `headers`, following redirects one hop at a time.
@@ -1020,7 +1038,7 @@ mod http {
     ) -> Result<ureq::http::Response<ureq::Body>, String> {
         let mut url = url.to_owned();
         for _ in 0..=MAX_REDIRECTS {
-            let mut request = agent().get(&url);
+            let mut request = agent(&url).get(&url);
             for (name, value) in headers {
                 request = request.header(*name, value);
             }

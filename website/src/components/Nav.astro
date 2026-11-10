@@ -114,13 +114,15 @@ const onRootPage = /^\/(zh-CN\/)?(apps|directory|releases)(\/|$)/.test(pagePath)
       >
         {isZh ? '社区生态' : 'Directory'}
       </a>
-      <a
-        href={releasesHref}
-        class:list={['site-nav__link', { active: activeSection === 'releases' }]}
-        aria-current={activeSection === 'releases' ? 'true' : undefined}
-      >
-        {isZh ? '版本发布' : 'Releases'}
-      </a>
+      {siteVersions.length <= 1 && (
+        <a
+          href={releasesHref}
+          class:list={['site-nav__link', { active: activeSection === 'releases' }]}
+          aria-current={activeSection === 'releases' ? 'true' : undefined}
+        >
+          {isZh ? '版本发布' : 'Releases'}
+        </a>
+      )}
     </nav>
 
     <div class="site-nav__actions">
@@ -143,6 +145,13 @@ const onRootPage = /^\/(zh-CN\/)?(apps|directory|releases)(\/|$)/.test(pagePath)
                 {version.id === latestVersion && <span>{isZh ? '最新' : 'latest'}</span>}
               </a>
             ))}
+            <a
+              href={releasesHref}
+              class:list={['site-nav__versions-releases', { 'is-current': activeSection === 'releases' }]}
+              aria-current={activeSection === 'releases' ? 'page' : undefined}
+            >
+              {isZh ? '版本发布' : 'Release notes'}
+            </a>
           </div>
         </details>
       )}

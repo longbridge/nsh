@@ -3321,6 +3321,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         rtl: env.rtl,
         pixel_ratio: env.pixel_ratio,
         os: env.os,
+        platform: env.platform,
         os_version: env.os_version,
         idiom: env.idiom,
         locale: env.locale,
@@ -3336,6 +3337,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         audio: env.audio,
         cell: env.cell,
         web_input: env.web_input,
+        web_views: env.web_views,
     }
 }
 

@@ -199,6 +199,8 @@ struct Items {
     next: Rc<Cell<u64>>,
     order: Rc<OrderWatch>,
     keyed: Stored<Option<Keyed>>,
+    /// The item with the keyboard focus, if any.
+    focused: Signal<Option<u64>>,
 }
 
 impl Items {
@@ -223,6 +225,7 @@ impl Items {
             next: Rc::new(Cell::new(0)),
             order: Rc::new(order),
             keyed,
+            focused: signal(None),
         }
     }
 
@@ -288,16 +291,28 @@ impl Items {
     /// Moves the focus from item `key` to the enabled item of its level
     /// that `step` names.
     fn step(&self, key: u64, step: ItemStep) {
+        let level = self
+            .list
+            .borrow()
+            .iter()
+            .find(|e| e.key == key)
+            .map(|e| e.level);
+        if let Some(level) = level {
+            self.step_in(level, Some(key), step);
+        }
+    }
+
+    /// Moves the focus to the enabled item of submenu `level` that `step`
+    /// names from item `key`, or from none: Down and Home go to the first,
+    /// Up and End to the last.
+    fn step_in(&self, level: u32, key: Option<u64>, step: ItemStep) {
         let target = {
             let list = self.list.borrow();
-            let Some(level) = list.iter().find(|e| e.key == key).map(|e| e.level) else {
-                return;
-            };
             let enabled: Vec<&Entry> = list
                 .iter()
                 .filter(|e| e.level == level && !e.disabled.get_untracked())
                 .collect();
-            let at = enabled.iter().position(|e| e.key == key);
+            let at = key.and_then(|key| enabled.iter().position(|e| e.key == key));
             let n = enabled.len();
             let index = match (step, at) {
                 _ if n == 0 => return,
@@ -311,8 +326,35 @@ impl Items {
         target.focus();
     }
 
+    /// Binds the keys that move the focus into the menu's items while
+    /// `active` and none of them has it (a menu the pointer opened), as
+    /// the desktops' menus take them: Down and Home focus the first
+    /// enabled item, Up and End the last. Once an item has the focus, its
+    /// own keys take over.
+    fn bind_entry_keys(&self, active: impl Fn() -> bool + 'static) {
+        let (items, current) = (self.clone(), self.focused);
+        crate::keys::bind_while(
+            move || active() && current.get().is_none(),
+            ITEM_KEYS,
+            move |step| items.step_in(0, None, step),
+        );
+    }
+
     /// Binds the keys that move the focus from item `key` while `focused`.
     fn bind_keys(&self, key: u64, focused: Signal<bool>) {
+        let current = self.focused;
+        effect(move || {
+            if focused.get() {
+                current.set(Some(key));
+            } else if current.get_untracked() == Some(key) {
+                current.set(None);
+            }
+        });
+        cleanup(move || {
+            if current.get_untracked() == Some(key) {
+                current.set(None);
+            }
+        });
         let items = self.clone();
         crate::keys::bind_while(
             move || focused.get(),
@@ -405,6 +447,12 @@ fn surface(
         Rc::new(move |reason: OpenChangeReason| change(false, reason))
     };
     let presence = PopupPresence::new(move || !sheet && open.get(), parts.looks());
+    let items = Items::new(keyed);
+    // A popup opened with no item focused (by the pointer) takes the
+    // arrows, Home and End as well.
+    if !sheet {
+        items.bind_entry_keys(move || presence.mounted() && open.get());
+    }
     provide_context(MenuContext {
         close,
         sheet,
@@ -415,7 +463,7 @@ fn surface(
         next: stored(1),
         looks: parts.looks(),
         popup: presence.popup(),
-        items: Items::new(keyed),
+        items,
         leave: None,
         why,
     });
@@ -654,7 +702,9 @@ pub enum MenuEvent {
 /// screens). Choosing an item, a press outside, Escape and the Android back
 /// button close it. Return, Space or Down on the focused trigger opens it
 /// with the keyboard focus on its first enabled item, Up on its last
-/// (WAI-ARIA's menu button); a press opens it with none. It looks like
+/// (WAI-ARIA's menu button); a press opens it with none, and on the
+/// desktops Down or Home then focuses the first, Up or End the last, as
+/// the desktops' menus do. It looks like
 /// nothing: style the popup or sheet with
 /// `popupClass` / `popupStyle`, the backdrop with `backdropClass` /
 /// `backdropStyle`, and the items.
@@ -838,6 +888,8 @@ pub struct ContextMenuProps {
 /// VO-Shift-M on macOS, UI Automation's `ShowContextMenu` on Windows) open
 /// it below the trigger with the keyboard focus on its first enabled item,
 /// as WAI-ARIA has it, and closing it gives the focus back to the trigger.
+/// Opened by the pointer with no item focused, Down or Home focus the
+/// first enabled item and Up or End the last, as `Menu`'s keys do.
 /// Its items are those of `Menu`, and so is how it
 /// closes and how it is styled.
 #[component]
@@ -903,6 +955,11 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                             let page = at.unwrap_or_default();
                             let task = set_timeout(HOLD, move || {
                                 hold.replace(None);
+                                // The finger went to the menu: lifting it
+                                // presses nothing (no `onPress` or
+                                // `onPressUp`) and the trigger's `active:`
+                                // styles reset now.
+                                anchor.cancel_press();
                                 keyed.replace(None);
                                 point.set(page);
                                 on_hold(true, OpenChangeReason::LongPress);

@@ -6,7 +6,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 
 | JSX | Native (Apple) | Notes |
 |---|---|---|
-| `<View>` | `NshView` (UIView) | `onPress` / `onLongPress` / `onPressDown` / `onPressUp`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`, `pan={{x, y}}` + `onPanStart` / `onPanEnd`, `pinch` / `rotation`; `desktop={{ windowDrag }}` (any element: pressing it drags the window; the platforms decide on the main thread from `ViewProps::window_drag`, the nearest view that sets it decides, inputs and views with press / touch handlers nearer than it stay clickable; `nsh/desktop`) |
+| `<View>` | `NshView` (UIView) | `onPress` / `onLongPress` / `onPressDown` / `onPressUp`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`, `pan={{x, y}}` + `onPanStart` / `onPanEnd`, `pinch` / `rotation`; `desktop={{ windowDrag }}` (any element: pressing it drags the window; the platforms decide on the main thread from `ViewProps::window_drag`, the nearest view that sets it decides, inputs and views with press / touch handlers nearer than it stay clickable; `nsh/desktop`); `web={{ element }}` (any view or text: the HTML element the web draws it as where `role` cannot say it, `ViewProps::web_element`; headings come from `role="header"` and its level, links from `Link`'s `href`; the other platforms ignore it; [web.md](web.md) "Document elements") |
 | `<Text>` | `TextView` (CTFrame) | nested `<Text>` is a span, other elements are inline attachments ([text.md](text.md)); the style keys `numberOfLines` and `textOverflow`, `allowFontScaling`, `maxFontSizeMultiplier`, `adjustsFontSizeToFit` + `minimumFontScale`, the style key `userSelect` (range selection) + `selectionColor` (`selection:text-*`), `onTextLayout` |
 | `<Image src>` | UIView + image CALayer | `src` is a URL or `import img from "./a.png"` (an asset descriptor with its size); the `objectFit` style (`object-*`); `placeholder` (a URL or an asset, shown until the image loads), `blurRadius`, `fadeDuration`; `onLoadStart` / `onProgress` (`loaded` / `total` bytes) / `onLoad` (the source's pixel size) / `onError` / `onLoadEnd`; `tintColor`; animated GIF / WebP / APNG; `Image.getSize(src)` / `Image.prefetch(src)` |
 | `<Scroll>` | UIScrollView | `horizontal`, `contentStyle` / `contentClass`, `refreshing` + `onRefresh` (with `refreshIndicator` + `pullValue` for an indicator of the app's own), `scrollValue`, `onScrollEnd`, `keyboardDismissMode`, zooming, see [scrolling-and-lists.md](scrolling-and-lists.md) |
@@ -391,6 +391,17 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `app.paste(selector, { text, html, files, uris })` pastes as the user does (files are paths whose bytes are read):
   headless, and on macOS and iOS through a pasteboard of the test's own (`TestStep::Paste`), the machine's
   clipboard untouched. `onPaste` is kind 64: `EventMask` has two words.
+- **Edit menu** (internal, for components that draw their own selection: `RichEditor` on touch screens):
+  `ElementRef::open_edit_menu(bounds, actions)` on a focused input (`Command::OpenEditMenu`, `bounds` in the root
+  view) opens the system's menu there offering `actions`, `close_edit_menu` closes it. The actions are
+  `EditAction`s, named as gpui-base's input actions (`Cut`, `Copy`, `Paste`, `SelectAll`); the component leaves out
+  what cannot apply rather than disabling it. iOS (`input.rs`): a `UIEditMenuInteraction` on the field
+  (`UIMenuController` before iOS 16), its target rect the bounds, preferring above them; while the menu is the
+  component's, `canPerformAction:` offers only what it asked for (Paste with something on the pasteboard) and `cut:` /
+  `copy:` / `selectAll:` report instead of acting. Android (`InputBox.openEditMenu`): a floating `ActionMode` with
+  the system's Cut, Copy, Paste and Select all. Chosen actions come back as `EventKind::EditAction` (`action`: `cut`,
+  `copy`, `selectAll`); Paste is the input's own paste (`onPaste`). Other platforms ignore it. Headless, `app.menu()` lists
+  it with the platform's labels and `chooseMenuItem` chooses from it (Paste pastes the test's clipboard).
 
 Text, styles, scrolling and lists, animation, canvases and images have their own pages.
 
@@ -458,6 +469,30 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
   so. The overlay should
   not take the pointer (`pointerEvents: "none"`).
+- **A link's hint** (a hint overlay whose parent is a link of a text: a nested span, `AttributedText::links`): the
+  span is its anchor (`Core::hint_anchor` takes any span, `is_text_span`, since the watch is what makes it a link;
+  `is_link_span`: a span taking presses or watched for a hint). A span taking no presses (`RichEditor`'s link mark,
+  whose presses are the editor's) is a link for the pointer only: `MouseEnter` / `MouseLeave`, `focus_stop` false,
+  and none inside a span that takes presses (that one keeps the press); the platforms route presses, the pointer
+  cursor and Tab only to links whose events take presses (`has_press`; the web's `PRESS_EVENTS`). The span has no
+  frame, so
+  the platforms report the pointer over its characters: while a hint watches the span (`watch::HINT`), its
+  `TextLink::events` carry `MouseEnter` / `MouseLeave` (`collect_text`; `rewatch` merges the block again), and each
+  desktop backend sends them to the span's node as the link under the mouse changes (`hover_link` in the macOS,
+  Linux, Windows and GPUI `input.rs`, from the pick their cursor or hover already makes; the web's
+  `installLinkHover` over the runs' link spans; the headless driver models links as views). The hint is placed
+  against where the pointer came over the link (`OverlayState::pointer`, an `OverlayAnchor::Point`), against the
+  text block for the keyboard focus; a press on the block hides it (the block listens to touches), and so does a
+  scroll of a scroll view or list around the link (`Core::set_scroll_offset` → `overlay_scrolled`: the point would
+  stay behind; the pointer coming over a link again shows it there). `nsh-base`'s
+  `Link`, `TextView`'s links (and images in them) and `RichEditor`'s link mark show their destination with it
+  (`link_hint.rs`: the link's title — Markdown's, HTML
+  `<a title>`'s, the mark's `title`, `Link`'s `title` prop — over one row of
+  `open_url::hint_url`'s two parts, laid out LTR (`direction`) in every app: a head of scheme, host and port that
+  never shrinks or wraps and a rest that alone gives way, one line with a middle ellipsis (`EllipsizeMode::Middle`),
+  IDN hosts as punycode; paths and anchors as written, escaped; `Link`'s below the link, by default apart from an app's
+  `tooltip` above it, though either may flip near an edge); hint overlays inside an element count
+  for none of its positional classes (`is_tooltip_overlay`).
 - **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
   overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
   placement never moves it), placed on top with a 4 pt gap, holding the element JS made (retained by the node, moved

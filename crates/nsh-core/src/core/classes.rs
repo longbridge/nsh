@@ -218,6 +218,10 @@ impl<M: TextEngine> Core<M> {
         if held {
             new |= state::PRESSED;
         }
+        if !held && self.press_cancelled(key) {
+            new &= !state::PRESSED;
+        }
+        let node = &mut self.nodes[key as usize];
         if new == node.states {
             return;
         }
@@ -363,7 +367,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Restyles `key` if its classes read its states, and the nodes inside
     /// it that read its group states.
-    fn states_changed(&mut self, key: Key) {
+    pub(super) fn states_changed(&mut self, key: Key) {
         let Some(classes) = self.nodes[key as usize].classes.clone() else {
             return;
         };

@@ -201,6 +201,12 @@ fn start(
         if !foreground {
             command.arg("--background");
         }
+        // As the app runs (`--background` takes precedence): a menu bar app
+        // run `--foreground` has no Dock icon either. As `nsh run` does, a
+        // test runs as a regular app when `nsh.json` does not read (the
+        // keys only packages use are checked there too).
+        let config = crate::package::read_config(&entry).unwrap_or_default();
+        command.args(config.macos.host_args());
     }
     if target == Target::Gpui && cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some()
     {

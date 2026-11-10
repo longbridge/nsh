@@ -228,6 +228,12 @@ pub struct Environment {
     pub screen_reader: bool,
     /// The operating system.
     pub os: Os,
+    /// The platform's name where it is not the OS's: a platform built
+    /// outside NSH, on NSH's engine (`docs/dev/platforms.md`), names itself
+    /// here (`Some("miniprogram")`) and reports the OS it runs on in
+    /// [`Environment::os`]. Lower case, none of [`Os`]'s names. `None` on
+    /// NSH's own platforms ([`Environment::platform_name`]).
+    pub platform: Option<&'static str>,
     /// The OS version: major and minor (iOS, desktops), Android's API level
     /// and 0.
     pub os_version: (u16, u16),
@@ -287,9 +293,23 @@ pub struct Environment {
     /// ([`crate::Command::SendInput`], macOS); without it, the command
     /// does nothing.
     pub web_input: bool,
+    /// The platform shows web views (TS: `WebView.available()`). `true` by
+    /// default; a platform that knows from the start that it shows none
+    /// (built without a web engine, the system's failed to load) sets
+    /// `false`, and every web view then reports `onError` with `code`
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
+    /// when a web view starts reports that error itself.
+    pub web_views: bool,
 }
 
 impl Environment {
+    /// The platform's name (TS: `platform.name`): [`Environment::platform`]
+    /// on a platform built outside NSH (`"miniprogram"`), else the OS's
+    /// (`"ios"`, `"web"`, ...).
+    pub fn platform_name(&self) -> &'static str {
+        self.platform.unwrap_or(self.os.name())
+    }
+
     /// Desktop behavior applies: a desktop OS, a browser in the desktop
     /// idiom or a terminal ([`Idiom::desktop_on`]: `desktop={{…}}` props,
     /// `platform.select({ desktop })`, `platform.desktop`, `platform.idiom`
@@ -320,6 +340,7 @@ impl Default for Environment {
             pixel_ratio: 1.0,
             screen_reader: false,
             os: Os::default(),
+            platform: None,
             os_version: (0, 0),
             idiom: Idiom::Phone,
             apple_keyboard: false,
@@ -335,6 +356,7 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
+            web_views: true,
         }
     }
 }
@@ -1261,6 +1283,80 @@ pub fn content_type(path: &str) -> &'static str {
     }
 }
 
+/// The MIME type of a local file by its name's extension, `""` when the
+/// name says none (a directory, no extension, one this table lacks), as the
+/// DOM's `File.type`. File drags and drops report it beside each URL
+/// (`FileDragEvent::mime_types`): it reads the name only, never the file,
+/// so it costs nothing while a drag hovers and is the same on every
+/// platform. `uri` is a `file:` URL or a path.
+#[doc(hidden)]
+pub fn file_mime_type(uri: &str) -> &'static str {
+    let path = uri.split(['?', '#']).next().unwrap_or_default();
+    let name = path.rsplit('/').next().unwrap_or_default();
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return "";
+    };
+    if stem.is_empty() {
+        // A dotfile (`.env`): a name, not an extension.
+        return "";
+    }
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" | "jpe" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "ico" => "image/x-icon",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "wav" => "audio/wav",
+        "ogg" | "oga" | "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        "aif" | "aiff" => "audio/aiff",
+        "caf" => "audio/x-caf",
+        "txt" | "text" | "log" => "text/plain",
+        "md" | "markdown" => "text/markdown",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" => "text/javascript",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "yaml" | "yml" => "application/yaml",
+        "pdf" => "application/pdf",
+        "rtf" => "application/rtf",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "7z" => "application/x-7z-compressed",
+        "rar" => "application/vnd.rar",
+        "wasm" => "application/wasm",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        _ => "",
+    }
+}
+
 /// What happens to a request, in order: (for a streamed body) any number
 /// of `BodyWanted`; then `Head`, `Data`… and `End` — or `Failed` at any
 /// point.
@@ -1300,7 +1396,7 @@ pub enum FetchOp {
 mod tests {
     use super::{
         Environment, HostEnvironment, HourCycle, Idiom, Languages, Locale, LocaleSettings,
-        MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday, content_type,
+        MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday, content_type, file_mime_type,
     };
 
     #[test]
@@ -1623,6 +1719,28 @@ mod tests {
                 "application/octet-stream",
                 "{unknown}"
             );
+        }
+    }
+
+    #[test]
+    fn file_mime_types_come_from_the_name_alone() {
+        assert_eq!(file_mime_type("file:///tmp/a%20b.PNG"), "image/png");
+        assert_eq!(file_mime_type("file:///tmp/%E4%B8%AD.jpeg"), "image/jpeg");
+        assert_eq!(file_mime_type("/Users/me/Report.pdf"), "application/pdf");
+        assert_eq!(
+            file_mime_type("file:///tmp/notes.md?x=1#y"),
+            "text/markdown"
+        );
+        assert_eq!(file_mime_type("C:/Users/me/Clip.mov"), "video/quicktime");
+        // A directory, no extension, a dotfile, an extension the table lacks.
+        for none in [
+            "file:///tmp/photos.d/",
+            "file:///tmp/README",
+            "file:///tmp/.env",
+            "file:///tmp/a.unknownext",
+            "",
+        ] {
+            assert_eq!(file_mime_type(none), "", "{none}");
         }
     }
 }

@@ -44,6 +44,7 @@ pub(crate) const BASE: &str = "base";
 /// address, Rust's `set_app_url`) and every VM's `System` reads it
 /// (`UrlScheme.url()`), on the engine's thread. `UrlScheme.setUrl` writes
 /// it too, at once, so `url()` reads it back.
+#[doc(hidden)]
 #[derive(Debug, Clone, Default)]
 pub struct AppUrlCell(std::rc::Rc<std::cell::RefCell<AppUrlState>>);
 

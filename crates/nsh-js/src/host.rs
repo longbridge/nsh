@@ -1296,10 +1296,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         }
         EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
             let list = rquickjs::Array::new(cx.clone())?;
+            let types = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
                 list.set(index, uri.as_str())?;
+                types.set(index, nsh_core::platform::file_mime_type(uri))?;
             }
             obj.set("uris", list)?;
+            obj.set("mimeTypes", types)?;
             if let EventPayload::FileDropAt { page_position, .. } = payload {
                 obj.set("pagePosition", point_object(cx, *page_position)?)?;
             }
@@ -2226,6 +2229,47 @@ const report = (v) => text(String(v));
     }
 
     #[test]
+    fn file_drag_entry_delivers_metadata_before_drop_and_keeps_no_argument_handlers() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { element, prop } from "nsh:rt";
+            globalThis.seen = [];
+            const target = element("view");
+            prop(target, "onFileDragEnter", (e) => seen.push("enter " + e.uris.join(";") + " " + e.mimeTypes.join(";")));
+            prop(target, "onFileDragLeave", () => seen.push("leave"));
+            prop(target, "onFileDrop", (e) => seen.push("drop " + e.uris.join(";")));
+            const old = element("view");
+            prop(old, "onFileDragEnter", () => seen.push("old"));
+        "#,
+        )
+        .unwrap();
+        let first = EventPayload::FileDrop(vec![
+            "file:///tmp/a%20b.png".into(),
+            "file:///tmp/%E4%B8%AD.txt".into(),
+        ]);
+        let next = EventPayload::FileDrop(vec!["file:///tmp/next.png".into()]);
+        host.dispatch_event(2, EventKind::FileDragEnter, &first);
+        host.dispatch_event(2, EventKind::FileDragLeave, &EventPayload::None);
+        host.dispatch_event(2, EventKind::FileDragEnter, &next);
+        host.dispatch_event(2, EventKind::FileDrop, &next);
+        host.dispatch_event(4, EventKind::FileDragEnter, &first);
+        host.cx.with(|cx| {
+            let seen: Vec<String> = cx.globals().get("seen").unwrap();
+            assert_eq!(
+                seen,
+                [
+                    "enter file:///tmp/a%20b.png;file:///tmp/%E4%B8%AD.txt image/png;text/plain",
+                    "leave",
+                    "enter file:///tmp/next.png image/png",
+                    "drop file:///tmp/next.png",
+                    "old"
+                ]
+            );
+        });
+    }
+
+    #[test]
     fn file_drop_payload_keeps_the_native_uri_list() {
         let host = Host::new().unwrap();
         let uris = vec![
@@ -2236,6 +2280,8 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::FileDrop(uris.clone())).unwrap();
             let actual: Vec<String> = value.as_object().unwrap().get("uris").unwrap();
             assert_eq!(actual, uris);
+            let types: Vec<String> = value.as_object().unwrap().get("mimeTypes").unwrap();
+            assert_eq!(types, ["text/plain", ""]);
         });
     }
 

@@ -128,6 +128,9 @@ pub(crate) enum Action {
     /// (`sendInput`): the platform delivers it and the app holds
     /// `webview.input`; the answer resolves the slot.
     WebInputAvailable(AnswerSlot<bool>),
+    /// Whether a web view shows a page here: the platform shows web views
+    /// and the app holds `webview`; the answer resolves the slot.
+    WebViewAvailable(AnswerSlot<bool>),
     /// A request on local paths for the platform
     /// ([`crate::file_dialog`]); its answer resolves the slot.
     FileRequest(crate::file_dialog::FileRequest, FileAnswer),
@@ -170,6 +173,10 @@ pub(crate) enum Action {
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),
+    /// Presses what a pointer at the press's page position would inside
+    /// the node, with the layout of the commit the action goes out with;
+    /// whether a view took it resolves the slot.
+    PressAt(NodeId, crate::PressEvent, AnswerSlot<bool>),
 }
 
 /// What a speech recognition session asks of the core
