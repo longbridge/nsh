@@ -922,7 +922,8 @@ define_class!(
             })
         }
 
-        // What VoiceOver reaches of the children ([`crate::access::reached`]).
+        // What VoiceOver reaches of the children ([`crate::access::reached`]),
+        // in the order they are on screen ([`crate::access::in_reading_order`]).
         #[unsafe(method_id(accessibilityChildren))]
         fn accessibility_children(&self) -> Option<Retained<NSArray>> {
             let reached = self
@@ -930,9 +931,10 @@ define_class!(
                 .state
                 .try_borrow()
                 .map_or(crate::access::Reached::All, |s| crate::access::reached(&s));
-            // SAFETY: NSView's own children.
             let all = || -> Option<Retained<NSArray>> {
-                unsafe { msg_send![super(self), accessibilityChildren] }
+                // SAFETY: NSView's own children.
+                let all = unsafe { msg_send![super(self), accessibilityChildren] };
+                crate::access::in_reading_order(&NshView(self.retain()), all)
             };
             match reached {
                 crate::access::Reached::All => all(),

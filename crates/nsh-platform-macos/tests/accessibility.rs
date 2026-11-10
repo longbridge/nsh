@@ -79,6 +79,36 @@ mod macos {
                     .child(name("Save", "Save all")),
             )
             .child(geometry())
+            .child(order())
+    }
+
+    /// A scroll view and a plain view, each holding two texts made bottom
+    /// first, as a list's recycled cells can be.
+    #[component]
+    fn Order() -> impl IntoElement {
+        let two = |second: &'static str, first: &'static str| {
+            [
+                text("Second").test_id(second).absolute().top(px(40.0)),
+                text("First").test_id(first).absolute().top(px(0.0)),
+            ]
+        };
+        view()
+            .absolute()
+            .left(px(260.0))
+            .top(px(0.0))
+            .w(px(120.0))
+            .child(
+                scroll()
+                    .test_id("scrolled")
+                    .h(px(80.0))
+                    .children(two("scrolled-second", "scrolled-first")),
+            )
+            .child(
+                view()
+                    .test_id("plain")
+                    .h(px(80.0))
+                    .children(two("plain-second", "plain-first")),
+            )
     }
 
     /// Fixed geometry makes the expected screen frames independent of
@@ -202,6 +232,33 @@ mod macos {
             .find_map(|c| find(&c, id))
     }
 
+    /// The view with identifier `id` under `view`, through the view tree
+    /// (it need not be an element).
+    fn view_with_id(view: &NSView, id: &str) -> Option<Retained<NSView>> {
+        if view
+            .accessibilityIdentifier()
+            .is_some_and(|i| i.to_string() == id)
+        {
+            return Some(view.retain());
+        }
+        view.subviews().iter().find_map(|c| view_with_id(&c, id))
+    }
+
+    /// The identifiers of the accessibility children of view `id`, in
+    /// their order.
+    fn children_of(root: &NSView, id: &str) -> Vec<String> {
+        let view = view_with_id(root, id).unwrap_or_else(|| panic!("no view {id}"));
+        view.accessibilityChildren()
+            .map(|children| {
+                children
+                    .iter()
+                    .filter_map(|c| c.downcast::<NSView>().ok())
+                    .filter_map(|c| c.accessibilityIdentifier().map(|i| i.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn string(object: Option<Retained<AnyObject>>) -> Option<String> {
         object
             .and_then(|o| o.downcast::<NSString>().ok())
@@ -268,6 +325,18 @@ mod macos {
         );
         assert_eq!(read(&root, "labelled"), (None, Some("Fixed".into()), 0));
         assert_eq!(read(&root, "button"), (Some("Save all".into()), None, 0));
+
+        // A scroll view's content is read in the order it is on screen,
+        // not the order its views were made in; elsewhere the tree's order
+        // stays.
+        until("the order mount", || {
+            find(&root, "scrolled-first").is_some()
+        });
+        assert_eq!(
+            children_of(&root, "scrolled"),
+            ["scrolled-first", "scrolled-second"]
+        );
+        assert_eq!(children_of(&root, "plain"), ["plain-second", "plain-first"]);
 
         until("the geometry mount", || find(&root, "nested-row").is_some());
         println!("window backing scale: {}", window.backingScaleFactor());
