@@ -191,7 +191,7 @@ pub(crate) use self::{
     animated::LiveNode,
     back::BackListener,
     builder::{ElKind, PlaceFn},
-    component::{AnyInstance, caught},
+    component::{AnyInstance, caught, panic_message},
     task::{
         Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
         NotificationAction, SpeechAction,
@@ -224,6 +224,7 @@ pub use crate::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
         transparent_black, transparent_white, white, yellow,
     },
+    main_thread::{MainThreadError, OnMainThread},
     overlay::{Align, Placement},
     platform::{
         Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,

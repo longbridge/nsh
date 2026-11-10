@@ -694,6 +694,10 @@ fn selected_text(surface: &Surface, id: NodeId) -> Option<(NshView, String)> {
         }
         model.text(&texts)
     };
+    // A selection of hidden characters only copies nothing.
+    if text.is_empty() {
+        return None;
+    }
     Some((area, text))
 }
 

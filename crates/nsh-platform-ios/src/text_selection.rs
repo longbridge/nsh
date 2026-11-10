@@ -229,11 +229,11 @@ impl TextView {
     }
 
     /// The selected text, without the placeholders of attachments and
-    /// hidden runs.
+    /// hidden runs (`None` when nothing is left of it).
     pub(crate) fn selected_string(&self) -> Option<String> {
         let (a, b) = self.ivars().selection.range.get().filter(|(a, b)| a < b)?;
         let text = self.ivars().text.borrow();
-        Some(text.as_ref()?.copied_text(a as u32..b as u32))
+        Some(text.as_ref()?.copied_text(a as u32..b as u32)).filter(|t| !t.is_empty())
     }
 
     /// Changes the selection from code (not UIKit), telling UIKit's

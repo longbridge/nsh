@@ -71,7 +71,11 @@ impl<M: TextEngine> Core<M> {
     ) -> Option<(NodeId, Point<Points>)> {
         use crate::props::PointerEvents;
         let node = &self.nodes[key as usize];
-        if node.layout.is_none() || !valid(&node.frame) || node.view_style.hidden {
+        if node.layout.is_none()
+            || !valid(&node.frame)
+            || node.view_style.hidden
+            || node.hidden_in_text
+        {
             return None;
         }
         let pointer = match node.props.as_deref().map(|p| p.pointer_events) {
