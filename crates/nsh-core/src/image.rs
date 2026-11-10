@@ -279,7 +279,7 @@ pub(crate) fn data_key(mime: &str, bytes: &[u8]) -> String {
     key
 }
 
-fn base64(s: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn base64(s: &str) -> Result<Vec<u8>, String> {
     let value = |c: u8| match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),

@@ -938,6 +938,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "(e: WebViewDownload) => void",
         "With a listener, what the page downloads (an attachment, a type the web view cannot show, a `download` link) is saved as a file in the app's data directory, `downloads/<id>/<filename>`: reported as it starts, finishes and fails. Without one, those navigations behave as before.",
     ),
+    (
+        EventKind::WebViewProgress,
+        on::WEBVIEW,
+        "(e: { progress: number | null }) => void",
+        "The page loaded further: `progress` is a fraction from 0 to 1, `null` when the platform cannot tell (a page about to load). A later navigation reports its own progress, never the last page's.",
+    ),
     (EventKind::End, on::VIDEO, "() => void", ""),
     (
         EventKind::Buffer,
@@ -992,6 +998,12 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::EditAction,
     EventKind::KeyCommand,
     EventKind::Menu,
+    // The platform's answer to `Command::WebViewRequest`: the core resolves
+    // the request's typed result with it.
+    EventKind::WebViewReply,
+    // A manual download waiting for the app's destination: Rust's
+    // `WebView::on_download_pending`.
+    EventKind::DownloadPending,
     EventKind::ViewableItemsChange,
     // `NavPage`'s `onDismiss` / `onBackPress` and `Dialog`'s `onClose` /
     // `onCancel` / `onOpenChange` / `onOpen`: the navigation's handlers

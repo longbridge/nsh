@@ -16,10 +16,10 @@ use super::{
     },
 };
 use crate::{
-    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
-    KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
-    OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType, Rgba,
-    ScreenAnimation, ScreenProp, ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag,
+    AudioSession, AutoCapitalize, AutoFill, Color, ContentRuleList, EventKind, HeaderSlot, Hsla,
+    JsonValue, KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp,
+    NativeProp, OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType,
+    Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag,
     WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
@@ -29,6 +29,7 @@ use crate::{
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement},
     style::SvgPaint,
+    webview::{WebDownload, WebDownloadBehavior, WebDownloadPending, WebProgress},
 };
 
 /// Whether `a` and `b` set the same property (their values aside).
@@ -76,6 +77,8 @@ crate::static_reactive!(JsonValue: JsonValue);
 crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
 crate::static_reactive!(Placement: Placement);
 crate::static_reactive!(Align: Align);
+crate::static_reactive!(Vec<ContentRuleList>: Vec<ContentRuleList>);
+crate::static_reactive!(WebDownloadBehavior: WebDownloadBehavior);
 
 /// Sets `prop` among `props`, replacing one of its kind.
 pub(crate) fn set_in(props: &mut Vec<Prop>, prop: Prop) {
@@ -1489,6 +1492,36 @@ impl WebView {
         self.set(Prop::Native(NativeProp::Incognito(incognito)))
     }
 
+    /// Content blocker rule lists the page applies ([`ContentRuleList`]):
+    /// WebKit's content blocker rules, which macOS and WebKitGTK compile
+    /// natively and which the Windows backend applies itself (it reports
+    /// the rules it cannot). They apply to the loads from when the engine
+    /// takes them on; setting new rules replaces the old ones, and a
+    /// failed replacement keeps the rules installed before it. A platform
+    /// that cannot apply a nonempty list reports `onError` and shows an
+    /// inert page while the list stays set (clearing it loads the app's
+    /// page again): a refused filter never reaches the network unfiltered.
+    /// There is no JS setter: filtering is a host's decision.
+    pub fn content_rules(self, rules: impl IntoReactive<Vec<ContentRuleList>>) -> Self {
+        self.bind_prop(rules, |rules: Vec<ContentRuleList>| {
+            Prop::Native(NativeProp::ContentRules(rules))
+        })
+    }
+
+    /// How the page's downloads are written: the platform's automatic
+    /// behavior ([`WebDownloadBehavior::Automatic`], the default), or only
+    /// after the app accepts a destination for a
+    /// [`WebDownloadPending`] ([`WebDownloadBehavior::Manual`]). With no
+    /// `on_download_pending` listener, manual downloads are cancelled. A
+    /// platform that cannot defer downloads reports `onError` and shows an
+    /// inert page while manual is set (automatic downloads load the app's
+    /// page again). There is no JS setter.
+    pub fn download_behavior(self, behavior: impl IntoReactive<WebDownloadBehavior>) -> Self {
+        self.bind_prop(behavior, |behavior: WebDownloadBehavior| {
+            Prop::Native(NativeProp::WebDownloadBehavior(behavior))
+        })
+    }
+
     /// Serves the page the URLs of `scheme` (`"app-image"` for
     /// `<img src="app-image:1">`) from the app: `handler` answers each
     /// request with bytes and a MIME type
@@ -1569,6 +1602,46 @@ impl WebView {
     /// The page called `window.nsh.postMessage(data)`.
     pub fn on_message<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::Message, listener.into_listener(), events::data)
+    }
+
+    /// The page loaded further: how far (0 to 1), `None` when the platform
+    /// cannot tell (TS: `onLoadProgress`, whose event carries `progress`
+    /// the same way). A second navigation reports its own progress, not
+    /// the last page's.
+    pub fn on_progress<M>(self, listener: impl IntoListener<WebProgress, M>) -> Self {
+        self.listen(
+            EventKind::WebViewProgress,
+            listener.into_listener(),
+            events::web_progress,
+        )
+    }
+
+    /// An accepted download started, finished or failed (the platform's
+    /// existing `onDownload` lifecycle; TS: `onDownload`). Registered
+    /// before the page downloads, it makes automatic downloads write into
+    /// the app's data directory.
+    pub fn on_download<M>(self, listener: impl IntoListener<WebDownload, M>) -> Self {
+        self.listen(
+            EventKind::Download,
+            listener.into_listener(),
+            events::web_download,
+        )
+    }
+
+    /// The page asked to download a file and waits for the app's
+    /// destination: with [`Self::download_behavior`] manual, nothing is
+    /// written until [`super::ElementRef::accept_download`] (or it is
+    /// cancelled). Not reported without a listener: a manual download is
+    /// then cancelled.
+    pub fn on_download_pending<M>(
+        self,
+        listener: impl IntoListener<WebDownloadPending, M>,
+    ) -> Self {
+        self.listen(
+            EventKind::DownloadPending,
+            listener.into_listener(),
+            events::web_download_pending,
+        )
     }
 
     /// It navigated.

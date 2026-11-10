@@ -125,6 +125,26 @@ jobs:
             exit 1
           fi
 
+      # Branch-only verification before an upstream PR is opened. Removed
+      # from the final PR once its logs, captures and source hashes are kept.
+      - name: Install WebView preflight runtime
+        if: always() && !cancelled() && runner.os == 'Linux' && github.event_name == 'workflow_dispatch' && github.repository == 'honsunrise/nsh' && github.ref_name == 'feat/desktop-webview-controls'
+        run: sudo apt-get install -y libwebkitgtk-6.0-dev xvfb xauth
+
+      - name: Run native WebView preflight
+        if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.repository == 'honsunrise/nsh' && github.ref_name == 'feat/desktop-webview-controls'
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} .github/ci/webview-preflight.py
+
+      - name: Keep native WebView proof
+        if: always() && github.event_name == 'workflow_dispatch' && github.repository == 'honsunrise/nsh' && github.ref_name == 'feat/desktop-webview-controls'
+        uses: actions/upload-artifact@v4
+        with:
+          name: webview-native-${{ runner.os }}
+          path: |
+            .nsh/webview-preflight/logs/
+            .nsh/webview-preflight/proof/
+          include-hidden-files: true
+
   # The same crate compiled into the app's own web runtime: `nsh package
   # --target web` builds it for wasm32 and publishes the site.
   web:

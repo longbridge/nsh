@@ -24,7 +24,7 @@ use std::{
 use super::{
     Answer, Component,
     reactive::Kept,
-    task::{Action, Executor},
+    task::{Action, Executor, WebAnswer},
 };
 use crate::{
     Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, ListScrollPosition,
@@ -358,6 +358,119 @@ impl ElementRef {
     /// Jumps a video to `seconds`.
     pub fn seek(&self, seconds: f64) {
         self.send(Command::Seek(seconds));
+    }
+
+    /// A PNG of the web view's page as it shows. Await it in a task; it
+    /// fails when the ref names no mounted web view, the platform has none
+    /// of these controls, the page cannot be captured, or no answer comes
+    /// in time.
+    pub fn capture_page(&self) -> Answer<Result<Vec<u8>, String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::CapturePage,
+            WebAnswer::CapturePage,
+        )
+    }
+
+    /// The cookies of `uri`, or every cookie in the store of the web
+    /// view's own profile when omitted. `uri` must be an HTTP(S) URL. Await
+    /// it in a task.
+    pub fn get_cookies(
+        &self,
+        uri: Option<&str>,
+    ) -> Answer<Result<Vec<crate::webview::WebCookie>, String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::GetCookies {
+                uri: uri.map(str::to_owned),
+            },
+            WebAnswer::Cookies,
+        )
+    }
+
+    /// Sets `cookies` in the web view's cookie store (each by name, domain
+    /// and path). The core checks every cookie before it sets any. Await
+    /// it in a task.
+    pub fn set_cookies(
+        &self,
+        cookies: Vec<crate::webview::WebCookie>,
+    ) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::SetCookies { cookies },
+            WebAnswer::Done,
+        )
+    }
+
+    /// Opens the web inspector, where the platform has a public API for it
+    /// (the desktops); elsewhere it fails rather than show none. Await it
+    /// in a task.
+    pub fn open_devtools(&self) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::OpenDevtools,
+            WebAnswer::Done,
+        )
+    }
+
+    /// Lets the user inspect the page (`enabled`; off by default). Await it
+    /// in a task.
+    pub fn set_inspectable(&self, enabled: bool) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::SetInspectable { enabled },
+            WebAnswer::Done,
+        )
+    }
+
+    /// Lets the download ([`crate::webview::WebDownloadPending::id`]) write
+    /// to the destination the app chose; nothing is written before. A
+    /// relative path, an existing file (unless `overwrite`) or a missing
+    /// parent directory fails without reaching the platform. Await it in a
+    /// task: acceptance (or its refusal) is the answer, not the finished
+    /// file ([`crate::EventKind::Download`] reports that).
+    pub fn accept_download(
+        &self,
+        destination: crate::webview::WebDownloadDestination,
+    ) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::AcceptDownload {
+                id: destination.id,
+                path: destination.path,
+                overwrite: destination.overwrite,
+            },
+            WebAnswer::Done,
+        )
+    }
+
+    /// Cancels the download `id`, discarding a partial file. Await it in a
+    /// task.
+    pub fn cancel_download(&self, id: String) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::CancelDownload { id },
+            WebAnswer::Done,
+        )
+    }
+
+    /// Sends `operation` to the web view carrying the ref; `answer` takes
+    /// the platform's answer. With no rendered element carrying the ref,
+    /// the answer fails at once.
+    fn web_view<U>(
+        &self,
+        operation: crate::webview::WebViewOperation,
+        answer: impl FnOnce(super::AnswerSlot<Result<U, String>>) -> WebAnswer,
+    ) -> Answer<Result<U, String>> {
+        let (result, slot) = Answer::new();
+        let pending = slot.clone();
+        let answer = answer(slot);
+        let sent = self.reach(move |node, executor| {
+            executor.act(Action::WebViewRequest {
+                node,
+                operation,
+                answer,
+            })
+        });
+        if sent.is_none() {
+            pending
+                .borrow_mut()
+                .deliver(Err(crate::webview::NOT_MOUNTED.into()));
+        }
+        result
     }
 
     /// Calls command `name` of a native component with `args`.

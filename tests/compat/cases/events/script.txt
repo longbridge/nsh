@@ -165,6 +165,13 @@ event id:web onDownload state=started id=d1 url=https://example.com/r.pdf filena
 event id:web onDownload state=finished id=d1 url=https://example.com/r.pdf filename=r.pdf path=/data/downloads/d1/r.pdf bytes=2048
 event id:web onDownload state=failed id=d2 url=https://example.com/x.csv filename=x.csv path=/data/downloads/d2/x.csv message="network lost"
 expect Web: start https://example.com/ "" loading true back false forward false | nav https://example.com/a "Page A" loading false back true forward false | load https://example.com/a "Page A" loading false back true forward false | message hello there | error offline | download started r.pdf - - | download finished r.pdf 2048 - | download failed x.csv - network lost
+# Indeterminate loading and known zero progress are distinct states.
+event id:web onLoadProgress progress=null
+expect Loading: indeterminate
+event id:web onLoadProgress progress=0
+expect Loading: 0%
+event id:web onLoadProgress progress=0.75
+expect Loading: 75%
 covers [nsh] Image
 covers [nsh] Video
 covers [nsh] WebView
@@ -178,6 +185,7 @@ covers [events] onEnd
 covers [events] onMessage
 covers [events] onNavigationStateChange
 covers [events] onDownload
+covers [events] onLoadProgress
 # events-pointer
 tap id:case-events-pointer
 expect Press: none

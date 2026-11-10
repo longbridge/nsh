@@ -16518,6 +16518,981 @@ mod touch {
     }
 }
 
+/// Native WebView requests and policy enforcement.
+mod webview {
+    use serde_json::json;
+
+    use super::{views::texts, *};
+    use crate::prelude::*;
+
+    /// A web view's ref driven by buttons: the controls' request
+    /// lifecycle, with what the answers showed.
+    #[component]
+    fn WebControls() -> impl IntoElement {
+        let web = element_ref();
+        let shown = signal(String::new());
+        let hidden = signal(false);
+        view()
+            .child(dynamic(move || {
+                if hidden.get() {
+                    return view().into_element();
+                }
+                web_view("https://example.com/")
+                    .element_ref(&web)
+                    .into_element()
+            }))
+            .child(text(move || shown.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    let line = match web.capture_page().await {
+                        Ok(bytes) => format!("shot {}", String::from_utf8_lossy(&bytes)),
+                        Err(error) => format!("shot error {error}"),
+                    };
+                    shown.set(line);
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    let line = match web.get_cookies(None).await {
+                        Ok(cookies) => format!(
+                            "cookies {}",
+                            cookies
+                                .iter()
+                                .map(|c| format!("{}@{}", c.name, c.domain))
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ),
+                        Err(error) => format!("cookies error {error}"),
+                    };
+                    shown.set(line);
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    let cookie = crate::webview::WebCookie {
+                        name: "a;b".into(),
+                        value: "v".into(),
+                        domain: "example.com".into(),
+                        ..Default::default()
+                    };
+                    let set = web.set_cookies(vec![cookie]).await;
+                    let accept = web
+                        .accept_download(crate::webview::WebDownloadDestination {
+                            id: "d".into(),
+                            path: std::path::PathBuf::from("relative/out"),
+                            overwrite: false,
+                        })
+                        .await;
+                    shown.set(format!("set {set:?} accept {accept:?}"));
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    let path = std::env::temp_dir()
+                        .join(format!("nsh-webview-accept-{}", std::process::id()));
+                    let line = match web
+                        .accept_download(crate::webview::WebDownloadDestination {
+                            id: "download-1".into(),
+                            path,
+                            overwrite: true,
+                        })
+                        .await
+                    {
+                        Ok(()) => "accept ok".to_owned(),
+                        Err(error) => format!("accept error {error}"),
+                    };
+                    shown.set(line);
+                });
+            }))
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| hidden.set(true)),
+            )
+    }
+
+    /// The web view `batch` created.
+    fn web_node(batch: &MountBatch) -> NodeId {
+        batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create { id, kind } if *kind == ViewKind::WebView => Some(*id),
+                _ => None,
+            })
+            .expect("a web view")
+    }
+
+    /// The nodes of `batch` listening to presses, in the order they are
+    /// created.
+    fn press_nodes(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The web view requests in `items`: the node each went to, its id and
+    /// what it asks.
+    fn web_requests(items: &[MountItem]) -> Vec<(NodeId, u64, crate::webview::WebViewOperation)> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id,
+                    command: Command::WebViewRequest(request),
+                } => Some((*id, request.id, request.operation.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The web view props in `batch`.
+    fn web_props(batch: &MountBatch) -> Option<&crate::WebProps> {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::NativeProps {
+                props: crate::NativeProps::WebView(p),
+                ..
+            } => Some(p.as_ref()),
+            _ => None,
+        })
+    }
+
+    fn web_controls_core(requested: bool) -> Core<FakeEngine> {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            webview_requests: requested,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<WebControls>(|| ()));
+        c
+    }
+
+    #[test]
+    fn web_view_requests_correlate_their_answers_by_node_and_id() {
+        let mut c = web_controls_core(true);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        assert_eq!(buttons.len(), 5);
+
+        // A screenshot: the request reaches the web view's node.
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch.items);
+        let [(node, shot, crate::webview::WebViewOperation::CapturePage)] = &requests[..] else {
+            panic!("one screenshot request: {requests:?}");
+        };
+        assert_eq!(*node, web);
+
+        // A cookie read while the screenshot is pending.
+        assert!(c.component_event(buttons[1], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch.items);
+        let [(node, cookies, crate::webview::WebViewOperation::GetCookies { uri: None })] =
+            &requests[..]
+        else {
+            panic!("one cookie request: {requests:?}");
+        };
+        assert_eq!(*node, web);
+
+        // A reply from another node settles nothing.
+        let reply = json!({ "id": shot, "ok": true, "value": "aGk=" });
+        assert!(c.component_event(ROOT_ID, EventKind::WebViewReply, &EventPayload::Json(reply)));
+        assert!(c.commit().is_none());
+
+        // The cookies' answer settles their request alone.
+        let reply = json!({
+            "id": cookies,
+            "ok": true,
+            "value": [{
+                "name": "session", "value": "v", "domain": "example.com", "path": "/"
+            }]
+        });
+        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["cookies session@example.com"]);
+
+        // The screenshot's answer (base64 `hi`) settles only its own.
+        let reply = json!({ "id": shot, "ok": true, "value": "aGk=" });
+        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["shot hi"]);
+
+        // A duplicate is dropped.
+        let reply = json!({ "id": shot, "ok": true, "value": "aGk=" });
+        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        assert!(c.commit().is_none());
+
+        // A failure is the request's error.
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch.items);
+        let [(_, failed, _)] = &requests[..] else {
+            panic!("one request");
+        };
+        let reply = json!({ "id": failed, "ok": false, "error": "no picture" });
+        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["shot error no picture"]);
+    }
+
+    #[test]
+    fn web_view_requests_are_answered_without_platform_controls() {
+        let mut c = web_controls_core(false);
+        let batch = c.commit().unwrap();
+        let buttons = press_nodes(&batch);
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch.items).is_empty(), "nothing is sent");
+        assert_eq!(
+            texts(&batch),
+            [
+                "shot error this platform has no web view controls (screenshots, cookies, dev tools or downloads)"
+            ]
+        );
+    }
+
+    /// A ref on a plain view: no web view controls apply.
+    #[component]
+    fn WrongRef() -> impl IntoElement {
+        let target = element_ref();
+        let shown = signal(String::new());
+        view()
+            .child(view().element_ref(&target).w(px(10.0)).h(px(10.0)))
+            .child(text(move || shown.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (target, shown) = (target, shown);
+                spawn(async move {
+                    shown.set(match target.capture_page().await {
+                        Ok(_) => "shot ok".to_owned(),
+                        Err(error) => format!("shot error {error}"),
+                    });
+                });
+            }))
+    }
+
+    #[test]
+    fn web_view_requests_fail_on_a_node_that_is_not_a_web_view() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            webview_requests: true,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<WrongRef>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = press_nodes(&batch)[0];
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch.items).is_empty(), "nothing is sent");
+        assert_eq!(texts(&batch), ["shot error the element is not a web view"]);
+    }
+
+    #[test]
+    fn web_view_requests_fail_once_the_ref_names_no_element() {
+        let mut c = web_controls_core(true);
+        let batch = c.commit().unwrap();
+        let buttons = press_nodes(&batch);
+        // Hide the web view, then ask for a screenshot of it.
+        assert!(c.component_event(buttons[4], EventKind::Press, &EventPayload::None));
+        assert!(c.commit().is_some(), "the web view went");
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch.items).is_empty(), "nothing is sent");
+        assert_eq!(texts(&batch), ["shot error the web view is not mounted"]);
+    }
+
+    #[test]
+    fn web_view_requests_time_out_and_late_or_foreign_answers_are_dropped() {
+        let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+        let _clock = clock.enter();
+        let mut c = web_controls_core(true);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let [(node, request, _)] = &web_requests(&batch.items)[..] else {
+            panic!("one request");
+        };
+        assert_eq!(*node, web);
+
+        // Still waiting just before the deadline.
+        clock.advance_to(
+            crate::time::now() + crate::webview::REPLY_TIMEOUT
+                - std::time::Duration::from_millis(1),
+        );
+        c.run_component_tasks();
+        assert!(c.commit().is_none());
+
+        // Past it, the answer fails; the request is gone.
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(1));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["shot error the web view did not answer"]);
+
+        // A late answer to it changes nothing.
+        let reply = json!({ "id": request, "ok": true, "value": "aGk=" });
+        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        assert!(c.commit().is_none());
+    }
+
+    #[test]
+    fn web_view_control_inputs_are_checked_before_they_are_sent() {
+        let mut c = web_controls_core(true);
+        let batch = c.commit().unwrap();
+        let buttons = press_nodes(&batch);
+        // An invalid cookie and a relative destination fail at once; the
+        // platform hears of neither.
+        assert!(c.component_event(buttons[2], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch.items).is_empty(), "nothing is sent");
+        let shown = texts(&batch);
+        let line = &shown[0];
+        assert!(line.contains("is not a valid cookie name"), "{line}");
+        assert!(
+            line.contains("`relative/out` is not an absolute path"),
+            "{line}"
+        );
+
+        // An acceptable destination reaches the platform with its overwrite
+        // choice.
+        assert!(c.component_event(buttons[3], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch.items);
+        let [
+            (
+                _,
+                _,
+                crate::webview::WebViewOperation::AcceptDownload {
+                    id,
+                    path,
+                    overwrite,
+                },
+            ),
+        ] = &requests[..]
+        else {
+            panic!("one accept request: {requests:?}");
+        };
+        assert_eq!(id, "download-1");
+        assert!(path.is_absolute());
+        assert!(*overwrite, "overwrite is passed through");
+    }
+
+    /// A web view with the Rust-only policies and the download listeners.
+    #[component]
+    fn WebListeners() -> impl IntoElement {
+        let progress = signal(String::from("progress unknown"));
+        let download = signal(String::from("download none"));
+        let pending = signal(String::from("pending none"));
+        view()
+            .child(
+                web_view("https://example.com/")
+                    .content_rules(vec![crate::ContentRuleList {
+                        id: "ads".into(),
+                        rules: "[]".into(),
+                    }])
+                    .download_behavior(crate::webview::WebDownloadBehavior::Manual)
+                    .on_progress(move |p: &crate::webview::WebProgress| {
+                        progress.set(format!("progress {:?}", p.progress))
+                    })
+                    .on_download(move |d: &crate::webview::WebDownload| {
+                        download.set(format!(
+                            "download {} {} {} {}",
+                            d.state,
+                            d.id,
+                            d.filename,
+                            d.bytes.map_or("none".to_owned(), |b| b.to_string())
+                        ))
+                    })
+                    .on_download_pending(move |p: &crate::webview::WebDownloadPending| {
+                        pending.set(format!("pending {} {}", p.id, p.filename))
+                    }),
+            )
+            .child(text(move || progress.get()))
+            .child(text(move || download.get()))
+            .child(text(move || pending.get()))
+    }
+
+    #[test]
+    fn web_view_progress_and_downloads_reach_rust_listeners() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            webview_requests: true,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<WebListeners>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        // The platform sees the listeners it needs.
+        let mask = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if *id == web => Some(*events),
+                _ => None,
+            })
+            .expect("the web view listens");
+        for kind in [
+            EventKind::WebViewProgress,
+            EventKind::Download,
+            EventKind::DownloadPending,
+        ] {
+            assert!(mask.contains(kind), "{kind:?}");
+        }
+
+        let reply = json!({ "progress": 0.25 });
+        assert!(c.component_event(web, EventKind::WebViewProgress, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["progress Some(25%)"]);
+
+        let reply = json!({ "progress": null });
+        assert!(c.component_event(web, EventKind::WebViewProgress, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["progress None"]);
+
+        let download = EventPayload::Map(vec![
+            ("state", crate::PayloadValue::Str("started".into())),
+            ("id", crate::PayloadValue::Str("d1".into())),
+            (
+                "url",
+                crate::PayloadValue::Str("https://example.com/a".into()),
+            ),
+            ("filename", crate::PayloadValue::Str("a.zip".into())),
+            ("path", crate::PayloadValue::Str("/tmp/a.zip".into())),
+        ]);
+        assert!(c.component_event(web, EventKind::Download, &download));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["download started d1 a.zip none"]);
+
+        let finished = match download.clone() {
+            EventPayload::Map(mut fields) => {
+                fields[0].1 = crate::PayloadValue::Str("finished".into());
+                fields.push(("bytes", crate::PayloadValue::Number(5.0)));
+                EventPayload::Map(fields)
+            }
+            _ => unreachable!(),
+        };
+        assert!(c.component_event(web, EventKind::Download, &finished));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["download finished d1 a.zip 5"]);
+
+        let reply = json!({ "id": "d1", "url": "https://example.com/a", "filename": "a.zip" });
+        assert!(c.component_event(web, EventKind::DownloadPending, &EventPayload::Json(reply)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["pending d1 a.zip"]);
+    }
+
+    /// A web view whose Rust-only policy signals can be set and cleared.
+    #[derive(Clone, PartialEq, Props)]
+    struct WebPolicyProps {
+        rules: bool,
+        manual: bool,
+    }
+
+    #[component]
+    fn WebPolicy(props: WebPolicyProps) -> impl IntoElement {
+        let rules = signal(props.rules);
+        let manual = signal(props.manual);
+        view()
+            .child(
+                web_view("https://example.com/")
+                    .injected_java_script("window.nshPolicyProbe = 1;")
+                    .back_forward_gestures(true)
+                    .content_rules(move || {
+                        if rules.get() {
+                            vec![crate::ContentRuleList {
+                                id: "ads".into(),
+                                rules: "[]".into(),
+                            }]
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .download_behavior(move || {
+                        if manual.get() {
+                            crate::webview::WebDownloadBehavior::Manual
+                        } else {
+                            crate::webview::WebDownloadBehavior::Automatic
+                        }
+                    }),
+            )
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| rules.set(false)),
+            )
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| manual.set(false)),
+            )
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| rules.set(true)),
+            )
+    }
+
+    /// The props the platform receives for a blocked web view: an inert,
+    /// nonempty page with nothing that can run or navigate.
+    fn assert_inert_page(props: &crate::WebProps) {
+        let crate::WebSource::Html { html, base_url } = &props.source else {
+            panic!("an inert page, not {:?}", props.source);
+        };
+        assert!(!html.is_empty(), "an inert page is nonempty");
+        assert_eq!(*base_url, None);
+        assert_eq!(props.src, None);
+        assert_eq!(props.base_url, None);
+        assert!(!props.javascript_enabled);
+        assert_eq!(props.injected_js, None);
+        assert_eq!(props.injected_js_before, None);
+        assert!(!props.back_forward_gestures);
+    }
+
+    /// The app's page, with its scripts and gestures, as the platform gets
+    /// it once the policy is in force.
+    fn assert_app_page(props: &crate::WebProps) {
+        assert_eq!(
+            props.source,
+            crate::WebSource::Uri("https://example.com/".into())
+        );
+        assert!(props.javascript_enabled);
+        assert_eq!(
+            props.injected_js.as_deref(),
+            Some("window.nshPolicyProbe = 1;")
+        );
+        assert!(props.back_forward_gestures);
+    }
+
+    /// A core with `WebPolicy` mounted, on a platform with (`controls`) or
+    /// without web view controls.
+    fn policy_core(rules: bool, manual: bool, controls: bool) -> Core<FakeEngine> {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            webview_requests: controls,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<WebPolicy>(move || {
+            WebPolicyProps { rules, manual }
+        }));
+        c
+    }
+
+    #[test]
+    fn a_web_view_policy_the_platform_cannot_carry_out_keeps_the_page_from_loading() {
+        // Refused filtering: the requested rules still reach the platform
+        // (not silently dropped), but an inert page replaces the app's.
+        let mut c = policy_core(true, false, false);
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(props.content_rules.len(), 1, "the policy is kept");
+        assert_inert_page(props);
+        let refused = js_events(&mut c);
+        assert!(
+            refused.iter().any(|(_, kind, payload)| *kind == EventKind::Error
+                && matches!(payload, EventPayload::Map(fields) if fields.iter().any(|(k, v)| *k == "message"
+                    && matches!(v, crate::PayloadValue::Str(m) if m.contains("not loaded"))))),
+            "{refused:?}"
+        );
+
+        // Clearing the rules lets the app's page and scripts back.
+        let buttons = press_nodes(&batch);
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert!(props.content_rules.is_empty());
+        assert_app_page(props);
+
+        // Refused manual downloads: the policy is kept, and an inert page
+        // replaces the app's (a download must not run unobserved).
+        let mut c = policy_core(false, true, false);
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(
+            props.download_behavior,
+            crate::webview::WebDownloadBehavior::Manual
+        );
+        assert_inert_page(props);
+        let buttons = press_nodes(&batch);
+        assert!(c.component_event(buttons[1], EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(
+            props.download_behavior,
+            crate::webview::WebDownloadBehavior::Automatic
+        );
+        assert_app_page(props);
+
+        // Where the platform carries the controls out, the same policies
+        // reach it with the page's source and scripts.
+        let mut c = policy_core(true, true, true);
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(props.content_rules.len(), 1);
+        assert_eq!(
+            props.download_behavior,
+            crate::webview::WebDownloadBehavior::Manual
+        );
+        assert_app_page(props);
+        assert!(
+            !js_events(&mut c)
+                .iter()
+                .any(|(_, kind, _)| *kind == EventKind::Error),
+            "the supported policies are not refused"
+        );
+    }
+
+    #[test]
+    fn blocking_an_already_loaded_page_replaces_it_and_clearing_restores_it() {
+        let mut c = policy_core(false, false, false);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        assert_app_page(web_props(&batch).expect("the web view's props"));
+
+        // The page is already there; asking for a filter this platform
+        // cannot apply must replace it, not leave it running unfiltered.
+        assert!(c.component_event(buttons[2], EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(props.content_rules.len(), 1);
+        assert_inert_page(props);
+
+        // Navigation commands stay gated while the policy is in force,
+        // including injected scripts (a `location.href` or `fetch` in one
+        // would bypass the refused policy); the batch may be empty.
+        let script =
+            || Command::InjectJavaScript("location.href = 'https://example.com/next'".into());
+        apply(
+            &mut c,
+            vec![
+                Op::Command {
+                    id: web,
+                    command: Command::Reload,
+                },
+                Op::Command {
+                    id: web,
+                    command: script(),
+                },
+            ],
+        );
+        let batch = c.commit().unwrap_or_default();
+        assert!(navigation_commands(&batch.items, web).is_empty());
+
+        // Clearing the policy restores the app's URL, scripts and gestures,
+        // and navigation works again.
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert!(props.content_rules.is_empty());
+        assert_app_page(props);
+        apply(
+            &mut c,
+            vec![
+                Op::Command {
+                    id: web,
+                    command: Command::Reload,
+                },
+                Op::Command {
+                    id: web,
+                    command: script(),
+                },
+            ],
+        );
+        let batch = c.commit().unwrap_or_default();
+        assert_eq!(navigation_commands(&batch.items, web), ["reload", "script"]);
+    }
+
+    /// A web view whose policy builder is there only while `blocked`: the
+    /// element stops setting it afterwards.
+    #[component]
+    fn WebPolicyOmitted() -> impl IntoElement {
+        let blocked = signal(true);
+        view()
+            .child(dynamic(move || {
+                let web = web_view("https://example.com/");
+                if blocked.get() {
+                    web.content_rules(vec![crate::ContentRuleList {
+                        id: "ads".into(),
+                        rules: "[]".into(),
+                    }])
+                    .into_element()
+                } else {
+                    web.into_element()
+                }
+            }))
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| blocked.set(false)),
+            )
+    }
+
+    #[test]
+    fn an_omitted_web_policy_builder_resets_the_policy() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<WebPolicyOmitted>(|| ()));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(props.content_rules.len(), 1);
+        assert_inert_page(props);
+
+        // The rebuild leaves the prop out entirely (not `set(empty)`): the
+        // reset takes it back to none, and the page loads again.
+        let button = press_nodes(&batch)[0];
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert!(
+            props.content_rules.is_empty(),
+            "an omitted policy builder resets it"
+        );
+        assert_eq!(
+            props.source,
+            crate::WebSource::Uri("https://example.com/".into())
+        );
+        assert!(props.javascript_enabled);
+    }
+
+    /// As [`WebPolicyOmitted`], for the download behavior.
+    #[component]
+    fn WebPolicyManualOmitted() -> impl IntoElement {
+        let blocked = signal(true);
+        view()
+            .child(dynamic(move || {
+                let web = web_view("https://example.com/");
+                if blocked.get() {
+                    web.download_behavior(crate::webview::WebDownloadBehavior::Manual)
+                        .into_element()
+                } else {
+                    web.into_element()
+                }
+            }))
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| blocked.set(false)),
+            )
+    }
+
+    #[test]
+    fn an_omitted_manual_builder_resets_to_automatic() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<WebPolicyManualOmitted>(|| ()));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(
+            props.download_behavior,
+            crate::webview::WebDownloadBehavior::Manual
+        );
+        assert_inert_page(props);
+
+        let button = press_nodes(&batch)[0];
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let props = web_props(&batch).expect("the web view's props");
+        assert_eq!(
+            props.download_behavior,
+            crate::webview::WebDownloadBehavior::Automatic,
+            "an omitted download builder resets it"
+        );
+        assert_eq!(
+            props.source,
+            crate::WebSource::Uri("https://example.com/".into())
+        );
+        assert!(props.javascript_enabled);
+    }
+
+    /// The navigation commands `items` forwards to web view `web`, by name
+    /// (`script` for `injectJavaScript`).
+    fn navigation_commands(items: &[MountItem], web: NodeId) -> Vec<&'static str> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command { id, command } if *id == web => Some(match command {
+                    Command::Load(_) => "load",
+                    Command::Reload => "reload",
+                    Command::GoBack => "back",
+                    Command::GoForward => "forward",
+                    Command::InjectJavaScript(_) => "script",
+                    _ => return None,
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn navigation_commands_wait_for_the_web_views_policy_to_be_in_force() {
+        let load = || {
+            Command::Load(crate::WebLoad {
+                src: "https://example.com/next".into(),
+                headers: Vec::new(),
+            })
+        };
+        let mut c = policy_core(true, false, false);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        // `load`, `reload`, `goBack` and `goForward` are refused while the
+        // requested rules are not in force, and reported.
+        apply(
+            &mut c,
+            vec![
+                Op::Command {
+                    id: web,
+                    command: load(),
+                },
+                Op::Command {
+                    id: web,
+                    command: Command::Reload,
+                },
+                Op::Command {
+                    id: web,
+                    command: Command::GoBack,
+                },
+                Op::Command {
+                    id: web,
+                    command: Command::GoForward,
+                },
+                // An injected script could navigate or fetch past the
+                // refused policy, so it is refused too.
+                Op::Command {
+                    id: web,
+                    command: Command::InjectJavaScript(
+                        "location.href = 'https://example.com/next'".into(),
+                    ),
+                },
+            ],
+        );
+        let batch = c.commit().unwrap_or_default();
+        assert!(
+            navigation_commands(&batch.items, web).is_empty(),
+            "nothing navigates or runs: {:?}",
+            navigation_commands(&batch.items, web)
+        );
+        let errors = js_events(&mut c)
+            .into_iter()
+            .filter(|(id, kind, payload)| {
+                *id == web
+                    && *kind == EventKind::Error
+                    && matches!(payload, EventPayload::Map(fields) if fields.iter().any(|(k, v)| *k == "message"
+                        && matches!(v, crate::PayloadValue::Str(m) if m.contains("does not navigate"))))
+            })
+            .count();
+        assert_eq!(
+            errors, 5,
+            "each refused navigation and injected script is reported"
+        );
+
+        // Clearing the rules lets the same commands through, in order.
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        apply(
+            &mut c,
+            vec![
+                Op::Command {
+                    id: web,
+                    command: Command::Reload,
+                },
+                Op::Command {
+                    id: web,
+                    command: load(),
+                },
+                Op::Command {
+                    id: web,
+                    command: Command::GoBack,
+                },
+                Op::Command {
+                    id: web,
+                    command: Command::InjectJavaScript(
+                        "location.href = 'https://example.com/next'".into(),
+                    ),
+                },
+            ],
+        );
+        let batch = c.commit().unwrap_or_default();
+        assert_eq!(
+            navigation_commands(&batch.items, web),
+            ["reload", "load", "back", "script"]
+        );
+
+        // Manual downloads block navigation too, and automatic frees it.
+        let mut c = policy_core(false, true, false);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        let script =
+            || Command::InjectJavaScript("location.href = 'https://example.com/next'".into());
+        apply(
+            &mut c,
+            vec![
+                Op::Command {
+                    id: web,
+                    command: Command::Reload,
+                },
+                Op::Command {
+                    id: web,
+                    command: script(),
+                },
+            ],
+        );
+        let batch = c.commit().unwrap_or_default();
+        assert!(navigation_commands(&batch.items, web).is_empty());
+        assert!(c.component_event(buttons[1], EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        apply(
+            &mut c,
+            vec![
+                Op::Command {
+                    id: web,
+                    command: Command::Reload,
+                },
+                Op::Command {
+                    id: web,
+                    command: script(),
+                },
+            ],
+        );
+        let batch = c.commit().unwrap_or_default();
+        assert_eq!(navigation_commands(&batch.items, web), ["reload", "script"]);
+    }
+}
+
 /// Rust components' drawings (`ui::Painter`).
 mod painter {
     use super::*;

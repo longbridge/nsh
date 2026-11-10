@@ -73,6 +73,8 @@ mount(Browser);
 | `onError` | `{ message: string }` | 页面加载失败。 |
 | `onNavigationStateChange` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
 | `onMessage` | `{ data: string }` | 页面调用了 `window.nsh.postMessage(data)`。 |
+| `onLoadProgress` | `{ progress: number \| null }` | 桌面页面加载进度变化；`null` 表示无法估计。 |
+| `onDownload` | `WebViewDownload` | 桌面下载开始、完成或失败；文件保存在应用数据目录。 |
 
 ```ts
 interface WebViewNavigation {
@@ -96,6 +98,10 @@ interface WebViewNavigation {
 | `evaluate(script, { timeout? })` | 在页面中执行 `script`，返回 `{ value }`，即其 JSON 结果；参见[执行脚本](#执行脚本)。 |
 | `postMessage(data)` | 向页面发送 `data`（字符串）：在 `window` 上触发 `message` 事件，`event.data` 即为 `data`。 |
 | `load({ src, headers? })` | 加载 `src`，只给页面自身的请求带上 `headers`（`Record<string, string>`），子资源、之后的导航和重新加载都不带；用于已登录的页面（`Authorization`）。主机必须是 `webview.hosts` 允许的。请求头无效时抛出 `TypeError`。浏览器后端不做任何事。见[已登录的页面](../docs/web-view-and-video.md#已登录的页面请求头)。 |
+
+Rust 宿主还可通过[桌面控制](../elements/web-view.md#rust-桌面控制)使用截图、Cookie、检查工具、手动下载决策及内容过滤。
+这些操作使用宿主的权限；上表列出 TSX 模块可调用的方法。
+
 
 ## 与页面通信
 

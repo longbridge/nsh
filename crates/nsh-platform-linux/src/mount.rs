@@ -463,6 +463,7 @@ impl Mounter {
             | Command::PostMessage(_)
             | Command::Load(_)
             | Command::Seek(_)
+            | Command::WebViewRequest(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {
                     crate::native::command(surface, view, command);

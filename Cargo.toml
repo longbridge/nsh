@@ -139,6 +139,8 @@ url = "2.5"
 ureq = { version = "3.1", features = ["platform-verifier"] }
 ring = "0.17"
 regex = "1"
+# Accurate first-party boundaries for desktop WebView content filtering.
+psl = "2"
 # The text of `nsh-base`'s `Editor`: a rope, and its grapheme and word boundaries.
 ropey = "1.6"
 unicode-segmentation = "1.13"
@@ -219,7 +221,7 @@ webview2-com = "0.39"
 gtk4 = { version = "0.11", features = ["v4_14"] }
 pango = "0.22"
 pangocairo = "0.22"
-# The Linux backend's web views (its feature `webview`): WebKitGTK 6.0 (2.40+).
+# The Linux backend's web views (its feature `webview`): WebKitGTK 6.0 (2.42+ for cookie enumeration).
 webkit6 = "0.6"
 # The Linux backend's sounds: decoded once into memory, mixed in one pipeline
 # (GStreamer, which GTK's media streams already run on; the glib of gtk4's).

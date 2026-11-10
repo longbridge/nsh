@@ -43,6 +43,7 @@ mod web;
 
 use std::{
     cell::{Cell, RefCell},
+    path::PathBuf,
     rc::{Rc, Weak},
     sync::Arc,
 };
@@ -308,6 +309,10 @@ pub(crate) struct NativeState {
     access: RefCell<Option<Arc<Access>>>,
     /// The application id: web views keep their data under it.
     app_id: RefCell<String>,
+    /// Where web views save downloads (the app's data directory's
+    /// `downloads`); `None` before an app starts or without a data
+    /// directory.
+    downloads: RefCell<Option<PathBuf>>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
 }
@@ -344,6 +349,17 @@ impl NativeState {
     /// their profile in `%LOCALAPPDATA%\<app id>\WebView2`.
     pub(crate) fn set_app_id(&self, app_id: &str) {
         *self.app_id.borrow_mut() = app_id.to_owned();
+    }
+
+    /// Where the app that starts saves web downloads (its data
+    /// directory's `downloads`); `None` without one.
+    pub(crate) fn set_downloads(&self, downloads: Option<PathBuf>) {
+        *self.downloads.borrow_mut() = downloads;
+    }
+
+    /// Where web views save downloads.
+    pub(crate) fn downloads(&self) -> Option<PathBuf> {
+        self.downloads.borrow().clone()
     }
 
     /// Drops every control (the app stopped): media stops playing, pages
@@ -992,17 +1008,35 @@ impl Emitter {
     }
 
     fn emit(&self, kind: EventKind, payload: impl FnOnce() -> EventPayload) {
+        if self.listens(kind)
+            && let Some(surface) = self.surface.upgrade()
+        {
+            surface.event(self.id, kind, payload());
+        }
+    }
+
+    /// Whether the app's view listens to `kind` (or its state cannot be
+    /// read right now: send it, JS ignores events it has no handler for).
+    fn listens(&self, kind: EventKind) -> bool {
+        self.surface.upgrade().is_some_and(|surface| {
+            surface
+                .view(self.id)
+                .is_some_and(|v| v.try_state().is_none_or(|s| s.events.contains(kind)))
+        })
+    }
+
+    /// Answers a native request ([`nsh_core::webview`]) whatever the app
+    /// listens to: the core settles JS's promise for `id`. It must be
+    /// called once per request id.
+    fn reply(&self, id: u64, result: Result<JsonValue, String>) {
         let Some(surface) = self.surface.upgrade() else {
             return;
         };
-        // A view whose state is being changed right now cannot be read:
-        // send the event, JS ignores events it has no handler for.
-        let listens = surface
-            .view(self.id)
-            .is_some_and(|v| v.try_state().is_none_or(|s| s.events.contains(kind)));
-        if listens {
-            surface.event(self.id, kind, payload());
-        }
+        surface.event(
+            self.id,
+            EventKind::WebViewReply,
+            nsh_core::webview::reply(id, result),
+        );
     }
 }
 

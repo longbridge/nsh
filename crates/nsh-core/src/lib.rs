@@ -72,6 +72,7 @@ pub mod transition;
 pub mod url_scheme;
 pub mod web_resource;
 pub mod websocket;
+pub mod webview;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
 extern crate self as nsh_core;
@@ -92,9 +93,9 @@ pub use crate::{
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     image::ImageData,
     mount::{
-        AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
-        NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,
-        VideoProps, ViewKind, WebProps,
+        AudioSession, ContentRuleList, ImageOptions, InputConfig, ModalConfig, MountBatch,
+        MountItem, NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior,
+        StickyCell, VideoProps, ViewKind, WebProps,
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,

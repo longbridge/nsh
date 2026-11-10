@@ -9,7 +9,7 @@ view per node, the core lays everything out); the GPUI backend (`gpui.md`) is a 
 
 The crates need the GTK 4 (≥ 4.14; Pango from 1.50 on, the app's fonts going through Fontconfig) development
 packages (`libgtk-4-dev` on Debian / Ubuntu, `gtk4` on Arch, `gtk4-devel` on Fedora), for web views WebKitGTK 6.0's
-(2.40 or later: `libwebkitgtk-6.0-dev` on Debian / Ubuntu, `webkitgtk-6.0` on Arch, `webkitgtk6.0-devel` on Fedora),
+(2.42 or later: `libwebkitgtk-6.0-dev` on Debian / Ubuntu, `webkitgtk-6.0` on Arch, `webkitgtk6.0-devel` on Fedora),
 GStreamer's core and base plug-ins (`libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian / Ubuntu,
 `gstreamer gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora; sounds decode and mix
 with them, `sound.rs`) and, for QuickJS, clang. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
@@ -43,6 +43,15 @@ web view: WebKitGTK cannot be loaded on demand the way iOS and macOS load WebKit
 it. `cargo xtask dist` builds both with web views when `pkg-config` finds `webkitgtk-6.0`, else without them
 (`--no-default-features`, with a warning), so a distribution made without WebKitGTK's development files still
 works and its runner only needs GTK.
+
+## WebView controls
+
+`native/web.rs` implements the [desktop WebView request protocol](elements.md#desktop-webview-controls) with
+WebKitGTK snapshots, the view's own cookie manager, inspection settings and load-progress notifications. Cookie
+enumeration requires WebKitGTK 2.42. Automatic downloads use the app's data directory and report the existing
+`onDownload` lifecycle; manual mode holds the destination decision until the Rust host accepts or cancels it.
+WebKit user-content filters compile before their pending navigation and replace the previous rules only after
+successful compilation. Teardown discards pending compilation results and cancels downloads.
 
 ## Architecture
 

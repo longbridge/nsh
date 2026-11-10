@@ -60,6 +60,34 @@ of what is in scope: a host element's primitive is imported from its home (`impo
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).
 
+## Desktop WebView controls
+
+Rust hosts use `ElementRef`'s screenshot, cookie, inspection and download-control methods. They return
+`Answer<Result<_, String>>`, following the native file-dialog methods. These privileged host operations are
+Rust-only; `onLoadProgress` and the existing `onDownload` event also reach TSX through the generated event table.
+
+`nsh_core::webview` defines the typed requests and replies. The core gives each request an id, retains its target
+node and answer, and sends `Command::WebViewRequest` with the normal mount batch. The native host emits
+`WebViewReply` on that same node. Only a matching pending request is settled; duplicate, foreign and late replies
+are discarded. Unsupported hosts, wrong or unmounted refs, teardown and timeout settle the answer with an error.
+The main thread never waits for a Rust callback to decide the native operation.
+
+Cookie expiry crosses the protocol as Unix milliseconds. A batch is validated before a native store is mutated;
+native store failures can still happen during the operation and are reported. Every operation uses the target
+view's store, preserving incognito isolation. Screenshot replies carry base64 PNG in the internal JSON envelope;
+the Rust result contains decoded bytes. Progress is `Option<Percentage>` in Rust and a fraction or `null` in JS.
+
+Automatic downloads preserve `onDownload`'s existing state and payload. `WebDownloadBehavior::Manual` instead
+holds the native destination decision and emits `DownloadPending` to the Rust listener. Accepting the destination
+settles that request; transfer completion is a later `Download` event. Reject unknown ids and unauthorized or
+invalid destinations rather than silently succeeding. Unanswered decisions are bounded; teardown releases held
+callbacks, cancels transfers and removes only their owned partial output. Completed files belong to the app.
+
+Content rules must be installed before the navigation they govern. Invalid or unsupported rules produce an
+error, not a partially installed or silently weaker policy. Replacements retain the previous policy until the
+new one compiles; stale completions cannot replace a newer policy. Platform support and native APIs are described
+in [Linux](linux.md), [macOS](macos.md) and [Windows](windows.md).
+
 ## The main thread never waits for JS
 
 Some callbacks are questions the system wants answered on the spot (may this

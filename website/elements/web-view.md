@@ -83,7 +83,8 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant, and `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` where the platform shows no web view (Rust: also `.on_unavailable`, the message). |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
-| `onDownload` | | `WebViewDownload` | A download started, finished or failed (macOS). |
+| `onLoadProgress` | `.on_progress` | `{ progress: number \| null }` (`WebProgress`) | Loading advanced on a desktop web view; `null` means the engine cannot estimate it. |
+| `onDownload` | `.on_download` | `WebViewDownload` (`WebDownload`) | A desktop download started, finished or failed. |
 
 `WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`; in Rust `WebNavigation` with `url`, `title`,
 `loading`, `can_go_back` and `can_go_forward`.
@@ -97,7 +98,7 @@ engine](../docs/web-view-and-video.md#when-there-is-no-web-engine)).
 (an attachment, a type the web view does not show, a `download` link) is saved in the app's data directory as
 `downloads/<id>/<filename>`, where `path` points, and the app reads it with `fs/promises`.
 
-On macOS, adding the listener lets any loaded page allowed by the `webview` capability save downloads
+On macOS, Windows and Linux, adding the listener lets any loaded page allowed by the `webview` capability save downloads
 automatically. The app is responsible for its storage budget and for removing completed files from `downloads/`
 when it has finished using them. Removing the web view cancels downloads in progress and removes their partial
 directories. Downloads report through `onDownload`; converting a navigation into a download keeps `onError`
@@ -114,6 +115,80 @@ and long names are shortened to 200 bytes while preserving an extension that fit
 | `injectJavaScript(script)` | `inject_java_script(script)` | Runs JavaScript in the page. |
 | `postMessage(data)` | `post_message(data)` | Sends a string to the page, which receives a `message` event on `window`. |
 | `load({ src, headers })` | `load(WebLoad::new(src, headers)?)` | Loads `src` with `headers` (e.g. `Authorization`) on the page's own request only, not its subresources or later navigations ([guide](../docs/web-view-and-video.md#signed-in-pages-request-headers)). |
+
+### Desktop controls in Rust
+
+Rust hosts use the web view's `ElementRef` to capture its visible page, manage its cookies and inspection tools,
+and decide downloads. Await each control in a component task. An unavailable control, an unmounted ref or a native
+failure returns an error; pending requests also end when the view is removed or their deadline expires.
+
+| Rust method | Successful result | Purpose |
+|---|---|---|
+| `capture_page()` | `Vec<u8>` | A PNG of the visible page. |
+| `get_cookies(uri)` | `Vec<WebCookie>` | Cookies matching the URL, or all cookies in this view's store with `None`. |
+| `set_cookies(cookies)` | `()` | Sets cookies after validating the complete input batch. |
+| `set_inspectable(enabled)` | `()` | Enables or disables the platform's inspection tools. |
+| `open_devtools()` | `()` | Opens developer tools on Linux and Windows. macOS uses its inspection menu. |
+| `accept_download(destination)` | `()` | Accepts a pending download's destination; transfer completion arrives through `on_download`. |
+| `cancel_download(id)` | `()` | Cancels a pending or active download. |
+
+On macOS, enable inspection with `set_inspectable(true)` and use WebKit's inspection menu;
+`open_devtools()` returns an unsupported-operation error.
+
+`WebCookie` is in `nsh_core::webview`. It carries `name`, `value`, `domain`, `path`, `http_only`, `secure`,
+`expires` (Unix milliseconds, `None` for a session cookie), and `same_site` (`CookieSameSite`). Cookie access uses
+the target view's own store, including its `incognito` store. Views sharing a store share its cookies.
+A domain beginning with `.` also matches its subdomains; an undotted domain is host-only.
+
+#### Choosing a download destination
+
+Automatic download behavior is the default. A Rust host chooses `WebDownloadBehavior::Manual` with
+`.download_behavior(..)` and handles `.on_download_pending(..)`. The pending event supplies the download's `id`,
+`url` and suggested `filename`; the host accepts or cancels that id. Destination acceptance and final transfer
+completion are separate outcomes.
+
+```rust
+use nsh_core::prelude::*;
+use nsh_core::webview::{WebDownloadBehavior, WebDownloadDestination, WebDownloadPending};
+
+let web = element_ref();
+web_view("https://example.com")
+    .element_ref(&web)
+    .download_behavior(WebDownloadBehavior::Manual)
+    .on_download_pending(move |event: &WebDownloadPending| {
+        let id = event.id.clone();
+        spawn(async move {
+            // A host may instead ask the user for an authorized destination.
+            let mut destination = WebDownloadDestination::default();
+            destination.id = id;
+            destination.path = std::env::temp_dir().join("download.bin");
+            if let Err(error) = web.accept_download(destination).await {
+                log::warn!("Download destination rejected: {error}");
+            }
+        });
+    });
+```
+
+A destination is an absolute host path. Existing files are protected unless the host explicitly enables
+`overwrite`. The host is responsible for selecting a path it is authorized to use. Removing the view cancels
+unanswered decisions and active downloads and cleans their owned partial files.
+Manual transfers use a separate staging file and publish the final path only on completion. The default
+no-overwrite publication requires filesystem support for hard links; an unsupported filesystem reports an error
+rather than replacing an existing file.
+
+#### Content filtering
+
+`.content_rules(..)` takes `ContentRuleList` values, each with an `id` and WebKit-style JSON `rules`. The desktop
+host installs the policy before loading the page. Replacing the lists replaces the policy; an empty list clears
+it. Compilation failures report through `on_error` and retain the previously installed policy.
+
+macOS and Linux compile rules with WebKit. Windows supports `block`, `ignore-previous-rules` and main-document
+`css-display-none`, with strict validation of the supported triggers and resource types. `block-cookies`,
+`make-https`, unsupported resource types and load-type-conditioned cosmetic exceptions return errors. Windows
+uses the Public Suffix List for site boundaries; if it cannot determine a document request's top frame, a matching
+top-dependent rule refuses that request with HTTP 403 instead of guessing. Choose rules supported by the engines
+the app targets.
+
 
 ## Messaging
 

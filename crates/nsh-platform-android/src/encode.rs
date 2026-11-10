@@ -797,6 +797,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_)
+                    // No web view controls (`Environment::webview_requests`
+                    // is false): the core answers their requests first.
+                    | Command::WebViewRequest(_)
                     // No performance monitor on Android yet.
                     | Command::PerfMonitor(_) => e.int(-1),
                     // `Audio.java`: the sub-opcode, then the command's

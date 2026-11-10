@@ -207,6 +207,19 @@ pub(crate) enum Action {
     /// the node, with the layout of the commit the action goes out with;
     /// whether a view took it resolves the slot.
     PressAt(NodeId, crate::PressEvent, AnswerSlot<bool>),
+    /// A request on a web view ([`crate::webview`]) the core sends to the
+    /// platform once the target is known to be a mounted, granted web
+    /// view; its reply resolves `answer`.
+    WebViewRequest {
+        /// The node carrying the element ref.
+        node: NodeId,
+        /// What to do on it.
+        operation: crate::webview::WebViewOperation,
+        /// Where the platform's reply goes.
+        answer: WebAnswer,
+    },
+    /// Web view request `id` waited too long for the platform's answer.
+    WebViewTimeout(u64),
 }
 
 /// What a speech recognition session asks of the core
@@ -298,6 +311,44 @@ impl FileAnswer {
                 None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
             }),
         }
+    }
+}
+
+/// A web view request waiting for the platform's answer
+/// ([`Action::WebViewRequest`]).
+pub(crate) enum WebAnswer {
+    /// The page's PNG (its bytes), or why it could not be taken.
+    CapturePage(AnswerSlot<Result<Vec<u8>, String>>),
+    /// The cookies, or why they could not be read.
+    Cookies(AnswerSlot<Result<Vec<crate::webview::WebCookie>, String>>),
+    /// A request without a value, or why it failed.
+    Done(AnswerSlot<Result<(), String>>),
+}
+
+impl WebAnswer {
+    /// Answers with the platform's `value` (any JSON, as its reply carries
+    /// it) or its `error`.
+    pub(crate) fn deliver(self, value: Option<&crate::JsonValue>, error: Option<String>) {
+        match self {
+            WebAnswer::CapturePage(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => crate::webview::capture_png(value),
+            }),
+            WebAnswer::Cookies(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => crate::webview::cookies(value),
+            }),
+            WebAnswer::Done(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }),
+        }
+    }
+
+    /// Answers with `error`: the request was not carried out (no platform
+    /// support, no web view, unmounted, no answer in time).
+    pub(crate) fn fail(self, error: String) {
+        self.deliver(None, Some(error));
     }
 }
 

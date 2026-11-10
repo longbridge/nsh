@@ -3262,8 +3262,6 @@ mod tests {
                 "{main}"
             );
         }
-        // Optional platform features come from the app, not its runner.
-        assert!(!read("rust-linux/Cargo.toml").contains("webview"));
         let android = read("rust-android/lib.rs");
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));

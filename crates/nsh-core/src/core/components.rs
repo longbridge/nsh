@@ -24,7 +24,7 @@ use crate::{
         ComponentSpec, ElKind, ElNode, Environment, Executor, FileAnswer, ImageSize, IntoElement,
         JsEvent, JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
         Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
-        caught,
+        WebAnswer, caught,
         responder::ResponderEl,
         services::FetchFailure,
         view,
@@ -660,6 +660,13 @@ pub(super) struct Components {
     /// request id: their answers.
     file_requests: FxHashMap<u32, FileAnswer>,
     next_file_request: u32,
+    /// Requests on web views ([`crate::webview`]), by request id: the node
+    /// each went to and its answer. A reply from another node, or to a
+    /// request no longer here (a timeout's, a duplicate), is dropped.
+    webview_requests: FxHashMap<u64, (NodeId, WebAnswer)>,
+    /// Their timeouts, whose tasks cancel when the request settles.
+    webview_timeouts: FxHashMap<u64, Task<()>>,
+    next_webview_request: u64,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -768,6 +775,9 @@ impl Default for Components {
             next_screen_color: 1,
             file_requests: FxHashMap::default(),
             next_file_request: 1,
+            webview_requests: FxHashMap::default(),
+            webview_timeouts: FxHashMap::default(),
+            next_webview_request: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -5848,6 +5858,14 @@ impl<M: TextEngine> Core<M> {
                     self.components.environment.web_views && self.access.allows_webviews();
                 answer.borrow_mut().deliver(available);
             }
+            Action::WebViewRequest {
+                node,
+                operation,
+                answer,
+            } => self.web_view_request(node, operation, answer),
+            Action::WebViewTimeout(request) => {
+                self.webview_failed(request, crate::webview::NO_ANSWER)
+            }
             Action::PickScreenColor(answer) => {
                 if !self.components.environment.screen_color {
                     answer.borrow_mut().deliver(None);
@@ -6062,6 +6080,90 @@ impl<M: TextEngine> Core<M> {
             _ => {
                 log::debug!(target: "js", "nsh/host: dropped the answer to call {id}, which no longer waits")
             }
+        }
+    }
+
+    /// Sends `operation` to the web view `node` (an element ref's web view
+    /// methods, [`crate::webview`]) and keeps `answer` for the platform's
+    /// reply. Fails at once where the platform has no such controls, the
+    /// app holds no `webview` grant, the node is no web view, or the
+    /// operation's own input is invalid (a URL filter, a cookie, a
+    /// download's destination); otherwise the answer fails too if it comes
+    /// after [`crate::webview::REPLY_TIMEOUT`] or the node unmounts.
+    fn web_view_request(
+        &mut self,
+        node: NodeId,
+        operation: crate::webview::WebViewOperation,
+        answer: WebAnswer,
+    ) {
+        if !self.components.environment.webview_requests {
+            answer.fail(crate::webview::UNSUPPORTED.into());
+            return;
+        }
+        if !self.access.allows_webviews() {
+            answer.fail(
+                "web views are not granted: add `webview` to capabilities in nsh.json".into(),
+            );
+            return;
+        }
+        let web = self
+            .key(node)
+            .ok()
+            .is_some_and(|key| self.nodes[key as usize].kind == Kind::WebView);
+        if !web {
+            answer.fail(crate::webview::NOT_A_WEB_VIEW.into());
+            return;
+        }
+        if let Err(error) = crate::webview::check_operation(&operation) {
+            answer.fail(error);
+            return;
+        }
+        // Ids are unique among the requests pending: a reply settles the
+        // request it names and no other.
+        let id = loop {
+            let id = self.components.next_webview_request;
+            self.components.next_webview_request = id.wrapping_add(1);
+            if !self.components.webview_requests.contains_key(&id) {
+                break id;
+            }
+        };
+        let executor = self.components.executor.clone();
+        let timeout = crate::element::task::act_after(
+            &executor,
+            node,
+            crate::webview::REPLY_TIMEOUT,
+            Action::WebViewTimeout(id),
+        );
+        self.components.webview_timeouts.insert(id, timeout);
+        self.components.webview_requests.insert(id, (node, answer));
+        let _ = self.apply_op(Op::Command {
+            id: node,
+            command: Command::WebViewRequest(crate::webview::WebViewRequest { id, operation }),
+        });
+    }
+
+    /// Web view request `id` fails with `error` (the platform has none of
+    /// these controls, the node is no web view or goes, no answer came):
+    /// its answer resolves, its timeout goes.
+    pub(super) fn webview_failed(&mut self, id: u64, error: impl Into<String>) {
+        self.components.webview_timeouts.remove(&id);
+        if let Some((_, answer)) = self.components.webview_requests.remove(&id) {
+            answer.fail(error.into());
+        }
+    }
+
+    /// The node `id` is released (it unmounted): the web view requests
+    /// pending on it fail, their answers never coming.
+    pub(super) fn webview_released(&mut self, id: NodeId) {
+        let pending: Vec<u64> = self
+            .components
+            .webview_requests
+            .iter()
+            .filter(|(_, (node, _))| *node == id)
+            .map(|(request, _)| *request)
+            .collect();
+        for request in pending {
+            self.webview_failed(request, crate::webview::NOT_MOUNTED);
         }
     }
 
@@ -6375,6 +6477,58 @@ impl<M: TextEngine> Core<M> {
                 };
                 if let Some(answer) = self.components.file_requests.remove(request) {
                     answer.deliver(paths.clone(), error.clone());
+                }
+                true
+            }
+            // The platform's answer to a web view request
+            // (`crate::webview`), on the node it was sent to.
+            EventKind::WebViewReply => {
+                let EventPayload::Json(reply) = payload else {
+                    return false;
+                };
+                // JSON's numbers may come as floats (`1.0`); `1.5` is no
+                // request.
+                let request = reply.get("id").and_then(|id| {
+                    id.as_u64().or_else(|| {
+                        id.as_f64()
+                            .filter(|n| n.is_finite() && n.fract() == 0.0 && *n >= 0.0)
+                            .map(|n| n as u64)
+                    })
+                });
+                let Some(request) = request else {
+                    log::debug!(target: "js", "web view: dropped a reply without a request's id: {reply}");
+                    return true;
+                };
+                let Some(target) = self
+                    .components
+                    .webview_requests
+                    .get(&request)
+                    .map(|(node, _)| *node)
+                else {
+                    log::debug!(target: "js", "web view: dropped a reply to unknown request {request}: {reply}");
+                    return true;
+                };
+                // Only the web view the request went to answers it.
+                if target != id {
+                    log::debug!(
+                        target: "js",
+                        "web view: dropped a reply to request {request} from node {id}, not {target}: {reply}"
+                    );
+                    return true;
+                }
+                self.components.webview_timeouts.remove(&request);
+                let Some((_, answer)) = self.components.webview_requests.remove(&request) else {
+                    return true;
+                };
+                if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
+                    answer.deliver(reply.get("value"), None);
+                } else {
+                    let error = reply
+                        .get("error")
+                        .and_then(crate::JsonValue::as_str)
+                        .unwrap_or(crate::webview::NO_ANSWER)
+                        .to_string();
+                    answer.fail(error);
                 }
                 true
             }

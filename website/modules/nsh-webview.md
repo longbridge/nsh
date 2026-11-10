@@ -73,6 +73,8 @@ mount(Browser);
 | `onError` | `{ message: string }` | A page failed to load. |
 | `onNavigationStateChange` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `{ data: string }` | The page called `window.nsh.postMessage(data)`. |
+| `onLoadProgress` | `{ progress: number \| null }` | Desktop page loading advanced; `null` is indeterminate. |
+| `onDownload` | `WebViewDownload` | A desktop download started, finished or failed; files are saved in the app's data directory. |
 
 ```ts
 interface WebViewNavigation {
@@ -96,6 +98,11 @@ interface WebViewNavigation {
 | `evaluate(script, { timeout? })` | Runs `script` in the page and resolves `{ value }`, its result as JSON; see [Evaluating scripts](#evaluating-scripts). |
 | `postMessage(data)` | Sends `data` (a string) to the page: a `message` event on `window`, with `data` as `event.data`. |
 | `load({ src, headers? })` | Loads `src` with `headers` (`Record<string, string>`) on the page's own request only, not on its subresources, later navigations or reloads; for a signed-in page (`Authorization`). The host must be one `webview.hosts` allows. An invalid header throws a `TypeError`. The browser backend does nothing. See [Signed-in pages](../docs/web-view-and-video.md#signed-in-pages-request-headers). |
+
+Rust hosts also use the [desktop controls](../elements/web-view.md#desktop-controls-in-rust) for screenshots,
+Cookie access, inspection, manual download decisions and content filtering. Their privileges belong to the host;
+the table above lists the methods exposed to TSX modules.
+
 
 ## Talking to the page
 

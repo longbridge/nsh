@@ -431,6 +431,17 @@ impl AppView {
         };
         self.surface.native.set_access(Arc::new(access));
         let options = self.options.borrow();
+        // Its web views save downloads in `<data dir>/<app id>/downloads`,
+        // as macOS's do.
+        let downloads = options
+            .data_dir
+            .clone()
+            .or_else(nsh_engine::data_dir)
+            .map(|root| {
+                root.join(nsh_engine::app_dir_name(app.app_id()))
+                    .join("downloads")
+            });
+        self.surface.native.set_downloads(downloads);
         let config = EngineConfig {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
@@ -538,6 +549,9 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        // WebView2 answers page captures, cookies, developer tools and
+        // download decisions.
+        webview_requests: true,
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()

@@ -56,6 +56,28 @@ pub enum ViewKind {
     Video,
 }
 
+/// A content blocker rule list: WebKit's content blocker rules, as JSON,
+/// which the page's engine applies to the loads it makes and to what it
+/// shows.
+///
+/// macOS compiles them into `WKContentRuleList`s and WebKitGTK into its
+/// user content filters; both engines block the matching loads, hide the
+/// elements `css-display-none` rules name, and honour the exceptions
+/// (`ignore-previous-rules`) in order. WebView2 has no such engine, so the
+/// Windows backend applies the rules it can itself and refuses the ones it
+/// cannot (it does not silently ignore them). Platforms without content
+/// filtering report a nonempty list instead of pretending it applies.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContentRuleList {
+    /// Names the list to the engine, which keeps a compiled copy of it
+    /// (and recompiles it when the rules change); a list of another
+    /// identifier replaces the one of that identifier.
+    pub id: Arc<str>,
+    /// The rules, as WebKit's content blocker JSON array.
+    pub rules: Arc<str>,
+}
+
 /// A web view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WebProps {
@@ -87,6 +109,21 @@ pub struct WebProps {
     /// ([`crate::web_resource`]). Read when the platform makes the web
     /// view, as `incognito`.
     pub url_schemes: Vec<crate::web_resource::WebUrlScheme>,
+    /// Content blocker rule lists, which apply to the loads from when the
+    /// engine takes them on (and, with none, nothing is blocked). A
+    /// failed replacement keeps the rules installed before it and reports
+    /// the failure ([`crate::webview`]). A platform without the controls
+    /// to apply them still receives the requested list, and the core
+    /// shows an inert page in place of the app's while it is set (nothing
+    /// loads or runs unfiltered).
+    pub content_rules: Vec<ContentRuleList>,
+    /// How the page's downloads are written: the platform's
+    /// ([`crate::webview::WebDownloadBehavior::Automatic`]), or only after
+    /// the app accepts a destination
+    /// ([`crate::webview::WebDownloadBehavior::Manual`]). A platform that
+    /// cannot defer downloads reports it, and the core shows an inert
+    /// page in place of the app's while manual is set.
+    pub download_behavior: crate::webview::WebDownloadBehavior,
 }
 
 impl Default for WebProps {
@@ -103,6 +140,8 @@ impl Default for WebProps {
             back_forward_gestures: false,
             incognito: false,
             url_schemes: Vec::new(),
+            content_rules: Vec::new(),
+            download_behavior: crate::webview::WebDownloadBehavior::Automatic,
         }
     }
 }

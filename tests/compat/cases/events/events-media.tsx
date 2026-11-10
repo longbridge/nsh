@@ -22,6 +22,7 @@ function App() {
   const broken = signal<string[]>([]);
   const video = signal<string[]>([]);
   const web = signal<string[]>([]);
+  const loadProgress = signal<number | null>(null);
   const add = (log: typeof image, line: string) => log.update((l) => [...l, line]);
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
@@ -61,12 +62,14 @@ function App() {
         style={{ width: 180, height: 60 }}
         onLoadStart={(e) => add(web, `start ${nav(e)}`)}
         onLoad={(e) => add(web, `load ${nav(e)}`)}
+        onLoadProgress={({ progress }) => loadProgress.set(progress)}
         onNavigationStateChange={(e) => add(web, `nav ${nav(e)}`)}
         onMessage={(e) => add(web, `message ${e.data}`)}
         onError={(e) => add(web, `error ${e.message}`)}
         onDownload={(e) => add(web, `download ${e.state} ${e.filename} ${e.bytes ?? "-"} ${e.message ?? "-"}`)}
       />
       <Text>Web: {web().join(" | ")}</Text>
+      <Text>Loading: {loadProgress() === null ? "indeterminate" : `${Math.round(loadProgress()! * 100)}%`}</Text>
     </View>
   );
 }
