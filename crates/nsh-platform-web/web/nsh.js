@@ -53,7 +53,7 @@ const HOVERED = 2;
 const FOCUSED = 4;
 /** `KeyboardEvent.key`s of modifiers: pressed alone, they leave the input
  * modality as it is (`inputWith`). */
-const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
+const MODALITY_KEYS_SKIPPED = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 /** The DOM's `buttons` bits, in the order a held button is named by. */
@@ -7390,7 +7390,7 @@ class Player {
     // the core shows the focus by it (`focus-visible:`), as the browser
     // decides `:focus-visible`. Only a change crosses to the engine.
     root.addEventListener("pointerdown", () => this.inputWith(1), true);
-    window.addEventListener("keydown", (e) => MODIFIER_KEYS.has(e.key) || this.inputWith(0), true);
+    window.addEventListener("keydown", (e) => MODALITY_KEYS_SKIPPED.has(e.key) || this.inputWith(0), true);
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
     // A link (`Link` with an `href`) is the app's to press: a plain click
     // stays in the app (its `onPress`), a click with a modifier or the
