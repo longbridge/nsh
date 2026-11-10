@@ -34,8 +34,8 @@ reduced motion. A screen whose every change is an instant swap is unfinished.
 Before writing a screen's code, write its motion inventory (Design Guides,
 "Motion inventory") in the app's `DESIGN.md`; before finishing, verify every
 line in the running app and report it. Finish every UI change by running the
-Design Guides' "Finishing checklist" (radius, typography, spacing, color,
-states, motion) on screenshots in light and dark, and report each group.
+Design Guides' "Finishing checklist" (radius, typography, spacing, alignment,
+color, hover, pressed, states, motion) on screenshots in light and dark, and report each group.
 
 Choose the app's Desktop, Mobile, Web and TUI targets explicitly. Adapt density,
 navigation, input and overlays to those targets, preserving shared semantics.

@@ -1443,15 +1443,47 @@ report each group as passed or as what was fixed. A group not checked is not pas
 - [ ] Padding belongs to the component, gaps to the parent; no doubled insets.
 - [ ] Peers share alignment spines; repeated rows keep their columns; leading and trailing written as start / end.
 
+**Alignment**
+- [ ] Each surface has a few named spines (leading and trailing content edges, a baseline or center line per band,
+  fixed lanes); every element at one level sits on one of them.
+- [ ] Sibling regions (header, toolbar, rows, empty state, footer) share one content inset; nested levels return
+  exactly to the parent spine.
+- [ ] Repeated rows keep fixed lanes for icon, label, metadata, numbers and trailing actions; a missing icon or badge
+  does not move the rest (icons centered in a fixed slot).
+- [ ] Mixed text sizes in a row align by baseline; icons and text by center line; numbers end-aligned with
+  `tabular-nums`.
+- [ ] Equal edges and gaps are equal to the rendered pixel at the window sizes, text sizes and scales checked; a
+  difference is fixed at its shared owner, never with a literal offset.
+- [ ] Indentation only for real hierarchy; `justify-between` only when both sides own opposite edges.
+- [ ] Hairlines drawn once by the boundary's owner; scrollbars at the scrolling region's trailing edge.
+
 **Color and surfaces**
 - [ ] Every color is a theme token; no raw hex, RGB or palette classes in presentation code.
 - [ ] One primary action per surface; strong color, badges and alerts scarce.
 - [ ] Popups share one surface treatment; shadows only on what floats; base regions separated by background and hairlines.
 - [ ] Light and dark are balanced; no leftover colors of an earlier palette.
 
-**Controls and states**
-- [ ] Every interactive control shows hover (desktop), pressed, focus-visible, disabled and, where it applies,
-  selected and loading, all distinct and from the app's styled controls.
+**Hover**
+- [ ] Every pressable element on desktop and web answers hover; nothing that cannot be pressed reacts to it.
+- [ ] Hover is a quiet wash (a `muted` / `accent` background, a slightly stronger border or text), weaker than
+  selected and pressed, the same treatment for every control of one kind.
+- [ ] Hover does not change size, weight, padding or layout, and does not move neighbors; it does not reveal the
+  only way to reach an action (it is also in a menu or keyboard).
+- [ ] It comes in fast (`instant`, ease-out) and leaves without lag; it is absent on touch (no stuck hover after a tap).
+- [ ] Rows: the wash fills the row's full hit area, inside the list's radius, and does not double with selection.
+
+**Pressed**
+- [ ] Every pressable element has a pressed state the app styles (`active:` / `activeStyle`), visible within the
+  frame of the touch or click, stronger than hover.
+- [ ] Buttons scale slightly (0.97, icon buttons 0.95) and/or deepen their wash on the soft settle; rows and list
+  items deepen their background instead of scaling.
+- [ ] The pressed state covers the whole hit area, keeps the label readable, and does not shift layout.
+- [ ] Releasing outside cancels without firing; a control owning a menu stays visibly open until the menu closes.
+- [ ] Disabled controls show neither hover nor pressed.
+
+**Other states**
+- [ ] Focus-visible rings on every keyboard-reachable control, outside the clip; selected, disabled and loading
+  distinct from each other and from hover.
 - [ ] Icon-only buttons are square, the same size within a group, and have an accessibility label.
 - [ ] One icon family, one stroke weight, sizes from the scale.
 
