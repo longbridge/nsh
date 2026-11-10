@@ -6661,13 +6661,38 @@ class Player {
     this.event(ROOT_ID, "onClipboard", payload);
   }
 
-  /** `Clipboard.writeImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
-  async writeClipboardImage(uri) {
+  /**
+   * `Clipboard.writeImage`: a `data:` URI's image as a clipboard item.
+   * Browsers write images as PNG only, so another format is decoded and
+   * encoded again. The write starts before that, with the PNG to come:
+   * Safari only writes within the user's gesture, which an `await` loses.
+   */
+  writeClipboardImage(uri) {
+    // Decoded here: the CSP of a page whose app restricts `network` keeps `fetch` from `data:` URIs.
+    const base64 = /^data:([^;,]*);base64,/.exec(uri);
+    const png = (async () => {
+      const blob = base64
+        ? new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] })
+        : await (await fetch(uri)).blob();
+      if (blob.type === "image/png") return blob;
+      const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
+      try {
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        canvas.getContext("2d").drawImage(bitmap, 0, 0);
+        return await canvas.convertToBlob({ type: "image/png" });
+      } finally {
+        bitmap.close();
+      }
+    })();
+    const fail = (err) => console.warn(`[nsh] Clipboard.writeImage: ${err?.message ?? err}`);
+    // Handled by the write; this keeps it from reporting twice when the write never starts.
+    png.catch(() => {});
     try {
-      const blob = await (await fetch(uri)).blob();
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-    } catch {
-      // Denied, an insecure context, or a type the browser does not write.
+      return navigator.clipboard.write([new ClipboardItem({ "image/png": png })]).catch(fail);
+    } catch (err) {
+      // No clipboard (an insecure context) or no `ClipboardItem`.
+      fail(err);
+      return Promise.resolve();
     }
   }
 

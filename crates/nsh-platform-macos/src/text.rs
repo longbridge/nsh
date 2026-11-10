@@ -2219,20 +2219,102 @@ pub(crate) fn selection_key(
 /// Copies the selection to the general pasteboard (the Edit menu's Copy).
 /// False if there is none.
 pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
-    let Some(text) = surface.selection.area.text().or_else(|| {
-        surface
-            .selection
-            .with_range()
-            .and_then(|v| selected_text(&v))
-    }) else {
+    write_selection(surface, &objc2_app_kit::NSPasteboard::generalPasteboard())
+}
+
+/// Puts the selected text on `board` (Copy, the Services menu). False if
+/// there is none.
+pub(crate) fn write_selection(
+    surface: &crate::surface::Surface,
+    board: &objc2_app_kit::NSPasteboard,
+) -> bool {
+    let Some(text) = selection_text(surface) else {
         return false;
     };
-    let board = objc2_app_kit::NSPasteboard::generalPasteboard();
     board.clearContents();
     // SAFETY: an immutable AppKit constant.
     let kind = unsafe { objc2_app_kit::NSPasteboardTypeString };
     board.setString_forType(&objc2_foundation::NSString::from_str(&text), kind);
     true
+}
+
+/// The selected text of the surface, if any.
+pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String> {
+    surface.selection.area.text().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+    })
+}
+
+/// A secondary click on selectable text or in a selectable view: Copy
+/// (with a selection), Select All, and what macOS adds for selected text
+/// (Look Up, Translate, Services), which the root view serves through
+/// `validRequestorForSendType:returnType:`. Returns once it closed.
+pub(crate) fn context_menu(surface: &crate::surface::Surface) {
+    use nsh_core::desktop::MenuRole;
+    use objc2::{MainThreadMarker, MainThreadOnly, sel};
+    use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem, NSPasteboardTypeString};
+    use objc2_foundation::{NSArray, NSString};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let Some(event) = app.currentEvent() else {
+        return;
+    };
+    // SAFETY: an immutable AppKit constant.
+    let kind = unsafe { NSPasteboardTypeString };
+    // What the Services menu (and Translate) may ask the root view for.
+    app.registerServicesMenuSendTypes_returnTypes(&NSArray::from_slice(&[kind]), &NSArray::new());
+    let root = crate::input::event_root(surface);
+    let menu = NSMenu::new(mtm);
+    menu.setAutoenablesItems(false);
+    for (role, action, enabled) in [
+        (MenuRole::Copy, sel!(copy:), can_copy(surface)),
+        (MenuRole::SelectAll, sel!(selectAll:), true),
+    ] {
+        // SAFETY: a new item with a valid selector.
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(role.label()),
+                Some(action),
+                &NSString::new(),
+            )
+        };
+        // SAFETY: the root view answers both actions and outlives the menu.
+        unsafe { item.setTarget(Some(root.ns())) };
+        item.setEnabled(enabled);
+        menu.addItem(&item);
+    }
+    // Look Up (dictionary, Wikipedia, Siri Knowledge), the same panel as
+    // Force Click / Ctrl+Cmd+D. Translate and Services are added by AppKit
+    // because the root view is a valid Services requestor.
+    if let Some(text) = selection_text(surface).filter(|t| !t.trim().is_empty()) {
+        let word: String = text.trim().chars().take(24).collect();
+        let more = if text.trim().chars().count() > 24 {
+            "…"
+        } else {
+            ""
+        };
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        // SAFETY: a new item with a selector the root view implements.
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(&format!("Look Up \u{201c}{word}{more}\u{201d}")),
+                Some(sel!(nshLookUp:)),
+                &NSString::new(),
+            )
+        };
+        // SAFETY: the root view answers the action and outlives the menu.
+        unsafe { item.setTarget(Some(root.ns())) };
+        menu.addItem(&item);
+    }
+    NSMenu::popUpContextMenu_withEvent_forView(&menu, &event, root.ns());
 }
 
 /// Whether [`copy`] has a selection to copy.

@@ -336,7 +336,7 @@ empty off macOS (`target_os = "macos"`, not Catalyst). `nsh-platform-windows` an
 check them on Windows, with the MSVC Build Tools, the Windows SDK and LLVM (libclang for QuickJS' bindings);
 `RUST_MIN_STACK=268435456` if rustc overflows its stack on the `windows` crate. The GPUI backend (`crates/gpui`) is
 a workspace of its own: the main workspace's `cargo test --workspace` and clippy never build it, and its CI runs only when
-it changes (and daily). Its crates build on all three desktops and are empty elsewhere; on Linux they need GPUI's X11 /
+it changes (and on main's scheduled runs). Its crates build on all three desktops and are empty elsewhere; on Linux they need GPUI's X11 /
 Wayland / xkbcommon / fontconfig packages plus GTK 3, WebKitGTK 4.1 (feature `webview`, on by default) and GStreamer
 1.20+ with its base plug-ins (feature `video`, the host's); on macOS Xcode's Metal Toolchain, or the
 feature `runtime-shaders` (`docs/dev/gpui.md`), which the CLI turns on when `xcrun metal` fails. It builds into the
@@ -599,8 +599,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 
 ## CI
 
-The checks run on pull requests and once a day on `main` (and on manual runs), not on every push to `main`: the
-pull request already ran them, and the daily run saves the dependencies' caches pull requests restore. Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+The checks run on pull requests and on `main` every three hours when it moved (and on manual runs), not on every push to `main`: the
+pull request already ran them, and the scheduled run saves the dependencies' caches pull requests restore. Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
 It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow
