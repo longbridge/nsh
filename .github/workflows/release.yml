@@ -117,9 +117,10 @@ jobs:
         # built for the runner's processor, so each architecture has a runner
         # of its own. `embed` names the embedding SDK a build releases. The
         # components the same everywhere (Android, web) come from x86_64
-        # Linux's build, so the arm64 Linux and Windows builds skip Android
-        # (`no_android`; the NDK has no toolchain for arm64 Linux). It also
-        # sets `NSH_DIST_NO_ANDROID`, so xtask skips it where an SDK is found.
+        # Linux's build alone (`shared`); every other build sets
+        # `NSH_DIST_NO_ANDROID` and `NSH_DIST_NO_WEB` and skips them: built
+        # there, they were thrown away at packing, and cost the macOS and
+        # x86_64 Windows builds 40 to 65 minutes each.
         include:
           # The iOS runtimes and SDK need Xcode and Apple silicon; the macOS
           # runtime is built for this machine.
@@ -133,14 +134,13 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-24.04
             embed: android
+            shared: true
           - name: linux-arm64
             os: ubuntu-24.04-arm
-            no_android: true
           - name: windows-x86_64
             os: windows-latest
           - name: windows-arm64
             os: windows-11-arm
-            no_android: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -188,12 +188,12 @@ jobs:
       # The Android runtime: `javac` + `d8` (Java 17), the SDK's
       # `platforms;android-35` and an NDK (the images have the SDK and NDKs).
       - uses: actions/setup-java@v4
-        if: ${{ !matrix.no_android }}
+        if: ${{ matrix.shared }}
         with:
           distribution: temurin
           java-version: "17"
       - name: Install the Android platform
-        if: ${{ !matrix.no_android }}
+        if: ${{ matrix.shared }}
         run: |
           if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]]; then
             sdkmanager=$(ls "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager* | head -1)
@@ -210,6 +210,7 @@ jobs:
       # The web runtime's C code (zstd) needs upstream LLVM: Apple's clang
       # does not target wasm32. Check the C tools before building runtimes.
       - name: Set up WebAssembly C tools
+        if: ${{ matrix.shared }}
         run: |
           suffix=""
           if [[ "$RUNNER_OS" == macOS ]]; then
@@ -269,7 +270,8 @@ jobs:
       - name: Build the distribution
         env:
           NSH_CHANNEL: ${{ env.NIGHTLY == 'true' && 'nightly' || 'stable' }}
-          NSH_DIST_NO_ANDROID: ${{ matrix.no_android && '1' || '' }}
+          NSH_DIST_NO_ANDROID: ${{ !matrix.shared && '1' || '' }}
+          NSH_DIST_NO_WEB: ${{ !matrix.shared && '1' || '' }}
         run: cargo xtask dist -v
 
       # The packaged CLI makes and bundles a new app.

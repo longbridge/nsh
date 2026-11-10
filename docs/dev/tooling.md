@@ -1004,9 +1004,9 @@ are. App-specific development hosts are generated in `.nsh/rust/tui/tui-host`.
 
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon, with the iOS and Mac Catalyst
 runtimes and the iOS SDK, and Intel), Linux and Windows (x86_64 and arm64), each with the desktop runtime and the GPUI
-and terminal development hosts of its machine. The arm64 Linux and Windows builds set `NSH_DIST_NO_ANDROID` and leave
-the Android runtime out: the `android` component comes from x86_64 Linux, and the NDK has no arm64 Linux
-toolchain. Each run checks that the packaged CLI makes and bundles a new app, and archives `dist/nsh` as one
+and terminal development hosts of its machine. The components the same on every machine,
+`android` and `web`, come from x86_64 Linux's build alone: every other build sets `NSH_DIST_NO_ANDROID` and
+`NSH_DIST_NO_WEB` and leaves them out (the NDK has no arm64 Linux toolchain either). Each run checks that the packaged CLI makes and bundles a new app, and archives `dist/nsh` as one
 directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on Windows) with the CLI and that machine's runtime only. The
 embedding SDKs are archives of their own (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack`
 moves every other runtime into its component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and
