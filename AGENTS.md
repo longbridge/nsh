@@ -436,7 +436,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   "Extensions").
 - **API shapes: one form per thing, shapes that can grow** (decided by the user before the freeze; details and
   examples in `docs/dev/api-naming.md` "Conventions", "Shapes that can grow" and "Units"; the API is being brought to
-  them). Names come from `gpui-base` / GPUI and the DOM; React Native is a reference only.
+  them). Names are short, accurate and neutral: the project's own word for a concept first, then `gpui-base` /
+  GPUI's and the DOM's (`CONTRIBUTING.md` "API design"); React Native is a reference only.
   - Units: one per quantity. Lengths are points; an image's or a video's own size is pixels, typed `PixelSize`
     (never `Size`); times are milliseconds; velocities points per second; shares fractions from 0 to 1 (no `Percent`
     in names). Only media time is seconds (HTML's `currentTime`) and a deceleration the velocity kept per
