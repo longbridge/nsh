@@ -331,7 +331,7 @@ fn own_name(view: &NshView, s: &ViewState, role: Option<Role>) -> Option<String>
     }
     if let Some(t) = &s.text {
         // Hidden runs are not read.
-        return Some(t.text.shown_text().into_owned());
+        return Some(t.text.visible_text().into_owned());
     }
     if !role.is_some_and(|r| groups(s, r)) {
         return None;
@@ -362,7 +362,7 @@ fn content_name(view: &NshView, out: &mut String) {
                     .label
                     .as_deref()
                     .map(std::borrow::Cow::Borrowed)
-                    .or_else(|| s.text.as_ref().map(|t| t.text.shown_text())),
+                    .or_else(|| s.text.as_ref().map(|t| t.text.visible_text())),
             };
             match own {
                 Some(text) => {
