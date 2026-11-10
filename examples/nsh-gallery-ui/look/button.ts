@@ -139,7 +139,7 @@ export function buttonLook(kind: Live<ButtonKind> = "secondary", o?: ButtonLookO
           : finish.pressed;
       return { ...shade, ...sink(0.97) };
     },
-    get focusStyle(): ViewStyle {
+    get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
     disabledStyle: { opacity: 0.4 } as ViewStyle,
@@ -227,7 +227,7 @@ export function iconButtonLook(o: IconButtonLookOptions = {}) {
       if (read(o.disabled)) return undefined;
       return { ...(raised ? finish.pressed : { backgroundColor: alpha(colors.text, 0.1) }), ...sink(0.9) };
     },
-    get focusStyle(): ViewStyle {
+    get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
     disabledStyle: { opacity: 0.4 } as ViewStyle,
@@ -274,7 +274,7 @@ export function roundButtonLook(variant: "primary" | "secondary" = "primary", o:
     get activeStyle(): ViewStyle | undefined {
       return read(o.disabled) ? undefined : sink(0.92);
     },
-    get focusStyle(): ViewStyle {
+    get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
     disabledStyle: { opacity: 0.4 } as ViewStyle,
@@ -352,7 +352,7 @@ export function splitButtonLook(kind: Live<ButtonKind> = "primary", o?: ButtonLo
         get activeStyle(): ViewStyle | undefined {
           return read(s?.disabled) ? undefined : { backgroundColor: shade(0.12) };
         },
-        get focusStyle(): ViewStyle {
+        get focusVisibleStyle(): ViewStyle {
           return focusRing(-2);
         },
         // Taller only: the halves touch, so a finger's slop stays off their shared edge.

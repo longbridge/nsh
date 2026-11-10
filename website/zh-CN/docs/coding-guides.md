@@ -601,8 +601,9 @@ view()
 - 类名的含义与 Tailwind CSS v4 完全相同，样式值的含义见[样式参考](../modules/style-reference.md)（即 CSS 的含义，采用原生的写法：数字的单位是点）；`unknown class` 警告是需要修复的问题；
 - token 按语义而不是调色板位置使用；
 - 与状态无关的几何放在普通的构建器链或类名字符串中；
-- 运行时交互状态使用 `active:`、`hover:` 和 `focus:`（`.active(..)`、`.hover(..)`、`.focus(..)`），它们原生生效，不需要往返
-  应用代码；
+- 运行时交互状态使用 `active:`、`hover:` 和 `focus-visible:`（`.active(..)`、`.hover(..)`、`.focus_visible(..)`），它们原生
+  生效，不需要往返应用代码。`focus-visible:` 是键盘的焦点环：键盘移来焦点时显示，点击或轻点之后不显示；任何焦点都要显示的
+  地方（输入框的边框、列表里高亮的行）用 `focus:`；
 - checked、selected、pressed、disabled 外观使用组件的语义状态样式（`selected:`、`checked:`、`disabled:`）；
 - 弹出层的所有权使用显式状态（`open` 与 `onOpenChange`），使触发器在关闭前持续呈现打开或按下的外观；
 - 变体保持少而有意义，不为每个调用处增加一个变体；
@@ -686,7 +687,7 @@ keymap.bind("mod+s", save);
 - `Button`、`Switch` 和菜单项在桌面和 Web 上是键盘焦点的停靠点；在它们之上构建控件，而不是在裸视图上；
 - 在事件中，或在跟随状态变化的 effect 中，用 ref 的 `focus()` 移动焦点，用 `set_accessibility_focus()`（Rust）或
   `nsh` 的 `setAccessibilityFocus`（TSX）移动屏幕阅读器的焦点；
-- 绘制清楚的 `focus:` 状态；
+- 绘制清楚的 `focus-visible:` 状态；
 - 禁止在渲染时无条件设置焦点。
 
 复合控件应完成整个导航模型：方向键、适用时的 Home / End 或翻页、确认、取消与 Tab，而不是几个孤立的快捷键。

@@ -96,7 +96,7 @@ export function Press(props: {
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
       style={[props.style ?? null, { ...pressSink().transition, opacity: props.disabled ? 0.4 : 1 }]}
-      focusStyle={focusRing()}
+      focusVisibleStyle={focusRing()}
     >
       {props.children}
     </View>
@@ -388,7 +388,7 @@ export function Row(props: { first?: boolean; focusable?: boolean; onPress?: () 
     <View
       onPress={props.onPress}
       focusable={props.focusable}
-      focusStyle={props.focusable ? focusRing() : undefined}
+      focusVisibleStyle={props.focusable ? focusRing() : undefined}
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
         minHeight: terminal ? TERMINAL_ROW : density.row,
