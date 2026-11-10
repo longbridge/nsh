@@ -133,6 +133,9 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The scroll under way has no scroll view of this surface under it:
+    /// it goes to the view the surface is in (an embedded app's host).
+    forward_scroll: Cell<bool>,
     /// Views that track `HOVERED` or listen to the mouse's events
     /// (`onMouseEnter`, `onMouseLeave`, `onMouseMove`).
     hover_tracked: RefCell<FxHashSet<NodeId>>,
@@ -148,6 +151,10 @@ pub(crate) struct Input {
     js_block: Cell<bool>,
     /// Where the mouse last was (root coordinates), while over the root.
     last: Cell<Option<(f32, f32)>>,
+    /// The cursor this surface last set (`None`: another may show, a
+    /// hosted view's or another app's) — `NSCursor::currentCursor` is
+    /// another object than the one set when the pointer is customized.
+    cursor: Cell<Option<Cursor>>,
     /// Hovered views and the cursor are picked again on the main queue
     /// (what is under the mouse moved).
     repick: Cell<bool>,
@@ -511,9 +518,8 @@ fn update_cursor(surface: &Surface, x: f32, y: f32) {
 /// [`update_cursor`]; unless `always`, only when the app's cursor is
 /// another one. `-[NSCursor set]` costs milliseconds even for the cursor
 /// already set (with a customized pointer size or color it renders the
-/// cursor image again: ~3 ms on macOS 26), so what calls it while the mouse
-/// is still (batches, scroll steps, AppKit's cursor updates) skips it; a
-/// mouse that moves sets it, as it may come from another app's cursor.
+/// cursor image again: ~3 ms on macOS 26), so only the mouse coming in
+/// (it may bring another app's cursor) and a press's end set it always.
 fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     if surface.input.pointer.borrow().is_some() {
         // A drag keeps the cursor it began with.
@@ -528,7 +534,8 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
         y,
     );
     let cursor = match hit {
-        Some(hit) if hit.native => return,
+        // the hosted view sets its own: the next one is set again
+        Some(hit) if hit.native => return surface.input.cursor.set(None),
         Some(hit) => {
             if over_link(surface, &hit.view, x, y) {
                 Cursor::Pointer
@@ -538,10 +545,17 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
         }
         None => Cursor::Default,
     };
-    let cursor = ns_cursor(cursor);
-    if always || NSCursor::currentCursor() != cursor {
-        cursor.set();
+    if let Some(cursor) = cursor_to_set(always, surface.input.cursor.get(), cursor) {
+        ns_cursor(cursor).set();
+        surface.input.cursor.set(Some(cursor));
     }
+}
+
+/// The cursor to set where the app's is `cursor`, after this surface last
+/// set `set` (`None`: another may show, a hosted view's or another app's):
+/// none when it shows already, unless `always`.
+fn cursor_to_set(always: bool, set: Option<Cursor>, cursor: Cursor) -> Option<Cursor> {
+    (always || set != Some(cursor)).then_some(cursor)
 }
 
 /// The mouse at `(x, y)` (root coordinates) is over `view` (none: off the
@@ -599,10 +613,13 @@ fn refresh_cursor(surface: &Surface) {
 }
 
 /// AppKit asks the view under the mouse for its cursor (`cursorUpdate:`,
-/// after views moved or were added): NSH's, which AppKit's default (the
-/// arrow, set again on every update) would replace.
+/// after views moved or were added, or the pointer left a window edge's
+/// resize cursor): NSH's, which AppKit's default (the arrow, set again on
+/// every update) would replace. Set always: AppKit may have shown another.
 pub(crate) fn cursor_update(surface: &Surface) {
-    refresh_cursor(surface);
+    if let Some((x, y)) = surface.input.last.get() {
+        set_cursor_at(surface, x, y, true);
+    }
 }
 
 /// A repick waits this long after the last content move (ms): each repick
@@ -788,11 +805,16 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
             hover(surface, x, y, mouse);
             mouse_moved(surface, x, y, mouse);
             reveal_indicators(surface, x, y);
-            update_cursor(surface, x, y);
+            // Set always as the mouse comes in (it may bring another app's
+            // cursor); while it moves, only when it changes: setting it
+            // on every move kept a customized pointer re-rendering
+            // (~95% of the main thread's time over a chat's rows).
+            set_cursor_at(surface, x, y, ty == NSEventType::MouseEntered);
         }
         NSEventType::MouseExited => {
             // The views it leaves hear where it was last over them.
             let (x, y) = input.last.take().unwrap_or((x, y));
+            input.cursor.set(None);
             if input.pointer.borrow().is_none() {
                 set_hovered(surface, Vec::new(), x, y, Mouse::of(event));
                 hover_link(surface, None, x, y);
@@ -1481,6 +1503,10 @@ fn down(
     };
     let input = &surface.input;
     input.js_block.set(false);
+    // A press stops the momentum a trackpad flick left running, wherever
+    // it lands; the press still registers (`catch` below is for the app's
+    // own glides on views under the pointer, and swallows it).
+    end_momentum(surface);
     let native = hit.native;
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
@@ -2610,6 +2636,64 @@ fn gesture_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option
     })
 }
 
+/// Whether `event` belongs to a scroll this surface does not take, so its
+/// view passes it up the responder chain: the app is embedded in another
+/// view's content ([`embedded`]) and no scroll view of it that can move
+/// ([`crate::scroll::movable`]: enabled, with content overflowing its
+/// viewport) is under the pointer when the scroll begins. The host then
+/// scrolls, as a page scrolls under an iframe that cannot; an embedded
+/// app whose scroll view is switched off or whose content fits takes no
+/// scroll either. Decided when a gesture begins (or per mouse wheel notch
+/// with nothing latched) and kept for the gesture's changes, end and
+/// momentum.
+pub(crate) fn forwards_scroll(surface: &Rc<Surface>, event: &NSEvent) -> bool {
+    let input = &surface.input;
+    let phase = event.phase();
+    let momentum = event.momentumPhase();
+    let starts = if momentum.is_empty() {
+        if phase.is_empty() {
+            input.latch.borrow().is_none()
+        } else {
+            phase.intersects(NSEventPhase::MayBegin | NSEventPhase::Began)
+        }
+    } else {
+        false
+    };
+    if starts {
+        // The root of the window the scroll came to: the app's own, or
+        // one of the windows it opened.
+        let root = event_root(surface);
+        let p = root
+            .ns()
+            .convertPoint_fromView(event.locationInWindow(), None);
+        let forward = embedded(root.ns())
+            && !pick(&root, p.x as f32, p.y as f32).is_some_and(|hit| {
+                chain(&hit.view)
+                    .into_iter()
+                    .any(|v| v.kind() == ViewKind::Scroll && crate::scroll::movable(&v))
+            });
+        if forward {
+            // Fingers on the trackpad stop what moves, as in
+            // `gesture_event`: the momentum of an earlier flick here would
+            // otherwise wait for events that now go to the host.
+            end_momentum(surface);
+        }
+        input.forward_scroll.set(forward);
+    }
+    input.forward_scroll.get()
+}
+
+/// Whether `root`'s app is in another view's content: its view
+/// ([`crate::AppView::view`]) is not its window's content view, so a
+/// view above it can take the scrolls it passes on. A window's own app
+/// keeps them all (its views still bounce where their content fits).
+fn embedded(root: &objc2_app_kit::NSView) -> bool {
+    let Some(window) = root.window() else {
+        return false;
+    };
+    crate::view::superview(root).is_some_and(|app| window.contentView().as_ref() != Some(&app))
+}
+
 /// A `scrollWheel:` event at `(x, y)`.
 fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f64) {
     let precise = event.hasPreciseScrollingDeltas();
@@ -3000,6 +3084,31 @@ mod tests {
         let vertical = Candidate::Pan { x: false, y: true };
         assert!(vertical.accepts(1.0, -7.0));
         assert!(!vertical.accepts(-7.0, 1.0));
+    }
+
+    #[test]
+    fn the_cursor_is_set_only_when_it_changes() {
+        // A move over views of the same cursor sets nothing.
+        assert_eq!(
+            cursor_to_set(false, Some(Cursor::Pointer), Cursor::Pointer),
+            None
+        );
+        // A move onto another cursor sets it.
+        assert_eq!(
+            cursor_to_set(false, Some(Cursor::Pointer), Cursor::Text),
+            Some(Cursor::Text)
+        );
+        // After a hosted view's or another app's cursor, it is set again.
+        assert_eq!(
+            cursor_to_set(false, None, Cursor::Pointer),
+            Some(Cursor::Pointer)
+        );
+        // The mouse coming in, a press's end and AppKit's cursor updates set
+        // it always.
+        assert_eq!(
+            cursor_to_set(true, Some(Cursor::Pointer), Cursor::Pointer),
+            Some(Cursor::Pointer)
+        );
     }
 
     #[test]
