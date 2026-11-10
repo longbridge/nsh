@@ -1274,6 +1274,10 @@ struct WebIvars {
     navigation: Cell<Option<usize>>,
     /// Response policies that converted a navigation into a download.
     downloading: RefCell<FxHashSet<usize>>,
+    /// The folder path (`/a/b/`) of the `file://` page the app last loaded
+    /// here: the only files this web view may open (its pages can link to
+    /// each other, never to a file outside it).
+    file: RefCell<Option<String>>,
 }
 
 /// A download under way: its `WKDownload` (kept alive until it ends) and
@@ -1327,13 +1331,13 @@ define_class!(
                     .map(|s| s.to_string());
                 (main, url.unwrap_or_default())
             };
-            let allowed = !main
-                || url.is_empty()
-                || self
-                    .ivars()
-                    .access
-                    .as_ref()
-                    .is_none_or(|a| a.allows_webview(&url));
+            let ivars = self.ivars();
+            let allowed = navigation_allowed(
+                ivars.access.as_deref(),
+                ivars.file.borrow().as_deref(),
+                main,
+                &url,
+            );
             if !allowed {
                 log::warn!(target: "js", "web view navigation to {url} is not granted");
                 let message = format!("navigation to {url} is not granted");
@@ -1509,6 +1513,7 @@ impl WebHandler {
             active: RefCell::default(),
             navigation: Cell::default(),
             downloading: RefCell::default(),
+            file: RefCell::new(None),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -1746,6 +1751,100 @@ fn describe(object: &AnyObject) -> String {
     d.to_string()
 }
 
+/// Whether a web view may navigate to `url`: a frame inside the page, a
+/// file in the folder of the `file://` page the app itself loaded there
+/// (`folder`, which the `webview` grant, made of web hosts, can't name),
+/// and what the grant allows. Never a file outside that folder.
+fn navigation_allowed(
+    access: Option<&Access>,
+    folder: Option<&str>,
+    main: bool,
+    url: &str,
+) -> bool {
+    if !main || url.is_empty() {
+        return true;
+    }
+    if is_file_url(url) {
+        return folder.is_some_and(|dir| {
+            local_file_path(url).is_some_and(|path| path.starts_with(dir) && !has_dot_segment(path))
+        });
+    }
+    access.is_none_or(|a| a.allows_webview(url))
+}
+
+fn is_file_url(url: &str) -> bool {
+    url.get(..5)
+        .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+}
+
+/// The path of a local `file://` URL, without query or fragment: `None`
+/// for any other URL and for a file on another host. `file:///a` and
+/// `file://localhost/a` are the same file, `/a`.
+fn local_file_path(url: &str) -> Option<&str> {
+    const SCHEME: &str = "file://";
+    if !url
+        .get(..SCHEME.len())
+        .is_some_and(|s| s.eq_ignore_ascii_case(SCHEME))
+    {
+        return None;
+    }
+    let rest = &url[SCHEME.len()..];
+    let slash = rest.find('/')?;
+    let host = &rest[..slash];
+    if !(host.is_empty() || host.eq_ignore_ascii_case("localhost")) {
+        return None;
+    }
+    let path = &rest[slash..];
+    Some(path.split(['?', '#']).next().unwrap_or(path))
+}
+
+/// Whether `path` has a `.` or `..` segment, written out or
+/// percent-encoded (`%2e`, `..%2f`), which could name a folder above the
+/// one it seems to.
+fn has_dot_segment(path: &str) -> bool {
+    percent_decoded(path)
+        .split(|&b| b == b'/')
+        .any(|segment| segment == b"." || segment == b"..")
+}
+
+/// The folder path (`/a/b/`) a `file://` page may read: the file's own and
+/// what is under it, nothing above. `None` for any other URL, which loads
+/// as a request, for a file on another host, for a file at the root, whose
+/// folder is the whole disk (`file://localhost/a.pdf` included), and for a
+/// path with a `.` or `..` segment.
+fn file_read_scope(uri: &str) -> Option<&str> {
+    let path = local_file_path(uri)?;
+    if has_dot_segment(path) {
+        return None;
+    }
+    let end = path.rfind('/')? + 1;
+    (end > 1).then(|| &path[..end])
+}
+
+/// `s` with each `%XX` turned into its byte; a `%` not followed by two hex
+/// digits stays as it is.
+fn percent_decoded(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(h), Some(l)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push((h * 16 + l) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// A JS string literal for `s`.
 fn js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -1914,12 +2013,26 @@ impl WebHost {
                 msg_send![&prefs, setAllowsContentJavaScript: Bool::new(p.javascript_enabled)];
             // Scripts apply to pages loaded from now on: load again.
             if first || p.source != old.source || scripts_changed {
+                // Only the file this load opens is the page's own: none for
+                // any other source.
+                *self.handler.ivars().file.borrow_mut() = None;
                 match &p.source {
                     WebSource::Uri(uri) => {
-                        if let (Some(url), Some(cls)) = (
-                            NSURL::URLWithString(&NSString::from_str(uri)),
-                            class(c"NSURLRequest"),
-                        ) {
+                        let url = NSURL::URLWithString(&NSString::from_str(uri));
+                        let dir = file_read_scope(uri);
+                        let scope = dir.and_then(|dir| {
+                            NSURL::URLWithString(&NSString::from_str(&format!("file://{dir}")))
+                        });
+                        if let (Some(url), Some(scope), Some(dir)) = (&url, scope, dir) {
+                            *self.handler.ivars().file.borrow_mut() = Some(dir.to_owned());
+                            // A request for a file URL shows nothing: WebKit
+                            // reads a local file only where it is let.
+                            let _: Option<Retained<AnyObject>> = msg_send![
+                                web,
+                                loadFileURL: &**url,
+                                allowingReadAccessToURL: &*scope
+                            ];
+                        } else if let (Some(url), Some(cls)) = (url, class(c"NSURLRequest")) {
                             let request: Retained<AnyObject> =
                                 msg_send![cls, requestWithURL: &*url];
                             let _: Option<Retained<AnyObject>> =
@@ -2210,6 +2323,144 @@ mod tests {
             Some(Location::Path("/Users/me/a.mp4".into()))
         );
         assert_eq!(locate("", None), None);
+    }
+
+    #[test]
+    fn a_file_url_reads_its_own_folder_and_nothing_wider() {
+        assert_eq!(
+            file_read_scope("file:///tmp/opened/7f/Invoice%20May.pdf"),
+            Some("/tmp/opened/7f/")
+        );
+        assert_eq!(
+            file_read_scope("FILE:///tmp/x/a.pdf#page=2"),
+            Some("/tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file://localhost/tmp/x/a.pdf"),
+            Some("/tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file://LOCALHOST/tmp/x/a.pdf"),
+            Some("/tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file:///tmp/x/a.pdf?/b/c"),
+            Some("/tmp/x/"),
+            "a slash after the path is no folder"
+        );
+        assert_eq!(
+            file_read_scope("file:///tmp/x/..a/b..pdf"),
+            Some("/tmp/x/..a/"),
+            "dots in a name are a name"
+        );
+        assert_eq!(file_read_scope("file:///tmp/x/a%20.pdf"), Some("/tmp/x/"));
+        for uri in [
+            "file:///a.pdf",
+            "file://localhost/a.pdf",
+            "file://localhost/",
+            "file://server/share/a.pdf",
+            "file://localhost",
+            "file:///tmp/x/../../a.pdf",
+            "file:///tmp/x/./a.pdf",
+            "file:///tmp/x/%2e%2e/%2E%2E/a.pdf",
+            "file:///tmp/x/.%2e/a.pdf",
+            "file:///tmp/x/..%2f..%2fetc/a.pdf",
+            "file:///tmp/x/..%2F/a.pdf",
+            "file://localhost/tmp/../a.pdf",
+            "file:///tmp/../a.pdf#page=2",
+            "http://127.0.0.1:8790/file/raw/m1/a.pdf",
+            "https://example.com/a.pdf",
+            "about:blank",
+            "/tmp/b.pdf",
+            "",
+        ] {
+            assert_eq!(file_read_scope(uri), None, "{uri}");
+        }
+    }
+
+    #[test]
+    fn a_web_view_opens_only_files_in_the_folder_it_was_given() {
+        let dir = "/tmp/opened/7f/";
+        let native = Policy::default().access();
+        let go =
+            |loaded: Option<&str>, url: &str| navigation_allowed(Some(&native), loaded, true, url);
+        for url in [
+            "file:///tmp/opened/7f/a.pdf",
+            "file:///tmp/opened/7f/a.pdf#page=2",
+            "FILE:///tmp/opened/7f/a.pdf",
+            "file://localhost/tmp/opened/7f/a.pdf",
+            "file:///tmp/opened/7f/b.html",
+            "file:///tmp/opened/7f/sub/c.html?x=1",
+        ] {
+            assert!(go(Some(dir), url), "same folder: {url}");
+        }
+        for url in [
+            "file:///tmp/opened/a.pdf",
+            "file:///etc/passwd",
+            "file://localhost/etc/passwd",
+            "file://server/tmp/opened/7f/a.pdf",
+            "file:///tmp/opened/7f/../x.pdf",
+            "file:///tmp/opened/7f/%2e%2e/x.pdf",
+            "file:///tmp/opened/7fx/a.pdf",
+        ] {
+            assert!(!go(Some(dir), url), "outside the folder: {url}");
+        }
+        assert!(
+            !go(None, "file:///tmp/opened/7f/a.pdf"),
+            "a web view that loaded no file (the mail reader)"
+        );
+        assert!(
+            !navigation_allowed(None, None, true, "file:///tmp/a.pdf"),
+            "nothing known of the app"
+        );
+        // Not a file: the grant decides, unrestricted or not.
+        assert!(go(Some(dir), "https://example.com/a"));
+        assert!(go(None, "about:blank"));
+        let granted = nsh_core::access::Capabilities::from_json(
+            &serde_json::json!({ "webview": { "hosts": ["example.com"] } }),
+        )
+        .unwrap();
+        let app = Access {
+            declared: granted,
+            granted: None,
+        };
+        for url in [
+            "data:text/html,<p>x</p>",
+            "buwiz://chat/new",
+            "javascript:alert(1)",
+        ] {
+            assert!(!go(Some(dir), url), "not a web page: {url}");
+            assert!(
+                !navigation_allowed(Some(&app), Some(dir), true, url),
+                "{url}"
+            );
+        }
+        assert!(!navigation_allowed(
+            Some(&app),
+            Some(dir),
+            true,
+            "https://evil.example/a"
+        ));
+        assert!(
+            navigation_allowed(Some(&app), Some(dir), true, "file:///tmp/opened/7f/a.pdf"),
+            "a JS app's own file page"
+        );
+        assert!(!navigation_allowed(
+            Some(&app),
+            None,
+            true,
+            "file:///tmp/opened/7f/a.pdf"
+        ));
+        assert!(navigation_allowed(
+            Some(&app),
+            None,
+            true,
+            "https://example.com/a"
+        ));
+        assert!(
+            navigation_allowed(Some(&app), None, false, "file:///etc/passwd"),
+            "a frame inside the page"
+        );
     }
 
     #[test]

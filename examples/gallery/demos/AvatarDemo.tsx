@@ -197,7 +197,7 @@ export function AvatarDemo() {
                   }}
                   hoverStyle={hovered()}
                   activeStyle={{ backgroundColor: alpha(colors.text, 0.08) }}
-                  focusStyle={focusRing()}
+                  focusVisibleStyle={focusRing()}
                 >
                   <Person name={m().name} side={row} src={avatarPortrait(m().name)} label={`${m().name}, ${p()}`}>
                     <Dot presence={p()} side={row} />

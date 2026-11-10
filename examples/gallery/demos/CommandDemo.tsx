@@ -115,7 +115,7 @@ export function CommandDemo() {
       >
         <Button
           onPress={() => show(true)}
-          class="flex-row items-center gap-2 rounded-lg border border-border bg-raised px-3 transition-colors motion-reduce:transition-none hover:bg-hover active:opacity-70 focus:outline-2 focus:outline-ring"
+          class="flex-row items-center gap-2 rounded-lg border border-border bg-raised px-3 transition-colors motion-reduce:transition-none hover:bg-hover active:opacity-70 focus-visible:outline-2 focus-visible:outline-ring"
           style={{ height: desktop() ? 36 : 44 }}
         >
           <Icon name="search" size={16} tint={colors.muted} />

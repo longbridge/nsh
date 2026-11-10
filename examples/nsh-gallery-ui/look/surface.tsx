@@ -144,7 +144,7 @@ export interface ListRowLook {
   readonly style: ViewStyle;
   readonly hoverStyle: ViewStyle | undefined;
   readonly activeStyle: ViewStyle;
-  readonly focusStyle: ViewStyle;
+  readonly focusVisibleStyle: ViewStyle;
   readonly disabledStyle: ViewStyle;
 }
 
@@ -182,7 +182,7 @@ export function listRow(o?: ListRowOptions): ListRowLook {
       return read(o?.disabled) ? undefined : { backgroundColor: token("accent") };
     },
     activeStyle: { opacity: 0.7 },
-    get focusStyle(): ViewStyle {
+    get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
     disabledStyle: { opacity: 0.4 },

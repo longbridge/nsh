@@ -1016,6 +1016,8 @@ embedding SDKs are archives of their own (`nsh-embed-ios.zip`, `nsh-embed-androi
 moves every other runtime into its component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and
 `nsh-web.tar.gz` from x86_64 Linux's build, `nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`,
 `nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
+The release builds them with thin LTO over 16 codegen units (`CARGO_PROFILE_RELEASE_*` in the workflow) rather than
+the profile's fat LTO over one, which linked each executable single-threaded for up to 25 minutes; `web` keeps fat LTO.
 `xtask dist` strips the executables it copies (`copy_executable`: about a sixth of each), after the build rather
 than with the profile's `strip`, so the release builds a checkout keeps for profiling stay as they are. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
@@ -1085,10 +1087,11 @@ and `[self-hosted, Windows]`. Their runner groups allow this public repository. 
 request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
 events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
 
-The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` once
-a day (19:00 UTC) and on manual runs, never on every push: a push to `main` is a pull request that already passed
-them. The daily run is on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
-macOS check runs only in the daily run.
+The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
+three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed
+them. The scheduled runs are on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
+macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
+requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
 
 `.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
 `~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds

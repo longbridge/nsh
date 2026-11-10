@@ -180,7 +180,7 @@ export interface ChoiceTileLook {
   readonly style: ViewStyle;
   readonly hoverStyle: ViewStyle | undefined;
   readonly activeStyle: ViewStyle;
-  readonly focusStyle: ViewStyle;
+  readonly focusVisibleStyle: ViewStyle;
   readonly disabledStyle: ViewStyle;
 }
 
@@ -221,7 +221,7 @@ export function choiceTileLook(on: Live<boolean>, o?: ChoiceTileOptions): Choice
     get activeStyle(): ViewStyle {
       return sink.activeStyle;
     },
-    get focusStyle(): ViewStyle {
+    get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
     disabledStyle: { opacity: 0.4 },
