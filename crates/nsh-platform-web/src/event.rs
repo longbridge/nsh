@@ -11,7 +11,10 @@ use nsh_core::{
 };
 
 /// `value`, the JSON payload of a `kind` event, as the core takes it.
-pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload {
+/// `None` when the payload names something this build does not know, such as
+/// a mouse button's name it cannot report: the event is dropped rather than
+/// reported as another one.
+pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> Option<EventPayload> {
     let num = |k: &str| value.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     let text = |k: &str| {
         value
@@ -20,7 +23,7 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
             .unwrap_or_default()
             .to_owned()
     };
-    match kind {
+    let payload = match kind {
         EventKind::ScrollEnd
         | EventKind::ScrollDragStart
         | EventKind::ScrollDragEnd
@@ -85,12 +88,14 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
                 page_position,
                 modifiers,
                 // A keyboard or scripted release names no button; the
-                // primary one is the release that `onPressUp` pairs with.
-                value
-                    .get("button")
-                    .and_then(|v| v.as_str())
-                    .and_then(mouse_button)
-                    .unwrap_or(nsh_core::MouseButton::Left),
+                // primary one is the release that `onPressUp` pairs with. A
+                // name this build does not know is no release to report: the
+                // `?` drops the event instead of reading it as the primary
+                // button.
+                match value.get("button").and_then(|v| v.as_str()) {
+                    None => nsh_core::MouseButton::Left,
+                    Some(name) => mouse_button(name)?,
+                },
             ))
         }
         EventKind::ContextMenu
@@ -169,7 +174,8 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
             ),
             _ => EventPayload::None,
         },
-    }
+    };
+    Some(payload)
 }
 
 /// `name` as the static payload key the core takes: each distinct key is

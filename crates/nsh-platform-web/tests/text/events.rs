@@ -9,7 +9,7 @@ use crate::event::payload;
 /// The fields of `name`'s payload `value` as the core gets them.
 fn fields(name: &str, value: serde_json::Value) -> Vec<(&'static str, PayloadValue)> {
     let kind = EventKind::from_prop(name).unwrap_or_else(|| panic!("{name} is no event"));
-    match payload(kind, value) {
+    match payload(kind, value).unwrap_or_else(|| panic!("{name}: no payload")) {
         EventPayload::Map(fields) => fields,
         other => panic!("{name}: {other:?}"),
     }
@@ -128,4 +128,21 @@ fn wheels_reach_the_core_with_their_unit() {
     };
     assert!(points.delta.precise());
     assert_eq!(points.delta.xy(), (0.0, -3.0));
+}
+
+#[test]
+fn a_release_reports_its_button_but_not_one_it_cannot_name() {
+    use nsh_core::MouseButton;
+
+    let button = |value: serde_json::Value| match payload(EventKind::MouseUp, value) {
+        Some(EventPayload::MouseButton(event)) => event.button,
+        other => panic!("{other:?}"),
+    };
+    // A keyboard or scripted release names no button: it is the primary one,
+    // which `onPressUp` pairs with.
+    assert_eq!(button(json!({})), MouseButton::Left);
+    assert_eq!(button(json!({ "button": "right" })), MouseButton::Right);
+    // A name this build does not know is no release at all; it must not read
+    // as the primary button.
+    assert!(payload(EventKind::MouseUp, json!({ "button": "side" })).is_none());
 }
