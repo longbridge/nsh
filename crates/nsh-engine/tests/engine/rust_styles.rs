@@ -506,7 +506,7 @@ fn DeclaredButtons() -> impl IntoElement {
         .child(
             nsh_base::button()
                 .variant("primary")
-                .size("lg")
+                .with_size("lg")
                 .child(text("Buy")),
         )
         .child(nsh_base::button().child(text("Plain")))

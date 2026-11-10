@@ -803,7 +803,7 @@ stay, so an embedded app looks like its host (`embedding.md`, "GPUI and GPUI Kit
 ## Component styles
 
 An app declares the looks of `nsh-base`'s components once, per component, and pages name them (`Button`'s `variant`
-and `size`). NSH declares none: a component nothing is declared for has no look, as before. The store
+and `size`; Rust's setter of the size is `with_size`, beside `Styled::size`, as gpui-component's `Sizable`). NSH declares none: a component nothing is declared for has no look, as before. The store
 (`element/component_styles.rs`) is a per-surface global signal holding two maps by component name: typed looks
 (`set_component_style("button", ComponentStyle::new().base(..).variant("primary", ..).size("sm", ..))`, the app's
 Rust code, `Styled` closures that may declare states with `.hover(..)` / `.active(..)` / `.focus(..)` /

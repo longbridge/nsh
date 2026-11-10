@@ -183,7 +183,7 @@ fn Declared() -> impl IntoElement {
     view().child(
         button()
             .variant("primary")
-            .size("lg")
+            .with_size("lg")
             .accessibility_label("Go")
             .child(text("Go")),
     )
@@ -435,7 +435,7 @@ fn PickedUndeclared() -> impl IntoElement {
     view().child(
         button()
             .variant("primary")
-            .size("lg")
+            .with_size("lg")
             .accessibility_label("Go")
             .child(text("Go")),
     )

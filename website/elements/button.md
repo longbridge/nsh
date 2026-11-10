@@ -66,7 +66,7 @@ the typed style methods (`.px_4()`, `.bg(..)`) for its look, the state methods (
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `variant` | `.variant(..)` | `string` | the declared default | The variant of the looks the app declared for buttons ([Styling](#styling)); a name the declarations lack applies none and logs a warning. |
-| `size` | `.size(..)` | `string` | the declared default | The size of the looks the app declared for buttons, as `variant`. In Rust `.size(..)` on a button is this prop; its width and height are `.w(..)` and `.h(..)`. |
+| `size` | `.with_size(..)` | `string` | the declared default | The size of the looks the app declared for buttons, as `variant`. In Rust it is `.with_size(..)`, beside the style method `.size(..)`, the button's width and height. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No presses and no press feedback; `disabled:` styles apply and screen readers say it is dimmed. |
 | `selected` | `.selected(..)` | `boolean` | `false` | Selected: the current item (a folder, a filter) or the trigger of an open menu. Something on or off is a `Toggle`. Screen readers say so. The app owns the value and styles it. |
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | none | The style while `selected` and not disabled, as `selected:` classes. |
@@ -137,7 +137,7 @@ fn actions(save: impl Fn() + 'static, cancel: impl Fn() + 'static) -> impl IntoE
         .flex_row()
         .gap_2()
         .child(button().on_press(save).child(text("Save")))
-        .child(button().variant("outline").size("sm").on_press(cancel).child(text("Cancel")))
+        .child(button().variant("outline").with_size("sm").on_press(cancel).child(text("Cancel")))
 }
 ```
 
@@ -256,8 +256,7 @@ fn close(open: Signal<bool>) -> impl IntoElement {
         .hit_slop(EdgeInsets::all(px(12.0)))
         .accessibility_label("Close")
         .on_press(move || open.set(false))
-        .w(px(20.0))
-        .h(px(20.0))
+        .size(px(20.0))
         .items_center()
         .justify_center()
         .child(text("×"))

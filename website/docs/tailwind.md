@@ -318,7 +318,7 @@ set_component_style(
 );
 
 // Any page.
-button().variant("ghost").size("sm").child(text("Later"))
+button().variant("ghost").with_size("sm").child(text("Later"))
 ```
 
 ```tsx tabs

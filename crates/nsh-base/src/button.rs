@@ -37,8 +37,11 @@ pub struct ButtonProps {
     /// (`None`: the declared default). NSH names and draws none.
     pub variant: Prop<Option<SharedString>>,
     /// The size of the looks the app declared for buttons, as `variant`
-    /// (nsh.json `"components": { "button": { "sizes": .. } }`).
-    pub size: Prop<Option<SharedString>>,
+    /// (nsh.json `"components": { "button": { "sizes": .. } }`). TS's
+    /// `size`; Rust's setter is `with_size`, beside `Styled::size` (the
+    /// width and height), as gpui-component's `Sizable::with_size`.
+    #[prop(rename = "size")]
+    pub with_size: Prop<Option<SharedString>>,
     /// The content.
     pub children: Prop<Children>,
 }
@@ -78,7 +81,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         })
         .selected_style(props.selected_style)
         .hit_slop(props.hit_slop)
-        .declared_style("button", props.variant, props.size)
+        .declared_style("button", props.variant, props.with_size)
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .on_press_down(move |_: &()| cx.emit(ButtonEvent::PressDown))
         .on_press_up(move |_: &()| cx.emit(ButtonEvent::PressUp))

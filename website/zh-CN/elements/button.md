@@ -59,7 +59,7 @@ mount(App);
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `variant` | `.variant(..)` | `string` | 声明的默认值 | 应用为按钮声明的外观中的变体（[样式](#styling)）；声明中没有的名称不应用任何外观，并记录警告。 |
-| `size` | `.size(..)` | `string` | 声明的默认值 | 应用为按钮声明的外观中的尺寸，与 `variant` 相同。在 Rust 中，按钮的 `.size(..)` 就是这个属性；它的宽和高用 `.w(..)` 和 `.h(..)`。 |
+| `size` | `.with_size(..)` | `string` | 声明的默认值 | 应用为按钮声明的外观中的尺寸，与 `variant` 相同。在 Rust 中写作 `.with_size(..)`，与设置按钮宽和高的样式方法 `.size(..)` 并存。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不响应按压，也没有按压反馈；`disabled:` 样式生效，屏幕阅读器会报告它不可用。 |
 | `selected` | `.selected(..)` | `boolean` | `false` | 选中：当前项（文件夹、筛选条件）或菜单打开期间的触发按钮。开或关的东西用 `Toggle`。屏幕阅读器会报告。值由应用持有，样式也由应用决定。 |
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | `selected` 且未禁用时的样式，与 `selected:` 类相同。 |
@@ -132,7 +132,7 @@ fn actions(save: impl Fn() + 'static, cancel: impl Fn() + 'static) -> impl IntoE
         .flex_row()
         .gap_2()
         .child(button().on_press(save).child(text("Save")))
-        .child(button().variant("outline").size("sm").on_press(cancel).child(text("Cancel")))
+        .child(button().variant("outline").with_size("sm").on_press(cancel).child(text("Cancel")))
 }
 ```
 
@@ -245,8 +245,7 @@ fn close(open: Signal<bool>) -> impl IntoElement {
         .hit_slop(EdgeInsets::all(px(12.0)))
         .accessibility_label("Close")
         .on_press(move || open.set(false))
-        .w(px(20.0))
-        .h(px(20.0))
+        .size(px(20.0))
         .items_center()
         .justify_center()
         .child(text("×"))

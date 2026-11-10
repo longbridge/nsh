@@ -66,7 +66,7 @@ pub fn App() -> impl IntoElement {
     view()
         .flex_1()
         .bg(theme().background)
-        .child(button().size("sm").child(text("Buy")))
+        .child(button().with_size("sm").child(text("Buy")))
         .child(button().variant("ghost").child(text("Later")))
 }
 ```

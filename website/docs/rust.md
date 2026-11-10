@@ -537,7 +537,7 @@ render.
 
 On the theme, the crate declares its controls' looks once, as component styles: `set_component_style("button", ..)`
 in the root component (or `"components"` in `nsh.json`) gives each variant and size its typed styles and states, and
-pages name them, `button().variant("primary").size("sm")`, in Rust and TSX alike
+pages name them, `button().variant("primary").with_size("sm")`, in Rust and TSX alike
 ([Component styles](./tailwind.md#component-styles)).
 
 The theme has the design tokens of [shadcn/ui](https://ui.shadcn.com/docs/theming), and its default is shadcn's
