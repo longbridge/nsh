@@ -47,11 +47,11 @@ NSH 的分层与 GPUI Kit 对应：`nsh-core` 对应 GPUI，`nsh-base` 对应 [`
 
 ### 应用的 `ui` 层
 
-GPUI Kit 应用之所以一致，很大程度上是因为 `gpui-component` 只给它们有限的 API：`Button` 接受一个 variant、一个 size 和少数状态，所以用它构建的每个屏幕行为和外观都一样。NSH 只有没有外观的 `nsh/base`，没有自己组件层的应用会逐渐走样：每个屏幕各自给按钮、行和弹层加样式，功能变多后，设计、交互和行为不再一致。因此每个 NSH 应用在创建之初就建立自己的 `ui` 层，并用它构建所有功能。
+应用的屏幕都由 API 有限的组件构建时，才能保持一致：只接受一个 variant、一个 size 和少数状态的 `Button`，在每个屏幕上行为和外观都一样。`nsh/base` 只有行为没有外观，没有自己组件层的应用会逐渐走样：每个屏幕各自给按钮、行和弹层加样式，功能变多后，设计、交互和行为不再一致。因此每个 NSH 应用在创建之初就建立自己的 `ui` 层，并用它构建所有功能。
 
 - **位置。** 与功能模块并列的 `ui` 模块（Rust 为 `src/ui/`，TSX 为 `ui/` 或 `src/ui/`），每个组件或组件家族一个文件（`button`、`input`、`menu` 等），连同它的 token（`tokens`、`motion`）和图标。功能放在自己的模块中，从 `ui` 导入。
 - **先建一组核心组件**，在第一个屏幕之前完成，让功能开发永远不必临时发挥：`Icon`；`Button` 与 `IconButton`（primary、secondary、ghost、outline、danger 等 variant；多个 size）；`Input`、`Textarea` 和 `Field`（标签、控件、说明、错误）；`Checkbox`、`Switch`、`Select`；`Tabs` 或分段控件；`Menu`、`Popover`、`Tooltip`；`Dialog`、`AlertDialog`、`Sheet`；`Toast`；`ListItem` / 行；`Surface` 或卡片；`Badge`；`Avatar`；`Separator`；`Empty`、`Skeleton`、`Spinner`。其他组件（数据表格、日期选择器、工具栏）在第一个功能需要时按同样标准加入。
-- **像 `gpui-component` 一样的有限 API。** 每个组件只暴露按含义变化的部分：`variant`、`size`、状态（`selected`、`disabled`、`loading`、`invalid`）、内容 slot（标签、图标、children）和事件。它的外观、hover、按下、焦点和动效都在组件内部，来自 token。它从调用方接受布局（宽度、flex、margin、对齐），从不接受颜色、圆角、padding 或字体：功能需要的新外观成为 `ui` 中的新 variant 或 size，供所有屏幕使用，而不是在某一处覆盖。
+- **有限的 API。** 每个组件只暴露按含义变化的部分：`variant`、`size`、状态（`selected`、`disabled`、`loading`、`invalid`）、内容 slot（标签、图标、children）和事件。它的外观、hover、按下、焦点和动效都在组件内部，来自 token。它从调用方接受布局（宽度、flex、margin、对齐），从不接受颜色、圆角、padding 或字体：功能需要的新外观成为 `ui` 中的新 variant 或 size，供所有屏幕使用，而不是在某一处覆盖。
 - **功能组合 `ui`，不写样式。** 功能代码使用 `ui` 组件和布局原语（`View`、`Text`、`Scroll`、`List`，配合间距 class 和文字 token）。不直接从 `nsh/base` 导入控件，不写颜色、圆角或字号，也不用可按下的 view 手搭控件。`ui` 缺少某样东西时，先把它加进 `ui`，再使用。
 - **一致性来自结构。** 一个 `Button` 意味着处处同样的按下反馈、焦点环和禁用外观；一个 `Menu` 意味着每个菜单都以同样方式打开、移动和关闭。修好一个组件就修好了每个屏幕。
 - **把它展示出来。** 保留一个页面（调试页或应用自己的 gallery），以浅色和深色展示每个 `ui` 组件的所有 variant、size 和状态；新组件先在那里评审，再给功能使用。
@@ -526,11 +526,11 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
 
 ### 组件标准
 
-这些标准是通用的，具体数值来自应用自己的风格。它们提炼自在桌面上长期验证的 GPUI Kit 样式化组件（`gpui-component`），文中引用的默认值是还没有自己风格的应用的起点。已有自己外观的应用（更大的圆角、更高的控件、自己的配色）保留它，并把同样的关系应用到自己的数值上，让控件不必逐屏微调就彼此一致：
+这些标准是通用的，具体数值来自应用自己的风格。文中引用的数值是还没有自己风格的应用的起点。已有自己外观的应用（更大的圆角、更高的控件、自己的配色）保留它，并把同样的关系应用到自己的数值上，让控件不必逐屏微调就彼此一致：
 
-- **一个尺寸尺度决定一切。** 控件只接受一个 `size`（xs、sm、默认 md、lg），由它同时决定高度、水平 padding、字号、图标尺寸、gap 和圆角；不要每次使用时逐项设置。GPUI Kit 的按钮高 20 / 24 / 32pt（xs / sm / md 和 lg），输入框共享这些高度，表格行高 26 / 30 / 32 / 40pt，单元格 padding 同步递增。触摸设备上即使绘制的控件更小，点击区域也至少 44pt。`compact` 变体收紧 padding，不改变高度。
+- **一个尺寸尺度决定一切。** 控件只接受一个 `size`（xs、sm、默认 md、lg），由它同时决定高度、水平 padding、字号、图标尺寸、gap 和圆角；不要每次使用时逐项设置。作为起点，按钮高 20 / 24 / 32pt（xs / sm / md 和 lg），输入框共享这些高度，表格行高 26 / 30 / 32 / 40pt，单元格 padding 同步递增。触摸设备上即使绘制的控件更小，点击区域也至少 44pt。`compact` 变体收紧 padding，不改变高度。
 - **图标按钮是与控件同高的正方形**（20 / 24 / 32pt），图标 14–16pt；按钮内的图标比它的文字行小一级。按钮组或工具栏内使用同一尺寸。
-- **圆角来自两个 token。** 控件和弹层用 `radius`（GPUI Kit 默认 6pt），容纳控件的容器用 `radius-lg`（8pt）；小控件和标签用一半的圆角。全圆形状也来自主题（`radius-full`），这样直角主题会让头像、圆点和滑块一起变成直角。
+- **圆角来自两个 token。** 控件和弹层用 `radius`（起点为 6pt），容纳控件的容器用 `radius-lg`（8pt）；小控件和标签用一半的圆角。全圆形状也来自主题（`radius-full`），这样直角主题会让头像、圆点和滑块一起变成直角。
 - **状态是每个变体的 token。** 每个变体（default、primary、secondary、danger、ghost、outline）在主题中都有常态、hover 和按下颜色（`primary`、`primary-hover`、`primary-active`）；着色和 ghost 变体使用同一色相的递增强度，静止约 10%、hover 20%、按下 40%。选中的按钮与菜单打开中的按钮共用一种样式。禁用时没有 hover 和按下反馈；加载时控件略微变暗并保持尺寸。
 - **组合控件读作一个整体。** 分体按钮或分段组中，hover 其中一部分时其他部分以一半强度显示 hover；只有外侧的角是圆的。
 - **一种弹层界面。** Popover、菜单、select、combobox 和日期选择器共享一种样式：popover 背景、ring 加阴影的边缘、主题圆角。新的锚定界面复用它。

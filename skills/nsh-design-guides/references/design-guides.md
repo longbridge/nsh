@@ -73,9 +73,9 @@ system. See [Coding Guides](./coding-guides.md#build-the-apps-ui-foundations-bef
 
 ### The app's `ui` layer
 
-GPUI Kit apps are consistent largely because `gpui-component` gives them a limited API: a `Button` takes a variant,
-a size and a few states, so every screen built with it behaves and looks the same. NSH has only `nsh/base`, which has
-no look, so an app without its own component layer drifts: each screen restyles its own buttons, rows and popups, and
+Apps stay consistent when their screens are built from components with a limited API: a `Button` that takes a
+variant, a size and a few states behaves and looks the same on every screen. `nsh/base` has behavior and no look, so
+an app without its own component layer drifts: each screen restyles its own buttons, rows and popups, and
 as features grow their design, interaction and behavior stop agreeing. Every NSH app therefore creates its own `ui`
 layer when it is created, and builds every feature from it.
 
@@ -88,7 +88,7 @@ layer when it is created, and builds every feature from it.
   `Popover`, `Tooltip`; `Dialog`, `AlertDialog`, `Sheet`; `Toast`; a `ListItem` / row; a `Surface` or card; `Badge`;
   `Avatar`; `Separator`; `Empty`, `Skeleton`, `Spinner`. Add others (a data table, a date picker, a toolbar) as the
   first feature needs them, built to the same standard.
-- **A limited API, like `gpui-component`'s.** Each component exposes what varies by meaning: `variant`, `size`,
+- **A limited API.** Each component exposes what varies by meaning: `variant`, `size`,
   states (`selected`, `disabled`, `loading`, `invalid`), content slots (label, icon, children) and events. Its look,
   hover, pressed, focus and motion are inside it, from tokens. It takes layout from its caller (width, flex, margin,
   alignment), never colors, radii, paddings or fonts: a look a feature needs becomes a new variant or size in `ui`,
@@ -730,20 +730,19 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
 
 ### Component standards
 
-These standards are general; the app's style supplies the values. They are distilled from GPUI Kit's styled
-components (`gpui-component`), long proven on the desktop, whose defaults are quoted as a starting point for an app
-that has no style of its own yet. An app with its own look (larger radii, taller controls, its own palette) keeps
+These standards are general; the app's style supplies the values. The numbers quoted are a starting point for an
+app that has no style of its own yet. An app with its own look (larger radii, taller controls, its own palette) keeps
 it, and applies the same relationships to its own values, so its controls agree with each other without per-screen
 tuning:
 
 - **One size scale drives everything.** A control takes one `size` (xs, sm, md default, lg), and the size sets its
-  height, horizontal padding, text size, icon size, gap and radius together; never set them one by one per use. GPUI
-  Kit's buttons are 20 / 24 / 32pt tall (xs / sm / md and lg), inputs share those heights, table rows 26 / 30 / 32 /
+  height, horizontal padding, text size, icon size, gap and radius together; never set them one by one per use. As a
+  starting point, buttons are 20 / 24 / 32pt tall (xs / sm / md and lg), inputs share those heights, table rows 26 / 30 / 32 /
   40pt with cell padding growing in step. On touch, the hit target stays at least 44pt even when the drawn control is
   smaller. A `compact` variant tightens padding, not height.
 - **Icon buttons are squares of the control height** (20 / 24 / 32pt) with a 14–16pt icon; a button's icon is one step
   smaller than its text line. A button group or toolbar uses one size throughout.
-- **Radius comes from two tokens.** `radius` (6pt in GPUI Kit's default) for controls and popups, `radius-lg` (8pt) for
+- **Radius comes from two tokens.** `radius` (6pt as a starting point) for controls and popups, `radius-lg` (8pt) for
   containers that hold controls; small controls and tags take half the radius. Fully round shapes come from the theme
   too (`radius-full`), so a theme that squares its corners squares avatars, dots and thumbs as well.
 - **States are tokens per variant.** Each variant (default, primary, secondary, danger, ghost, outline) has a normal,
