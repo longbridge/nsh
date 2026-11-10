@@ -7,6 +7,7 @@ mod layout_tree;
 mod list;
 mod measure;
 mod overlay;
+mod pace;
 mod parent_viewport;
 mod renders;
 mod resize_anchor;
@@ -1144,6 +1145,8 @@ pub struct Core<M: TextEngine> {
     cull_made: bool,
     /// The walk of [`Core::sync_culled`], kept for its buffer.
     cull_scratch: Vec<(Key, f32, f32)>,
+    /// Views out of sight spread over turns (`pace.rs`).
+    pace: pace::Pace,
     /// The placeholders of `<Each>` rows ([`Op::Placeholder`]), with their
     /// ids (a key may be another node's by now).
     placeholders: Vec<(Key, NodeId)>,
@@ -1465,6 +1468,7 @@ impl<M: TextEngine> Core<M> {
             cull_dirty: false,
             cull_made: false,
             cull_scratch: Vec::new(),
+            pace: pace::Pace::default(),
             placeholders: Vec::new(),
             asked_rows: Vec::new(),
             placeholders_resized: false,
@@ -2825,6 +2829,7 @@ impl<M: TextEngine> Core<M> {
         if self.components.executor.has_due_answers() {
             self.run_answers();
         }
+        self.pace_commit();
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -3008,6 +3013,11 @@ impl<M: TextEngine> Core<M> {
             self.sync_culled();
         }
         self.update_lists(relayout);
+        // Views that waited for the budget, once lists placed their cells
+        // (`pace.rs`).
+        if !self.pace.waiting.is_empty() {
+            self.sync_paced();
+        }
         // After every frame of the round: what followers follow is placed.
         self.place_followers(relayout);
         if !self.decorated.is_empty() {
@@ -6388,6 +6398,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
+        self.pace.made += 1;
         // The frame it was given while culled, its view's first.
         let culled_frame = std::mem::take(&mut node.culled)
             .then_some(node.frame)
