@@ -2802,6 +2802,7 @@ mod file_listener_tests {
             view().on_file_drag_enter(unit),
             view().on_file_drag_enter(move |e: &events::FileDragEvent| {
                 assert_eq!(e.uris, ["file:///tmp/a%20b.png"]);
+                assert_eq!(e.mime_types, ["image/png"]);
                 d.set(d.get() + 1);
             }),
         ];
