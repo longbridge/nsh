@@ -1387,6 +1387,7 @@ pub fn set_tray(tray: impl Into<Option<Tray>>) {
         tooltip: tray.tooltip,
         menu: items.into(),
         click: click.as_ref().map_or(0, |(id, _)| *id),
+        ..Default::default()
     };
     let generation = {
         let mut m = menus.borrow_mut();
