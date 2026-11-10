@@ -169,6 +169,12 @@ A floor, not a substitute for the guides.
 - **Every screen has a motion inventory.** Written before its code, every state
   change named with its tool and tokens, each line verified in the running app
   before the work is called done (Design Guides, "Motion inventory").
+- **Accessibility and keyboard are required.** Every action works by keyboard (Tab
+  order, arrows in groups, Enter / Space, Escape) with visible focus, and every
+  control has a role and name for screen readers; a screen that fails is broken.
+- **Design per target family.** Desktop and web share one design (compact pointer
+  controls); mobile follows iOS and Android (44pt / 48dp targets, sheets, back);
+  TUI is keyboard-first on whole cells.
 - **TSX has no DOM, no Node and no npm UI.** Standard modules are exactly `buffer`,
   `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`,
   `zlib`.

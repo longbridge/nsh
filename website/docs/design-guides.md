@@ -46,6 +46,8 @@ decoration should support them rather than compete with them.
    surfaces overlap.
 7. **Feedback reflects reality.** Loading, tooltips, and motion should clarify a real state or transition, not add
    ceremony to an immediate action.
+8. **Accessibility and keyboard are requirements.** Every action works by keyboard and with a screen reader; an
+   interface that fails either is broken.
 
 ## Establish the app's design system first
 
@@ -105,21 +107,43 @@ layer when it is created, and builds every feature from it.
 
 ### Design for the platforms the app targets
 
-Choose the supported targets before defining component variants. Share semantics, tokens and state while adapting
-presentation and interaction to the targets the app actually needs:
+Choose the supported targets before defining component variants. NSH apps run in three families of interfaces; share
+semantics, tokens and state across them, and adapt interaction, presentation and sizes to each family the app targets:
 
-| Target | Design decisions |
-| --- | --- |
-| Desktop | Compact pointer controls, keyboard shortcuts, visible focus, persistent navigation, context menus and resizable panes where useful |
-| Mobile | Touch targets, safe areas, software-keyboard space, navigation back behavior and touch-appropriate sheets and menus |
-| Web | Responsive browser viewports, browser text selection and input, and touch or pointer behavior for the device running the page |
-| TUI | Whole-cell layout, terminal colors, text labels for actions, keyboard-first navigation, visible focus, terminal mouse input and compact line-based controls |
+**Desktop and Web: one family.** macOS, Windows, Linux and the web in the desktop idiom share interaction, design
+and sizes; the web is not a separate design.
+- Pointer and keyboard first: hover on everything pressable, visible focus, keyboard shortcuts for frequent commands,
+  context menus, tooltips for icon-only controls, text selection where content is read.
+- Compact controls: about 24–32pt tall (32 the default), icons 14–16pt, rows 28–36pt, dense tables and toolbars.
+- Persistent navigation (sidebars, tabs, toolbars), resizable panes, popovers and menus anchored to their triggers,
+  dialogs centered in the window, Escape to dismiss.
+- Responsive windows: the layout holds from the minimum window size up; a web page on a phone follows Mobile.
 
-Web may run on a phone or a desktop; TUI has its own `platform.idiom === "terminal"` even though
-`platform.desktop` is true. Use device and idiom information rather than assuming every desktop has window chrome.
-A component may use a popup with a pointer, a sheet on a phone and a framed list in TUI while preserving its value,
-events and accessibility meaning. Validate the component library in the app's supported appearances, input modes
-and viewports, including terminal Cells when TUI is a target ([TUI](./tui.md)).
+**Mobile: iOS and Android conventions.** Mac Catalyst counts as mobile. Follow each platform's interaction design and
+control sizes rather than shrinking the desktop.
+- Touch targets at least 44 × 44pt on iOS and 48 × 48dp on Android, even when the drawn control is smaller; controls
+  and rows usually 44–56pt tall; body text at least 16pt.
+- Navigation as the platform does it: a stack with a back gesture and back button, a tab bar for top-level sections,
+  the system headers; Android's back button and predictive back.
+- Menus, pickers and secondary panels become sheets or full pages; no hover, no tooltips, no pointer-only actions;
+  long press and swipe for secondary actions, always with a visible alternative.
+- Safe areas, the software keyboard (inputs stay visible, Return moves to the next field), Dynamic Type / font size,
+  the system's press and scroll physics.
+
+**TUI: keyboard and cells.** In a terminal (`platform.idiom === "terminal"`) design for the keyboard and the
+character grid.
+- Every action has a key; Tab and arrows move focus visibly; Enter activates, Escape goes back; show the keys that
+  matter in a footer or help line.
+- Layout snaps to whole cells: no fractional spacing, no radii or shadows that cannot render; boxes drawn with line
+  characters, separators as single lines.
+- Terminal colors and attributes (bold, dim, reverse) carry state; never color alone; works in 16 colors and in
+  monochrome.
+- Text labels instead of icons whose glyphs may be missing; terminal mouse input is a bonus, never required.
+
+A component keeps its value, events and accessibility meaning across families while its presentation changes: a popup
+with a pointer, a sheet on a phone, a framed list in TUI. Use device and idiom information (`platform.idiom`,
+`platform.desktop`), not assumptions. Validate the `ui` layer in each target's appearances, input modes and viewports,
+including terminal cells when TUI is a target ([TUI](./tui.md)).
 
 ## Learning from Shadcn
 
@@ -736,10 +760,10 @@ it, and applies the same relationships to its own values, so its controls agree 
 tuning:
 
 - **One size scale drives everything.** A control takes one `size` (xs, sm, md default, lg), and the size sets its
-  height, horizontal padding, text size, icon size, gap and radius together; never set them one by one per use. As a
-  starting point, buttons are 20 / 24 / 32pt tall (xs / sm / md and lg), inputs share those heights, table rows 26 / 30 / 32 /
-  40pt with cell padding growing in step. On touch, the hit target stays at least 44pt even when the drawn control is
-  smaller. A `compact` variant tightens padding, not height.
+  height, horizontal padding, text size, icon size, gap and radius together; never set them one by one per use. Sizes
+  differ by family: on desktop and web, as a starting point, buttons are 20 / 24 / 32pt tall (xs / sm / md and lg), inputs share those heights, table rows 26 / 30 / 32 /
+  40pt with cell padding growing in step. On mobile, controls follow iOS and Android (44pt / 48dp targets, 44–56pt
+  rows); in TUI, sizes are whole cells. A `compact` variant tightens padding, not height.
 - **Icon buttons are squares of the control height** (20 / 24 / 32pt) with a 14–16pt icon; a button's icon is one step
   smaller than its text line. A button group or toolbar uses one size throughout.
 - **Radius comes from two tokens.** `radius` (6pt as a starting point) for controls and popups, `radius-lg` (8pt) for
@@ -1466,9 +1490,34 @@ AI output is incomplete until a human can explain why the hierarchy, density, co
 literal values belong in this product. A visually plausible screenshot is not proof: keyboard and touch behavior,
 focus, dynamic content, themes, resizing, text size, and failure states are part of the design.
 
+## Accessibility and keyboard (required)
+
+Accessibility and keyboard operation are requirements, not polish: a screen that a keyboard or a screen reader cannot
+complete is broken, however it looks. These rules are **musts** on every target.
+
+- **Every action works by keyboard.** On desktop, web and TUI, everything a pointer can do can be done from the
+  keyboard: Tab / Shift-Tab move through controls in visual order, arrows move within a group (lists, menus, tabs,
+  radios, grids), Enter / Space activate, Escape closes the topmost surface. Frequent commands have shortcuts shown in
+  menus and tooltips.
+- **Focus is visible and managed.** Every focusable control shows a focus ring when the keyboard moved focus
+  (`focus-visible:`); opening a dialog, sheet or menu moves focus into it and closing returns it to the trigger;
+  focus never lands on something hidden or disappears.
+- **Use semantic components.** Build controls on `nsh/base` (Button, Menu, Dialog, Select, Tabs, ...), which carry
+  roles, states and keyboard behavior; a control hand-built from a pressable view has none of them.
+- **Everything has a name.** Icon-only controls have an `accessibilityLabel`; images that mean something have a
+  description, decorative ones are hidden; states (selected, expanded, checked, disabled, busy) are exposed, not only
+  drawn.
+- **Never by color or motion alone.** Status has text or an icon besides its color; text and meaningful boundaries
+  meet contrast in light and dark; nothing requires animation or sound to be understood.
+- **It scales and adapts.** Larger text, right to left, longer translations and reduced motion keep the screen
+  complete.
+- **Test it.** Complete the main task with the keyboard only, and with the platform's screen reader (VoiceOver,
+  TalkBack, Narrator, Orca) on at least one target; `nsh test` selects by role and label, so tests that find
+  controls by `role:button[Send]` also check their names.
+
 ## Accessibility checklist
 
-Before considering a screen complete, verify that:
+Before considering a screen complete, verify every item; any failure blocks finishing:
 
 - every action is reachable and operable by keyboard, touch, and screen reader;
 - focus order follows visual and task order;
@@ -1480,7 +1529,9 @@ Before considering a screen complete, verify that:
 - disabled and read-only states are distinguishable;
 - labels, errors, and descriptions remain near their controls;
 - content remains usable with longer translations, right to left, and larger text;
-- touch targets are at least 44 × 44 points, and pointer targets are comfortably sized even in a dense layout.
+- every action can be completed with the keyboard alone, with visible focus, and with a screen reader;
+- touch targets are at least 44 × 44pt on iOS and 48 × 48dp on Android, and pointer targets are comfortably sized
+  even in a dense layout.
 
 ## Finishing checklist
 
@@ -1572,6 +1623,17 @@ report each group as passed or as what was fixed. A group not checked is not pas
 - [ ] The screen's motion inventory exists and every line was verified in the running app ("Motion inventory").
 - [ ] Durations and easings come from the app's motion tokens; nothing moves without a reason; reduced motion checked.
 - [ ] Sound only if the app calls for it, at completed changes, quiet, and the screen works silent.
+
+**Accessibility and keyboard (blocking)**
+- [ ] The main task completes with the keyboard alone: Tab order follows the screen, arrows within groups, Enter /
+  Space activate, Escape closes; focus visible and returned after overlays.
+- [ ] Every control has a role and name (icon-only included), states exposed; checked with a screen reader on one
+  target.
+- [ ] Nothing relies on color, motion or sound alone; contrast holds in light and dark.
+
+**Platforms**
+- [ ] Desktop and web share one design; mobile follows iOS / Android sizes and navigation (44pt / 48dp targets,
+  sheets, back); TUI works by keyboard on whole cells in 16 colors.
 
 **Platforms and states of content**
 - [ ] Empty, loading, error and long-content states designed, not left blank.

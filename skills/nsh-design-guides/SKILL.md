@@ -57,7 +57,8 @@ order (`grep -n '^## ' references/design-guides.md`):
 | Interface language                    | Any user-facing text: labels, buttons, titles, errors, empty states    |
 | Internationalization and platform fit | Multi-locale copy, Chinese terminology, platform conventions           |
 | Guidance for AI-generated interfaces  | Always when an agent produces UI                                       |
-| Accessibility checklist               | Before finishing                                                       |
+| Accessibility and keyboard (required) | Always; keyboard operation, focus, names and roles are musts           |
+| Accessibility checklist               | Before finishing; any failure blocks finishing                         |
 | Finishing checklist                   | Before finishing; run every item on the running app and report each group |
 | Design review checklist               | Before finishing; run every item against the work                      |
 
