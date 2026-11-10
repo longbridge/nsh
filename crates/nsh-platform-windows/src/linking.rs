@@ -16,6 +16,13 @@
 //!   running instance shows its window (restored, or shown when hidden),
 //!   brings it to the front and sends the URL. A launch without a URL opens
 //!   another window, as before.
+//! - Single instance (nsh.json `singleInstance`): the same mutex, made with
+//!   or without schemes. A later launch, with a URL or not, hands the
+//!   running instance its arguments and working directory
+//!   ([`nsh_core::single_instance::SecondInstance`], JSON in a
+//!   `WM_COPYDATA`) and exits before it opens a window; the running instance
+//!   shows its window as for a URL, reports the launch
+//!   (`EventKind::SecondInstance`) and sends the URLs among the arguments.
 
 use std::{
     cell::RefCell,
@@ -57,6 +64,8 @@ unsafe extern "system" {
 
 /// `COPYDATASTRUCT::dwData` of a forwarded URL ("NSHL").
 const COPY_LINK: usize = 0x4E53_484C;
+/// `COPYDATASTRUCT::dwData` of a forwarded launch ("NSHI"): UTF-8 JSON.
+const COPY_INSTANCE: usize = 0x4E53_4849;
 /// The subclass id of the window that hears forwarded URLs.
 const SUBCLASS: usize = 0x4E53_484C;
 /// How long a second launch looks for the first one's window, which may still
@@ -71,6 +80,8 @@ thread_local! {
     static PROPERTY: RefCell<Option<HSTRING>> = const { RefCell::new(None) };
     /// The surface forwarded URLs go to.
     static SURFACE: RefCell<Option<Weak<Surface>>> = const { RefCell::new(None) };
+    /// The app's schemes, which a forwarded launch's URLs are of.
+    static SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// What [`start`] decided.
@@ -82,12 +93,14 @@ pub(crate) enum Start {
 }
 
 /// Registers `schemes` for the app `id` named `name`, reads the launch URL
-/// and, when an instance of the app already runs, forwards the URL to it. On
-/// the UI thread, before the window opens. Does nothing without schemes.
-pub(crate) fn start(id: &str, name: &str, schemes: &[String]) -> Start {
-    if schemes.is_empty() {
+/// and, when an instance of the app already runs, forwards the URL to it, or
+/// with `single_instance` the whole launch. On the UI thread, before the
+/// window opens. Does nothing without schemes or `single_instance`.
+pub(crate) fn start(id: &str, name: &str, schemes: &[String], single_instance: bool) -> Start {
+    if schemes.is_empty() && !single_instance {
         return Start::Run;
     }
+    SCHEMES.with(|s| *s.borrow_mut() = schemes.to_vec());
     if !cfg!(feature = "dev") {
         for scheme in schemes {
             if let Err(err) = register(scheme, name) {
@@ -106,8 +119,16 @@ pub(crate) fn start(id: &str, name: &str, schemes: &[String]) -> Start {
         let handle = CreateMutexW(std::ptr::null(), BOOL(0), PCWSTR(mutex.as_ptr()));
         handle.is_invalid() || GetLastError() != ERROR_ALREADY_EXISTS
     };
-    if !first && let Some(url) = &url {
-        if forward(&property, url) {
+    if !first && single_instance {
+        let launch = nsh_core::single_instance::SecondInstance::current();
+        let data = launch.to_json().to_string().into_bytes();
+        if forward(&property, COPY_INSTANCE, &data) {
+            return Start::Forwarded;
+        }
+        log::warn!("single instance: the running instance did not answer; opening another");
+    } else if !first && let Some(url) = &url {
+        let data: Vec<u8> = url.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        if forward(&property, COPY_LINK, &data) {
             return Start::Forwarded;
         }
         log::warn!("links: the running instance did not answer; opening another");
@@ -173,8 +194,22 @@ unsafe extern "system" fn link_proc(
                 let units = unsafe {
                     std::slice::from_raw_parts(data.lpData as *const u16, data.cbData as usize / 2)
                 };
-                received(hwnd, String::from_utf16_lossy(units));
+                let url = String::from_utf16_lossy(units);
+                received(hwnd, |surface| send(surface, url));
                 return LRESULT(1);
+            }
+            if data.dwData == COPY_INSTANCE && !data.lpData.is_null() {
+                // SAFETY: `cbData` bytes at `lpData`, as `forward` sends them.
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize)
+                };
+                let launch = serde_json::from_slice(bytes)
+                    .ok()
+                    .and_then(|json| nsh_core::single_instance::SecondInstance::from_json(&json));
+                if let Some(launch) = launch {
+                    received(hwnd, |surface| relaunched(surface, launch));
+                    return LRESULT(1);
+                }
             }
         }
         WM_NCDESTROY => {
@@ -189,11 +224,33 @@ unsafe extern "system" fn link_proc(
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
-/// A URL from a later launch: shows the window, brings it to the front and
-/// sends the URL. A hidden window shows as the app's `focus()` shows it
-/// (one hidden since launch, nsh.json `window.defaultVisible: false`,
-/// drawn before DWM composites it), as a link shows it on macOS and Linux.
-fn received(window: HWND, url: String) {
+/// A later launch of a single-instance app: reports it, then sends the URLs
+/// of the app's schemes among its arguments.
+fn relaunched(surface: &Surface, launch: nsh_core::single_instance::SecondInstance) {
+    let urls: Vec<String> = SCHEMES.with(|schemes| {
+        let schemes = schemes.borrow();
+        launch
+            .args
+            .iter()
+            .filter(|arg| matches(arg, &schemes))
+            .cloned()
+            .collect()
+    });
+    let payload = launch.to_payload();
+    surface.control(|control| {
+        control.dispatch_event(ROOT_ID, EventKind::SecondInstance, payload);
+    });
+    for url in urls {
+        send(surface, url);
+    }
+}
+
+/// A URL or a launch from a later launch: shows the window, brings it to the
+/// front and hands `deliver` the surface. A hidden window shows as the app's
+/// `focus()` shows it (one hidden since launch, nsh.json
+/// `window.defaultVisible: false`, drawn before DWM composites it), as a
+/// link shows it on macOS and Linux.
+fn received(window: HWND, deliver: impl FnOnce(&Surface)) {
     let surface = SURFACE.with(|s| s.borrow().as_ref().and_then(Weak::upgrade));
     // SAFETY: plain queries on the app's window.
     let (iconic, visible) = unsafe {
@@ -217,20 +274,20 @@ fn received(window: HWND, url: String) {
     // process to take the foreground.
     let _ = unsafe { SetForegroundWindow(window) };
     match surface {
-        Some(surface) => send(&surface, url),
-        None => log::warn!("links: a URL arrived without a window to take it"),
+        Some(surface) => deliver(&surface),
+        None => log::warn!("links: a launch arrived without a window to take it"),
     }
 }
 
-/// Sends `url` to the window marked with `property`, waiting for it while
-/// the running instance may still be opening it. `true` when it took it.
-fn forward(property: &HSTRING, url: &str) -> bool {
+/// Sends `data` of the `kind` to the window marked with `property`, waiting
+/// for it while the running instance may still be opening it. `true` when
+/// it took it.
+fn forward(property: &HSTRING, kind: usize, data: &[u8]) -> bool {
     for step in 0..WAIT_STEPS {
         if let Some(window) = find(property) {
-            let data: Vec<u16> = url.encode_utf16().collect();
             let copy = COPYDATASTRUCT {
-                dwData: COPY_LINK,
-                cbData: (data.len() * 2) as u32,
+                dwData: kind,
+                cbData: data.len() as u32,
                 lpData: data.as_ptr() as *mut _,
             };
             let mut result = 0usize;

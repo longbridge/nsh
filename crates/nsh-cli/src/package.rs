@@ -198,6 +198,13 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// The app runs once (`"singleInstance": true`, Windows and Linux): a
+    /// second launch hands its arguments and working directory to the
+    /// running instance (`Application.on("secondInstance", ...)`) and exits
+    /// before it opens a window. Written into `app.json`, where the
+    /// release runner reads it; macOS runs one instance of an app already.
+    #[serde(default)]
+    pub(crate) single_instance: bool,
     /// The main window's launch-time options (`"window"`, checked by
     /// [`read_config`]): written into `app.json` and the dev server's app
     /// info, where the runners read them before the app's code runs.
@@ -341,6 +348,9 @@ pub(crate) fn desktop_app_json(
     }
     if let Some(window) = &config.window {
         info["window"] = window.clone();
+    }
+    if config.single_instance {
+        info["singleInstance"] = true.into();
     }
     info
 }
@@ -2002,6 +2012,15 @@ mod tests {
         // An app without them has none.
         let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
         assert!(info.get("window").is_none());
+    }
+
+    #[test]
+    fn single_instance_apps_say_so_in_app_json() {
+        let config: AppConfig = serde_json::from_str(r#"{ "singleInstance": true }"#).unwrap();
+        let info = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(info["singleInstance"], serde_json::json!(true));
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("singleInstance").is_none());
     }
 
     #[test]
