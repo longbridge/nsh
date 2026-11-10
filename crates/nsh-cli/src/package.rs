@@ -600,11 +600,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let mut built = if crate::rust_app::is_root(&entry) {
         crate::build::rust_root()
     } else {
-        let compile = match options.target {
-            PackageTarget::Web => crate::build::compile_split,
-            _ => crate::build::compile,
-        };
-        let built = compile(&entry, true).map_err(|e| e.into_error(&entry))?;
+        let split = matches!(options.target, PackageTarget::Web);
+        let built = crate::build::compile_package(&entry, split, config)
+            .map_err(|e| e.into_error(&entry))?;
         ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
         built
     };

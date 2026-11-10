@@ -511,6 +511,7 @@ fn js_reads_the_files_the_app_ships_with_fetch() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     // SAFETY: compiled just now by this runtime.

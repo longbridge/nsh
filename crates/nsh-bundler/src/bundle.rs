@@ -16,12 +16,17 @@ use rolldown_common::{ChunkFilenamesOutputOption, CodeSplittingMode, Output};
 use crate::{compile, compile::strip_ansi, plugin};
 
 /// What to bundle and how.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BundleOptions {
     /// Entry module (usually `App.tsx`).
     pub entry: PathBuf,
     /// Minify the output (release builds).
     pub minify: bool,
+    /// A development build, as `appInfo()` reports it.
+    pub development: bool,
+    /// The app's id, name, version and build number in place of
+    /// `nsh.json`'s, as `appInfo()` reports them.
+    pub app: AppInfo,
     /// Split what `import()` loads into chunks of their own
     /// ([`Bundle::chunks`]), loaded on demand (published web apps);
     /// otherwise the bundle holds the whole app, dynamically imported
@@ -30,6 +35,22 @@ pub struct BundleOptions {
     /// The UI sets the hosts serve, described (`nsh_base::registry()`
     /// and an app's own, as `SetDescription`s): their modules stay imports.
     pub ui_sets: Vec<nsh_core::element::description::SetDescription>,
+}
+
+/// The app's identity a build gives it in place of `nsh.json`'s (what a
+/// package is named and versioned as: `nsh package --id … --version 2.0.0
+/// --build 7`), as `appInfo()` reports it; `None`: `nsh.json`'s.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct AppInfo {
+    /// The id (`nsh.json` `"id"`).
+    pub id: Option<String>,
+    /// The display name (`nsh.json` `"name"`).
+    pub name: Option<String>,
+    /// The version (`nsh.json` `"version"`).
+    pub version: Option<String>,
+    /// The build number (`nsh.json` `"build"`).
+    pub build: Option<u64>,
 }
 
 /// A failed build, formatted for people.
@@ -339,9 +360,14 @@ fn theme_json(
 }
 
 /// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// `nsh.json` in `dir` (the app's, [`app_dir`]), checked. `"theme"` is
+/// `nsh.json` in the app directory ([`app_dir`]), checked, and the app's information
+/// (`development`: a development build; [`app_json`]). `"theme"` is
 /// shadcn's `cssVars` ([`theme_json`]).
-fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
+fn tailwind_setup(
+    dir: &std::path::Path,
+    development: bool,
+    info: &AppInfo,
+) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let mut setup = plugin::ThemeSetup::default();
     // The theme's tokens are classes (`bg-primary`): the default's unless
     // the app sets its own.
@@ -350,10 +376,12 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
     let Ok(text) = std::fs::read_to_string(&path) else {
         setup.theme.set_tokens(&tokens);
         setup.i18n = i18n_json(dir, None)?;
+        setup.app = app_json(&serde_json::Value::Null, development, info);
         return Ok(Arc::new(setup));
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    setup.app = app_json(&config, development, info);
     if let Some(tailwind) = config.get("tailwind") {
         let json = tailwind.to_string();
         let ignored;
@@ -394,6 +422,21 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
     }
     setup.i18n = i18n_json(dir, Some(&config))?;
     Ok(Arc::new(setup))
+}
+
+/// What `appInfo()` reports, as JSON: `nsh.json`'s `"id"`, `"name"`,
+/// `"version"` and `"build"` (`info`'s where it gives them; `null` where
+/// neither does) and whether this is a development build.
+fn app_json(config: &serde_json::Value, development: bool, info: &AppInfo) -> String {
+    let text = |key: &str| config.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+    serde_json::json!({
+        "id": info.id.clone().or_else(|| text("id")),
+        "name": info.name.clone().or_else(|| text("name")),
+        "version": info.version.clone().or_else(|| text("version")),
+        "build": info.build.or_else(|| config.get("build").and_then(|v| v.as_u64())),
+        "development": development,
+    })
+    .to_string()
 }
 
 /// The app's translations (`locales/`) and the language data of the
@@ -493,7 +536,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     let cwd_for_errors = cwd.clone();
     let cwd_root = cwd.clone();
     let app = app_dir(&cwd);
-    let tailwind = tailwind_setup(&app)?;
+    let tailwind = tailwind_setup(&app, options.development, &options.app)?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
     let resolve = ResolveSetup::read(&app)?;
@@ -891,7 +934,7 @@ pub async fn bundle_hot_async(
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let app = app_dir(&cwd);
-    let tailwind = tailwind_setup(&app)?;
+    let tailwind = tailwind_setup(&app, true, &AppInfo::default())?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
     let resolve = ResolveSetup::read(&app)?;
@@ -1065,6 +1108,7 @@ mod tests {
             minify: true,
             split,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap()
     }
@@ -1202,6 +1246,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
     }
 
@@ -1471,6 +1516,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap();
         assert!(bundle.code.contains("#123456"), "{}", bundle.code);
@@ -1479,7 +1525,8 @@ mod tests {
             assert_eq!(app_dir(&dir.join(sub)), dir, "{sub}");
         }
         // ... and the class check knows its tokens: the same setup.
-        let setup = tailwind_setup(&app_dir(&dir.join("tests"))).unwrap();
+        let setup =
+            tailwind_setup(&app_dir(&dir.join("tests")), false, &AppInfo::default()).unwrap();
         assert_eq!(
             crate::classes::check(code, oxc::span::SourceType::tsx(), &setup.theme),
             []
@@ -1520,7 +1567,7 @@ mod tests {
         )
         .unwrap();
         assert!(ResolveSetup::read(&dir).is_ok());
-        let setup = tailwind_setup(&dir).unwrap();
+        let setup = tailwind_setup(&dir, false, &AppInfo::default()).unwrap();
         assert!(setup.theme.color("brand").is_some());
         assert_ne!(
             theme_tokens(&dir).unwrap().color("primary"),
@@ -1552,6 +1599,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
     }
 
@@ -1576,6 +1624,7 @@ mod tests {
             minify: true,
             split: true,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap();
         assert!(!bundle.chunks.is_empty());

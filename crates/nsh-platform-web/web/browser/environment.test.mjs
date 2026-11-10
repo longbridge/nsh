@@ -133,3 +133,13 @@ test("a part is written only when it changed", () => {
   env.update(engine({ lifecycle: "inactive", locale: "fr-FR", localeSettings: fewer }));
   assert.deepEqual(writes, [fewer]);
 });
+
+test("setup hands over what appInfo reports, as the build wrote it", () => {
+  const { env } = environment();
+  assert.deepEqual(env.api.appInfo(), { id: null, name: null, version: null, build: null, development: false });
+  env.setup(null, null, null, null, JSON.stringify({ id: "com.example.notes", name: "Notes", version: "1.2.0", build: 4, development: true }));
+  assert.deepEqual(env.api.appInfo(), { id: "com.example.notes", name: "Notes", version: "1.2.0", build: 4, development: true });
+  // The entry's own setup, without the fifth argument, keeps it.
+  env.setup(null, null, null, null);
+  assert.equal(env.api.appInfo().version, "1.2.0");
+});

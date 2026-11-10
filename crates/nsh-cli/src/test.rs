@@ -492,6 +492,8 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         minify: false,
         split: false,
         ui_sets: sets.to_vec(),
+        development: true,
+        ..Default::default()
     })
     .map_err(|e| BuildError::from(e).into_error(entry))?;
     if announce {
