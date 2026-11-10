@@ -2430,7 +2430,7 @@ const TRAY_TITLE: &str = r##"import { mount, signal, Text } from "nsh";
 import { Tray } from "nsh/desktop";
 
 const log = signal([]);
-Tray.set({ tooltip: "Quotes", title: [{ text: "AAPL " }, { text: "228.00 +1.33%", color: "#d92d20" }], onClick: () => log.set([...log(), "click"]) });
+Tray.set({ tooltip: "Quotes", title: [{ text: "AAPL " }, { text: "228.00 +1.33%", color: "#d92d20" }], titlePosition: "left", onClick: () => log.set([...log(), "click"]) });
 
 const errors = [];
 for (const title of ["AAPL", [{ color: "#d92d20" }], [{ text: 228 }], [{ text: "AAPL", color: "not a color" }]]) {
@@ -2440,14 +2440,19 @@ for (const title of ["AAPL", [{ color: "#d92d20" }], [{ text: 228 }], [{ text: "
     errors.push(e instanceof TypeError);
   }
 }
+try {
+  Tray.set({ title: [{ text: "AAPL" }], titlePosition: "top", onClick: () => log.set([...log(), "wrong click"]) });
+} catch (e) {
+  errors.push(e instanceof TypeError);
+}
 
 mount(() => <Text>{`errors ${errors.join(",")} ${log().join(",")}`}</Text>);
 "##;
 
 /// A tray's title reaches the platform as its runs, each with its color
-/// (`None` for the panel's text color); a title of another shape, a run
-/// without its text, a text that is not a string or a color that is not one
-/// throws a `TypeError` and changes nothing: the tray shown keeps its click.
+/// (`None` for the panel's text color), and the side it shows on; a title of another shape, a run
+/// without its text, a text that is not a string, a color that is not one or
+/// a `titlePosition` other than `"right"` and `"left"` throws a `TypeError` and changes nothing: the tray shown keeps its click.
 #[test]
 fn tray_titles_reach_the_platform_with_their_colors() {
     use nsh_core::{EventKind, EventPayload, PayloadValue, color::Hsla, desktop::DesktopCommand};
@@ -2459,7 +2464,9 @@ fn tray_titles_reach_the_platform_with_their_colors() {
             ..Environment::default()
         },
     );
-    let batches = until(&rx, |batch| shows(batch, "errors true,true,true,true "));
+    let batches = until(&rx, |batch| {
+        shows(batch, "errors true,true,true,true,true ")
+    });
     let trays: Vec<_> = batches
         .iter()
         .flat_map(|b| &b.items)
@@ -2484,6 +2491,10 @@ fn tray_titles_reach_the_platform_with_their_colors() {
         .collect();
     let red: Hsla = "#d92d20".parse().unwrap();
     assert_eq!(runs, [("AAPL ", None), ("228.00 +1.33%", Some(red))]);
+    assert_eq!(
+        tray.title_position,
+        nsh_core::desktop::TrayTitlePosition::Left
+    );
 
     // The failed sets left the first tray's click in place.
     engine.control().dispatch_event(
@@ -2492,12 +2503,12 @@ fn tray_titles_reach_the_platform_with_their_colors() {
         EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(tray.click)))]),
     );
     let clicked = until(&rx, |batch| {
-        shows(batch, "errors true,true,true,true click")
+        shows(batch, "errors true,true,true,true,true click")
     });
     assert!(
         clicked
             .iter()
-            .any(|b| shows(b, "errors true,true,true,true click")),
+            .any(|b| shows(b, "errors true,true,true,true,true click")),
         "{clicked:?}"
     );
 }

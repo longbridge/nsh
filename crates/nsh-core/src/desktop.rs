@@ -866,6 +866,17 @@ pub struct TrayTitleRun {
     pub color: Option<Hsla>,
 }
 
+/// Which side of the tray's icon its title shows on ([`Tray::title_position`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum TrayTitlePosition {
+    /// Right of the icon, as menu bar apps usually show it.
+    #[default]
+    Right,
+    /// Left of the icon. macOS only: Linux's panels draw the title right of
+    /// the icon.
+    Left,
+}
+
 /// The app's icon in the system tray ([`DesktopCommand::SetTray`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
@@ -877,9 +888,14 @@ pub struct Tray {
     /// Shown when the pointer rests on it; `""` for the app's name.
     pub tooltip: String,
     /// Text beside the icon, in runs each of its own color: what the app
-    /// keeps in sight (a price, a count). macOS's menu bar shows it; the
-    /// other platforms' trays show the icon alone. Empty: the icon alone.
+    /// keeps in sight (a price, a count). macOS's menu bar shows it in its
+    /// colors; Linux's panels that show AppIndicator labels (GNOME's
+    /// AppIndicator extension, Unity, MATE, Budgie) show its text right of
+    /// the icon; Windows' notification area shows the icon alone. Empty: the
+    /// icon alone.
     pub title: Vec<TrayTitleRun>,
+    /// Which side of the icon the title shows on.
+    pub title_position: TrayTitlePosition,
     /// Its menu: opened by a secondary click (a primary one too when
     /// [`Self::click`] is 0); empty for none.
     pub menu: Arc<[MenuItem]>,

@@ -15,7 +15,8 @@ use std::{
 use nsh_core::{
     Command, EventKind, ImageSource, Op, ROOT_ID,
     desktop::{
-        DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray, TrayTitleRun,
+        DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray,
+        TrayTitlePosition, TrayTitleRun,
     },
     geometry::{Points, point},
     keymap::When,
@@ -648,6 +649,16 @@ unsafe extern "C" fn set_tray(
         Ok(title) => title,
         Err(message) => return throw(cx, &message),
     };
+    let title_position = match string(cx, options, c"titlePosition").as_deref() {
+        None | Some("right") => TrayTitlePosition::Right,
+        Some("left") => TrayTitlePosition::Left,
+        Some(_) => {
+            return throw(
+                cx,
+                "nsh/desktop: the tray's `titlePosition` is \"right\" or \"left\"",
+            );
+        }
+    };
     let menu = get(cx, options, c"menu");
     let (items, mut functions) = if nullish(menu) {
         free(cx, menu);
@@ -676,6 +687,7 @@ unsafe extern "C" fn set_tray(
     tray.icon = icon;
     tray.tooltip = string(cx, options, c"tooltip").unwrap_or_default();
     tray.title = title;
+    tray.title_position = title_position;
     tray.menu = items;
     tray.click = click;
     listen(cx)
@@ -1291,9 +1303,13 @@ export interface TrayOptions {
   /** Shown when the pointer rests on the icon (the app's name without it). */
   tooltip?: string;
   /** Text beside the icon, in runs each of its own color: what the app
-   * keeps in sight, such as a price. macOS's menu bar shows it; the other
-   * platforms' trays show the icon alone. */
+   * keeps in sight, such as a price. macOS's menu bar shows it in its
+   * colors; Linux's panels that show AppIndicator labels show its text;
+   * Windows' notification area shows the icon alone. */
   title?: readonly TrayTitleRun[];
+  /** Which side of the icon the title shows on: `"right"` (the default) or
+   * `"left"`. macOS only: Linux's panels draw the title right of the icon. */
+  titlePosition?: "right" | "left";
   /** Its menu, opened by a secondary click (and a primary one without
    * `onClick`). */
   menu?: readonly (MenuItem | null | undefined | false)[];

@@ -802,7 +802,8 @@ interface TrayModule {
 | --- | --- |
 | `icon` | The icon, as `<Image>`'s `src` takes it. Panels draw it at 16 to 24 pixels, so keep it simple and square. On macOS and Windows an SVG is a template drawn in the color of the menu bar's or taskbar's text. Without it, Windows shows the app's icon. |
 | `tooltip` | Shown when the pointer rests on the icon; the app's name without it. |
-| `title` | Text beside the icon, as runs `{ text, color? }`, each in its own color (a CSS color; without one, the menu bar's text color): what the app keeps in sight, such as a price. macOS's menu bar shows it in the menu bar's font; the notification area on Windows and Linux's panels show the icon alone. |
+| `title` | Text beside the icon, as runs `{ text, color? }`, each in its own color (a CSS color; without one, the menu bar's text color): what the app keeps in sight, such as a price. macOS's menu bar shows it in the menu bar's font. Linux's panels that show AppIndicator labels (GNOME's AppIndicator extension, Unity, MATE, Budgie) show its text right of the icon, in the panel's color; Plasma, Waybar and Windows' notification area show the icon alone. |
+| `titlePosition` | Which side of the icon the title shows on: `"right"` (the default) or `"left"`. macOS only; Linux's panels always draw the title right of the icon. |
 | `menu` | Its menu, made of the same items as `Menu`'s. A secondary click opens it, and so does a primary one when there is no `onClick`. |
 | `onClick` | Called when the icon is clicked with the primary button (on Windows, Enter or Space on the icon too), with `{ bounds }`: where the icon is ([below](#a-window-at-the-icon)). |
 

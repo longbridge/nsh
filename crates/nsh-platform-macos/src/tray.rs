@@ -9,8 +9,9 @@
 //!   click. With one, a primary click is reported with the item's frame on
 //!   the screen (its button's window), and a secondary click (or Control and
 //!   a primary one, as everywhere on macOS) opens the menu.
-//! - A title (`Tray::title`) shows right of the icon, its runs each in its
-//!   color, in the menu bar's font; the item grows to fit it.
+//! - A title (`Tray::title`) shows right of the icon (left with
+//!   `TrayTitlePosition::Left`), its runs each in its color, in the menu
+//!   bar's font; the item grows to fit it.
 //! - The menu's items are reported as the application menu's are
 //!   ([`crate::chrome::menu`]). The item goes with the app that set it.
 
@@ -19,7 +20,7 @@ use std::cell::RefCell;
 use nsh_core::{
     EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID, ResizeMode,
     color::Rgba,
-    desktop::{Tray, TrayTitleRun},
+    desktop::{Tray, TrayTitlePosition, TrayTitleRun},
     geometry::{Bounds, Points, size},
     image::Want,
 };
@@ -142,7 +143,7 @@ pub(crate) fn set(surface: &Surface, tray: Option<&Tray>) {
             button.setAction(clicks.then_some(sel!(trayClicked:)));
         }
         button.sendActionOn(NSEventMask::LeftMouseUp | NSEventMask::RightMouseUp);
-        set_title(&button, &tray.title);
+        set_title(&button, &tray.title, tray.title_position);
     }
     item.status.setMenu(if tray.click == 0 {
         item.menu.as_deref()
@@ -156,10 +157,10 @@ pub(crate) fn set(surface: &Surface, tray: Option<&Tray>) {
     ITEM.with(|i| *i.borrow_mut() = Some(item));
 }
 
-/// Shows `title` right of the icon, in the menu bar's font, each run in its
+/// Shows `title` on the `position` side of the icon, in the menu bar's font, each run in its
 /// color (the menu bar's text color without one); an empty title leaves the
 /// icon alone.
-fn set_title(button: &NSStatusBarButton, title: &[TrayTitleRun]) {
+fn set_title(button: &NSStatusBarButton, title: &[TrayTitleRun], position: TrayTitlePosition) {
     if title.is_empty() {
         button.setTitle(&NSString::new());
         button.setImagePosition(NSCellImagePosition::ImageOnly);
@@ -204,7 +205,11 @@ fn set_title(button: &NSStatusBarButton, title: &[TrayTitleRun]) {
         at += len;
     }
     button.setAttributedTitle(&text);
-    button.setImagePosition(NSCellImagePosition::ImageLeft);
+    // The image's side is the other one: `ImageRight` puts the title left.
+    button.setImagePosition(match position {
+        TrayTitlePosition::Right => NSCellImagePosition::ImageLeft,
+        TrayTitlePosition::Left => NSCellImagePosition::ImageRight,
+    });
 }
 
 /// Gives the item `icon` once it has loaded (now when it is in memory), or
