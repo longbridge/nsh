@@ -64,6 +64,7 @@ use std::{
     },
 };
 
+use nsh_core::access::WebMedia;
 use nsh_core::{
     Color, Command, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID, WebProps, WebSource,
 };
@@ -87,16 +88,18 @@ use webview2_com::{
         COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_DOUBLE_CLICK,
         COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_DOWN, COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_UP,
         COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
-        COREWEBVIEW2_POINTER_EVENT_KIND, COREWEBVIEW2_WEB_ERROR_STATUS,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2, ICoreWebView2_2,
-        ICoreWebView2CompositionController, ICoreWebView2Controller, ICoreWebView2Controller2,
-        ICoreWebView2Controller3, ICoreWebView2Environment, ICoreWebView2Environment2,
-        ICoreWebView2Environment3, ICoreWebView2Environment10,
+        COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_POINTER_EVENT_KIND,
+        COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2,
+        ICoreWebView2_2, ICoreWebView2CompositionController, ICoreWebView2Controller,
+        ICoreWebView2Controller2, ICoreWebView2Controller3, ICoreWebView2Environment,
+        ICoreWebView2Environment2, ICoreWebView2Environment3, ICoreWebView2Environment10,
         ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2Settings2, ICoreWebView2Settings6,
     },
     MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
-    NavigationStartingEventHandler, WebMessageReceivedEventHandler,
-    WebResourceRequestedEventHandler, take_pwstr,
+    NavigationStartingEventHandler, PermissionRequestedEventHandler,
+    WebMessageReceivedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::{
     Win32::{
@@ -590,9 +593,33 @@ impl WebItem {
             });
             Ok(())
         }));
+        let weak = Rc::downgrade(self);
+        let permission = PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+            let (Some(item), Some(args)) = (weak.upgrade(), args) else {
+                return Ok(());
+            };
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+            // SAFETY: WebView2 calls on the event's live object.
+            unsafe { args.PermissionKind(&mut kind)? };
+            let media = match kind {
+                COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => WebMedia::Microphone,
+                COREWEBVIEW2_PERMISSION_KIND_CAMERA => WebMedia::Camera,
+                // Other permissions keep WebView2's own handling.
+                _ => return Ok(()),
+            };
+            let state = if item.allows_media(media) {
+                COREWEBVIEW2_PERMISSION_STATE_ALLOW
+            } else {
+                log::warn!(target: "js", "web view {} capture is not granted: add it to capabilities.webview.media", media.as_str());
+                COREWEBVIEW2_PERMISSION_STATE_DENY
+            };
+            // SAFETY: as above.
+            unsafe { args.SetState(state) }
+        }));
         // SAFETY: WebView2 calls on the live web view; the handlers hold the
         // item weakly, and go with the web view.
         unsafe {
+            let _ = webview.add_PermissionRequested(&permission, &mut token);
             let _ = webview.add_NavigationStarting(&starting, &mut token);
             let _ = webview.add_NavigationCompleted(&completed, &mut token);
             let _ = webview.add_WebMessageReceived(&message, &mut token);
@@ -695,6 +722,16 @@ impl WebItem {
         };
         let access = surface.native.access.borrow().clone();
         access.is_none_or(|a: Arc<nsh_engine::Access>| a.allows_webview(url))
+    }
+
+    /// Whether the page may capture `media` (`webview.media`): never
+    /// without a declaration.
+    fn allows_media(&self, media: WebMedia) -> bool {
+        let Some(surface) = self.surface.upgrade() else {
+            return false;
+        };
+        let access = surface.native.access.borrow().clone();
+        access.is_some_and(|a| a.allows_web_media(media))
     }
 
     pub(crate) fn set(self: &Rc<Self>, surface: &Rc<Surface>, view: &NshView, p: &WebProps) {
