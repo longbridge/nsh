@@ -579,7 +579,8 @@ Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，
 `--browser <PATH>` 指定的可执行文件（需要有浏览器：找不到时 `nsh test` 会列出它找过的位置）。整个运行共用一个浏览器，
 每次 `open` 得到一个拥有独立存储的页面。输入是浏览器的可信输入，与用户的输入一样：鼠标点击、滚轮滚动和按键。
 
-在 iOS 上，应用运行在 iOS 模拟器里的开发 host 中：使用已启动的模拟器，否则 `nsh test` 会启动最新的 iPhone。步骤是手指的触摸和软键盘的输入，
+在 iOS 上，应用运行在 iOS 模拟器里的开发 host 中：使用 `--device` 指定的模拟器（名称或 UDID），否则使用已启动的模拟器，
+再否则 `nsh test` 会启动最新的 iPhone。步骤是手指的触摸和软键盘的输入，
 UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟器的外观，`nsh test` 会在应用结束后把它恢复原样；屏幕是所模拟设备的尺寸。
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）；
 `HOME`、`TMPDIR` 和 `PATH` 是模拟器为应用设置的路径。

@@ -24,12 +24,13 @@ use crate::run::{BUNDLE_ID, simctl, simctl_with_env};
 /// How long the host may take to launch and connect.
 const CONNECT: Duration = Duration::from_secs(90);
 
-/// Starts the apps tests open in a simulator (a booted one, else the
-/// newest iPhone, booted first), installing the development host there;
-/// `fps` has it log its performance monitor's readings.
-pub(crate) fn starter(work: &Path, fps: bool) -> anyhow::Result<StartHost> {
+/// Starts the apps tests open in a simulator (`device`, by name or UDID;
+/// else a booted one, else the newest iPhone, booted first), installing the
+/// development host there; `fps` has it log its performance monitor's
+/// readings.
+pub(crate) fn starter(work: &Path, fps: bool, device: Option<&str>) -> anyhow::Result<StartHost> {
     let host = crate::runtime::test_host(crate::runtime::Platform::IphoneSimulator)?;
-    let udid = crate::run::simulator(None)?;
+    let udid = crate::run::simulator(device)?;
     let app = crate::run::package_ios(&work.join("ios"), &host)?;
     let step = crate::ui::Step::start("installing the development host in the simulator");
     simctl(&["install", &udid, &app.to_string_lossy()])?;
