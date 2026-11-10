@@ -875,6 +875,116 @@ fn svg_safety_whitespace_is_not_a_visited_node() {
     assert_eq!(check_text(&tree), Ok(false));
 }
 
+const OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="10" height="10">"#;
+
+fn obb_clip(text: &str) -> String {
+    format!(
+        r#"<clipPath id="c" clipPathUnits="objectBoundingBox"><text x="0" y="0.9">{text}</text></clipPath>"#
+    )
+}
+
+fn check(doc: &str) -> Result<bool, Error> {
+    check_text(&xml(doc).unwrap())
+}
+
+#[test]
+fn svg_safety_duplicate_resource_ids_use_the_last() {
+    // usvg's link table keeps the last element with an id for resource
+    // links; the walk's `<use>` table keeps the first and must not be used
+    // for a clip-path reference.
+    let text = "a".repeat(1000);
+    let rects = r#"<rect width="5" height="5" clip-path="url(#c)"/>"#.repeat(100);
+    let doc = format!(
+        r#"{OPEN}<defs><clipPath id="c"/>{}</defs>{rects}<text x="0" y="9">a</text></svg>"#,
+        obb_clip(&text)
+    );
+    assert_eq!(check(&doc), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_duplicate_feimage_targets_use_the_last() {
+    let text = "a".repeat(70_000);
+    let doc = format!(
+        r##"{OPEN}<defs><g id="t"/><filter id="f" filterUnits="userSpaceOnUse"><feImage href="#t"/></filter><text id="t" x="0" y="9">{text}</text></defs><rect width="10" height="10" filter="url(#f)"/><text x="0" y="9">a</text></svg>"##
+    );
+    assert_eq!(check(&doc), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_inline_style_parses_like_usvg() {
+    // simplecss skips a comment before a name and drops a leading `*`; the
+    // walk must use the same tokenizer.
+    let text = "a".repeat(1000);
+    for style in ["/**/clip-path:url(#c)", "*clip-path:url(#c)"] {
+        let rects = format!(r#"<rect width="5" height="5" style="{style}"/>"#).repeat(100);
+        let doc = format!(
+            r#"{OPEN}<defs>{}</defs>{rects}<text x="0" y="9">a</text></svg>"#,
+            obb_clip(&text)
+        );
+        assert_eq!(check(&doc), Err(Error::TooMuchText), "{style}");
+    }
+}
+
+#[test]
+fn svg_safety_inline_marker_shorthand_is_bounded() {
+    // `marker: url(#m)` sets the three marker properties.
+    let text = "a".repeat(1000);
+    let path: String = (0..100).map(|i| format!("L{i} 0")).collect();
+    let doc = format!(
+        r#"{OPEN}<defs><marker id="m" markerWidth="1" markerHeight="1"><text x="0" y="9">{text}</text></marker></defs><path d="M0 0{path}" fill="none" stroke="black" style="marker:url(#m)"/><text x="0" y="9">a</text></svg>"#
+    );
+    assert_eq!(check(&doc), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_inherited_clip_paths_are_bounded() {
+    // `clip-path="inherit"` takes the direct parent's value.
+    let text = "a".repeat(1000);
+    let rects = r#"<rect width="5" height="5" clip-path="inherit"/>"#.repeat(100);
+    let doc = format!(
+        r#"{OPEN}<defs>{}</defs><g clip-path="url(#c)">{rects}</g><text x="0" y="9">a</text></svg>"#,
+        obb_clip(&text)
+    );
+    assert_eq!(check(&doc), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_markers_through_use_copies_are_bounded() {
+    // The marker is on the `<g>` around a `<use>`; usvg draws it on every
+    // path the use copies, not only on the source path.
+    let text = "a".repeat(1000);
+    let a = r##"<use href="#p"/>"##.repeat(10);
+    let b = r##"<use href="#a"/>"##.repeat(10);
+    let doc = format!(
+        r##"{OPEN}<defs><marker id="m" markerWidth="1" markerHeight="1"><text x="0" y="9">{text}</text></marker><path id="p" d="M0 0L5 5" stroke="black"/><g id="a">{a}</g><g id="b">{b}</g></defs><g marker-start="url(#m)"><use href="#b"/></g><text x="0" y="9">a</text></svg>"##
+    );
+    assert_eq!(check(&doc), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_marker_on_the_use_itself_is_bounded() {
+    let text = "a".repeat(1000);
+    let a = r##"<use href="#p"/>"##.repeat(10);
+    let b = r##"<use href="#a"/>"##.repeat(10);
+    let doc = format!(
+        r##"{OPEN}<defs><marker id="m" markerWidth="1" markerHeight="1"><text x="0" y="9">{text}</text></marker><path id="p" d="M0 0L5 5" stroke="black"/><g id="a">{a}</g><g id="b">{b}</g></defs><use href="#b" marker-start="url(#m)"/><text x="0" y="9">a</text></svg>"##
+    );
+    assert_eq!(check(&doc), Err(Error::TooMuchText));
+}
+
+#[test]
+fn svg_safety_text_free_stylesheet_marker_still_parses() {
+    // An arrow marker without text is common; charging its path data against
+    // the text budget refused a document usvg accepts.
+    let d = format!("M0 0{}", "L1 1".repeat(50));
+    let paths = format!(r#"<path d="{d}" stroke="black"/>"#).repeat(200);
+    let doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>path{{marker-end:url(#a)}}</style><defs><marker id="a" markerWidth="4" markerHeight="4"><path d="M0 0L4 2L0 4z"/></marker></defs>{paths}</svg>"#
+    );
+    assert_eq!(check(&doc), Ok(false));
+    assert!(size(doc.as_bytes()).is_ok());
+}
+
 #[test]
 fn svg_text_draws_with_the_font_database() {
     // The machine's fonts are not part of this test: the document's family

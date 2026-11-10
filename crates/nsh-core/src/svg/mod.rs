@@ -143,8 +143,9 @@ pub enum Error {
         pixels: u64,
     },
     /// Walking or drawing it would visit more nodes than a document may
-    /// hold: a `<use>` target counts at each use, and shared patterns, masks
-    /// and clip paths count each time they are drawn.
+    /// hold, or nest deeper than 1024 elements: a `<use>` target counts at
+    /// each use, and shared patterns, masks and clip paths count each time
+    /// they are drawn.
     TooManyNodes,
     /// The parser or the renderer panicked on it.
     Panicked,
@@ -444,33 +445,33 @@ fn parse_tree(
 /// overflow the stack. Every visited element also counts against
 /// [`layers::MAX_VISITS`], the bound usvg itself lays a document out under.
 fn check_text(doc: &roxmltree::Document<'_>) -> Result<bool, Error> {
+    // `<use>` and `<tref>` resolve an id to the first element that carries
+    // it; every other link (`clip-path`, `mask`, `filter`, markers, paints,
+    // `feImage` and resource `href`s) goes through svgtree's link table,
+    // where the last one wins.
     let mut ids: HashMap<&str, roxmltree::Node<'_, '_>> = HashMap::new();
-    let mut shapes = 0u64;
-    let mut vertices = 0u64;
+    let mut links: HashMap<&str, roxmltree::Node<'_, '_>> = HashMap::new();
     for node in doc.descendants().filter(roxmltree::Node::is_element) {
         if let Some(id) = node.attribute("id") {
             ids.entry(id).or_insert(node);
+            links.insert(id, node);
         }
-        if is_marker_shape(node) {
-            shapes = shapes.saturating_add(1);
-        }
-        vertices = vertices.saturating_add(vertex_bound(node));
     }
     let mut resources = HashMap::new();
-    for (&id, &node) in &ids {
+    for (&id, &node) in &links {
         if let Some(kind) = ResourceKind::of(node.tag_name().name()) {
             resources.insert(id, Resource { kind, node });
         }
     }
     let mut scan = TextScan {
         ids,
+        links,
         resources,
         memo: HashMap::new(),
+        link_memo: HashMap::new(),
         text_memo: HashMap::new(),
         resource_memo: HashMap::new(),
         counted: HashSet::new(),
-        shapes,
-        vertices,
         visits: 0,
     };
     let mut total = Expansion::default();
@@ -488,10 +489,28 @@ fn check_text(doc: &roxmltree::Document<'_>) -> Result<bool, Error> {
 struct Expansion {
     chars: usize,
     nodes: u64,
+    /// Path-like shapes and their vertex bound, expanded through `<use>`:
+    /// what a marker inherited by this subtree is drawn on.
+    shapes: u64,
+    vertices: u64,
     has_text: bool,
 }
 
+/// The shapes of a subtree a marker property applies to.
+#[derive(Clone, Copy, Default)]
+struct MarkerTarget {
+    shapes: u64,
+    vertices: u64,
+}
+
 impl Expansion {
+    fn marker_target(&self) -> MarkerTarget {
+        MarkerTarget {
+            shapes: self.shapes,
+            vertices: self.vertices,
+        }
+    }
+
     fn add(&mut self, other: Expansion) -> Result<(), Error> {
         self.chars = self.chars.saturating_add(other.chars);
         if self.chars > MAX_TEXT_CHARS {
@@ -501,6 +520,8 @@ impl Expansion {
         if self.nodes > u64::from(layers::MAX_VISITS) {
             return Err(Error::TooManyNodes);
         }
+        self.shapes = self.shapes.saturating_add(other.shapes);
+        self.vertices = self.vertices.saturating_add(other.vertices);
         self.has_text |= other.has_text;
         Ok(())
     }
@@ -508,6 +529,14 @@ impl Expansion {
     /// The expansion repeated `multiplier` times: a marker is laid out once
     /// per vertex of the shape that uses it.
     fn scaled(self, multiplier: u64) -> Result<Self, Error> {
+        if multiplier <= 1 {
+            return Ok(self);
+        }
+        // No text, no text-layout cost to bound. A text-free arrow marker on
+        // many paths must not be refused as if its paths were glyphs.
+        if self.chars == 0 {
+            return Ok(Expansion::default());
+        }
         let chars = (self.chars as u64).saturating_mul(multiplier);
         if chars > MAX_TEXT_CHARS as u64 {
             return Err(Error::TooMuchText);
@@ -519,6 +548,8 @@ impl Expansion {
         Ok(Self {
             chars: chars as usize,
             nodes,
+            shapes: self.shapes.saturating_mul(multiplier),
+            vertices: self.vertices.saturating_mul(multiplier),
             has_text: self.has_text,
         })
     }
@@ -598,21 +629,22 @@ struct Resource<'a, 'input> {
 }
 
 struct TextScan<'a, 'input> {
+    /// First element per id, for `<use>` and `<tref>`.
     ids: HashMap<&'a str, roxmltree::Node<'a, 'input>>,
+    /// Last element per id, for resource links and `<feImage>`.
+    links: HashMap<&'a str, roxmltree::Node<'a, 'input>>,
     resources: HashMap<&'a str, Resource<'a, 'input>>,
     /// A referenced subtree's expansion by (id, inside text): a `<use>` chain
     /// that fans out is counted once per target, not once per path.
     memo: HashMap<(&'a str, bool), Expansion>,
+    /// The same for a link resolved by its last definition.
+    link_memo: HashMap<(&'a str, bool), Expansion>,
     /// The text content of a `<tref>` target, by id.
     text_memo: HashMap<&'a str, usize>,
     /// A resource's own content, before references multiply it.
     resource_memo: HashMap<&'a str, Expansion>,
     /// Resources usvg converts once and reuses.
     counted: HashSet<&'a str>,
-    /// The document's path-like shapes and their vertex bound, for a marker
-    /// inherited by a subtree (or a `<use>` whose target is elsewhere).
-    shapes: u64,
-    vertices: u64,
     visits: u32,
 }
 
@@ -622,6 +654,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
         id: &'a str,
         in_text: bool,
         depth: u32,
+        last: bool,
         visiting: &mut Vec<&'a str>,
     ) -> Result<Expansion, Error> {
         if depth > MAX_DEPTH {
@@ -630,17 +663,31 @@ impl<'a, 'input> TextScan<'a, 'input> {
         if visiting.contains(&id) {
             return Ok(Expansion::default());
         }
-        if let Some(expansion) = self.memo.get(&(id, in_text)) {
-            return Ok(*expansion);
+        let cached = if last {
+            self.link_memo.get(&(id, in_text)).copied()
+        } else {
+            self.memo.get(&(id, in_text)).copied()
+        };
+        if let Some(expansion) = cached {
+            return Ok(expansion);
         }
-        let Some(target) = self.ids.get(id).copied() else {
+        let target = if last {
+            self.links.get(id).copied()
+        } else {
+            self.ids.get(id).copied()
+        };
+        let Some(target) = target else {
             return Ok(Expansion::default());
         };
         visiting.push(id);
         let expansion = self.expand(target, in_text, true, depth, visiting);
         visiting.pop();
         let expansion = expansion?;
-        self.memo.insert((id, in_text), expansion);
+        if last {
+            self.link_memo.insert((id, in_text), expansion);
+        } else {
+            self.memo.insert((id, in_text), expansion);
+        }
         Ok(expansion)
     }
 
@@ -697,6 +744,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
             chars: node.text().unwrap_or_default().chars().count(),
             nodes: 0,
             has_text: true,
+            ..Expansion::default()
         })?;
         Ok(out)
     }
@@ -715,7 +763,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
         for child in node.children() {
             out.add(self.expand(child, true, false, depth + 1, visiting)?)?;
         }
-        out.add(self.references(node, depth, visiting)?)?;
+        out.add(self.references(node, MarkerTarget::default(), depth, visiting)?)?;
         Ok(out)
     }
 
@@ -733,8 +781,9 @@ impl<'a, 'input> TextScan<'a, 'input> {
             chars,
             nodes: 1,
             has_text: chars > 0,
+            ..Expansion::default()
         };
-        out.add(self.references(node, depth, visiting)?)?;
+        out.add(self.references(node, MarkerTarget::default(), depth, visiting)?)?;
         Ok(out)
     }
 
@@ -750,12 +799,13 @@ impl<'a, 'input> TextScan<'a, 'input> {
         };
         // `parse_svg_use_element` parses the target one level deeper than
         // the element that referred to it, so a use counts two.
-        let mut out = self.expand_ref(id, in_text, depth + 2, visiting)?;
+        let mut out = self.expand_ref(id, in_text, depth + 2, false, visiting)?;
         out.add(Expansion {
             nodes: 1,
             ..Expansion::default()
         })?;
-        out.add(self.references(node, depth, visiting)?)?;
+        let target = out.marker_target();
+        out.add(self.references(node, target, depth, visiting)?)?;
         Ok(out)
     }
 
@@ -768,12 +818,15 @@ impl<'a, 'input> TextScan<'a, 'input> {
     ) -> Result<Expansion, Error> {
         let mut out = Expansion {
             nodes: 1,
+            shapes: u64::from(is_marker_shape(node)),
+            vertices: vertex_bound(node),
             ..Expansion::default()
         };
         for child in node.children() {
             out.add(self.expand(child, in_text, false, depth + 1, visiting)?)?;
         }
-        out.add(self.references(node, depth, visiting)?)?;
+        let target = out.marker_target();
+        out.add(self.references(node, target, depth, visiting)?)?;
         Ok(out)
     }
 
@@ -782,6 +835,7 @@ impl<'a, 'input> TextScan<'a, 'input> {
     fn references(
         &mut self,
         node: roxmltree::Node<'a, 'input>,
+        target: MarkerTarget,
         depth: u32,
         visiting: &mut Vec<&'a str>,
     ) -> Result<Expansion, Error> {
@@ -789,28 +843,86 @@ impl<'a, 'input> TextScan<'a, 'input> {
         if node.tag_name().name() == "feImage"
             && let Some(id) = href(node)
         {
-            out.add(self.expand_ref(id, false, depth + 2, visiting)?)?;
+            let mut image = self.expand_ref(id, false, depth + 2, true, visiting)?;
+            // What `feImage` draws is not part of the marker inheritance of
+            // the element that embeds it.
+            image.shapes = 0;
+            image.vertices = 0;
+            out.add(image)?;
         }
         for attribute in node.attributes() {
             match attribute.name() {
                 "style" => {
-                    out.add(self.inline_style(attribute.value(), node, depth, visiting)?)?;
+                    out.add(self.inline_style(
+                        attribute.value(),
+                        node,
+                        target,
+                        depth,
+                        visiting,
+                    )?)?;
                 }
                 name => {
-                    let Some(kind) = ResourceKind::property(name) else {
-                        continue;
-                    };
-                    // A `filter` value is a list: `url(#a) url(#b)` converts
-                    // and lays out both.
-                    if kind == ResourceKind::Filter {
-                        for id in func_iris(attribute.value()) {
-                            out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
-                        }
-                    } else if let Some(id) = func_iri(attribute.value()) {
-                        out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
-                    }
+                    out.add(self.property_use(
+                        node,
+                        name,
+                        attribute.value(),
+                        target,
+                        depth,
+                        visiting,
+                    )?)?;
                 }
             }
+        }
+        Ok(out)
+    }
+
+    /// One presentation attribute or style declaration, resolving
+    /// `inherit` and walking every URL in a `filter` list.
+    fn property_use(
+        &mut self,
+        node: roxmltree::Node<'a, 'input>,
+        name: &str,
+        value: &'a str,
+        target: MarkerTarget,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let Some(kind) = ResourceKind::property(name) else {
+            return Ok(Expansion::default());
+        };
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("inherit") {
+            // An inherited marker reference is counted by the ancestor that
+            // sets it, over this whole subtree.
+            if kind == ResourceKind::Marker {
+                return Ok(Expansion::default());
+            }
+            let Some(value) = inherited_value(node, name) else {
+                return Ok(Expansion::default());
+            };
+            return self.value_use(name, kind, value, target, depth, visiting);
+        }
+        self.value_use(name, kind, value, target, depth, visiting)
+    }
+
+    fn value_use(
+        &mut self,
+        name: &str,
+        kind: ResourceKind,
+        value: &'a str,
+        target: MarkerTarget,
+        depth: u32,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<Expansion, Error> {
+        let mut out = Expansion::default();
+        // A `filter` value is a list: `url(#a) url(#b)` converts and lays
+        // out both.
+        if kind == ResourceKind::Filter {
+            for id in func_iris(value) {
+                out.add(self.resource_use(id, kind, name, target, depth, visiting)?)?;
+            }
+        } else if let Some(id) = func_iri(value) {
+            out.add(self.resource_use(id, kind, name, target, depth, visiting)?)?;
         }
         Ok(out)
     }
@@ -819,24 +931,35 @@ impl<'a, 'input> TextScan<'a, 'input> {
         &mut self,
         style: &'a str,
         node: roxmltree::Node<'a, 'input>,
+        target: MarkerTarget,
         depth: u32,
         visiting: &mut Vec<&'a str>,
     ) -> Result<Expansion, Error> {
         let mut out = Expansion::default();
-        for declaration in style.split(';') {
-            let Some((name, value)) = declaration.split_once(':') else {
-                continue;
-            };
-            let name = name.trim();
-            let Some(kind) = ResourceKind::property(name) else {
-                continue;
-            };
-            if kind == ResourceKind::Filter {
-                for id in func_iris(value) {
-                    out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+        // usvg parses a style attribute with simplecss: comments before a
+        // name are skipped, a leading `*` is dropped, and `marker` expands
+        // to the three marker properties.
+        for declaration in simplecss::DeclarationTokenizer::from(style) {
+            if declaration.name.eq_ignore_ascii_case("marker") {
+                for property in ["marker-start", "marker-mid", "marker-end"] {
+                    out.add(self.property_use(
+                        node,
+                        property,
+                        declaration.value,
+                        target,
+                        depth,
+                        visiting,
+                    )?)?;
                 }
-            } else if let Some(id) = func_iri(value) {
-                out.add(self.resource_use(id, kind, node, name, depth, visiting)?)?;
+            } else {
+                out.add(self.property_use(
+                    node,
+                    declaration.name,
+                    declaration.value,
+                    target,
+                    depth,
+                    visiting,
+                )?)?;
             }
         }
         Ok(out)
@@ -846,8 +969,8 @@ impl<'a, 'input> TextScan<'a, 'input> {
         &mut self,
         id: &'a str,
         kind: ResourceKind,
-        user: roxmltree::Node<'a, 'input>,
         property: &str,
+        target: MarkerTarget,
         depth: u32,
         visiting: &mut Vec<&'a str>,
     ) -> Result<Expansion, Error> {
@@ -860,9 +983,13 @@ impl<'a, 'input> TextScan<'a, 'input> {
         if resource.kind.cached(resource.node) && !self.counted.insert(id) {
             return Ok(Expansion::default());
         }
-        let body = self.resource_body(id, resource, depth + 4, visiting)?;
+        let mut body = self.resource_body(id, resource, depth + 4, visiting)?;
+        // A resource's shapes are drawn where it is used, not as marker
+        // targets of the element that references it.
+        body.shapes = 0;
+        body.vertices = 0;
         let multiplier = if kind == ResourceKind::Marker {
-            marker_multiplier(user, property, self.shapes, self.vertices)
+            marker_multiplier(property, target)
         } else {
             1
         };
@@ -893,12 +1020,13 @@ impl<'a, 'input> TextScan<'a, 'input> {
         {
             body.add(self.resource_body(link, linked, depth + 4, visiting)?)?;
         }
-        // A clip path can name another clip path in `clip-path`, and a mask
-        // another mask in `mask`; usvg converts the linked resource too.
-        body.add(self.references(resource.node, depth, visiting)?)?;
         for child in resource.node.children() {
             body.add(self.expand(child, false, true, depth + 1, visiting)?)?;
         }
+        // A clip path can name another clip path in `clip-path`, and a mask
+        // another mask in `mask`; usvg converts the linked resource too.
+        let target = body.marker_target();
+        body.add(self.references(resource.node, target, depth, visiting)?)?;
         visiting.pop();
         self.resource_memo.insert(id, body);
         Ok(body)
@@ -932,20 +1060,19 @@ impl<'a, 'input> TextScan<'a, 'input> {
         if resources.is_empty() {
             return Ok(());
         }
-        let vertices = self.vertices.max(1);
-        // A stylesheet can apply to every element the document expands to,
-        // including the copies a `<use>` makes; the walk's node count bounds
-        // both.
+        // A stylesheet can apply to every expanded element, including the
+        // copies a `<use>` makes; the walk's node and vertex counts bound it.
         let expanded = total.nodes.max(1);
+        let vertices = total.vertices.max(1);
         for (id, resource) in resources {
             if resource.kind.cached(resource.node) && self.counted.contains(id) {
                 continue;
             }
             let body = self.resource_body(id, resource, 0, visiting)?;
             let multiplier = match resource.kind {
-                // A marker is laid out for each end and each vertex of every
+                // A marker is laid out once per end and vertex of every
                 // element the rule matches.
-                ResourceKind::Marker => expanded.saturating_mul(vertices),
+                ResourceKind::Marker => vertices,
                 // A cached resource is converted once however many rules
                 // name it; an objectBoundingBox clip path or mask is
                 // converted per element.
@@ -980,48 +1107,15 @@ impl<'a, 'input> TextScan<'a, 'input> {
 }
 
 /// How many times a marker is laid out for `user`: once at each end, and once
-/// per vertex for middle markers. A marker attribute inherits to descendant
-/// shapes, so the whole subtree counts; a `<use>` can reach shapes elsewhere,
-/// so it falls back to the document's totals.
-fn marker_multiplier(
-    node: roxmltree::Node<'_, '_>,
-    property: &str,
-    document_shapes: u64,
-    document_vertices: u64,
-) -> u64 {
-    let (mut shapes, mut vertices, has_use) = marker_totals(node);
-    if has_use {
-        shapes = document_shapes;
-        vertices = document_vertices;
-    }
+/// per vertex for middle markers. The shape and vertex counts are the
+/// subtree's expanded ones, so `<use>` copies count.
+fn marker_multiplier(property: &str, target: MarkerTarget) -> u64 {
     if property.eq_ignore_ascii_case("marker-start") || property.eq_ignore_ascii_case("marker-end")
     {
-        shapes.max(1)
+        target.shapes.max(1)
     } else {
-        vertices.max(1)
+        target.vertices.max(1)
     }
-}
-
-fn marker_totals(node: roxmltree::Node<'_, '_>) -> (u64, u64, bool) {
-    let mut shapes = 0u64;
-    let mut vertices = 0u64;
-    let mut has_use = false;
-    let mut add = |node: roxmltree::Node<'_, '_>| {
-        if is_marker_shape(node) {
-            shapes = shapes.saturating_add(1);
-        }
-        vertices = vertices.saturating_add(vertex_bound(node));
-        has_use |= node.tag_name().name() == "use";
-    };
-    add(node);
-    for descendant in node
-        .descendants()
-        .skip(1)
-        .filter(roxmltree::Node::is_element)
-    {
-        add(descendant);
-    }
-    (shapes, vertices, has_use)
 }
 
 fn is_marker_shape(node: roxmltree::Node<'_, '_>) -> bool {
@@ -1044,6 +1138,44 @@ fn vertex_bound(node: roxmltree::Node<'_, '_>) -> u64 {
         "rect" | "circle" | "ellipse" => 8,
         _ => 0,
     }
+}
+
+/// The parent's computed value of a property when a node says `inherit`.
+/// `clip-path`, `mask` and `filter` are not inherited: only a direct parent
+/// with an explicit value supplies one, and a parent that itself says
+/// `inherit` resolves up the chain.
+fn inherited_value<'a, 'input>(
+    node: roxmltree::Node<'a, 'input>,
+    property: &str,
+) -> Option<&'a str> {
+    let mut parent = node.parent_element()?;
+    loop {
+        match property_value(parent, property) {
+            Some(value) if value.trim().eq_ignore_ascii_case("inherit") => {
+                parent = parent.parent_element()?;
+            }
+            value => return value,
+        }
+    }
+}
+
+/// A property's presentation-attribute or inline-style value, as usvg reads
+/// a style attribute (simplecss declarations).
+fn property_value<'a, 'input>(
+    node: roxmltree::Node<'a, 'input>,
+    property: &str,
+) -> Option<&'a str> {
+    if let Some(value) = node.attribute(property) {
+        return Some(value);
+    }
+    let style = node.attribute("style")?;
+    let mut value = None;
+    for declaration in simplecss::DeclarationTokenizer::from(style) {
+        if declaration.name.eq_ignore_ascii_case(property) {
+            value = Some(declaration.value);
+        }
+    }
+    value
 }
 
 /// The id a `<use>`, `<tref>` or resource `href` refers to, when it is in
