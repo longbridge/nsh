@@ -169,6 +169,10 @@ pub(crate) struct Surface {
     /// The GPUI view drawing the surface ([`crate::app::AppView`]): notified
     /// when the surface changed.
     pub(crate) entity: Cell<Option<gpui::EntityId>>,
+    /// The GPUI window that view is in, as it was made or last drawn: what
+    /// reaches the window between frames uses it (native components' props
+    /// and commands, [`crate::native`]).
+    pub(crate) main_window: Cell<Option<gpui::AnyWindowHandle>>,
     /// The GPUI text system (fonts the engine thread shapes with, and the
     /// main thread draws with).
     pub(crate) text_system: RefCell<Option<Arc<gpui::TextSystem>>>,
@@ -296,6 +300,7 @@ impl Surface {
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             scale: Cell::new(1.0),
             entity: Cell::new(None),
+            main_window: Cell::new(None),
             text_system: RefCell::new(None),
             origin: Cell::new((0.0, 0.0)),
             invalid: Cell::new(false),
