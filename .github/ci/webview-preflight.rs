@@ -22,6 +22,7 @@ use nsh_platform_windows as platform;
 const CONTENT: &[u8] = b"NSH native WebView download fixture\n";
 
 fn main() -> impl std::process::Termination {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,nsh_platform_windows::native=debug")).init();
     let dir = PathBuf::from(std::env::var("SMOKE_OUTPUT").expect("SMOKE_OUTPUT"));
     std::fs::create_dir_all(&dir).unwrap();
     let options = platform::AppOptions {
@@ -305,6 +306,7 @@ fn Smoke() -> impl IntoElement {
                         .download_behavior(mode)
                         .on_message(move |s: &str| messages.update(|v| v.push(s.to_owned())))
                         .on_error(move |s: &str| errors.update(|v| v.push(s.to_owned())))
+                        .on_unavailable(move |s: &str| errors.update(|v| v.push(format!("primary unavailable: {s}"))))
                         .on_progress(move |e: &WebProgress| progress.update(|v| v.push(*e)))
                         .on_download(move |e: &WebDownload| downloads.update(|v| v.push(e.clone())))
                         .on_download_pending(move |e: &WebDownloadPending| {
@@ -319,6 +321,7 @@ fn Smoke() -> impl IntoElement {
                 .h(px(240.0))
                 .on_download(move |e: &WebDownload| downloads.update(|v| v.push(e.clone())))
                 .on_message(move |s: &str| messages.update(|v| v.push(s.to_owned())))
+                .on_unavailable(move |s: &str| errors.update(|v| v.push(format!("shared unavailable: {s}"))))
                 .into_element(),
             web_view(url)
                 .incognito(true)
@@ -326,6 +329,7 @@ fn Smoke() -> impl IntoElement {
                 .w(px(320.0))
                 .h(px(240.0))
                 .on_message(move |s: &str| messages.update(|v| v.push(s.to_owned())))
+                .on_unavailable(move |s: &str| errors.update(|v| v.push(format!("private unavailable: {s}"))))
                 .into_element(),
         ]),
     )

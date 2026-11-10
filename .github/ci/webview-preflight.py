@@ -45,6 +45,7 @@ edition = "2024"
 nsh-core = {{ path = {json.dumps(str(root / "crates/nsh-core"))} }}
 nsh-platform-{platform} = {{ path = {json.dumps(str(root / ("crates/nsh-platform-" + platform)))}, default-features = false{features} }}
 serde_json = "1"
+env_logger = "0.11"
 image = {{ version = "0.25", default-features = false, features = ["png"] }}
 '''
 (smoke / "Cargo.toml").write_text(manifest, encoding="utf-8")
