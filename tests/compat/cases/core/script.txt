@@ -252,6 +252,21 @@ tap id:measure
 expect Sizes: 100x10 110x11 120x12 130x13 150x15 160x16
 expect Calls: 1
 covers [nsh:rt] ref
+# core-reveal
+tap id:case-core-reveal
+expect Called: none
+# The ref's method takes no options, vertical, horizontal and animated.
+tap id:default
+expect Called: default
+tap id:center
+expect Called: center
+tap id:nearest
+expect Called: nearest
+tap id:end
+expect Called: end
+# An alignment it does not know is a TypeError, at the call.
+tap id:unknown
+expect Unknown alignment: TypeError
 # core-resource
 tap id:case-core-resource
 # Resources without a source: a value at once, an initial value while the
