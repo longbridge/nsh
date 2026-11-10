@@ -1268,6 +1268,12 @@ pub struct Core<M: TextEngine> {
     /// chain was last worked out: the next commit round does it once,
     /// whatever order the reports came in.
     focus_moved: bool,
+    /// A view reported losing the focus and none took it since: the chain
+    /// waits for the next display frame before it lets go, so a move
+    /// that comes as a blur then a focus in two messages, with a commit
+    /// between them, is one change of `focus-within`, not a leave and a
+    /// new enter.
+    blur_held: bool,
     /// The chain changed since the focus watches last looked
     /// (`ElementRef::on_focus_in`).
     focus_within_changed: bool,
@@ -1479,6 +1485,7 @@ impl<M: TextEngine> Core<M> {
             focus_chain: Vec::new(),
             focus_scratch: Vec::new(),
             focus_moved: false,
+            blur_held: false,
             focus_within_changed: false,
             modality: None,
             focus_visible: false,
@@ -2817,7 +2824,9 @@ impl<M: TextEngine> Core<M> {
         // what they did: one change of the chain, the views both chains
         // share untouched.
         let visible_moved = std::mem::take(&mut self.focus_visible_moved);
-        if self.focus_moved {
+        // A blur no focus followed yet waits for the frame (`blur_held`).
+        let held = self.blur_held && self.focus.is_none() && !self.focus_chain.is_empty();
+        if self.focus_moved && !held {
             self.update_focus_within();
             self.update_focus_visible();
             // The hints the focus came to or left.
