@@ -557,6 +557,11 @@ struct PackageArgs {
     /// App Bundle (`aab`, uploaded to Google Play).
     #[arg(long, value_enum, default_value_t)]
     format: crate::android::Format,
+    /// macOS: the processors the app runs on, `arm64` (Apple silicon),
+    /// `x86_64` (Intel) or `universal` (both, in one executable). Default:
+    /// this Mac's.
+    #[arg(long, value_enum)]
+    arch: Option<package::Arch>,
     /// Install and launch the app in the simulator or on the Android device
     /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
     /// machine at the address it prints).
@@ -935,6 +940,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 keystore_password,
                 abi,
                 format,
+                arch,
                 run,
                 asset_url,
             } = *args;
@@ -960,6 +966,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 }),
                 abis: &abi,
                 format,
+                arch,
                 run,
                 asset_url: asset_url.as_deref(),
             })
@@ -1212,6 +1219,32 @@ mod command_tests {
         assert!(
             matches!(cli.command, Command::Build { out, .. } if out == std::path::Path::new("custom"))
         );
+    }
+
+    #[test]
+    fn macos_packages_name_their_processors() {
+        use super::package::Arch;
+        let arch = |args: &[&str]| {
+            let mut line = vec!["nsh", "package", "--target", "macos"];
+            line.extend_from_slice(args);
+            match Cli::try_parse_from(line).map(|cli| cli.command) {
+                Ok(Command::Package(args)) => Ok(args.arch),
+                Ok(_) => panic!("expected nsh package"),
+                Err(e) => Err(e),
+            }
+        };
+        assert_eq!(arch(&[]).unwrap(), None);
+        for (value, expected) in [
+            ("arm64", Arch::Arm64),
+            ("aarch64", Arch::Arm64),
+            ("x86_64", Arch::X86_64),
+            ("universal", Arch::Universal),
+        ] {
+            assert_eq!(arch(&["--arch", value]).unwrap(), Some(expected), "{value}");
+        }
+        for value in ["x86-64", "i386", "x86_64-apple-darwin"] {
+            assert!(arch(&["--arch", value]).is_err(), "{value}");
+        }
     }
 
     #[test]
