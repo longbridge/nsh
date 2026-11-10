@@ -119,7 +119,7 @@ const message = signal("");
 
 ## 权限
 
-如果应用在 `nsh.json` 中声明了 `capabilities`，网页视图只能显示和导航到 `webview` 下列出的主机；其他顶层导航会在原生侧被拒绝。没有 `capabilities` 键的应用可以显示任何内容；在 macOS 上，文件也只限一个页面：`src` 为 `file://` 页面的网页视图只能打开这个页面，不能打开其他文件。见[沙箱与权限](../docs/sandbox-and-capabilities.md)。
+如果应用在 `nsh.json` 中声明了 `capabilities`，网页视图只能显示和导航到 `webview` 下列出的主机；其他顶层导航会在原生侧被拒绝。没有 `capabilities` 键的应用可以显示任何内容；在 macOS 上，文件只限一个文件夹：`src` 为 `file://` 页面的网页视图可以打开该页面所在文件夹（及其子文件夹）中的文件，不能打开文件夹以外的文件。见[沙箱与权限](../docs/sandbox-and-capabilities.md)。
 
 ```json
 {

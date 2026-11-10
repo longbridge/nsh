@@ -119,7 +119,7 @@ const message = signal("");
 
 ## Capabilities
 
-When your app declares `capabilities` in `nsh.json`, a web view may only show and navigate to the hosts listed under `webview`; other top-level navigations are refused natively. An app without a `capabilities` key may show anything; on macOS its files too keep to one page: a web view whose `src` is a `file://` page opens that page and no other file. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+When your app declares `capabilities` in `nsh.json`, a web view may only show and navigate to the hosts listed under `webview`; other top-level navigations are refused natively. An app without a `capabilities` key may show anything; on macOS its files keep to one folder: a web view whose `src` is a `file://` page may open files in that page's folder (and below it), and no file outside it. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
 ```json
 {
