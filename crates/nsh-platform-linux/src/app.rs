@@ -431,6 +431,8 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        // WebKitGTK, in builds with it.
+        web_views: cfg!(feature = "webview"),
         ..Environment::default()
     }
 }

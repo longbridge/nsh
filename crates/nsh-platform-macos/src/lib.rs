@@ -78,8 +78,8 @@ pub use objc2_foundation;
 pub use crate::app::set_root;
 pub use crate::{
     app::{
-        AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, set_components,
-        set_ui_sets,
+        ActivationPolicy, AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app,
+        set_components, set_ui_sets,
     },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},

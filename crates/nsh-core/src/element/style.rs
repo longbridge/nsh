@@ -1687,6 +1687,8 @@ pub trait Styled: Sized {
     /// Laid out but not shown, nor what is inside it (CSS's `visibility:
     /// hidden`, Tailwind's `invisible`, GPUI's `Styled::invisible`): it
     /// keeps its place and frame, and takes no presses or keyboard focus.
+    /// On a text nested in another (a span), its characters keep their
+    /// place in the lines and are left out of copies and screen readers.
     fn invisible(mut self) -> Self {
         self.style()
             .value(StyleKey::Visibility, PropertyValue::Bool(true));

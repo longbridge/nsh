@@ -3,6 +3,7 @@ name = "nsh-platform-tui"
 description = "Native Shell surfaces embedded in a terminal grid."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

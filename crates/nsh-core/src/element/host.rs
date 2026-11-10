@@ -1585,6 +1585,19 @@ impl WebView {
         self.listen(EventKind::Error, listener.into_listener(), events::message)
     }
 
+    /// The platform shows no web view here: it has no web engine, or its
+    /// engine failed to start (the message; TS: `onError` with `code`
+    /// `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`). [`on_error`](Self::on_error)
+    /// hears it too. [`web_view_available`](crate::element::web_view_available)
+    /// asks ahead.
+    pub fn on_unavailable<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(
+            EventKind::Error,
+            listener.into_listener(),
+            events::unavailable,
+        )
+    }
+
     /// The page called `window.nsh.postMessage(data)`.
     pub fn on_message<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::Message, listener.into_listener(), events::data)

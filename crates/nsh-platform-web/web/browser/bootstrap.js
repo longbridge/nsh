@@ -3367,6 +3367,7 @@
 			"stopLoading",
 			"injectJavaScript",
 			"postMessage",
+			"insertText",
 			"sendInput",
 			"load",
 			"seek"

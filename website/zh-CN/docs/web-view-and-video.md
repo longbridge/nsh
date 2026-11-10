@@ -86,7 +86,7 @@ mount(App);
 |---|---|---|
 | `onLoadStart` | `WebViewNavigation` | 页面开始加载。 |
 | `onLoad` | `WebViewNavigation` | 页面加载完成。 |
-| `onError` | `{ message }` | 加载失败。 |
+| `onError` | `{ message, code? }` | 加载失败，或平台无法显示网页视图（`code` 为 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`，见下文）。 |
 | `onNavigationStateChange` | `WebViewNavigation` | URL、标题、加载状态或历史改变。 |
 | `onMessage` | `{ data: string }` | 页面发来消息（见下文）。 |
 
@@ -432,6 +432,45 @@ web_view("https://example.com/preview").incognito(true).flex_1()
 ```
 
 检查覆盖网页视图的 `src` 以及页面发起的每一次顶层导航（链接、重定向、修改 `location`）；它在平台询问能否继续导航时由原生决定。页面自己的子资源（脚本、图片、iframe）属于网页内容自身的事情，不做检查。`*.example.com` 只匹配子域名；要包括裸域名，还需列出 `example.com`。没有 `"capabilities"` 键的应用可以显示任何页面。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
+
+### 没有网页引擎时
+
+网页视图依赖平台的网页引擎，而有些环境里没有：未带 WebKitGTK 构建的 Linux 运行时、没有安装 WebView2 Runtime 的 Windows、没有启用系统 WebView 的 Android 设备。这时网页视图显示占位内容，应用可以立刻改为显示别的东西（代码块、链接、文件卡片）。
+
+可以先用 `web_view_available()`（`WebView.available()`）询问：平台在启动时就知道自己无法显示网页视图时，或应用的能力未授予 `webview` 时，它得到 `false`。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let web = signal(true);
+spawn(async move { web.set(web_view_available().await) });
+```
+
+```tsx tabs
+import { signal, WebView } from "nsh";
+
+const web = signal(true);
+WebView.available().then((available) => web.set(available));
+```
+
+有些引擎要到网页视图启动时才会失败（Windows 上的 WebView2），所以网页视图自己也会报告：平台一旦知道，就触发 `onError`，其 `code` 为 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`。
+
+```tsx
+import { signal, Text, WebView } from "nsh";
+
+function Preview(props: { url: string }) {
+  const failed = signal(false);
+  return (
+    <If when={!failed()} else={<Text>{props.url}</Text>}>
+      <WebView
+        src={props.url}
+        onError={(e) => e.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" && failed.set(true)}
+        style={{ flex: 1 }}
+      />
+    </If>
+  );
+}
+```
 
 ## Video
 

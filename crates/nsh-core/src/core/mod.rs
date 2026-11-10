@@ -2391,6 +2391,14 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command {
+                id,
+                command: Command::CancelPress,
+            } => {
+                self.key(id)?;
+                self.cancel_press(id);
+                Ok(())
+            }
+            Op::Command {
                 command: Command::ClearJsResponder,
                 ..
             } => {
@@ -2856,6 +2864,18 @@ impl<M: TextEngine> Core<M> {
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
         }
+        // Presses a component passes on, onto this commit's layout.
+        for (id, press, answer) in std::mem::take(&mut self.components.presses) {
+            let target = self.press_target(id, press.page_position);
+            if let Some((node, position)) = target {
+                self.events.push(crate::element::JsEvent::Event(
+                    node,
+                    EventKind::Press,
+                    EventPayload::Press(crate::PressEvent { position, ..press }),
+                ));
+            }
+            answer.borrow_mut().deliver(target.is_some());
+        }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
         for (id, mut command) in std::mem::take(&mut self.commands) {
@@ -3111,7 +3131,30 @@ impl<M: TextEngine> Core<M> {
         self.nodes[key as usize].layout = Some(layout);
         self.sync_grid_role(key);
         self.became(key, style);
+        if kind == Kind::WebView && !self.components.environment.web_views {
+            self.web_view_unavailable(id);
+        }
         Ok(())
+    }
+
+    /// A web view on a platform that shows none fails at once (`onError`
+    /// with `code` `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). Always reported:
+    /// the `onError` listener is set after the node is made.
+    fn web_view_unavailable(&mut self, id: NodeId) {
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                (
+                    "message",
+                    PayloadValue::Str("web views are not available on this platform".into()),
+                ),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
+                ),
+            ]),
+        ));
     }
 
     /// Whether node `key` is a control: a view with a control's
@@ -3711,11 +3754,12 @@ impl<M: TextEngine> Core<M> {
         } else {
             node.view_style != view
         };
-        // A span's background is part of its block's text.
-        let span_background_changed = node.inline
+        // A span's background and visibility are part of its block's text.
+        let span_drawing_changed = node.inline
             && node.kind == Kind::Text
-            && span_background(&node.view_style, node.id) != span_background(&view, node.id);
-        let text_changed = node.text_style != text || span_background_changed;
+            && (span_background(&node.view_style, node.id) != span_background(&view, node.id)
+                || node.view_style.hidden != view.hidden);
+        let text_changed = node.text_style != text || span_drawing_changed;
         // What its children inherit as `currentColor`.
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
         let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
@@ -5217,8 +5261,16 @@ impl<M: TextEngine> Core<M> {
                     if attached {
                         self.accessory_attached(key, true);
                     }
+                    return Ok(());
                 }
-                return Ok(());
+                // Other views: the embedding app finds them by it
+                // (`watchScroll`).
+                let value: Option<Arc<str>> = name.as_deref().map(Into::into);
+                let props = node.props.get_or_insert_default();
+                if props.native_id != value {
+                    props.native_id = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
             }
             Prop::Modal(prop) => {
                 if let Some(root) = node.root.as_mut() {
@@ -5685,6 +5737,12 @@ impl<M: TextEngine> Core<M> {
                     .insert_child_at_index(parent_layout, index as usize, child_layout);
             }
             self.needs_layout = true;
+            // A dialog opening in content a scroll view has not made yet
+            // makes the views around it: it shows over everything.
+            let parent_created = parent_created
+                || (child_kind == Kind::Modal
+                    && self.nodes[parent as usize].culled
+                    && self.uncull(parent));
             // An overlay's native view goes to its root view
             // (`sync_overlays`).
             if parent_created
@@ -6853,6 +6911,7 @@ impl<M: TextEngine> Core<M> {
         let layout = self.nodes[key as usize]
             .layout
             .expect("text block has layout");
+        let colors_at_draw = self.text_engine.draws_colors_from_text();
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         if *cx.text == text && cx.alignments == alignments {
@@ -6871,11 +6930,33 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
+        // Only colors changed, and the platform draws them from the text:
+        // its typesetting, measurements and final layout all stand; the new
+        // text is mounted with the layout drawn (a fitted text has a layout
+        // of its own text, made again).
+        if !inserted
+            && cx.alignments == alignments
+            && colors_at_draw
+            && cx
+                .laid_out
+                .as_ref()
+                .is_none_or(|l| Arc::ptr_eq(&l.text, &cx.text))
+            && cx.text.same_but_colors(&text)
+        {
+            let text = Arc::new(text);
+            if let Some(laid) = &mut cx.laid_out {
+                laid.text = text.clone();
+            }
+            cx.text = text;
+            cx.metadata_changed = true;
+            return true;
+        }
         cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
-        // Platform typesetting state embeds colors too: always rebuild it.
+        // Platform typesetting state embeds colors too (unless it draws
+        // them from the text, above): rebuild it.
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;
@@ -6926,6 +7007,11 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
+                    // `visibility: "hidden"` on a span hides its characters,
+                    // and those of the spans inside it, where they stand.
+                    if inner.hidden || child.view_style.hidden {
+                        inner = inner.hide();
+                    }
                     let press = pressable(child.events);
                     let hinted = child.overlay_watched & overlay::watch::HINT != 0;
                     self.collect_text(c, inner, out, alignments, in_press || press);
@@ -6936,7 +7022,9 @@ impl<M: TextEngine> Core<M> {
                     // its hint: no press, no stop of Tab. Inside a span that
                     // takes presses it is none, so that span, the innermost
                     // link there, keeps the press of those characters.
-                    if press || (hinted && !in_press) {
+                    // Hidden characters take no presses, as CSS's hidden
+                    // elements take no pointer events.
+                    if !inner.hidden && (press || (hinted && !in_press)) {
                         let mut events = child.events;
                         if hinted {
                             events.set(EventKind::MouseEnter, true);

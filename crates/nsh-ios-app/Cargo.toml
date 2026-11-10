@@ -3,6 +3,7 @@ name = "nsh-ios-app"
 description = "Release app runner: the executable of packaged nsh apps (no development features)."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

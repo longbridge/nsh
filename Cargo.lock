@@ -3835,6 +3835,7 @@ dependencies = [
 name = "nsh-engine"
 version = "0.4.0"
 dependencies = [
+ "block2",
  "crossbeam-channel",
  "libc",
  "log",

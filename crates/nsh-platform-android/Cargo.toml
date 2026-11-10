@@ -3,6 +3,7 @@ name = "nsh-platform-android"
 description = "Android backend: JNI glue, StaticLayout text engine, mount batch encoding, native animation driver."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

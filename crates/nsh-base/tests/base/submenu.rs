@@ -1,7 +1,7 @@
 //! `Submenu`'s `onOpenChange`: each opening and closing the user asks for
 //! is reported once, with why: the trigger hovered or pressed, the pointer
-//! over another item, Escape or the sheet's back row, the whole menu
-//! closing with an item chosen. Not when the app closes the menu itself.
+//! over another item or the keyboard focus moved to one, Escape or the
+//! sheet's back row, the whole menu closing with an item chosen. Not when the app closes the menu itself.
 //! On a Mac (cascading popups) and on a phone (the sheet's items).
 
 use nsh_base::{MenuEvent, SubmenuEvent, menu, menu_item, submenu};
@@ -30,7 +30,8 @@ fn start(os: Os, idiom: Idiom) -> Headless {
 
 /// A File menu the app keeps open (`open`), with a plain item and two
 /// submenus, Share and Export, that write what they report to the log; a
-/// Share item that closes the menu from the app's own code.
+/// Share item that closes the menu from the app's own code; `New` writes
+/// to the log when it is chosen.
 #[component]
 fn Menus() -> impl IntoElement {
     let open = signal(false);
@@ -56,7 +57,11 @@ fn Menus() -> impl IntoElement {
                     }
                 })
                 .trigger(row("file", "File").w(px(80.0)))
-                .child(menu_item().child(row("new", "New")))
+                .child(
+                    menu_item()
+                        .on_select(move || log.update(|l| l.push("chose new".into())))
+                        .child(row("new", "New")),
+                )
                 .child(
                     submenu()
                         .trigger(row("share", "Share"))
@@ -111,6 +116,50 @@ fn a_desktop_submenu_reports_hovers_presses_and_the_menu_closing() {
         &mut app,
         "share open Hover, share close Hover, export open Hover, export close Hover, share open \
          TriggerPress, share close Select",
+    );
+}
+
+#[test]
+fn the_keyboard_on_another_item_closes_a_submenu_the_pointer_opened() {
+    let mut app = start(Os::MacOs, Idiom::Desktop);
+    app.press("id:file").unwrap();
+    app.wait_for("Share").unwrap();
+    app.hover("id:share").unwrap();
+    app.wait_for("Mail").unwrap();
+    // Down focuses the menu's first item, `New`: the submenu closes, so
+    // one item is highlighted, and Return chooses `New`.
+    app.press_key("down").unwrap();
+    shows_log(&mut app, "share open Hover, share close Focus");
+    app.wait_for_gone("Mail", WAIT).unwrap();
+    app.press_key("enter").unwrap();
+    shows_log(&mut app, "share open Hover, share close Focus, chose new");
+}
+
+#[test]
+fn the_keyboard_on_a_submenus_own_trigger_keeps_it_open() {
+    let mut app = start(Os::MacOs, Idiom::Desktop);
+    app.press("id:file").unwrap();
+    app.wait_for("Share").unwrap();
+    // The focus on `Share`, then the pointer opens `Export`: Down to
+    // `Export` keeps it open, Up to `Share` closes it.
+    app.press_key("down").unwrap();
+    app.press_key("down").unwrap();
+    app.hover("id:export").unwrap();
+    shows_log(&mut app, "export open Hover");
+    app.press_key("down").unwrap();
+    app.press_key("up").unwrap();
+    shows_log(&mut app, "export open Hover, export close Focus");
+    // Right on `Share` opens it at `Mail`, Left closes it with the focus
+    // back on `Share`, which Return opens again.
+    app.press_key("right").unwrap();
+    app.wait_for("Mail").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for_gone("Mail", WAIT).unwrap();
+    app.press_key("enter").unwrap();
+    shows_log(
+        &mut app,
+        "export open Hover, export close Focus, share open TriggerPress, share close Cancel, share \
+         open TriggerPress",
     );
 }
 

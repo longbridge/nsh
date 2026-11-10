@@ -827,6 +827,7 @@ impl RootView {
             access,
             self.ivars().options.components.clone(),
         );
+        installed.watch_scrolls(self.ivars().options.scroll_watchers.clone());
         // The app's downloaded images go through its disk cache.
         installed.set_image_cache(engine.image_cache());
         if self.ivars().options.fps || nsh_engine::perf::enabled_by_env() {
@@ -889,6 +890,9 @@ pub struct SurfaceOptions {
     pub cache: nsh_engine::CacheOptions,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
+    /// The scroll views the embedding app watches by `nativeID`
+    /// ([`crate::AppView::watch_scroll`]).
+    pub scroll_watchers: crate::ScrollWatchers,
     /// The embedding app's channel with the apps (`nsh/host`): launch
     /// parameters, events and handlers of their calls and posts, one for
     /// every app the surface runs.
@@ -909,6 +913,7 @@ impl Default for SurfaceOptions {
             storage: None,
             cache: nsh_engine::CacheOptions::default(),
             components: crate::component::Components::default(),
+            scroll_watchers: crate::ScrollWatchers::default(),
             host: nsh_engine::HostChannel::default(),
             fps: false,
         }

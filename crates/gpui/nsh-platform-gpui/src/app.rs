@@ -897,6 +897,8 @@ fn initial_environment() -> Environment {
         },
         idiom: Idiom::Desktop,
         file_requests: true,
+        // wry, in builds with it.
+        web_views: cfg!(feature = "webview"),
         ..Environment::default()
     }
 }

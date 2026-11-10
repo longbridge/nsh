@@ -31,6 +31,8 @@ class HostStream {
 }
 ```
 
+应用随附的视频以 URL 导入（`import intro from "./media/intro.mp4"`，`.mov`、`.m4v`、`.webm` 同样），文件随应用打包。
+
 ```tsx
 import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
 

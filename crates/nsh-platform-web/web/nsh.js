@@ -5978,6 +5978,23 @@ class Player {
         else document.activeElement?.blur?.();
         break;
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
+      case "insertText": {
+        // As the user's typing: the browser's undo history keeps it and
+        // `input` reports it. `execCommand` edits the focused field only.
+        const field = el?._field;
+        if (!field) break;
+        if (field._composing) {
+          // The input method's text would be committed around it (as on Linux).
+          console.warn("insertText: an input method is composing; nothing inserted");
+          break;
+        }
+        if (document.activeElement !== field) field.focus();
+        if (!document.execCommand("insertText", false, args[0])) {
+          field.setRangeText(args[0], field.selectionStart, field.selectionEnd, "end");
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        break;
+      }
       case "scrollTo":
         if (!el) break;
         // A textarea's text (a built-in bar's drags).
@@ -7500,8 +7517,8 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) are left out, as the native
-   * platforms copy. */
+   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
+   * the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -7546,6 +7563,12 @@ class Player {
         last = run.parentNode;
         lastArea = area;
         lastBox = box;
+      }
+      // A hidden run (`visibility: hidden` on a span) keeps its place but
+      // is not copied; the line's break after it still is.
+      if (getComputedStyle(run).visibility === "hidden") {
+        if (to === text.length && run._after) out += run._after;
+        continue;
       }
       const part = text.slice(from, to);
       out += area ? part.replaceAll("\uFFFC", "") : part;
