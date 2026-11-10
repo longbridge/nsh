@@ -1604,6 +1604,41 @@ pub(crate) fn release(surface: &Rc<Surface>, id: NodeId) {
     restore_focus(surface, &scope, m.focus_before.take());
 }
 
+/// Window root `root` opened in a window of its own: the dialogs presented
+/// in it earlier, while it was not a window yet (in the batch that opens
+/// it, the dialogs of its first render come before the command that opens
+/// it), move over to it from the surface's root. They keep their order;
+/// the window's first sizing ([`window_resized`]) sizes them, and they are
+/// shown at the end of the batch.
+pub(crate) fn window_opened(surface: &Rc<Surface>, root: &NshView) {
+    let mut nav = surface.nav.borrow_mut();
+    let window = root.id();
+    let ids: Vec<NodeId> = nav
+        .order
+        .iter()
+        .copied()
+        .filter(|id| {
+            nav.modals
+                .get(id)
+                .is_some_and(|m| m.config.window == window && m.host.as_ref() != Some(root))
+        })
+        .collect();
+    for id in ids {
+        let Some(m) = nav.modals.get_mut(&id) else {
+            continue;
+        };
+        let Some(view) = m.view.clone() else { continue };
+        if view.has_parent() {
+            drop_focus(surface, view.ns());
+            view.unparent();
+        }
+        view.insert_before(root, None);
+        m.host = Some(root.clone());
+        // What had the focus over there is not this window's to restore.
+        m.focus_before = focused(root);
+    }
+}
+
 /// A modal was removed: dismiss it.
 pub(crate) fn dismiss(surface: &Rc<Surface>, view: &NshView) {
     if crate::window::removed(surface, view) {

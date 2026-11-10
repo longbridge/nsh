@@ -1295,6 +1295,8 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         window.setAppearance(surface.root.ns().appearance().as_deref());
         crate::window_state::observe(surface, Target::Own(id), &w.watch, Some(&window));
     }
+    // Dialogs of its first render were presented before it was a window.
+    crate::navigation::window_opened(surface, view);
     // A dialog stays above its parent and moves with it.
     if kind == WindowKind::Dialog
         && let Some(parent) = &parent_window
