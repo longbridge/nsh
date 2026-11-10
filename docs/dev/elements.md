@@ -187,8 +187,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
   the keyboard focus: "Keyboard focus" above) and `scrollTo({ x, y, animated })` (use `ref`); lists also
-  `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; `Keyboard.dismiss()` (`nsh`).
-  Commands run after the commit's other mount items; list scrolls are resolved by the core with the current item sizes.
+  `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; every node
+  `reveal({ vertical, horizontal, animated })`; `Keyboard.dismiss()` (`nsh`).
+  Commands run after the commit's other mount items; list scrolls and `reveal` are resolved by the core with
+  the current layout (`docs/dev/scrolling-and-lists.md`).
 - **`measure()`** (on any node's ref) resolves, once the turn's changes are laid out, to `{ bounds, pagePosition }`
   or `null` (not in the tree, never shown). `bounds` is the frame in the parent, as
   `onLayout` reports it; `pagePosition` the top left corner in the root view the node is in: the surface, or the modal

@@ -206,6 +206,15 @@ emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.t
 ...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
 entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
+A layout spring is `gpui-base`'s `Spring`: `Spring::new(response)` and `.damping_ratio(ratio)` keep its names and
+meaning (a critically damped spring by default, the undamped period as the response), and `Spring::from_stiffness`
+is for springs given by their stiffness, as design systems give them. Not followed: the response is milliseconds
+(`response_ms`, a `f32`), not a `Duration` ("Units"), and there is no `epsilon` or travel: a layout spring always
+runs from rest to its target and settles within a thousandth of it (`settle_ms`), so a layout transition needs no
+more. The same `Spring` drives the animation graph (`stiffness`, `damping` the coefficient, `mass`, as React Native
+and the platforms' spring APIs). `LayoutCurve::FittedSpring { damping_ratio }` is the spring whose stiffness is
+fitted to a given duration, JS's `type: "spring"` with React Native's `springDamping`.
+
 `DataTable`'s column `fixed` uses `nsh_base::data_table::ColumnFixed`, scoped to its
 component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follows its
 `Left` / `Right` variants (`crates/component/src/table/column.rs`). TS uses `"left"` / `"right"`;
@@ -296,7 +305,8 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape, and `pointerType: PointerType \| null` (`"mouse"`, `"pen"`, `"touch"`) | Points | `Menu.popup(items, e.pagePosition)`; `pointerType` is the DOM's (a keyboard `contextmenu` is a `PointerEvent` with `pointerType` `""`), `null` for no pointer as `pressedButton` is for no button |
 | `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout({ bounds }: { bounds: Bounds })` | Geometry | `LayoutEvent` dropped; `onLayout(bounds)` first, one object since 2026-10-27 (Payloads, below) |
 | `ref.measure()` → `{ x, y, width, height, pageX, pageY }` | `{ bounds: Bounds; pagePosition: Point }` | Geometry | |
-| `YNode` (every ref; what primitives return) | `ViewRef` (`focus`, `blur`, `measure`; what an element is, in `JSX.Element`), and per element `InputRef` (`setSelection`), `ScrollRef` (`scrollTo`, `zoomTo`, `scrollToEnd`), `ListRef` (`scrollTo`, `scrollToOffset`, `scrollToIndex`, `scrollToEnd`), `WebViewRef`, `VideoRef` (`seek`), `NativeComponentRef` (`command`) over it; primitives return `JSX.Element` | Shapes that can grow | 2026-10-28: a method added to one element appears on its ref only. `Overlay`'s `anchor`, `setAccessibilityFocus` and a Rust component's ref's `node` take a `ViewRef`; the methods' signatures are unchanged |
+| `YNode` (every ref; what primitives return) | `ViewRef` (`focus`, `blur`, `measure`, `reveal`; what an element is, in `JSX.Element`), and per element `InputRef` (`setSelection`), `ScrollRef` (`scrollTo`, `zoomTo`, `scrollToEnd`), `ListRef` (`scrollTo`, `scrollToOffset`, `scrollToIndex`, `scrollToEnd`), `WebViewRef`, `VideoRef` (`seek`), `NativeComponentRef` (`command`) over it; primitives return `JSX.Element` | Shapes that can grow | 2026-10-28: a method added to one element appears on its ref only. `Overlay`'s `anchor`, `setAccessibilityFocus` and a Rust component's ref's `node` take a `ViewRef`; the methods' signatures are unchanged |
+| DOM `element.scrollIntoView({ block, inline, behavior })`; GPUI `ScrollHandle::scroll_to_item(ix)` with `ScrollStrategy` (`Top`, `Center`, `Bottom`, `Nearest`); GPUI Kit `TreeState::reveal_item` | `ViewRef.reveal({ vertical?, horizontal?, animated? })` (`RevealOptions`, Rust `ElementRef::reveal`), `ScrollAlignment` (`"start"`, `"center"`, `"end"`, `"nearest"`) | Shapes that can grow | 2026-11-10: `reveal` is the project's word for bringing something into view (`Tree.revealItem`, `Editor.revealPosition`, GPUI Kit's `reveal_item`): short and neutral, not the web's phrase. `vertical` / `horizontal`: the alignments are physical, and the DOM's `block` / `inline` follow the writing mode. One `ScrollAlignment` serves both axes, so start / end (as `SnapAlignment`), not GPUI's top / bottom. `animated` as `scrollTo`'s |
 | `ScrollEvent` (`onScroll`) `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` | `{ offset: Point; contentSize: Size; size: Size; zoomScale }` | Geometry | The other scroll events pass `{ offset: Point }` (Payloads, 2026-10-27, below) |
 | `OverlayPosition` `{ placement, x, y, width, height, availableWidth, availableHeight }` | `{ placement; bounds: Bounds; available: Size }` | Geometry | |
 | `TextLayoutLine` `{ text, x, y, width, height, ... }` | `{ text; bounds: Bounds; ... }` | Geometry | `ascender` / `descender` / `capHeight` / `xHeight` stay |

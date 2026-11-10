@@ -421,6 +421,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         ),
     ),
     (
+        "reveal",
+        1,
+        decl!("(options?: RevealOptions): void"),
+        decl!(
+            "Scrolls the `<Scroll>`s around the view, innermost first, so it shows, once this turn's changes are laid out: `vertical` places it along vertical scroll views (`\"start\"` by default), `horizontal` along horizontal ones (`\"nearest\"` by default), `\"nearest\"` moving only what it must; `animated` defaults to `true`. `\"start\"` and `\"end\"` are physical (top / bottom, left / right). Each scroll view stops at its content's ends, past them by its `contentInset`. An unknown alignment throws a `TypeError`. A `List` keeps its own: use its `scrollToIndex`."
+        ),
+    ),
+    (
         "reload",
         0,
         decl!("(): void"),

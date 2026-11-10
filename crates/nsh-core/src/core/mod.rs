@@ -358,6 +358,10 @@ struct ScrollState {
     /// made (`ScrollBy` items and `ScrollTo` commands; lists count theirs in
     /// their state): platforms report how many they applied.
     issued: u32,
+    /// Where the last `ScrollTo` sent scrolls it, with its number in
+    /// `issued` (moved by the `ScrollBy`s after it), until a report shows
+    /// it applied: `reveal` starts from there.
+    target: Option<(u32, (f32, f32))>,
     /// The lists virtualized against this scroll view (`viewport="parent"`;
     /// empty for nearly every scroll view).
     dependents: Vec<Key>,
@@ -394,6 +398,7 @@ impl Default for ScrollState {
             zoom: 1.0,
             offset: (0.0, 0.0),
             issued: 0,
+            target: None,
             dependents: Vec::new(),
             pending: Vec::new(),
             asked: None,
@@ -1823,6 +1828,9 @@ impl<M: TextEngine> Core<M> {
         if let Some(scroll) = node.scroll.as_mut() {
             moved = scroll.offset != (x, y);
             scroll.offset = (x, y);
+            if scroll.target.is_some_and(|(n, _)| n <= applied) {
+                scroll.target = None;
+            }
             if !scroll.dependents.is_empty() {
                 scroll.pending.retain(|&(n, _)| n > applied);
                 dependents = true;
@@ -2910,6 +2918,27 @@ impl<M: TextEngine> Core<M> {
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
         }
+        // Into the scroll commands of the scroll views around, in place,
+        // with this commit's layout and the scrolls of the commands before.
+        if self
+            .commands
+            .iter()
+            .any(|(_, c)| matches!(c, Command::Reveal(_)))
+        {
+            let mut projected = Vec::new();
+            for (id, command) in std::mem::take(&mut self.commands) {
+                let commands = match command {
+                    Command::Reveal(options) => self.reveal_scrolls(id, options, &projected),
+                    command => vec![(id, command)],
+                };
+                for (id, command) in commands {
+                    if let Some(to) = self.scrolled_to(id, &command) {
+                        projected.push((id, to));
+                    }
+                    self.commands.push((id, command));
+                }
+            }
+        }
         // Presses a component passes on, onto this commit's layout.
         for (id, press, answer) in std::mem::take(&mut self.components.presses) {
             let target = self.press_target(id, press.page_position);
@@ -3083,6 +3112,9 @@ impl<M: TextEngine> Core<M> {
                     .is_some_and(|s| s.horizontal);
                 let to = if horizontal { x.0 } else { y.0 };
                 self.scroll_issued(key, PendingScroll::To(to));
+                if let Some(scroll) = self.nodes[key as usize].scroll.as_mut() {
+                    scroll.target = Some((scroll.issued, (x.0, y.0)));
+                }
             }
             self.mount.push(MountItem::Command { id, command });
         }
@@ -6197,6 +6229,7 @@ impl<M: TextEngine> Core<M> {
             scroll.content = None;
             // The new native view counts the core's scrolls from zero.
             scroll.issued = 0;
+            scroll.target = None;
             scroll.pending.clear();
         }
         // A list in its parent's viewport is a plain view clipping its

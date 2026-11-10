@@ -87,6 +87,17 @@
 - **Kept rows**: a row holding the keyboard focus, an open overlay (a row's menu or popover; not a hint) or an end of
   a text selection stays bound wherever the list scrolls, so the field keeps the focus and the menu stays open
   (`Core::sync_kept`, each commit before the lists update). Once none is left in it, the row is recycled as any other.
+- **Revealing a view** (`reveal`, `ElementRef::reveal`): a command on the view that the
+  core turns into `ScrollTo` commands of the `Scroll`s around it at the commit, in place among the commands
+  (`Core::reveal_scrolls`, `core/measure.rs`), innermost first, each from where the ones inside it end up and the
+  commit's earlier scroll commands put it (`Core::scrolled_to`) or, before that, where the last `ScrollTo` sent in an
+  earlier commit goes until a report shows it applied (`ScrollState::target`, by the platforms' count of applied
+  scrolls), along each scroll view's axis and clamped to the range the platforms scroll over (the content widened by
+  `contentInset`: `-inset.leading ..= content + inset.trailing - viewport`); a scroll view already where it would go
+  gets none, even at an offset outside that range (insets UIKit adds that the core does not know). `start` / `end` are
+  physical along `horizontal` (left / right, RTL too). It walks the frames as `measure()` does: transforms and a `zoomTo`
+  not reported yet are not taken into account. Lists are passed through (their offsets are their rows', `scrollToIndex`'s); platforms
+  never see the command.
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
