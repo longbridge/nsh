@@ -15,6 +15,14 @@ Rust apps and embedders; the prebuilt runners an app without Rust crates ships h
 by what the app imports (`docs/dev/browser-js-size.md`), and GPUI always has it. A crate with `default-features = false`
 names the feature to keep shaders: `features = ["shader"]`. The other optional parts are in [features.md](features.md).
 
+Apps learn whether shaders draw from `Environment::shaders` (TS `shadersAvailable()`, Rust `shaders_available()`),
+which `Shader::compile` cannot tell: it only says a source is valid. Each platform starts it at
+`nsh_engine::shader::LINKED` (`true` on the web, whose page reports `shaders: false` once its WebGL 2 context fails);
+when its `Renderer::new` finds no GPU it calls
+`EngineControl::shaders_unavailable`, and the engine keeps it `false` from then on, for later environments and for
+engines started after it in the same process. The engine also reports `false` on a grid surface. Headless runs keep the
+default, `true`.
+
 ## The contract
 
 An app writes one function and whatever helpers and constants it needs:

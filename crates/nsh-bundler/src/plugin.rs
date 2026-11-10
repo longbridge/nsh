@@ -123,9 +123,10 @@ fn svg_asset(rel: &str, data: &[u8]) -> Result<(Size<Points>, Vec<String>), nsh_
     Ok((size, warnings))
 }
 
-/// What an SVG holds that browsers draw and the native backends'
-/// rasterizer leaves out: text, animation (SMIL elements, CSS animations),
-/// embedded images and HTML (`<foreignObject>`).
+/// What an SVG holds that browsers draw and the native image rasterizer
+/// leaves out: animation (SMIL elements, CSS animations), an `<image>` that
+/// references a file, a URL or a nested SVG document, and HTML
+/// (`<foreignObject>`). Inline raster `data:` images draw natively.
 fn svg_browser_only(data: &[u8]) -> Vec<&'static str> {
     let Ok(text) = std::str::from_utf8(data) else {
         return Vec::new();
@@ -137,14 +138,18 @@ fn svg_browser_only(data: &[u8]) -> Vec<&'static str> {
     let Ok(doc) = roxmltree::Document::parse_with_options(text, options) else {
         return Vec::new();
     };
-    let (mut texts, mut animation, mut images, mut html) = (false, false, false, false);
+    let (mut animation, mut images, mut html) = (false, false, false);
     for node in doc.descendants().filter(|n| n.is_element()) {
         match node.tag_name().name() {
-            "text" => texts = true,
             "animate" | "animateColor" | "animateMotion" | "animateTransform" | "set" => {
                 animation = true
             }
-            "image" => images = true,
+            "image" => {
+                let href = node
+                    .attribute("href")
+                    .or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")));
+                images |= !href.is_some_and(inline_raster);
+            }
             "foreignObject" => html = true,
             "style" => {
                 animation |= node
@@ -157,15 +162,13 @@ fn svg_browser_only(data: &[u8]) -> Vec<&'static str> {
         animation |= node.attribute("style").is_some_and(css_animates);
     }
     let mut found = Vec::new();
-    if texts {
-        found.push("its <text> shows in browsers; native platforms draw the SVG without it");
-    }
     if animation {
         found.push("its animation plays in browsers; native platforms draw the SVG still");
     }
     if images {
         found.push(
-            "its <image> elements show in browsers; native platforms draw the SVG without them",
+            "its <image> elements that reference files, URLs or SVG documents show only in \
+             browsers; native platforms draw inline raster data images",
         );
     }
     if html {
@@ -175,6 +178,25 @@ fn svg_browser_only(data: &[u8]) -> Vec<&'static str> {
         );
     }
     found
+}
+
+/// Whether an `<image>` href is an inline raster `data:` image, the only
+/// kind the native rasterizer loads.
+fn inline_raster(href: &str) -> bool {
+    let Some(rest) = href.strip_prefix("data:") else {
+        return false;
+    };
+    // The MIME is trimmed and lowercased, as usvg's data URL parser reads it.
+    let mime = rest
+        .split([';', ','])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        mime.as_str(),
+        "image/png" | "image/jpeg" | "image/jpg" | "image/gif" | "image/webp"
+    )
 }
 
 /// Whether CSS (a style sheet or a `style` attribute) animates: a
@@ -1059,10 +1081,10 @@ mod tests {
     fn svg_import_warns_about_what_browsers_alone_draw() {
         let warnings = |body| svg_asset("icons/a.svg", &svg(body)).unwrap().1;
         assert!(warnings(r#"<rect width="5" height="5"/>"#).is_empty());
-        let text = warnings("<text>NSH</text>");
-        assert_eq!(text.len(), 1);
-        assert!(text[0].starts_with("icons/a.svg: "), "{text:?}");
-        assert!(text[0].contains("<text>"), "{text:?}");
+        assert!(
+            warnings("<text>NSH</text>").is_empty(),
+            "text draws natively"
+        );
         for animated in [
             r#"<rect width="5" height="5"><animate attributeName="x" to="5" dur="1s"/></rect>"#,
             r#"<rect width="5" height="5"><animateTransform attributeName="transform" type="rotate" to="90" dur="1s"/></rect>"#,
@@ -1089,15 +1111,30 @@ mod tests {
         ] {
             assert!(warnings(still).is_empty(), "{still}");
         }
-        let images = warnings(r#"<image href="data:image/png;base64,AAAA" width="5" height="5"/>"#);
+        let images = warnings(
+            r#"<image href="logo.png" width="5" height="5"/><image href="data:image/svg%2Bxml,%3Csvg/%3E" width="5" height="5"/>"#,
+        );
         assert_eq!(images.len(), 1);
+        assert!(images[0].starts_with("icons/a.svg: "), "{images:?}");
         assert!(images[0].contains("<image>"), "{images:?}");
+        for href in [
+            "data:image/png;base64,AAAA",
+            "data: IMAGE/PNG;base64,AAAA",
+            "data:image/PNG,AAAA",
+        ] {
+            let body = format!(r#"<image href="{href}" width="5" height="5"/>"#);
+            let found = svg_asset("icons/a.svg", &svg(&body)).unwrap().1;
+            assert!(
+                found.is_empty(),
+                "inline raster images draw natively: {href}: {found:?}"
+            );
+        }
         let html = warnings(r#"<foreignObject width="5" height="5"><p>NSH</p></foreignObject>"#);
         assert_eq!(html.len(), 1);
         assert!(html[0].contains("<foreignObject>"), "{html:?}");
         assert_eq!(
             warnings("<text>a</text><set/><image/><foreignObject/>").len(),
-            4
+            3
         );
     }
 

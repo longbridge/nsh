@@ -470,6 +470,80 @@ fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
     app.app.wait_for("text:chose:Quit").unwrap();
 }
 
+#[test]
+fn page_down_and_page_up_go_to_the_last_and_first_enabled_items_and_stop() {
+    // Every item is in view: a page is all of them. New is disabled, so
+    // Page Up stops at Open; neither goes around.
+    for (keys, chosen) in [
+        (&["pagedown"][..], "Quit"),
+        (&["pageup"][..], "Open"),
+        (&["down", "pagedown"][..], "Quit"),
+        (&["pagedown", "pagedown"][..], "Quit"),
+        (&["end", "pageup"][..], "Open"),
+        (&["pageup", "pageup"][..], "Open"),
+    ] {
+        let mut app = start_with(Root::of::<FileMenu>());
+        app.app.press("id:file").unwrap();
+        app.app.wait_for("Open").unwrap();
+        for key in keys {
+            app.app.press_key(key).unwrap();
+        }
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{keys:?}: {e}"));
+    }
+}
+
+#[test]
+fn the_keys_start_at_the_item_the_pointer_is_on() {
+    // The pointer on Save, the third item: Down goes on to Quit, Up back
+    // to Open, Space chooses Save itself.
+    for (key, chosen) in [("down", "Quit"), ("up", "Open"), ("space", "Save")] {
+        let mut app = start_with(Root::of::<FileMenu>());
+        app.app.press("id:file").unwrap();
+        app.app.wait_for("Open").unwrap();
+        app.app.hover("label:Save").unwrap();
+        app.app.press_key(key).unwrap();
+        if key != "space" {
+            app.app.press_key("space").unwrap();
+        }
+        app.app
+            .wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
+    }
+}
+
+#[test]
+fn the_pointer_moves_on_from_the_item_the_keys_reached() {
+    // Down three times reaches Quit; the pointer then on Open: Down is
+    // Save, the item after Open.
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.hover("label:Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Save").unwrap();
+}
+
+#[test]
+fn the_pointer_leaving_the_items_leaves_none_for_the_keys() {
+    // The pointer on Save, then off the menu: the item it left is no
+    // longer the keys' start, so Down goes to the first enabled item.
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.hover("label:Save").unwrap();
+    app.app.hover("id:file").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Open").unwrap();
+}
+
 /// A document whose context menu's first item is disabled: New
 /// (disabled), Rename, Delete. The text says the item chosen last and how
 /// the last `onContextMenu` of a plain view beside it came.

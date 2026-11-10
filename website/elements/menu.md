@@ -20,7 +20,10 @@ trigger by the keyboard in the browser and on Linux, and by screen readers on ma
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused; on the desktops Down or Home then
-focuses the first enabled item and Up or End the last.
+focuses the first enabled item and Up or End the last. Page Down moves to the last enabled item in view and Page Up to
+the first, stopping at the ends (a `MenuList` pages a view at a time, see [Long lists](#long-lists)). On the desktops the pointer moving over an item gives
+it the keyboard focus, so the keys go on from the item under the pointer; style an item's `focus:` state as its
+`hover:` one.
 On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
 its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item. A submenu
 the pointer opened closes when the arrow keys move the focus to another item of its menu.
@@ -61,7 +64,7 @@ import { Menu, MenuItem, MenuSeparator, Submenu } from "nsh/base";
 
 function Item(props: { label: string; onSelect: () => void }) {
   return (
-    <MenuItem onSelect={props.onSelect} class="rounded-md px-3 py-2 hover:bg-gray-100 active:bg-gray-200">
+    <MenuItem onSelect={props.onSelect} class="rounded-md px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 active:bg-gray-200">
       <Text>{props.label}</Text>
     </MenuItem>
   );
@@ -199,7 +202,7 @@ function ViewMenu() {
         indicatorClass={part}
         indicator={<Text>✓</Text>}
         onSelect={() => sidebar.set(!sidebar())}
-        class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100"
+        class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 focus:bg-gray-100"
       >
         <Text>Show sidebar</Text>
       </MenuItem>
@@ -211,7 +214,7 @@ function ViewMenu() {
             indicatorClass={part}
             indicator={<Text>✓</Text>}
             onSelect={() => sort.set(by())}
-            class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 checked:font-semibold"
+            class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 focus:bg-gray-100 checked:font-semibold"
           >
             <Text>{by()}</Text>
           </MenuItem>
@@ -275,7 +278,8 @@ const recent = signal<string[] | null>(null);
 A menu of many items, or of as many as the data has (models, accounts, recent files), puts them in a `MenuList`
 (Rust): a virtualized list whose rows are made only near its viewport. Its rows are items of the menu among the ones
 around it: Up, Down, Home and End walk every row of the list, scrolling to a row before focusing it and passing over
-disabled ones, then go on to the items before and after the list, a `Submenu`'s item among them. `render_item` draws
+disabled ones, then go on to the items before and after the list, a `Submenu`'s item among them. Page Down and Page Up
+scroll the list a view at a time. `render_item` draws
 each row from its index, one `MenuItem` or `Submenu` per row; give the list a height.
 
 ```rust

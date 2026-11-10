@@ -80,10 +80,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 
 ## Interaction and the environment
 
-- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `focusWithinStyle`,
+- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`,
   `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`, `pressedStyle` (and a `Button`'s
   `selectedStyle`) on any view (declared in `StateStyleProps`), the same as the `active:` / `hover:` / `focus:` /
-  `focus-within:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` / `aria-expanded:` / `aria-pressed:`
+  `focus-visible:` / `focus-within:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` / `aria-expanded:` / `aria-pressed:`
   classes: the core restyles the view while the platform reports it pressed, hovered or focused, while the focus is on
   it or a view inside it (the content of an overlay is inside the view the overlay is in; `docs/dev/styles.md`), and
   while its accessibility state is selected, checked, mixed,
@@ -151,8 +151,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   so a menu opened below it starts where the view does; `ContextMenu` puts the keyboard focus on its first enabled
   item then.
 - **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
-  presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus, and
-  `focus-visible:` is the same variant. Focus and presses are separate: `ViewProps::focus_stop` decides, from
+  presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus; it
+  shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when the keyboard moved it
+  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`). Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
   `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.
@@ -444,8 +445,12 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:
-  the room on that side, what a menu may grow to). A view inside an overlay measures in the root
-  view's coordinates.
+  the room on that side, what a menu may grow to). An overlay whose max size along its side is the `available` it was
+  told (a select's or a date picker's popup, held to the room and scrolling past it) chooses its side at its natural
+  size, not the size that room gave it (`Core::natural_extent`, `nsh_core::overlay::place_fitted`): one that grew
+  past the room below, or opens again with the last room below still set, goes above when it fits there whole; on
+  the side with more room, limited to it, when it fits on neither. The core measures it without that limit only
+  while the limit holds it, once per layout. A view inside an overlay measures in the root view's coordinates.
 - **Covering the anchor** (`OverlayConfig::cover`, `OverlayProp::Cover`; Rust `overlay().cover(&element_ref, shown)`;
   no JS prop): instead of on a side, the overlay starts where the anchor does, with a view inside it centered on the
   anchor vertically (a select's selected row over its trigger, title on title: shadcn/ui's `item-aligned`), then moved

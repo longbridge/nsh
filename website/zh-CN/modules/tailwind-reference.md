@@ -480,7 +480,8 @@ view()
 |---|---|---|
 | `active:` | 元素被按下 | `.active(\|s\| …)` |
 | `hover:` | 指针悬停其上（iPad 指针、Mac Catalyst、Android 鼠标） | `.hover(\|s\| …)` |
-| `focus:`、`focus-visible:` | 输入框获得焦点 | `.focus(\|s\| …)` |
+| `focus:` | 元素获得焦点 | `.focus(\|s\| …)` |
+| `focus-visible:` | 元素获得焦点并显示焦点（键盘把焦点移到了这里；文本输入框获得焦点时总是显示） | `.focus_visible(\|s\| …)` |
 | `focus-within:` | 元素自身或其后代获得焦点（`Overlay` 的内容是它所在元素的后代） | `.focus_within(…)` |
 | `disabled:` | 元素设置了 `disabled` 属性 | `.disabled_style(\|s\| …)` |
 | `enabled:` | 元素没有设置 `disabled` 属性 |  |
@@ -494,7 +495,7 @@ view()
 | `aria-selected:` | 元素已选中：`accessibilityState.selected` 为 `true`，同 `selected:` |  |
 | `data-<name>:` | 元素带有名为 `name` 的布尔 `data-*` 属性（Tailwind 的 `&[data-<name>]`；名称由小写字母、数字和 `-` 组成）：组件的部件在状态之外显示的信息，比如日历中区间起点的那一天带 `data-range-start` | 用 `Interactive::project_data(name, …)` 设置 |
 
-这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle`、`checkedStyle`、`indeterminateStyle`、`expandedStyle` 和 `pressedStyle` 属性（以及 `Button` 的 `selectedStyle`）；它们叠加在元素的样式和类之上。
+这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle`、`focusVisibleStyle`、`focusWithinStyle`、`disabledStyle`、`checkedStyle`、`indeterminateStyle`、`expandedStyle` 和 `pressedStyle` 属性（以及 `Button` 的 `selectedStyle`）；它们叠加在元素的样式和类之上。
 
 `disabled` 适用于任何元素：它会让 `disabled:` 生效，并移除元素的按压处理器，因此也不会显示按压反馈。
 
@@ -530,7 +531,8 @@ view()
 |---|---|---|
 | `group-active:` | 按下 | `.group_active(…)`、`.group_active_named(name, …)` |
 | `group-hover:` | 悬停 | `.group_hover(…)`、`.group_hover_named(name, …)` |
-| `group-focus:`、`group-focus-visible:` | 获得焦点 |  |
+| `group-focus:` | 获得焦点 |  |
+| `group-focus-visible:` | 获得焦点并显示焦点 | `.group_focus_visible(…)`、`.group_focus_visible_named(name, …)` |
 | `group-focus-within:` | 自身或内部获得焦点 | `.group_focus_within(…)`、`.group_focus_within_named(name, …)` |
 | `group-disabled:` | 禁用 |  |
 | `group-selected:` | 选中 |  |

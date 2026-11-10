@@ -395,7 +395,24 @@ impl std::fmt::Debug for NshView {
     }
 }
 
+/// A view that does not keep its node alive ([`NshView::downgrade`]).
+#[derive(Clone)]
+pub(crate) struct WeakView(Weak<Node>);
+
+impl WeakView {
+    /// The view, while its node lives.
+    pub(crate) fn upgrade(&self) -> Option<NshView> {
+        self.0.upgrade().map(NshView)
+    }
+}
+
 impl NshView {
+    /// A handle that does not keep the node alive (callbacks the node's
+    /// own state holds).
+    pub(crate) fn downgrade(&self) -> WeakView {
+        WeakView(Rc::downgrade(&self.0))
+    }
+
     /// A new, detached view of node `id`.
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         NshView(Rc::new(Node {

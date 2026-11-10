@@ -53,6 +53,7 @@ const HOST_PROPS: &[&str] = &[
     "hoverStyle",
     "focusStyle",
     "focusWithinStyle",
+    "focusVisibleStyle",
     "disabledStyle",
     "testID",
     "tooltip",

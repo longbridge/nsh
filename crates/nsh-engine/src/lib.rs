@@ -1235,12 +1235,16 @@ enum Message {
     /// environment is several times the size of every other message, and
     /// it changes rarely.
     Environment(Box<Environment>),
+    /// The platform found no GPU to draw shader views with
+    /// ([`EngineControl::shaders_unavailable`]).
+    ShadersUnavailable,
     /// The displays (desktops).
     Displays(Arc<[nsh_core::desktop::Display]>),
     RootSize(NodeId, Size<Points>, EdgeInsets),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
+    Modality(nsh_core::platform::InputModality),
     FontsChanged,
     Remount,
     /// An event of a request (by the hop it is for: events of a hop the
@@ -1314,6 +1318,9 @@ const PACED_BIND_TIME: std::time::Duration = std::time::Duration::from_millis(2)
 #[derive(Clone)]
 pub struct EngineControl {
     tx: Sender<Message>,
+    /// The input modality last sent ([`Self::set_input_modality`]), shared
+    /// by every clone: 0 none, else 1 + the modality.
+    modality: Arc<std::sync::atomic::AtomicU8>,
 }
 
 impl EngineControl {
@@ -1390,6 +1397,14 @@ impl EngineControl {
         let _ = self.tx.send(Message::Environment(Box::new(environment)));
     }
 
+    /// The platform has no GPU to draw shader views with
+    /// ([`shader::Renderer::new`] is `None`): the app's
+    /// `Environment::shaders` turns `false` now and stays so, whatever the
+    /// platform reports later. Telling it again does nothing.
+    pub fn shaders_unavailable(&self) {
+        let _ = self.tx.send(Message::ShadersUnavailable);
+    }
+
     /// Reports the displays (desktops: on start, in
     /// [`Engine::start_with`]'s setup, so the app reads them as it first
     /// renders, then whenever they change).
@@ -1454,6 +1469,23 @@ impl EngineControl {
     /// it, instead of waiting for the batches to stop for a while.
     pub fn flush(&self, done: impl FnOnce(bool) + Send + 'static) {
         let _ = self.tx.send(Message::Flush(Box::new(done)));
+    }
+
+    /// The user gave the surface input with `modality`: a pointer, finger
+    /// or pen going down, or a key pressed (not a modifier alone). Called
+    /// for every such event, before the platform acts on it, so it reaches
+    /// the core ahead of the focus move it causes; only a change crosses
+    /// to the engine. The core shows the keyboard focus by it
+    /// (`focus-visible:`; [`nsh_core::Core::set_input_modality`]).
+    pub fn set_input_modality(&self, modality: nsh_core::platform::InputModality) {
+        use std::sync::atomic::Ordering;
+        let code = match modality {
+            nsh_core::platform::InputModality::Keyboard => 1,
+            nsh_core::platform::InputModality::Pointer => 2,
+        };
+        if self.modality.swap(code, Ordering::Relaxed) != code {
+            let _ = self.tx.send(Message::Modality(modality));
+        }
     }
 
     /// Reports the interaction states of view `id` that the core asked to
@@ -1542,7 +1574,11 @@ impl Engine {
     {
         let image_cache = config.cache.open_images(config.app.app_id());
         let (tx, rx) = crossbeam_channel::unbounded();
-        setup(&EngineControl { tx: tx.clone() });
+        let modality = Arc::default();
+        setup(&EngineControl {
+            tx: tx.clone(),
+            modality: Arc::clone(&modality),
+        });
         let engine_tx = tx.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_stop = stop.clone();
@@ -1552,7 +1588,7 @@ impl Engine {
             .stack_size(ENGINE_STACK_SIZE)
             .spawn(move || run(config, make_text_engine(), sink, engine_tx, rx, engine_stop))?;
         Ok(Engine {
-            control: EngineControl { tx },
+            control: EngineControl { tx, modality },
             thread: Some(thread),
             host,
             stop,
@@ -1714,7 +1750,10 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     ) -> Option<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let control = EngineControl { tx: tx.clone() };
+        let control = EngineControl {
+            tx: tx.clone(),
+            modality: Arc::default(),
+        };
         setup(&control);
         let _clock = config.clock.enter();
         let _context = config.context.enter();
@@ -1864,6 +1903,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
+        drawn_shaders(&mut config.environment, false);
         let trial = match &config.app {
             App::Js(bundle) => bundle.trial.clone(),
             App::Rust(_) => None,
@@ -2045,6 +2085,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             events_reported: 0,
             pinned: config.pinned,
             environment: config.environment,
+            shaders_unavailable: false,
             app_locale: None,
             host: config.host.clone(),
             url_opens: Vec::new(),
@@ -2513,6 +2554,9 @@ struct State<M: TextEngine> {
     pinned: EnvironmentPins,
     /// The environment given last, before the app's language is applied.
     environment: Environment,
+    /// The platform found no GPU for shader views
+    /// ([`EngineControl::shaders_unavailable`]).
+    shaders_unavailable: bool,
     /// The language the app shows in whatever the user's (`setLocale`).
     app_locale: Option<nsh_core::platform::Locale>,
     /// A display frame was requested and has not begun yet.
@@ -3359,7 +3403,15 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         cell: env.cell,
         web_input: env.web_input,
         web_views: env.web_views,
+        shaders: env.shaders,
     }
+}
+
+/// `Environment::shaders` as the app sees it: the platform's, `false` on a
+/// grid surface (a terminal's Cells) and once the platform or this process
+/// found no GPU (`unavailable`: [`EngineControl::shaders_unavailable`]).
+fn drawn_shaders(env: &mut Environment, unavailable: bool) {
+    env.shaders &= env.cell.is_none() && !unavailable && !shader::no_gpu();
 }
 
 /// What class variants read from the environment.
@@ -3577,8 +3629,19 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::Wake => {}
         Message::Environment(mut env) => {
             state.pinned.apply(&mut env);
+            drawn_shaders(&mut env, state.shaders_unavailable);
             let env = state.window_state.report(*env, nsh_core::time::now());
             apply_environment(script, state, env);
+        }
+        Message::ShadersUnavailable => {
+            state.shaders_unavailable = true;
+            if state.environment.shaders {
+                let env = Environment {
+                    shaders: false,
+                    ..state.environment
+                };
+                apply_environment(script, state, env);
+            }
         }
         Message::Displays(displays) => {
             state.core.set_displays(displays.clone());
@@ -3596,6 +3659,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::States(id, states) => state.core.set_states(id, states),
+        Message::Modality(modality) => state.core.set_input_modality(modality),
         Message::FontsChanged => state.core.fonts_changed(),
         Message::Remount => state.core.remount(),
         Message::Fetch(who, hop, event) => match (who, state.net.event(who, hop, event)) {

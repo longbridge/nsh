@@ -84,6 +84,9 @@ pub struct Environment {
     /// The platform shows web views
     /// ([`crate::platform::Environment::web_views`]).
     pub web_views: bool,
+    /// The platform draws shader views
+    /// ([`crate::platform::Environment::shaders`]).
+    pub shaders: bool,
 }
 
 impl Environment {
@@ -127,6 +130,7 @@ impl Default for Environment {
             cell: None,
             web_input: false,
             web_views: true,
+            shaders: true,
         }
     }
 }
