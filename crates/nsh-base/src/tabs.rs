@@ -125,7 +125,8 @@ pub struct TabsProps {
 /// previous and next tab, around the ends, Home and End to the first and
 /// last, past disabled tabs. The tab the focus moves to reports `onPress`,
 /// so the app selects it as the focus moves (automatic activation); Space
-/// and Return press the focused tab.
+/// and Return press the focused tab. Its tabs are its children, or inside
+/// the app's views among them (a tab with a hover frame or a badge).
 ///
 /// Its indicator (`gpui-component`'s tab bar's: an underline, a pill or a
 /// segmented highlight) is a part the app styles with `indicatorClass` and

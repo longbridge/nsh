@@ -217,6 +217,42 @@ fn a_tab_outside_a_list_is_a_stop_of_its_own() {
     app.wait_for("text:pressed:second").unwrap();
 }
 
+/// Three tabs, each inside views of the app's (one inside two), the first
+/// selected.
+#[component]
+fn WrappedTabs() -> impl IntoElement {
+    let selected = signal(0usize);
+    let section = move |i: usize| {
+        tab()
+            .selected(move || selected.get() == i)
+            .on_press(move |_: &()| selected.set(i))
+            .child(text(NAMES[i]))
+    };
+    view()
+        .child(view().on_press(|| {}).child(text("Before")))
+        .child(
+            tabs()
+                .flex_row()
+                .child(view().child(section(0)))
+                .child(view().child(view().child(section(1))))
+                .child(view().p(px(4.0)).child(section(2))),
+        )
+        .child(text(move || format!("selected:{}", NAMES[selected.get()])))
+}
+
+#[test]
+fn tabs_inside_views_of_the_list_are_its_tabs() {
+    let mut app = start::<WrappedTabs>();
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:One").unwrap();
+}
+
 #[derive(Clone, PartialEq, Props)]
 struct ManyProps {
     count: usize,
