@@ -603,11 +603,12 @@ tokio timer wakes the engine from another thread, which the OS may run late), an
 `background`), a `Delay` is tokio's. `run_on_main_thread(f)` (and `ModuleCx::run_on_main_thread`) queues `f` as a
 `MainThreadTask` action; after each commit the engine hands the turn's tasks to its `MountSink::run_on_main_thread`
 (`Core::take_main_thread_tasks`), which each platform sends down the channel its batches take, so `f` runs on the UI
-thread after the batch of its turn (Android: a `NshView.runMainThreadTasks` post that calls back into Rust). The
+thread after the batch of its turn (Android: one `NshView.runMainThreadTasks` post per task, which calls back into Rust). The
 default runs it on the engine thread at the end of the commit: the web and headless tests, which have no other; on
 the native platforms it runs later, while the engine goes on, so apps learn that it ran from the awaited result. The result comes back as a
-future (`OnMainThread`) the platform's thread completes; a panic in `f` is caught there (`MainThreadError`), and a
-task dropped unrun (its surface went away) completes it too. A task changes what it wants by writing
+future (`OnMainThread`) the platform's thread completes; a panic in `f` is caught there (`MainThreadError`; the web
+runtime aborts on a panic), and a task dropped unrun (its surface went away) completes it too. `f` runs outside the
+reactive graph and the executor, so it returns a value; the task that awaits it changes what it wants by writing
 signals, inside the graph like any other Rust code of the view; the patches that makes go out with the next commit.
 `spawn`, `set_timeout`, `set_interval` and `request_animation_frame` return a `Spawned`: the task belongs to the owner
 current when it was made and ends with it (or at `.cancel()`), and is polled under it, so what it makes is that

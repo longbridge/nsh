@@ -144,7 +144,8 @@ native targets' threads. `run_on_main_thread(f)` runs `f` on the platform's main
 (AppKit's status items, UIKit): after the views of the current turn are mounted, and its result is a future to await
 on the engine thread. A module function that is not `async` calls `cx.run_on_main_thread(f)`. On the web and in
 headless tests `f` runs on the engine thread at the end of the commit, and on the native platforms later, while the
-engine goes on: await the result to know that `f` ran.
+engine goes on: await the result to know that `f` ran. `f` returns a value, and the code that awaits it writes signals
+and calls NSH's functions with it.
 
 ## Desktop title bars
 

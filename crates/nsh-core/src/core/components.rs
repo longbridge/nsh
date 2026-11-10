@@ -929,6 +929,7 @@ impl<M: TextEngine> Core<M> {
     /// on the platform's main thread since the last call
     /// ([`crate::element::run_on_main_thread`]), in order: the engine hands
     /// them to its sink after the commit.
+    #[doc(hidden)]
     pub fn take_main_thread_tasks(&mut self) -> Vec<crate::main_thread::MainThreadTask> {
         std::mem::take(&mut self.components.main_thread)
     }

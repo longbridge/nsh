@@ -267,20 +267,23 @@ fn tasks_wait_for_display_frames() {
     assert_eq!(frames.load(Ordering::SeqCst), 3);
 }
 
-/// Runs the app's functions for the main thread on a thread of its own,
-/// after the batches before them, as a platform's UI thread does.
-struct MainThreadSink {
-    batches: Sender<MountBatch>,
-    main: Sender<nsh_engine::MainThreadTask>,
+/// What a platform's UI thread gets, in the order the engine sends it.
+enum ToMain {
+    Batch(MountBatch),
+    Task(nsh_engine::MainThreadTask),
 }
+
+/// Sends batches and the app's functions for the main thread down one
+/// channel, as a platform's UI thread gets them.
+struct MainThreadSink(Sender<ToMain>);
 
 impl MountSink for MainThreadSink {
     fn submit(&self, batch: MountBatch) {
-        let _ = self.batches.send(batch);
+        let _ = self.0.send(ToMain::Batch(batch));
     }
 
     fn run_on_main_thread(&self, task: nsh_engine::MainThreadTask) {
-        let _ = self.main.send(task);
+        let _ = self.0.send(ToMain::Task(task));
     }
 }
 
@@ -289,6 +292,7 @@ impl MountSink for MainThreadSink {
 fn OnMain() -> impl IntoElement {
     let shown = signal(String::from("asking"));
     spawn(async move {
+        shown.set("calling".into());
         let name = run_on_main_thread(|| std::thread::current().name().map(str::to_owned))
             .await
             .ok()
@@ -303,27 +307,43 @@ fn OnMain() -> impl IntoElement {
 #[test]
 fn functions_run_on_the_platforms_main_thread_and_answer_the_engine() {
     let (tx, rx) = crossbeam_channel::unbounded();
-    let (main_tx, main_rx) = crossbeam_channel::unbounded::<nsh_engine::MainThreadTask>();
+    let (main_tx, main_rx) = crossbeam_channel::unbounded::<ToMain>();
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let seen = order.clone();
     std::thread::Builder::new()
         .name("ui".into())
         .spawn(move || {
-            for task in main_rx {
-                task.run();
+            for message in main_rx {
+                match message {
+                    ToMain::Batch(batch) => {
+                        for item in &batch.items {
+                            if let MountItem::Text { text, .. } = item {
+                                seen.lock().unwrap().push(text.text.clone());
+                            }
+                        }
+                        let _ = tx.send(batch);
+                    }
+                    ToMain::Task(task) => {
+                        seen.lock().unwrap().push("task".into());
+                        task.run();
+                    }
+                }
             }
         })
         .unwrap();
-    let sink = MainThreadSink {
-        batches: tx,
-        main: main_tx,
-    };
     let engine = Engine::start(
         config(App::Rust(Root::of::<OnMain>())),
         || ApproxTextEngine,
-        sink,
+        MainThreadSink(main_tx),
     )
     .unwrap();
     let (texts, ..) = until(&rx, "ui true");
     assert_eq!(texts.last().map(String::as_str), Some("ui true"));
+    // The batch of the turn that asked reaches the UI thread before the function.
+    let order = order.lock().unwrap();
+    let calling = order.iter().position(|t| t == "calling").unwrap();
+    let task = order.iter().position(|t| t == "task").unwrap();
+    assert!(calling < task, "{order:?}");
     drop(engine);
 }
 

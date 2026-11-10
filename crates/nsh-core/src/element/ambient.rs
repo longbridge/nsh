@@ -1104,7 +1104,10 @@ pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T
 /// (headless tests, the web, where the engine runs on the page's thread)
 /// `f` runs on the engine thread, at the end of the commit; elsewhere it
 /// runs later, while the engine goes on, so only the awaited result tells
-/// that `f` ran. A function that is not `async` calls
+/// that `f` ran. `f` runs outside the reactive graph: it returns a value,
+/// and the caller writes signals after awaiting it. A panic in `f` is a
+/// [`MainThreadError::Panicked`](crate::main_thread::MainThreadError)
+/// (the web runtime aborts on a panic). A function that is not `async` calls
 /// [`ModuleCx::run_on_main_thread`](super::ModuleCx::run_on_main_thread).
 pub fn run_on_main_thread<R: Send + 'static>(
     f: impl FnOnce() -> R + Send + 'static,

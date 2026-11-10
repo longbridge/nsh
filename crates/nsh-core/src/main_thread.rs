@@ -17,7 +17,7 @@ pub struct MainThreadTask(Box<dyn FnOnce() + Send>);
 
 impl MainThreadTask {
     /// `f`, to run on the main thread.
-    pub fn new(f: impl FnOnce() + Send + 'static) -> Self {
+    pub(crate) fn new(f: impl FnOnce() + Send + 'static) -> Self {
         Self(Box::new(f))
     }
 
@@ -31,12 +31,6 @@ impl MainThreadTask {
                 crate::element::panic_message(payload)
             );
         }
-    }
-}
-
-impl Default for MainThreadTask {
-    fn default() -> Self {
-        Self::new(|| {})
     }
 }
 

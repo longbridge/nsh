@@ -508,7 +508,6 @@ impl MountSink for Sink {
         });
     }
 
-    #[cfg(feature = "dev")]
     fn run_on_main_thread(&self, task: nsh_engine::MainThreadTask) {
         self.0
             .main_thread_tasks
@@ -530,6 +529,7 @@ impl MountSink for Sink {
         });
     }
 
+    #[cfg(feature = "dev")]
     fn hot_update_failed(&self) {
         if let Some(dev) = self.0.dev.lock().ok().as_ref().and_then(|d| d.as_ref()) {
             dev.reload(&self.0);
@@ -1800,7 +1800,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_afterBatch(
     floats(&env, &ui.outputs())
 }
 
-/// Runs the functions the app asked to run on the UI thread
+/// Runs the next function the app asked to run on the UI thread
 /// ([`MountSink::run_on_main_thread`]). On the UI thread.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_runMainThreadTasks(
@@ -1810,13 +1810,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_runMainThreadTasks(
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let tasks = std::mem::take(
-        &mut *host
-            .main_thread_tasks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()),
-    );
-    for task in tasks {
+    // One post per task, so a task never runs ahead of a batch posted after an earlier task.
+    let task = host
+        .main_thread_tasks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop_front();
+    if let Some(task) = task {
         task.run();
     }
 }
