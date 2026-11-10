@@ -59,6 +59,30 @@ impl Measurement {
     }
 }
 
+/// Where a list's viewport starts among its rows
+/// (`ref.measureScrollPosition()`), as GPUI's `ListOffset`: the row there
+/// and how far into it, along the list's axis from the side item 0 is on
+/// (the top, the bottom of an inverted list). Scrolling the list to row
+/// `index` with a view offset of `-offset` puts the viewport's start back
+/// there, wherever the list's sizes still are estimates.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ListScrollPosition {
+    /// The first item of the row the viewport starts in (`0` while it
+    /// starts in the header or before it).
+    pub index: u32,
+    /// How far past the row's start the viewport starts: negative before
+    /// the first row, past the row's size in the gap after it.
+    pub offset: Points,
+}
+
+impl ListScrollPosition {
+    /// The JS object `ref.measureScrollPosition()` resolves to.
+    pub(crate) fn to_json(self) -> JsonValue {
+        serde_json::json!({ "index": self.index, "offset": self.offset.0 })
+    }
+}
+
 /// Descendants reaching less than this far out of a view do not count
 /// (rounding).
 const OVERFLOW_EPSILON: f32 = 0.5;
@@ -402,6 +426,30 @@ impl<M: TextEngine> Core<M> {
         let value = self
             .measure(id)
             .map_or(JsonValue::Null, Measurement::to_json);
+        self.settle(call, Ok(Box::new(value)));
+    }
+
+    /// Where list `id`'s viewport starts among its rows, from the last
+    /// layout; `None` when it is no list in the tree, is not laid out or
+    /// has no items.
+    pub fn list_scroll_position(&self, id: NodeId) -> Option<ListScrollPosition> {
+        let key = self.key(id).ok()?;
+        let node = &self.nodes[key as usize];
+        if !node.created || (key != self.root && !self.in_tree(key)) {
+            return None;
+        }
+        let (index, offset) = node.list.as_ref()?.scroll_position()?;
+        Some(ListScrollPosition {
+            index,
+            offset: Points(offset),
+        })
+    }
+
+    /// Answers JS's `ref.measureScrollPosition()` call `call`.
+    pub(super) fn answer_scroll_position(&mut self, id: NodeId, call: u32) {
+        let value = self
+            .list_scroll_position(id)
+            .map_or(JsonValue::Null, ListScrollPosition::to_json);
         self.settle(call, Ok(Box::new(value)));
     }
 

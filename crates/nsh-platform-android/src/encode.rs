@@ -754,6 +754,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToIndex { .. }
                     | Command::Reveal(_)
                     | Command::Measure { .. }
+                    | Command::MeasureScrollPosition { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)

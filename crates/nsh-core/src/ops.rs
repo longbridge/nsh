@@ -2198,6 +2198,15 @@ pub enum Command {
         /// The call to answer.
         call: u32,
     },
+    /// Where a list's viewport starts among its rows, with this commit's
+    /// layout (`ref.measureScrollPosition()`): answered by the core in its
+    /// events for promise `call` (a [`crate::ListScrollPosition`], or null
+    /// for a view that is no list or a list without items); never
+    /// mounted.
+    MeasureScrollPosition {
+        /// The call to answer.
+        call: u32,
+    },
     /// Put `text` on the system clipboard (on the root; `Clipboard.writeText`).
     SetClipboard(String),
     /// Read the system clipboard and report it as [`EventKind::Clipboard`]

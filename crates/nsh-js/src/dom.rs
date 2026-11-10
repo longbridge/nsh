@@ -421,6 +421,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         ),
     ),
     (
+        "measureScrollPosition",
+        0,
+        decl!("(): Promise<{ index: number; offset: number } | null>"),
+        decl!(
+            "`List`: where its viewport starts among its rows once this turn's changes are laid out, as the list lays them out (measured rows at their sizes, the others at their estimates): `index` the first item of the row there, `offset` how far past the row's start (negative in a header before the first row). Read it as the list scrolls (`onScroll`) to keep a reading position; `scrollToIndex({ index, viewOffset: -offset })` puts the viewport's start back there, in a list made anew too. Along the list's axis from the side item 0 is on (the bottom of an inverted list). `null` for a list without items."
+        ),
+    ),
+    (
         "reveal",
         1,
         decl!("(options?: RevealOptions): void"),
@@ -527,6 +535,9 @@ unsafe extern "C" fn node_method(
     };
     if name == "measure" {
         return crate::components::measure(cx, id);
+    }
+    if name == "measureScrollPosition" {
+        return crate::components::measure_scroll_position(cx, id);
     }
     let a0 = arg(argc, argv, 0);
     let number = |v: JsValue| -> JsValue {
