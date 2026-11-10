@@ -120,7 +120,7 @@ export function fieldLook(o?: FieldLookOptions) {
 
 /** Options of `fieldText`. */
 export interface FieldTextOptions {
-  /** Read-only: the value in the muted color. */
+  /** Read-only: the value keeps the text color, as shadcn's read-only input (the well lies flat: `fieldLook`). */
   readonly?: boolean;
   /** Several lines: a least height and the padding above and below instead of a set height. */
   multiline?: boolean;
@@ -128,8 +128,10 @@ export interface FieldTextOptions {
 
 /**
  * An input's text in a field: the field's size and padding, the text color
- * (muted while read-only), a faint placeholder, the caret and selection in
- * the accent. Call it where the style is read, so it follows the theme.
+ * (read-only too: the flat well tells it apart, and disabled dims to 50%),
+ * the placeholder in the muted color (shadcn's `muted-foreground`), the
+ * caret and selection in the accent. Call it where the style is read, so it
+ * follows the theme.
  */
 export function fieldText(o?: FieldTextOptions): InputStyle {
   const box = terminal
@@ -145,8 +147,8 @@ export function fieldText(o?: FieldTextOptions): InputStyle {
     flex: 1,
     paddingHorizontal: fieldSize.pad,
     fontSize: fieldSize.font,
-    color: o?.readonly ? colors.muted : colors.text,
-    placeholderColor: colors.faint,
+    color: colors.text,
+    placeholderColor: colors.muted,
     caretColor: colors.accent,
     selectionColor: colors.accent,
     ...box,
@@ -205,7 +207,7 @@ export function numberInputText(): InputStyle {
     paddingHorizontal: 8,
     fontSize: controlSize.label,
     color: colors.text,
-    placeholderColor: colors.faint,
+    placeholderColor: colors.muted,
     fontVariant: ["tabular-nums"],
     ...(terminal ? { textAlign: "right" as const } : {}),
   };

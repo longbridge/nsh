@@ -30,7 +30,7 @@ export interface ButtonLookOptions {
    * `on` fill, a ghost the neutral `accent` fill, a filled one its
    * pressed shade; no hover while selected. */
   selected?: Live<boolean | undefined>;
-  /** No hover and no press feedback; dimmed to 40% (`disabledStyle`). */
+  /** No hover and no press feedback; dimmed to half (`disabledStyle`, shadcn's). */
   disabled?: Live<boolean | undefined>;
   /** Work started by it is going on: no hover and no press feedback, not dimmed. */
   busy?: Live<boolean | undefined>;
@@ -98,7 +98,7 @@ function rest(kind: ButtonKind, selected: boolean): ViewStyle {
  * lightens, a ghost gets a whisper of the text color, a filled one a touch
  * of transparency; pressed it sinks to 97% (none with reduced motion) and
  * shades (a raised button's inner shade, a filled one dims). Keyboard
- * focus: `focusRing()`. Disabled: 40%, no hover or press. Pair it with
+ * focus: `focusRing()`. Disabled: half opacity, no hover or press. Pair it with
  * `buttonLabel` for the label and `buttonGlyph` for an icon.
  */
 export function buttonLook(kind: Live<ButtonKind> = "secondary", o?: ButtonLookOptions) {
@@ -142,7 +142,7 @@ export function buttonLook(kind: Live<ButtonKind> = "secondary", o?: ButtonLookO
     get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
-    disabledStyle: { opacity: 0.4 } as ViewStyle,
+    disabledStyle: { opacity: 0.5 } as ViewStyle,
     get hitSlop(): number | undefined {
       return slop(dimensions(o).height);
     },
@@ -188,7 +188,7 @@ export interface IconButtonLookOptions {
   tone?: "danger";
   /** `ghost` (default): bare until the pointer is over it; `secondary`: raised. */
   variant?: "ghost" | "secondary";
-  /** No hover and no press feedback; dimmed to 40%. */
+  /** No hover and no press feedback; dimmed to half. */
   disabled?: Live<boolean | undefined>;
 }
 
@@ -230,7 +230,7 @@ export function iconButtonLook(o: IconButtonLookOptions = {}) {
     get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
-    disabledStyle: { opacity: 0.4 } as ViewStyle,
+    disabledStyle: { opacity: 0.5 } as ViewStyle,
     hitSlop: slop(side),
   };
 }
@@ -277,7 +277,7 @@ export function roundButtonLook(variant: "primary" | "secondary" = "primary", o:
     get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
-    disabledStyle: { opacity: 0.4 } as ViewStyle,
+    disabledStyle: { opacity: 0.5 } as ViewStyle,
     hitSlop: slop(side),
   };
 }

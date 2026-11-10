@@ -22,7 +22,7 @@ function Field(props: InputProps) {
       onBlur={() => focused.set(false)}
       {...props}
       style={{
-        placeholderColor: colors.faint,
+        placeholderColor: colors.muted,
         caretColor: colors.accent,
         selectionColor: colors.accent,
         height: 48,

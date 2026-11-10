@@ -72,7 +72,7 @@ export function Tooltips() {
               <Trigger
                 icon={t().icon}
                 variant="ghost"
-                open={tool() === t().id}
+                on={tool() === t().id}
                 ink={tool() === t().id ? colors.text : colors.muted}
                 accessibilityLabel={t().label}
                 tip={<Tip label={t().label} shortcut={key(t().key)} placement="bottom" />}

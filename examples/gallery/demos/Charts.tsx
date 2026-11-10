@@ -560,9 +560,10 @@ const PERIODS = [
 ] as const;
 type Period = (typeof PERIODS)[number]["value"];
 const RESOURCES: { name: string; color: string; unit: string; total: number; used: Record<Period, number> }[] = [
-  { name: "Compute", color: chart.s1, unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
-  { name: "Memory", color: chart.s2, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
-  { name: "Network", color: chart.s3, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
+  // Getters: the series colors follow the appearance, so they are read when the rings render.
+  { name: "Compute", get color() { return chart.s1; }, unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
+  { name: "Memory", get color() { return chart.s2; }, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
+  { name: "Network", get color() { return chart.s3; }, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
 ];
 /** In a terminal the rings take more Cells, so the average and its
  * caption fit in the innermost ring's hole, clear of its arcs. */
@@ -3140,7 +3141,8 @@ const ALLOCATION_VIEWS = [
 type AllocationView = (typeof ALLOCATION_VIEWS)[number]["value"];
 const ASSET_CLASSES = ["Equities", "Bonds", "Alternatives", "Cash"] as const;
 type AssetClass = (typeof ASSET_CLASSES)[number];
-const ASSET_COLOR: Record<AssetClass, string> = { Equities: chart.s1, Bonds: chart.s2, Alternatives: chart.s4, Cash: chart.s3 };
+/** Each class's series color, read when the plot renders so it follows the appearance. */
+const assetColor = (c: AssetClass) => ({ Equities: chart.s1, Bonds: chart.s2, Alternatives: chart.s4, Cash: chart.s3 })[c];
 const ASSET_GROUP: Record<AssetClass, string> = {
   Equities: "fill-chart-1/15",
   Bonds: "fill-chart-2/15",
@@ -3205,7 +3207,7 @@ function Allocation() {
       </Figures>
       <Plot
         data={rows()}
-        colorScale={{ type: "ordinal", domain: [...ASSET_CLASSES], range: ASSET_CLASSES.map((c) => ASSET_COLOR[c]) }}
+        colorScale={{ type: "ordinal", domain: [...ASSET_CLASSES], range: ASSET_CLASSES.map(assetColor) }}
         appearGeneration={1}
         motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 700, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 380, damping: 36 } }}
         tooltipPlacement="pointer"

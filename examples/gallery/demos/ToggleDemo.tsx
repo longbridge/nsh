@@ -291,8 +291,8 @@ export function ToggleDemo() {
             borderRadius: 9,
             borderCurve: "continuous",
             borderWidth: 1,
-            borderColor: finish.track.borderColor,
-            backgroundColor: colors.track,
+            borderColor: colors.border,
+            backgroundColor: colors.inset,
             boxShadow: finish.track.boxShadow,
           }}
         >

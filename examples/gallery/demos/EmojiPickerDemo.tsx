@@ -1,6 +1,6 @@
 import { type JSX, platform, signal, Text, View } from "nsh";
 import { Input, Popover } from "nsh/base";
-import { alpha, Caption, Card, colors, DemoPage, EmojiPanel, Icon, PopIn, popupSurface, Sheet } from "../ui";
+import { alpha, Caption, Card, colors, DemoPage, EmojiPanel, Icon, PopIn, popupSurface, radius, Sheet } from "../ui";
 
 /** A pointer and a keyboard: the picker pops over its button; a phone opens it in a sheet. */
 const pointer = platform.desktop;
@@ -46,7 +46,7 @@ function PickerFrom(props: {
   );
 }
 
-/** A round button the picker opens from. */
+/** The icon button the picker opens from: a rounded square at the controls' radius, as icon buttons are. */
 function SmileButton(props: { open: boolean; onPress?: () => void; label: string }) {
   return (
     <View
@@ -54,8 +54,8 @@ function SmileButton(props: { open: boolean; onPress?: () => void; label: string
       accessibilityLabel={props.label}
       tooltip={pointer ? props.label : undefined}
       onPress={props.onPress}
-      class="items-center justify-center rounded-full hover:bg-hover active:scale-95 transition duration-100 motion-reduce:transition-none"
-      style={{ width: pointer ? 32 : 40, height: pointer ? 32 : 40, backgroundColor: props.open ? alpha(colors.text, 0.08) : undefined }}
+      class="items-center justify-center hover:bg-hover active:scale-95 transition duration-100 motion-reduce:transition-none"
+      style={{ width: pointer ? 32 : 40, height: pointer ? 32 : 40, borderRadius: radius.control, backgroundColor: props.open ? alpha(colors.text, 0.08) : undefined }}
     >
       <Icon name="smile" size={pointer ? 18 : 22} tint={props.open ? colors.text : colors.muted} />
     </View>
@@ -85,7 +85,7 @@ function Composer() {
           onChange={({ value }) => text.set(value)}
           placeholder="Message"
           accessibilityLabel="Message"
-          class={`flex-1 text-foreground placeholder:text-faint ${pointer ? "text-sm" : "text-base"}`}
+          class={`flex-1 text-foreground placeholder:text-muted-foreground ${pointer ? "text-sm" : "text-base"}`}
         />
       </View>
       <Caption label={`Recent: ${recent().slice(0, 9).join(" ")}`} note={`${recent().length} kept`} />
@@ -152,7 +152,7 @@ function Reactions() {
         </View>
         <View class="flex-row items-center gap-0.5 self-start rounded-full border border-border" style={{ marginLeft: 42, padding: 3, backgroundColor: colors.surface }}>
           {recent().slice(0, 6).map((emoji) => (
-            <View role="button" accessibilityLabel={`React ${emoji}`} onPress={() => react(emoji)} class="items-center justify-center rounded-full hover:bg-hover active:scale-90" style={{ width: pointer ? 30 : 38, height: pointer ? 30 : 38 }}>
+            <View role="button" accessibilityLabel={`React ${emoji}`} onPress={() => react(emoji)} class="items-center justify-center hover:bg-hover active:scale-90" style={{ width: pointer ? 30 : 38, height: pointer ? 30 : 38, borderRadius: radius.control }}>
               <Text style={{ fontSize: pointer ? 18 : 22 }}>{emoji}</Text>
             </View>
           ))}

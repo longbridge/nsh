@@ -278,7 +278,7 @@ function Unsaved() {
             onBlur={() => focused.set(false)}
             placeholder="A draft"
             style={{
-              placeholderColor: colors.faint,
+              placeholderColor: colors.muted,
               caretColor: colors.accent,
               selectionColor: colors.accent,
               height: 48,
@@ -460,7 +460,11 @@ function Addressed() {
           }}
         >
           {(route) => (
-            <NavPage header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}>
+            // The card's surface, not the system's page color, under each page.
+            <NavPage
+              header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}
+              style={{ backgroundColor: colors.surface }}
+            >
               <View style={{ padding: 12, gap: 8 }}>
                 {route === "Inbox" ? (
                   <Each of={["Welcome", "Invoice", "Travel"]}>

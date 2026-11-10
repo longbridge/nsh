@@ -25,7 +25,7 @@ export const commandClasses = {
    */
   searchBar: `flex-row items-center gap-2 border-b border-border ${terminal ? "" : "px-3"}`,
   /** The search field. */
-  search: `flex-1 ${terminal ? "px-2 " : ""}${desktop ? "h-11 text-sm" : "h-12 text-base"} text-foreground placeholder:text-faint`,
+  search: `flex-1 ${terminal ? "px-2 " : ""}${desktop ? "h-11 text-sm" : "h-12 text-base"} text-foreground placeholder:text-muted-foreground`,
   /**
    * The scroll view of the rows. A terminal's rows set their text off
    * the edge with their own padding, as the field does.

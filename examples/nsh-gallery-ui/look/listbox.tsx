@@ -237,7 +237,7 @@ export interface ClearButtonOptions {
  */
 export function clearButtonLook(o?: ClearButtonOptions) {
   return {
-    clearButtonClass: "items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track",
+    clearButtonClass: "items-center justify-center rounded-full enabled:hover:bg-foreground/8 active:bg-track",
     clearButtonStyle: terminal
       ? undefined
       : o?.over
@@ -309,12 +309,12 @@ export const listboxFooter = {
 /**
  * The search well at the top of a list (spread it on a searchable
  * `Select`): the field color in a recess, 32 high with a pointer, 40 on a
- * touch screen, 6 points above the rows; the text and a faint placeholder
+ * touch screen, 6 points above the rows; the text and a muted placeholder
  * as token classes, so they follow the theme.
  */
 export function listboxSearch() {
   return {
-    searchClass: `${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`,
+    searchClass: `${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-muted-foreground`,
     get searchStyle(): ViewStyle {
       return {
         height: pointer ? 32 : 40,
@@ -373,7 +373,7 @@ export function comboboxLook(open: Live<boolean>, o?: ComboboxLookOptions) {
       return edgeClass({ rest: read(open) ? "border-faint" : "border-input", hover: "border-faint" });
     },
     get inputClass(): string {
-      return `${pointer ? "text-sm" : "text-base"} text-foreground ${read(o?.filled) ? "placeholder:text-foreground" : "placeholder:text-faint"}`;
+      return `${pointer ? "text-sm" : "text-base"} text-foreground ${read(o?.filled) ? "placeholder:text-foreground" : "placeholder:text-muted-foreground"}`;
     },
     get inputStyle(): InputStyle {
       return { flex: 1, minWidth: 40, height: controlSize.line - 2 };

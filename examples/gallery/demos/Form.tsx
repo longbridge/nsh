@@ -1,4 +1,4 @@
-import { cleanup, effect, type InputRef, type JSX, reduceMotion, Scroll, signal, split, Text, View } from "nsh";
+import { cleanup, effect, type InputRef, type JSX, reduceMotion, Scroll, signal, split, Text, token, View } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
 import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
@@ -20,7 +20,7 @@ const relayout = () => {
   if (!reduceMotion()) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 };
 
-/** A prefix or suffix of a field: quiet text inside it, or an `addon` set off on the inset color with a hairline. */
+/** A prefix or suffix of a field: quiet text inside it, or an `addon` set off on the muted fill with a hairline. */
 function Affix(props: { text: string; addon?: boolean; side: "start" | "end" }) {
   return (
     <If
@@ -32,7 +32,8 @@ function Affix(props: { text: string; addon?: boolean; side: "start" | "end" }) 
           alignSelf: "stretch",
           justifyContent: "center",
           paddingHorizontal: fieldPad,
-          backgroundColor: colors.inset,
+          // shadcn's input addon: the muted fill, a step off the field in both appearances.
+          backgroundColor: token("muted"),
           [props.side === "start" ? "borderRightWidth" : "borderLeftWidth"]: 1,
           borderColor: colors.line,
           // The field's corners on its outer side, inside its border.
@@ -318,7 +319,7 @@ function Strength(props: { password: string }) {
             {(i) => {
               const on = follow(() => (score() > i() ? 1 : 0));
               return (
-                <View style={{ flex: 1, height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.track, borderWidth: 1, ...finish.track }}>
+                <View style={{ flex: 1, height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: alpha(colors.text, 0.1) }}>
                   <View
                     style={{
                       position: "absolute",
@@ -917,7 +918,7 @@ function MessageBar() {
             testID="message-bar"
             returnKeyType="send"
             style={{
-              placeholderColor: colors.faint,
+              placeholderColor: colors.muted,
               caretColor: colors.accent,
               selectionColor: colors.accent,
               flex: 1,
