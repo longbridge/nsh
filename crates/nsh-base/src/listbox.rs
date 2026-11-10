@@ -923,8 +923,9 @@ pub(crate) struct Parts {
     /// `footer`); none for `Select`.
     pub(crate) footer: Option<Footer>,
     /// Desktops: the list opens with its selected item over the trigger
-    /// (`Select`'s, as shadcn/ui's item-aligned select), else on a side of
-    /// it (`Combobox`'s). The view the size of that row it lays over.
+    /// (`Select`'s on macOS, as the system's pop-up buttons and shadcn/ui's
+    /// item-aligned select), else on a side of it (`Select`'s elsewhere,
+    /// `Combobox`'s). The view the size of that row it lays over.
     pub(crate) cover: Option<popup::Cover>,
 }
 
