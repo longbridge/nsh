@@ -58,8 +58,9 @@ function App() {
         style={{ width: 300, height: 40 }}
         onChange={({ value }) => inserted.set(value)}
         onPaste={(e) => {
+          // Called first: a throw would leave "Pasted" as it was.
+          if (e.text.startsWith("insert:")) pasteField!.insertText(e.text.slice("insert:".length));
           pasted.set(`${e.text} html ${e.html.length} files ${e.files.length} uris ${e.uris.length}`);
-          if (e.text.startsWith("insert:")) pasteField?.insertText(e.text.slice("insert:".length));
         }}
       />
       <Text>Pasted: {pasted()}</Text>

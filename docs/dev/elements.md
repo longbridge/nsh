@@ -384,7 +384,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   and the line rules applied, `onChangeText` reporting it, no key, and a step of the platform's undo history, which a
   new value is not. Linux: the editors' `delete-from-cursor` / `insert-at-cursor` signals (`GtkText`; inserting
   from outside an edit would clear its history) or one user action on the `GtkTextBuffer`; web: `execCommand("insertText")`;
-  headless: at the end, as a paste; the other platforms ignore it. Where Paste is offered, it is offered for images and files too while
+  headless: at the end, as a paste; macOS, Windows, iOS, Android and GPUI insert nothing yet and log a warning.
+  During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
+  input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
   `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text

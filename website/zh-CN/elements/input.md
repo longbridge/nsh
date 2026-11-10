@@ -186,7 +186,7 @@ const height = signal(40);
 | `focus()` | `focus()` | 让输入框获得焦点并弹出键盘。 |
 | `blur()` | `blur()` | 让它失去焦点。 |
 | `setSelection(start, end?)` | `set_selection(start, end)` | 选中 `start..end`（UTF-16 单位）；两者相等时为光标。 |
-| `insertText(text)` | `insert_text(text)` | 以用户编辑的方式用 `text` 替换选区：遵守 `maxLength` 与单行规则，由 `onChange` 报告，并且是输入框撤销历史中的一步（Linux、Web）。 |
+| `insertText(text)` | `insert_text(text)` | 以用户编辑的方式用 `text` 替换选区：遵守 `maxLength` 与单行规则，由 `onChange` 报告，并且是输入框撤销历史中的一步。目前只在 Linux、Web 和无头测试中生效，其它平台不做任何事并打印警告。 |
 
 按回车把焦点移到下一个输入框：
 

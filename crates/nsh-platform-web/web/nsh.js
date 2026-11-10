@@ -5900,6 +5900,11 @@ class Player {
         // `input` reports it. `execCommand` edits the focused field only.
         const field = el?._field;
         if (!field) break;
+        if (field._composing) {
+          // The input method's text would be committed around it (as on Linux).
+          console.warn("insertText: an input method is composing; nothing inserted");
+          break;
+        }
         if (document.activeElement !== field) field.focus();
         if (!document.execCommand("insertText", false, args[0])) {
           field.setRangeText(args[0], field.selectionStart, field.selectionEnd, "end");
