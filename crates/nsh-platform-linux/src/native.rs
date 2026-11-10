@@ -675,6 +675,7 @@ impl Emitter {
     /// Sends `payload` to the engine whatever the app listens to: a reply
     /// the core waits for, which is settled by a timeout or unmount
     /// instead.
+    #[cfg(feature = "webview")]
     fn reply(&self, kind: EventKind, payload: EventPayload) {
         if let Some(surface) = self.surface.upgrade() {
             surface.event(self.id, kind, payload);

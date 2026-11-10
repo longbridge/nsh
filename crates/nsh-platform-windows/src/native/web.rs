@@ -1345,9 +1345,10 @@ impl WebItem {
         let surface_key = surface.key();
         let node = self.emitter.id;
         let id = id.to_owned();
+        let ui = crate::window::UiThread::current();
         std::thread::spawn(move || {
             std::thread::sleep(PENDING_DOWNLOAD_TIMEOUT);
-            crate::window::invoke(move || {
+            ui.invoke(move || {
                 if let Some(surface) = Surface::by_key(surface_key)
                     && let Some(item) = super::web_item(&surface, node)
                 {
@@ -1915,9 +1916,10 @@ impl WebItem {
         let node = self.emitter.id;
         let alive = self.alive.clone();
         let rules = rules.to_vec();
+        let ui = crate::window::UiThread::current();
         std::thread::spawn(move || {
             let compiled = Blocker::compile(&rules);
-            crate::window::invoke(move || {
+            ui.invoke(move || {
                 // The originating view is gone (its surface/node may now be
                 // a replacement): its completion belongs to nothing.
                 if !alive.load(Ordering::Acquire) {
@@ -2025,7 +2027,10 @@ impl WebItem {
                     // owns the outcome: remove this script, which nothing
                     // else knows about yet.
                     if let Some(webview) = item.webview.borrow().clone() {
-                        let _ = webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
+                        // SAFETY: this callback runs on the owning WebView2 UI thread.
+                        let _ = unsafe {
+                            webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id))
+                        };
                     }
                     return Ok(());
                 }
@@ -3406,7 +3411,7 @@ fn sanitize_file_name(suggested: &str) -> String {
         let extension = name
             .rsplit_once('.')
             .map(|(_, ext)| format!(".{ext}"))
-            .filter(|ext| ext.len() + 1 <= 200);
+            .filter(|ext| ext.len() < 200);
         if let Some(extension) = &extension {
             name.truncate(name.len() - extension.len());
         }

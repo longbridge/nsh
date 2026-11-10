@@ -437,6 +437,12 @@ impl List {
         top_known: bool,
     ) -> Decision {
         let mut candidates: Vec<u32> = Vec::new();
+        // A URL without an authority can still match a protocol/path regex.
+        if target.host.is_empty() {
+            for rules in self.by_host.values() {
+                candidates.extend_from_slice(rules);
+            }
+        }
         for suffix in suffixes(&target.host) {
             if !suffix.is_empty()
                 && let Some(rules) = self.by_host.get(suffix)
@@ -830,6 +836,10 @@ fn registrable(host: &str) -> &str {
 /// the pattern names a complete host (not one a class or wildcard
 /// continues).
 fn extract_host(pattern: &str) -> Option<String> {
+    // Alternate branches or inline modes need the general regex path.
+    if pattern.contains('|') || pattern.contains("(?") {
+        return None;
+    }
     const PREFIX: &str = r"^[^:]+://+([^:/]+\.)?";
     let rest = pattern.strip_prefix(PREFIX)?;
     let mut host = String::new();
@@ -862,13 +872,21 @@ fn extract_host(pattern: &str) -> Option<String> {
     // that end the authority prove a host. An exhausted pattern does not:
     // its regex still matches a prefix of a longer hostname.
     let rest: String = chars[at..].iter().collect();
-    let boundary = rest.starts_with('/')
-        || rest.starts_with('$')
-        || rest.starts_with('#')
-        || rest.starts_with(r"\/")
-        || rest.starts_with(r"\?")
-        || rest.starts_with(r"\#");
-    boundary.then_some(host)
+    let tail = rest
+        .strip_prefix('/')
+        .or_else(|| rest.strip_prefix('$'))
+        .or_else(|| rest.strip_prefix('#'))
+        .or_else(|| rest.strip_prefix(r"\/"))
+        .or_else(|| rest.strip_prefix(r"\?"))
+        .or_else(|| rest.strip_prefix(r"\#"))?;
+    if tail
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c, '?' | '*' | '{'))
+    {
+        return None;
+    }
+    Some(host)
 }
 
 /// The literal runs a pattern proves a match needs: top-level literals
@@ -1646,6 +1664,40 @@ mod tests {
             extract_host(r"^[^:]+://+([^:/]+\.)?ads\.example\.com\?x"),
             Some("ads.example.com".to_owned())
         );
+    }
+
+    #[test]
+    fn regex_boundaries_and_alternatives_match_without_host_assumptions() {
+        for (pattern, url) in [
+            (
+                r"^[^:]+://+([^:/]+\.)?ads\.example\.com/?",
+                "https://ads.example.com.attacker.test/x.js",
+            ),
+            (
+                r"^[^:]+://+([^:/]+\.)?ads\.example\.com/",
+                "https://ads.example.com.attacker.test/x.js",
+            ),
+            (
+                r"^[^:]+://+([^:/]+\.)?ads\.example\.com/|https://other\.test/",
+                "https://other.test/x.js",
+            ),
+            (
+                r"^[^:]+://+([^:/]+\.)?ads\.example\.com/",
+                "file:///ads.example.com/x.js",
+            ),
+        ] {
+            let expected = regex::Regex::new(pattern).unwrap().is_match(url);
+            let actual = blocked(
+                &format!(
+                    r#"[{{"trigger":{{"url-filter":{}}},"action":{{"type":"block"}}}}]"#,
+                    serde_json::to_string(pattern).unwrap()
+                ),
+                "https://site.test/",
+                url,
+                Resource::Script,
+            );
+            assert_eq!(actual, expected, "{pattern:?} against {url:?}");
+        }
     }
 
     #[test]

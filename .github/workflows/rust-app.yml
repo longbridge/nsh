@@ -129,7 +129,11 @@ jobs:
       # from the final PR once its logs, captures and source hashes are kept.
       - name: Install WebView preflight runtime
         if: always() && !cancelled() && runner.os == 'Linux' && github.event_name == 'workflow_dispatch' && github.repository == 'honsunrise/nsh' && github.ref_name == 'feat/desktop-webview-controls'
-        run: sudo apt-get install -y libwebkitgtk-6.0-dev xvfb xauth
+        run: |
+          sudo apt-get install -y libwebkitgtk-6.0-dev xvfb xauth at-spi2-core
+          # Keep WebKit's process sandbox; permit its user/network namespaces
+          # in this disposable runner instead of disabling the sandbox.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Run native WebView preflight
         if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.repository == 'honsunrise/nsh' && github.ref_name == 'feat/desktop-webview-controls'
@@ -169,6 +173,9 @@ jobs:
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
       - name: Install clang, LLVM, GTK 4 and GStreamer
         run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Permit browser sandbox namespaces for preflight
+        if: github.event_name == 'workflow_dispatch' && github.repository == 'honsunrise/nsh' && github.ref_name == 'feat/desktop-webview-controls'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

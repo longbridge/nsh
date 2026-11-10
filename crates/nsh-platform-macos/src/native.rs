@@ -1976,7 +1976,10 @@ fn download_stage_path(path: &Path, id: &str) -> Result<PathBuf, String> {
         parent.join(format!(".nsh-download-{id}.part")),
         parent.join(format!(".nsh-download-{id}.part.tmp")),
     ] {
-        if stage == path {
+        if stage
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&path.to_string_lossy())
+        {
             continue;
         }
         match std::fs::symlink_metadata(&stage) {
@@ -2350,7 +2353,7 @@ impl WebHandler {
             (self.ivars().emitter.clone(), id, self.ivars().alive.clone()),
             mtm,
         );
-        let when = dispatch2::DispatchTime::NOW.time(DOWNLOAD_DECISION_TIMEOUT.as_nanos() as u64);
+        let when = dispatch2::DispatchTime::NOW.time(DOWNLOAD_DECISION_TIMEOUT.as_nanos() as i64);
         let _ = dispatch2::DispatchQueue::main().after(when, move || {
             let mtm = MainThreadMarker::new().expect("main queue");
             let (emitter, id, alive) = target.into_inner(mtm);
@@ -3109,8 +3112,7 @@ fn compile_content_rules(
                         format!("WebKit could not compile content rules {log_id}")
                     } else {
                         // SAFETY: WebKit passes an NSError on failure.
-                        let described: Retained<NSString> =
-                            unsafe { msg_send![error, localizedDescription] };
+                        let described: Retained<NSString> = msg_send![error, localizedDescription];
                         format!("content rules {log_id}: {}", described.to_string())
                     };
                     let mut failed = pending.failed.lock().unwrap_or_else(|e| e.into_inner());
@@ -3119,7 +3121,7 @@ fn compile_content_rules(
                     }
                 } else {
                     // SAFETY: a live list; retained for the main queue.
-                    let retained: *mut AnyObject = unsafe { msg_send![compiled, retain] };
+                    let retained: *mut AnyObject = msg_send![compiled, retain];
                     let mut lists = pending.lists.lock().unwrap_or_else(|e| e.into_inner());
                     lists.push((list_id.clone(), retained as usize));
                 }
@@ -3198,8 +3200,7 @@ fn finish_rules(pending: Arc<PendingRules>) {
                     for (id, ptr) in lists {
                         // SAFETY: the retain in `compile_content_rules`
                         // balances this.
-                        let Some(list) =
-                            (unsafe { Retained::<AnyObject>::from_raw(ptr as *mut AnyObject) })
+                        let Some(list) = Retained::<AnyObject>::from_raw(ptr as *mut AnyObject)
                         else {
                             continue;
                         };
@@ -4618,6 +4619,15 @@ mod tests {
             stage.file_name().unwrap().to_string_lossy(),
             ".nsh-download-id.part.tmp"
         );
+
+        // These ASCII aliases coincide on default case-insensitive volumes.
+        let alias = dir.join(".NSH-DOWNLOAD-case.part");
+        let stage = download_stage_path(&alias, "case").expect("a distinct sibling");
+        std::fs::write(&stage, b"complete").unwrap();
+        assert!(!alias.exists());
+        publish_download(&stage, &alias, false).unwrap();
+        assert_eq!(std::fs::read(&alias).unwrap(), b"complete");
+        assert!(!stage.exists());
 
         // An occupied candidate is refused, never overwritten.
         let occupied = dir.join(".nsh-download-other.part");

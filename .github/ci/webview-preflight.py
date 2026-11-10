@@ -79,8 +79,8 @@ try:
         env.pop("WAYLAND_DISPLAY", None)
         env.update(GDK_BACKEND="x11", WEBKIT_DISABLE_DMABUF_RENDERER="1", GSK_RENDERER="gl",
                    XDG_DATA_HOME=str(output / "profile"), XDG_CACHE_HOME=str(output / "cache"))
-        command = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *command]
-        unit_command = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *unit_command]
+        command = ["dbus-run-session", "--", "xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *command]
+        unit_command = ["dbus-run-session", "--", "xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *unit_command]
     elif platform == "windows":
         env.setdefault("LIBCLANG_PATH", r"C:\Program Files\LLVM\bin")
         env.setdefault("RUST_MIN_STACK", "268435456")
