@@ -1713,7 +1713,7 @@ impl<M: TextEngine> Core<M> {
             .set_storage(crate::storage::Store::new(backend));
     }
 
-    /// The app's own data directory, what [`crate::element::app_data_dir`]
+    /// The app's own data directory, what [`crate::element::data_dir`]
     /// gives; `None`: it has none.
     pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.components.runtime.set_data_dir(dir);

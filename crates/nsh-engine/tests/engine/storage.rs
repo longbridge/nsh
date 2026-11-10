@@ -356,7 +356,7 @@ struct WriterProps {}
 #[component]
 fn Writer(_props: WriterProps) -> impl IntoElement {
     Storage::set_item("from", "rust").unwrap();
-    let dir = nsh_core::prelude::app_data_dir().expect("the app's data directory");
+    let dir = nsh_core::prelude::data_dir().expect("the app's data directory");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("app.db"), "rust").unwrap();
     text(|| "rust wrote".to_owned())
@@ -399,7 +399,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
     drop(engine);
     let file = root.join("com.example.rusty/storage.json");
     assert_eq!(std::fs::read_to_string(file).unwrap(), r#"{"from":"rust"}"#);
-    // Its own files sit beside its storage (`app_data_dir`).
+    // Its own files sit beside its storage (`data_dir`).
     let db = root.join("com.example.rusty/app.db");
     assert_eq!(std::fs::read_to_string(db).unwrap(), "rust");
 }

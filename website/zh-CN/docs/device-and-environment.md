@@ -479,12 +479,12 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 
 ## 应用数据目录
 
-Rust 中的 `app_data_dir()`，即 TSX 中的 `process.dataDir`，是应用存放自己文件（例如 SQLite 数据库）的目录：`<数据目录>/<应用 id>`，与 `storage.json` 同一目录，在所有原生平台上可用，包括 Android 和 iOS。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
+Rust 中的 `data_dir()`，即 TSX 中的 `process.dataDir`，是应用存放自己文件（例如 SQLite 数据库）的目录：`<数据目录>/<应用 id>`，与 `storage.json` 同一目录，在所有原生平台上可用，包括 Android 和 iOS。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
 
 ```rust
 use nsh_core::prelude::*;
 
-if let Some(dir) = app_data_dir() {
+if let Some(dir) = data_dir() {
     std::fs::create_dir_all(&dir)?;
     let db = dir.join("app.sqlite");
 }

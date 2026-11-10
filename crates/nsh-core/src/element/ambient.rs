@@ -47,7 +47,7 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
-    /// The app's own data directory ([`app_data_dir`]).
+    /// The app's own data directory ([`data_dir`]).
     data_dir: Option<std::path::PathBuf>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
@@ -145,7 +145,7 @@ impl super::Runtime {
         with_data(|d| d.ambient.storage = Some(storage));
     }
 
-    /// The app's own data directory ([`app_data_dir`]).
+    /// The app's own data directory ([`data_dir`]).
     pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.data_dir = dir);
@@ -583,9 +583,9 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
 /// before writing.
 ///
 /// ```ignore
-/// let db = app_data_dir().map(|dir| dir.join("app.sqlite"));
+/// let db = data_dir().map(|dir| dir.join("app.sqlite"));
 /// ```
-pub fn app_data_dir() -> Option<std::path::PathBuf> {
+pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
 }
 
