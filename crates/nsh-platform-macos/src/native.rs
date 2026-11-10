@@ -1751,8 +1751,10 @@ fn without_fragment(url: &str) -> &str {
 }
 
 /// The folder a `file://` page may read: the file's own, nothing above it.
-/// `None` for any other URL, which loads as a request, and for a file at
-/// the root, whose folder is the whole disk.
+/// `None` for any other URL, which loads as a request, for a file at the
+/// root, whose folder is the whole disk, and for a path with a `.` or `..`
+/// in it, written out or percent-encoded (`%2e`, `..%2f`), which could
+/// name a folder above the one it seems to.
 fn file_read_scope(uri: &str) -> Option<&str> {
     const SCHEME: &str = "file://";
     if !uri
@@ -1762,8 +1764,39 @@ fn file_read_scope(uri: &str) -> Option<&str> {
         return None;
     }
     let path = uri.split(['?', '#']).next().unwrap_or(uri);
+    let decoded = percent_decoded(&path[SCHEME.len()..]);
+    if decoded
+        .split(|&b| b == b'/')
+        .any(|segment| segment == b"." || segment == b"..")
+    {
+        return None;
+    }
     let end = path.rfind('/')? + 1;
     (end > SCHEME.len() + 1).then(|| &uri[..end])
+}
+
+/// `s` with each `%XX` turned into its byte; a `%` not followed by two hex
+/// digits stays as it is.
+fn percent_decoded(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(h), Some(l)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push((h * 16 + l) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// A JS string literal for `s`.
@@ -2264,7 +2297,23 @@ mod tests {
             "a slash after the path is no folder"
         );
         assert_eq!(file_read_scope("file:///a.pdf"), None, "not the whole disk");
+        assert_eq!(
+            file_read_scope("file:///tmp/x/..a/b..pdf"),
+            Some("file:///tmp/x/..a/"),
+            "dots in a name are a name"
+        );
+        assert_eq!(
+            file_read_scope("file:///tmp/x/a%20.pdf"),
+            Some("file:///tmp/x/")
+        );
         for uri in [
+            "file:///tmp/x/../../a.pdf",
+            "file:///tmp/x/./a.pdf",
+            "file:///tmp/x/%2e%2e/%2E%2E/a.pdf",
+            "file:///tmp/x/.%2e/a.pdf",
+            "file:///tmp/x/..%2f..%2fetc/a.pdf",
+            "file:///tmp/x/..%2F/a.pdf",
+            "file:///tmp/../a.pdf#page=2",
             "http://127.0.0.1:8790/file/raw/m1/a.pdf",
             "https://example.com/a.pdf",
             "about:blank",
