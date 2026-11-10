@@ -1061,8 +1061,8 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
         .filter(|path| path.is_dir())
 }
 
-/// Native hosts choose these anchors before any application JavaScript runs.
-#[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
+/// Native hosts choose these anchors before any application JavaScript runs
+/// (the VM's `fs/promises` and the core's media files read under them).
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     let mut paths = bundle.system_paths.clone();
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
