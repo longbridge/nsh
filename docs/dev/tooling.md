@@ -1085,10 +1085,11 @@ and `[self-hosted, Windows]`. Their runner groups allow this public repository. 
 request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
 events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
 
-The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` once
-a day (19:00 UTC) and on manual runs, never on every push: a push to `main` is a pull request that already passed
-them. The daily run is on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
-macOS check runs only in the daily run.
+The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
+three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed
+them. The scheduled runs are on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
+macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
+requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
 
 `.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
 `~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds
