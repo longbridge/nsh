@@ -118,8 +118,10 @@
       ...(app.entryChunks ?? []).flatMap(id => (app.chunkFonts[id] ?? []).map(loadFont)),
     ]);
     player = loaded;
-    // Every side module the app may need, downloaded behind its first
-    // screen: ready before the user opens what needs one.
+    // The side modules not `onDemand`, downloaded behind its first
+    // screen. `nsh package` marks every one it writes `onDemand` (each is
+    // code only a lazy chunk or a feature's first use needs), so a side
+    // module is fetched when the chunk that needs it is imported.
     player.prefetchSides(app.sides);
     if (hostModule) {
       host = await hostModule.createHost(player);
