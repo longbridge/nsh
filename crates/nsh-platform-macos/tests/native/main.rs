@@ -17,6 +17,8 @@ mod input_hidden;
 #[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
+mod press_momentum;
+#[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
 mod window_dialog;
@@ -38,6 +40,8 @@ fn main() {
                 window_dialog::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
+                press_momentum::run();
             } else {
                 window_press::run();
                 window_hover::run();
@@ -45,6 +49,8 @@ fn main() {
                 window_dialog::run();
                 input_hidden::run();
                 mount::run();
+                // Last: it leaves the app an accessory, never activated.
+                press_momentum::run();
             }
         }
     }
