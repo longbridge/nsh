@@ -283,15 +283,44 @@ impl AppConfig {
         nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
     }
 
+    /// What `capabilities.webview.media` lets web pages capture
+    /// (`"microphone"`, `"camera"`): never granted without a declaration.
+    pub(crate) fn web_media(&self, kind: &str) -> bool {
+        self.capabilities
+            .as_ref()
+            .and_then(|c| c.pointer("/webview/media"))
+            .and_then(|m| m.as_array())
+            .is_some_and(|m| m.iter().any(|k| k.as_str() == Some(kind)))
+    }
+
     /// Adds what the system shows when the app first asks for the
-    /// microphone and speech recognition, which it requires (it ends an app
-    /// that asks without them), when the app may recognize speech.
+    /// microphone, the camera and speech recognition, which it requires
+    /// (it ends an app that asks without them): for speech recognition and
+    /// web pages' media capture (`webview.media`). The app's `infoPlist`
+    /// may word them its own way.
     fn usage_descriptions(&self, info: &mut plist::Dictionary) {
-        if !self.speech() {
-            return;
+        if self.speech() {
+            for (key, text) in USAGE_DESCRIPTIONS {
+                info.insert(key.into(), plist::Value::String(text.to_owned()));
+            }
         }
-        for (key, text) in USAGE_DESCRIPTIONS {
-            info.insert(key.into(), plist::Value::String(text.to_owned()));
+        for (kind, key, text) in WEB_MEDIA_USAGE_DESCRIPTIONS {
+            if self.web_media(kind) && !info.contains_key(key) {
+                info.insert(key.into(), plist::Value::String(text.to_owned()));
+            }
+        }
+    }
+
+    /// The macOS entitlements web pages' media capture needs under the
+    /// hardened runtime and the sandbox (`webview.media`).
+    fn web_media_entitlements(&self, entitlements: &mut plist::Dictionary) {
+        for (kind, key) in [
+            ("microphone", "com.apple.security.device.audio-input"),
+            ("camera", "com.apple.security.device.camera"),
+        ] {
+            if self.web_media(kind) && !entitlements.contains_key(key) {
+                entitlements.insert(key.into(), true.into());
+            }
         }
     }
 }
@@ -305,6 +334,21 @@ pub(crate) const USAGE_DESCRIPTIONS: [(&str, &str); 2] = [
     (
         "NSSpeechRecognitionUsageDescription",
         "The app turns what you say into text.",
+    ),
+];
+
+/// The usage descriptions of an app whose web pages capture media
+/// (`webview.media`), by kind.
+pub(crate) const WEB_MEDIA_USAGE_DESCRIPTIONS: [(&str, &str, &str); 2] = [
+    (
+        "microphone",
+        "NSMicrophoneUsageDescription",
+        "The app's web pages use the microphone.",
+    ),
+    (
+        "camera",
+        "NSCameraUsageDescription",
+        "The app's web pages use the camera.",
     ),
 ];
 
@@ -993,6 +1037,8 @@ fn package_android(
             dev: false,
             cleartext: config.android.uses_cleartext_traffic,
             notifications: config.notifications(),
+            microphone: config.web_media("microphone"),
+            camera: config.web_media("camera"),
             schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
@@ -1188,7 +1234,8 @@ fn package_macos(
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
         .context("write Info.plist")?;
-    let entitlements = config.macos.entitlements()?;
+    let mut entitlements = config.macos.entitlements()?;
+    config.web_media_entitlements(&mut entitlements);
     for key in entitlements.keys() {
         if crate::apple::needs_profile(key) {
             ui::warn(format!(
@@ -1933,6 +1980,40 @@ mod tests {
         assert!(usage(None));
         assert!(usage(Some(serde_json::json!({ "speech": true }))));
         assert!(!usage(Some(serde_json::json!({ "picker": true }))));
+    }
+
+    #[test]
+    fn web_pages_that_capture_media_explain_it() {
+        let config = AppConfig {
+            capabilities: Some(serde_json::json!({
+                "webview": { "hosts": ["*"], "media": ["microphone", "camera"] }
+            })),
+            ..AppConfig::default()
+        };
+        for info in [
+            macos_info_plist("A", "com.a", "a", &config, false).unwrap(),
+            info_plist("A", "com.a", "a", &config, "iphoneos").unwrap(),
+        ] {
+            assert!(info.contains_key("NSMicrophoneUsageDescription"));
+            assert!(info.contains_key("NSCameraUsageDescription"));
+            assert!(!info.contains_key("NSSpeechRecognitionUsageDescription"));
+        }
+        let mut entitlements = plist::Dictionary::new();
+        config.web_media_entitlements(&mut entitlements);
+        assert!(entitlements.contains_key("com.apple.security.device.audio-input"));
+        assert!(entitlements.contains_key("com.apple.security.device.camera"));
+        // Not declared: nothing, even for an app that declares no capabilities.
+        for capabilities in [
+            None,
+            Some(serde_json::json!({ "webview": { "hosts": ["*"] } })),
+        ] {
+            let config = AppConfig {
+                capabilities,
+                ..AppConfig::default()
+            };
+            let info = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+            assert!(!info.contains_key("NSCameraUsageDescription"));
+        }
     }
 
     #[test]

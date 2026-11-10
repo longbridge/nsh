@@ -246,6 +246,11 @@ final class Mounter {
         return Native.allowsWebview(handle(), url);
     }
 
+    /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
+    boolean allowsWebMedia(String kind) {
+        return Native.allowsWebMedia(handle(), kind);
+    }
+
     long handle() {
         return host.handle;
     }

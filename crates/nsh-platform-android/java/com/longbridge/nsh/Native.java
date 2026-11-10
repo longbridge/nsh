@@ -148,6 +148,12 @@ final class Native {
     static native boolean allowsWebview(long handle, String url);
 
     /**
+     * Whether the running app's web pages may capture {@code kind}
+     * ({@code "microphone"}, {@code "camera"}): its {@code webview.media}.
+     */
+    static native boolean allowsWebMedia(long handle, String kind);
+
+    /**
      * The URL a media load redirected from {@code base} to {@code location}
      * goes on to, or null if the running app may not load it.
      */
