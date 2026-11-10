@@ -597,7 +597,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 
 ## CI
 
-Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+The checks run on pull requests and once a day on `main` (and on manual runs), not on every push to `main`: the
+pull request already ran them, and the daily run saves the dependencies' caches pull requests restore. Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
 It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow

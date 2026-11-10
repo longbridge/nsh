@@ -13,8 +13,11 @@ name: Compat
 # passes in seconds without building.
 
 on:
-  push:
-    branches: [main]
+  # Pull requests test every change before it merges; main runs once a day
+  # instead of on every push, which only tested again what its pull request
+  # had, and saves the dependencies' caches pull requests restore.
+  schedule:
+    - cron: "0 19 * * *"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.

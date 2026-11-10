@@ -10,12 +10,11 @@ name: Examples
 # `crates/**`, so a change to the examples alone was never built.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "examples/**"
-      - ".github/workflows/examples.yml"
-      - ".github/actions/cargo/**"
+  # Pull requests test every change before it merges; main runs once a day
+  # instead of on every push, which only tested again what its pull request
+  # had, and saves the dependencies' caches pull requests restore.
+  schedule:
+    - cron: "0 19 * * *"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
