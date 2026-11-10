@@ -347,10 +347,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         return;
     }
     // The embedding app owns its window and the shell's integration: only
-    // context menus work there.
+    // context menus, and the labels of the menus the view makes, work
+    // there.
     if !top_level(hwnd) {
         match command {
-            DesktopCommand::PopupMenu { .. } => {}
+            DesktopCommand::PopupMenu { .. } | DesktopCommand::SetMenuLabels(_) => {}
             DesktopCommand::RegisterGlobalShortcut { id, .. } => {
                 crate::global_shortcut::answer(surface, *id, false);
                 return;
@@ -400,10 +401,13 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         // The Win32 menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
-        // The edit menus read them as they open, the menu bar now.
+        // The edit menus read them as they open, a top-level window's menu
+        // bar now.
         DesktopCommand::SetMenuLabels(labels) => {
             c.labels.replace((**labels).clone());
-            show_menu_bar(surface);
+            if top_level(hwnd) {
+                show_menu_bar(surface);
+            }
         }
         DesktopCommand::PopupMenu { items, at } => popup(
             surface,

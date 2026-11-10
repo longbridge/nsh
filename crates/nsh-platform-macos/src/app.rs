@@ -336,6 +336,7 @@ impl AppView {
     /// A view with no app yet; it fills its superview.
     pub fn new(mtm: MainThreadMarker, options: AppOptions) -> Rc<AppView> {
         let surface = Surface::new(mtm, initial_environment());
+        surface.chrome.labels.replace(options.menu_labels.clone());
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
         let frame = NSRect::new(
@@ -976,10 +977,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     app.setActivationPolicy(activation_policy(&options));
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
-    crate::chrome::set_menu_labels(options.menu_labels.clone());
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    crate::chrome::show_standard_menu(mtm);
+    crate::chrome::show_standard_menu(mtm, &options.menu_labels);
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
