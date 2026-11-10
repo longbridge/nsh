@@ -943,6 +943,11 @@ class Player {
     // Browser blob URLs of the in-memory images (`data:` URIs, blobs) the
     // views show, by the source's URI (`image_bytes`).
     this.inlineImages = new Map();
+    // `svg()`s drawn in their text color: the SVG's text by its address
+    // (a promise while it loads), and its blob URL by address and color
+    // (`svgInColor`).
+    this.svgTexts = new Map();
+    this.coloredSvgs = new Map();
     this.pointers = new Map();
     this.requests = new Map();
     this.websockets = new Map();
@@ -1042,12 +1047,18 @@ class Player {
           // The key names the media type (`data:<type>;nsh-key=…`): browsers
           // draw an SVG blob only with its type.
           const type = uri.startsWith("data:") ? uri.slice(5, uri.indexOf(";")) : "";
-          this.inlineImages.set(uri, URL.createObjectURL(new Blob([this.bytes(dp, dl).slice()], { type })));
+          const blob = URL.createObjectURL(new Blob([this.bytes(dp, dl).slice()], { type }));
+          if (old) this.forgetColoredSvgs(old);
+          this.inlineImages.set(uri, blob);
+          if (type === "image/svg+xml") this.svgTexts.set(blob, new TextDecoder().decode(this.bytes(dp, dl)));
         },
         release_image: (p, l) => {
           const uri = this.str(p, l);
           const url = this.inlineImages.get(uri);
-          if (url) URL.revokeObjectURL(url);
+          if (url) {
+            URL.revokeObjectURL(url);
+            this.forgetColoredSvgs(url);
+          }
           this.inlineImages.delete(uri);
         },
         submit: (p, l) => {
@@ -2881,7 +2892,7 @@ class Player {
    * Any URL the browser loads works: `asset:/` and http(s); `data:` URIs and
    * `blob:` URLs arrive as bytes (`image_bytes`) and show as browser blob URLs.
    */
-  op_img([, id, uri, mode, placeholder, blur, fade, position]) {
+  op_img([, id, uri, mode, placeholder, blur, fade, position, color]) {
     const el = this.view(id);
     if (!el?._img) return;
     const img = el._img;
@@ -2908,7 +2919,29 @@ class Player {
         el._ph = null;
       }
     }
-    const src = this.asset(uri ?? "");
+    let src = this.asset(uri ?? "");
+    // An `svg()`: its `currentColor` is `color`, its text color, written
+    // into a copy of it (an SVG an `<img>` draws sees no page CSS), shown
+    // once that copy is made.
+    if (color && src) {
+      const key = `${src}\n${color}`;
+      if (el._srcKey === key) return;
+      el._srcKey = key;
+      const colored = this.svgInColor(src, color);
+      if (typeof colored !== "string") {
+        colored.then(() => {
+          if (el._srcKey !== key || !el._img) return;
+          el._srcKey = null;
+          this.op_img([, id, uri, mode, placeholder, blur, fade, position, color]);
+        });
+        if (el._src) return;
+        src = "";
+      } else {
+        src = colored;
+      }
+    } else {
+      el._srcKey = null;
+    }
     if (el._src === src) return;
     el._src = src;
     el._failed = false;
@@ -2926,6 +2959,43 @@ class Player {
     // Only an image that had to load fades in (the native backends').
     if (img.complete) img.style.opacity = "";
     this.applyTint(el);
+  }
+
+  /** `src`, an SVG, with its `currentColor` painted `color`: its blob URL,
+   * or a promise while its text loads. An SVG without `currentColor`, or
+   * one that does not load as text, is `src` itself. */
+  svgInColor(src, color) {
+    const key = `${src}\n${color}`;
+    const done = this.coloredSvgs.get(key);
+    if (done) return done;
+    let text = this.svgTexts.get(src);
+    if (text === undefined) {
+      text = fetch(src).then((r) => (r.ok ? r.text() : "")).catch(() => "");
+      this.svgTexts.set(src, text);
+    }
+    const make = (text) => {
+      const url = /currentcolor/i.test(text)
+        ? URL.createObjectURL(new Blob([text.replace(/currentcolor/gi, color)], { type: "image/svg+xml" }))
+        : src;
+      this.coloredSvgs.set(key, url);
+      return url;
+    };
+    if (typeof text === "string") return make(text);
+    return text.then((loaded) => {
+      if (this.svgTexts.get(src) === text) this.svgTexts.set(src, loaded);
+      return this.coloredSvgs.get(key) ?? make(loaded);
+    });
+  }
+
+  /** Drops the colored copies of in-memory SVG `blob`, released. */
+  forgetColoredSvgs(blob) {
+    this.svgTexts.delete(blob);
+    const prefix = `${blob}\n`;
+    for (const [key, url] of this.coloredSvgs) {
+      if (!key.startsWith(prefix)) continue;
+      if (url !== blob) URL.revokeObjectURL(url);
+      this.coloredSvgs.delete(key);
+    }
   }
 
   applyTint(el) {

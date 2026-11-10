@@ -1203,6 +1203,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .num(options.fade_ms.unwrap_or(0.0))
                 // CSS's `object-position`; empty for the center.
                 .str(&object_position(options.position))
+                // `svg()`'s text color, for its `currentColor`.
+                .opt_str(options.current_color.map(css_color).as_deref())
                 .end();
         }
         MountItem::ScrollConfig {
