@@ -2252,8 +2252,8 @@ pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String
 /// (with a selection), Select All and, for selected text, Look Up, titled
 /// in AppKit's own words ([`appkit_title`]). The root view is a Services
 /// requestor for the selection (`validRequestorForSendType:returnType:`),
-/// which AppKit asks when it appends the Services that apply to a context
-/// menu (`allowsContextMenuPlugIns`, on by default). Translate is not
+/// available to AppKit Services. Context-menu plugins are enabled by
+/// default; their presentation depends on AppKit. Translate is not
 /// offered: `NSTextView`'s comes from a private framework, and the public
 /// translation UI is SwiftUI's only (`translationPresentation`). Returns
 /// once the menu closed.
