@@ -24,10 +24,18 @@ missing roles to the theme first. User-selected or data colors remain data.
 Build complete styled controls for the feature's needs, then compose pages from
 them; extend shared variants instead of restyling base controls per screen.
 
+Motion is part of the foundations, not polish added later. Define the app's
+motion tokens (durations, easings, distances, scales) beside its theme, and build
+the styled controls with their motion: hover washes, press scales, glyph swaps,
+popups growing from their trigger, a sliding selection. Plan each screen's state
+changes with its layout and pick the native tool from the Design Guides' "Motion"
+section (transitions, motions, springs, `LayoutAnimation`, `Shader`), honoring
+reduced motion. A screen whose every change is an instant swap is unfinished.
+
 Choose the app's Desktop, Mobile, Web and TUI targets explicitly. Adapt density,
 navigation, input and overlays to those targets, preserving shared semantics.
 TUI uses character Cells and terminal colors; Web follows the device's input.
-Review token use, component reuse and platform states before finishing. For a
+Review token use, component reuse, motion and platform states before finishing. For a
 narrow change, extend the existing system within the requested scope.
 
 ## Choose the Mode, Then Read Its Page
