@@ -344,6 +344,7 @@ impl Headless {
                 page: finger.at,
                 location: point(finger.at.x - finger.origin.x, finger.at.y - finger.origin.y),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
             activated,
         };

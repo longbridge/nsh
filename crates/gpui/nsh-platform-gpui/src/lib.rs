@@ -40,6 +40,7 @@ mod file_drop;
 mod geom;
 mod image;
 mod input;
+mod key_focus;
 mod keymap;
 mod keys;
 mod mount;

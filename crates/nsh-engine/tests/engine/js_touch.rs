@@ -123,6 +123,7 @@ fn touch(
             page: nsh_core::geometry::point(px(x), px(y + 100.0)),
             location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
+            pointer_type: nsh_core::PointerType::Touch,
         }],
     }))
 }

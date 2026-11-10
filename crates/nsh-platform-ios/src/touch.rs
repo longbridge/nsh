@@ -229,6 +229,7 @@ impl TouchTracker {
                     page: point(Points(page.x as f32), Points(page.y as f32)),
                     location: point(Points(local.x as f32), Points(local.y as f32)),
                     changed: is_changed,
+                    pointer_type: nsh_core::PointerType::Touch,
                 }
             })
             .collect();

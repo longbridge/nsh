@@ -14,7 +14,10 @@ use std::{
 
 use nsh_core::{
     Command, EventKind, ImageSource, Op, ROOT_ID,
-    desktop::{DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray},
+    desktop::{
+        DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray,
+        TrayTitlePlacement, TrayTitleRun,
+    },
     geometry::{Points, point},
     keymap::When,
     platform::Os,
@@ -640,6 +643,22 @@ unsafe extern "C" fn set_tray(
             );
         }
     };
+    // Before the menu and the click: a bad title must leave the tray shown,
+    // and its functions, as they are.
+    let title = match tray_title(cx, options) {
+        Ok(title) => title,
+        Err(message) => return throw(cx, &message),
+    };
+    let title_placement = match string(cx, options, c"titlePlacement").as_deref() {
+        None | Some("right") => TrayTitlePlacement::Right,
+        Some("left") => TrayTitlePlacement::Left,
+        Some(_) => {
+            return throw(
+                cx,
+                "nsh/desktop: the tray's `titlePlacement` is \"right\" or \"left\"",
+            );
+        }
+    };
     let menu = get(cx, options, c"menu");
     let (items, mut functions) = if nullish(menu) {
         free(cx, menu);
@@ -667,12 +686,73 @@ unsafe extern "C" fn set_tray(
     let mut tray = Tray::default();
     tray.icon = icon;
     tray.tooltip = string(cx, options, c"tooltip").unwrap_or_default();
+    tray.title = title;
+    tray.title_placement = title_placement;
     tray.menu = items;
     tray.click = click;
     listen(cx)
         .and_then(|()| send(cx, DesktopCommand::SetTray(Some(tray))))
         .err()
         .unwrap_or(UNDEFINED)
+}
+
+/// The tray's `title`: an array of `{ text, color? }`, `text` a string and
+/// `color` a CSS color.
+fn tray_title(cx: *mut JsContext, options: JsValue) -> Result<Vec<TrayTitleRun>, String> {
+    let list = get(cx, options, c"title");
+    let runs = tray_title_runs(cx, list);
+    free(cx, list);
+    runs
+}
+
+fn tray_title_runs(cx: *mut JsContext, list: JsValue) -> Result<Vec<TrayTitleRun>, String> {
+    const SHAPE: &str =
+        "nsh/desktop: the tray's `title` is an array of `{ text, color? }`, `text` a string";
+    if nullish(list) {
+        return Ok(Vec::new());
+    }
+    // SAFETY: an inline tag check.
+    if !unsafe { qjs::JS_IsArray(list) } {
+        return Err(SHAPE.into());
+    }
+    let mut len: i64 = 0;
+    // SAFETY: the length of a live array.
+    unsafe { qjs::JS_GetLength(cx, list, &mut len) };
+    // Not sized by `len`: the app sets an array's length, holes and all; the
+    // first hole ends the decoding with an error.
+    let mut runs = Vec::new();
+    for i in 0..len.max(0) {
+        // SAFETY: an element of a live array (owned).
+        let v = unsafe { qjs::JS_GetPropertyInt64(cx, list, i) };
+        let fields = is_object(v).then(|| (text_string(cx, v), string(cx, v, c"color")));
+        free(cx, v);
+        let Some((Some(text), color)) = fields else {
+            return Err(SHAPE.into());
+        };
+        let mut run = TrayTitleRun::default();
+        run.text = text;
+        run.color = match color {
+            None => None,
+            Some(color) => Some(color.parse().map_err(|_| {
+                format!("nsh/desktop: the tray's title color `{color}` is not a CSS color")
+            })?),
+        };
+        runs.push(run);
+    }
+    Ok(runs)
+}
+
+/// Property `text` when it is a string (no other value is converted).
+fn text_string(cx: *mut JsContext, object: JsValue) -> Option<String> {
+    let v = get(cx, object, c"text");
+    // SAFETY: an inline tag check.
+    let s = if unsafe { qjs::JS_IsString(v) } {
+        dom::string_arg(cx, v)
+    } else {
+        None
+    };
+    free(cx, v);
+    s
 }
 
 /// `Tray`: an object of its functions.
@@ -1202,6 +1282,16 @@ export interface TrayClickEvent {
   bounds: Bounds | null;
 }
 
+/** A run of the tray's `title`: text in one color. */
+export interface TrayTitleRun {
+  /** The text. */
+  text: string;
+  /** Its color, a CSS color (`#d92d20`, or a theme token's color from
+   * `token`); without one, the
+   * menu bar's text color, which follows its appearance. */
+  color?: string;
+}
+
 /** The app's icon in the system tray. */
 export interface TrayOptions {
   /** The icon, as `<Image>`'s `src` takes it (an imported file, or a URL).
@@ -1212,6 +1302,14 @@ export interface TrayOptions {
   icon?: ImageAsset | string;
   /** Shown when the pointer rests on the icon (the app's name without it). */
   tooltip?: string;
+  /** Text beside the icon, in runs each of its own color: what the app
+   * keeps in sight, such as a price. macOS's menu bar shows it in its
+   * colors; Linux's panels that show AppIndicator labels show its text;
+   * Windows' notification area shows the icon alone. */
+  title?: readonly TrayTitleRun[];
+  /** Which side of the icon the title shows on: `"right"` (the default) or
+   * `"left"`. macOS only: Linux's panels draw the title right of the icon. */
+  titlePlacement?: "right" | "left";
   /** Its menu, opened by a secondary click (and a primary one without
    * `onClick`). */
   menu?: readonly (MenuItem | null | undefined | false)[];
