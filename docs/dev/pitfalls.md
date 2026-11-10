@@ -521,6 +521,12 @@ Things that were found the hard way. Read the section of the area you change bef
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
   binding and older systems no property.
 
+- **TextKit 2 has no rect for text it has not laid out**: an `NSTextView` lays out only the text near its visible part,
+  and `firstRectForCharacterRange:actualRange:` answers `NSZeroRect` for the rest, so input methods open their
+  candidates at the screen's bottom-left corner (macOS 27.2, a standalone probe). A point-wide input, as the editors'
+  sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
+  (`text_input.rs`).
+
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
   (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.

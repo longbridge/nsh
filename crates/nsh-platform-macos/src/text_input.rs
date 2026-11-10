@@ -74,7 +74,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{
     NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRange,
-    NSString,
+    NSRect, NSString,
 };
 
 use crate::{
@@ -1090,6 +1090,26 @@ define_text_view!(
             if let Some(cx) = self.ivars().get() {
                 cx.composition_changed();
             }
+        }
+
+        /// Where an input method opens its candidates. TextKit 2 lays out
+        /// only the text near the visible part and has no rect for the
+        /// rest (a point-wide view, a line per character, soon holds
+        /// such text): the visible part, not the screen's corner.
+        #[unsafe(method(firstRectForCharacterRange:actualRange:))]
+        fn first_rect(&self, range: NSRange, actual: *mut NSRange) -> NSRect {
+            // SAFETY: NSTextView's own method (NSTextInputClient); `actual`
+            // is the caller's.
+            let rect: NSRect = unsafe {
+                msg_send![super(self), firstRectForCharacterRange: range, actualRange: actual]
+            };
+            if rect != NSRect::ZERO {
+                return rect;
+            }
+            let Some(window) = self.window() else {
+                return rect;
+            };
+            window.convertRectToScreen(self.convertRect_toView(self.visibleRect(), None))
         }
 
         /// A paste (Edit > Paste, Command+V, the context menu): reported,
