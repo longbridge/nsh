@@ -1342,6 +1342,11 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::Audio { id, .. } => obj.set("id", *id)?,
         // Handled natively (`crate::window`).
         EventPayload::Window(_) => return Ok(Value::new_undefined(cx.clone())),
+        // Raw wheel and pinch events are for Rust listeners (`on_wheel`,
+        // `on_magnify`); JS has no handler for them.
+        EventPayload::Wheel(_) | EventPayload::Magnify(_) => {
+            return Ok(Value::new_undefined(cx.clone()));
+        }
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;

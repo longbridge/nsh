@@ -50,6 +50,29 @@ pub(crate) trait Driver: Send {
         Err("holding keys (`keyboard.down` / `keyboard.up`) runs headless only for now: run the test without `--target`".into())
     }
     fn hover(&mut self, selector: &str) -> Result<(), String>;
+    /// The wheel or a touchpad scrolls by `delta` points (positive `y`:
+    /// down) over the view `selector` names: what listens to `onWheel`
+    /// hears it, else the scroll view around it moves.
+    fn wheel_at(
+        &mut self,
+        selector: &str,
+        delta: Point<Points>,
+        phase: nsh_core::WheelPhase,
+    ) -> Result<(), String> {
+        let _ = (selector, delta, phase);
+        Err("`wheel_at` runs headless only for now: run the test without `--target`".into())
+    }
+    /// A touchpad pinch of `delta` (the change of scale) over the view
+    /// `selector` names: what listens to `onMagnify` hears it.
+    fn magnify_at(
+        &mut self,
+        selector: &str,
+        delta: nsh_core::geometry::Percentage,
+        phase: nsh_core::MagnifyPhase,
+    ) -> Result<(), String> {
+        let _ = (selector, delta, phase);
+        Err("`magnify_at` runs headless only for now: run the test without `--target`".into())
+    }
     fn right_click(&mut self, selector: &str) -> Result<(), String>;
     /// Pastes `content` into the input `selector` names, as the user's
     /// paste does with it on the clipboard.
@@ -206,6 +229,22 @@ impl Driver for Headless {
     }
     fn hover(&mut self, selector: &str) -> Result<(), String> {
         Headless::hover(self, selector)
+    }
+    fn wheel_at(
+        &mut self,
+        selector: &str,
+        delta: Point<Points>,
+        phase: nsh_core::WheelPhase,
+    ) -> Result<(), String> {
+        Headless::wheel_at(self, selector, delta, phase)
+    }
+    fn magnify_at(
+        &mut self,
+        selector: &str,
+        delta: nsh_core::geometry::Percentage,
+        phase: nsh_core::MagnifyPhase,
+    ) -> Result<(), String> {
+        Headless::magnify_at(self, selector, delta, phase)
     }
     fn right_click(&mut self, selector: &str) -> Result<(), String> {
         Headless::right_click(self, selector)

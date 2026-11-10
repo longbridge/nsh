@@ -89,8 +89,12 @@ fn file_mime_types(uris: &[String]) -> Vec<String> {
 
 pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, PropError> {
     Ok(match payload {
-        // The web opens no windows of the app's own.
-        EventPayload::None | EventPayload::Window(_) => Value(0),
+        // The web opens no windows of the app's own, and has no Rust
+        // listeners for raw wheel and pinch events.
+        EventPayload::None
+        | EventPayload::Window(_)
+        | EventPayload::Wheel(_)
+        | EventPayload::Magnify(_) => Value(0),
         EventPayload::Value(v) => scalar(v)?,
         EventPayload::Map(fields) => object(
             fields

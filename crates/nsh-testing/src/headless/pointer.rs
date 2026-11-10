@@ -8,8 +8,9 @@
 //! the finger moves away.
 
 use nsh_core::{
-    EventKind, EventPayload, NodeId, Point, Points, ROOT_ID, TouchEvent, TouchPhase, TouchPoint,
-    geometry::point,
+    EventKind, EventPayload, MagnifyEvent, MagnifyPhase, NodeId, Point, Points, ROOT_ID,
+    TouchEvent, TouchPhase, TouchPoint, WheelEvent, WheelPhase,
+    geometry::{Percentage, point},
     input::{
         self, Candidate, Gate, Grab, GrabOptions, PAN_SLOP, PRESS_RETENTION, PRESS_SLOP,
         SCROLL_PRESS_DELAY, VelocityTracker,
@@ -509,6 +510,125 @@ impl Headless {
             self.send(id, EventKind::MouseMove, self.mouse_at(id, at));
         }
         self.done()
+    }
+
+    /// The step `wheelAt(<selector>, <dx>, <dy>, <phase>)`: the wheel or a
+    /// touchpad scrolls by `delta` points (positive `y` toward the content's
+    /// end: down) over the middle of the view `selector` names, on a
+    /// desktop or the web. As the backends decide it
+    /// ([`input::event_target`]): the innermost view around it listening to
+    /// `onWheel` hears it, with the modifier keys held (`hold_keys`), and
+    /// nothing else moves; with none listening the nearest scroll view
+    /// around it scrolls by `delta` along its axis (Ctrl + wheel's pinch
+    /// is not simulated). A [`WheelPhase::Unknown`] is a mouse wheel's
+    /// notch, any other phase a touchpad's (`precise`).
+    pub fn wheel_at(
+        &mut self,
+        selector: &str,
+        delta: Point<Points>,
+        phase: WheelPhase,
+    ) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!(
+            "wheelAt({selector}, {}, {}, {phase:?})",
+            delta.x, delta.y
+        ));
+        self.mouse_wheel_check("wheel")?;
+        let pick = self.screen.view(&parsed);
+        let target = self.picked(pick, selector, "view")?;
+        let at = self
+            .screen
+            .bounds_in_root(target)
+            .ok_or_else(|| format!("`{selector}` is not on screen"))?
+            .center();
+        let chain = self.screen.chain(target);
+        let listener = chain
+            .iter()
+            .copied()
+            .find(|id| self.screen.hears(*id, EventKind::Wheel));
+        if let Some(id) = listener {
+            let origin = self
+                .screen
+                .bounds_in_root(id)
+                .map_or(Point::default(), |b| b.origin);
+            let event = WheelEvent::new(
+                point(at.x - origin.x, at.y - origin.y),
+                at,
+                delta,
+                phase,
+                self.held,
+                phase != WheelPhase::Unknown,
+            );
+            self.send(id, EventKind::Wheel, EventPayload::Wheel(event));
+        } else if let Some(view) = chain
+            .into_iter()
+            .find(|id| self.screen.scroll(*id).is_some())
+        {
+            // Vertical wheels scroll horizontal views too.
+            let by = if self.scroll_horizontal(view) && delta.x != Points::ZERO {
+                delta.x
+            } else {
+                delta.y
+            };
+            let end = self.screen.scroll_end(view);
+            let offset = (self.scroll_offset(view) + by).clamp(Points::ZERO, end);
+            self.scroll_to(view, offset);
+            self.send(view, EventKind::ScrollEnd, self.scroll_payload(view));
+        }
+        self.done()
+    }
+
+    /// The step `magnifyAt(<selector>, <delta>, <phase>)`: a touchpad pinch
+    /// of `delta` (the change of scale, 0.02: 2 % bigger) over the middle of
+    /// the view `selector` names, as macOS reports it: the innermost view
+    /// around it listening to `onMagnify` hears it; with none listening
+    /// nothing happens (the pinch gesture is not simulated).
+    pub fn magnify_at(
+        &mut self,
+        selector: &str,
+        delta: Percentage,
+        phase: MagnifyPhase,
+    ) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("magnifyAt({selector}, {}, {phase:?})", delta.0));
+        self.mouse_wheel_check("pinch")?;
+        let pick = self.screen.view(&parsed);
+        let target = self.picked(pick, selector, "view")?;
+        let at = self
+            .screen
+            .bounds_in_root(target)
+            .ok_or_else(|| format!("`{selector}` is not on screen"))?
+            .center();
+        let listener = self
+            .screen
+            .chain(target)
+            .into_iter()
+            .find(|id| self.screen.hears(*id, EventKind::Magnify));
+        if let Some(id) = listener {
+            let origin = self
+                .screen
+                .bounds_in_root(id)
+                .map_or(Point::default(), |b| b.origin);
+            let event = MagnifyEvent::new(
+                point(at.x - origin.x, at.y - origin.y),
+                at,
+                delta,
+                phase,
+                self.held,
+            );
+            self.send(id, EventKind::Magnify, EventPayload::Magnify(event));
+        }
+        self.done()
+    }
+
+    /// Fails on a platform with no mouse or touchpad to `what` with.
+    fn mouse_wheel_check(&self, what: &str) -> Result<(), String> {
+        if !self.environment.desktop() && self.environment.os != nsh_core::platform::Os::Web {
+            return Err(format!(
+                "a phone has no mouse or touchpad to {what} with: open the app as a desktop or the web (`platform`)"
+            ));
+        }
+        Ok(())
     }
 
     /// The mouse at `at` in the root, as view `id` hears it: where it is in

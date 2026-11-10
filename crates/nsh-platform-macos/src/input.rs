@@ -57,8 +57,9 @@ use std::{
 
 use dispatch2::{DispatchQueue, DispatchTime};
 use nsh_core::{
-    Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, MouseEvent, NodeId,
-    PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    Command, Cursor, EventKind, EventPayload, GestureValues, MagnifyEvent, MagnifyPhase,
+    MouseButton, MouseEvent, NodeId, PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase,
+    TouchPoint, ViewKind, WheelEvent, WheelPhase,
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
@@ -130,6 +131,11 @@ pub(crate) struct Input {
     wheel: RefCell<Option<Wheel>>,
     /// The scroll view the system's momentum after a gesture goes to.
     momentum: RefCell<Option<NshView>>,
+    /// The view with an `onWheel` listener a trackpad scroll gesture (and
+    /// the momentum after it) goes to, until it ends.
+    raw_wheel: RefCell<Option<NshView>>,
+    /// The view with an `onMagnify` listener a trackpad pinch goes to.
+    raw_magnify: RefCell<Option<NshView>>,
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
@@ -267,6 +273,8 @@ pub(crate) fn reset(surface: &Surface) {
     input.zoom.borrow_mut().take();
     input.wheel.borrow_mut().take();
     input.momentum.borrow_mut().take();
+    input.raw_wheel.borrow_mut().take();
+    input.raw_magnify.borrow_mut().take();
     input.latch.borrow_mut().take();
     input.hover_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -2318,8 +2326,159 @@ fn trackpad_transform(
     }
 }
 
+/// The innermost view at `(x, y)` (root coordinates) that listens to
+/// `kind` (`onWheel`, `onMagnify`).
+fn raw_target(surface: &Surface, x: f32, y: f32, kind: EventKind) -> Option<NshView> {
+    let hit = pick(&event_root(surface), x, y)?;
+    input::event_target(chain(&hit.view), kind, |v| v.state().events)
+}
+
+/// `view` still shows in a window.
+fn raw_alive(view: &NshView) -> bool {
+    view.ns().window().is_some()
+}
+
+/// `kind` of `view` with `payload` at `(x, y)` (root coordinates).
+fn send_raw(surface: &Surface, view: &NshView, kind: EventKind, payload: EventPayload) {
+    let id = view.state().id;
+    surface.event(id, kind, payload);
+}
+
+/// A trackpad pinch step (`magnifyWithEvent:`) for a view that listens to
+/// `onMagnify` (the one a gesture began on takes it to its end); false when
+/// none does and the pinch gesture takes it.
+fn raw_magnify(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> bool {
+    let slot = &surface.input.raw_magnify;
+    let phase = event.phase();
+    let ended = phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled);
+    let magnify_phase = if phase.contains(NSEventPhase::Began) {
+        MagnifyPhase::Began
+    } else if ended {
+        MagnifyPhase::Ended
+    } else if phase.contains(NSEventPhase::Changed) {
+        MagnifyPhase::Changed
+    } else {
+        MagnifyPhase::Unknown
+    };
+    let latched = slot.borrow().clone().filter(raw_alive);
+    let view = match latched {
+        Some(view) if magnify_phase != MagnifyPhase::Began => view,
+        _ => {
+            let target = raw_target(surface, x, y, EventKind::Magnify);
+            *slot.borrow_mut() = target.clone();
+            let Some(view) = target else { return false };
+            view
+        }
+    };
+    if ended || magnify_phase == MagnifyPhase::Unknown {
+        slot.borrow_mut().take();
+    }
+    let (lx, ly) = local(surface, &view, x, y);
+    let payload = MagnifyEvent::new(
+        point(Points(lx), Points(ly)),
+        point(Points(x), Points(y)),
+        nsh_core::geometry::Percentage(event.magnification() as f32),
+        magnify_phase,
+        modifiers(event.modifierFlags()),
+    );
+    send_raw(
+        surface,
+        &view,
+        EventKind::Magnify,
+        EventPayload::Magnify(payload),
+    );
+    true
+}
+
+/// A scroll event of `(dx, dy)` points (positive toward the content's end)
+/// for a view that listens to `onWheel`, before any scroll view; false when
+/// none does. A gesture and the momentum after it stay on the view they
+/// began on.
+fn raw_wheel(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, dx: f32, dy: f32) -> bool {
+    let input = &surface.input;
+    let phase = event.phase();
+    let momentum = event.momentumPhase();
+    let precise = event.hasPreciseScrollingDeltas();
+    let (wheel_phase, continues) = if !momentum.is_empty() {
+        let ended = momentum.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled);
+        (
+            if ended {
+                WheelPhase::MomentumEnded
+            } else {
+                WheelPhase::Momentum
+            },
+            true,
+        )
+    } else if phase.is_empty() {
+        (WheelPhase::Unknown, false)
+    } else if phase.contains(NSEventPhase::Began) {
+        (WheelPhase::Began, false)
+    } else if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
+        (WheelPhase::Ended, true)
+    } else if phase.contains(NSEventPhase::MayBegin) {
+        // Fingers resting on the trackpad: nothing scrolls yet, and what
+        // listens keeps the scroll views from stopping for it.
+        return raw_target(surface, x, y, EventKind::Wheel).is_some();
+    } else {
+        (WheelPhase::Changed, true)
+    };
+    let latched = input.raw_wheel.borrow().clone().filter(raw_alive);
+    let view = match latched {
+        Some(view) if continues => view,
+        // The end of a gesture and its momentum only go on to the view
+        // that heard it begin.
+        _ if matches!(
+            wheel_phase,
+            WheelPhase::Ended | WheelPhase::Momentum | WheelPhase::MomentumEnded
+        ) =>
+        {
+            input.raw_wheel.borrow_mut().take();
+            return false;
+        }
+        _ => {
+            // A scroll view's gesture goes on with it.
+            let scrolling = input.wheel.borrow().is_some() || input.momentum.borrow().is_some();
+            if continues && scrolling {
+                input.raw_wheel.borrow_mut().take();
+                return false;
+            }
+            let target = raw_target(surface, x, y, EventKind::Wheel);
+            *input.raw_wheel.borrow_mut() = target.clone();
+            let Some(view) = target else { return false };
+            view
+        }
+    };
+    if wheel_phase == WheelPhase::MomentumEnded || wheel_phase == WheelPhase::Unknown {
+        input.raw_wheel.borrow_mut().take();
+    }
+    let (dx, dy) = if precise {
+        (dx, dy)
+    } else {
+        (dx * WHEEL_LINE, dy * WHEEL_LINE)
+    };
+    let (lx, ly) = local(surface, &view, x, y);
+    let payload = WheelEvent::new(
+        point(Points(lx), Points(ly)),
+        point(Points(x), Points(y)),
+        point(Points(dx), Points(dy)),
+        wheel_phase,
+        modifiers(event.modifierFlags()),
+        precise,
+    );
+    send_raw(
+        surface,
+        &view,
+        EventKind::Wheel,
+        EventPayload::Wheel(payload),
+    );
+    true
+}
+
 /// `magnifyWithEvent:`: a trackpad pinch.
 fn magnify(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) {
+    if raw_magnify(surface, event, x, y) {
+        return;
+    }
     let m = event.magnification() as f32;
     trackpad_transform(surface, event, x, y, false, |t| {
         t.scale = (t.scale * (1.0 + m)).max(0.01);
@@ -2618,6 +2777,9 @@ fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
         -event.scrollingDeltaX() as f32,
         -event.scrollingDeltaY() as f32,
     );
+    if raw_wheel(surface, event, x, y, dx, dy) {
+        return;
+    }
     let phase = event.phase();
     let momentum = event.momentumPhase();
     if !momentum.is_empty() {

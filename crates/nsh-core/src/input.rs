@@ -646,6 +646,19 @@ pub fn scroll_target<V>(
         .find(|v| (!any_along || along(v)) && takes(v))
 }
 
+/// The innermost of `views` (innermost first) that listens to `kind`
+/// (`events` is a view's event mask): who takes a raw wheel or pinch event
+/// ([`EventKind::Wheel`], [`EventKind::Magnify`]) before any scroll view
+/// or pinch gesture sees it. A listener takes every event of the kind,
+/// whatever the views outside it would do with it.
+pub fn event_target<V>(
+    views: Vec<V>,
+    kind: EventKind,
+    events: impl Fn(&V) -> EventMask,
+) -> Option<V> {
+    views.into_iter().find(|v| events(v).contains(kind))
+}
+
 // --- The keyboard -------------------------------------------------------------------
 
 /// The Tab stop Tab (Shift + Tab with `back`) moves to among `n` from
@@ -964,6 +977,28 @@ mod tests {
         assert_eq!(target(5.0, 0.0, &views), Some(1));
         // Only a horizontal view: it takes vertical wheels too.
         assert_eq!(target(0.0, 5.0, &views[..2].to_vec()), Some(1));
+    }
+
+    #[test]
+    fn raw_events_go_to_the_innermost_listener() {
+        let mask = |kinds: &[EventKind]| {
+            let mut m = EventMask::default();
+            for k in kinds {
+                m.set(*k, true);
+            }
+            m
+        };
+        // Innermost first: a plain view, a chart, a page that listens too.
+        let views = vec![
+            (1, mask(&[EventKind::Press])),
+            (2, mask(&[EventKind::Wheel])),
+            (3, mask(&[EventKind::Wheel, EventKind::Magnify])),
+        ];
+        let target = |kind| event_target(views.clone(), kind, |v| v.1).map(|v| v.0);
+        assert_eq!(target(EventKind::Wheel), Some(2));
+        assert_eq!(target(EventKind::Magnify), Some(3));
+        assert_eq!(target(EventKind::Press), Some(1));
+        assert_eq!(target(EventKind::Touch), None);
     }
 
     #[test]

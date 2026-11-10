@@ -971,6 +971,10 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Audio,
     EventKind::Window,
     EventKind::EditAction,
+    // Rust listeners' raw wheel and touchpad pinch events (`on_wheel`,
+    // `on_magnify`).
+    EventKind::Wheel,
+    EventKind::Magnify,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

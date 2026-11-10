@@ -1051,6 +1051,46 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     })
 }
 
+/// Gives a wheel or touchpad scroll to the innermost view under the pointer
+/// that listens to `onWheel` ([`EventKind::Wheel`]), before the scroll
+/// views and Ctrl + wheel's pinch see it, unless a scroll of nsh's scroll
+/// views is going on (one scroll stays on its view). Windows reports no
+/// gesture phases, so the event's phase is [`nsh_core::WheelPhase::Unknown`].
+/// False when no view listens.
+fn listener_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
+    let input = &surface.input;
+    let time = event.time * 1000.0;
+    let horizontal = event.dx.abs() > event.dy.abs();
+    let latched = input.wheel.borrow().is_some()
+        || input
+            .latch
+            .borrow()
+            .as_ref()
+            .is_some_and(|(view, h, last)| latch_holds(*h, *last, horizontal, time) && shown(view));
+    if latched {
+        return false;
+    }
+    let Some(hit) = pick(&surface.input_root(), event.x, event.y, true) else {
+        return false;
+    };
+    let Some(view) = input::event_target(chain(&hit.view), EventKind::Wheel, |v| v.state().events)
+    else {
+        return false;
+    };
+    let (local_x, local_y) = local(&view, event.x, event.y);
+    let payload = nsh_core::WheelEvent::new(
+        point(Points(local_x), Points(local_y)),
+        point(Points(event.x), Points(event.y)),
+        point(Points(event.dx), Points(event.dy)),
+        nsh_core::WheelPhase::Unknown,
+        event.modifiers.core(),
+        event.precise,
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(payload));
+    true
+}
+
 /// A wheel event from the window.
 pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     let (x, y) = (event.x, event.y);
@@ -1058,6 +1098,9 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
         return;
     }
     surface.input.last.set(Some((x, y)));
+    if listener_wheel(surface, &event) {
+        return;
+    }
     let (mut dx, mut dy) = (event.dx, event.dy);
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
     // (precision touchpads pinch this way too).

@@ -12,7 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
+    MagnifyEvent, MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size,
+    Tag, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1490,6 +1491,34 @@ pub trait Interactive: Element {
         self.on(
             EventKind::ContextMenu,
             events::typed(listener.into_listener(), events::context_menu),
+        )
+    }
+
+    /// The wheel or a touchpad scrolled over it or a view inside it
+    /// (desktops): the nearest element around the one under the pointer
+    /// that listens takes the event, before any scroll view, and nothing
+    /// else scrolls or zooms with it (Ctrl + wheel, which Windows
+    /// touchpads pinch with, included: [`WheelEvent::modifiers`]). An
+    /// element that listens takes every wheel event; to let some through,
+    /// listen on an element that is only where they should be taken.
+    ///
+    /// The listener runs on the engine's thread, after the platform has
+    /// decided: it cannot hand the event back, so it has no result.
+    fn on_wheel<M>(self, listener: impl IntoListener<WheelEvent, M>) -> Self {
+        self.on(
+            EventKind::Wheel,
+            events::typed(listener.into_listener(), events::wheel),
+        )
+    }
+
+    /// A touchpad pinch (macOS: `NSEvent` magnify) over it or a view inside
+    /// it: [`MagnifyEvent::delta`] is the change of scale since the last
+    /// event. The nearest element that listens takes it instead of the
+    /// pinch gesture ([`Self::on_pinch_start`]); see [`Self::on_wheel`].
+    fn on_magnify<M>(self, listener: impl IntoListener<MagnifyEvent, M>) -> Self {
+        self.on(
+            EventKind::Magnify,
+            events::typed(listener.into_listener(), events::magnify),
         )
     }
 

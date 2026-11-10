@@ -258,6 +258,8 @@ events! {
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
     EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
+    Wheel = "onWheel" as "": "The wheel or a touchpad scrolled over the view or a view inside it, which takes it instead of the scroll views around it (desktops; payload: [`EventPayload::Wheel`]).",
+    Magnify = "onMagnify" as "": "A touchpad pinch (macOS) over the view or a view inside it, which takes it instead of the pinch gesture (payload: [`EventPayload::Magnify`]).",
 
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
 }
@@ -429,6 +431,127 @@ impl MouseEvent {
             pressed_button,
         }
     }
+}
+
+/// Where a wheel or touchpad scroll happened and how far it went
+/// ([`EventKind::Wheel`]), in points.
+///
+/// `delta` follows the DOM's `WheelEvent` (`deltaX`, `deltaY`) in what the
+/// content does: positive `y` is a scroll toward the end (the wheel
+/// rolled down, the fingers pushed up on a touchpad with natural scrolling:
+/// what the user sees is the content moving up), positive `x` toward the
+/// right.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct WheelEvent {
+    /// Position in the view, its transforms undone.
+    pub position: Point<Points>,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal).
+    pub page_position: Point<Points>,
+    /// How far, in points; for a mouse wheel notch the platform's
+    /// distance per notch.
+    pub delta: Point<Points>,
+    /// Where it is in a touchpad gesture ([`WheelPhase::Unknown`] on
+    /// platforms without phases, and for mouse wheels).
+    pub phase: WheelPhase,
+    /// The modifier keys held (Ctrl + wheel is how Windows touchpads
+    /// pinch).
+    pub modifiers: crate::keymap::Modifiers,
+    /// From a touchpad or a high-resolution wheel (`true`), rather than a
+    /// mouse wheel's whole notches (`false`).
+    pub precise: bool,
+}
+
+impl WheelEvent {
+    /// A scroll of `delta` at `position` in the view and `page_position`
+    /// in its root view.
+    pub fn new(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        delta: Point<Points>,
+        phase: WheelPhase,
+        modifiers: crate::keymap::Modifiers,
+        precise: bool,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            delta,
+            phase,
+            modifiers,
+            precise,
+        }
+    }
+}
+
+/// Where a scroll is in a touchpad gesture ([`WheelEvent::phase`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WheelPhase {
+    /// The platform reports no phases (mouse wheels, Windows).
+    #[default]
+    Unknown,
+    /// The fingers touched down and began scrolling.
+    Began,
+    /// The fingers moved.
+    Changed,
+    /// The fingers lifted.
+    Ended,
+    /// The content glides on after the fingers lifted.
+    Momentum,
+    /// The glide came to rest.
+    MomentumEnded,
+}
+
+/// A touchpad pinch over a view ([`EventKind::Magnify`], macOS).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct MagnifyEvent {
+    /// Position in the view, its transforms undone.
+    pub position: Point<Points>,
+    /// Position in the root view the view is in.
+    pub page_position: Point<Points>,
+    /// How much the scale changed since the last event, as a fraction
+    /// (0.02: 2 % bigger; negative: smaller).
+    pub delta: crate::geometry::Percentage,
+    /// Where it is in the gesture.
+    pub phase: MagnifyPhase,
+    /// The modifier keys held.
+    pub modifiers: crate::keymap::Modifiers,
+}
+
+impl MagnifyEvent {
+    /// A pinch step of `delta` at `position` in the view and
+    /// `page_position` in its root view.
+    pub fn new(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        delta: crate::geometry::Percentage,
+        phase: MagnifyPhase,
+        modifiers: crate::keymap::Modifiers,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            delta,
+            phase,
+            modifiers,
+        }
+    }
+}
+
+/// Where a pinch is in its gesture ([`MagnifyEvent::phase`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MagnifyPhase {
+    /// The platform reports no phase.
+    #[default]
+    Unknown,
+    /// The fingers began pinching.
+    Began,
+    /// The fingers moved.
+    Changed,
+    /// The fingers lifted (or the system cancelled the pinch).
+    Ended,
 }
 
 /// A mouse button, as GPUI's `MouseButton` (TS: `"left"`, `"right"`,
@@ -832,6 +955,10 @@ pub enum EventPayload {
     Mouse(MouseEvent),
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
+    /// A wheel or touchpad scroll over a view (`onWheel`).
+    Wheel(WheelEvent),
+    /// A touchpad pinch over a view (`onMagnify`).
+    Magnify(MagnifyEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
     /// `onPressDown`, `onPressUp`), with the modifier keys and the click
     /// count, on backends that know it.

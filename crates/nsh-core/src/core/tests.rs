@@ -22439,6 +22439,72 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
         MountItem::Text { text, .. } if text.text == "4 5 14 25")));
 }
 
+#[test]
+fn wheels_and_magnifies_reach_rust_listeners_with_their_fields() {
+    use crate::prelude::*;
+    #[component]
+    fn Chart() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_wheel(move |e: &WheelEvent| {
+                at.set(format!(
+                    "wheel {} {} {} {} {:?} {} {}",
+                    e.position.x.0,
+                    e.position.y.0,
+                    e.delta.x.0,
+                    e.delta.y.0,
+                    e.phase,
+                    e.modifiers.ctrl,
+                    e.precise
+                ))
+            })
+            .on_magnify(move |e: &MagnifyEvent| {
+                at.set(format!("magnify {} {:?}", e.delta.0, e.phase));
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Chart>());
+    let batch = c.commit().unwrap();
+    let (host, events) = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::Wheel) => {
+                Some((*id, *events))
+            }
+            _ => None,
+        })
+        .expect("the listening view mounts Wheel in its event mask");
+    assert!(events.contains(EventKind::Magnify));
+    let event = crate::WheelEvent::new(
+        point(px(4.0), px(5.0)),
+        point(px(14.0), px(25.0)),
+        point(px(-3.0), px(12.5)),
+        crate::WheelPhase::Changed,
+        crate::keymap::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+        true,
+    );
+    assert!(c.component_event(host, EventKind::Wheel, &EventPayload::Wheel(event)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "wheel 4 5 -3 12.5 Changed true true")));
+    let pinch = crate::MagnifyEvent::new(
+        point(px(4.0), px(5.0)),
+        point(px(14.0), px(25.0)),
+        crate::geometry::Percentage(0.02),
+        crate::MagnifyPhase::Began,
+        Default::default(),
+    );
+    assert!(c.component_event(host, EventKind::Magnify, &EventPayload::Magnify(pinch)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "magnify 0.02 Began")));
+}
+
 /// A container `2` with `style` and empty children `4`, `6`, ... with
 /// theirs, laid out at the root; the children's frames.
 fn grid_frames(
