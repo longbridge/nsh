@@ -44,6 +44,7 @@ mount(() => <Text>{{shown()}}</Text>);
         minify: false,
         split: false,
         ui_sets: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
     let _ = std::fs::remove_dir_all(&dir);

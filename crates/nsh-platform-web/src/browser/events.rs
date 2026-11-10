@@ -80,6 +80,13 @@ fn strings(items: &[String]) -> Result<Value, PropError> {
             .collect::<Result<Vec<_>, _>>()?,
     )
 }
+/// The MIME type of each file `uris` names, as the native JS host reports.
+fn file_mime_types(uris: &[String]) -> Vec<String> {
+    uris.iter()
+        .map(|uri| nsh_core::platform::file_mime_type(uri).to_owned())
+        .collect()
+}
+
 pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, PropError> {
     Ok(match payload {
         // The web opens no windows of the app's own.
@@ -124,12 +131,16 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                 },
             ),
         ])?,
-        EventPayload::FileDrop(uris) => object([("uris", strings(uris)?)])?,
+        EventPayload::FileDrop(uris) => object([
+            ("uris", strings(uris)?),
+            ("mimeTypes", strings(&file_mime_types(uris))?),
+        ])?,
         EventPayload::FileDropAt {
             uris,
             page_position,
         } => object([
             ("uris", strings(uris)?),
+            ("mimeTypes", strings(&file_mime_types(uris))?),
             ("pagePosition", point(*page_position)?),
         ])?,
         EventPayload::Paste(paste) => {

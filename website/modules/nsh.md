@@ -307,6 +307,38 @@ brand("#e11d48");
 setTheme(null); // the app's theme again
 ```
 
+## appInfo
+
+```ts
+function appInfo(): AppInfo;
+
+interface AppInfo {
+  readonly id: string | null;
+  readonly name: string | null;
+  readonly version: string | null;
+  readonly build: number | null;
+  readonly development: boolean;
+}
+```
+
+The app as it was built: its id, name, version and build number, and whether it is a development build. A package
+reports what `nsh package` and `nsh publish` name and version it as, their `--id`, `--name`, `--version` and `--build`
+included, with version `1.0.0` and build `1` where nothing gives them; other builds report `nsh.json`'s `"id"`,
+`"name"`, `"version"` and `"build"`, `null` where it leaves them out. `nsh run`, `nsh dev`, `nsh test` and `nsh build`
+without `--release` make development builds; `nsh package`, `nsh publish` and `nsh build --release` make release
+builds. It reads the same on every platform and in any module, at its top level too: the build hands the information
+to the runtime before the app's modules run.
+
+`nsh/updater`'s [`shellInfo()`](./nsh-updater.md#shellinfo) reports the installed app's version.
+
+```tsx
+import { appInfo, Text } from "nsh";
+
+const { version, build, development } = appInfo();
+
+export const About = () => <Text>{`${version} (${build})${development ? " · dev" : ""}`}</Text>;
+```
+
 ## View, Text, Scroll, Overlay
 
 ```ts

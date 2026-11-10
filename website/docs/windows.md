@@ -79,7 +79,7 @@ Writes a directory, the same as an archive, and an installer:
   <Name>.exe             the executable, with the app's icon: a Rust app's own runner, built with its crate; nsh's release runner for TSX
   nsh\bundle.nshc         a TSX app, compiled
   nsh\assets\…           the assets it imports (a Rust crate's `assets!()` too)
-  nsh\app.json           the window title, the app id, the version and the appearance
+  nsh\app.json           the window title, the app id, the version, the appearance and nsh.json's window options
 .nsh\out\<Name>.zip
 .nsh\out\<Name>.iss        the Inno Setup script for the installer
 .nsh\out\<Name>-setup.exe  the installer, when Inno Setup 6 is installed

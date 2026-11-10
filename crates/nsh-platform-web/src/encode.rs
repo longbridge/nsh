@@ -683,6 +683,11 @@ fn text_css(
     inherit_color: bool,
 ) -> String {
     let mut css = format!("font:{};", css_font(style));
+    // Hidden runs keep their place; the browser leaves them out of the
+    // selection's copy and of the accessibility tree.
+    if style.hidden {
+        css.push_str("visibility:hidden;");
+    }
     if !inherit_color {
         let _ = write!(css, "color:{};", css_color(style.color));
     }
@@ -1423,6 +1428,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(*start)
                 .num(*end)
                 .end();
+        }
+        Command::InsertText(text) => {
+            out.item("cmd").num(id).str("insertText").str(text).end();
         }
         Command::Dialog(d) => {
             out.item("cmd").num(id).str("dialog").num(d.id);

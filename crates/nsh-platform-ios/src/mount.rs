@@ -170,6 +170,27 @@ enum Refresh {
     },
 }
 
+/// Whether `refresh`, a scroll view's pull to refresh, is `control` itself
+/// (not merely a control in the same place).
+fn holds_refresh(refresh: Option<&Refresh>, control: &UIRefreshControl) -> bool {
+    matches!(refresh, Some(Refresh::Native(held)) if std::ptr::eq(&**held, control))
+}
+
+/// A refresh control for scroll view `id`. It names its scroll view itself
+/// ([`refresh_owner`]): UIKit may place it in a container of its own (iOS 26
+/// under a large title), so its superview is not the scroll view.
+fn refresh_control(id: NodeId, mtm: MainThreadMarker) -> Retained<UIRefreshControl> {
+    let control = UIRefreshControl::new(mtm);
+    control.setTag(id as isize);
+    control
+}
+
+/// The scroll view refresh control `control` was made for
+/// ([`refresh_control`]), wherever UIKit placed it.
+pub(crate) fn refresh_owner(control: &UIRefreshControl) -> NodeId {
+    control.tag() as NodeId
+}
+
 /// Lays UIKit's own content of `view` (controls, navigation bars, text
 /// fields) out right to left, or left to right.
 pub(crate) fn mirror(view: &UIView, rtl: bool) {
@@ -1763,6 +1784,10 @@ impl Mounter {
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
+            // Not carried out on iOS yet: the app's paste is lost, so say so.
+            (Command::InsertText(_), _) => {
+                log::warn!("insertText is not supported on iOS yet; nothing inserted")
+            }
             (Command::OpenEditMenu { bounds, actions }, Native::Input(input)) => {
                 let view = input.editor_view();
                 let rect = CGRect::new(
@@ -3211,7 +3236,7 @@ impl Mounter {
                 });
             }
             Some(None) => {
-                let control = UIRefreshControl::new(mtm);
+                let control = refresh_control(id, mtm);
                 // SAFETY: `handleRefresh:` is implemented by the target.
                 unsafe {
                     control.addTarget_action_forControlEvents(
@@ -4339,6 +4364,18 @@ impl Mounter {
         }
     }
 
+    /// UIKit's refresh control `control`, made for scroll view `id`, was
+    /// pulled. Only the control that scroll view holds now refreshes it: one
+    /// left over from a deleted view (whose id a new view may take) or
+    /// replaced by another indicator reports nothing.
+    pub(crate) fn refresh_pulled(&self, id: NodeId, control: &UIRefreshControl) {
+        let held = self.slot(id).and_then(|s| s.gestures.refresh.as_ref());
+        if holds_refresh(held, control) {
+            self.control
+                .dispatch_event(id, EventKind::Refresh, EventPayload::None);
+        }
+    }
+
     /// Brings a list's sticky cells above its other cells (the cells of a
     /// list in the scroll view's viewport are in that list, where the core
     /// keeps them on top).
@@ -4939,6 +4976,49 @@ mod tests {
             settled_content_width(320.0, 500.0, reaches_beyond(&scroll, 320.5)),
             320.0
         );
+    }
+
+    /// iOS 26 moves a scroll view's refresh control under a large title into
+    /// an untagged container: the control still names its own scroll view,
+    /// never node 0 from the container.
+    #[test]
+    #[ignore = "requires a UIKit main-thread harness"]
+    fn a_reparented_refresh_control_names_its_scroll_view() {
+        let mtm = MainThreadMarker::new().expect(
+            "UIKit views need the main thread: run this test from a UIKit main-thread harness, not a plain `cargo test` thread",
+        );
+        let scroll = UIScrollView::new(mtm);
+        scroll.setTag(6);
+        let control = refresh_control(6, mtm);
+        scroll.setRefreshControl(Some(&control));
+        assert_eq!(refresh_owner(&control), 6);
+
+        let container = UIView::new(mtm);
+        scroll.addSubview(&container);
+        container.addSubview(&control);
+        assert_eq!(control.superview().map(|v| v.tag()), Some(0));
+        assert_eq!(refresh_owner(&control), 6);
+    }
+
+    /// Only the control a scroll view holds now refreshes it: one it replaced,
+    /// or one of a deleted view whose id a new view took, is not it.
+    #[test]
+    #[ignore = "requires a UIKit main-thread harness"]
+    fn only_the_held_refresh_control_refreshes() {
+        let mtm = MainThreadMarker::new().expect(
+            "UIKit views need the main thread: run this test from a UIKit main-thread harness, not a plain `cargo test` thread",
+        );
+        let (old, new) = (refresh_control(6, mtm), refresh_control(6, mtm));
+        let held = Refresh::Native(new.clone());
+        assert!(holds_refresh(Some(&held), &new));
+        assert!(!holds_refresh(Some(&held), &old));
+        // Deleted, or switched to a pull detected here.
+        assert!(!holds_refresh(None, &new));
+        let custom = Refresh::Custom {
+            spinner: None,
+            refreshing: false,
+        };
+        assert!(!holds_refresh(Some(&custom), &new));
     }
 }
 

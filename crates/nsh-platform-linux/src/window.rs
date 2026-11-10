@@ -131,6 +131,11 @@ pub(crate) struct MainWindow {
     displays_watched: bool,
     /// It lets the pointer through (an empty input region).
     no_input: bool,
+    /// Its state when GTK last had a size for it: where a hidden window
+    /// was left, as GTK drops a hidden widget's size (and on X11 the window
+    /// manager its maximized state). Forgotten when the app sets a hidden
+    /// window's mode or size, which GTK holds for its next show ([`hidden`]).
+    seen: Option<WindowState>,
 }
 
 impl Default for MainWindow {
@@ -141,6 +146,7 @@ impl Default for MainWindow {
             closing: false,
             displays_watched: false,
             no_input: false,
+            seen: None,
         }
     }
 }
@@ -1362,14 +1368,66 @@ pub(crate) fn main_state_changed(surface: &Surface) {
     let Some(window) = main_window(surface) else {
         return;
     };
-    let mut normal = surface.main_window.borrow().normal;
-    let next = state_of(&window, surface.root.upcast_ref(), &mut normal);
-    surface.main_window.borrow_mut().normal = normal;
+    let (mut normal, seen) = {
+        let main = surface.main_window.borrow();
+        (main.normal, main.seen)
+    };
+    let sized = state_of(&window, surface.root.upcast_ref(), &mut normal);
+    let next = sized.or_else(|| hidden(&window, seen));
+    {
+        let mut main = surface.main_window.borrow_mut();
+        main.normal = normal;
+        if sized.is_some() {
+            main.seen = sized;
+        }
+    }
     let mut env = surface.environment.get();
     if next.is_some() && env.window_state != next {
         env.window_state = next;
         surface.set_environment(env);
     }
+}
+
+/// A main window hidden at launch (nsh.json `window.defaultVisible:
+/// false`): its app is laid out at the size the window opens at, as GTK
+/// sizes a window only as it shows it, and reads it hidden.
+pub(crate) fn launch_hidden(surface: &Surface) {
+    let Some(window) = main_window(surface) else {
+        return;
+    };
+    let (width, height) = window.default_size();
+    if width > 0 && height > 0 {
+        surface.assume_size(width as f32, height as f32);
+    }
+    main_state_changed(surface);
+}
+
+/// The state of a hidden main window, which GTK has no size for: where it
+/// was left (`seen`, its state when it last had a size: mode and bounds),
+/// or, not shown yet (nsh.json `window.defaultVisible: false`) or changed
+/// by the app since, as GTK holds it for its next show: in its mode, at
+/// its default size.
+fn hidden(window: &gtk::Window, seen: Option<WindowState>) -> Option<WindowState> {
+    if window.is_visible() {
+        return None;
+    }
+    if let Some(mut state) = seen {
+        state.visible = false;
+        state.focused = false;
+        return Some(state);
+    }
+    let (width, height) = window.default_size();
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    let bounds = Bounds::new(
+        point(Points(0.0), Points(0.0)),
+        size(Points(width as f32), Points(height as f32)),
+    );
+    let mode = mode_of(window.is_fullscreen(), window.is_maximized());
+    let mut state = WindowState::new(bounds, WindowPlacement::new(mode, bounds));
+    state.visible = false;
+    Some(state)
 }
 
 /// Follows the main window's state (once per window: `chrome`'s watch).
@@ -1415,8 +1473,43 @@ pub(crate) fn watch_main(surface: &Rc<Surface>, window: &gtk::Window) {
             });
         }
     }
+    let weak = Rc::downgrade(surface);
+    window.connect_map(move |window| {
+        if let Some(surface) = weak.upgrade() {
+            report_once_sized(&surface, window);
+        }
+    });
     pass_pointer(surface, ROOT_ID);
     main_state_changed(surface);
+    if window.is_visible() {
+        // Watched as it first shows, maybe inside the map above.
+        report_once_sized(surface, window);
+    }
+}
+
+/// Reports the main window's state once GTK has sized it: a window shows
+/// (and may take the focus) before it has a size, which GTK drops while it
+/// is hidden, so its state reads it shown only a frame later, often at the
+/// size its app already has (no resize reports it then).
+fn report_once_sized(surface: &Rc<Surface>, window: &gtk::Window) {
+    if window.width() > 0 && window.height() > 0 {
+        main_state_changed(surface);
+        return;
+    }
+    let weak = Rc::downgrade(surface);
+    window.add_tick_callback(move |window, _| {
+        if !window.is_visible() {
+            // Hidden again: its next map reports it.
+            return glib::ControlFlow::Break;
+        }
+        if window.width() <= 0 || window.height() <= 0 {
+            return glib::ControlFlow::Continue;
+        }
+        if let Some(surface) = weak.upgrade() {
+            main_state_changed(&surface);
+        }
+        glib::ControlFlow::Break
+    });
 }
 
 /// The surface's root was resized.
@@ -1486,6 +1579,19 @@ pub(crate) fn main_request(surface: &Rc<Surface>, request: &WindowRequest) {
         }
         WindowRequest::Center { .. } => {}
         WindowRequest::RequestAttention { .. } => launcher_urgent(surface, true),
+    }
+    let resized = matches!(
+        request,
+        WindowRequest::SetMode(_)
+            | WindowRequest::SetBounds(_)
+            | WindowRequest::SetContentSize { .. }
+            | WindowRequest::SetPlacement(_)
+    );
+    if resized && !window.is_visible() {
+        // GTK holds the mode and size for the window's next show: it reads
+        // as that, no longer where it was left.
+        surface.main_window.borrow_mut().seen = None;
+        main_state_changed(surface);
     }
 }
 
@@ -1784,9 +1890,13 @@ pub(crate) fn clear(surface: &Surface) {
         w.window.destroy();
     }
     let mut main = surface.main_window.borrow_mut();
-    let watched = main.displays_watched;
+    // The main window stays for the next app (a development host's
+    // reload), and so do its normal bounds and where it was left.
+    let (watched, normal, seen) = (main.displays_watched, main.normal, main.seen);
     *main = MainWindow {
         displays_watched: watched,
+        normal,
+        seen,
         ..MainWindow::default()
     };
 }
@@ -1955,6 +2065,61 @@ mod tests {
             size(Points(width), Points(300.0)),
         );
         WindowState::new(bounds, WindowPlacement::new(WindowMode::Normal, bounds))
+    }
+
+    /// The main window's state as the surface reports it.
+    fn reported(surface: &Surface) -> WindowState {
+        surface
+            .environment
+            .get()
+            .window_state
+            .expect("the main window's state")
+    }
+
+    #[test]
+    fn a_hidden_main_window_reads_where_it_was_left() {
+        crate::gtk_test::run(|| {
+            let surface = crate::gtk_test::surface();
+            let window = gtk::Window::new();
+            window.set_default_size(400, 300);
+            window.set_child(Some(&surface.root));
+            // Not shown yet: as GTK holds it for its first show.
+            main_state_changed(&surface);
+            let unshown = reported(&surface);
+            let opening = crate::gtk_test::frame(0.0, 0.0, 400.0, 300.0);
+            assert!(!unshown.visible);
+            assert_eq!(
+                unshown.placement,
+                WindowPlacement::new(WindowMode::Normal, opening)
+            );
+            // Shown, maximized and hidden: GTK dropped its size (and X11's
+            // window manager its maximized state), not where the user left
+            // it, which a reload keeps.
+            let mut seen = state(640.0);
+            seen.mode = WindowMode::Maximized;
+            seen.placement = WindowPlacement::new(WindowMode::Maximized, seen.bounds);
+            seen.focused = true;
+            surface.main_window.borrow_mut().seen = Some(seen);
+            main_state_changed(&surface);
+            let left = reported(&surface);
+            assert!(!left.visible && !left.focused);
+            assert_eq!(left.placement, seen.placement);
+            clear(&surface);
+            assert_eq!(surface.main_window.borrow().seen, Some(seen));
+            // The app sets its mode while it is hidden: as GTK holds it for
+            // its next show.
+            main_request(&surface, &WindowRequest::SetMode(WindowMode::Normal));
+            assert_eq!(
+                reported(&surface).placement,
+                WindowPlacement::new(WindowMode::Normal, opening)
+            );
+            main_request(&surface, &WindowRequest::SetMode(WindowMode::Maximized));
+            assert_eq!(
+                reported(&surface).placement,
+                WindowPlacement::new(WindowMode::Maximized, opening)
+            );
+            window.destroy();
+        });
     }
 
     #[test]

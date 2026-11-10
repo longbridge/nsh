@@ -432,7 +432,7 @@ impl AppView {
     /// `view.update(cx, |view, cx| …)`.
     #[cfg(feature = "dev")]
     pub fn connect_dev_server(&self, url: impl Into<String>, cx: &mut Context<Self>) {
-        crate::dev::start(self, url.into(), cx);
+        crate::dev::start(self, url.into(), false, cx);
     }
 
     /// Registers native component `name` (`nativeComponent(name, ...)` in
@@ -888,6 +888,8 @@ fn initial_environment() -> Environment {
         },
         idiom: Idiom::Desktop,
         file_requests: true,
+        // wry, in builds with it.
+        web_views: cfg!(feature = "webview"),
         ..Environment::default()
     }
 }
@@ -899,6 +901,15 @@ pub fn open_app_window(
     options: AppOptions,
     cx: &mut GpuiApp,
 ) -> anyhow::Result<gpui::WindowHandle<AppView>> {
+    open(source, options, cx).map(|(handle, _)| handle)
+}
+
+/// [`open_app_window`], and whether the window shows as it opens.
+fn open(
+    source: AppSource,
+    options: AppOptions,
+    cx: &mut GpuiApp,
+) -> anyhow::Result<(gpui::WindowHandle<AppView>, bool)> {
     // nsh.json `window` (a JS bundle's or a Rust root's), read before the
     // window is made so that its first frame has them (a dev server's
     // comes with its first bundle, and the engine applies its attributes
@@ -929,24 +940,64 @@ pub fn open_app_window(
         window_options.window_bounds = Some(crate::window::gpui_window_bounds(p));
         window_options.display_id = None;
     }
+    // nsh.json `window.defaultVisible: false`: the window opens hidden and
+    // the app runs in it, unseen, until it shows it (a tray app). A
+    // development host's window waits for its app, which brings the
+    // window's options (`crate::dev`). GPUI shows its windows as they open
+    // on Linux: there they show.
+    let held = app.is_err() && !SHOWN_AS_OPENED;
+    let shown = !held && (main.visible_at_launch() || SHOWN_AS_OPENED);
+    window_options.show = shown;
+    window_options.focus = shown;
+    if !held && !shown {
+        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
+    }
+    // GPUI applies a window's mode as it opens it, which shows a hidden one
+    // (full screen on macOS, maximizing on Windows): a window opening hidden
+    // opens in the normal mode and takes its mode as it first shows.
+    let opening_mode = match window_options.window_bounds {
+        Some(gpui::WindowBounds::Maximized(bounds)) if !shown => {
+            window_options.window_bounds = Some(gpui::WindowBounds::Windowed(bounds));
+            Some(nsh_core::desktop::WindowMode::Maximized)
+        }
+        Some(gpui::WindowBounds::Fullscreen(bounds)) if !shown => {
+            window_options.window_bounds = Some(gpui::WindowBounds::Windowed(bounds));
+            Some(nsh_core::desktop::WindowMode::FullScreen)
+        }
+        _ => None,
+    };
     let handle = cx.open_window(window_options, move |window, cx| {
         let view: Entity<AppView> = cx.new(|cx| AppView::new(options, window, cx));
         view.read(cx).own_window(window, cx);
+        view.read(cx)
+            .surface()
+            .chrome
+            .opening_mode
+            .set(opening_mode);
         match app {
             Ok(app) => view.read(cx).load(app),
             #[cfg(feature = "dev")]
             Err(AppSource::DevServer(url)) => {
-                view.update(cx, |view, cx| view.connect_dev_server(url, cx))
+                view.update(cx, |view, cx| crate::dev::start(view, url, held, cx))
             }
             #[allow(unreachable_patterns)]
             Err(_) => {}
         }
         let focus = view.read(cx).focus.clone();
         window.focus(&focus, cx);
+        // A hidden window draws no frame to report it with: the app reads
+        // it hidden until it shows it.
+        if !shown {
+            crate::window::observe_main(view.read(cx).surface(), window, cx);
+        }
         view
     })?;
-    Ok(handle)
+    Ok((handle, shown))
 }
+
+/// GPUI shows a window as it opens on Linux (X11, Wayland), whatever
+/// `WindowOptions::show` says.
+const SHOWN_AS_OPENED: bool = cfg!(target_os = "linux");
 
 /// The engine's configuration for running `app` with `options` (the
 /// environment and the picker the view's).
@@ -1060,13 +1111,16 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
             }
         })
         .detach();
-        if let Err(err) = open_app_window(source, options, cx) {
-            log::error!("cannot open a window: {err}");
-            ok.set(false);
-            cx.quit();
-            return;
+        match open(source, options, cx) {
+            Ok((_, true)) => cx.activate(true),
+            // Hidden: the app stays where the user is.
+            Ok((_, false)) => {}
+            Err(err) => {
+                log::error!("cannot open a window: {err}");
+                ok.set(false);
+                cx.quit();
+            }
         }
-        cx.activate(true);
     });
     if result.get() {
         std::process::ExitCode::SUCCESS

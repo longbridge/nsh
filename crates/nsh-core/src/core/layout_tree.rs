@@ -626,9 +626,9 @@ where
             FlexDirection::Row | FlexDirection::RowReverse
         )
         && n.style.flex_wrap == FlexWrap::NoWrap
-        && n.children
-            .iter()
-            .any(|&child| view.node(child).style.flex_grow > 0.0)
+        && view
+            .child_ids(node)
+            .any(|child| view.node(child).style.flex_grow > 0.0)
     {
         let measuring = LayoutInput {
             run_mode: RunMode::ComputeSize,

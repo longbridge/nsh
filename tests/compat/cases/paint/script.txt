@@ -418,6 +418,10 @@ style span:gone textUnderlineOffset 2
 style span:SHOUT textTransform uppercase
 style span:outer color #007affff
 style span:inner color #007affff
+# A hidden span keeps its characters and their place: as wide as shown.
+expect Seen unseen words
+frame id:hidden-span 0 942 131 17
+frame id:shown-span 0 959 131 17
 style span:inner fontSize 16
 covers [styles] fontFamily
 covers [styles] fontSize

@@ -3,6 +3,7 @@ name = "nsh-platform-ios"
 description = "UIKit backend: native view mounting, text measurement, input, app hosting and the embedding API (C ABI under the NativeShell Swift module)."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

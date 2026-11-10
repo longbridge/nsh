@@ -170,6 +170,10 @@ Things that were found the hard way. Read the section of the area you change bef
   idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control unless the
   app draws its own indicator (`refreshIndicator`), which `UIRefreshControl` cannot give way to: then it takes the Mac idiom's way,
   without the spinner (`Mounter::sync_refresh`, on the events and on each behavior).
+- **A `UIRefreshControl`'s superview is not always its scroll view**: under a large title iOS 26 moves it into an untagged
+  container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
+  pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
+  deleted or replaced view reports nothing, even where a new view took its id.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -435,6 +439,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **GTK delivers pointer events by allocation**, ignoring NSH's clipping (`overflow: hidden` in `snapshot`), `hidden`
   and `pointerEvents`: a hosted widget (a web view's page) gets clicks and wheels outside what is drawn of it unless
   the root's capture controller stops them (`input.rs`'s `shields_page`).
+- **GTK sizes a window only as it shows it, and drops the size while it is hidden**: a window maps, and may take the
+  focus, a frame before it has a size (its width reads 0 until then), and showing it again need not allocate the
+  root again when its size is the one it had. The main window's state reads it shown once it is sized
+  (`window::report_once_sized`, from its `map`), and an app whose window starts hidden is laid out at the window's
+  default size (`window::launch_hidden`).
 - **Tiling window managers ignore the host's `--window-size`** (the window's default size): a test's screenshots have the size
   the window got, and so does `app.setViewport` (it resizes on X11 and floating windows).
 
@@ -634,6 +643,9 @@ Things that were found the hard way. Read the section of the area you change bef
   of frames a minute and CPU went up several times on NVIDIA and Intel. Microsoft calls the flag "not recommended for
   general use": it is meant for apps that call Direct3D from a single thread, which NSH does (video decoding takes
   Direct3D's multithread lock and stays valid; the flag changes no thread safety).
+- **A hidden window can stay the foreground window**: hiding the foreground window (`SW_HIDE`) leaves
+  `GetForegroundWindow` returning it until another window takes the foreground, so a window's state reads it focused
+  only while it is shown (`window_state.rs`).
 - **Win32 timers tick at ~15.6 ms** (the default timer resolution) and wake-ups come late on a loaded machine: tests
   must not assume two timers a few milliseconds apart run in separate turns (chain them instead), and a test's waits
   need slack.

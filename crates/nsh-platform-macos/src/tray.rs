@@ -6,8 +6,9 @@
 //!   a new one has loaded, and the item keeps its place when the app changes
 //!   it.
 //! - Without an `onClick`, the item owns its menu and AppKit opens it at any
-//!   click. With one, a primary click is reported, and a secondary click (or
-//!   Control and a primary one, as everywhere on macOS) opens the menu.
+//!   click. With one, a primary click is reported with the item's frame on
+//!   the screen (its button's window), and a secondary click (or Control and
+//!   a primary one, as everywhere on macOS) opens the menu.
 //! - The menu's items are reported as the application menu's are
 //!   ([`crate::chrome::menu`]). The item goes with the app that set it.
 
@@ -16,7 +17,7 @@ use std::cell::RefCell;
 use nsh_core::{
     EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID, ResizeMode,
     desktop::Tray,
-    geometry::{Points, size},
+    geometry::{Bounds, Points, size},
     image::Want,
 };
 use objc2::{
@@ -28,7 +29,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSCopying, NSObjectProtocol, NSSize, NSString};
 
-use crate::{chrome, image::Load, surface::Surface};
+use crate::{chrome, image::Load, surface::Surface, window_state};
 
 /// The side of the square the icon is fitted in, in points: the menu bar's
 /// icon size (`NSStatusBar`'s thickness leaves 3 points around it).
@@ -82,7 +83,7 @@ define_class!(
             if secondary {
                 open_menu(mtm);
             } else {
-                report_click();
+                report_click(mtm);
             }
         }
     }
@@ -184,21 +185,34 @@ fn app_icon(mtm: MainThreadMarker) -> Option<Retained<NSImage>> {
     Some(icon)
 }
 
-/// A primary click, with an `onClick`.
-fn report_click() {
-    let Some((owner, click)) = ITEM.with(|i| i.borrow().as_ref().map(|i| (i.owner, i.click)))
-    else {
+/// A primary click, with an `onClick`: reported with the item's frame.
+fn report_click(mtm: MainThreadMarker) {
+    let Some((owner, click, status)) = ITEM.with(|i| {
+        i.borrow()
+            .as_ref()
+            .map(|i| (i.owner, i.click, i.status.clone()))
+    }) else {
         return;
     };
     if click != 0
         && let Some(surface) = Surface::with_key(owner)
     {
-        surface.event(
-            ROOT_ID,
-            EventKind::Menu,
-            EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(click)))]),
-        );
+        let mut payload = vec![("id", PayloadValue::Number(f64::from(click)))];
+        if let Some(bounds) = bounds(&status, mtm) {
+            payload.push(("bounds", PayloadValue::Bounds(bounds)));
+        }
+        surface.event(ROOT_ID, EventKind::Menu, EventPayload::Map(payload));
     }
+}
+
+/// The item's frame in screen points: its button's window, which the menu
+/// bar sizes to the item.
+fn bounds(status: &NSStatusItem, mtm: MainThreadMarker) -> Option<Bounds<Points>> {
+    let window = status.button(mtm)?.window()?;
+    Some(window_state::to_bounds(
+        window.frame(),
+        window_state::primary_height(mtm),
+    ))
 }
 
 /// A secondary click, with an `onClick`: the item shows its menu for as long

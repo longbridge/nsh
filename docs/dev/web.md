@@ -340,7 +340,12 @@ A Rust app (`nsh.json` `"root"`: `rust_app::RootConfig`, its entry the `nsh.json
 at all: its member `rust-web` is `nsh-platform-web` **without the feature `browser-core`** (no browser host, the
 engine without `js`) and `nsh_platform_web::rust_app!(sets, app_root())`, whose `nsh_app_init` also registers the
 root (`set_root`); `app_root()` is generated from `"root"`, `"theme"` (compiled in with `include_str!`) and
-`"appearance"` (`Root::appearance`). The page calls `player.runRust()` (`nsh_start_rust`) instead of `runModule`:
+`"appearance"` (`Root::appearance`). Its `sets` take `nsh/base`'s core part only
+(`nsh_base::registry_of([parts::core])`, `RustApp::rust_web_sets`), not `nsh_base::registry()`: with no JS, nothing
+makes a component by its registered name, the root makes each component by type (`nsh_base::select()`), which links
+that component where it is used, and the set gives the theme's tokens and the built-in scroll bars. Registering every
+part would link every component of `nsh/base` into the module. The page calls `player.runRust()` (`nsh_start_rust`)
+instead of `runModule`:
 the packaged page when `app.rust` is set (no `app.js`), the dev page (`{{rust}}`) once the dev server greets it; the
 dev session publishes no bundles (`DevSession::rust_root`). The browser host's exports (`nsh_browser_*`) are
 `cfg(feature = "browser-core")`. The runtime builds to
@@ -348,8 +353,9 @@ dev session publishes no bundles (`DevSession::rust_root`). The browser host's e
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
 (`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
-Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no browser host, so smaller than
-the prebuilt runtime, which a TSX entry needs.
+Rust app (2026-11) its `nsh.wasm` is 9.15 MB (3.11 MB with `gzip -9`, 2.18 MB with brotli; 12.78 / 4.40 / 3.00 MB
+while it registered every part of `nsh/base`; `examples/tasks-rs` 5.23 MB, 11.04 MB before): no browser host, which
+a TSX entry needs.
 
 ### Crates that call JS through wasm-bindgen
 

@@ -58,13 +58,15 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Whether `key` is made with its parent wherever it is: it may show
-    /// away from its frame.
+    /// away from its frame, or lays out on its own (a dialog's modal, which
+    /// [`Core::sync_culled`] never comes back to).
     pub(super) fn never_culled(&self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
         node.sticky.is_some()
             || node.follow.is_some()
             || node.decoration
             || node.is_overlay()
+            || node.is_layout_root()
             || !node.animated.is_empty()
             || !node.view_style.transform.ops().is_empty()
     }

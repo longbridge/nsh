@@ -1967,6 +1967,13 @@ pub enum Command {
         /// End.
         end: u32,
     },
+    /// Insert text into an input in place of its selection, as the user's
+    /// edit: the input's `maxLength` and line rules apply, `onChangeText`
+    /// reports it, no key is reported, and where the platform keeps an
+    /// undo history it is a step of it (unlike a new `value`). With
+    /// `pasteBehavior` `"report"`, the app inserts a paste it allowed or
+    /// rewrote this way.
+    InsertText(String),
     /// Have the screen reader read a message (on the root).
     Announce(String),
     /// Turn the performance monitor on or off (on the root;
