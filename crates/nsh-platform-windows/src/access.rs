@@ -256,6 +256,7 @@ struct Spec {
     checked: Option<Checked>,
     expanded: Option<bool>,
     busy: bool,
+    invalid: bool,
     /// The current value of a range.
     now: Option<f32>,
     live: LiveRegion,
@@ -546,6 +547,7 @@ fn spec_of(s: &ViewState) -> Spec {
         checked: toggled(a),
         expanded: a.state.expanded,
         busy: a.state.busy,
+        invalid: a.state.invalid,
         now: a.value.as_ref().and_then(|v| v.now),
         live: a.live_region,
     }
@@ -714,6 +716,8 @@ pub(crate) struct Exposed {
     pub(crate) expanded: Option<bool>,
     /// Busy.
     pub(crate) busy: bool,
+    /// The content does not pass the app's checks.
+    pub(crate) invalid: bool,
     /// A range's value.
     pub(crate) now: Option<f32>,
 }
@@ -727,6 +731,7 @@ fn exposed_of(s: &Spec) -> Exposed {
         checked: s.checked,
         expanded: s.expanded,
         busy: s.busy,
+        invalid: s.invalid,
         now: s.now,
     }
 }

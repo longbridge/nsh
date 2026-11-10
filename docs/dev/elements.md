@@ -271,19 +271,25 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `time`), `hasPopup` (`aria-haspopup`: the element opens a popup, a menu or a list, and its `expanded` says whether
   it is open; `nsh-base`'s `Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set it on their
   triggers; an `expanded` element without it is a disclosure that shows its content in place; the web sets
-  `aria-haspopup`, the terminal marks a disclosure `▸` / `▾` and a popup trigger not; elsewhere it is not exposed yet);
+  `aria-haspopup`, the terminal marks a disclosure `▸` / `▾` and a popup trigger not; elsewhere it is not exposed yet),
+  `invalid` (`aria-invalid`: the content does not pass the app's checks, a rejected field; `aria-invalid:` classes
+  style it; a slot's element keeps the app's beside the component's states);
   `accessibilityLevel` (`aria-level`: a heading's level, a tree item's depth). Per platform: macOS a toggle is
   `AXCheckBox` / `AXToggle` with its pressed value, `region` / `navigation` are `AXGroup` with WebKit's landmark
   subroles, a tree is a list of static-text items (as options: AppKit's outline rows need its rows and columns) with
   their disclosure level, `current` and a heading's level are not exposed (AppKit has no attribute for the first, and a
-  heading's value is its text, which VoiceOver reads); iOS a pressed toggle carries the selected trait (UIKit's toggle
-  trait is iOS 17's), mixed and `current` are spoken in the value, `group` / `region` / `navigation` / `tree` /
+  heading's value is its text, which VoiceOver reads), `invalid` is WebKit's `AXInvalid` attribute, which the view
+  answers itself (`view.rs`); iOS a pressed toggle carries the selected trait (UIKit's toggle
+  trait is iOS 17's), mixed, `current` and `invalid` are spoken in the value, `group` / `region` / `navigation` / `tree` /
   `toolbar` are semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
-  is a checkable `ToggleButton`, `current` and mixed go in the state description, roles without a widget class in the
+  is a checkable `ToggleButton`, `current` and mixed go in the state description, `invalid` there too and in
+  `setContentInvalid`, roles without a widget class in the
   role description, no level; Windows a toggle has the Toggle pattern (and "toggle button"), landmarks
   (`UIA_LandmarkTypePropertyId`), `Tree` / `TreeItem` control types, a heading's `HeadingLevel1`…`9`, a tree item's
-  `UIA_LevelPropertyId`, `current` in `AriaProperties`; Linux GTK's roles, `Pressed` on buttons, `Level`; GPUI
-  AccessKit's roles, `toggled`, `level`, `aria_current`; the web the ARIA attributes. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
+  `UIA_LevelPropertyId`, `current` and `invalid` in `AriaProperties`, `invalid` also as `IsDataValidForForm` false;
+  Linux GTK's roles, `Pressed` on buttons, `Level`, `Invalid` (AT-SPI's invalid entry); GPUI AccessKit's roles,
+  `toggled`, `level`, `aria_current`, `invalid`; the web the ARIA attributes (`aria-invalid` on an input's field
+  too). Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
