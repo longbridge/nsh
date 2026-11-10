@@ -2556,6 +2556,67 @@ fn a_base_button_has_behavior_and_no_look() {
     );
 }
 
+const DECLARED_BUTTON: &str = r##"import { mount, Text, View } from "nsh";
+import { Button } from "nsh/base";
+
+mount(() => (
+  <View>
+    <Button testID="buy" variant="primary">
+      <Text>Buy</Text>
+    </Button>
+    <Button testID="plain">
+      <Text>Plain</Text>
+    </Button>
+  </View>
+));
+"##;
+
+/// A TSX app's `nsh.json` `"components"` reaches the core before the first
+/// render: the `Button` that picks the variant takes its classes, with the
+/// theme's token resolved, and the one that picks none takes no look.
+#[test]
+fn a_tsx_button_takes_its_declared_variant() {
+    let (_engine, rx) = start_with(
+        DECLARED_BUTTON,
+        Environment::default(),
+        None,
+        Some(
+            r##"{
+                "theme": { "cssVars": { "light": { "primary": "#0000ff" }, "dark": { "primary": "#0000ff" } } },
+                "components": { "button": { "variants": { "primary": "bg-primary bg-nope" } } }
+            }"##,
+        ),
+    );
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let root = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let background = |view: u32| {
+        first.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if *id == view => Some(style.background_color),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        background(root("buy")),
+        Some(nsh_core::Color(0x0000_ffff)),
+        "{:?}",
+        first.items
+    );
+    assert_eq!(background(root("plain")), None, "{:?}", first.items);
+}
+
 const BASE_SWITCH: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Switch } from "nsh/base";
 

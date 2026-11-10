@@ -92,12 +92,13 @@ export function createEnvironment(reactive, invoke, dom) {
         fields.locale.set(tag);
       });
     },
-    setup(tailwind, theme, scheme, statusBar, app) {
+    setup(tailwind, theme, scheme, statusBar, app, components) {
       if (typeof tailwind === "string") dom.rootProp("tailwindTheme", tailwind);
       if (typeof theme === "string") { dom.rootProp("uiTheme", theme); invoke(403, [theme]); tokens.update(value => value + 1); }
       if (["light", "dark", "system"].includes(scheme)) setColorScheme(scheme);
       if (typeof statusBar === "string") invoke(405, [statusBar]);
       if (typeof app === "string") appInfo = readAppInfo(app);
+      if (typeof components === "string") dom.rootProp("componentStyles", components);
     },
   };
 }

@@ -194,6 +194,7 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught, panic_message},
+    component_styles::set_component_classes,
     task::{
         Action, AfterAnswer, AnswerSlot, AudioAction, ClipboardRead, Executor, FileAnswer,
         NotificationAction, SpeechAction,

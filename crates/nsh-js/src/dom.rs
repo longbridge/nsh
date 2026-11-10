@@ -3382,11 +3382,13 @@ unsafe extern "C" fn unmount(
     result
 }
 
-/// `setup(tailwind, theme, appearance, statusBar, app)`: the app's Tailwind
-/// theme and the theme of the Rust components (JSON strings, or null), its
-/// appearance (`"light"` / `"dark"`, or null), the status bar's default
-/// (`nsh.json` `"statusBar"` as JSON, or null) and what `appInfo()` reports
-/// (JSON, or null), before anything renders.
+/// `setup(tailwind, theme, appearance, statusBar, app, components)`: the
+/// app's Tailwind theme and the theme of the Rust components (JSON strings,
+/// or null), its appearance (`"light"` / `"dark"`, or null), the status
+/// bar's default (`nsh.json` `"statusBar"` as JSON, or null), what
+/// `appInfo()` reports (JSON, or null) and the looks of `nsh-base`'s
+/// components (`nsh.json` `"components"` as JSON, or null), before anything
+/// renders.
 unsafe extern "C" fn setup(
     cx: *mut JsContext,
     _this: JsValue,
@@ -3401,7 +3403,9 @@ unsafe extern "C" fn setup(
         crate::env::set_app_info(cx, &json);
     }
     let root = dom(cx).root.get();
-    for (i, name) in ["tailwindTheme", "uiTheme"].into_iter().enumerate() {
+    // The components' looks reach the core before the components the first
+    // render makes, in this turn's commit: they read them when they build.
+    for (i, name) in [(0, "tailwindTheme"), (1, "uiTheme"), (5, "componentStyles")] {
         let v = arg(argc, argv, i);
         // SAFETY: an inline tag check.
         if unsafe { qjs::JS_IsString(v) }

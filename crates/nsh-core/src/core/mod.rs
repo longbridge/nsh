@@ -5010,6 +5010,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_ui_theme(&json);
                 return Ok(());
             }
+            Prop::ComponentStyles(json) => {
+                self.set_component_styles(&json);
+                return Ok(());
+            }
             Prop::LayoutDirection(rtl) => {
                 // The surface's direction (the root's): the user's language, as
                 // JS or the policy sets it.

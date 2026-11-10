@@ -558,6 +558,11 @@ pub(crate) fn ui_theme<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> 
     Some(Prop::UiTheme(input.as_string()?.into()))
 }
 
+/// `componentStyles`: JSON; nothing without it.
+pub(crate) fn component_styles<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    Some(Prop::ComponentStyles(input.as_string()?.into()))
+}
+
 /// `role`: one of the role names; others are no role (and a
 /// warning).
 pub(crate) fn role<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<AccessibilityProp> {

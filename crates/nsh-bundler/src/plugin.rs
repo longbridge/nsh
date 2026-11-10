@@ -49,8 +49,8 @@ pub(crate) struct NshPlugin {
     pub(crate) split: bool,
 }
 
-/// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// app's `nsh.json`.
+/// The `"tailwind"`, `"theme"`, `"appearance"`, `"statusBar"` and
+/// `"components"` of the app's `nsh.json`.
 #[derive(Debug, Default)]
 pub(crate) struct ThemeSetup {
     /// The Tailwind theme as JSON, for the runtime (`None`: the default).
@@ -63,6 +63,9 @@ pub(crate) struct ThemeSetup {
     pub(crate) appearance: Option<&'static str>,
     /// `"statusBar"`, checked, as JSON: the status bar's default.
     pub(crate) status_bar: Option<String>,
+    /// `"components"`, its unknown classes taken out, as JSON: the looks
+    /// of `nsh-base`'s components per variant and size.
+    pub(crate) components: Option<String>,
     /// The app's translations (`locales/`) and the language data it ships
     /// (`"locales"`), as the runtime's `i18n` takes them: a module of their
     /// own the entry imports first ([`I18N_MODULE`]).
@@ -315,10 +318,18 @@ impl NshPlugin {
         let call = (setup.json.is_some()
             || setup.ui.is_some()
             || setup.appearance.is_some()
-            || setup.status_bar.is_some())
+            || setup.status_bar.is_some()
+            || setup.components.is_some())
         .then(|| {
+            // The fifth argument, the app's information, comes from its
+            // own module ([`APP_MODULE`]); the components' looks follow it
+            // (a runtime that predates them ignores them).
+            let components = match &setup.components {
+                Some(_) => format!(", null, {}", json(&setup.components)),
+                None => String::new(),
+            };
             format!(
-                "_$setup({}, {}, {}, {});",
+                "_$setup({}, {}, {}, {}{components});",
                 json(&setup.json),
                 json(&setup.ui),
                 json(&setup.appearance.map(str::to_owned)),

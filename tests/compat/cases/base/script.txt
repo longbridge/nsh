@@ -181,6 +181,16 @@ covers [events] onPressUp
 covers [events] onPress
 covers [props] Button.selected
 covers [props] selectedStyle
+# base-component-style
+tap id:case-base-component-style
+# nsh.json's looks for the variant and size picked, `bg-primary` the
+# theme's token (shadcn's `neutral`); none for a button picking neither.
+expect Buy
+style id:buy backgroundColor #171717ff
+frame id:buy 0 20 390 44
+nostyle id:plain backgroundColor
+covers [props] Button.variant
+covers [props] Button.size
 # base-link
 tap id:case-base-link
 # The link role on the link alone, no look of its own: the app's

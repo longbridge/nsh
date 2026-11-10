@@ -5,6 +5,16 @@
     "foreground": "dark",
     "hidden": true
   },
+  "components": {
+    "button": {
+      "variants": {
+        "primary": "bg-primary"
+      },
+      "sizes": {
+        "lg": "h-[44px]"
+      }
+    }
+  },
   "theme": {
     "cssVars": {
       "theme": {

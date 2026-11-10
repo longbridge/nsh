@@ -8,6 +8,7 @@ import BaseAccordion from "./base-accordion";
 import BaseAlertDialog from "./base-alert-dialog";
 import BaseAvatar from "./base-avatar";
 import BaseButton from "./base-button";
+import BaseComponentStyle from "./base-component-style";
 import BaseCarousel from "./base-carousel";
 import BaseCheckbox from "./base-checkbox";
 import BaseCollapsible from "./base-collapsible";
@@ -66,6 +67,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-alert-dialog": BaseAlertDialog,
   "base-avatar": BaseAvatar,
   "base-button": BaseButton,
+  "base-component-style": BaseComponentStyle,
   "base-carousel": BaseCarousel,
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,

@@ -381,10 +381,10 @@ fn theme_json(
     })
 }
 
-/// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// `nsh.json` in the app directory ([`app_dir`]), checked, and the app's information
-/// (`development`: a development build; [`app_json`]). `"theme"` is
-/// shadcn's `cssVars` ([`theme_json`]).
+/// The `"tailwind"`, `"theme"`, `"appearance"`, `"statusBar"` and
+/// `"components"` of the `nsh.json` in the app directory ([`app_dir`]),
+/// checked, and the app's information (`development`: a development build;
+/// [`app_json`]). `"theme"` is shadcn's `cssVars` ([`theme_json`]).
 fn tailwind_setup(
     dir: &std::path::Path,
     development: bool,
@@ -442,8 +442,66 @@ fn tailwind_setup(
         warn_ignored("statusBar", &ignored);
         setup.status_bar = Some(status_bar.to_string());
     }
+    if let Some(components) = config.get("components") {
+        // After `set_tokens`: the theme's tokens are classes too.
+        let (checked, unknown) = checked_components(&setup.theme, components);
+        for what in unknown {
+            log::warn!(target: "nsh::build", "nsh.json: components: {what}, ignored");
+        }
+        setup.components = checked;
+    }
     setup.i18n = i18n_json(dir, Some(&config))?;
     Ok(Arc::new(setup))
+}
+
+/// `nsh.json` `"components"` with the classes this NSH does not know (or
+/// the app's theme does not define) taken out of each class string, as
+/// JSON for the runtime, and a line naming each class taken out. The rest
+/// of its form the core checks when it reads it (keys of a newer NSH are
+/// left as they are); `None` when it is not an object.
+fn checked_components(
+    theme: &nsh_core::tailwind::Theme,
+    components: &serde_json::Value,
+) -> (Option<String>, Vec<String>) {
+    use serde_json::Value;
+    let mut unknown = Vec::new();
+    let Value::Object(components) = components else {
+        unknown.push(format!("{components} is not an object"));
+        return (None, unknown);
+    };
+    let mut check = |at: String, value: &mut Value| {
+        let Value::String(classes) = value else {
+            return;
+        };
+        let list = nsh_core::tailwind::parse(theme, classes);
+        if list.unknown().is_empty() {
+            return;
+        }
+        for class in list.unknown() {
+            unknown.push(format!("{at}: unknown class `{class}`"));
+        }
+        let kept: Vec<&str> = classes
+            .split_ascii_whitespace()
+            .filter(|c| !list.unknown().iter().any(|u| &**u == *c))
+            .collect();
+        *value = Value::String(kept.join(" "));
+    };
+    let mut components = components.clone();
+    for (name, spec) in &mut components {
+        let Value::Object(spec) = spec else { continue };
+        if let Some(base) = spec.get_mut("base") {
+            check(format!("{name}.base"), base);
+        }
+        for key in ["variants", "sizes"] {
+            let Some(Value::Object(looks)) = spec.get_mut(key) else {
+                continue;
+            };
+            for (entry, classes) in looks {
+                check(format!("{name}.{key}.{entry}"), classes);
+            }
+        }
+    }
+    (Some(Value::Object(components).to_string()), unknown)
 }
 
 /// What `appInfo()` reports, as JSON: `nsh.json`'s `"id"`, `"name"`,
@@ -1643,6 +1701,80 @@ mod tests {
         assert!(caps.status_bar);
         // A value of a form this NSH does not know grants nothing.
         assert!(!caps.clipboard);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `nsh.json` `"components"` loses the classes the bundler does not
+    /// know, each named in a warning, and keeps the rest of every string
+    /// and the keys it leaves to the core.
+    #[test]
+    fn nsh_json_components_unknown_classes_warn() {
+        let dir = std::env::temp_dir().join(format!("nsh-components-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let components = serde_json::json!({
+            "button": {
+                "base": "rounded-md px-4",
+                "variants": { "primary": "bg-primary bg-nope text-primary-foreground" },
+                "sizes": { "lg": "h-10" },
+                "defaults": { "variant": "primary" }
+            }
+        });
+        std::fs::write(
+            dir.join("nsh.json"),
+            serde_json::json!({ "components": components }).to_string(),
+        )
+        .unwrap();
+        let setup = tailwind_setup(&dir, false, &AppInfo::default()).unwrap();
+        let checked: serde_json::Value =
+            serde_json::from_str(setup.components.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            checked,
+            serde_json::json!({
+                "button": {
+                    "base": "rounded-md px-4",
+                    "variants": { "primary": "bg-primary text-primary-foreground" },
+                    "sizes": { "lg": "h-10" },
+                    "defaults": { "variant": "primary" }
+                }
+            })
+        );
+        let (_, unknown) = checked_components(&setup.theme, &components);
+        assert_eq!(
+            unknown,
+            ["button.variants.primary: unknown class `bg-nope`"]
+        );
+        // Not an object: nothing reaches the runtime.
+        let (checked, unknown) = checked_components(&setup.theme, &serde_json::json!([]));
+        assert_eq!((checked, unknown.len()), (None, 1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The entry's prologue hands the runtime `"components"` as `setup`'s
+    /// sixth argument, after the app's information (null there).
+    #[test]
+    fn nsh_json_components_reach_the_prologue() {
+        let dir = single(
+            "components",
+            "import { mount } from \"nsh\";\n\
+             import { Button } from \"nsh/base\";\n\
+             mount(() => <Button variant=\"primary\" />);\n",
+        );
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "components": { "button": { "variants": { "primary": "bg-primary" } } } }"#,
+        )
+        .unwrap();
+        let code = bundling(&dir).unwrap().code;
+        let marker = "null, null, null, null, null, ";
+        let at = code.find(marker).expect(&code);
+        let json: String =
+            serde_json::from_str(code[at + marker.len()..].split(");").next().unwrap())
+                .expect(&code);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            serde_json::json!({ "button": { "variants": { "primary": "bg-primary" } } })
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
