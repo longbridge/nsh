@@ -85,7 +85,7 @@ pub fn tokens_of(json: Option<&str>) -> Result<Tokens, String> {
 pub(crate) fn read_tokens(json: Option<&str>) -> Result<(Tokens, Vec<String>), String> {
     match json {
         Some(json) => {
-            let (theme, ignored) = Theme::from_json_lenient(json).map_err(|e| e.0)?;
+            let (theme, ignored) = Theme::from_json_with_diagnostics(json).map_err(|e| e.0)?;
             Ok((theme.into_tokens(), ignored))
         }
         None => Ok((Theme::default().into_tokens(), Vec::new())),
@@ -237,12 +237,13 @@ impl Theme {
     /// NSH keeps its theme on an older runtime. Only text that is not JSON
     /// is an error.
     pub fn from_json(json: &str) -> Result<Self, ThemeError> {
-        Self::from_json_lenient(json).map(|(theme, _)| theme)
+        Self::from_json_with_diagnostics(json).map(|(theme, _)| theme)
     }
 
-    /// [`Theme::from_json`], with what it left out, which the toolchain
-    /// warns of (a newer NSH's, or a typo) and the runtime logs.
-    pub fn from_json_lenient(json: &str) -> Result<(Self, Vec<String>), ThemeError> {
+    /// Parses the theme as [`Theme::from_json`] and returns diagnostics
+    /// describing sections and values it could not read. The toolchain
+    /// displays these diagnostics as warnings; the runtime logs them.
+    pub fn from_json_with_diagnostics(json: &str) -> Result<(Self, Vec<String>), ThemeError> {
         let mut tokens = DEFAULT_TOKENS.clone();
         let ignored = apply(&mut tokens, json)?;
         Ok((Self::of(Arc::new(tokens)), ignored))
@@ -688,7 +689,7 @@ mod tests {
 
     #[test]
     fn what_it_cannot_read_is_left_out() {
-        let (theme, mut ignored) = Theme::from_json_lenient(
+        let (theme, mut ignored) = Theme::from_json_with_diagnostics(
             r##"{ "cssVars": {
                 "theme": { "radius": "0.5rem" },
                 "light": { "a": "var(--b)", "b": "var(--a)", "primary": "#e11d48", "odd": [1] },
@@ -709,7 +710,7 @@ mod tests {
             ]
         );
         // Another form of theme (a newer NSH's): the default's tokens.
-        let (theme, ignored) = Theme::from_json_lenient(r#"{ "colors": {} }"#).unwrap();
+        let (theme, ignored) = Theme::from_json_with_diagnostics(r#"{ "colors": {} }"#).unwrap();
         assert_eq!(theme, Theme::default());
         assert_eq!(ignored.len(), 1);
     }
@@ -718,10 +719,10 @@ mod tests {
     fn a_non_object_css_vars_is_listed() {
         for vars in ["null", "[]", "true", "12", r#""light""#] {
             let json = format!(r#"{{ "cssVars": {vars} }}"#);
-            let (_, ignored) = Theme::from_json_lenient(&json).unwrap();
+            let (_, ignored) = Theme::from_json_with_diagnostics(&json).unwrap();
             assert_eq!(ignored, ["cssVars: expected an object"], "{json}");
         }
-        let (_, ignored) = Theme::from_json_lenient(r#"{ "cssVars": {} }"#).unwrap();
+        let (_, ignored) = Theme::from_json_with_diagnostics(r#"{ "cssVars": {} }"#).unwrap();
         assert!(ignored.is_empty());
     }
 
@@ -733,10 +734,10 @@ mod tests {
             "color-mix(in srgb, rgb(255 0 0), #fff",
         ] {
             let json = format!(r#"{{ "cssVars": {{ "light": {{ "brand": "{value}" }} }} }}"#);
-            let (_, ignored) = Theme::from_json_lenient(&json).unwrap();
+            let (_, ignored) = Theme::from_json_with_diagnostics(&json).unwrap();
             assert_eq!(ignored, [format!("`brand`: {value} is no color")]);
         }
-        let (_, ignored) = Theme::from_json_lenient(
+        let (_, ignored) = Theme::from_json_with_diagnostics(
             r#"{ "cssVars": { "theme": { "shadow-sm": "rgb(0 0 0 / 0.1) 0px 1px 2px" } } }"#,
         )
         .unwrap();
@@ -745,7 +746,7 @@ mod tests {
 
     #[test]
     fn a_dark_length_does_not_hide_an_unreadable_light_color() {
-        let (theme, ignored) = Theme::from_json_lenient(
+        let (theme, ignored) = Theme::from_json_with_diagnostics(
             r##"{ "cssVars": { "light": { "brand": "#zz" }, "dark": { "brand": "12px" } } }"##,
         )
         .unwrap();
@@ -755,7 +756,7 @@ mod tests {
 
     #[test]
     fn a_color_that_is_none_is_listed() {
-        let (theme, mut ignored) = Theme::from_json_lenient(
+        let (theme, mut ignored) = Theme::from_json_with_diagnostics(
             r##"{ "cssVars": {
                 "theme": { "shadow-sm": "0 1px 2px #0000", "letter-spacing": "0em" },
                 "light": { "brand": "#e11d48", "edge": "#zzz", "glow": "lab(50% 40 59)",
