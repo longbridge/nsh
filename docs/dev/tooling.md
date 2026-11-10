@@ -1012,6 +1012,8 @@ embedding SDKs are archives of their own (`nsh-embed-ios.zip`, `nsh-embed-androi
 moves every other runtime into its component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and
 `nsh-web.tar.gz` from x86_64 Linux's build, `nsh-ios-macos-arm64.tar.gz`, `nsh-gpui-<platform>.tar.gz`,
 `nsh-tui-<platform>.tar.gz`), each with a `.sha256`.
+The release builds them with thin LTO over 16 codegen units (`CARGO_PROFILE_RELEASE_*` in the workflow) rather than
+the profile's fat LTO over one, which linked each executable single-threaded for up to 25 minutes; `web` keeps fat LTO.
 `xtask dist` strips the executables it copies (`copy_executable`: about a sixth of each), after the build rather
 than with the profile's `strip`, so the release builds a checkout keeps for profiling stay as they are. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers

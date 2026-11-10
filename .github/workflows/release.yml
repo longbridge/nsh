@@ -266,8 +266,17 @@ jobs:
             ${{ runner.os }}-release-cargo-
 
       # A nightly CLI knows its channel: `nsh update` stays on it.
+      # The release profile's fat LTO over one codegen unit links each of
+      # the distribution's ~15 executables single-threaded, 5 to 25 minutes
+      # apiece: thin LTO over 16 units takes a fraction of that for little
+      # run-time cost. The web profile, which inherits release, keeps fat
+      # LTO: what pages download is built for size (docs/dev/web.md).
       - name: Build the distribution
         env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_WEB_LTO: fat
+          CARGO_PROFILE_WEB_CODEGEN_UNITS: "1"
           NSH_CHANNEL: ${{ env.NIGHTLY == 'true' && 'nightly' || 'stable' }}
           NSH_DIST_NO_ANDROID: ${{ matrix.no_android && '1' || '' }}
         run: cargo xtask dist -v
