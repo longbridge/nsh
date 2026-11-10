@@ -99,6 +99,7 @@ impl Headless {
             self.finger_lifted(finger);
         }
         let parsed = Selector::parse(selector)?;
+        self.input_with(nsh_core::platform::InputModality::Pointer);
         let pick = self.screen.view(&parsed);
         let target = self.picked(pick, selector, "view")?;
         let bounds = self

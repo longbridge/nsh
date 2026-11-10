@@ -155,6 +155,7 @@ pub fn style_patch_prop(name: &str) -> Option<StylePatchProp> {
         "expandedStyle" => Prop::ExpandedStyle,
         "pressedStyle" => Prop::PressedStyle,
         "focusWithinStyle" => Prop::FocusWithinStyle,
+        "focusVisibleStyle" => Prop::FocusVisibleStyle,
         "headerStyle" => Prop::HeaderStyle,
         _ => return None,
     })

@@ -608,6 +608,9 @@ fn shields_page(surface: &Surface, event: &gdk::Event) -> bool {
 fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
     use gdk::EventType as T;
     let ty = event.event_type();
+    if matches!(ty, T::ButtonPress | T::TouchBegin) {
+        pointer_input(surface);
+    }
     match ty {
         T::ButtonPress
         | T::ButtonRelease
@@ -951,6 +954,12 @@ pub(crate) fn hold(keys: gdk::ModifierType, down: bool) {
 
 /// Feeds a simulated pointer action through the same path as real input.
 #[cfg(feature = "dev")]
+/// A button or a finger went down: told before the press acts, so the
+/// focus it moves does not show (`focus-visible:`).
+fn pointer_input(surface: &Surface) {
+    surface.control(|c| c.set_input_modality(nsh_core::platform::InputModality::Pointer));
+}
+
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
     let held = HELD.with(std::cell::Cell::get);
@@ -963,6 +972,9 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     | Simulated::Hover(x, y)
     | Simulated::ContextMenu(x, y)) = action;
     surface.input.last.set(Some((x, y)));
+    if matches!(action, Simulated::Down(..) | Simulated::ContextMenu(..)) {
+        pointer_input(surface);
+    }
     match action {
         Simulated::Down(x, y) => {
             // Simulated drags carry no state: the button held is recorded.

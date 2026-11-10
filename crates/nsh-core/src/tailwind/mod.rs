@@ -79,6 +79,12 @@ pub mod state {
     /// The view is busy (`aria-busy:`): its `accessibilityState.busy`.
     /// Set by the core, never reported by the platform.
     pub const BUSY: u16 = 1024;
+    /// The view has the keyboard focus and shows it (`focus-visible:`):
+    /// the keyboard moved it there, or it is an input that edits, as CSS's
+    /// `:focus-visible`. Set by the core from [`FOCUSED`] and the surface's
+    /// input modality (`Core::set_input_modality`), never reported by the
+    /// platform.
+    pub const FOCUS_VISIBLE: u16 = 2048;
     /// The states the core sets from the accessibility state, which the
     /// platforms never report.
     pub(crate) const ACCESSIBILITY: u16 =
@@ -282,8 +288,11 @@ impl Condition {
     /// Applies only while the view (or its group) is pressed, hovered or
     /// focused: press feedback.
     fn interactive(&self) -> bool {
-        const INTERACTION: u16 =
-            state::PRESSED | state::HOVERED | state::FOCUSED | state::FOCUS_WITHIN;
+        const INTERACTION: u16 = state::PRESSED
+            | state::HOVERED
+            | state::FOCUSED
+            | state::FOCUS_WITHIN
+            | state::FOCUS_VISIBLE;
         self.states & INTERACTION != 0
             || self
                 .group
@@ -1181,7 +1190,7 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
             rank::FOCUS
         }
         "focus-visible" => {
-            states(cond, FOCUSED);
+            states(cond, FOCUS_VISIBLE);
             rank::FOCUS_VISIBLE
         }
         "active" => {
@@ -1286,7 +1295,7 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
                     "hover" => (HOVERED, rank::HOVER),
                     "active" => (PRESSED, rank::ACTIVE),
                     "focus" => (FOCUSED, rank::FOCUS),
-                    "focus-visible" => (FOCUSED, rank::FOCUS_VISIBLE),
+                    "focus-visible" => (FOCUS_VISIBLE, rank::FOCUS_VISIBLE),
                     "focus-within" => (FOCUS_WITHIN, rank::FOCUS_WITHIN),
                     "disabled" => (DISABLED, rank::DISABLED),
                     "selected" => (SELECTED, rank::SELECTED),

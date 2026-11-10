@@ -7996,6 +7996,180 @@ fn a_focus_within_style_applies_while_the_focus_is_inside() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
 
+/// Whether view `id` is in the `FOCUS_VISIBLE` state.
+fn focus_visible(c: &Core<FakeEngine>, id: NodeId) -> bool {
+    let key = c.key(id).unwrap();
+    c.nodes[key as usize].states & crate::tailwind::state::FOCUS_VISIBLE != 0
+}
+
+#[test]
+fn focus_moved_after_a_pointer_does_not_show_until_a_key() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    views(
+        &mut c,
+        &[(
+            2,
+            ROOT_ID,
+            "opacity-50 focus:opacity-75 focus-visible:opacity-100",
+        )],
+    );
+    c.commit();
+    // A press that moves the focus (the app's `focus()` on it): `focus:`
+    // only.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.75);
+    assert!(!focus_visible(&c, 2));
+    // A key while it has the focus shows it.
+    c.set_input_modality(InputModality::Keyboard);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // A pointer after that leaves it showing: only a move decides again.
+    c.set_input_modality(InputModality::Pointer);
+    assert!(c.commit().is_none_or(|b| view_style_of(&b, 2).is_none()));
+    assert!(focus_visible(&c, 2));
+    // Leaving takes both states off.
+    c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!focus_visible(&c, 2));
+}
+
+#[test]
+fn focus_moved_by_the_keyboard_shows_at_once() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-visible:opacity-100"),
+            (4, ROOT_ID, "opacity-50 focus-visible:opacity-100"),
+        ],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Keyboard);
+    c.set_states(2, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // Tab on: the state moves with the focus, reported as the platforms
+    // do (the view it reaches first).
+    c.set_states(4, FOCUSED);
+    c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(focus_visible(&c, 4) && !focus_visible(&c, 2));
+    // The press that comes next does not take it from where it is; a
+    // move after it (the app's `focus()`) does not show.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    c.set_states(4, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.5);
+    assert!(view_style_of(&batch, 2).is_none_or(|s| s.opacity == 0.5));
+    assert!(!focus_visible(&c, 2) && !focus_visible(&c, 4));
+}
+
+#[test]
+fn focus_shows_before_any_input() {
+    use crate::tailwind::state::FOCUSED;
+    // An app's first focus (an `autoFocus`) shows, as a browser's does.
+    let mut c = core();
+    views(&mut c, &[(2, ROOT_ID, "focus-visible:opacity-50")]);
+    c.commit();
+    c.set_states(2, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
+fn an_input_that_edits_shows_its_focus_whatever_gave_it() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Input,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::Readonly(true),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(focus_visible(&c, 2), "a tap into a field shows its focus");
+    // A read-only one takes no typing: a tap gives it the focus unseen.
+    c.set_states(4, FOCUSED);
+    c.set_states(2, 0);
+    c.commit();
+    assert!(!focus_visible(&c, 4) && !focus_visible(&c, 2));
+}
+
+#[test]
+fn the_input_modality_alone_sends_nothing() {
+    use crate::platform::InputModality;
+    // No focus: a key or a press changes no view.
+    let mut c = core();
+    views(&mut c, &[(2, ROOT_ID, "focus-visible:opacity-50")]);
+    c.commit();
+    c.set_input_modality(InputModality::Keyboard);
+    assert!(c.commit().is_none_or(|b| b.items.is_empty()));
+    c.set_input_modality(InputModality::Pointer);
+    assert!(c.commit().is_none_or(|b| b.items.is_empty()));
+}
+
+#[test]
+fn a_focus_visible_style_and_group_follow_the_shown_focus() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "group opacity-50"),
+            (4, 2, "opacity-50 group-focus-visible:opacity-100"),
+        ],
+    );
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FocusVisibleStyle(patch(&[("opacity", crate::StyleValue::Number(0.8))])),
+        }],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    let batch = c.commit();
+    assert!(batch.as_ref().is_none_or(|b| view_style_of(b, 2).is_none()));
+    assert!(batch.as_ref().is_none_or(|b| view_style_of(b, 4).is_none()));
+    c.set_input_modality(InputModality::Keyboard);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.8);
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
+}
+
 #[test]
 fn a_focus_reported_untracked_survives_a_tracking_change() {
     use crate::tailwind::state::{FOCUSED, HOVERED};

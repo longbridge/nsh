@@ -61,6 +61,7 @@ impl Headless {
     /// something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
         self.step(format!("keyboard.press({keys})"));
+        self.input_with(nsh_core::platform::InputModality::Keyboard);
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
         let editing = self.screen.focused().is_some();
         // A hardware keyboard fires the app's shortcuts (`on_key`,

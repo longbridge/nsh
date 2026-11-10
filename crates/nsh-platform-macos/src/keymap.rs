@@ -113,6 +113,8 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(root) = crate::window::root_in(surface, &window) else {
         return false;
     };
+    // Before a binding acts: the focus it moves shows (`focus-visible:`).
+    surface.control(|c| c.set_input_modality(nsh_core::platform::InputModality::Keyboard));
     let own = root.ns() != surface.root.ns();
     let window_root = root.id();
     if crate::window::blocked(surface, own.then_some(&root)) {

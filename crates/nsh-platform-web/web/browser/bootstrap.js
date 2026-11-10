@@ -3688,6 +3688,7 @@
 			"hoverStyle",
 			"focusStyle",
 			"focusWithinStyle",
+			"focusVisibleStyle",
 			"disabledStyle",
 			"testID",
 			"tooltip",

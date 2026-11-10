@@ -72,7 +72,7 @@
   sends nothing when its attributes change), `group-*:` (named groups `group/name`; `group-data-<name>:` too), `first:` / `last:` /
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
-  `focusStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
+  `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
   `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
   `expanded`, `pressed` (`state::ARIA_PRESSED`) and `busy` are value states (`state::ACCESSIBILITY`, set by
   `Core::set_accessibility_states` from `classes::accessibility_states`) the core sets from the accessibility state (never reported by the platform). The first three are
@@ -147,8 +147,13 @@
   `flex-start`, which makes taffy's block a formatting context); strings keep their whitespace (`whitespace-*` sets
   wrapping only; the JSX compiler collapses literal JSX text); `transition` / `transition-all` animate their groups
   (`TransitionProps`: colors, opacity, transform, shadows, shape), and filters, backdrop filters, gradients and layout
-  take their new values at once; `focus-visible:` is `focus:` (the state bits, a `u8`, have none left for a focus's
-  origin, which only the desktops and the web report).
+  take their new values at once; `focus-visible:` (`state::FOCUS_VISIBLE`) is the focus that shows, after the
+  browsers' `:focus-visible`: the platforms report only how the user last gave input (`InputModality`: a key, or a
+  pointer, pen or finger going down; `EngineControl::set_input_modality`), and the core decides (`classes.rs`
+  `focus_shows`): an input that edits always shows its focus, any other view unless the last input was a pointer, so
+  Tab, a group's arrows and a shortcut show it, a press or a tap does not, a move the app makes (`focus()`, a calendar
+  or a dialog opening) shows it after a key and not after a press, and a key typed while the focus does not show
+  shows it. `focus:` is any focus.
 - **Layout values**: `box-content` / `box-border` select Taffy's content-box / border-box sizing. Width and
   height accept `min-content`, `max-content` and `fit-content` (`w/h/size-min/max/fit`); min-content text measures
   each Unicode line-breaking segment with the platform text engine and caches the widest one. `flow-root` uses

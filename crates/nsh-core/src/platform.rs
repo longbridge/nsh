@@ -52,6 +52,18 @@ impl Appearance {
     }
 }
 
+/// What the user last gave a surface input with
+/// (`EngineControl::set_input_modality`): the core shows the keyboard focus
+/// (`focus-visible:`) by it, as browsers decide CSS's `:focus-visible`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputModality {
+    /// A key press (not a modifier alone): Tab, an arrow, a shortcut,
+    /// typing, from a hardware keyboard.
+    Keyboard,
+    /// A mouse button, a pen or a finger going down.
+    Pointer,
+}
+
 /// The operating system (`platform.os`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
