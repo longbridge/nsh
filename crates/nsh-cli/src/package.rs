@@ -251,6 +251,26 @@ pub(crate) fn app_json(
     info.to_string()
 }
 
+/// The `app.json` of a desktop package (Linux, Windows), which its runner
+/// reads before the app runs: the app's name (the window's title), id and
+/// version, the appearance its window opens in, and `nsh.json` `"window"`,
+/// the main window's options (`Bundle::read_trusted`).
+pub(crate) fn desktop_app_json(
+    config: &AppConfig,
+    name: &str,
+    id: &str,
+    version: &str,
+) -> serde_json::Value {
+    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
+    if let Some(appearance) = &config.appearance {
+        info["appearance"] = appearance.as_str().into();
+    }
+    if let Some(window) = &config.window {
+        info["window"] = window.clone();
+    }
+    info
+}
+
 /// `nsh.json` `"window"` of the app at `entry` (checked), as JSON: the
 /// dev server's app info carries it.
 pub(crate) fn window_json(entry: &Path) -> Option<String> {
@@ -912,8 +932,8 @@ fn package_android(
 
 /// A directory `<out>/<name>`: the release runner as `<executable>`, the
 /// bundle and assets in `nsh/` (where the runner looks, next to itself),
-/// `nsh/app.json` (the window's title, the application id and the app's
-/// appearance, which the window opens in), a
+/// `nsh/app.json` (the window's title, the application id, the app's
+/// appearance, which the window opens in, and the main window's options), a
 /// `<id>.desktop` entry and the icon; then the same as `<name>.tar.gz`.
 fn package_linux(
     options: &PackageOptions<'_>,
@@ -951,15 +971,8 @@ fn package_linux(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({
-        "name": name,
-        "id": id,
-        "version": version,
-        "schemes": config.schemes,
-    });
-    if let Some(appearance) = &config.appearance {
-        info["appearance"] = appearance.as_str().into();
-    }
+    let mut info = desktop_app_json(config, name, id, version);
+    info["schemes"] = serde_json::json!(config.schemes);
     fs::write(resources.join("app.json"), info.to_string())?;
     if let Some(icon) = &config.icon {
         fs::copy(icon, dir.join(format!("{id}.png")))
@@ -1612,6 +1625,31 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
         assert_eq!(config.url_schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn desktop_packages_carry_the_main_windows_options() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false } }"#,
+        )
+        .unwrap();
+        let info = desktop_app_json(&config, "Focus", "com.a", "1.0.0");
+        assert_eq!(
+            info,
+            serde_json::json!({
+                "name": "Focus",
+                "id": "com.a",
+                "version": "1.0.0",
+                "appearance": "dark",
+                "window": { "title": "Focus", "closeOnPress": false },
+            })
+        );
+        // The runner opens the main window with them (`Bundle::read_trusted`).
+        let window = nsh_core::desktop::MainWindowOptions::from_json(&info["window"]).unwrap();
+        assert_eq!(window.attributes.title.as_deref(), Some("Focus"));
+        // An app without them has none.
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("window").is_none());
     }
 
     #[test]
