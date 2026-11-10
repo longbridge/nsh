@@ -542,7 +542,7 @@ export function CalendarItem(props: CalendarItemProps) {
         <View
           class={
             `${props.item.today ? quietFill : "group-disabled:bg-transparent"} transition-colors duration-100 motion-reduce:transition-none ` +
-            `group-hover:${quietFill} group-aria-selected:bg-primary group-data-range-middle:bg-transparent border border-transparent group-focus:border-brand/30 group-focus:bg-brand-tint group-aria-selected:group-focus:bg-primary group-data-range-middle:group-focus:bg-brand-tint`
+            `group-hover:${quietFill} group-aria-selected:bg-primary group-data-range-middle:bg-transparent border border-transparent group-focus-visible:border-brand/30 group-focus-visible:bg-brand-tint group-aria-selected:group-focus-visible:bg-primary group-data-range-middle:group-focus-visible:bg-brand-tint`
           }
           style={{ width: cell, height: cell, borderRadius: cellRadius(), alignItems: "center", justifyContent: "center" }}
         >
