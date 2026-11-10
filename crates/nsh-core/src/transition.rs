@@ -32,8 +32,7 @@ use std::sync::Arc;
 
 use crate::{
     AttributedText, Bounds, BoxShadow, Color, Corners, Edges, KeyframeAnimation, Keyframes,
-    LayoutCurve, LayoutProperty, LayoutSpring, LayoutTransition, Points, Transform, TransitionProps,
-    ViewStyle,
+    LayoutCurve, LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewStyle,
     geometry::{Percentage, Point, Radians, Size, deg},
 };
 
@@ -571,12 +570,12 @@ enum Curve {
     Bezier([f32; 4]),
     /// A spring with this damping ratio that settles within the duration.
     Spring(f32),
-    /// A spring's physics over this duration (ms).
-    Physical(LayoutSpring, f32),
+    /// A spring's physics, over the time it settles in.
+    Physical(crate::element::Spring),
 }
 
 impl Curve {
-    fn of(curve: LayoutCurve, duration: f32) -> Curve {
+    fn of(curve: LayoutCurve) -> Curve {
         match curve {
             LayoutCurve::Linear => Curve::Linear,
             // UIKit's curves.
@@ -585,8 +584,8 @@ impl Curve {
             LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => {
                 Curve::Bezier([0.42, 0.0, 0.58, 1.0])
             }
-            LayoutCurve::Spring { damping } => Curve::Spring(damping),
-            LayoutCurve::PhysicalSpring(spring) => Curve::Physical(spring, duration),
+            LayoutCurve::FittedSpring { damping_ratio } => Curve::Spring(damping_ratio),
+            LayoutCurve::Spring(spring) => Curve::Physical(spring),
         }
     }
 
@@ -595,7 +594,7 @@ impl Curve {
             Curve::Linear => x,
             Curve::Bezier(b) => cubic_bezier(b, x),
             Curve::Spring(damping) => spring(damping, x),
-            Curve::Physical(spring, duration) => spring.progress(x * duration),
+            Curve::Physical(spring) => spring.progress(x * spring.settle_ms()),
         }
     }
 }
@@ -694,7 +693,7 @@ impl Timing {
     }
 
     fn layout(t: &LayoutTransition) -> Self {
-        Timing::new(t.delay_ms, t.duration_ms, Curve::of(t.curve, t.duration_ms))
+        Timing::new(t.delay_ms, t.run_ms(), Curve::of(t.curve))
     }
 
     /// When it ends (ms), `now` before its first step.
@@ -1015,7 +1014,7 @@ fn lerp_rect(a: Bounds<Points>, b: Bounds<Points>, t: f32) -> Bounds<Points> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LayoutAnimation, TransformKind};
+    use crate::{LayoutAnimation, TransformKind, element::Spring};
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
@@ -1066,7 +1065,7 @@ mod tests {
 
     /// `spring` released at rest at 0 toward 1, stepped by semi-implicit
     /// Euler at 10 µs: where it is after each of `steps` milliseconds.
-    fn integrate(spring: LayoutSpring, steps: usize) -> Vec<f64> {
+    fn integrate(spring: Spring, steps: usize) -> Vec<f64> {
         let (k, c, m) = (
             f64::from(spring.stiffness),
             f64::from(spring.damping),
@@ -1084,61 +1083,80 @@ mod tests {
         out
     }
 
+    /// A spring of these physics: stiffness, damping coefficient, mass.
+    fn physics(stiffness: f32, damping: f32, mass: f32) -> Spring {
+        Spring {
+            stiffness,
+            damping,
+            mass,
+            ..Spring::default()
+        }
+    }
+
     /// M3 Expressive's fast spatial spring (stiffness 800, damping ratio
     /// 0.6, mass 1), its damping as a coefficient: 2 · 0.6 · √800.
-    const FAST_SPATIAL: LayoutSpring = LayoutSpring {
+    const FAST_SPATIAL: Spring = Spring {
         stiffness: 800.0,
         damping: 33.941_124,
         mass: 1.0,
+        velocity: None,
+        frame_rate: None,
     };
 
     #[test]
     fn a_physical_spring_follows_its_physics() {
-        let critical = LayoutSpring {
-            stiffness: 400.0,
-            damping: 40.0,
-            mass: 1.0,
-        };
-        let overdamped = LayoutSpring {
-            stiffness: 100.0,
-            damping: 40.0,
-            mass: 2.0,
-        };
+        let critical = physics(400.0, 40.0, 1.0);
+        let overdamped = physics(100.0, 40.0, 2.0);
         for spring in [FAST_SPATIAL, critical, overdamped] {
             assert_eq!(spring.progress(0.0), 0.0, "{spring:?}");
             for (ms, expected) in integrate(spring, 600).into_iter().enumerate() {
                 let found = f64::from(spring.progress((ms + 1) as f32));
-                assert!((found - expected).abs() < 1e-3, "{spring:?} at {ms} ms: {found} vs {expected}");
+                assert!(
+                    (found - expected).abs() < 1e-3,
+                    "{spring:?} at {ms} ms: {found} vs {expected}"
+                );
             }
         }
         // Underdamped, it overshoots; critically damped or overdamped, it does not.
         assert!((1..400).any(|ms| FAST_SPATIAL.progress(ms as f32) > 1.0));
         for spring in [critical, overdamped] {
-            assert!((1..2000).all(|ms| spring.progress(ms as f32) <= 1.0), "{spring:?}");
+            assert!(
+                (1..2000).all(|ms| spring.progress(ms as f32) <= 1.0),
+                "{spring:?}"
+            );
         }
     }
 
     #[test]
     fn a_physical_spring_settles_within_a_thousandth_by_its_settling_time() {
         // ln(1000) / (0.6 · √800) s.
-        assert!((FAST_SPATIAL.settle_ms() - 407.03).abs() < 0.1, "{}", FAST_SPATIAL.settle_ms());
+        assert!(
+            (FAST_SPATIAL.settle_ms() - 407.03).abs() < 0.1,
+            "{}",
+            FAST_SPATIAL.settle_ms()
+        );
         let springs = [
             FAST_SPATIAL,
-            LayoutSpring { stiffness: 400.0, damping: 40.0, mass: 1.0 },
-            LayoutSpring { stiffness: 100.0, damping: 40.0, mass: 2.0 },
-            LayoutSpring { stiffness: 1400.0, damping: 67.35, mass: 1.0 },
+            physics(400.0, 40.0, 1.0),
+            physics(100.0, 40.0, 2.0),
+            physics(1400.0, 67.35, 1.0),
         ];
         for spring in springs {
             let settle = spring.settle_ms();
             let zeta = spring.damping / (2.0 * (spring.stiffness * spring.mass).sqrt());
             // Underdamped, its decay is 1/1000 there: the swing is within 1/1000 of 1/√(1-ζ²).
-            let bound = if zeta < 0.999 { 1e-3 / (1.0 - zeta * zeta).sqrt() } else { 1e-3 };
+            let bound = if zeta < 0.999 {
+                1e-3 / (1.0 - zeta * zeta).sqrt()
+            } else {
+                1e-3
+            };
             for ms in [settle, settle + 50.0, settle * 2.0] {
                 let off = (spring.progress(ms) - 1.0).abs();
                 assert!(off <= bound * 1.01, "{spring:?} at {ms} ms: {off}");
             }
             // Not long before: it is still more than a thousandth away somewhere.
-            let earlier = (0..100).any(|i| (spring.progress(settle * 0.7 + i as f32) - 1.0).abs() > 1e-3);
+            let earlier =
+                (0..100).any(|i| (spring.progress(settle * 0.7 + i as f32) - 1.0).abs() > 1e-3);
             assert!(earlier, "{spring:?} settled long before {settle} ms");
         }
     }
@@ -1146,12 +1164,11 @@ mod tests {
     #[test]
     fn a_spring_that_never_settles_is_there_at_once() {
         for spring in [
-            LayoutSpring { stiffness: 800.0, damping: 0.0, mass: 1.0 },
-            LayoutSpring { stiffness: 0.0, damping: 30.0, mass: 1.0 },
-            LayoutSpring { stiffness: 800.0, damping: 30.0, mass: 0.0 },
-            LayoutSpring { stiffness: f32::NAN, damping: 30.0, mass: 1.0 },
-            LayoutSpring { stiffness: f32::INFINITY, damping: 30.0, mass: 1.0 },
-            LayoutSpring::default(),
+            physics(800.0, 0.0, 1.0),
+            physics(0.0, 30.0, 1.0),
+            physics(800.0, 30.0, 0.0),
+            physics(f32::NAN, 30.0, 1.0),
+            physics(f32::INFINITY, 30.0, 1.0),
         ] {
             assert_eq!(spring.progress(10.0), 1.0, "{spring:?}");
             assert_eq!(spring.settle_ms(), 0.0, "{spring:?}");
@@ -1163,21 +1180,76 @@ mod tests {
     #[test]
     fn a_layout_spring_moves_by_its_physics_and_ends_when_it_settles() {
         let transition = LayoutTransition::spring(FAST_SPATIAL);
-        assert_eq!(transition.curve, LayoutCurve::PhysicalSpring(FAST_SPATIAL));
+        assert_eq!(transition.curve, LayoutCurve::Spring(FAST_SPATIAL));
         assert_eq!(transition.duration_ms, FAST_SPATIAL.settle_ms());
         assert_eq!(transition.delay_ms, 0.0);
         let mut t = Timing::layout(&transition);
         assert_eq!(t.at(1000.0), Some((0.0, false)));
         for ms in [16.0_f32, 100.0, 250.0, 400.0] {
             let (value, done) = t.at(1000.0 + f64::from(ms)).unwrap();
-            assert!(close(value, FAST_SPATIAL.progress(ms)) && !done, "{ms} ms: {value}");
+            assert!(
+                close(value, FAST_SPATIAL.progress(ms)) && !done,
+                "{ms} ms: {value}"
+            );
         }
-        assert_eq!(t.at(1000.0 + f64::from(transition.duration_ms)), Some((1.0, true)));
-        // Given a shorter duration, it is cut short there.
-        let mut t = Timing::layout(&LayoutTransition::new(LayoutCurve::PhysicalSpring(FAST_SPATIAL), 100.0));
-        t.at(0.0);
-        assert!(close(t.at(50.0).unwrap().0, FAST_SPATIAL.progress(50.0)));
-        assert_eq!(t.at(100.0), Some((1.0, true)));
+        assert_eq!(
+            t.at(1000.0 + f64::from(transition.duration_ms)),
+            Some((1.0, true))
+        );
+    }
+
+    #[test]
+    fn a_layout_spring_times_itself_whatever_its_duration() {
+        let settle = FAST_SPATIAL.settle_ms();
+        for duration in [100.0, 2000.0] {
+            let transition = LayoutTransition::new(LayoutCurve::Spring(FAST_SPATIAL), duration);
+            assert_eq!(transition.run_ms(), settle);
+            let mut t = Timing::layout(&transition);
+            t.at(0.0);
+            assert!(
+                close(t.at(100.0).unwrap().0, FAST_SPATIAL.progress(100.0)),
+                "{duration}"
+            );
+            assert_eq!(t.at(f64::from(settle)), Some((1.0, true)), "{duration}");
+        }
+        // Other curves keep their duration.
+        assert_eq!(
+            LayoutTransition::new(LayoutCurve::Linear, 100.0).run_ms(),
+            100.0
+        );
+    }
+
+    #[test]
+    fn a_spring_is_made_as_gpui_base_makes_one() {
+        // `Spring::new(response)`: one undamped swing in `response`, critically damped.
+        let spring = Spring::new(280.0);
+        let omega = std::f32::consts::TAU / 0.28;
+        assert!(close(spring.stiffness, omega * omega) && close(spring.mass, 1.0));
+        assert!(close(spring.damping, 2.0 * omega));
+        assert!((1..2000).all(|ms| spring.progress(ms as f32) <= 1.0));
+        // `with_damping(0.85)`: ln 1000 / (0.85 · 2π / 0.28 s), what `Tabs` waited by hand.
+        let move_ = spring.damping_ratio(0.85);
+        assert!(
+            (move_.settle_ms() - 362.2).abs() < 0.1,
+            "{}",
+            move_.settle_ms()
+        );
+        assert!((1..400).any(|ms| move_.progress(ms as f32) > 1.0));
+        // From a stiffness token, at another mass: the ratio holds.
+        let mut heavy = Spring::from_stiffness(800.0);
+        heavy.mass = 2.0;
+        let heavy = heavy.damping_ratio(0.6);
+        assert!(close(heavy.damping / (2.0 * (800.0_f32 * 2.0).sqrt()), 0.6));
+        assert!(close(
+            Spring::from_stiffness(800.0).damping_ratio(0.6).damping,
+            FAST_SPATIAL.damping
+        ));
+        // A critically damped 180 ms response settles where `Collapsible` waited by hand.
+        assert!(
+            (Spring::new(180.0).settle_ms() - 264.5).abs() < 0.5,
+            "{}",
+            Spring::new(180.0).settle_ms()
+        );
     }
 
     #[test]
@@ -1212,7 +1284,7 @@ mod tests {
         assert!(over);
         assert_eq!(t.at(700.0), Some((1.0, true)));
         assert_eq!(spring.create.unwrap().property, LayoutProperty::Opacity);
-        assert_eq!(Curve::of(spring.delete.unwrap().curve, 700.0), Curve::Linear);
+        assert_eq!(Curve::of(spring.delete.unwrap().curve), Curve::Linear);
     }
 
     #[test]

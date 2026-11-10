@@ -1459,21 +1459,21 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::EaseIn => (1, 0.0),
         LayoutCurve::EaseOut => (2, 0.0),
         LayoutCurve::EaseInEaseOut => (3, 0.0),
-        LayoutCurve::Spring { damping } => (4, damping),
+        LayoutCurve::FittedSpring { damping_ratio } => (4, damping_ratio),
         LayoutCurve::Keyboard => (5, 0.0),
-        LayoutCurve::PhysicalSpring(_) => (6, 0.0),
+        LayoutCurve::Spring(_) => (6, 0.0),
     };
     e.int(curve);
     e.float(damping);
-    if let LayoutCurve::PhysicalSpring(spring) = t.curve {
-        // The spring's progress, sampled evenly over the duration: Java draws it piecewise linear
-        // (`Mounter.Transition`), so the physics stays in Rust.
+    if let LayoutCurve::Spring(spring) = t.curve {
+        // The spring's progress, sampled evenly over the time it settles in: Java draws it
+        // piecewise linear (`Mounter.Transition`), so the physics stays in Rust.
         e.int(SPRING_SAMPLES as i32 + 1);
         for i in 0..=SPRING_SAMPLES {
             e.float(if i == SPRING_SAMPLES {
                 1.0
             } else {
-                spring.progress(t.duration_ms * i as f32 / SPRING_SAMPLES as f32)
+                spring.progress(spring.settle_ms() * i as f32 / SPRING_SAMPLES as f32)
             });
         }
     }
@@ -1481,7 +1481,7 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutProperty::Opacity => 0,
         LayoutProperty::Scale => 1,
     });
-    e.float(t.duration_ms);
+    e.float(t.run_ms());
     e.float(t.delay_ms);
 }
 

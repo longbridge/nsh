@@ -106,9 +106,9 @@ final class Mounter {
 
     /** One part of a layout animation (`encode.rs` `layout_transition`). */
     private static final class Transition {
-        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring, 5 the keyboard's, 6 physical spring
+        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 fitted spring, 5 the keyboard's, 6 spring
         float damping;
-        /** A physical spring's progress (6), sampled evenly over the duration, ending at 1. */
+        /** A spring's progress (6), sampled evenly over the time it settles in (the duration), ending at 1. */
         float[] samples;
         int property; // 0 opacity, 1 scale
         long duration, delay;

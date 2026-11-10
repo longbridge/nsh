@@ -206,6 +206,15 @@ emojibase's; `groups` and the group ids as Unicode's emoji groups (`emoji-test.t
 ...), where the pickers say `categories`; `annotations` as CLDR's; `base` as Unicode's emoji modifier base; an
 entry's `hasSkinTones` is a payload's boolean (`has<Noun>`, "States" above).
 
+A layout spring is `gpui-base`'s `Spring`: `Spring::new(response)` and `.damping_ratio(ratio)` keep its names and
+meaning (a critically damped spring by default, the undamped period as the response), and `Spring::from_stiffness`
+is for springs given by their stiffness, as design systems give them. Not followed: the response is milliseconds
+(`response_ms`, a `f32`), not a `Duration` ("Units"), and there is no `epsilon` or travel: a layout spring always
+runs from rest to its target and settles within a thousandth of it (`settle_ms`), so a layout transition needs no
+more. The same `Spring` drives the animation graph (`stiffness`, `damping` the coefficient, `mass`, as React Native
+and the platforms' spring APIs). `LayoutCurve::FittedSpring { damping_ratio }` is the spring whose stiffness is
+fitted to a given duration, JS's `type: "spring"` with React Native's `springDamping`.
+
 `DataTable`'s column `fixed` uses `nsh_base::data_table::ColumnFixed`, scoped to its
 component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follows its
 `Left` / `Right` variants (`crates/component/src/table/column.rs`). TS uses `"left"` / `"right"`;

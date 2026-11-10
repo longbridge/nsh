@@ -4821,7 +4821,7 @@ fn animate(
     f: impl Fn() + 'static,
 ) {
     let block = block2::RcBlock::new(f);
-    let (duration, delay) = (t.duration_ms as f64 / 1000.0, t.delay_ms as f64 / 1000.0);
+    let (duration, delay) = (t.run_ms() as f64 / 1000.0, t.delay_ms as f64 / 1000.0);
     let base = UIViewAnimationOptions::BeginFromCurrentState
         | UIViewAnimationOptions::AllowUserInteraction;
     match t.curve {
@@ -4836,11 +4836,11 @@ fn animate(
                 mtm,
             )
         }),
-        LayoutCurve::Spring { damping } => {
+        LayoutCurve::FittedSpring { damping_ratio } => {
             UIView::animateWithDuration_delay_usingSpringWithDamping_initialSpringVelocity_options_animations_completion(
                 duration,
                 delay,
-                damping as CGFloat,
+                damping_ratio as CGFloat,
                 0.0,
                 base,
                 &block,
@@ -4848,9 +4848,9 @@ fn animate(
                 mtm,
             )
         }
-        // UIKit's own spring of the same physics: UIKit times it by the
-        // physics and leaves `duration` aside.
-        LayoutCurve::PhysicalSpring(spring) => {
+        // UIKit's own spring of the same physics, which UIKit times by the
+        // physics (`duration`, the time it settles in, is left aside).
+        LayoutCurve::Spring(spring) => {
             let timing = UISpringTimingParameters::initWithMass_stiffness_damping_initialVelocity(
                 UISpringTimingParameters::alloc(mtm),
                 spring.mass as CGFloat,
@@ -4911,7 +4911,7 @@ fn disappear(
         }
     });
     UIView::animateWithDuration_delay_options_animations_completion(
-        t.duration_ms as f64 / 1000.0,
+        t.run_ms() as f64 / 1000.0,
         t.delay_ms as f64 / 1000.0,
         UIViewAnimationOptions::BeginFromCurrentState,
         &block,

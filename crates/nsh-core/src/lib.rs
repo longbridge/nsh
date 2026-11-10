@@ -110,7 +110,7 @@ pub use crate::{
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,
         AccessibilityRole, AccessibilityState, AccessibilityValue, Checked, EdgeInsets,
-        GestureValues, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutSpring, LayoutTransition, LiveRegion,
+        GestureValues, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion,
         PanActivation, PointerEvents, Ripple, ViewProps,
     },
     style::{

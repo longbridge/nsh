@@ -945,15 +945,20 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
                 LayoutCurve::EaseIn => "ease-in".to_owned(),
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
                 LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => "ease-in-out".to_owned(),
-                LayoutCurve::Spring { damping } => spring_easing(damping),
-                LayoutCurve::PhysicalSpring(spring) => sampled_easing(|x| {
-                    // It ends on its place, even cut short by a shorter duration.
-                    if x >= 1.0 { 1.0 } else { spring.progress(x * t.duration_ms) }
+                LayoutCurve::FittedSpring { damping_ratio } => spring_easing(damping_ratio),
+                // It times itself: its progress over the time it settles in,
+                // ending on its place.
+                LayoutCurve::Spring(spring) => sampled_easing(|x| {
+                    if x >= 1.0 {
+                        1.0
+                    } else {
+                        spring.progress(x * spring.settle_ms())
+                    }
                 }),
             };
             format!(
                 "{{\"duration\":{},\"delay\":{},\"easing\":{},\"property\":{}}}",
-                t.duration_ms,
+                t.run_ms(),
                 t.delay_ms,
                 json_str(&easing),
                 json_str(&kebab(&format!("{:?}", t.property)))

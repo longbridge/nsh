@@ -4368,7 +4368,10 @@ fn scoped_layout_commit(root_too: bool) -> Vec<(NodeId, Option<crate::LayoutTran
     }
     apply(&mut c, ops);
     c.commit().unwrap();
-    let spring = crate::LayoutTransition::new(crate::LayoutCurve::Spring { damping: 1.0 }, 265.0);
+    let spring = crate::LayoutTransition::new(
+        crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+        265.0,
+    );
     let mut ops = vec![
         style_op(2, &[("height", StyleValue::Number(30.0))]),
         style_op(8, &[("height", StyleValue::Number(20.0))]),
@@ -29761,7 +29764,12 @@ fn following_another_view_moves_its_frame_alone_with_its_transition() {
     let mut c = core();
     follow_row(&mut c, false);
     c.commit().unwrap();
-    let spring = crate::LayoutTransition::new(crate::LayoutCurve::Spring { damping: 0.85 }, 362.0);
+    let spring = crate::LayoutTransition::new(
+        crate::LayoutCurve::FittedSpring {
+            damping_ratio: 0.85,
+        },
+        362.0,
+    );
     apply(
         &mut c,
         vec![
