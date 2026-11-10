@@ -9426,6 +9426,81 @@ fn canvas_local_images_are_resolved_on_every_draw() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Menu and tray icons load what the check granted, as an `<Image>`
+/// does: one the app's capabilities do not grant is dropped.
+#[test]
+fn menu_and_tray_icons_load_what_the_check_granted() {
+    use crate::desktop::{DesktopCommand, MenuAction, MenuItem, Tray};
+    let icon = |uri: &str| {
+        Some(ImageSource {
+            uri: uri.into(),
+            ..Default::default()
+        })
+    };
+    let action = |uri: &str| {
+        MenuItem::Action(MenuAction {
+            id: 1,
+            label: "A".into(),
+            shortcut: None,
+            enabled: true,
+            checked: None,
+            role: None,
+            when: Default::default(),
+            icon: icon(uri),
+        })
+    };
+    let items = || -> Arc<[MenuItem]> {
+        vec![
+            action("https://cdn.example.com/a.png"),
+            MenuItem::Submenu {
+                label: "S".into(),
+                enabled: true,
+                items: vec![action("https://evil.example/b.png")],
+                icon: icon("https://evil.example/c.png"),
+            },
+        ]
+        .into()
+    };
+    let icons = |items: &[MenuItem]| {
+        let mut out = Vec::new();
+        MenuItem::each_icon(items, &mut |i| out.push(i.uri.to_string()));
+        out
+    };
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["cdn.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    let mut menu = DesktopCommand::SetMenu(Some(items()));
+    c.check_menu_icons(&mut menu);
+    let DesktopCommand::SetMenu(Some(checked)) = &menu else {
+        unreachable!()
+    };
+    assert_eq!(icons(checked), ["https://cdn.example.com/a.png"]);
+    let mut tray = DesktopCommand::SetTray(Some(Tray {
+        icon: icon("https://evil.example/t.png"),
+        menu: items(),
+        ..Default::default()
+    }));
+    c.check_menu_icons(&mut tray);
+    let DesktopCommand::SetTray(Some(checked)) = &tray else {
+        unreachable!()
+    };
+    assert_eq!(checked.icon, None);
+    assert_eq!(icons(&checked.menu), ["https://cdn.example.com/a.png"]);
+    // Without capabilities every icon loads as written.
+    c.set_access(Arc::default());
+    let mut menu = DesktopCommand::SetMenu(Some(items()));
+    c.check_menu_icons(&mut menu);
+    let DesktopCommand::SetMenu(Some(checked)) = &menu else {
+        unreachable!()
+    };
+    assert_eq!(icons(checked).len(), 3);
+}
+
 /// A placeholder loads the URL the check granted, as the image's source
 /// does, and shows nothing when its host is not granted.
 #[test]

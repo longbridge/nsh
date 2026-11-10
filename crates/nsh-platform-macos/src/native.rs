@@ -272,6 +272,12 @@ impl NativeState {
         *self.access.borrow_mut() = Some(Arc::new(access));
     }
 
+    /// What the running app may reach (all before an app starts): what
+    /// its image loads check their redirects against.
+    pub(crate) fn access(&self) -> Arc<Access> {
+        self.access.borrow().clone().unwrap_or_default()
+    }
+
     /// Drops every control (the app stopped): media stops playing.
     pub(crate) fn clear(&self) {
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());

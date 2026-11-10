@@ -160,7 +160,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
     Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
-        access: Arc::default(),
+        access: surface.native.access(),
         media_files: Arc::default(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
