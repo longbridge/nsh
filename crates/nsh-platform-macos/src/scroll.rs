@@ -241,7 +241,12 @@ fn limits(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let max = s.max((state.frame.size.width.0, state.frame.size.height.0));
+    range(s, (state.frame.size.width.0, state.frame.size.height.0))
+}
+
+/// [`limits`] of scroll state `s` in a viewport of `viewport` points.
+fn range(s: &ScrollState, viewport: (f32, f32)) -> (f32, f32) {
+    let max = s.max(viewport);
     let min = if !s.horizontal && s.live.refreshing {
         -s.behavior.refresh_inset().0
     } else {
@@ -319,6 +324,26 @@ pub(crate) fn can_scroll(view: &NshView, dx: f32, dy: f32) -> bool {
     };
     let pos = main(s);
     (d > 0.0 && pos < max - 0.5) || (d < 0.0 && pos > min + 0.5)
+}
+
+/// Whether `view` is a scroll view the user can move at all: it is
+/// enabled and its content is larger than its viewport along its axis.
+/// Unlike [`can_scroll`] it needs no direction, so input can ask it as a
+/// scroll begins, before the scroll has one: an embedded app passes on a
+/// scroll with no such view under the pointer
+/// ([`crate::input::forwards_scroll`]).
+pub(crate) fn movable(view: &NshView) -> bool {
+    let state = view.state();
+    state
+        .scroll
+        .as_ref()
+        .is_some_and(|s| movable_in(s, (state.frame.size.width.0, state.frame.size.height.0)))
+}
+
+/// [`movable`] for scroll state `s` in a viewport of `viewport` points.
+fn movable_in(s: &ScrollState, viewport: (f32, f32)) -> bool {
+    let (min, max) = range(s, viewport);
+    s.behavior.enabled && max > min
 }
 
 /// Whether a trackpad gesture by `(dx, dy)` may stretch `view` past its
@@ -2060,6 +2085,46 @@ pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scroll view of `content` points in a 300 x 200 viewport.
+    fn movable_with(content: (f32, f32), horizontal: bool, enabled: bool) -> bool {
+        let s = ScrollState {
+            content,
+            horizontal,
+            behavior: nsh_core::ScrollBehavior {
+                enabled,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        movable_in(&s, (300.0, 200.0))
+    }
+
+    /// A scroll view switched off (`scrollable={false}`) cannot move, however
+    /// long its content: an embedded app passes its scrolls on.
+    #[test]
+    fn a_disabled_scroll_view_does_not_move() {
+        assert!(!movable_with((300.0, 800.0), false, false));
+        assert!(!movable_with((900.0, 200.0), true, false));
+    }
+
+    /// A scroll view whose content fits its viewport along its axis cannot
+    /// move, even when the content overflows across it.
+    #[test]
+    fn a_scroll_view_whose_content_fits_does_not_move() {
+        assert!(!movable_with((300.0, 200.0), false, true));
+        assert!(!movable_with((300.0, 120.0), false, true));
+        assert!(!movable_with((900.0, 200.0), false, true));
+        assert!(!movable_with((300.0, 800.0), true, true));
+    }
+
+    /// An enabled scroll view whose content overflows along its axis moves:
+    /// an embedded app keeps its scrolls.
+    #[test]
+    fn an_overflowing_scroll_view_moves() {
+        assert!(movable_with((300.0, 800.0), false, true));
+        assert!(movable_with((900.0, 200.0), true, true));
+    }
 
     #[test]
     fn a_long_scroll_commits_only_when_it_ends() {

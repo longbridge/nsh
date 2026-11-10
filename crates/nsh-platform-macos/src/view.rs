@@ -736,6 +736,11 @@ define_class!(
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             match self.input_surface() {
+                // Nothing of this surface scrolls there: its host's turn.
+                // SAFETY: NSResponder's own handling (passes it up).
+                Some(surface) if crate::input::forwards_scroll(&surface, event) => unsafe {
+                    msg_send![super(self), scrollWheel: event]
+                },
                 // Scrolls move views: a frame for the performance monitor.
                 Some(surface) => surface.measure(true, || {
                     crate::input::event(&surface, event);

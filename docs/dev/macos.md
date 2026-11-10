@@ -155,7 +155,9 @@ belong to the app, which owns retention and its storage budget.
   waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so
   animations end and report it on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an
   endless animation, a shader, a JS frame request) waits for the link.
-- **Embedding**: `AppView` (`app.rs`) is one surface as a view; `run_app` opens one in a window with a standard menu
+- **Embedding**: `AppView` (`app.rs`) is one surface as a view. One placed in another view's content (not its
+  window's content view) passes a scroll that begins where none of its scroll views can move up the responder chain,
+  so the host scrolls (`input::forwards_scroll`). `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
   Full Screen, Close), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
   menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The window

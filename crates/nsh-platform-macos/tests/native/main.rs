@@ -13,6 +13,8 @@
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
 #[cfg(target_os = "macos")]
+mod embedded_scroll;
+#[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
 mod mount;
@@ -38,6 +40,8 @@ fn main() {
                 window_dialog::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
+                embedded_scroll::run();
             } else {
                 window_press::run();
                 window_hover::run();
@@ -45,6 +49,8 @@ fn main() {
                 window_dialog::run();
                 input_hidden::run();
                 mount::run();
+                // Last: it makes the process an accessory app.
+                embedded_scroll::run();
             }
         }
     }
