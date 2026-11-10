@@ -606,8 +606,9 @@ nsh test --target tui                         # in an in-memory terminal
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
-The window opens at the viewport's size (390 × 844 unless `open` says), within the screen; on iOS and Android the app
-fills the device's screen, at the device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen (on macOS, `setViewport`
+keeps it there, its top left corner when it is larger); on iOS and Android the app fills the device's screen, at the
+device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
 it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the app's time at once (timers,
 `requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)`, `waitFor` and `waitUntil` move it too, and each frame
 the platform shows moves it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
