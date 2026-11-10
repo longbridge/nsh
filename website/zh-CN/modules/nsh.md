@@ -316,12 +316,13 @@ interface AppInfo {
 }
 ```
 
-应用构建时的信息：`nsh.json` 的 `"id"` 和 `"name"`，构建给它的版本号和构建号（`nsh.json` 的 `"version"` 和 `"build"`，或
-`nsh package`、`nsh publish` 的 `--version` 和 `--build`），以及是否为开发构建。`nsh run`、`nsh dev`、`nsh test` 和不带
-`--release` 的 `nsh build` 是开发构建；`nsh package`、`nsh publish` 和 `nsh build --release` 不是。`nsh.json` 里没有的项为
-`null`。在任何平台、任何模块中都能读取，包括模块顶层的代码：构建会在应用的模块运行之前把这些信息交给运行时。
+应用构建时的信息：id、名称、版本号、构建号，以及是否为开发构建。打包产物报告的是 `nsh package`、`nsh publish` 给包的
+名称和版本（包括 `--id`、`--name`、`--version`、`--build`），没有给出时版本为 `1.0.0`、构建号为 `1`；其他构建报告
+`nsh.json` 的 `"id"`、`"name"`、`"version"` 和 `"build"`，没有的项为 `null`。`nsh run`、`nsh dev`、`nsh test` 和不带
+`--release` 的 `nsh build` 是开发构建；`nsh package`、`nsh publish` 和 `nsh build --release` 不是。在任何平台、任何模块中
+都能读取，包括模块顶层的代码：构建会在应用的模块运行之前把这些信息交给运行时。
 
-签名包的代码报告的是包自己的版本和构建号；安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。
+安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。
 
 ```tsx
 import { appInfo, Text } from "nsh";

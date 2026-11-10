@@ -5162,13 +5162,13 @@
 			info = JSON.parse(json) ?? {};
 		} catch {}
 		const text = (value) => typeof value === "string" ? value : null;
-		return Object.freeze({
+		return {
 			id: text(info.id),
 			name: text(info.name),
 			version: text(info.version),
 			build: Number.isFinite(info.build) ? info.build : null,
 			development: info.development === true
-		});
+		};
 	}
 	function createEnvironment(reactive, invoke, dom) {
 		const fields = Object.fromEntries(Object.entries({

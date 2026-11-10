@@ -24,8 +24,9 @@ pub struct BundleOptions {
     pub minify: bool,
     /// A development build, as `appInfo()` reports it.
     pub development: bool,
-    /// The version and build number in place of `nsh.json`'s.
-    pub app: AppVersion,
+    /// The app's id, name, version and build number in place of
+    /// `nsh.json`'s, as `appInfo()` reports them.
+    pub app: AppInfo,
     /// Split what `import()` loads into chunks of their own
     /// ([`Bundle::chunks`]), loaded on demand (published web apps);
     /// otherwise the bundle holds the whole app, dynamically imported
@@ -36,12 +37,16 @@ pub struct BundleOptions {
     pub ui_sets: Vec<nsh_core::element::description::SetDescription>,
 }
 
-/// The app's version and build number a build gives it in place of
-/// `nsh.json`'s (`nsh package --version 2.0.0 --build 7`), as `appInfo()`
-/// reports them; `None`: `nsh.json`'s.
+/// The app's identity a build gives it in place of `nsh.json`'s (what a
+/// package is named and versioned as: `nsh package --id … --version 2.0.0
+/// --build 7`), as `appInfo()` reports it; `None`: `nsh.json`'s.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct AppVersion {
+pub struct AppInfo {
+    /// The id (`nsh.json` `"id"`).
+    pub id: Option<String>,
+    /// The display name (`nsh.json` `"name"`).
+    pub name: Option<String>,
     /// The version (`nsh.json` `"version"`).
     pub version: Option<String>,
     /// The build number (`nsh.json` `"build"`).
@@ -361,7 +366,7 @@ fn theme_json(
 fn tailwind_setup(
     dir: &std::path::Path,
     development: bool,
-    version: &AppVersion,
+    info: &AppInfo,
 ) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let mut setup = plugin::ThemeSetup::default();
     // The theme's tokens are classes (`bg-primary`): the default's unless
@@ -371,12 +376,12 @@ fn tailwind_setup(
     let Ok(text) = std::fs::read_to_string(&path) else {
         setup.theme.set_tokens(&tokens);
         setup.i18n = i18n_json(dir, None)?;
-        setup.app = app_json(&serde_json::Value::Null, development, version);
+        setup.app = app_json(&serde_json::Value::Null, development, info);
         return Ok(Arc::new(setup));
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
-    setup.app = app_json(&config, development, version);
+    setup.app = app_json(&config, development, info);
     if let Some(tailwind) = config.get("tailwind") {
         let json = tailwind.to_string();
         let ignored;
@@ -420,15 +425,15 @@ fn tailwind_setup(
 }
 
 /// What `appInfo()` reports, as JSON: `nsh.json`'s `"id"`, `"name"`,
-/// `"version"` and `"build"` (`version`'s where it gives them; `null` where
+/// `"version"` and `"build"` (`info`'s where it gives them; `null` where
 /// neither does) and whether this is a development build.
-fn app_json(config: &serde_json::Value, development: bool, version: &AppVersion) -> String {
+fn app_json(config: &serde_json::Value, development: bool, info: &AppInfo) -> String {
     let text = |key: &str| config.get(key).and_then(|v| v.as_str()).map(str::to_owned);
     serde_json::json!({
-        "id": text("id"),
-        "name": text("name"),
-        "version": version.version.clone().or_else(|| text("version")),
-        "build": version.build.or_else(|| config.get("build").and_then(|v| v.as_u64())),
+        "id": info.id.clone().or_else(|| text("id")),
+        "name": info.name.clone().or_else(|| text("name")),
+        "version": info.version.clone().or_else(|| text("version")),
+        "build": info.build.or_else(|| config.get("build").and_then(|v| v.as_u64())),
         "development": development,
     })
     .to_string()
@@ -929,7 +934,7 @@ pub async fn bundle_hot_async(
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let app = app_dir(&cwd);
-    let tailwind = tailwind_setup(&app, true, &AppVersion::default())?;
+    let tailwind = tailwind_setup(&app, true, &AppInfo::default())?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
     let resolve = ResolveSetup::read(&app)?;
@@ -1521,7 +1526,7 @@ mod tests {
         }
         // ... and the class check knows its tokens: the same setup.
         let setup =
-            tailwind_setup(&app_dir(&dir.join("tests")), false, &AppVersion::default()).unwrap();
+            tailwind_setup(&app_dir(&dir.join("tests")), false, &AppInfo::default()).unwrap();
         assert_eq!(
             crate::classes::check(code, oxc::span::SourceType::tsx(), &setup.theme),
             []
@@ -1562,7 +1567,7 @@ mod tests {
         )
         .unwrap();
         assert!(ResolveSetup::read(&dir).is_ok());
-        let setup = tailwind_setup(&dir, false, &AppVersion::default()).unwrap();
+        let setup = tailwind_setup(&dir, false, &AppInfo::default()).unwrap();
         assert!(setup.theme.color("brand").is_some());
         assert_ne!(
             theme_tokens(&dir).unwrap().color("primary"),

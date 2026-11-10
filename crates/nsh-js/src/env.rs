@@ -153,7 +153,7 @@ pub(crate) const APP_INFO_EXPORT: crate::modules::Item = (
     "appInfo",
     Export::Function(app_info, 0),
     Ts::function(
-        "The app as it was built: its id and name, the version and build\nnumber the build gave it (`nsh.json`'s, or `nsh package`'s and `nsh\npublish`'s `--version` and `--build`), and whether it is a development\nbuild (`nsh run`, `nsh test`, `nsh build` without `--release`). A\nsigned package's code reports the package's version and build;\n`nsh/updater`'s `shellInfo()` the installed app's.",
+        "The app as it was built: its id, name, version and build number\n(`nsh.json`'s; a package's as `nsh package` and `nsh publish` name and\nversion it, `--id`, `--name`, `--version` and `--build` included, with\nversion `1.0.0` and build `1` where nothing gives them), and whether it\nis a development build (`nsh run`, `nsh dev`, `nsh test`, `nsh build`\nwithout `--release`). `nsh/updater`'s `shellInfo()` reports the\ninstalled app's.",
         &["(): AppInfo"],
     ),
 );

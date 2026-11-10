@@ -13,10 +13,10 @@ function readAppInfo(json) {
   let info = {};
   try { info = JSON.parse(json) ?? {}; } catch {}
   const text = value => typeof value === "string" ? value : null;
-  return Object.freeze({
+  return {
     id: text(info.id), name: text(info.name), version: text(info.version),
     build: Number.isFinite(info.build) ? info.build : null, development: info.development === true,
-  });
+  };
 }
 
 export function createEnvironment(reactive, invoke, dom) {

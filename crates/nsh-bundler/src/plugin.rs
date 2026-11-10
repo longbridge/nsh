@@ -811,7 +811,8 @@ mod tests {
             ..options(true)
         };
         assert_eq!(info(&bundle(&nested).unwrap().code), development);
-        release.app = crate::AppVersion {
+        release.app = crate::AppInfo {
+            id: Some("com.acme.renamed".into()),
             version: Some("2.0.0".into()),
             build: Some(9),
             ..Default::default()
@@ -819,6 +820,7 @@ mod tests {
         // Minified: the JSON as the minifier quotes it.
         let release = bundle(&release).unwrap().code.replace('\\', "");
         for part in [
+            r#""id":"com.acme.renamed""#,
             r#""version":"2.0.0""#,
             r#""build":9"#,
             r#""development":false"#,

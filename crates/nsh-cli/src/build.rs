@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use nsh_bundler::{AppVersion, BundleError, BundleOptions};
+use nsh_bundler::{AppInfo, BundleError, BundleOptions};
 
 use crate::ui;
 
@@ -195,7 +195,7 @@ impl BuildError {
 /// Bundles `entry` and compiles it to bytecode: one bundle, holding what
 /// `import()` loads too (native packages).
 pub(crate) fn compile(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, false, release.into(), AppVersion::default())
+    compile_with(entry, release, false, release.into(), AppInfo::default())
 }
 
 /// [`compile`] in release mode for a package of `config`'s app (`split`:
@@ -206,13 +206,13 @@ pub(crate) fn compile_package(
     split: bool,
     config: &crate::package::AppConfig,
 ) -> Result<Built, BuildError> {
-    compile_with(entry, true, split, true.into(), app_version(config))
+    compile_with(entry, true, split, true.into(), app_info(entry, config))
 }
 
 /// [`compile`], with what `import()` loads split into chunks
 /// ([`Built::chunks`]) loaded on demand (web apps).
 pub(crate) fn compile_split(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, true, release.into(), AppVersion::default())
+    compile_with(entry, release, true, release.into(), AppInfo::default())
 }
 
 /// [`compile`] in release mode (minified), with the bytecode stripped as
@@ -223,16 +223,21 @@ pub(crate) fn compile_release(
     strip: nsh_js::Strip,
     config: &crate::package::AppConfig,
 ) -> Result<Built, BuildError> {
-    compile_with(entry, true, false, strip, app_version(config))
+    compile_with(entry, true, false, strip, app_info(entry, config))
 }
 
-/// The version and build number `config` gives the app (`nsh.json`'s, or
-/// the command line's), as `appInfo()` reports them.
-fn app_version(config: &crate::package::AppConfig) -> AppVersion {
-    let mut version = AppVersion::default();
-    version.version = config.version.clone();
-    version.build = config.build.map(u64::from);
-    version
+/// The identity a package of `config`'s app carries (after `--id`,
+/// `--name`, `--version` and `--build`, with the defaults the package
+/// writers use: [`crate::package::name_and_id`], `1.0.0`, build `1`), so
+/// `appInfo()` reports what the package says it is.
+fn app_info(entry: &Path, config: &crate::package::AppConfig) -> AppInfo {
+    let (name, id) = crate::package::name_and_id(entry, config);
+    let mut info = AppInfo::default();
+    info.id = Some(id);
+    info.name = Some(name);
+    info.version = Some(config.version.clone().unwrap_or_else(|| "1.0.0".to_owned()));
+    info.build = Some(u64::from(config.build.unwrap_or(1)));
+    info
 }
 
 fn compile_with(
@@ -240,7 +245,7 @@ fn compile_with(
     release: bool,
     split: bool,
     strip: nsh_js::Strip,
-    app: AppVersion,
+    app: AppInfo,
 ) -> Result<Built, BuildError> {
     let start = Instant::now();
     let mut bundle = nsh_bundler::bundle(&BundleOptions {
