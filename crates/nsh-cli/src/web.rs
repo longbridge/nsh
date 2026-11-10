@@ -266,6 +266,9 @@ pub(crate) fn package(
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
     }
+    if let Some(history) = config.web.history {
+        app["history"] = history.into();
+    }
     let html = page(&PageParts {
         name,
         appearance,
@@ -556,7 +559,8 @@ impl GatePlan {
 /// `zlib`'s operations when it imports `zlib`, and shaders when it may
 /// make a shader view (`NativeUse::shader`, or an import of one of
 /// [`SHADER_EXPORTS`]). What the bundler cannot tell apart (no analysis,
-/// `import * as`, an `import()` of a computed specifier) keeps everything,
+/// `import * as` of a namespace used other than by reading its members by
+/// name, an `import()` of a computed specifier) keeps everything,
 /// so a runtime never lacks what an app needs.
 /// An app's own UI sets (`nsh.json` `"rust"`) keep the gate of each one it
 /// imports ([`ui_set_gate`]).
@@ -573,9 +577,9 @@ fn whole_because(uses: &nsh_bundler::NativeUse) -> Option<&'static str> {
         return Some("it loads a module whose name is worked out as it runs, `import(name)`");
     }
     match uses.imports.get(nsh_base::SPECIFIER) {
-        Some(nsh_bundler::Imported::All) => {
-            Some("it takes nsh/base whole, `import * as` or `import(\"nsh/base\")`")
-        }
+        Some(nsh_bundler::Imported::All) => Some(
+            "it takes nsh/base whole, a namespace (`import * as`) used other than by reading its members by name, or `import(\"nsh/base\")`",
+        ),
         _ => None,
     }
 }
@@ -976,13 +980,18 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
 
 /// The dev host's page and files ([`dev_host`]) for the app at `entry`:
 /// with its page's host module (`nsh.json` `web.host`) as `nsh-host.js`,
-/// read now (a change takes another session), or none.
+/// read now (a change takes another session), or none, and its
+/// `web.history`.
 pub(crate) fn with_page_host(
     (page, mut files): (String, Files),
     entry: &Path,
 ) -> anyhow::Result<(String, Files)> {
-    let module = crate::package::read_config(entry)?
-        .web
+    let web = crate::package::read_config(entry)?.web;
+    let history = match web.history {
+        Some(history) => history.to_string(),
+        None => "null".to_owned(),
+    };
+    let module = web
         .host
         .map(|host| crate::package::web_host_module(entry, &host))
         .transpose()?;
@@ -996,7 +1005,11 @@ pub(crate) fn with_page_host(
         }
         None => "null".to_owned(),
     };
-    Ok((page.replace("{{host}}", &host), files))
+    Ok((
+        page.replace("{{host}}", &host)
+            .replace("{{history}}", &history),
+        files,
+    ))
 }
 
 /// Where the dev host serves the page's host module ([`with_page_host`]).
@@ -1549,15 +1562,28 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nsh-web-dev-host-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let entry = dir.join("App.tsx");
-        let base = || ("const HOST = {{host}};".to_owned(), Files::new());
-        // No nsh.json, or one without `web.host`: no host.
+        let base = || {
+            (
+                "const HOST = {{host}}; const HISTORY = {{history}};".to_owned(),
+                Files::new(),
+            )
+        };
+        // No nsh.json, or one without `web.host`: no host, and the
+        // player's own default for the history.
         let (page, files) = with_page_host(base(), &entry).unwrap();
-        assert_eq!(page, "const HOST = null;");
+        assert_eq!(page, "const HOST = null; const HISTORY = null;");
         assert!(files.is_empty());
         fs::write(dir.join("host.js"), "export function createHost() {}").unwrap();
-        fs::write(dir.join("nsh.json"), r#"{ "web": { "host": "host.js" } }"#).unwrap();
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "web": { "host": "host.js", "history": false } }"#,
+        )
+        .unwrap();
         let (page, files) = with_page_host(base(), &entry).unwrap();
-        assert_eq!(page, "const HOST = \"./nsh-host.js\";");
+        assert_eq!(
+            page,
+            "const HOST = \"./nsh-host.js\"; const HISTORY = false;"
+        );
         assert_eq!(
             files,
             [(
@@ -1598,6 +1624,41 @@ mod tests {
         );
         app.computed_import = true;
         assert_eq!(native_exports(Some(&app)), serde_json::json!({}));
+    }
+
+    /// A namespace read by name (`base.EmojiPicker`, so that shells without
+    /// the export still run the app) declares the names read, which the
+    /// browser host's facade exports, and links their parts only.
+    #[test]
+    fn a_namespace_read_by_name_declares_and_links_what_it_reads() {
+        let natives = |s: &str| s == "nsh" || s.starts_with("nsh/");
+        let mut read = nsh_bundler::NativeUse::default();
+        read.add(
+            r#"import * as base from "nsh/base"; import { View } from "nsh";
+            const EmojiPicker = base.EmojiPicker;
+            export const Picker = (p) => (EmojiPicker ? _$c(EmojiPicker, p) : _$c(View, {}));"#,
+            natives,
+        );
+        assert_eq!(
+            native_exports(Some(&read)),
+            serde_json::json!({ "nsh": ["View"], "nsh/base": ["EmojiPicker"] })
+        );
+        assert_eq!(whole_because(&read), None);
+        assert_eq!(
+            linked_gates_of(Some(&read), &[]),
+            ["nsh_part_core", EMOJI_GATE]
+        );
+        // Passed on, it may be read for anything: every export, every gate.
+        let mut passed = nsh_bundler::NativeUse::default();
+        passed.add(
+            r#"import * as base from "nsh/base"; base.EmojiPicker; use(base);"#,
+            natives,
+        );
+        assert_eq!(native_exports(Some(&passed)), serde_json::json!({}));
+        assert!(whole_because(&passed).is_some());
+        let gates = linked_gates_of(Some(&passed), &[]);
+        assert!(gates.contains(&"nsh_part_editor".to_owned()));
+        assert!(gates.contains(&"nsh_feature_shader".to_owned()));
     }
 
     #[test]
@@ -1910,7 +1971,13 @@ mod tests {
             "{page}"
         );
         // The page's host is the app's (`with_page_host`).
-        assert!(!page.replace("{{host}}", "").contains("{{"), "{page}");
+        assert!(
+            !page
+                .replace("{{host}}", "")
+                .replace("{{history}}", "")
+                .contains("{{"),
+            "{page}"
+        );
         // `nsh/base` with its submodules, each a module the page serves.
         assert!(
             page.contains("const UI_SETS = [\"nsh/base\",\"nsh/base/plot\"];"),

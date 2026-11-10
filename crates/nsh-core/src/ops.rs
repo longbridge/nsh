@@ -233,7 +233,7 @@ events! {
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
     MouseLeave = "onMouseLeave": "The mouse left the view and the views inside it, or the window (payload: [`EventPayload::Mouse`], where it was last).",
-    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination.",
+    FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination (payload: [`EventPayload::FileDrop`]).",
     FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
@@ -256,6 +256,7 @@ events! {
     UrlScheme = "onUrlScheme": "The system handed the app a URL that opens it (root only; payload: `url`, [`crate::url_scheme::URL`]); the core keeps those of the schemes the app claims ([`crate::url_scheme`]).",
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
+    EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
 
 }
 
@@ -833,7 +834,7 @@ pub enum EventPayload {
     /// `onPressDown`, `onPressUp`), with the modifier keys and the click
     /// count, on backends that know it.
     Press(PressEvent),
-    /// Local file URLs dropped by the user, in the platform's order.
+    /// Local file URLs offered on drag entry or dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
     /// [`Self::FileDrop`] with where the files were let go, in the
     /// window's coordinates, from backends that know it.
@@ -1293,6 +1294,52 @@ pub enum KeyboardDismissMode {
     Interactive,
 }
 
+/// The HTML element the web draws a view or text as (`web={{ element }}`),
+/// for what `role` cannot say: paragraphs, landmarks, lists, emphasis, ...
+/// Headings come from `role="header"` with `accessibilityLevel` and links
+/// from a `Link` with an `href`, everywhere. Only the web reads it; the
+/// layout, styles and events stay the view's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum WebElement {
+    /// A paragraph (`<p>`).
+    P,
+    /// Navigation links (`<nav>`).
+    Nav,
+    /// The header of the page or a section (`<header>`), a landmark; a
+    /// heading is `role="header"`.
+    Header,
+    /// The footer of the page or a section (`<footer>`).
+    Footer,
+    /// The page's main content (`<main>`).
+    Main,
+    /// A self-contained composition (`<article>`).
+    Article,
+    /// A section of a document (`<section>`).
+    Section,
+    /// Content aside from the main content (`<aside>`).
+    Aside,
+    /// An unordered list (`<ul>`).
+    Ul,
+    /// An ordered list (`<ol>`).
+    Ol,
+    /// An item of a list (`<li>`).
+    Li,
+    /// Strong importance (`<strong>`).
+    Strong,
+    /// Emphasis (`<em>`).
+    Em,
+    /// A quotation (`<blockquote>`).
+    Blockquote,
+    /// A figure (`<figure>`).
+    Figure,
+    /// A figure's caption (`<figcaption>`).
+    Figcaption,
+    /// A date or time (`<time>`).
+    Time,
+    /// Contact information (`<address>`).
+    Address,
+}
+
 /// Which point of a page a snapping scroll view aligns to its start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum SnapAlignment {
@@ -1354,6 +1401,11 @@ pub enum ImageProp {
     /// Native).
     #[prop(js = "fadeDuration", min = 0, on = IMAGE)]
     FadeDuration(Option<f32>),
+    /// Set by `svg()` where the platform draws the SVG itself (the web): its
+    /// `currentColor` is the element's text color
+    /// ([`crate::mount::ImageOptions::current_color`]).
+    #[prop(js = "svgCurrentColor", internal)]
+    SvgCurrentColor(bool),
 }
 
 /// A behavior property of a scroll view or list.
@@ -1808,6 +1860,79 @@ impl WebKey {
     }
 }
 
+/// Where `reveal` puts a view along the axis of a scroll view around it
+/// (GPUI's `ScrollStrategy`, with the DOM's `ScrollLogicalPosition`
+/// names, as [`SnapAlignment`]). Physical: start and end are top and
+/// bottom along a vertical scroll view, left and right along a horizontal
+/// one, in either writing direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
+pub enum ScrollAlignment {
+    /// Its start at the start of the viewport.
+    #[default]
+    Start,
+    /// Its middle in the middle of the viewport.
+    Center,
+    /// Its end at the end of the viewport.
+    End,
+    /// Nowhere new while it is in full view or covers the viewport; else
+    /// the edge it is past at that edge of the viewport, or, when it is
+    /// longer than the viewport, its other edge at the viewport's other
+    /// edge (CSSOM View's).
+    Nearest,
+}
+
+/// How `reveal` scrolls ([`crate::element::ElementRef::reveal`], TS
+/// `ref.reveal(options)`). It places the view from the layout and the
+/// zoom scales the platforms last reported, as `measure()` does:
+/// transforms (animations included) and a `zoomTo` not applied yet are not
+/// taken into account.
+///
+/// ```
+/// # use nsh_core::{RevealOptions, ScrollAlignment};
+/// let options = RevealOptions::default().vertical(ScrollAlignment::Center);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct RevealOptions {
+    /// Along vertical scroll views; `Start` by default.
+    pub vertical: ScrollAlignment,
+    /// Along horizontal scroll views; `Nearest` by default.
+    pub horizontal: ScrollAlignment,
+    /// Animate the scrolls; `true` by default, as `scroll_to`'s.
+    pub animated: bool,
+}
+
+impl Default for RevealOptions {
+    fn default() -> Self {
+        Self {
+            vertical: ScrollAlignment::Start,
+            horizontal: ScrollAlignment::Nearest,
+            animated: true,
+        }
+    }
+}
+
+impl RevealOptions {
+    /// Sets where the view goes along vertical scroll views.
+    pub fn vertical(mut self, alignment: ScrollAlignment) -> Self {
+        self.vertical = alignment;
+        self
+    }
+
+    /// Sets where the view goes along horizontal scroll views.
+    pub fn horizontal(mut self, alignment: ScrollAlignment) -> Self {
+        self.horizontal = alignment;
+        self
+    }
+
+    /// Sets whether the scrolls animate.
+    pub fn animated(mut self, animated: bool) -> Self {
+        self.animated = animated;
+        self
+    }
+}
+
 /// An imperative call on a native view (`ref.focus()` and the like).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -1834,6 +1959,11 @@ pub enum Command {
     /// the web replaces the current history entry's, the native platforms
     /// keep none ([`crate::url_scheme`]).
     SetAppUrl(String),
+    /// The app's address as an entry of its own after the current one
+    /// (`UrlScheme.setUrl(url, { history: "push" })`, `set_app_url_with`; on
+    /// the root): the web pushes one unless the same turn pushed a page's
+    /// or it is the address shown; the native platforms keep none.
+    PushAppUrl(String),
     /// What the back button does when none of the app's listeners took
     /// it: the innermost stack pops (or asks, with `popOnBack` false); with
     /// none, the app leaves on Android (on the root).
@@ -1879,6 +2009,9 @@ pub enum Command {
         /// Animate the change.
         animated: bool,
     },
+    /// Scroll the scroll views around the view so it shows (resolved by
+    /// the core into their `ScrollTo`; never mounted).
+    Reveal(RevealOptions),
     /// Scroll a list to the end of its content.
     ScrollToEnd {
         /// Animate the change.
@@ -1907,6 +2040,12 @@ pub enum Command {
     },
     /// The JS responder let go (on the root).
     ClearJsResponder,
+    /// The press going on in this view (or a view inside it) ends without
+    /// its release: no `onPressUp` or `onPress` follow, and its `active:`
+    /// styles reset at once (a context menu opened by a held finger). The
+    /// core handles it; platforms never see it.
+    #[doc(hidden)]
+    CancelPress,
     /// Select a range of an input (UTF-16 units; equal for a caret).
     SetSelection {
         /// Start.
@@ -1914,6 +2053,13 @@ pub enum Command {
         /// End.
         end: u32,
     },
+    /// Insert text into an input in place of its selection, as the user's
+    /// edit: the input's `maxLength` and line rules apply, `onChangeText`
+    /// reports it, no key is reported, and where the platform keeps an
+    /// undo history it is a step of it (unlike a new `value`). With
+    /// `pasteBehavior` `"report"`, the app inserts a paste it allowed or
+    /// rewrote this way.
+    InsertText(String),
     /// Have the screen reader read a message (on the root).
     Announce(String),
     /// Turn the performance monitor on or off (on the root;
@@ -2066,6 +2212,38 @@ pub enum Command {
         /// Its arguments (any JSON value).
         args: crate::JsonValue,
     },
+    /// Open the system's edit menu over `bounds` (in the root view) on an
+    /// input that has the focus: the menu of a component that draws its
+    /// own text selection (`RichEditor`'s on touch screens). UIKit's
+    /// `UIEditMenuInteraction` on iOS, a floating `ActionMode` on Android;
+    /// platforms without such a menu ignore it. It offers `actions`, in the
+    /// platform's order: Paste pastes into the input as the user's paste
+    /// does (`onPaste`), the others are reported as
+    /// [`EventKind::EditAction`]. The menu closes when an action is chosen.
+    OpenEditMenu {
+        /// What the menu points at, in the root view.
+        bounds: Bounds<Points>,
+        /// The actions it offers; those that cannot apply are left out,
+        /// not disabled.
+        actions: Vec<EditAction>,
+    },
+    /// Close the edit menu [`Command::OpenEditMenu`] opened on an input.
+    CloseEditMenu,
+}
+
+/// An editing action of an edit menu ([`Command::OpenEditMenu`],
+/// [`EventKind::EditAction`]): gpui-base's input actions of the same names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+#[non_exhaustive]
+pub enum EditAction {
+    /// Cut the selection.
+    Cut,
+    /// Copy the selection.
+    Copy,
+    /// Paste the clipboard (the input's own paste).
+    Paste,
+    /// Select everything.
+    SelectAll,
 }
 
 /// A haptic the device plays ([`Command::Haptic`], TS: `Haptics` of
@@ -2526,8 +2704,9 @@ pub enum Prop {
     /// (`nsh/ios`) shown over the keyboard while the input has focus.
     #[prop(ios = "inputAccessoryViewID", on = INPUT)]
     InputAccessoryViewId(Option<Box<str>>),
-    /// `nativeID`: names the view for others (an input accessory's for
-    /// `inputAccessoryViewID`).
+    /// `nativeID`: names the view for others: an input accessory's for
+    /// `inputAccessoryViewID`, a scroll view's for the embedding app's
+    /// `watchScroll`.
     #[prop(js = "nativeID")]
     NativeId(Option<Box<str>>),
     /// The highlight of an input's or a selectable text's selection (Rust
@@ -2605,6 +2784,10 @@ pub enum Prop {
     /// view or a view inside it (an overlay's content counting as inside
     /// the view it is in), and it is not disabled.
     FocusWithinStyle(Option<std::rc::Rc<StylePatch>>),
+    /// `focusVisibleStyle`: the style while the view has focus and shows
+    /// it (`focus-visible:`: the keyboard moved the focus there, or it is
+    /// an input that edits), and it is not disabled.
+    FocusVisibleStyle(Option<std::rc::Rc<StylePatch>>),
     /// The states a part of a control shows its classes and state styles
     /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
     /// `indeterminate`, `disabled`): a switch's thumb styled `checked:`
@@ -2690,6 +2873,11 @@ pub enum Prop {
     /// `testID`: an identifier for UI tests.
     #[prop(js = "testID")]
     TestId(Option<Arc<str>>),
+    /// `web={{ element }}`: the HTML element the web draws the view or text
+    /// as (`"p"`, `"nav"`, `"article"`, ...), for what `role` cannot say;
+    /// the other platforms keep the view as it is.
+    #[prop(web = "element")]
+    WebElement(Option<WebElement>),
     /// `windowDrag` (desktops): pressing the view drags the window, as its
     /// title bar would (double-clicking maximizes it); `false` keeps a part
     /// of a draggable view clickable. The nearest view that sets it

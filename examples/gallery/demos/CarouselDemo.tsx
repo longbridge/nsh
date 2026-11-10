@@ -311,7 +311,7 @@ export function CarouselDemo() {
                   selectedStyle={{ borderColor: colors.accent, opacity: 1 }}
                   hoverStyle={{ opacity: 0.85 }}
                   activeStyle={{ transform: [{ scale: 0.94 }] }}
-                  focusStyle={focusRing(1)}
+                  focusVisibleStyle={focusRing(1)}
                 >
                   <Image src={photoUrl(p().name, "360x360")} style={{ flex: 1, borderRadius: 5, backgroundColor: colors.raised }} />
                 </CarouselPaginationItem>
@@ -404,7 +404,7 @@ export function CarouselDemo() {
                     accessibilityLabel={b().title}
                     class="group"
                     style={{ width: size.bar, height: size.hit, justifyContent: "center", borderRadius: 4 }}
-                    focusStyle={focusRing()}
+                    focusVisibleStyle={focusRing()}
                   >
                     <View class="opacity-70 group-hover:opacity-100 group-selected:opacity-0" style={{ height: 4, borderRadius: 2, backgroundColor: alpha(colors.text, 0.22), ...fade() }} />
                   </CarouselPaginationItem>

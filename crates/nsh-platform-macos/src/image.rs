@@ -25,8 +25,8 @@
 //! SVG images (sniffed from their bytes) are drawn by
 //! [`nsh_core::svg`] at the bucket's size, then go through the same blur,
 //! color matrix, tint and budget as decoded bitmaps; their size is their
-//! intrinsic size in points (CSS pixels of the SVG). Canvases draw bitmaps
-//! only.
+//! intrinsic size in points (CSS pixels of the SVG). Canvases draw them as
+//! their rasterized bitmap.
 //!
 //! Animated GIF / PNG / WebP images play through a keyframe animation of the
 //! layer's `contents`. The `placeholder` shows until the image arrives (and
@@ -911,8 +911,9 @@ fn frame_delay(source: &CGImageSource, i: usize) -> u32 {
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas, at its natural size, and hands over its (first) frame;
 /// `done` runs on the main thread (before this returns when it is in
-/// memory: callers must not hold a borrow `done` takes). Canvases draw
-/// bitmaps: an SVG is an image that failed to load.
+/// memory: callers must not hold a borrow `done` takes). An SVG is
+/// rasterized by the shared SVG renderer and its frame handed over as a
+/// bitmap.
 pub(crate) fn load(
     surface: &Rc<Surface>,
     uri: &str,
@@ -987,14 +988,10 @@ pub(crate) fn load_icon(
     )
 }
 
-/// The first frame of `picture`, loaded from `uri`, unless it is an SVG.
-fn bitmap(uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
-    match picture.natural {
-        Natural::Vector(_) => Err(format!(
-            "{uri} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-        )),
-        Natural::Pixels(..) => Ok(picture.frames[0].clone()),
-    }
+/// The first frame of `picture`, loaded from `uri`; an SVG is rasterized
+/// by the shared SVG renderer, so its frame is a bitmap here too.
+fn bitmap(_uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
+    Ok(picture.frames[0].clone())
 }
 
 /// `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`): reads the
@@ -1626,10 +1623,11 @@ mod tests {
     }
 
     #[test]
-    fn svg_is_no_canvas_image() {
+    fn svg_is_a_canvas_image() {
         let logo = decoded(SVG_LOGO, 48).unwrap();
-        let error = bitmap("asset:/logo.svg", logo).unwrap_err();
-        assert!(error.starts_with("asset:/logo.svg"), "{error}");
+        let image = bitmap("asset:/logo.svg", logo).unwrap();
+        assert_eq!(CGImage::width(Some(&*image)), 48);
+        assert_eq!(CGImage::height(Some(&*image)), 24);
         let png = decoded(&png_pixel(), 0).unwrap();
         assert_eq!(png.natural, Natural::Pixels(1, 1));
         assert!(bitmap("asset:/a.png", png).is_ok());

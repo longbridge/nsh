@@ -480,7 +480,8 @@ States are tracked by the platform only for elements whose classes use them, and
 |---|---|---|
 | `active:` | the element is pressed | `.active(\|s\| …)` |
 | `hover:` | a pointer is over it (iPad pointer, Mac Catalyst, Android mouse) | `.hover(\|s\| …)` |
-| `focus:`, `focus-visible:` | the input has focus | `.focus(\|s\| …)` |
+| `focus:` | the element has focus | `.focus(\|s\| …)` |
+| `focus-visible:` | the element has focus and shows it (the keyboard moved it there; a text input whenever it has focus) | `.focus_visible(\|s\| …)` |
 | `focus-within:` | the element or a descendant has focus (an `Overlay`'s content is a descendant of the element it is in) | `.focus_within(…)` |
 | `disabled:` | the element has the `disabled` prop | `.disabled_style(\|s\| …)` |
 | `enabled:` | the element does not have the `disabled` prop |  |
@@ -494,7 +495,7 @@ States are tracked by the platform only for elements whose classes use them, and
 | `aria-selected:` | the element is selected: `accessibilityState.selected` is `true`, as `selected:` |  |
 | `data-<name>:` | the element has the boolean `data-*` attribute `name` (Tailwind's `&[data-<name>]`; names of lower case letters, digits and `-`): what a component's part shows beyond its states, a calendar's day at the start of a range `data-range-start` | `Interactive::project_data(name, …)` sets one |
 
-The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle` and `pressedStyle` props of every element (and a `Button`'s `selectedStyle`); they go over the element's style and classes.
+The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle` and `pressedStyle` props of every element (and a `Button`'s `selectedStyle`); they go over the element's style and classes.
 
 `disabled` works on any element: it applies `disabled:` and removes the element's press handlers, so it shows no press feedback either.
 
@@ -530,7 +531,8 @@ Mark an ancestor with `group` and style descendants by its state with `group-<st
 |---|---|---|
 | `group-active:` | pressed | `.group_active(…)`, `.group_active_named(name, …)` |
 | `group-hover:` | hovered | `.group_hover(…)`, `.group_hover_named(name, …)` |
-| `group-focus:`, `group-focus-visible:` | focused |  |
+| `group-focus:` | focused |  |
+| `group-focus-visible:` | focused, showing it | `.group_focus_visible(…)`, `.group_focus_visible_named(name, …)` |
 | `group-focus-within:` | focused or containing focus | `.group_focus_within(…)`, `.group_focus_within_named(name, …)` |
 | `group-disabled:` | disabled |  |
 | `group-selected:` | selected |  |

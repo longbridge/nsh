@@ -85,6 +85,7 @@ final class Native {
     static final int URL_SCHEME = 73;
     static final int AUDIO = 74;
     static final int WINDOW = 75;
+    static final int EDIT_ACTION = 76;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -275,6 +276,9 @@ final class Native {
     static native float[] afterBatch(long handle, long seq);
 
     static native float[] tick(long handle, long frameNanos);
+
+    /** Runs the functions the app asked to run on the UI thread. */
+    static native void runMainThreadTasks(long handle);
 
     /** Shader view {@code id} is {@code width} × {@code height} px; whether frames should come. */
     static native boolean shaderSize(long handle, int id, int width, int height);

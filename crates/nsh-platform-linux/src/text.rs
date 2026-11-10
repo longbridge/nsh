@@ -9,9 +9,10 @@
 //! is what is drawn. Hinted metrics and rounded glyph positions are off on
 //! both sides, so measuring is resolution-independent.
 //!
-//! Colors and decorations are not part of a layout: the core reuses a
-//! layout for a text that only differs in them (`AttributedText::layout_eq`),
-//! so they are read from the drawn text's spans, per glyph cluster.
+//! Colors and decorations are not part of a layout: they are read from the
+//! drawn text's spans, per glyph cluster, so the core keeps a layout for a
+//! text that only differs in its colors
+//! (`TextEngine::draws_colors_from_text`).
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -23,9 +24,8 @@ use std::{
 
 use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
-    ATTACHMENT_CHAR, Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode,
-    EventKind, Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine,
-    TextPosition, TextSpan,
+    Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind, Points,
+    ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextPosition, TextSpan,
 };
 use rustc_hash::FxHashMap;
 
@@ -871,6 +871,11 @@ impl TextEngine for PangoTextEngine {
         Size::new(Points(width), Points(from_pango(bottom).ceil()))
     }
 
+    fn draws_colors_from_text(&self) -> bool {
+        // Colors and decorations are read from the drawn text's spans.
+        true
+    }
+
     fn breaks_lines_greedily(&self) -> bool {
         true
     }
@@ -1303,7 +1308,10 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
         let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
         let mut rects = drawn.selection_rects.borrow_mut();
         rects.clear();
-        layout.range_rects(range.0..range.1, &mut rects);
+        // Hidden characters show no highlight, as nothing of them shows.
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
+            layout.range_rects(shown, &mut rects);
+        }
         for r in rects.iter() {
             let (x, y) = (cx + r.origin.x.0, cy + r.origin.y.0);
             snapshot.append_color(
@@ -1390,6 +1398,13 @@ fn build(
             }
             let glyphs = &run.glyphs[i..j];
             let style = text.spans.get(span).map_or(&default, |s| &s.style);
+            if style.hidden {
+                // Nothing of a hidden run is drawn: not its color emoji,
+                // which keep their own colors, nor its shadow.
+                x += from_pango(glyphs.iter().map(|g| g.width).sum::<i32>());
+                i = j;
+                continue;
+            }
             let mut string = pango::GlyphString::new();
             string.set_size(glyphs.len() as i32);
             let mut width = 0;
@@ -1902,14 +1917,11 @@ fn copy(view: &NshView) {
     }
 }
 
-/// The selected text, without attachments' placeholders.
+/// The selected text, without attachments' placeholders and hidden runs.
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    let s = state.text.as_ref()?.text.text.as_str();
-    let start = utf16_to_byte(s, (0, 0), a);
-    let end = utf16_to_byte(s, (start, a), b);
-    Some(s[start..end].replace(ATTACHMENT_CHAR, ""))
+    Some(state.text.as_ref()?.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.
@@ -2535,6 +2547,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Glyphs of the text nodes under `node`.
+    fn drawn_glyphs(node: &gsk::RenderNode) -> u32 {
+        match node.node_type() {
+            gsk::RenderNodeType::ContainerNode => {
+                let c = node.clone().downcast::<gsk::ContainerNode>().unwrap();
+                (0..c.n_children()).map(|i| drawn_glyphs(&c.child(i))).sum()
+            }
+            gsk::RenderNodeType::ShadowNode => {
+                drawn_glyphs(&node.clone().downcast::<gsk::ShadowNode>().unwrap().child())
+            }
+            gsk::RenderNodeType::TextNode => node
+                .clone()
+                .downcast::<gsk::TextNode>()
+                .unwrap()
+                .num_glyphs(),
+            _ => 0,
+        }
+    }
+
+    /// Nothing of a hidden run is drawn: not its color emoji, its
+    /// decorations or its shadow.
+    #[test]
+    fn hidden_runs_draw_nothing() {
+        crate::gtk_test::run(|| {
+            let engine = PangoTextEngine::new("sans-serif".into());
+            let plain = ResolvedTextStyle::default();
+            let underlined = ResolvedTextStyle {
+                decoration: nsh_core::TextDecoration {
+                    underline: true,
+                    line_through: false,
+                },
+                ..plain
+            };
+            let built = |hidden: bool| {
+                let mut t = text(&[("ab ", plain)]);
+                // As the core hides a span.
+                let style = ResolvedTextStyle {
+                    hidden,
+                    color: if hidden {
+                        Color::TRANSPARENT
+                    } else {
+                        plain.color
+                    },
+                    ..underlined
+                };
+                t.push("\u{1F389} cd", style);
+                t.shadow = Some(nsh_core::TextShadow {
+                    color: Color(0x0000_0080),
+                    offset_x: Points(1.0),
+                    offset_y: Points(1.0),
+                    radius: Points(0.0),
+                });
+                let prepared = engine.prepare(&t);
+                let size = engine.measure(&prepared, None);
+                let layout = engine.layout(&prepared, size);
+                let l = layout.downcast::<LinuxLayout>().unwrap();
+                let content =
+                    Bounds::new(nsh_core::geometry::point(Points(0.0), Points(0.0)), size);
+                let node = build(&t, l, content).expect("a node");
+                (drawn_glyphs(&node), node)
+            };
+            let (shown, _) = built(false);
+            let (hidden, node) = built(true);
+            // "ab " only, of "ab 🎉 cd".
+            assert!(hidden > 0 && hidden < shown, "{hidden} of {shown}");
+            assert_eq!(hidden, 3, "{node:?}");
+        });
     }
 
     #[test]

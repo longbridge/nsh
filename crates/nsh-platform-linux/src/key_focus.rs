@@ -157,6 +157,16 @@ fn key_pressed(
     key: gdk::Key,
     modifiers: gdk::ModifierType,
 ) -> bool {
+    // Every key the window gets passes here first (the capture phase),
+    // before it acts: the focus it moves shows (`focus-visible:`). A
+    // modifier alone does not count.
+    let modifier = keys.current_event().is_some_and(|e| {
+        e.downcast_ref::<gdk::KeyEvent>()
+            .is_some_and(gdk::KeyEvent::is_modifier)
+    });
+    if !modifier {
+        surface.control(|c| c.set_input_modality(nsh_core::platform::InputModality::Keyboard));
+    }
     if matches!(
         key,
         gdk::Key::Tab | gdk::Key::ISO_Left_Tab | gdk::Key::KP_Tab
@@ -189,12 +199,7 @@ fn key_pressed(
         gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::ISO_Enter | gdk::Key::space
     ) && !(held.ctrl || held.alt || held.cmd);
     if activates && view.state().events.contains(EventKind::Press) {
-        let events = view.state().events;
-        for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-            if events.contains(kind) {
-                surface.event(view.id(), kind, EventPayload::None);
-            }
-        }
+        crate::input::activate(surface, &view);
         return true;
     }
     false

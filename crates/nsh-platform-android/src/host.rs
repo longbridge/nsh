@@ -50,6 +50,9 @@ pub(crate) struct Host {
     /// Animation items of submitted batches, by batch number, applied on the
     /// UI thread once Java has applied that batch.
     animation_queue: Mutex<VecDeque<(u64, Vec<MountItem>)>>,
+    /// Functions the app runs on the UI thread
+    /// ([`MountSink::run_on_main_thread`]), until Java's post runs them.
+    main_thread_tasks: Mutex<VecDeque<nsh_engine::MainThreadTask>>,
     seq: AtomicU64,
     ui: Mutex<UiAnimation>,
     epoch: Instant,
@@ -115,6 +118,15 @@ impl Host {
 
     fn control(&self) -> Option<EngineControl> {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
+    }
+
+    /// The user gave the surface input with `modality` (a finger, a mouse
+    /// or a hardware key going down): told before it acts, so the focus
+    /// it moves shows or not (`focus-visible:`).
+    pub(crate) fn input_with(&self, modality: nsh_core::platform::InputModality) {
+        if let Some(control) = self.control() {
+            control.set_input_modality(modality);
+        }
     }
 
     /// Hands event `kind` of node `id` to the running app.
@@ -505,6 +517,27 @@ impl MountSink for Sink {
         });
     }
 
+    fn run_on_main_thread(&self, task: nsh_engine::MainThreadTask) {
+        self.0
+            .main_thread_tasks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back(task);
+        let view = &self.0.view;
+        with_env(|env| {
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_method_unchecked(
+                    view.as_obj(),
+                    java().view_run_main_thread_tasks,
+                    ReturnType::Primitive(Primitive::Void),
+                    &[],
+                )
+            }
+            .map(|_| ())
+        });
+    }
+
     #[cfg(feature = "dev")]
     fn hot_update_failed(&self) {
         if let Some(dev) = self.0.dev.lock().ok().as_ref().and_then(|d| d.as_ref()) {
@@ -596,9 +629,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            // wgpu on Vulkan or GLES, in builds with it, until it finds no
+            // GPU.
+            shaders: nsh_engine::shader::LINKED,
             ..Environment::default()
         }),
         animation_queue: Mutex::new(VecDeque::new()),
+        main_thread_tasks: Mutex::new(VecDeque::new()),
         seq: AtomicU64::new(0),
         ui: Mutex::new(UiAnimation::default()),
         epoch: Instant::now(),
@@ -1275,6 +1312,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_event(
         EventKind::AccessibilityAction => {
             EventPayload::Map(vec![("actionName", PayloadValue::Str(read_text()))])
         }
+        EventKind::EditAction => {
+            EventPayload::Map(vec![("action", PayloadValue::Str(read_text()))])
+        }
         // Insets: x / y carry top / bottom, `count` packs left and right.
         EventKind::Insets => EventPayload::Map(vec![
             ("top", PayloadValue::Number(x as f64)),
@@ -1354,6 +1394,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_press(
     let Some(kind) = encode::kind_from(kind) else {
         return;
     };
+    if kind == EventKind::PressDown {
+        host.input_with(nsh_core::platform::InputModality::Pointer);
+    }
     let event = nsh_core::PressEvent {
         position: point(px(x), px(y)),
         page_position: point(px(page_x), px(page_y)),
@@ -1434,6 +1477,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
             }
         })
         .collect();
+    if phase == 0 {
+        host.input_with(nsh_core::platform::InputModality::Pointer);
+    }
     let phase = match phase {
         0 => nsh_core::TouchPhase::Start,
         1 => nsh_core::TouchPhase::Move,
@@ -1769,7 +1815,36 @@ extern "system" fn Java_com_longbridge_nsh_Native_afterBatch(
         ui.apply(item);
     }
     finish(host, &mut ui);
-    floats(&env, &ui.outputs())
+    let unavailable = ui.shaders.take_unavailable();
+    let outputs = floats(&env, &ui.outputs());
+    drop(ui);
+    // No GPU for the shader views just mounted: the app hears it
+    // (`shadersAvailable()`).
+    if unavailable && let Some(control) = host.control() {
+        control.shaders_unavailable();
+    }
+    outputs
+}
+
+/// Runs the next function the app asked to run on the UI thread
+/// ([`MountSink::run_on_main_thread`]). On the UI thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_runMainThreadTasks(
+    _env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    // One post per task, so a task never runs ahead of a batch posted after an earlier task.
+    let task = host
+        .main_thread_tasks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop_front();
+    if let Some(task) = task {
+        task.run();
+    }
 }
 
 /// A `Choreographer` frame (nanoseconds).

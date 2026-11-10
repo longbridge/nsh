@@ -641,7 +641,12 @@ impl ListState {
         }
         self.free.sort_unstable();
         self.free.dedup();
-        self.rebuild_offsets();
+        if removed == 0 && at + inserted == self.count {
+            // Appended: the rows before stay as they are.
+            self.resize_rows(at);
+        } else {
+            self.rebuild_offsets();
+        }
         if self.load_more_at.is_some() {
             self.load_more_at = None;
         }
@@ -938,6 +943,35 @@ impl ListState {
         self.dirty = true;
     }
 
+    /// The offsets after the items past the first `old` were appended or
+    /// dropped: only the rows at the end change, so a feed that grows a
+    /// row at a time costs O(log n) each, not a rebuild of every row.
+    fn resize_rows(&mut self, old: u32) {
+        let columns = self.columns;
+        let old_rows = old.div_ceil(columns) as usize;
+        if self.rows.len() != old_rows {
+            self.rebuild_offsets();
+            return;
+        }
+        let rows = self.row_count() as usize;
+        let gap = self.main_gap() as f64;
+        // The last row kept may have gained or lost items: its size again.
+        let kept = old_rows.min(rows);
+        self.rows.truncate(kept);
+        if kept > 0 {
+            let last = kept - 1;
+            let now = self.row_size(last as u32) as f64 + gap;
+            let was = self.rows.prefix(kept) - self.rows.prefix(last);
+            if now != was {
+                self.rows.add(last, now - was);
+            }
+        }
+        for r in kept..rows {
+            self.rows.push(self.row_size(r as u32) as f64 + gap);
+        }
+        self.dirty = true;
+    }
+
     /// Length of the item rows (no trailing gap).
     fn items_len(&self) -> f32 {
         if self.count == 0 {
@@ -1078,8 +1112,9 @@ impl ListState {
                 s.rendered = None;
             }
         }
+        let old = self.sizes.len() as u32;
         self.sizes.resize(count as usize, f32::NAN);
-        self.rebuild_offsets();
+        self.resize_rows(old);
         if self.load_more_at.is_some_and(|c| c != count) {
             self.load_more_at = None;
         }
@@ -1872,6 +1907,36 @@ mod tests {
         l.set_count(count);
         l.viewport = viewport;
         l
+    }
+
+    #[test]
+    fn appending_and_dropping_rows_matches_a_rebuild() {
+        for columns in [1, 3] {
+            let mut l = list(0, 30.0, 400.0);
+            l.set_columns(columns);
+            l.content.row_gap = px(4.0);
+            let check = |l: &mut ListState| {
+                let rows = l.rows.clone();
+                l.rebuild_offsets();
+                assert_eq!(rows.len(), l.rows.len());
+                for r in 0..=rows.len() {
+                    assert!((rows.prefix(r) - l.rows.prefix(r)).abs() < 1e-6, "row {r}");
+                }
+            };
+            for c in 1..40 {
+                l.set_count(c);
+                l.measured(c - 1, 20.0 + (c % 5) as f32 * 7.0);
+                check(&mut l);
+            }
+            for _ in 0..10 {
+                l.splice(l.count, 0, 2);
+                check(&mut l);
+            }
+            for c in [55, 31, 30, 7, 0, 5] {
+                l.set_count(c);
+                check(&mut l);
+            }
+        }
     }
 
     #[test]
@@ -2893,8 +2958,31 @@ mod tests {
             kept += l.measured(i, size);
         }
         l.offset += kept;
-        l.offset += l.take_splice_anchor();
-        l.anchor_end(kept);
+        // As the core: the splice already moved the offset.
+        let spliced = l.take_splice_anchor();
+        l.anchor_end(kept + spliced);
+    }
+
+    #[test]
+    fn follow_end_list_near_its_start_keeps_a_page_prepended_above() {
+        // #1459: a chat that loads older pages at its start, with
+        // `maintainVisibleContentPosition`, must not follow the end when a
+        // page lands above the reader.
+        let mut l = list(12, 66.0, 449.0);
+        l.follow_end = Some(100.0);
+        lay_out(&mut l, &(0..12).map(|i| (i, 66.0)).collect::<Vec<_>>());
+        l.reported(30.0, 0);
+        lay_out(&mut l, &[]);
+        let before = l.to_content(l.item_at(0), 66.0) - l.offset;
+        l.splice(0, 0, 6);
+        lay_out(&mut l, &(0..6).map(|i| (i, 66.0)).collect::<Vec<_>>());
+        let end = l.content_len() - l.viewport;
+        assert!(
+            l.offset < end - 100.0,
+            "offset {} followed the end {end}",
+            l.offset
+        );
+        assert_eq!(l.to_content(l.item_at(6), 66.0) - l.offset, before);
     }
 
     fn on_screen(l: &ListState, i: u32) -> f32 {
@@ -2963,5 +3051,50 @@ mod tests {
         l.splice(100, 0, 10);
         lay_out(&mut l, &[(15, 80.0), (30, 80.0)]);
         assert_eq!(at(&l), before);
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use std::time::Instant;
+
+    use super::*;
+
+    /// `cargo test -p nsh-core --release perf -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn list_costs() {
+        let n = 100_000u32;
+        let mut l = ListState::new();
+        l.set_estimated(40.0);
+        l.viewport = 800.0;
+        // Append one row at a time (a log / chat feed).
+        let t = Instant::now();
+        for c in 1..=n {
+            l.set_count(c);
+        }
+        eprintln!("append 1-by-1 to {n}: {:?}", t.elapsed());
+        let t = Instant::now();
+        for c in 0..20_000u32 {
+            l.splice(l.count, 0, 1);
+            let _ = c;
+        }
+        eprintln!("splice-append 20k: {:?}", t.elapsed());
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        for (slot, i) in binds.drain(..) {
+            l.rendered(slot, i);
+        }
+        let t = Instant::now();
+        let frames = 20_000;
+        for f in 0..frames {
+            l.offset = (f as f32) * 7.0;
+            l.update_window(&mut binds);
+            for (slot, i) in binds.drain(..) {
+                l.rendered(slot, i);
+                l.measured(i, 44.0);
+            }
+        }
+        eprintln!("scroll frame avg: {:?}", t.elapsed() / frames);
     }
 }

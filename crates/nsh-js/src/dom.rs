@@ -361,6 +361,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         decl!("Inputs: selects `start..end` (UTF-16 units; a caret without `end`)."),
     ),
     (
+        "insertText",
+        1,
+        decl!("(text: string): void"),
+        decl!(
+            "Inputs: inserts `text` in place of the selection as the user's edit: `maxLength` and the line rules apply, `onChange` reports it, and it is one step of the input's undo history where the platform keeps one (a new `value` is not). With `pasteBehavior=\"report\"`, a paste the app allows or rewrites in `onPaste` goes in this way."
+        ),
+    ),
+    (
         "command",
         2,
         decl!("(name: string, args?: unknown): void"),
@@ -410,6 +418,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         decl!("(): Promise<{ bounds: Bounds; pagePosition: Point } | null>"),
         decl!(
             "Where the view is once this turn's changes are laid out: `bounds` its frame in its parent (as `onLayout`), `pagePosition` its top left corner in the root view it is in (the surface, or its modal), the coordinates of touches' `pageX` / `pageY`: `event.pageX - m.pagePosition.x` is a touch's position in the view. Scroll offsets and zoom scales of the scroll views and lists around it are applied, transforms (animations included) are not. `null` when the view is not in the tree."
+        ),
+    ),
+    (
+        "reveal",
+        1,
+        decl!("(options?: RevealOptions): void"),
+        decl!(
+            "Scrolls the `<Scroll>`s around the view, innermost first, so it shows, once this turn's changes are laid out: `vertical` places it along vertical scroll views (`\"start\"` by default), `horizontal` along horizontal ones (`\"nearest\"` by default), `\"nearest\"` moving only what it must; `animated` defaults to `true`. `\"start\"` and `\"end\"` are physical (top / bottom, left / right). Each scroll view stops at its content's ends, past them by its `contentInset`. An unknown alignment throws a `TypeError`. A `List` keeps its own: use its `scrollToIndex`."
         ),
     ),
     (
@@ -3374,16 +3390,24 @@ unsafe extern "C" fn unmount(
     result
 }
 
-/// `setup(tailwind, theme, appearance, statusBar)`: the app's Tailwind
+/// `setup(tailwind, theme, appearance, statusBar, app)`: the app's Tailwind
 /// theme and the theme of the Rust components (JSON strings, or null), its
-/// appearance (`"light"` / `"dark"`, or null) and the status bar's default
-/// (`nsh.json` `"statusBar"` as JSON, or null), before anything renders.
+/// appearance (`"light"` / `"dark"`, or null), the status bar's default
+/// (`nsh.json` `"statusBar"` as JSON, or null) and what `appInfo()` reports
+/// (JSON, or null), before anything renders.
 unsafe extern "C" fn setup(
     cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
+    let app = arg(argc, argv, 4);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsString(app) }
+        && let Some(json) = string_arg(cx, app)
+    {
+        crate::env::set_app_info(cx, &json);
+    }
     let root = dom(cx).root.get();
     for (i, name) in ["tailwindTheme", "uiTheme"].into_iter().enumerate() {
         let v = arg(argc, argv, i);
@@ -4785,6 +4809,7 @@ mod tests {
             const i = element("input");
             i.focus();
             i.setSelection(2);
+            i.insertText("pasted");
             // A view that takes presses: the platforms move the keyboard
             // focus to it, as Tab does.
             const v = element("view");
@@ -4805,6 +4830,7 @@ mod tests {
                 "Command { id: 2, command: ScrollToIndex { index: 3, animated: true, view_position: 0%, view_offset: 0pt } }",
                 "Command { id: 4, command: Focus }",
                 "Command { id: 4, command: SetSelection { start: 2, end: 2 } }",
+                "Command { id: 4, command: InsertText(\"pasted\") }",
                 "Command { id: 6, command: Focus }",
                 "Command { id: 6, command: Blur }",
             ]

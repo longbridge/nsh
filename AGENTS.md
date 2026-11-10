@@ -170,6 +170,7 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
                       inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`,
                       TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes and registering native components, with Rust and TypeScript tests of the TSX entry; counter,
+                      with a test; tray: a tray app whose main window starts hidden (nsh.json `window.defaultVisible`),
                       with a test; host-echo: an app calling its web page's host (`nsh`'s `host`, nsh.json `web.host`), the host
                       module and their tests), embedding samples
                       (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
@@ -225,6 +226,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::elemen
 | `DockArea` and `ResizablePanelGroup`: the layout data, render keys, drag and drop, compact presentation | `docs/dev/dock.md` |
 | `Editor`: the code editor's model, display rows, input, keys, highlighting, search, diagnostics and parts | `docs/dev/editor.md` |
 | `DiffView`: the line diff, pairing and inline changes, rows and separators, patches, parts | `docs/dev/diff.md` |
+| platforms built outside NSH: the extension points, `Environment::platform` (the platform's name beside the device's `Os`), external targets (`nsh-platform-<name>`), the generated `nsh_rust_app` | `docs/dev/platforms.md` |
 | `DataTable`: columns, the virtual rows and columns, huge extents, selection, the layers | `docs/dev/data-table.md` |
 | `RichEditor`: the schema, steps and transactions, positions, states, plugins, node views, formats | `docs/dev/rich-editor.md` |
 | Rust classes TS uses (`#[class]`), module functions' kinds, callbacks, how calls and Rust components' props cross (typed) | `docs/dev/rust-classes.md`, `docs/dev/components.md` |
@@ -408,7 +410,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `CodeHighlighter` or `renderCodeBlock` replaces, and the `Editor`'s default look, its colors the theme's shadcn tokens
   (search matches amber, warnings amber, information blue), its font the theme's `font-mono`, every part overridable by
   the app's `classes` / `styles`, and the same built-in syntax highlighting colors, which the app's `decorations` style over, and `DiffView`'s default look: theme tokens, added green, deleted red, every part
-  overridable by `classes` / `styles`); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
+  overridable by `classes` / `styles`, and the URL hint of `Link` and `TextView`'s links: the theme's popover tokens, so every app shows where a link goes (`link_hint.rs`)); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms
   draw nothing of NSH's either: no header where the system has none (the desktops and the web place a page's `header`
   slot), no dialog card, scrim or shadow, no native press fade (press feedback is the app's `activeStyle` /
@@ -434,7 +436,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   "Extensions").
 - **API shapes: one form per thing, shapes that can grow** (decided by the user before the freeze; details and
   examples in `docs/dev/api-naming.md` "Conventions", "Shapes that can grow" and "Units"; the API is being brought to
-  them). Names come from `gpui-base` / GPUI and the DOM; React Native is a reference only.
+  them). Names are short, accurate and neutral: the project's own word for a concept first, then `gpui-base` /
+  GPUI's and the DOM's (`CONTRIBUTING.md` "API design"); React Native is a reference only.
   - Units: one per quantity. Lengths are points; an image's or a video's own size is pixels, typed `PixelSize`
     (never `Size`); times are milliseconds; velocities points per second; shares fractions from 0 to 1 (no `Percent`
     in names). Only media time is seconds (HTML's `currentTime`) and a deceleration the velocity kept per
@@ -594,7 +597,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 
 ## CI
 
-Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+The checks run on pull requests and once a day on `main` (and on manual runs), not on every push to `main`: the
+pull request already ran them, and the daily run saves the dependencies' caches pull requests restore. Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
 It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow
@@ -620,7 +624,9 @@ CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` install
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
 `main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
-directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`.
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The release and the
+website's deployment run on the organization's self-hosted runners, never pull requests (`docs/dev/tooling.md`
+"Self-hosted runners").
 
 ## Parallel agents
 

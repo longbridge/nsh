@@ -424,6 +424,10 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        // WebKitGTK, in builds with it.
+        web_views: cfg!(feature = "webview"),
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -585,6 +589,17 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         for url in launch_links.take() {
             view.open_url(&url);
         }
+        // A development host's window waits for its app, which brings the
+        // window's options ([`crate::dev`]).
+        let held = app_of.is_err();
+        // nsh.json `window.defaultVisible: false`: the window is made and
+        // the app runs in it, unseen, until it shows it (a tray app). GTK
+        // keeps the mode `launch_main` asked for until it first shows.
+        let present = !held && launch.visible_at_launch();
+        if !held && !present {
+            log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
+            crate::window::launch_hidden(&view.surface);
+        }
         match app_of {
             Ok(app) => view.load(app),
             #[cfg(feature = "dev")]
@@ -597,7 +612,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         *shown.borrow_mut() = Some((window.clone(), view.clone()));
         // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
-        window.present();
+        if present {
+            window.present();
+        }
     });
     // GTK must not parse the host's own arguments: only the URL the app
     // was opened with goes to it (`open`).

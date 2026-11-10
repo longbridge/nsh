@@ -40,8 +40,8 @@ const ICON_SIZES: [u32; 7] = [16, 20, 24, 32, 40, 48, 64];
 /// A directory `<out>/<name>`: the release runner as `<name>.exe` (the
 /// app's icon embedded), the bundle and assets in `nsh\` (where the runner
 /// looks, next to itself), `nsh\app.json` (the window's title, the app's
-/// id and appearance, which the window opens in); then the same as
-/// `<name>.zip`.
+/// id and appearance, which the window opens in, and the main window's
+/// options); then the same as `<name>.zip`.
 pub(crate) fn package(
     options: &PackageOptions<'_>,
     config: &AppConfig,
@@ -82,10 +82,7 @@ pub(crate) fn package(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
-    if let Some(appearance) = &config.appearance {
-        info["appearance"] = appearance.as_str().into();
-    }
+    let info = crate::package::desktop_app_json(config, name, id, version);
     fs::write(resources.join("app.json"), info.to_string())?;
     if let Some(icon) = &config.icon {
         let images = icon_images(icon)?;

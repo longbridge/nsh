@@ -197,6 +197,7 @@ pub(crate) fn test(
             }
         }
     }
+    crate::test_web::close();
     if let Some(report) = junit {
         std::fs::write(report, tally.junit(start.elapsed()))
             .with_context(|| format!("write {}", ui::path(report)))?;
@@ -432,7 +433,7 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities, url_schemes) = match kind {
+        let (bytecode, map, capabilities, url_schemes, main_window) = match kind {
             Entry::TestFile => test_file_bytecode(entry)?,
             Entry::App => {
                 let entry = crate::entry::resolve(entry)?;
@@ -459,6 +460,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             source_map,
             capabilities,
             url_schemes,
+            main_window,
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
@@ -480,18 +482,27 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
 }
 
 /// A compiled entry: its bytecode, its source map, and the capabilities
-/// (JSON) and URL schemes its `nsh.json` declares, which the app runs
-/// under, as on a device.
-type Compiled = (Vec<u8>, Option<String>, Option<String>, Vec<String>);
+/// (JSON), URL schemes and main window's launch options (JSON) its
+/// `nsh.json` declares, which the app runs under, as on a device.
+type Compiled = (
+    Vec<u8>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+);
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
-/// source map, declared capabilities and URL schemes; `announce`: saying so.
+/// source map, declared capabilities, URL schemes and main window's launch
+/// options; `announce`: saying so.
 fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,
         split: false,
         ui_sets: sets.to_vec(),
+        development: true,
+        ..Default::default()
     })
     .map_err(|e| BuildError::from(e).into_error(entry))?;
     if announce {
@@ -512,6 +523,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         bundle.source_map,
         capabilities,
         bundle.url_schemes,
+        bundle.main_window,
     ))
 }
 
@@ -782,7 +794,7 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities, url_schemes) = match kind {
+        let (bytecode, map, capabilities, url_schemes, main_window) = match kind {
             Entry::App => {
                 let entry =
                     crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
@@ -811,8 +823,10 @@ fn compiler() -> nsh_testing::Compile {
         // SAFETY: compiled just now by this runtime.
         let bundle = unsafe { Bundle::bytecode(bytecode) }
             .with_capabilities_json(capabilities.as_deref())?
-            // The schemes it claims, as a packaged app's runner reads them.
-            .with_url_schemes(url_schemes);
+            // The schemes it claims and its main window's launch options,
+            // as a packaged app's runner reads them.
+            .with_url_schemes(url_schemes)
+            .with_main_window(main_window.as_deref());
         Ok(Built::Js(Box::new(bundle), map))
     })
 }

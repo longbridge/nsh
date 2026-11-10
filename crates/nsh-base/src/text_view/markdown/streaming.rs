@@ -248,11 +248,19 @@ fn tex(text: &str) -> String {
         match tex_end(text, i) {
             Some(end) => i = end,
             None => {
-                let body = &text[i + 2..];
+                let mut body = text[i + 2..].trim_end();
+                // An odd backslash at the end is the closer arriving
+                // (`\[1\`): without it the body reads as it will once
+                // closed, so `\[1\]` never shows a formula of `1\`. An
+                // even run is TeX's line break (`\\`).
+                let backslashes = body.bytes().rev().take_while(|&b| b == b'\\').count();
+                if backslashes % 2 == 1 {
+                    body = &body[..body.len() - 1];
+                }
                 if body.trim().is_empty() {
                     return text[..i].trim_end().to_owned();
                 }
-                let mut out = text.trim_end().to_owned();
+                let mut out = text[..i + 2 + body.len()].trim_end().to_owned();
                 if bytes[i + 1] == b'(' {
                     out.push_str("\\)");
                 } else if body.contains('\n') {
@@ -551,6 +559,12 @@ mod tests {
         check("Display \\[x^2", "Display \\[x^2\\]");
         check("\\[\nx = 1\n+ 2", "\\[\nx = 1\n+ 2\n\\]");
         check("Opened \\(", "Opened");
+        // The closer half arrived: its backslash is not the body's.
+        check("Note\\[1\\", "Note\\[1\\]");
+        check("Euler \\(e^{i\\", "Euler \\(e^{i\\)");
+        check("Opened \\(\\", "Opened");
+        // TeX's line break stays.
+        check("\\[a \\\\", "\\[a \\\\\\]");
         check("Done \\(x\\) and **b", "Done \\(x\\) and **b**");
         // Inside a formula, markers are TeX's.
         check("\\(a*b", "\\(a*b\\)");

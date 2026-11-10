@@ -31,9 +31,9 @@ final class WebBox extends WidgetBox {
     private String injected, injectedBefore, userAgent;
     private boolean scrollable = true;
 
-    WebBox(Context context, Mounter mounter, int id) {
-        super(context, mounter, id, new WebView(context));
-        web = (WebView) widget;
+    private WebBox(Context context, Mounter mounter, int id, WebView web) {
+        super(context, mounter, id, web);
+        this.web = web;
         web.getSettings().setDomStorageEnabled(true);
         web.addJavascriptInterface(new Bridge(), "nsh");
         web.setWebViewClient(new Client());
@@ -44,6 +44,26 @@ final class WebBox extends WidgetBox {
             }
             return !scrollable && e.getActionMasked() == MotionEvent.ACTION_MOVE;
         });
+    }
+
+    /**
+     * A web view, or an empty box when the system has no WebView (no
+     * provider installed or enabled: {@code new WebView} throws). The app
+     * then hears {@code onError} with {@code ERR_FEATURE_UNAVAILABLE_ON_PLATFORM}
+     * and shows what it has instead.
+     */
+    static Box make(Context context, Mounter mounter, int id) {
+        WebView web;
+        try {
+            web = new WebView(context);
+        } catch (RuntimeException e) {
+            android.util.Log.w("nsh", "WebView is not available: " + e);
+            mounter.eventMap(id, Native.ERROR, new String[] {"message", "code"},
+                    new Object[] {"WebView is not available: " + e.getMessage(),
+                            "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"});
+            return new Box(context, mounter, id);
+        }
+        return new WebBox(context, mounter, id, web);
     }
 
     /** Called from the page on a binder thread. */

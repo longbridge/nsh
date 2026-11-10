@@ -63,7 +63,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
+    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && matrix.os || fromJSON(matrix.os == 'macos-15' && '["self-hosted", "macOS", "ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted", "Windows"]' || '["self-hosted", "Linux", "Packager"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,7 +81,7 @@ jobs:
       # Fast's CI list); web views (feature `webview`, wry) need GTK 3 and
       # WebKitGTK 4.1, videos (feature `video`) GStreamer 1.20+.
       - name: Install Linux dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y \

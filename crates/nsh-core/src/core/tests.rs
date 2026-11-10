@@ -14,6 +14,8 @@ struct FakeEngine {
     prepares: Cell<u32>,
     measures: Cell<u32>,
     layouts: Cell<u32>,
+    /// [`TextEngine::draws_colors_from_text`].
+    colors_at_draw: bool,
 }
 
 /// [`FakeEngine`]'s layout: the characters laid out and where its
@@ -42,6 +44,10 @@ impl TextEngine for FakeEngine {
             Some(max) if w > max && max > 0.0 => size_pt(max, (w / max).ceil() * 16.0),
             _ => size_pt(w, 16.0),
         }
+    }
+
+    fn draws_colors_from_text(&self) -> bool {
+        self.colors_at_draw
     }
 
     fn layout(&self, (chars, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
@@ -211,6 +217,73 @@ fn calls_into_rust_settle_their_promises_whatever_happens() {
             serde_json::json!({ "c": 4, "e": "the script stopped before the call ran" }),
         ]
     );
+}
+
+#[test]
+fn a_call_into_rust_that_is_not_async_spawns_tasks_and_makes_signals() {
+    use std::rc::Rc;
+
+    use crate::element::{RustCall, RustOp, ToJs, signal, spawn};
+    let mut c = core();
+    let done = Rc::new(Cell::new(0));
+    let seen = done.clone();
+    c.apply(Op::Rust(RustOp {
+        call: 1,
+        run: RustCall::Op(Box::new(move |_| {
+            let count = signal(1);
+            spawn(async move {
+                count.update(|n| *n += 1);
+                seen.set(count.get_untracked());
+            });
+            Ok(Box::new(()) as Box<dyn ToJs>)
+        })),
+    }))
+    .unwrap();
+    for _ in 0..10 {
+        if done.get() != 0 {
+            break;
+        }
+        c.run_component_tasks();
+    }
+    assert_eq!(done.get(), 2);
+    let replies: Vec<_> = js_events(&mut c)
+        .into_iter()
+        .map(|(_, _, payload)| match payload {
+            EventPayload::Native { data, .. } => data,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(replies, [serde_json::json!({ "c": 1, "v": null })]);
+}
+
+#[test]
+fn functions_for_the_main_thread_wait_for_the_engine_in_order() {
+    use std::sync::{Arc, Mutex};
+
+    use crate::element::{RustCall, RustOp, ToJs, run_on_main_thread, spawn};
+    let mut c = core();
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let (op, task) = (ran.clone(), ran.clone());
+    c.apply(Op::Rust(RustOp {
+        call: 0,
+        run: RustCall::Op(Box::new(move |cx| {
+            let first = op.clone();
+            drop(cx.run_on_main_thread(move || first.lock().unwrap().push("op")));
+            spawn(async move {
+                let _ = run_on_main_thread(move || task.lock().unwrap().push("task")).await;
+            });
+            Ok(Box::new(()) as Box<dyn ToJs>)
+        })),
+    }))
+    .unwrap();
+    c.run_component_tasks();
+    // Nothing runs in the core: the engine hands them to the platform.
+    assert!(ran.lock().unwrap().is_empty());
+    for task in c.take_main_thread_tasks() {
+        task.run();
+    }
+    assert_eq!(*ran.lock().unwrap(), ["op", "task"]);
+    assert!(c.take_main_thread_tasks().is_empty());
 }
 
 #[test]
@@ -767,6 +840,94 @@ fn a_clamped_column_is_as_tall_as_its_wrapped_text() {
         text.map(|f| (f.size.width.0, f.size.height.0)),
         Some((160.0, 48.0))
     );
+    // The same when the `flex: 1` item is in a slot holder laid out through.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 7,
+                tag: Tag::View,
+            },
+            style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &max),
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(6, &[("width", StyleValue::Number(40.0))]),
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::ComponentSlot("default".into()),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("flex", StyleValue::Number(1.0))]),
+            Op::CreateText {
+                id: 5,
+                text: "x".repeat(50),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 8,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 8,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 7,
+                child: 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 7,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    assert_eq!(
+        frame_of(&batch, 4).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 48.0))
+    );
     // Text alone: 400pt in 200pt is two lines.
     let (column, _) = max_width_column(&max, false, 50);
     assert_eq!(
@@ -1068,6 +1229,298 @@ fn span_backgrounds_style_their_characters() {
     );
     let text = text_item(&c.commit().unwrap()).unwrap();
     assert!(!text.has_backgrounds());
+}
+
+/// `<Text>a <Text visibility={hidden} red pressable>b<Text bold>c</Text></Text> d</Text>`.
+fn hidden_span_ops(hidden: bool) -> Vec<Op> {
+    let visibility = if hidden { "hidden" } else { "visible" };
+    vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        },
+        Op::CreateText {
+            id: 3,
+            text: "a ".into(),
+        },
+        Op::Create {
+            id: 4,
+            tag: Tag::Text,
+        },
+        style_op(
+            4,
+            &[
+                ("visibility", StyleValue::Str(visibility)),
+                ("color", StyleValue::Str("#ff0000")),
+                ("backgroundColor", StyleValue::Str("#00ff00")),
+            ],
+        ),
+        Op::Listen {
+            id: 4,
+            event: EventKind::Press,
+            enabled: true,
+        },
+        Op::CreateText {
+            id: 5,
+            text: "b".into(),
+        },
+        Op::Create {
+            id: 6,
+            tag: Tag::Text,
+        },
+        style_op(6, &[("fontWeight", StyleValue::Str("bold"))]),
+        Op::CreateText {
+            id: 7,
+            text: "c".into(),
+        },
+        Op::CreateText {
+            id: 8,
+            text: " d".into(),
+        },
+        Op::Insert {
+            parent: 6,
+            child: 7,
+            before: None,
+        },
+        Op::Insert {
+            parent: 4,
+            child: 5,
+            before: None,
+        },
+        Op::Insert {
+            parent: 4,
+            child: 6,
+            before: None,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 8,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ]
+}
+
+#[test]
+fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
+    let mut shown = core();
+    apply(&mut shown, hidden_span_ops(false));
+    let batch = shown.commit().unwrap();
+    let visible = text_item(&batch).unwrap();
+    let visible_frame = frame_of(&batch, 2).unwrap();
+    assert!(!visible.has_hidden());
+
+    let mut c = core();
+    apply(&mut c, hidden_span_ops(true));
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    // The characters stay in the text and lay out as visible ones.
+    assert_eq!(text.text, "a bc d");
+    assert!(text.layout_eq(&visible));
+    assert_eq!(frame_of(&batch, 2), Some(visible_frame));
+    // The span and the one inside it are hidden: nothing of them is drawn.
+    let hidden: Vec<_> = text.spans.iter().map(|s| s.style.hidden).collect();
+    assert_eq!(hidden, [false, true, true, false]);
+    for s in &text.spans[1..3] {
+        assert_eq!(s.style.color, Color::TRANSPARENT);
+        assert_eq!(s.style.background, None);
+    }
+    assert_eq!(text.spans[2].style.font_weight, 700);
+    // No press for hidden characters, nor a color transition over them.
+    assert!(text.links.is_empty());
+    assert_eq!(visible.links.len(), 1);
+    assert_eq!(text.uniform_color(), None);
+    // Copies and screen readers leave them out.
+    assert_eq!(text.visible_text(), "a  d");
+    assert_eq!(text.copied_text(0..6), "a  d");
+    assert_eq!(text.copied_text(2..4), "");
+    assert_eq!(text.copied_text(1..5), "  ");
+    assert_eq!(visible.copied_text(1..5), " bc ");
+    assert_eq!(visible.visible_text(), "a bc d");
+
+    // Shown again: drawn again, without measuring or moving anything.
+    apply(
+        &mut c,
+        vec![style_op(
+            4,
+            &[
+                ("visibility", StyleValue::Str("visible")),
+                ("color", StyleValue::Str("#ff0000")),
+                ("backgroundColor", StyleValue::Str("#00ff00")),
+            ],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    assert!(!text.has_hidden());
+    assert_eq!(text.spans[1].style.color, Color(0xff00_00ff));
+    assert_eq!(text.links.len(), 1);
+    assert!(frame_of(&batch, 2).is_none());
+}
+
+#[test]
+fn attachments_of_hidden_spans_are_hidden_with_them() {
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let size = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(20.0)),
+                ("height", StyleValue::Number(10.0)),
+            ],
+        )
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "ab".into(),
+            },
+            // A hidden span holding a view, and a span inside it holding
+            // an image.
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("visibility", StyleValue::Str("hidden"))]),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            size(6),
+            Op::Listen {
+                id: 6,
+                event: EventKind::Press,
+                enabled: true,
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::Text,
+            },
+            Op::Create {
+                id: 10,
+                tag: Tag::Image,
+            },
+            size(10),
+            // A view of the block itself stays.
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            size(12),
+            insert(8, 10),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 3),
+            insert(2, 4),
+            insert(2, 12),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(true), Some(true)));
+    assert_eq!(hidden_in(&batch, 10), (Some(true), Some(true)));
+    assert_eq!(hidden_in(&batch, 12), (None, None));
+    // They keep their place (laid out as when shown); a hidden view takes
+    // no presses.
+    assert!(frame_of(&batch, 6).is_some());
+    assert!(frame_of(&batch, 10).is_some());
+
+    // Shown again with the span.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("visibility", StyleValue::Str("visible"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(false), Some(false)));
+    assert_eq!(hidden_in(&batch, 10), (Some(false), Some(false)));
+
+    // Hidden again, then moved out of the text into a plain view: shown
+    // there.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("visibility", StyleValue::Str("hidden"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(true), Some(true)));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 14,
+                tag: Tag::View,
+            },
+            insert(ROOT_ID, 14),
+            Op::Remove {
+                parent: 4,
+                child: 6,
+            },
+            insert(14, 6),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 6), (Some(false), Some(false)));
+}
+
+#[test]
+fn visible_ranges_leave_hidden_runs_out() {
+    let plain = ResolvedTextStyle::default();
+    let mut t = AttributedText::default();
+    t.push("ab", plain);
+    t.push("cd", plain.hide());
+    t.push("ef", plain);
+    t.push("g", plain.hide());
+    assert_eq!(t.visible_ranges(0..7), vec![0..2, 4..6]);
+    assert_eq!(t.visible_ranges(1..5), vec![1..2, 4..5]);
+    assert_eq!(t.visible_ranges(2..4), Vec::<std::ops::Range<u32>>::new());
+    assert!(t.hidden_at(2) && t.hidden_at(6) && !t.hidden_at(4));
+    let mut shown = AttributedText::default();
+    shown.push("abc", plain);
+    assert_eq!(shown.visible_ranges(1..3), vec![1..3]);
+}
+
+#[test]
+fn copied_text_skips_hidden_runs_and_attachments() {
+    let plain = ResolvedTextStyle::default();
+    let mut t = AttributedText::default();
+    t.push("a\u{1F600}", plain);
+    t.push("bc", plain.hide());
+    t.push_attachment(crate::geometry::size_pt(4.0, 4.0), plain);
+    t.push("d\u{1F600}e", plain);
+    // a 😀(2) b c ￼ d 😀(2) e: 10 UTF-16 units.
+    assert_eq!(t.len_utf16(), 10);
+    assert_eq!(t.copied_text(0..10), "a\u{1F600}d\u{1F600}e");
+    assert_eq!(t.visible_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
+    assert_eq!(t.copied_text(1..4), "\u{1F600}");
+    assert_eq!(t.copied_text(3..7), "d");
+    // A range past the end is clamped; one inside a surrogate pair starts
+    // at the pair.
+    assert_eq!(t.copied_text(8..99), "\u{1F600}e");
+    assert_eq!(t.copied_text(12..20), "");
 }
 
 #[test]
@@ -1377,6 +1830,134 @@ fn color_change_skips_layout_and_identical_texts_share_measurements() {
         "no re-measure"
     );
     assert_eq!(c.text_engine.layouts.get(), 4);
+}
+
+#[test]
+fn colors_drawn_from_the_text_keep_its_typesetting() {
+    let mut c = Core::new(
+        FakeEngine {
+            colors_at_draw: true,
+            ..FakeEngine::default()
+        },
+        size_pt(320.0, 480.0),
+    );
+    // A block of three words, each a span of its own.
+    let mut ops = vec![Op::Create {
+        id: 10,
+        tag: Tag::Text,
+    }];
+    for (i, word) in ["fade ", "in ", "words"].into_iter().enumerate() {
+        let (span, raw) = (12 + i as u32 * 2, 13 + i as u32 * 2);
+        ops.extend([
+            Op::Create {
+                id: span,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: raw,
+                text: word.into(),
+            },
+            Op::Insert {
+                parent: span,
+                child: raw,
+                before: None,
+            },
+            Op::Insert {
+                parent: 10,
+                child: span,
+                before: None,
+            },
+        ]);
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: 10,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let mounted = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text {
+                id: 10,
+                text,
+                layout,
+                content,
+            } => Some((text.clone(), layout.clone(), *content)),
+            _ => None,
+        })
+    };
+    let (_, first, content) = mounted(&c.commit().unwrap()).expect("mounted");
+    let counts = |c: &Core<FakeEngine>| {
+        let e = &c.text_engine;
+        (e.prepares.get(), e.measures.get(), e.layouts.get())
+    };
+    let before = counts(&c);
+    let color = |c: &mut Core<FakeEngine>, id, color| {
+        c.apply(style_op(id, &[("color", StyleValue::Str(color))]))
+            .unwrap();
+        c.commit().unwrap()
+    };
+    // A word fading in: a new color, the same span boundaries.
+    let batch = color(&mut c, 14, "rgba(255, 0, 0, 0.5)");
+    assert_eq!(batch.items.len(), 1, "only the text: {:?}", batch.items);
+    let (text, layout, moved) = mounted(&batch).expect("the new text mounted");
+    assert_eq!(text.spans[1].style.color, Color(0xff00_0080));
+    assert!(Arc::ptr_eq(&layout.0, &first.0), "the layout drawn before");
+    assert_eq!(moved, content);
+    assert_eq!(counts(&c), before, "no typesetting, measuring or layout");
+    // Its neighbors take its color: the three spans merge into one.
+    color(&mut c, 12, "rgba(255, 0, 0, 0.5)");
+    let batch = color(&mut c, 16, "rgba(255, 0, 0, 0.5)");
+    let (text, layout, _) = mounted(&batch).expect("the new text mounted");
+    assert_eq!(text.spans.len(), 1);
+    assert!(Arc::ptr_eq(&layout.0, &first.0));
+    assert_eq!(counts(&c), before);
+    // A change of size is typeset again.
+    c.apply(style_op(14, &[("fontSize", StyleValue::Number(20.0))]))
+        .unwrap();
+    let (_, layout, _) = mounted(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(!Arc::ptr_eq(&layout.0, &first.0));
+    assert!(c.text_engine.prepares.get() > before.0);
+}
+
+#[test]
+fn spans_differing_only_in_colors_are_told_apart_from_other_changes() {
+    let style = ResolvedTextStyle::default();
+    let red = ResolvedTextStyle {
+        color: Color(0xff00_00ff),
+        ..style
+    };
+    let text = |words: &[(&str, ResolvedTextStyle)]| {
+        let mut t = AttributedText::default();
+        for &(w, s) in words {
+            t.push(w, s);
+        }
+        t
+    };
+    let plain = text(&[("ab", style), ("cd", style)]);
+    let split = text(&[("ab", style), ("cd", red)]);
+    assert_eq!((plain.spans.len(), split.spans.len()), (1, 2));
+    assert!(plain.same_but_colors(&split) && split.same_but_colors(&plain));
+    let bold = ResolvedTextStyle {
+        font_weight: 700,
+        ..red
+    };
+    assert!(!plain.same_but_colors(&text(&[("ab", style), ("cd", bold)])));
+    assert!(!plain.same_but_colors(&text(&[("ab", style), ("ce", red)])));
+    let underlined = ResolvedTextStyle {
+        decoration: crate::TextDecoration {
+            underline: true,
+            ..Default::default()
+        },
+        ..style
+    };
+    assert!(!plain.same_but_colors(&text(&[("abcd", underlined)])));
+    let lined = |color| ResolvedTextStyle {
+        decoration_color: color,
+        ..underlined
+    };
+    let green = Some(Color(0x00ff_00ff));
+    assert!(text(&[("ab", lined(None))]).same_but_colors(&text(&[("ab", lined(green))])));
 }
 
 #[test]
@@ -3787,7 +4368,10 @@ fn scoped_layout_commit(root_too: bool) -> Vec<(NodeId, Option<crate::LayoutTran
     }
     apply(&mut c, ops);
     c.commit().unwrap();
-    let spring = crate::LayoutTransition::new(crate::LayoutCurve::Spring { damping: 1.0 }, 265.0);
+    let spring = crate::LayoutTransition::new(
+        crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+        265.0,
+    );
     let mut ops = vec![
         style_op(2, &[("height", StyleValue::Number(30.0))]),
         style_op(8, &[("height", StyleValue::Number(20.0))]),
@@ -3935,6 +4519,46 @@ fn a_changing_label_is_sent_alone() {
     assert_eq!(batch.items.len(), 1, "{:?}", batch.items);
     assert!(
         matches!(&batch.items[0], MountItem::ViewProps { id: 2, props } if props.accessibility.label.as_deref() == Some("2 items"))
+    );
+}
+
+/// `nativeID` names any view for the embedding app (a scroll view it
+/// watches, `watchScroll`): it reaches the platforms apart from `testID`.
+#[test]
+fn native_id_reaches_the_platform() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::NativeId(Some("page".into())),
+            },
+            Op::Insert {
+                parent: 1,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(i, MountItem::ViewProps { id: 2, props } if props.native_id.as_deref() == Some("page") && props.test_id.is_none())));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::NativeId(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch.items.iter().any(
+            |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.native_id.is_none())
+        )
     );
 }
 
@@ -5559,6 +6183,89 @@ fn press_and_group_states() {
     c.set_states(2, 0);
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 1.0);
+}
+
+#[test]
+fn a_cancelled_press_resets_active_and_drops_its_release() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white active:bg-zinc-200");
+    c.commit().unwrap();
+    c.set_states(2, crate::tailwind::state::PRESSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xe4e4_e7ff)
+    );
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 2,
+            command: Command::CancelPress,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    // Never reaches the platform; the active styles reset at once.
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::Command {
+            command: Command::CancelPress,
+            ..
+        }
+    )));
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
+    // The platform still reporting it pressed changes nothing.
+    c.set_states(2, crate::tailwind::state::PRESSED);
+    assert!(c.commit().is_none_or(|b| view_style_of(&b, 2).is_none()));
+    // Its release reaches no one (JS included); the next press does.
+    assert!(c.component_event(2, EventKind::PressUp, &EventPayload::None));
+    assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+    assert!(!c.component_event(2, EventKind::PressDown, &EventPayload::None));
+    assert!(!c.component_event(2, EventKind::PressUp, &EventPayload::None));
+    assert!(!c.component_event(2, EventKind::Press, &EventPayload::None));
+}
+
+#[test]
+fn a_press_is_cancelled_after_other_nodes_were_freed() {
+    let mut c = core();
+    // Nodes made and freed before the pressed one leave vacant keys below
+    // its own.
+    view_with_classes(&mut c, 2, "bg-white");
+    view_with_classes(&mut c, 4, "bg-white");
+    view_with_classes(&mut c, 6, "bg-white active:bg-zinc-200");
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 2,
+            },
+            Op::Release { id: 2 },
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 4,
+            },
+            Op::Release { id: 4 },
+        ],
+    );
+    c.commit();
+    c.set_states(6, crate::tailwind::state::PRESSED);
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 6,
+            command: Command::CancelPress,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 6).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
 }
 
 #[test]
@@ -7292,6 +7999,180 @@ fn a_focus_within_style_applies_while_the_focus_is_inside() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
 
+/// Whether view `id` is in the `FOCUS_VISIBLE` state.
+fn focus_visible(c: &Core<FakeEngine>, id: NodeId) -> bool {
+    let key = c.key(id).unwrap();
+    c.nodes[key as usize].states & crate::tailwind::state::FOCUS_VISIBLE != 0
+}
+
+#[test]
+fn focus_moved_after_a_pointer_does_not_show_until_a_key() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    views(
+        &mut c,
+        &[(
+            2,
+            ROOT_ID,
+            "opacity-50 focus:opacity-75 focus-visible:opacity-100",
+        )],
+    );
+    c.commit();
+    // A press that moves the focus (the app's `focus()` on it): `focus:`
+    // only.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.75);
+    assert!(!focus_visible(&c, 2));
+    // A key while it has the focus shows it.
+    c.set_input_modality(InputModality::Keyboard);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // A pointer after that leaves it showing: only a move decides again.
+    c.set_input_modality(InputModality::Pointer);
+    assert!(c.commit().is_none_or(|b| view_style_of(&b, 2).is_none()));
+    assert!(focus_visible(&c, 2));
+    // Leaving takes both states off.
+    c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!focus_visible(&c, 2));
+}
+
+#[test]
+fn focus_moved_by_the_keyboard_shows_at_once() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-visible:opacity-100"),
+            (4, ROOT_ID, "opacity-50 focus-visible:opacity-100"),
+        ],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Keyboard);
+    c.set_states(2, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // Tab on: the state moves with the focus, reported as the platforms
+    // do (the view it reaches first).
+    c.set_states(4, FOCUSED);
+    c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(focus_visible(&c, 4) && !focus_visible(&c, 2));
+    // The press that comes next does not take it from where it is; a
+    // move after it (the app's `focus()`) does not show.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    c.set_states(4, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.5);
+    assert!(view_style_of(&batch, 2).is_none_or(|s| s.opacity == 0.5));
+    assert!(!focus_visible(&c, 2) && !focus_visible(&c, 4));
+}
+
+#[test]
+fn focus_shows_before_any_input() {
+    use crate::tailwind::state::FOCUSED;
+    // An app's first focus (an `autoFocus`) shows, as a browser's does.
+    let mut c = core();
+    views(&mut c, &[(2, ROOT_ID, "focus-visible:opacity-50")]);
+    c.commit();
+    c.set_states(2, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
+fn an_input_that_edits_shows_its_focus_whatever_gave_it() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Input,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::Readonly(true),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(focus_visible(&c, 2), "a tap into a field shows its focus");
+    // A read-only one takes no typing: a tap gives it the focus unseen.
+    c.set_states(4, FOCUSED);
+    c.set_states(2, 0);
+    c.commit();
+    assert!(!focus_visible(&c, 4) && !focus_visible(&c, 2));
+}
+
+#[test]
+fn the_input_modality_alone_sends_nothing() {
+    use crate::platform::InputModality;
+    // No focus: a key or a press changes no view.
+    let mut c = core();
+    views(&mut c, &[(2, ROOT_ID, "focus-visible:opacity-50")]);
+    c.commit();
+    c.set_input_modality(InputModality::Keyboard);
+    assert!(c.commit().is_none_or(|b| b.items.is_empty()));
+    c.set_input_modality(InputModality::Pointer);
+    assert!(c.commit().is_none_or(|b| b.items.is_empty()));
+}
+
+#[test]
+fn a_focus_visible_style_and_group_follow_the_shown_focus() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "group opacity-50"),
+            (4, 2, "opacity-50 group-focus-visible:opacity-100"),
+        ],
+    );
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FocusVisibleStyle(patch(&[("opacity", crate::StyleValue::Number(0.8))])),
+        }],
+    );
+    c.commit();
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    let batch = c.commit();
+    assert!(batch.as_ref().is_none_or(|b| view_style_of(b, 2).is_none()));
+    assert!(batch.as_ref().is_none_or(|b| view_style_of(b, 4).is_none()));
+    c.set_input_modality(InputModality::Keyboard);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.8);
+    assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
+}
+
 #[test]
 fn a_focus_reported_untracked_survives_a_tracking_change() {
     use crate::tailwind::state::{FOCUSED, HOVERED};
@@ -7976,6 +8857,47 @@ fn the_id_table_follows_the_nodes_alive_not_every_id_made() {
     // The newest node and the root are still known.
     assert!(c.key(1_999_998).is_ok());
     assert!(c.key(ROOT_ID).is_ok());
+}
+
+#[test]
+fn web_views_fail_at_once_where_the_platform_shows_none() {
+    let made = |web_views: bool| {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_views,
+            ..Default::default()
+        });
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::WebView,
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        js_events(&mut c)
+    };
+    // Where web views show, nothing to report.
+    assert_eq!(made(true), []);
+    let events = made(false);
+    let [(2, EventKind::Error, EventPayload::Map(fields))] = &events[..] else {
+        panic!("expected the web view's error: {events:?}");
+    };
+    assert!(fields.contains(&(
+        "code",
+        crate::PayloadValue::Str("ERR_FEATURE_UNAVAILABLE_ON_PLATFORM".into())
+    )));
 }
 
 #[test]
@@ -11491,6 +12413,8 @@ mod components {
             .child(view().on_press(move |_: &()| {
                 field.focus();
                 field.set_selection(3, 3);
+                // As an app allowing a paste it heard first.
+                field.insert_text("!");
             }))
     }
 
@@ -11599,7 +12523,8 @@ mod components {
             commands,
             [
                 (input, Command::Focus),
-                (input, Command::SetSelection { start: 3, end: 3 })
+                (input, Command::SetSelection { start: 3, end: 3 }),
+                (input, Command::InsertText("!".into()))
             ]
         );
     }
@@ -13548,6 +14473,116 @@ mod components {
         assert_eq!(web_input_available_with(false, None), "web input false");
     }
 
+    /// Shows whether a web view shows a page here.
+    #[component]
+    fn WebViewCheck() -> impl IntoElement {
+        let available = signal(String::from("asking"));
+        spawn(async move {
+            available.set(format!("web views {}", web_view_available().await));
+        });
+        text(move || available.get())
+    }
+
+    /// What [`WebViewCheck`] shows on a platform that does (`platform`) or
+    /// does not show web views, with the capabilities `declared` (`None`:
+    /// none declared).
+    fn web_view_available_with(platform: bool, declared: Option<serde_json::Value>) -> String {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_views: platform,
+            ..Default::default()
+        });
+        if let Some(declared) = declared {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&declared).unwrap(),
+                granted: None,
+            }));
+        }
+        c.mount_root(&crate::element::Root::new::<WebViewCheck>(|| ()));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("web views")));
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn web_views_are_available_where_the_platform_shows_them_and_the_app_holds_the_grant() {
+        assert_eq!(web_view_available_with(true, None), "web views true");
+        assert_eq!(web_view_available_with(false, None), "web views false");
+        let hosts = || Some(serde_json::json!({ "webview": { "hosts": [] } }));
+        assert_eq!(web_view_available_with(true, hosts()), "web views true");
+        assert_eq!(web_view_available_with(false, hosts()), "web views false");
+        // Capabilities without `webview`: not granted.
+        assert_eq!(
+            web_view_available_with(true, Some(serde_json::json!({}))),
+            "web views false"
+        );
+    }
+
+    /// A web view that says when the platform shows none.
+    #[component]
+    fn UnavailableWeb() -> impl IntoElement {
+        let heard = signal(String::from("waiting"));
+        view().child(text(move || heard.get())).child(
+            web_view("https://example.com/")
+                .on_unavailable(move |message: &str| heard.set(format!("unavailable: {message}"))),
+        )
+    }
+
+    /// What [`UnavailableWeb`] shows once the core's events reached it,
+    /// on a platform that does (`platform`) or does not show web views.
+    fn unavailable_web_with(platform: bool) -> Vec<String> {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_views: platform,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<UnavailableWeb>(|| ()));
+        let mut shown = texts(&c.commit().unwrap());
+        let mut events = Vec::new();
+        c.take_events(&mut events);
+        for event in events {
+            if let crate::element::JsEvent::Event(id, kind, payload) = event {
+                c.component_event(id, kind, &payload);
+            }
+        }
+        if let Some(batch) = c.commit() {
+            shown.extend(texts(&batch));
+        }
+        shown
+    }
+
+    #[test]
+    fn a_web_view_where_the_platform_shows_none_fails_at_once() {
+        let shown = unavailable_web_with(false);
+        assert!(
+            shown.last().unwrap().starts_with("unavailable: "),
+            "{shown:?}"
+        );
+        assert_eq!(unavailable_web_with(true), ["waiting"]);
+    }
+
+    /// Shows whether the platform draws shader views, and picks a branch
+    /// by it as an app picks a shader or its own drawing.
+    #[component]
+    fn ShaderCheck() -> impl IntoElement {
+        view()
+            .child(text(move || format!("shaders {}", shaders_available())))
+            .child(when(shaders_available, || text("shader")).otherwise(|| text("canvas")))
+    }
+
+    #[test]
+    fn shaders_available_follows_what_the_platform_reports() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ShaderCheck>(|| ()));
+        // The default environment, as headless runs have it.
+        assert_eq!(texts(&c.commit().unwrap()), ["shaders true", "shader"]);
+        // The platform found no GPU: what read it shows the change.
+        c.set_environment(crate::element::Environment {
+            shaders: false,
+            ..Default::default()
+        });
+        assert_eq!(texts(&c.commit().unwrap()), ["shaders false", "canvas"]);
+    }
+
     /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
     #[derive(Default)]
     struct TestSpeech {
@@ -13901,6 +14936,231 @@ mod components {
         let t = text(&c.commit().unwrap()).expect("built again");
         // A piece added between a span and the view goes in its place.
         assert_eq!(t.text, "Tapped 1 the link, bold and more\u{fffc}");
+    }
+
+    /// A sentence whose link has a hint (as `nsh-base` gives a link its
+    /// URL): an overlay inside the span.
+    #[component]
+    fn HintedLink() -> impl IntoElement {
+        view().child(
+            text("Read ")
+                .child(
+                    text("the docs").on_press(|_: &()| {}).child(
+                        crate::element::overlay()
+                            .hint(std::time::Duration::from_millis(500))
+                            .pointer_events(crate::props::PointerEvents::None)
+                            .child(text("https://example.com/docs")),
+                    ),
+                )
+                .child(" today"),
+        )
+    }
+
+    #[test]
+    fn a_link_of_a_text_is_its_hints_anchor_where_the_pointer_came() {
+        let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+        let _clock = clock.enter();
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<HintedLink>(|| ()));
+        let mut paragraph = None;
+        for _ in 0..2 {
+            if let Some(batch) = c.commit() {
+                for item in &batch.items {
+                    if let MountItem::Text { text, .. } = item
+                        && text.text.starts_with("Read")
+                    {
+                        paragraph = Some(text.clone());
+                    }
+                }
+            }
+        }
+        let t = paragraph.expect("the paragraph");
+        assert_eq!(t.text, "Read the docs today", "the hint is no text of it");
+        let link = t.links[0];
+        // The platforms tell the link when the pointer comes over its
+        // characters and leaves them.
+        assert!(link.events.contains(EventKind::MouseEnter));
+        assert!(link.events.contains(EventKind::MouseLeave));
+
+        let at = crate::geometry::point(px(60.0), px(8.0));
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            at,
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(link.node, EventKind::MouseEnter, &mouse);
+        c.run_component_tasks();
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        let batch = c.commit().expect("the hint shows");
+        assert!(
+            texts(&batch)
+                .iter()
+                .any(|t| t == "https://example.com/docs"),
+            "{:?}",
+            texts(&batch)
+        );
+        // Below where the pointer came (the default placement), not
+        // against the whole paragraph.
+        let overlay = inserts(&batch)
+            .into_iter()
+            .find(|&(p, ..)| p == ROOT_ID)
+            .map(|(_, child, _)| child)
+            .expect("the hint in the root view");
+        let frame = frame_of(&batch, overlay).expect("placed");
+        assert!(frame.origin.y >= px(8.0), "{frame:?}");
+
+        // Leaving the link hides it.
+        c.component_event(link.node, EventKind::MouseLeave, &mouse);
+        let batch = c.commit().expect("the hint hides");
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id } if *id == overlay))
+        );
+    }
+
+    /// A link of a text that takes no presses (as a `RichEditor`'s link
+    /// mark: the editor's touches place the caret), in a scroll view, with
+    /// a hint; beside a span taking presses with one inside it.
+    #[component]
+    fn HoverOnlyLink() -> impl IntoElement {
+        let hint = |url: &'static str| {
+            crate::element::overlay()
+                .hint(std::time::Duration::from_millis(500))
+                .pointer_events(crate::props::PointerEvents::None)
+                .child(text(url))
+        };
+        scroll().h(px(100.0)).child(
+            view().h(px(1000.0)).child(
+                text("Read ")
+                    .child(text("the docs").child(hint("https://example.com/docs")))
+                    .child(" or ")
+                    .child(
+                        text("pressed ")
+                            .on_press(|_: &()| {})
+                            .child(text("inner").child(hint("https://example.com/inner"))),
+                    ),
+            ),
+        )
+    }
+
+    #[test]
+    fn a_link_taking_no_presses_hears_the_pointer_for_its_hint_only() {
+        let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+        let _clock = clock.enter();
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<HoverOnlyLink>(|| ()));
+        let mut paragraph = None;
+        let mut scroller = None;
+        // The hint's watch comes after the first merge: the span is a
+        // link of its text from the next.
+        for _ in 0..3 {
+            if let Some(batch) = c.commit() {
+                for item in &batch.items {
+                    match item {
+                        MountItem::Text { text, .. } if text.text.starts_with("Read") => {
+                            paragraph = Some(text.clone());
+                        }
+                        MountItem::Create { id, kind } if *kind == ViewKind::Scroll => {
+                            scroller = Some(*id);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let t = paragraph.expect("the paragraph");
+        let scroller = scroller.expect("the scroll view");
+        assert_eq!(t.text, "Read the docs or pressed inner");
+        let docs = *t
+            .links
+            .iter()
+            .find(|l| (l.start, l.end) == (5, 13))
+            .expect("the hinted span is a link of its text");
+        // The pointer only: no press, no stop of Tab.
+        assert!(docs.events.contains(EventKind::MouseEnter));
+        assert!(docs.events.contains(EventKind::MouseLeave));
+        assert!(!docs.events.contains(EventKind::Press));
+        assert!(!docs.focus_stop);
+        // Inside a span taking presses, a hinted span is no link: the
+        // pressable one stays the innermost link of those characters.
+        let inner = t.link_at(26).expect("a link there");
+        assert!(inner.events.contains(EventKind::Press), "{inner:?}");
+        assert_eq!((inner.start, inner.end), (17, 30));
+
+        let at = crate::geometry::point(px(60.0), px(8.0));
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            at,
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        c.run_component_tasks();
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        let batch = c.commit().expect("the hint shows");
+        assert!(
+            texts(&batch)
+                .iter()
+                .any(|t| t == "https://example.com/docs"),
+            "{:?}",
+            texts(&batch)
+        );
+        let overlay = inserts(&batch)
+            .into_iter()
+            .find(|&(p, ..)| p == ROOT_ID)
+            .map(|(_, child, _)| child)
+            .expect("the hint in the root view");
+        // Placed where the pointer came, against the span, not the block.
+        let frame = frame_of(&batch, overlay).expect("placed");
+        assert!(frame.origin.y >= px(8.0), "{frame:?}");
+
+        // The content scrolls under a still pointer: the link moved away
+        // from where the hint points, so it hides.
+        c.set_scroll_offset(
+            scroller,
+            crate::geometry::point(px(0.0), px(40.0)),
+            u32::MAX,
+        );
+        let batch = c.commit().expect("the hint hides");
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id } if *id == overlay)),
+            "{:?}",
+            batch.items
+        );
+        // The pointer coming over the link again shows it there.
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        c.run_component_tasks();
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        let batch = c.commit().expect("shown again");
+        assert!(
+            texts(&batch)
+                .iter()
+                .any(|t| t == "https://example.com/docs")
+                || inserts(&batch)
+                    .iter()
+                    .any(|&(p, child, _)| p == ROOT_ID && child == overlay),
+            "{:?}",
+            batch.items
+        );
     }
 }
 
@@ -15176,6 +16436,365 @@ fn measures_in_root_coordinates() {
     assert_eq!(c.measure(1000), None);
 }
 
+/// A press passed on into an element (`ElementRef::press_at`) goes to the
+/// innermost view under it that hears presses, in a subtree that takes no
+/// pointer itself, and skips views that take none.
+#[test]
+fn presses_passed_on_reach_the_innermost_pressable_view() {
+    use crate::props::PointerEvents;
+    let mut c = core();
+    let listen = |id| Op::Listen {
+        id,
+        event: EventKind::Press,
+        enabled: true,
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            style_op(
+                2,
+                &[
+                    ("marginTop", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(200.0)),
+                    ("height", StyleValue::Number(50.0)),
+                    ("flexDirection", StyleValue::Str("row")),
+                ],
+            ),
+            style_op(
+                6,
+                &[
+                    ("marginLeft", StyleValue::Number(50.0)),
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ),
+            style_op(
+                8,
+                &[
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 8,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            listen(4),
+            listen(6),
+            listen(8),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    c.commit().unwrap();
+    // On 6 (at 50..70 in 4, which is at 40 in the root).
+    assert_eq!(
+        c.press_target(2, point(px(55.0), px(45.0))),
+        Some((6, point(px(5.0), px(5.0))))
+    );
+    // On 8, which takes no pointer: 4 under it.
+    assert_eq!(
+        c.press_target(2, point(px(75.0), px(45.0))),
+        Some((4, point(px(75.0), px(5.0))))
+    );
+    // Past every view that hears presses.
+    assert_eq!(c.press_target(2, point(px(10.0), px(120.0))), None);
+    // The commit passes it on as the platforms report a press.
+    c.components.presses.push((
+        2,
+        crate::PressEvent {
+            page_position: point(px(55.0), px(45.0)),
+            clicks: 2,
+            ..Default::default()
+        },
+        crate::element::Answer::<bool>::new().1,
+    ));
+    c.commit();
+    let pressed: Vec<_> = js_events(&mut c)
+        .into_iter()
+        .filter(|(_, kind, _)| *kind == EventKind::Press)
+        .collect();
+    assert!(matches!(
+        &pressed[..],
+        [(6, _, EventPayload::Press(p))] if p.position == point(px(5.0), px(5.0)) && p.clicks == 2
+    ));
+}
+
+/// `reveal` becomes a `ScrollTo` of the scroll view around, placed
+/// as its alignment says, and nothing when the view is where it would go.
+#[test]
+fn reveals_a_view() {
+    let mut c = scroll_around_view(500.0, 30.0);
+    let scroll = |c: &mut Core<FakeEngine>, vertical| {
+        c.apply(Op::Command {
+            id: 6,
+            command: Command::Reveal(crate::RevealOptions {
+                vertical,
+                animated: false,
+                ..Default::default()
+            }),
+        })
+        .unwrap();
+        c.commit().and_then(|batch| {
+            batch.items.iter().find_map(|item| match item {
+                MountItem::Command {
+                    id: 2,
+                    command: Command::ScrollTo { y, animated, .. },
+                } => {
+                    assert!(!animated);
+                    Some(y.0)
+                }
+                MountItem::Command { command, .. } => {
+                    panic!("only the scroll view scrolls: {command:?}")
+                }
+                _ => None,
+            })
+        })
+    };
+    use crate::ScrollAlignment::*;
+    assert_eq!(scroll(&mut c, Start), Some(520.0));
+    c.set_scroll_offset(2, point(px(0.0), px(520.0)), u32::MAX);
+    assert_eq!(scroll(&mut c, Nearest), None);
+    assert_eq!(scroll(&mut c, Center), Some(385.0));
+    assert_eq!(scroll(&mut c, End), Some(250.0));
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    assert_eq!(scroll(&mut c, Nearest), Some(250.0));
+}
+
+/// A scroll view 300pt high (2) over content 1000pt high with a padding of
+/// 20 (4), holding view 6 at `top` below the padding, `height` high.
+fn scroll_around_view(top: f32, height: f32) -> Core<FakeEngine> {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(2, &[("height", StyleValue::Number(300.0))]),
+            style_op(
+                4,
+                &[
+                    ("padding", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(1000.0)),
+                ],
+            ),
+            style_op(
+                6,
+                &[
+                    ("marginTop", StyleValue::Number(top)),
+                    ("height", StyleValue::Number(height)),
+                ],
+            ),
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    c
+}
+
+/// The offsets the commit's `ScrollTo` commands send scroll view 2 to.
+fn scrolls_of_scroll_view(c: &mut Core<FakeEngine>) -> Vec<f32> {
+    c.commit().map_or(Vec::new(), |batch| {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: 2,
+                    command: Command::ScrollTo { y, .. },
+                } => Some(y.0),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+fn nearest_into_view() -> Op {
+    Op::Command {
+        id: 6,
+        command: Command::Reveal(crate::RevealOptions {
+            vertical: crate::ScrollAlignment::Nearest,
+            animated: false,
+            ..Default::default()
+        }),
+    }
+}
+
+/// `"nearest"` leaves a view longer than the viewport where it is while it
+/// covers the viewport; past one edge, it brings its other edge to the
+/// viewport's other edge, as CSSOM View does.
+#[test]
+fn nearest_keeps_the_viewport_inside_a_longer_view() {
+    let mut c = scroll_around_view(0.0, 800.0);
+    c.set_scroll_offset(2, point(px(0.0), px(100.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), Vec::<f32>::new());
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![20.0]);
+    c.set_scroll_offset(2, point(px(0.0), px(600.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![520.0]);
+}
+
+/// `reveal` starts from where the commit's earlier scroll commands
+/// put the scroll view, not from where the platform last reported it.
+#[test]
+fn reveal_follows_earlier_scroll_commands() {
+    let mut c = scroll_around_view(0.0, 30.0);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollTo {
+            x: px(0.0),
+            y: px(500.0),
+            animated: false,
+        },
+    })
+    .unwrap();
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![500.0, 20.0]);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToEnd { animated: false },
+    })
+    .unwrap();
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![700.0, 20.0]);
+    c.set_scroll_offset(2, point(px(0.0), px(500.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![20.0]);
+}
+
+/// A scroll from an earlier commit counts until the platform reports it
+/// applied: `reveal` starts from where it goes.
+#[test]
+fn reveal_follows_unreported_scrolls() {
+    let mut c = scroll_around_view(0.0, 30.0);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollTo {
+            x: px(0.0),
+            y: px(500.0),
+            animated: true,
+        },
+    })
+    .unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![500.0]);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![20.0]);
+    // Reported applied: the report is where it is.
+    c.set_scroll_offset(2, point(px(0.0), px(20.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), Vec::<f32>::new());
+}
+
+/// With content insets, a view already in view stays put, at the offsets
+/// the insets add past either end.
+#[test]
+fn reveal_keeps_still_within_content_insets() {
+    let inset = |c: &mut Core<FakeEngine>, insets: EdgeInsets| {
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(crate::ops::ScrollProp::ContentInset(insets)),
+        })
+        .unwrap();
+        c.commit().unwrap();
+    };
+    let mut c = scroll_around_view(0.0, 30.0);
+    inset(
+        &mut c,
+        EdgeInsets {
+            top: px(50.0),
+            ..EdgeInsets::default()
+        },
+    );
+    c.set_scroll_offset(2, point(px(0.0), px(-50.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), Vec::<f32>::new());
+
+    let mut c = scroll_around_view(900.0, 60.0);
+    inset(
+        &mut c,
+        EdgeInsets {
+            bottom: px(100.0),
+            ..EdgeInsets::default()
+        },
+    );
+    c.set_scroll_offset(2, point(px(0.0), px(800.0)), u32::MAX);
+    c.apply(nearest_into_view()).unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), Vec::<f32>::new());
+    // As far as the bottom inset lets the platform scroll.
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    c.apply(Op::Command {
+        id: 6,
+        command: Command::Reveal(crate::RevealOptions {
+            vertical: crate::ScrollAlignment::Start,
+            animated: false,
+            ..Default::default()
+        }),
+    })
+    .unwrap();
+    assert_eq!(scrolls_of_scroll_view(&mut c), vec![800.0]);
+}
+
 /// `desktop={{ windowDrag }}` reaches the platform in the view's props, and
 /// clearing it sends them again.
 #[test]
@@ -15209,6 +16828,49 @@ fn window_drag_is_a_view_prop() {
     assert!(batch.items.iter().any(
         |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.window_drag.is_none())
     ));
+}
+
+/// `web={{ element }}` reaches the platform in the view's props (the web
+/// draws the view as that HTML element), and clearing it sends the props
+/// again.
+#[test]
+fn web_element_is_a_view_prop() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::WebElement(Some(crate::WebElement::Nav)),
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element == Some(crate::WebElement::Nav)
+    )));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::WebElement(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.web_element.is_none()
+    )));
 }
 
 /// `focusable={false}` reaches the platform in the view's props.
@@ -20406,6 +22068,62 @@ mod rust_windows {
         assert_eq!(kept, placement);
     }
 
+    #[test]
+    fn hidden_main_windows_keep_the_placement_the_user_left() {
+        use crate::desktop::{MainWindowOptions, WindowMode, WindowPlacement, WindowState};
+        let mut c = core();
+        let kept = |c: &Core<FakeEngine>| {
+            let _entered = c.components.runtime.enter();
+            crate::storage::Storage::get_item("nsh.window:main")
+                .map(|json| serde_json::from_str::<WindowPlacement>(&json).unwrap())
+        };
+        let state = |x: f32, mode: WindowMode, visible: bool| {
+            let bounds =
+                crate::geometry::Bounds::new(point(px(x), px(60.0)), size(px(640.0), px(480.0)));
+            let mut state = WindowState::new(bounds, WindowPlacement::new(mode, bounds));
+            state.visible = visible;
+            state
+        };
+        let report = |c: &mut Core<FakeEngine>, state: WindowState| {
+            c.set_environment(crate::element::Environment {
+                os: crate::platform::Os::MacOs,
+                window_state: Some(state),
+                ..Default::default()
+            });
+        };
+        // Hidden since launch (`defaultVisible: false`), in Normal mode
+        // until it shows in the mode it opens in: nothing kept yet, so the
+        // placement of the last run stays.
+        report(&mut c, state(0.0, WindowMode::Normal, false));
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            default_visible: Some(false),
+            ..Default::default()
+        });
+        report(&mut c, state(10.0, WindowMode::Normal, false));
+        assert_eq!(kept(&c), None);
+        let maximized = state(40.0, WindowMode::Maximized, true);
+        report(&mut c, maximized);
+        assert_eq!(kept(&c), Some(maximized.placement));
+        // Shown, it is where the user left it, hidden too: a window hidden
+        // right after a resize reports its new size only then (a tray
+        // app's close).
+        let resized = state(40.0, WindowMode::Normal, false);
+        report(&mut c, resized);
+        assert_eq!(kept(&c), Some(resized.placement));
+
+        // One that opens shown is where the user left it from the start,
+        // hidden reports included, as before `defaultVisible`.
+        let mut c = core();
+        c.set_main_window(&MainWindowOptions {
+            restore_bounds: true,
+            ..Default::default()
+        });
+        let hidden = state(80.0, WindowMode::Normal, false);
+        report(&mut c, hidden);
+        assert_eq!(kept(&c), Some(hidden.placement));
+    }
+
     /// A window with no size of the app's, and one with a `defaultSize`,
     /// each filled by a view.
     #[component]
@@ -20867,7 +22585,9 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         view()
             .disabled(move || disabled.get())
             .on_press(move |_: &()| disabled.set(true))
-            .on_file_drag_enter(|_: &()| {})
+            .on_file_drag_enter(move |event: &crate::element::FileDragEvent| {
+                received.set(format!("enter {}", event.uris.join("\n")))
+            })
             .on_file_drag_leave(|_: &()| {})
             .on_file_drop(move |event: &crate::element::FileDropEvent| {
                 received.set(event.uris.join("\n"))
@@ -20889,6 +22609,14 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         "file:///tmp/a%20b.txt".into(),
         "file:///tmp/%E4%B8%AD%E6%96%87/".into(),
     ];
+    assert!(c.component_event(
+        host,
+        EventKind::FileDragEnter,
+        &EventPayload::FileDrop(uris.clone())
+    ));
+    let entered = c.commit().unwrap();
+    assert!(entered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == format!("enter {}", uris.join("\n")))));
     assert!(c.component_event(
         host,
         EventKind::FileDrop,
@@ -22647,6 +24375,137 @@ fn overlays_show_in_their_root_view_above_its_children() {
     );
 }
 
+/// The `available` the last `onPosition` of overlay `id` told it.
+fn told_room(
+    events: &[(NodeId, EventKind, EventPayload)],
+    id: NodeId,
+) -> Option<(String, Size<Points>)> {
+    events
+        .iter()
+        .rev()
+        .find_map(|(at, kind, payload)| match payload {
+            EventPayload::Map(m) if *at == id && *kind == EventKind::Position => {
+                let placement = m.iter().find_map(|(k, v)| match (k, v) {
+                    (&"placement", PayloadValue::Str(s)) => Some(s.to_string()),
+                    _ => None,
+                })?;
+                let available = m.iter().find_map(|(k, v)| match (k, v) {
+                    (&"available", PayloadValue::Size(s)) => Some(*s),
+                    _ => None,
+                })?;
+                Some((placement, available))
+            }
+            _ => None,
+        })
+}
+
+#[test]
+fn overlays_held_to_the_room_they_were_told_flip_at_their_natural_size() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A trigger low in a 320 × 480 screen: 56 points below it (less the
+    // offset), 376 above.
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(380.0))]);
+    add(
+        &mut c,
+        6,
+        Tag::View,
+        ROOT_ID,
+        &[("width", Number(80.0)), ("height", Number(40.0))],
+    );
+    add(&mut c, 10, Tag::Overlay, 6, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(120.0)), ("height", Number(40.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(6)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(10, crate::OverlayProp::Offset(px(4.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::Position,
+                enabled: true,
+            },
+        ],
+    );
+    // It fits below: there.
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 424.0, 120.0, 40.0)));
+    let events = js_events(&mut c);
+    let (placement, room) = told_room(&events, 10).expect("onPosition");
+    assert_eq!(placement, "bottom");
+    assert_eq!(room.height, px(56.0));
+    // The app holds it to that room (a list scrolling past it), as
+    // `nsh-base`'s popups do.
+    apply(&mut c, vec![style_op(10, &[("maxHeight", Number(56.0))])]);
+    // Its 40 points fit under that: nothing moves, so maybe no batch.
+    c.commit();
+    // The core sees it held to the room it was told: its max height is
+    // that room, the one the last `onPosition` carried.
+    let key = c.key(10).unwrap();
+    let state = c.overlay(key).expect("overlay");
+    assert_eq!(state.told.map(|t| t.height), Some(px(56.0)));
+    let layout = c.nodes[key as usize].layout.expect("laid out");
+    assert_eq!(
+        c.layout.style(layout).max_size.height,
+        taffy::LengthPercentageAuto::length(56.0)
+    );
+    // Its content grows past the room below, fitting above: it goes
+    // above, at its whole height once the app gives it the room there.
+    apply(
+        &mut c,
+        vec![style_op(
+            12,
+            &[("width", Number(120.0)), ("height", Number(300.0))],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    // Measured without the room it was told: its natural 300 points.
+    let state = c.overlay(key).expect("overlay");
+    assert_eq!(state.natural, Some(px(300.0)));
+    assert_eq!(frame_of(&batch, 10).map(|f| f.origin.y), Some(px(76.0)));
+    let events = js_events(&mut c);
+    let (placement, room) = told_room(&events, 10).expect("onPosition");
+    assert_eq!(placement, "top");
+    assert_eq!(room.height, px(376.0));
+    apply(&mut c, vec![style_op(10, &[("maxHeight", Number(376.0))])]);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 76.0, 120.0, 300.0)));
+    // Taller than either side's room: the larger one, above, limited to
+    // it (the app's max height), from the top of the screen.
+    apply(
+        &mut c,
+        vec![style_op(
+            12,
+            &[("width", Number(120.0)), ("height", Number(450.0))],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 0.0, 120.0, 376.0)));
+    let events = js_events(&mut c);
+    assert!(told_room(&events, 10).is_none_or(|(placement, _)| placement == "top"));
+    // Short again: it stays above while it fits there (the side asked for
+    // has no room for it), at its own height.
+    apply(
+        &mut c,
+        vec![style_op(
+            12,
+            &[("width", Number(120.0)), ("height", Number(100.0))],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 276.0, 120.0, 100.0)));
+}
+
 #[test]
 fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
     use StyleValue::Number;
@@ -22949,6 +24808,46 @@ fn overlays_in_a_modal_show_in_it() {
     let batch = c.commit().unwrap();
     assert!(inserts(&batch).contains(&(2, 6, None)));
     assert_eq!(frame_of(&batch, 6), Some(rect(190.0, 290.0, 10.0, 10.0)));
+}
+
+#[test]
+fn an_anchored_overlay_lands_on_whole_device_pixels() {
+    use StyleValue::Number;
+    for ratio in [1.0, 2.0, 3.0] {
+        let mut c = core();
+        at_ratio(&mut c, ratio);
+        add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(480.0))]);
+        add(&mut c, 10, Tag::Overlay, 2, &[]);
+        add(
+            &mut c,
+            12,
+            Tag::View,
+            10,
+            &[("width", Number(120.0)), ("height", Number(60.0))],
+        );
+        // A pointer between pixels, as a context menu opens at.
+        apply(
+            &mut c,
+            vec![overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                    px(100.38),
+                    px(50.71),
+                ))),
+            )],
+        );
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 10).expect("overlay frame");
+        for v in [frame.origin.x.0, frame.origin.y.0] {
+            let pixels = v * ratio;
+            assert!(
+                (pixels - pixels.round()).abs() < 1.0e-3,
+                "{v} is not on a device pixel at {ratio}"
+            );
+        }
+        // Still centred on the pointer (100.38 - 120 / 2), within a pixel.
+        assert!((frame.origin.x.0 - 40.38).abs() <= 1.0 / ratio);
+    }
 }
 
 #[test]
@@ -26435,6 +28334,66 @@ fn a_culled_view_reports_its_layout_and_is_made_for_a_command() {
 }
 
 #[test]
+fn a_dialog_in_a_scroll_view_s_content_is_made_wherever_it_opens() {
+    // A dialog's modal shows over everything, not at its place in the
+    // content: it is made beside a row in view, and in a row far down
+    // that is not made yet, with the views around it.
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    ops.extend(child_view(4, 2, 50.0, &[]));
+    ops.extend(child_view(6, 2, 1000.0, &[]));
+    ops.extend(child_view(8, 2, 50.0, &[]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&4));
+    assert!(!created_in(&batch).contains(&8));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 10,
+                tag: Tag::Modal,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 10,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&10));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 12,
+                tag: Tag::Modal,
+            },
+            Op::Insert {
+                parent: 8,
+                child: 12,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let made = created_in(&batch);
+    assert!(made.contains(&8) && made.contains(&12), "{made:?}");
+}
+
+#[test]
 fn sticky_views_stick_in_the_viewport_of_the_scroll_view_around_them() {
     let mut c = core();
     let sticky = [
@@ -28547,7 +30506,12 @@ fn following_another_view_moves_its_frame_alone_with_its_transition() {
     let mut c = core();
     follow_row(&mut c, false);
     c.commit().unwrap();
-    let spring = crate::LayoutTransition::new(crate::LayoutCurve::Spring { damping: 0.85 }, 362.0);
+    let spring = crate::LayoutTransition::new(
+        crate::LayoutCurve::FittedSpring {
+            damping_ratio: 0.85,
+        },
+        362.0,
+    );
     apply(
         &mut c,
         vec![
@@ -32890,6 +34854,8 @@ mod audio {
     /// Plays in place of the platform: records what it is asked.
     struct FakeAudio {
         log: Mutex<Vec<String>>,
+        /// The names the loads went by.
+        hints: Mutex<Vec<String>>,
         decodes: Mutex<Decodes>,
     }
 
@@ -32897,6 +34863,7 @@ mod audio {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 log: Mutex::default(),
+                hints: Mutex::default(),
                 decodes: Mutex::new(Decodes {
                     duration: Duration::from_millis(400),
                     bytes: 70_000,
@@ -32913,8 +34880,11 @@ mod audio {
     impl AudioBackend for FakeAudio {
         fn command(&self, command: AudioCommand, events: &AudioSink) {
             let line = match &command {
-                AudioCommand::Load { max_duration, .. } => {
+                AudioCommand::Load {
+                    max_duration, hint, ..
+                } => {
                     assert_eq!(*max_duration, crate::audio::MAX_SOUND_DURATION);
+                    self.hints.lock().unwrap().push(hint.clone());
                     let d = self.decodes.lock().unwrap();
                     events.send(AudioEvent::Loaded {
                         duration: d.duration,
@@ -32992,6 +34962,38 @@ mod audio {
         let shown = signal(String::new());
         spawn(async move {
             shown.set(failed(load_sound(&click_uri()).await));
+        });
+        text(move || shown.get())
+    }
+
+    /// Loads a sound from bytes the app holds: the same bytes twice (one
+    /// static, one a copy) and other bytes once, and plays each.
+    #[component]
+    fn ByteSounds() -> impl IntoElement {
+        const TICK: &[u8; 16] = b"RIFF\0\0\0\0WAVEtick";
+        let shown = signal(String::new());
+        spawn(async move {
+            let a = load_sound(TICK).await.unwrap();
+            let b = load_sound(TICK.to_vec()).await.unwrap();
+            let c = load_sound(b"ID3 another".as_slice()).await.unwrap();
+            a.play(0.5, 1.0);
+            b.play(0.5, 1.0);
+            c.play(1.0, 1.0);
+            shown.set("done".into());
+        });
+        text(move || shown.get())
+    }
+
+    /// Loads a sound from bytes once and shows why it was refused, naming
+    /// the capability.
+    #[component]
+    fn ByteClick() -> impl IntoElement {
+        let shown = signal(String::new());
+        spawn(async move {
+            shown.set(match load_sound(b"RIFF a click".as_slice()).await {
+                Ok(_) => "loaded".into(),
+                Err(failure) => format!("{} {:?}", failure.error.as_str(), failure.permission),
+            });
         });
         text(move || shown.get())
     }
@@ -33096,6 +35098,34 @@ mod audio {
     }
 
     #[test]
+    fn bytes_load_once_named_by_their_format() {
+        let audio = FakeAudio::new();
+        let mut c = core();
+        c.set_audio(Some(audio.clone()));
+        assert_eq!(shown_after::<ByteSounds>(&mut c), "done");
+        settle(&mut c);
+        assert_eq!(
+            audio.log(),
+            [
+                "load",
+                "load",
+                "play 0.5 1",
+                "play 0.5 1",
+                "play 1 1",
+                "unload",
+                "unload"
+            ]
+        );
+        let hints = audio.hints.lock().unwrap().clone();
+        assert_eq!(hints.len(), 2);
+        assert!(hints[0].starts_with("data:audio/wav;nsh-key="), "{hints:?}");
+        assert!(
+            hints[1].starts_with("data:audio/mpeg;nsh-key="),
+            "{hints:?}"
+        );
+    }
+
+    #[test]
     fn a_sound_longer_than_the_limit_is_refused() {
         let audio = FakeAudio::new();
         audio.decodes.lock().unwrap().truncated = true;
@@ -33127,6 +35157,21 @@ mod audio {
             granted: None,
         }));
         assert_eq!(shown_after::<Click>(&mut c), "not-allowed");
+        // Bytes the app holds need the capability as much as a source: the
+        // core refuses them (without the engine's loader context) ...
+        assert_eq!(shown_after::<ByteClick>(&mut c), "not-allowed None");
+        // ... and so does the load, before it reads them, naming it.
+        let mut context = crate::image::loader::Context::default();
+        context.access = Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        });
+        c.set_image_context(context);
+        assert_eq!(
+            shown_after::<ByteClick>(&mut c),
+            "not-allowed Some(\"audio\")"
+        );
+        c.set_image_context(crate::image::loader::Context::default());
         assert_eq!(audio.log(), Vec::<String>::new());
     }
 
@@ -33831,4 +35876,422 @@ fn a_backdrop_follows_the_order_views_draw_in() {
         "{:?}",
         batch.items
     );
+}
+
+mod each_order {
+    use super::*;
+    use crate::{
+        element::{Component, Props, Root, Scope},
+        prelude::*,
+    };
+
+    #[derive(Clone, PartialEq)]
+    struct Item {
+        key: u32,
+        label: &'static str,
+        visible: bool,
+    }
+
+    fn item(key: u32, label: &'static str, visible: bool) -> Item {
+        Item {
+            key,
+            label,
+            visible,
+        }
+    }
+
+    fn caption(item: &Item, index: usize) -> String {
+        format!("{}:{}@{index}", item.key, item.label)
+    }
+
+    thread_local! {
+        static ITEMS: Cell<Option<Signal<Vec<Item>>>> = const { Cell::new(None) };
+        static FOOTER: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+        static MADE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[derive(Default)]
+    struct Holder;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct HolderProps {
+        children: Children,
+    }
+
+    impl Component for Holder {
+        type Props = HolderProps;
+        type Event = NoEvent;
+
+        fn view(props: HolderProps, _: Scope<NoEvent>) -> impl IntoElement {
+            view().child(props.children)
+        }
+    }
+
+    #[derive(Default)]
+    struct RowsFixture;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct FixtureProps {
+        nested: bool,
+        regions: bool,
+    }
+
+    impl Component for RowsFixture {
+        type Props = FixtureProps;
+        type Event = NoEvent;
+
+        fn view(props: FixtureProps, _: Scope<NoEvent>) -> impl IntoElement {
+            MADE.with(|made| made.set(0));
+            let items = signal(vec![
+                item(1, "one", true),
+                item(2, "two", !props.regions),
+                item(3, "three", true),
+            ]);
+            let footer = signal(false);
+            ITEMS.with(|saved| saved.set(Some(items)));
+            FOOTER.with(|saved| saved.set(Some(footer)));
+            let rows = each(
+                items,
+                |item: &Item| item.key,
+                move |item, index| {
+                    MADE.with(|made| made.set(made.get() + 1));
+                    if props.regions {
+                        dynamic(move || {
+                            let item = item.get();
+                            item.visible.then(|| text(caption(&item, index.get())))
+                        })
+                    } else {
+                        text(move || caption(&item.get(), index.get())).into_element()
+                    }
+                },
+            );
+            let children = vec![
+                text("prefix").into_element(),
+                rows,
+                when(footer, || text("anchor")).into_element(),
+                text("suffix").into_element(),
+            ];
+            if props.nested {
+                view()
+                    .child(
+                        Holder::element(HolderProps {
+                            children: Children::default(),
+                        })
+                        .children(children),
+                    )
+                    .into_element()
+            } else {
+                view().children(children).into_element()
+            }
+        }
+    }
+
+    fn children(c: &Core<FakeEngine>, parent: NodeId) -> Vec<NodeId> {
+        let key = c.key(parent).unwrap();
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&child| c.nodes[child as usize].id)
+            .collect()
+    }
+
+    fn order(c: &Core<FakeEngine>, parent: NodeId) -> Vec<String> {
+        children(c, parent)
+            .into_iter()
+            .filter_map(|id| {
+                let node = &c.nodes[c.key(id).unwrap() as usize];
+                node.children
+                    .first()
+                    .map(|&raw| c.nodes[raw as usize].text.clone())
+            })
+            .collect()
+    }
+
+    fn mounted(nested: bool, regions: bool) -> (Core<FakeEngine>, NodeId) {
+        let mut c = core();
+        c.set_content_culling(false);
+        c.mount_root(&Root::new::<RowsFixture>(move || FixtureProps {
+            nested,
+            regions,
+        }));
+        let batch = c.commit().unwrap();
+        let prefix = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "prefix" => Some(*id),
+                _ => None,
+            })
+            .expect("prefix mounted");
+        let parent = c.nodes[c.key(prefix).unwrap() as usize].parent;
+        let parent = c.nodes[parent as usize].id;
+        (c, parent)
+    }
+
+    fn update(c: &mut Core<FakeEngine>, items: Vec<Item>, footer: bool) -> MountBatch {
+        {
+            let _entered = c.components.runtime.enter();
+            ITEMS.with(Cell::get).unwrap().set(items);
+            FOOTER.with(Cell::get).unwrap().set(footer);
+        }
+        c.commit().unwrap()
+    }
+
+    #[test]
+    fn same_order_values_update_existing_nodes_and_repair_an_external_gap() {
+        let (mut c, parent) = mounted(false, false);
+        let original = children(&c, parent);
+        let batch = update(
+            &mut c,
+            vec![
+                item(1, "ONE", true),
+                item(2, "two", true),
+                item(3, "three", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "1:ONE@0", "2:two@1", "3:three@2", "suffix"]
+        );
+        assert_eq!(children(&c, parent), original);
+        assert_eq!(MADE.with(Cell::get), 3);
+        assert_eq!(
+            batch
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    MountItem::Text { text, .. } => Some(text.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ["1:ONE@0"]
+        );
+        assert!(
+            !batch.items.iter().any(|item| matches!(
+                item,
+                MountItem::Create { .. }
+                    | MountItem::Delete { .. }
+                    | MountItem::Insert { .. }
+                    | MountItem::Remove { .. }
+            )),
+            "same-order values must not remount or move rows"
+        );
+
+        // Equal keys alone do not prove physical placement: an unrelated
+        // sibling now splits the region. Its rows must become contiguous.
+        c.apply(Op::Create {
+            id: 4000,
+            tag: Tag::View,
+        })
+        .unwrap();
+        // Public apply routes a component host's Insert to its passed
+        // children. Perturb the physical tree directly for this check.
+        c.insert(parent, 4000, Some(original[2])).unwrap();
+        let split = [
+            original[0],
+            original[1],
+            4000,
+            original[2],
+            original[3],
+            original[4],
+        ];
+        assert_eq!(children(&c, parent), split, "the physical gap was inserted");
+        c.commit();
+        assert_eq!(
+            children(&c, parent),
+            split,
+            "the gap persists until reconciliation"
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "one", true),
+                item(2, "two", true),
+                item(3, "three", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            children(&c, parent),
+            [
+                original[0],
+                4000,
+                original[1],
+                original[2],
+                original[3],
+                original[4]
+            ]
+        );
+    }
+
+    #[test]
+    fn same_order_region_rows_follow_empty_and_populated_anchors() {
+        let (mut c, parent) = mounted(false, true);
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "1:one@0", "3:three@2", "suffix"]
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "one", true),
+                item(2, "TWO", true),
+                item(3, "three", true),
+            ],
+            true,
+        );
+        assert_eq!(
+            order(&c, parent),
+            [
+                "prefix",
+                "1:one@0",
+                "2:TWO@1",
+                "3:three@2",
+                "anchor",
+                "suffix"
+            ]
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "ONE", true),
+                item(2, "two", false),
+                item(3, "three", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "1:ONE@0", "3:three@2", "suffix"]
+        );
+        assert_eq!(MADE.with(Cell::get), 3, "the dynamic row owners stay");
+    }
+
+    #[test]
+    fn reordered_added_and_removed_rows_keep_the_retained_node_ids() {
+        let (mut c, parent) = mounted(false, false);
+        let original = children(&c, parent);
+        update(
+            &mut c,
+            vec![
+                item(3, "THREE", true),
+                item(1, "ONE", true),
+                item(4, "four", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "3:THREE@0", "1:ONE@1", "4:four@2", "suffix"]
+        );
+        let reordered = children(&c, parent);
+        assert_eq!(&reordered[1..3], &[original[3], original[1]]);
+        assert!(c.key(original[2]).is_err(), "the removed row was released");
+        assert_eq!(MADE.with(Cell::get), 4);
+        update(&mut c, vec![], false);
+        assert_eq!(order(&c, parent), ["prefix", "suffix"]);
+    }
+
+    #[test]
+    fn nested_component_content_keeps_its_existing_placement_path() {
+        let (mut c, parent) = mounted(true, false);
+        let original = children(&c, parent);
+        assert!(
+            c.is_host(parent)
+                && c.components
+                    .regions
+                    .values()
+                    .any(|state| state.host != parent
+                        && state
+                            .children
+                            .iter()
+                            .any(|element| element.id == original[1])),
+            "the rows belong to the outer view and are children of a nested host"
+        );
+        update(
+            &mut c,
+            vec![
+                item(1, "ONE", true),
+                item(2, "two", true),
+                item(3, "three", true),
+            ],
+            true,
+        );
+        assert_eq!(
+            order(&c, parent),
+            [
+                "prefix",
+                "1:ONE@0",
+                "2:two@1",
+                "3:three@2",
+                "anchor",
+                "suffix"
+            ]
+        );
+        update(
+            &mut c,
+            vec![item(3, "three", true), item(1, "one", true)],
+            false,
+        );
+        assert_eq!(
+            order(&c, parent),
+            ["prefix", "3:three@0", "1:one@1", "suffix"]
+        );
+        let reordered = children(&c, parent);
+        assert_eq!(&reordered[1..3], &[original[3], original[1]]);
+        assert_eq!(MADE.with(Cell::get), 3);
+    }
+}
+
+/// An `svg()` the platform draws as an image (the web) is sent with its text
+/// color, inherited, for its `currentColor`; an image is not (#1466).
+#[test]
+fn svg_drawn_as_an_image_carries_its_text_color() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-red-500");
+    let image = |c: &mut Core<FakeEngine>, id: NodeId, svg: bool| {
+        let mut ops = vec![
+            Op::Create {
+                id,
+                tag: Tag::Image,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Source(Some(ImageSource {
+                    uri: "asset:/icon.svg".into(),
+                    ..Default::default()
+                })),
+            },
+        ];
+        if svg {
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::Image(ImageProp::SvgCurrentColor(true)),
+            });
+        }
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+        apply(c, ops);
+    };
+    image(&mut c, 3, true);
+    image(&mut c, 4, false);
+    let color_of = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Image { id: i, options, .. } if *i == id => Some(options.current_color),
+            _ => None,
+        })
+    };
+    let batch = c.commit().unwrap();
+    assert_eq!(color_of(&batch, 3), Some(Some(Color(0xfb2c_36ff))));
+    assert_eq!(color_of(&batch, 4), Some(None));
+    // The ancestor's color changes: the svg's is sent again.
+    c.apply(class_op(2, "text-blue-500")).unwrap();
+    let batch = c.commit().unwrap();
+    let blue = color_of(&batch, 3).flatten().unwrap();
+    assert_ne!(blue, Color(0xfb2c_36ff));
+    assert_eq!(color_of(&batch, 4), None);
 }

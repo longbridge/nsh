@@ -60,6 +60,7 @@ pub struct System {
     pub updater: Option<Arc<dyn crate::runtime::UpdaterHost>>,
     /// The app's address, the core's own (`UrlScheme.url()`,
     /// [`Core::app_url_cell`](crate::Core::app_url_cell)).
+    #[doc(hidden)]
     pub app_url: crate::url_scheme::AppUrlCell,
     /// What `//` media sources resolve against, the page's URL on the web
     /// ([`Access::media_url`]); `None`: such a source names no URL.
@@ -132,6 +133,7 @@ impl System {
     }
 
     /// Shares the core's address (`UrlScheme.url()`).
+    #[doc(hidden)]
     pub fn with_app_url(mut self, app_url: crate::url_scheme::AppUrlCell) -> Self {
         self.app_url = app_url;
         self

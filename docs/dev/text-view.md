@@ -73,7 +73,13 @@ colored with the theme's tokens; the app restyles each part over it.
   under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
   Each link (and footnote reference) is a pressable span, so it is a stop of the keyboard focus where the platform
   walks links (`elements.md` "Keyboard focus": `TextLink::focus_stop`): Tab reaches it, Return presses it, and the
-  press goes through `onLinkPress` and `links` as a pointer's does.
+  press goes through `onLinkPress` and `links` as a pointer's does. Every link (a URL, a path, an `#anchor`) holds a
+  hint overlay of `nsh-base`'s `link_hint` (outside a terminal): its title over its destination below the pointer
+  resting on it, on the desktops (`elements.md` "A link's hint"). One overlay per link: a document with many links has
+  as many (shown natively only while one is up). HTML `<a href title>` and Markdown links (inline, reference,
+  autolinks) all become `Inline::Link`, where the hint is made; an image in a link carries the same hint (the link's
+  URL and title, `Cx::link`) as its tooltip, anchored to the image that takes the link's press (below it), or to the
+  view around an app's `renderImage` element.
 
 ## Parts and their default styles
 
@@ -204,7 +210,8 @@ build without syntect. Without the feature, code blocks the app does not highlig
 With `options.streaming`, `markdown/streaming.rs` repairs the last block of the text before parsing (the blocks before
 it are complete; a text ending inside a fenced code or `$$` block needs nothing): emphasis, strong, strikethrough
 (`**`, `*`, `__`, `_`, `~~`), inline code and formulas left open are closed in the reverse order they opened, a marker
-with nothing after it yet is removed; `[text` and `[text](partial` show as their text, `![alt` and `![alt](partial`
+with nothing after it yet is removed (so is half a formula closer, `\[1\` reads as `\[1\]`, which escaped brackets
+around a reference number keep as text); `[text` and `[text](partial` show as their text, `![alt` and `![alt](partial`
 are removed; an HTML tag being typed (`<di`, `<a href="x`) is removed; a table's header followed by the start of its
 delimiter row is completed to a table (and a lone `-` under it is no heading). So a reply never flashes literal `**`
 or `[` while the next chunk is on its way. The repair is a `Cow`: text with nothing open is parsed as it is.

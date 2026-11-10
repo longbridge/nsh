@@ -221,8 +221,8 @@ fn gather_name(view: &NSView, out: &mut String) {
                 .accessibility
                 .label
                 .as_deref()
-                .or(s.text.as_ref().map(|t| t.text.text.as_str()))
-                .map(str::to_owned),
+                .map(str::to_owned)
+                .or_else(|| s.text.as_ref().map(|t| t.text.visible_text().into_owned())),
         };
         drop(s);
         match own {
@@ -439,7 +439,12 @@ pub(crate) fn text_changed(view: &NshView) {
         let Some(drawn) = &s.text else { return };
         let old = s.access.text.replace(drawn.text.clone());
         match old {
-            Some(old) if Arc::ptr_eq(&old, &drawn.text) || old.text == drawn.text.text => return,
+            Some(old)
+                if Arc::ptr_eq(&old, &drawn.text)
+                    || old.visible_text() == drawn.text.visible_text() =>
+            {
+                return;
+            }
             old => old.is_none(),
         }
     };
@@ -520,8 +525,9 @@ fn update(view: &NshView) -> bool {
         let s = &mut *s;
         let a = &s.props.accessibility;
         let pressable = is_pressable(s.events);
-        let text = s.text.as_ref().map(|t| t.text.text.as_str());
-        let mut spec = spec_for(a, s.kind, pressable, text, s.style.hidden);
+        // Hidden runs are not read.
+        let text = s.text.as_ref().map(|t| t.text.visible_text());
+        let mut spec = spec_for(a, s.kind, pressable, text.as_deref(), s.style.hidden);
         if let Some(control) = s.props.window_control
             && !spec.hidden
         {
@@ -948,7 +954,11 @@ fn announce_live(view: &NshView) {
     while let Some(v) = at {
         let live = v.state().props.accessibility.live_region;
         if live != LiveRegion::None {
-            let text = view.state().text.as_ref().map(|t| t.text.text.clone());
+            let text = view
+                .state()
+                .text
+                .as_ref()
+                .map(|t| t.text.visible_text().into_owned());
             if let Some(text) = text {
                 announce(view.ns(), &text, priority(live));
             }

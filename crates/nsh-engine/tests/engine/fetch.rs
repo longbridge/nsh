@@ -110,6 +110,7 @@ fn fetch_round_trips_through_the_platform_network() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let network = Arc::new(EchoNetwork::default());
@@ -235,6 +236,7 @@ fn fetch_stays_within_the_capabilities() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -340,6 +342,7 @@ fn path_rules_hold_for_every_request() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));

@@ -203,6 +203,7 @@ fn windows(cx: &mut TestAppContext) {
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
     set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
     a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
+    props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -522,6 +523,114 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
     );
     wait_for(&view, cx, "fired revert bound bound new");
 }
+/// A native component that records what it is handed.
+struct Recorder {
+    log: Rc<std::cell::RefCell<Vec<String>>>,
+    rendered: Rc<std::cell::Cell<bool>>,
+}
+
+impl NativeComponent for Recorder {
+    fn render(&mut self, _: &mut Window, _: &mut GpuiApp) -> Option<AnyElement> {
+        self.rendered.set(true);
+        None
+    }
+
+    fn set_prop(
+        &mut self,
+        name: &str,
+        value: Option<&serde_json::Value>,
+        _: &mut Window,
+        _: &mut GpuiApp,
+    ) {
+        let value = value.map_or("none".to_owned(), |v| v.to_string());
+        self.log.borrow_mut().push(format!("{name}={value}"));
+    }
+
+    fn command(&mut self, name: &str, args: &serde_json::Value, _: &mut Window, _: &mut GpuiApp) {
+        self.log.borrow_mut().push(format!("{name} {args}"));
+    }
+}
+
+/// A component whose prop changes right before two commands.
+const COMMANDS_TO_COMPONENT: &str = r#"
+import { mount, nativeComponent, type NativeComponentRef, signal, View } from "nsh";
+
+const Recorder = nativeComponent<{ label: string }, {}>("test.recorder", {
+  props: ["label"],
+  events: [],
+});
+
+function App() {
+  const label = signal("first");
+  let recorder: NativeComponentRef | undefined;
+  setTimeout(() => {
+    label.set("second");
+    recorder?.command("go", { n: 1 });
+    recorder?.command("go", { n: 2 });
+  }, 0);
+  return (
+    <View style={{ flex: 1 }}>
+      <Recorder ref={(node) => (recorder = node)} label={label()} style={{ height: 20 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+/// A view the embedding app holds but does not show (a hidden panel).
+struct Unshown(Entity<AppView>);
+
+impl gpui::Render for Unshown {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().size_full()
+    }
+}
+
+fn props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx: &mut TestAppContext) {
+    use gpui::AppContext as _;
+    let code = nsh_bundler::compile_module("App.tsx", COMMANDS_TO_COMPONENT, &[]).unwrap();
+    let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let rendered = Rc::new(std::cell::Cell::new(false));
+    let (component_log, component_rendered) = (log.clone(), rendered.clone());
+    let (unshown, cx) = cx.add_window_view(|window, cx| {
+        Unshown(cx.new(|cx| AppView::new(AppOptions::default(), window, cx)))
+    });
+    let view = unshown.read_with(cx, |unshown, _| unshown.0.clone());
+    view.update(cx, |view, _| {
+        view.register_component(
+            "test.recorder",
+            Rc::new(move |_| {
+                Box::new(Recorder {
+                    log: component_log.clone(),
+                    rendered: component_rendered.clone(),
+                })
+            }),
+        );
+        view.load(App::Js(Bundle::source(code)));
+    });
+    let expected = [
+        r#"label="first""#,
+        r#"label="second""#,
+        r#"go {"n":1}"#,
+        r#"go {"n":2}"#,
+    ];
+    let start = Instant::now();
+    while log.borrow().len() < expected.len() {
+        cx.run_until_parked();
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the component got {:?}",
+            log.borrow()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Nothing more comes later (each is delivered once), in the order sent.
+    std::thread::sleep(Duration::from_millis(50));
+    cx.run_until_parked();
+    assert_eq!(*log.borrow(), expected);
+    assert!(!rendered.get(), "the view was drawn");
+}
+
 /// The part of the embedding app a view reaches: its engine's context.
 struct Desk(&'static str);
 
@@ -775,13 +884,13 @@ const log = signal<string[]>([]);
 const add = (entry: string) => log.set([...log(), entry]);
 mount(() => <View style={{ flex: 1 }}>
   <View
-    onFileDragEnter={() => add("enter outer")}
+    onFileDragEnter={(e) => add("enter outer " + e.uris.join(";"))}
     onFileDragLeave={() => add("leave outer")}
     onFileDrop={(e) => add("drop outer " + e.uris.join(";"))}
     style={{ height: 100 }}
   >
     <View
-      onFileDragEnter={() => add("enter inner")}
+      onFileDragEnter={(e) => add("enter inner " + e.uris.join(";"))}
       onFileDragLeave={() => add("leave inner")}
       onFileDrop={(e) => add("drop inner " + e.uris.join(";"))}
       style={{ height: 40 }}
@@ -822,19 +931,27 @@ mount(() => <View style={{ flex: 1 }}>
     // leaves it for the next one, and the drop goes there, without the
     // relative path.
     let dropped = crate::file_drop::test_url("a%20b.txt");
+    let second = crate::file_drop::test_url("c.txt");
+    let final_file = crate::file_drop::test_url("e.txt");
     enter(
         cx,
         20.0,
         &[crate::file_drop::test_path("a b.txt"), "b.txt".into()],
     );
-    wait_for(&view, cx, "enter inner");
+    wait_for(&view, cx, &format!("enter inner {dropped}"));
     send(cx, gpui::FileDropEvent::Pending { position: at(70.0) });
-    wait_for(&view, cx, "enter inner, leave inner, enter outer");
+    wait_for(
+        &view,
+        cx,
+        &format!("enter inner {dropped}, leave inner, enter outer {dropped}"),
+    );
     send(cx, gpui::FileDropEvent::Submit { position: at(70.0) });
     wait_for(
         &view,
         cx,
-        &format!("enter inner, leave inner, enter outer, drop outer {dropped}, leave outer"),
+        &format!(
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer"
+        ),
     );
     // Leaving the window leaves the destination.
     enter(cx, 20.0, &[crate::file_drop::test_path("c.txt")]);
@@ -843,8 +960,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner"
         ),
     );
     // Where no view listens, the drop goes nowhere.
@@ -859,8 +976,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner"
         ),
     );
     // A drag that ended schedules one clear of its destination, however
@@ -870,8 +987,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner, enter inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner, enter inner {final_file}"
         ),
     );
     view.update(cx, |view, cx| {
@@ -887,8 +1004,8 @@ mount(() => <View style={{ flex: 1 }}>
         &view,
         cx,
         &format!(
-            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
-             enter inner, leave inner, enter inner, leave inner"
+            "enter inner {dropped}, leave inner, enter outer {dropped}, drop outer {dropped}, leave outer, \
+             enter inner {second}, leave inner, enter inner {final_file}, leave inner"
         ),
     );
 }

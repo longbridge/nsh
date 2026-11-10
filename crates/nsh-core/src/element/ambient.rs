@@ -86,6 +86,7 @@ struct EnvSignals {
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
+    shaders: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -115,6 +116,7 @@ impl EnvSignals {
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
+                shaders: part!(shaders),
             }
         })
     }
@@ -297,6 +299,18 @@ pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
 }
 
+/// Whether the platform draws shader views ([`super::shader`] and the
+/// other shader elements; TS: `shadersAvailable()`), reading subscribes.
+/// `false` where the platform was built without a renderer, on a grid
+/// surface, or once the platform found no GPU; it starts `true` elsewhere
+/// and turns `false` (never back) when the first shader mounts on a
+/// machine without one, so an app shows a shader while this holds and
+/// its own drawing (a canvas, an image) otherwise. Whether a source
+/// compiles is [`crate::shader::Shader::compile`]'s answer.
+pub fn shaders_available() -> bool {
+    env(|e| e.shaders)
+}
+
 /// Whether the surface lays out right to left: the root's direction,
 /// which follows the user's language unless the app sets the root's
 /// `direction` (reading subscribes).
@@ -356,6 +370,15 @@ pub fn os() -> Os {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| e.os)
+}
+
+/// The platform's name (TS: `platform.name`): the OS's on NSH's own
+/// platforms (`"ios"`, `"web"`, ...), a platform built outside NSH's own
+/// (`"miniprogram"`), whose OS is [`os`]; it does not change.
+pub fn platform_name() -> &'static str {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.platform_name())
 }
 
 /// [`os`] where an engine runs (its thread, while it runs Rust code),
@@ -826,6 +849,19 @@ pub fn next_url_scheme_open() -> Answer<String> {
     answer
 }
 
+/// The next address the app moves to without making the move itself (TS:
+/// `UrlScheme.on("change", ...)`): on the web, the browser's back or
+/// forward to an entry the app's pages do not account for, or an address
+/// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
+/// it already. Moves while nothing listened since the app started are not
+/// kept; once something listened, at most
+/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextAppUrlChange(slot));
+    answer
+}
+
 /// The app's address (TS: `UrlScheme.url()`): on the web the page's, on
 /// the native platforms the last link that opened the app; what
 /// [`set_app_url`] set after it; `None` when there is none
@@ -843,6 +879,19 @@ pub fn app_url() -> Answer<Option<String>> {
 /// TS's `TypeError`; on the web a URL is resolved against the page's base,
 /// as TS's is, and one of another origin than the page's is an error.
 pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
+    set_app_url_with(url, crate::url_scheme::HistoryBehavior::Replace)
+}
+
+/// [`set_app_url`], saying how the address meets the history (TS:
+/// `UrlScheme.setUrl(url, { history })`): on the web
+/// [`HistoryBehavior::Push`](crate::url_scheme::HistoryBehavior::Push)
+/// makes it an entry of its own after the current one, so the browser's
+/// back goes back to the address before it; the native platforms keep it
+/// for [`app_url`] either way.
+pub fn set_app_url_with(
+    url: impl Into<String>,
+    history: crate::url_scheme::HistoryBehavior,
+) -> Result<(), String> {
     let mut url = url.into();
     crate::url_scheme::check_address(&url)?;
     // Where the app is the page (the web), as TS's `setUrl` there.
@@ -851,14 +900,14 @@ pub fn set_app_url(url: impl Into<String>) -> Result<(), String> {
     {
         url = crate::url_scheme::resolve_on_page(&url, &base)?;
     }
-    act(Action::SetAppUrl(url));
+    act(Action::SetAppUrl(url, history));
     Ok(())
 }
 
 /// `UrlScheme.setUrl`'s part in the core: the address again, in order with
 /// what came since the VM wrote it, and the web's history entry.
-pub(crate) fn set_app_url_from_js(url: String) {
-    act(Action::SetAppUrl(url));
+pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::HistoryBehavior) {
+    act(Action::SetAppUrl(url, history));
 }
 
 /// Whether a web view's ref gives its page trusted input here (TS:
@@ -869,6 +918,20 @@ pub(crate) fn set_app_url_from_js(url: String) {
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view shows a page here (TS: `WebView.available()`): the
+/// platform shows web views and the app's capabilities grant `webview`.
+/// Where it answers `false`, a web view reports `onError` (`code`
+/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform shows none,
+/// `ERR_ACCESS_DENIED` where `webview` is not granted). A web engine that
+/// fails only when a web view starts (Windows without the WebView2
+/// runtime) answers `true` and reports the error on the web view. To
+/// await in a task.
+pub fn web_view_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebViewAvailable(slot));
     answer
 }
 
@@ -1072,6 +1135,26 @@ pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T
     let handle = task.handle();
     cleanup(move || handle.cancel());
     Spawned(task)
+}
+
+/// Runs `f` on the platform's main thread (the UI thread), for APIs that
+/// only work there (AppKit's status items, UIKit): after the commit of this
+/// turn, after its views are mounted. Await the result on the engine
+/// thread; dropping it does not stop `f`. Without a main thread of its own
+/// (headless tests, the web, where the engine runs on the page's thread)
+/// `f` runs on the engine thread, at the end of the commit; elsewhere it
+/// runs later, while the engine goes on, so only the awaited result tells
+/// that `f` ran. `f` runs outside the reactive graph: it returns a value,
+/// and the caller writes signals after awaiting it. A panic in `f` is a
+/// [`MainThreadError::Panicked`](crate::main_thread::MainThreadError)
+/// (the web runtime aborts on a panic). A function that is not `async` calls
+/// [`ModuleCx::run_on_main_thread`](super::ModuleCx::run_on_main_thread).
+pub fn run_on_main_thread<R: Send + 'static>(
+    f: impl FnOnce() -> R + Send + 'static,
+) -> crate::main_thread::OnMainThread<R> {
+    let (task, result) = crate::main_thread::task(f);
+    act(Action::MainThread(task));
+    result
 }
 
 /// A future polled under `owner` ([`Owner::scope`]).

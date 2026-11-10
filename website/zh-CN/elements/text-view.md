@@ -327,6 +327,8 @@ text_view().markdown(doc).links(TextViewLinks::Open)
 <TextView markdown={doc} links="open" />
 ```
 
+在桌面平台和桌面形态的 Web 上，指针停在链接上会在指针下方显示它去往哪里：链接有标题时先显示标题（`[docs](https://example.com/docs "The guide")`，或 HTML 链接的 `title`），下面一行是用主题 `muted-foreground` 颜色显示的目的地。URL 按解析后的样子显示，协议、主机和端口始终完整（国际化域名显示为 ASCII 形式，冒充的字母会显示出本来面目），过长的路径从中间截断；路径和文档内的锚点（`#…`）按原样显示。链接里的图片也以同样方式在图片下方显示链接的目的地和标题。这与 [Link](./link.md#去往哪里) 的核对相同。
+
 <a id="render-functions"></a>
 
 ## 渲染函数

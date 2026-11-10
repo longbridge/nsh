@@ -65,6 +65,7 @@ use nsh_core::{
         self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, VelocityTracker, ZOOM_IDLE, has_press, laid_out,
         latch_holds, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
@@ -138,6 +139,9 @@ pub(crate) struct Input {
     /// Views that are hovered now (innermost first). Those listening hear
     /// `onMouseMove`: a move needs no hit test past the hover's.
     hovered: RefCell<Vec<NshView>>,
+    /// The link of a text the mouse is over, with its text view
+    /// ([`hover_link`]).
+    link_hovered: RefCell<Option<(NshView, nsh_core::TextLink)>>,
     /// Native gesture values by view.
     gestures: RefCell<FxHashMap<NodeId, (objc2::rc::Weak<ViewObj>, GestureValues)>>,
     /// The JS responder blocks native scrolling and pans.
@@ -266,6 +270,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.latch.borrow_mut().take();
     input.hover_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
+    input.link_hovered.borrow_mut().take();
     input.gestures.borrow_mut().clear();
     input.js_block.set(false);
 }
@@ -514,7 +519,15 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
         // A drag keeps the cursor it began with.
         return;
     }
-    let cursor = match pick(&event_root(surface), x, y) {
+    let hit = pick(&event_root(surface), x, y);
+    // The same pick says which link of a text the mouse is over.
+    hover_link(
+        surface,
+        hit.as_ref().filter(|h| !h.native).map(|h| &h.view),
+        x,
+        y,
+    );
+    let cursor = match hit {
         Some(hit) if hit.native => return,
         Some(hit) => {
             if over_link(surface, &hit.view, x, y) {
@@ -528,6 +541,47 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     let cursor = ns_cursor(cursor);
     if always || NSCursor::currentCursor() != cursor {
         cursor.set();
+    }
+}
+
+/// The mouse at `(x, y)` (root coordinates) is over `view` (none: off the
+/// root, or on a hosted view): a link of its text listening hears
+/// `onMouseEnter` when the mouse comes over the link's characters and
+/// `onMouseLeave` when it leaves them, as a view does (the core shows a
+/// link's hint, its URL, by them).
+fn hover_link(surface: &Surface, view: Option<&NshView>, x: f32, y: f32) {
+    let link = view.and_then(|v| {
+        if v.state()
+            .text
+            .as_ref()
+            .is_none_or(|t| t.text.links.is_empty())
+        {
+            return None;
+        }
+        let (lx, ly) = local(surface, v, x, y);
+        crate::text::link_at(&v.state(), lx, ly).map(|link| (v.clone(), link))
+    });
+    let input = &surface.input;
+    let same = input.link_hovered.borrow().as_ref().map(|(_, l)| l.node)
+        == link.as_ref().map(|(_, l)| l.node);
+    if same {
+        return;
+    }
+    let mouse = Mouse::now();
+    let old = input.link_hovered.replace(link.clone());
+    for (kind, hovered) in [(EventKind::MouseLeave, old), (EventKind::MouseEnter, link)] {
+        if let Some((v, l)) = hovered
+            && l.events.contains(kind)
+        {
+            let (lx, ly) = local(surface, &v, x, y);
+            let event = MouseEvent::new(
+                point(Points(lx), Points(ly)),
+                point(Points(x), Points(y)),
+                mouse.modifiers,
+                mouse.pressed,
+            );
+            surface.event(l.node, kind, EventPayload::Mouse(event));
+        }
     }
 }
 
@@ -662,14 +716,17 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     ) {
         input.last.set(Some((x, y)));
     }
-    // A press in a window gives it the keyboard (AppKit does it itself, but
-    // for an app in the background).
     if matches!(
         ty,
         NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
-    ) && let Some(window) = event.window(surface.mtm)
-    {
-        crate::window::became_key(surface, &window);
+    ) {
+        // Before the press acts: the focus it moves does not show.
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+        // A press in a window gives it the keyboard (AppKit does it itself,
+        // but for an app in the background).
+        if let Some(window) = event.window(surface.mtm) {
+            crate::window::became_key(surface, &window);
+        }
     }
     match ty {
         // Control-click is the secondary click on macOS.
@@ -738,6 +795,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
             let (x, y) = input.last.take().unwrap_or((x, y));
             if input.pointer.borrow().is_none() {
                 set_hovered(surface, Vec::new(), x, y, Mouse::of(event));
+                hover_link(surface, None, x, y);
             }
         }
         NSEventType::OtherMouseDown if event.buttonNumber() == BACK_BUTTON => {
@@ -792,6 +850,11 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
 /// move that way. Fields keep their keys (they reach the root only when
 /// they do not use them).
 pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
+    // Before the key acts: the focus it moves shows (`focus-visible:`).
+    // A modifier alone is a `flagsChanged`, never a key down.
+    if down {
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
             activate(surface, &view, "keyboard");

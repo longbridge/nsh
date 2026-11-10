@@ -16,6 +16,15 @@ use nsh_core::{
 
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
+/// This build has no renderer: a platform reports `Environment::shaders`
+/// `false` from the start.
+pub const LINKED: bool = false;
+
+/// No renderer ever looks for a GPU here.
+pub(crate) fn no_gpu() -> bool {
+    false
+}
+
 /// Never made: this build has no renderer.
 pub struct Renderer {
     format: PixelFormat,
@@ -30,6 +39,12 @@ impl Renderer {
     /// The format of the frames.
     pub fn format(&self) -> PixelFormat {
         self.format
+    }
+
+    /// `false`: there are no frames (`f` is dropped).
+    pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
+        drop(f);
+        false
     }
 }
 
@@ -104,6 +119,16 @@ impl ShaderView {
 
     /// `false`: there are no frames.
     pub fn pending(&self) -> bool {
+        false
+    }
+
+    /// `false`: there are no frames.
+    pub fn due(&self) -> bool {
+        false
+    }
+
+    /// `false`: there are no frames.
+    pub fn animates(&self) -> bool {
         false
     }
 

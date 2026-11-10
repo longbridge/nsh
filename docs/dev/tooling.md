@@ -176,7 +176,7 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   It uses the ordinary hot-patch/full-bundle protocol and reports `HostPlatform::Tui`. App errors open a dismissible
   panel and successful updates close it. `--points-per-cell WIDTHxHEIGHT` overrides `nsh.json`'s
   `"tui": { "pointsPerCell": "8x16" }`; both dimensions are finite, positive points, defaulting to 8 by 16.
-  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui-host`; Rust edits
+  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui/tui-host`; Rust edits
   restart it through the existing watcher. The CLI asks the host to exit on a stop before reaping it, allowing
   raw mode and the alternate screen to be restored. See [the terminal backend](tui.md).
 - `nsh run --target android` forwards the dev server's port to the device (`adb reverse tcp:<port> tcp:<port>`,
@@ -307,7 +307,7 @@ report it:
   (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
   500 ms count up (`clicks` 2 is a double press), as the platforms count them;
 - `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
-  `delayLongPress` (500 ms) `LongPress` and `PressOut`;
+  `delayLongPress` (500 ms) `LongPress` and `PressOut`, at the match's center as `press` does;
 - `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
 - `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
   `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line
@@ -345,8 +345,11 @@ report it:
   pointer (`input::hold`); other real targets refuse.
 - `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh`'s `keymap` parses it for the
   environment's OS; on every environment (a hardware keyboard: phones and tablets have one too) the root's keymap
-  (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
-  root hears `KeyCommand`; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
+  (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is, among the focused
+  window's and those of no window (`Keymap::find_in`), and the root hears `KeyCommand`; then, on a desktop, the
+  application menu (`DesktopCommand::SetMenu`, `Screen::app_menu`) chooses its item with that shortcut
+  (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
+  hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
   `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
@@ -444,6 +447,14 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   calls go over a channel to `RouteServer`, which `serve` answers on the test file's VM while a step runs, as a route's
   function; each call and post the handlers get is recorded for `app.host.calls()` / `posts()`), and
   `app.host.send` is `Headless::send_host_event`, a step;
+- `open`'s `modules` are stand-ins on the same channel (`HostChannel::fake_module_export`, read by the app's VM
+  through `HostBridge::module_fakes`): when the VM makes a native module's exports (`nsh-js` `modules.rs` `init`,
+  `host_module`), a faked export or member (`Export.member`, and a flat default module's object member) becomes the
+  stand-in (`host_channel.rs` `stand_in`): a value, a function returning it, or a function whose calls cross as
+  `HostBridge::call_module_fake` of `<specifier>#<path>`, its arguments a JSON array, without the `host` capability's
+  check or a time limit, answered by the test's function like a handler's. Their handlers
+  (`HostChannel::handle_module_fake`) are kept apart from the embedding app's: `host.call` never reaches them, and
+  they leave the channel unconfigured, so `host.available()` and a page host (`web.host`) stay as they were;
 - images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
@@ -559,9 +570,11 @@ it gets `--background` unless `nsh test --foreground` (`AppOptions::background`)
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
 without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
 the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
-"Checking a change"). A left button press into a web view of the inactive app goes to the `WKWebView` directly
-(`agent::mouse`), since AppKit gives an inactive window's first click only to views that accept the first mouse. A
-window that is not the
+"Checking a change"). It gets `--activation-policy` too when nsh.json's `macos.activationPolicy` is not the default
+(`MacosConfig::host_args`, as under `nsh run`): `--background` takes precedence, so the app runs with its policy under
+`--foreground` (`docs/dev/macos.md` "Activation policy"). A left button press into a web view of the inactive app goes
+to the `WKWebView` directly (`agent::mouse`), since AppKit gives an inactive window's first click only to views that
+accept the first mouse. A window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
 for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
@@ -646,13 +659,13 @@ test plays the embedding app there too, through the view's own channel (`Model::
 `open`'s `host.params` arrive in the setup (`TestEnvironment::host_params`), `app.host.send` is
 `TestStep::HostSend` (the model's `send_host_event`, then the agent settles; the web's page answers
 `SceneQuery::HostSend`), and the channel's URL handler records each URL the app opens and takes it, so nothing
-opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` runs headless only: the calls would need
-the test's functions over the dev server. `open` checks its options against the target before it starts a host
+opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` and `modules` run headless only: the calls would
+need the test's functions over the dev server. `open` checks its options against the target before it starts a host
 (`run.rs`'s `check_launch`, against `TestRun::target`, a `HostTarget` the CLI makes: `test_host::host_target`), so
 no option is dropped: `width` / `height` where the app fills a device's screen (iOS, Android: `HostTarget::sized`
 false), a `platform` of another kind of device than the target's (`HostTarget::platform`, GPUI's the machine's
 desktop: a desktop's `platform`, the way a test asks for a mouse and keys headless, runs on every desktop and the web
-as the target's; `ios` and `android` only on their own) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`
+as the target's; `ios` and `android` only on their own), `host.handlers` and `modules` reject with `ERR_NSH_TEST_UNSUPPORTED`
 (`failure::unsupported`), naming the option and the target.
 Every other option reaches the host (storage, routes, the environment, the clipboard, a manual clock, `host.params`).
 
@@ -854,6 +867,9 @@ program that describes them, builds the hosts and runners with them, and does ev
     with Rust components"). `gpui-host` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os = "linux",
     target_os = "macos", windows))`) is a workspace of its own in `.nsh/rust/gpui` (excluded from the main one), written
     only when the GPUI host is built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates.
+    `tui-host` is one too, in `.nsh/rust/tui` (`RustApp::tui_workspace`), written only when the terminal host is built:
+    `nsh check`, `nsh test` and the other targets never resolve the terminal's crates, which nsh's crates.io releases
+    before the terminal backend lack.
     The hosts and runners of Windows, macOS, Linux and iOS (`<platform>-host`, `<platform>-app`, `rust-<platform>`;
     `components_platform`) also register each crate's native components: `#[native_components(<platform>)]`
     (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` at the crate's root makes,
@@ -969,7 +985,11 @@ output policy), rather than assuming the main workspace's `target`. On macOS it 
 built for this machine from a copy in `.nsh/hosts/<profile>/` that changes only when the build does
 (`runtime::stable_copy`): cargo links the binary into `target/<profile>` again on every build, even one with nothing
 to do, and macOS checks an executable whose file changed again the first time it runs, a second or more for a debug
-host on every `nsh run`. The web runtimes (`runtime/web/nsh.wasm`
+host on every `nsh run`. `nsh package --target macos --arch` builds the release runner (the checkout's or a Rust app's)
+for each processor it names, with `--target <triple>` for one other than this Mac's (`runtime::file_for`,
+`RustApp::runtime`; programs the CLI runs itself, such as `describe`, stay this Mac's), and `lipo` makes one universal
+executable of `universal`'s two; an installed distribution's runner is its own processor's, so the package checks what
+the runner holds (`package::macos_runners`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 
@@ -982,15 +1002,15 @@ directory. A checkout's build never downloads: it builds its runtimes with cargo
 
 The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
 is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
-are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
+are. App-specific development hosts are generated in `.nsh/rust/tui/tui-host`.
 
 ## Releases
 
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon, with the iOS and Mac Catalyst
 runtimes and the iOS SDK, and Intel), Linux and Windows (x86_64 and arm64), each with the desktop runtime and the GPUI
-and terminal development hosts of its machine. The arm64 Linux and Windows builds set `NSH_DIST_NO_ANDROID` and leave
-the Android runtime out: the `android` component comes from x86_64 Linux, and the NDK has no arm64 Linux
-toolchain. Each run checks that the packaged CLI makes and bundles a new app, and archives `dist/nsh` as one
+and terminal development hosts of its machine. The components the same on every machine,
+`android` and `web`, come from x86_64 Linux's build alone: every other build sets `NSH_DIST_NO_ANDROID` and
+`NSH_DIST_NO_WEB` and leaves them out (the NDK has no arm64 Linux toolchain either). Each run checks that the packaged CLI makes and bundles a new app, and archives `dist/nsh` as one
 directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on Windows) with the CLI and that machine's runtime only. The
 embedding SDKs are archives of their own (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), and `nsh component pack`
 moves every other runtime into its component's archive (`nsh-android.tar.gz`, `nsh-android-symbols.tar.gz` and
@@ -1055,6 +1075,34 @@ How users get it (`website/docs/installation.md`):
 - Scoop: the release job fills in `.github/packages/nsh.json` and attaches it as `nsh.json`; Scoop installs from
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.
 - mise: its `github:` backend picks the archive by OS and architecture, strips `nsh/` and finds `bin/`.
+
+### Self-hosted runners
+
+The release (its builds, its `Plan`, `Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's
+update) and the Website workflow's build and deployment of the published site run on the organization's self-hosted
+runners, the machines longbridge-pro releases on: `[self-hosted, macOS, ARM64]`, `[self-hosted, Linux, Packager]`
+and `[self-hosted, Windows]`. Their runner groups allow this public repository. They take no pull request: a pull
+request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
+events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
+
+The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` once
+a day (19:00 UTC) and on manual runs, never on every push: a push to `main` is a pull request that already passed
+them. The daily run is on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
+macOS check runs only in the daily run.
+
+`.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
+`~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds
+only what changed. What the workflows install on GitHub's runners is installed on these machines beforehand:
+
+- every one: rustup, `git`, `curl`, `gh`, `jq`, `zip`;
+- macOS: Xcode (the iOS SDKs) and its command line tools;
+- Linux: Ubuntu 24.04 (the Linux runtime's glibc and GTK), the packages of `release.yml`'s "Install clang, GTK 4
+  and GPUI's libraries" step, `envsubst`, Java 17 and an Android SDK with an NDK (`ANDROID_HOME`), Node.js,
+  Python 3 with `venv`, and Playwright's system libraries for Chromium, Firefox and WebKit
+  (`playwright install-deps`), and what the CI workflows' `apt-get` steps install (`xvfb`, `xauth`,
+  `dbus`, `at-spi2-core`, `libxtst6`, GStreamer's good plug-ins, `libvulkan1`, `libasound2-dev`, `libssl-dev`);
+- Windows: the MSVC Build Tools, the Windows SDK, LLVM in `C:\Program Files\LLVM` and Git for Windows, whose
+  `bash` is the first on `PATH`.
 
 ### Homebrew publishing setup and recovery
 

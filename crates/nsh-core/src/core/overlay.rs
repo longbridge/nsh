@@ -49,6 +49,7 @@ use crate::{
     ops::{Op, OverlayProp},
     overlay::{
         HINT_DELAY, OverlayAnchor, OverlayConfig, Placed, Placement, TooltipContent, inset, place,
+        place_fitted,
     },
     props::PointerEvents,
 };
@@ -111,9 +112,24 @@ pub(super) struct OverlayState {
     /// A hint: the keyboard focus on its anchor shows it (not since
     /// Escape or a press hid it).
     pub(super) focus_shown: bool,
+    /// A hint on a link of a text (a span, which has no frame of its own):
+    /// where the pointer came over it, in its root view's coordinates,
+    /// what it is placed against ([`Core::resolved_anchor`]).
+    pub(super) pointer: Option<Point<Points>>,
     /// Its `cover` view's frame in it, once that was laid out, with the
     /// overlay's size and the view's frame in its parent then.
     pub(super) covered: Option<(Bounds<Points>, Size<Points>, Bounds<Points>)>,
+    /// The room `onPosition` last told it (`available`), kept while it is
+    /// hidden: an overlay whose max size along its side is still that room
+    /// when shown again follows it ([`Core::natural_extent`]).
+    pub(super) told: Option<Size<Points>>,
+    /// Its extent along its side without the room it was told, measured
+    /// once per layout while that room holds it ([`Core::natural_extent`]).
+    pub(super) natural: Option<Points>,
+    /// The max size it was last found held to, along its side: still that
+    /// room's while the app has yet to take the newer one `told` carries
+    /// (the core flipped it, and told it so, in the same commit).
+    pub(super) held: Option<Points>,
 }
 
 impl OverlayState {
@@ -171,7 +187,11 @@ impl<M: TextEngine> Core<M> {
                 waiting: None,
                 focus_on: false,
                 focus_shown: false,
+                pointer: None,
                 covered: None,
+                told: None,
+                natural: None,
+                held: None,
             }));
         }
         self.overlays.push(key);
@@ -293,17 +313,20 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Whether `key` is the overlay of an element's `tooltip`: not one of
-    /// its children for its classes (`first:`, `last:`, ...).
+    /// Whether `key` is the overlay of an element's `tooltip`, or another
+    /// hint overlay inside an element (a Rust `tooltip`, a link's URL hint
+    /// of `nsh-base`): not one of its children for its classes (`first:`,
+    /// `last:`, ...).
     pub(super) fn is_tooltip_overlay(&self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
         node.is_overlay()
             && node.parent != NO_KEY
-            && self
-                .overlay_state
-                .tooltips
-                .get(&self.nodes[node.parent as usize].id)
-                .is_some_and(|t| t.overlay == node.id)
+            && (self.overlay(key).is_some_and(|s| s.config.hint.is_some())
+                || self
+                    .overlay_state
+                    .tooltips
+                    .get(&self.nodes[node.parent as usize].id)
+                    .is_some_and(|t| t.overlay == node.id))
     }
 
     pub(super) fn overlay(&self, key: Key) -> Option<&OverlayState> {
@@ -523,6 +546,15 @@ impl<M: TextEngine> Core<M> {
             for &key in hints {
                 if let Some(k) = self.hint_anchor(key) {
                     hinting.push((k, self.nodes[k as usize].id));
+                    // A link of a text: its block listens to touches, so a
+                    // press on the link hides the hint. A span is not
+                    // watched yet the first time (`is_text_span`, not
+                    // `is_link_span`): watching it is what makes it one.
+                    if self.is_text_span(k)
+                        && let Some(block) = self.framed(k)
+                    {
+                        hinting.push((block, self.nodes[block as usize].id));
+                    }
                 }
             }
             hinting.sort_unstable();
@@ -544,25 +576,35 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The nodes of `old` not in `new` stop listening for `bit`, those of
-    /// `new` not in `old` start.
+    /// `new` not in `old` start. A link of a text listens through its text
+    /// block's links ([`crate::text::TextLink::events`]): the block is
+    /// merged again.
     fn rewatch(&mut self, old: &[(Key, NodeId)], new: &[(Key, NodeId)], bit: u8) {
         for &(k, id) in old {
             if !new.contains(&(k, id)) && self.nodes.get(k as usize).is_some_and(|n| n.id == id) {
                 self.nodes[k as usize].overlay_watched &= !bit;
                 self.mark(k, super::dirty::EVENTS);
+                if self.nodes[k as usize].inline {
+                    self.mark_text_block(k);
+                }
             }
         }
         for &(k, id) in new {
             if !old.contains(&(k, id)) {
                 self.nodes[k as usize].overlay_watched |= bit;
                 self.mark(k, super::dirty::EVENTS);
+                if self.nodes[k as usize].inline {
+                    self.mark_text_block(k);
+                }
             }
         }
     }
 
     /// What hint overlay `key` is placed against and whose pointer it
-    /// follows: its anchor, else the nearest view around it with a frame
-    /// (its parent, unless that is a span of text).
+    /// follows: its anchor, else its parent when that is a span of a text
+    /// (a link, pressable or not: once its hint watches it, the platforms
+    /// report the pointer coming over its characters and leaving them),
+    /// else the nearest view around it with a frame.
     fn hint_anchor(&self, key: Key) -> Option<Key> {
         match self.overlay(key)?.config.anchor {
             OverlayAnchor::Node(id)
@@ -570,38 +612,77 @@ impl<M: TextEngine> Core<M> {
             | OverlayAnchor::Beside { node: id, .. } => self.key(id).ok(),
             OverlayAnchor::Point(_) | OverlayAnchor::Bounds(_) => None,
             OverlayAnchor::None => {
-                let mut k = self.nodes[key as usize].parent;
-                while k != NO_KEY {
-                    let n = &self.nodes[k as usize];
-                    if n.layout.is_some() {
-                        return Some(k);
-                    }
-                    k = n.parent;
+                let parent = self.nodes[key as usize].parent;
+                // Any span, watched or not yet: the watch that makes it a
+                // link of its text ([`Self::is_link_span`]) comes from
+                // this answer.
+                if parent != NO_KEY && self.is_text_span(parent) {
+                    return Some(parent);
                 }
-                None
+                self.framed(parent)
             }
         }
     }
 
+    /// Whether `key` is a nested span of a text, with no frame of its own.
+    fn is_text_span(&self, key: Key) -> bool {
+        let n = &self.nodes[key as usize];
+        n.kind == Kind::Text && n.inline && n.layout.is_none()
+    }
+
+    /// Whether `key` is a link of a text (`AttributedText::links`): a
+    /// nested span taking presses, or one a hint watches (a `RichEditor`'s
+    /// link mark, whose presses are the editor's: it only hears the
+    /// pointer come and go).
+    fn is_link_span(&self, key: Key) -> bool {
+        let n = &self.nodes[key as usize];
+        self.is_text_span(key)
+            && (super::pressable(n.events) || n.overlay_watched & watch::HINT != 0)
+    }
+
+    /// `key` itself, or the nearest view around it, with a frame (a link
+    /// span's text block).
+    fn framed(&self, mut k: Key) -> Option<Key> {
+        while k != NO_KEY {
+            let n = &self.nodes[k as usize];
+            if n.layout.is_some() {
+                return Some(k);
+            }
+            k = n.parent;
+        }
+        None
+    }
+
     /// What overlay `key` is placed against: a hint without an anchor
-    /// against the view it follows ([`Self::hint_anchor`]).
+    /// against the view it follows ([`Self::hint_anchor`]); one on a link
+    /// of a text where the pointer came over the link (its text block
+    /// for the keyboard focus, which comes with no pointer).
     fn resolved_anchor(&self, key: Key) -> OverlayAnchor {
         let Some(state) = self.overlay(key) else {
             return OverlayAnchor::None;
         };
         match state.config.anchor {
             OverlayAnchor::None if state.config.hint.is_some() => {
-                self.hint_anchor(key).map_or(OverlayAnchor::None, |k| {
-                    OverlayAnchor::Node(self.nodes[k as usize].id)
-                })
+                let Some(k) = self.hint_anchor(key) else {
+                    return OverlayAnchor::None;
+                };
+                if self.is_text_span(k) {
+                    if let Some(at) = state.pointer.filter(|_| !state.focus_shown) {
+                        return OverlayAnchor::Point(at);
+                    }
+                    return self.framed(k).map_or(OverlayAnchor::None, |f| {
+                        OverlayAnchor::Node(self.nodes[f as usize].id)
+                    });
+                }
+                OverlayAnchor::Node(self.nodes[k as usize].id)
             }
             anchor => anchor,
         }
     }
 
-    /// The pointer came over node `id` or left it (`kind`): the hints it
-    /// anchors wait for it to rest, or hide.
-    pub(super) fn overlay_hover(&mut self, id: NodeId, kind: EventKind) {
+    /// The pointer came over node `id` or left it (`kind`), at `at` in its
+    /// root view: the hints it anchors wait for it to rest, or hide.
+    pub(super) fn overlay_hover(&mut self, id: NodeId, kind: EventKind, at: Option<Point<Points>>) {
         let Ok(anchor) = self.key(id) else {
             return;
         };
@@ -617,9 +698,18 @@ impl<M: TextEngine> Core<M> {
                     && self.hint_anchor(k) == Some(anchor)
             })
             .collect();
+        let span = self.is_link_span(anchor);
         for key in hints {
             match kind {
-                EventKind::MouseEnter => self.hint_wait(key),
+                EventKind::MouseEnter => {
+                    if span && let Some(state) = self.overlay_mut(key) {
+                        // Where it goes, unless it shows already.
+                        if !state.hint_shown() {
+                            state.pointer = at;
+                        }
+                    }
+                    self.hint_wait(key)
+                }
                 _ => self.unhint(key),
             }
         }
@@ -663,6 +753,48 @@ impl<M: TextEngine> Core<M> {
     /// (and the focus does not keep it).
     fn unhint(&mut self, key: Key) {
         self.hide_hint(key, false, HintReason::Pointer);
+    }
+
+    /// Scroll view or list `scroll` moved its content: a hint on a link of
+    /// a text in it, placed where the pointer came over the link (a point
+    /// of the root view, which does not move with the link), would show
+    /// where the link was. It hides, as when the pointer leaves the link;
+    /// the pointer coming over a link again shows that link's where it is.
+    /// A hint the keyboard focus shows stays, placed against the link's
+    /// text block, which the scroll moves.
+    pub(super) fn overlay_scrolled(&mut self, scroll: Key) {
+        let hints: Vec<Key> = self
+            .overlays
+            .iter()
+            .copied()
+            .filter(|&k| {
+                self.overlay(k).is_some_and(|s| {
+                    s.config.hint.is_some()
+                        && matches!(s.config.anchor, OverlayAnchor::None)
+                        && s.pointer.is_some()
+                        && (s.hinted || s.waiting.is_some())
+                }) && self
+                    .hint_anchor(k)
+                    .is_some_and(|a| self.is_text_span(a) && self.is_within(a, scroll))
+            })
+            .collect();
+        for key in hints {
+            if let Some(state) = self.overlay_mut(key) {
+                state.pointer = None;
+            }
+            self.unhint(key);
+        }
+    }
+
+    /// Whether `key` is `outer` or inside it.
+    pub(super) fn is_within(&self, mut key: Key, outer: Key) -> bool {
+        while key != NO_KEY {
+            if key == outer {
+                return true;
+            }
+            key = self.nodes[key as usize].parent;
+        }
+        false
     }
 
     /// Hint `key` stops waiting and the pointer's showing ends, the
@@ -759,7 +891,13 @@ impl<M: TextEngine> Core<M> {
             })
             .collect();
         for key in hints {
-            let Some(anchor) = self.hint_anchor(key).map(|k| self.nodes[k as usize].id) else {
+            // A link's text block for a link of a text: a touch's path
+            // holds views.
+            let Some(anchor) = self
+                .hint_anchor(key)
+                .and_then(|k| self.framed(k))
+                .map(|k| self.nodes[k as usize].id)
+            else {
                 continue;
             };
             let pressed = touch
@@ -1067,6 +1205,10 @@ impl<M: TextEngine> Core<M> {
             .as_mut()
             .expect("root state")
             .laid_out = Some((size, 0.0));
+        // Its content may have changed: measured again when needed.
+        if let Some(state) = self.overlay_mut(key) {
+            state.natural = None;
+        }
         self.layout_root(wrapper, definite(size));
         self.emit_frames(key);
     }
@@ -1215,11 +1357,38 @@ impl<M: TextEngine> Core<M> {
                     },
                     None => config,
                 };
-                place(anchor, framed, area, &config, self.nodes[key as usize].rtl)
+                let rtl = self.nodes[key as usize].rtl;
+                let horizontal = config.placement.is_horizontal();
+                match self.natural_extent(key, horizontal, frame.size, area, ring) {
+                    // Its size follows the room it is told: the side is
+                    // chosen at its natural size.
+                    Some(natural) => {
+                        let natural = match horizontal {
+                            true => Size {
+                                width: natural + ring.width * 2.0,
+                                ..framed
+                            },
+                            false => Size {
+                                height: natural + ring.height * 2.0,
+                                ..framed
+                            },
+                        };
+                        place_fitted(anchor, natural, area, &config, rtl)
+                    }
+                    None => place(anchor, framed, area, &config, rtl),
+                }
             }
         };
+        // On the device pixel grid, as every other frame is (`round`): an
+        // origin between two pixels (a context menu at the pointer, a
+        // popup centred on a trigger of odd width) would have the window
+        // resample the whole overlay, its text included, and draw it soft.
+        let ratio = self.pixel_ratio();
         let placed = Placed {
-            origin: point(placed.origin.x + ring.width, placed.origin.y + ring.height),
+            origin: point(
+                Points(super::round((placed.origin.x + ring.width).0, ratio)),
+                Points(super::round((placed.origin.y + ring.height).0, ratio)),
+            ),
             available: Size {
                 width: (placed.available.width - ring.width * 2.0).max(Points::ZERO),
                 height: (placed.available.height - ring.height * 2.0).max(Points::ZERO),
@@ -1236,6 +1405,7 @@ impl<M: TextEngine> Core<M> {
         if state.placed != Some((placed, bounds)) {
             state.placed = Some((placed, bounds));
             if listens {
+                state.told = Some(placed.available);
                 self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::Position,
@@ -1262,6 +1432,68 @@ impl<M: TextEngine> Core<M> {
             }),
         );
         placed.origin
+    }
+
+    /// The extent of overlay `key` (laid out at `size`) along its side's
+    /// axis (`horizontal`: its width) when its size follows the room it
+    /// was told: its max size that way is the `available` it last heard
+    /// (a select's list, an app's popup that scrolls past it). That room
+    /// may be the other side's, or the side's before its content grew, so
+    /// while it holds the overlay to it the core measures the overlay
+    /// without it (up to `area`, as large as either side's room can be,
+    /// less the terminal's frame `ring`): once per layout, only then.
+    /// `None` for any other overlay: its size is its own, placed as it is.
+    fn natural_extent(
+        &mut self,
+        key: Key,
+        horizontal: bool,
+        size: Size<Points>,
+        area: Bounds<Points>,
+        ring: Size<Points>,
+    ) -> Option<Points> {
+        let state = self.overlay(key)?;
+        let told = state.told?;
+        let layout = self.nodes[key as usize].layout?;
+        let max = self.layout.style(layout).max_size;
+        let (max, told, extent, room) = match horizontal {
+            true => (
+                max.width,
+                told.width,
+                size.width,
+                area.size.width - ring.width * 2.0,
+            ),
+            false => (
+                max.height,
+                told.height,
+                size.height,
+                area.size.height - ring.height * 2.0,
+            ),
+        };
+        // A max size of the app's own: the overlay's size is its own.
+        let taffy::ExpandedLengthPercentageAuto::Length(max) = max.expand() else {
+            return None;
+        };
+        let follows = |room: Points| (max - room.0).abs() <= 0.5;
+        if !follows(told) && !state.held.is_some_and(follows) {
+            return None;
+        }
+        let state = self.overlay_mut(key)?;
+        state.held = Some(Points(max));
+        let state = self.overlay(key)?;
+        // Short of the max it is held to: its natural size already.
+        if extent.0 < max - 0.5 {
+            return Some(extent);
+        }
+        if let Some(natural) = state.natural {
+            return Some(natural);
+        }
+        let measure = super::leaf_measure(&self.text_engine, &mut self.measure_cache);
+        let measured = self
+            .layout
+            .extent_capped(layout, !horizontal, room.0.max(0.0), measure)?;
+        let natural = Points(measured).max(extent);
+        self.overlay_mut(key)?.natural = Some(natural);
+        Some(natural)
     }
 
     /// Where unanchored overlay `key`, laid out at `frame` in host

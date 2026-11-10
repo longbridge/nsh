@@ -4,9 +4,11 @@
 //! `ERR_ACCESS_DENIED` (checked here, in the call, as the core checks the
 //! loads of Rust components' calls). In a terminal, which decodes no
 //! images, both reject at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+//! A `blob:` URL's bytes are in the VM already: its size is read from
+//! their header here, without the platform.
 
 use crate::{
-    ImageScales, ImageSource,
+    ImageData, ImageScales, ImageSource,
     element::{
         ImageSize, JsError, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, System, TsTypes,
         codes, module,
@@ -25,6 +27,8 @@ pub(crate) struct ImageUrl {
     url: String,
     scales: ImageScales,
     size: Option<ImageSize>,
+    /// The bytes of a `blob:` URL (`URL.createObjectURL`).
+    blob: Option<ImageData>,
 }
 
 impl ImageUrl {
@@ -50,10 +54,15 @@ impl JsValue for ImageUrl {
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
         if let Some(url) = value.as_string() {
+            let blob = match url.starts_with("blob:") {
+                true => value.host().image_blob(&url).map(|(_, data)| data),
+                false => None,
+            };
             return Ok(Self {
                 url,
                 scales: ImageScales::NONE,
                 size: None,
+                blob,
             });
         }
         if value.kind() == JsKind::Object
@@ -91,7 +100,12 @@ impl JsValue for ImageUrl {
                 } else {
                     None
                 };
-            return Ok(Self { url, scales, size });
+            return Ok(Self {
+                url,
+                scales,
+                size,
+                blob: None,
+            });
         }
         Err(value.expected("a URL or an imported image"))
     }
@@ -111,6 +125,9 @@ impl Image {
     /// the `network` capability does not grant its URL and
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` in a terminal.
     pub(crate) async fn get_size(src: ImageUrl, sys: System) -> Result<ImageSize, JsError> {
+        if let Some(data) = &src.blob {
+            return blob_size(&src.url, data);
+        }
         let imported_size = src.size;
         let (url, scale) = src.pick();
         granted(&sys, &url)?;
@@ -134,12 +151,29 @@ impl Image {
     /// imported image with variants loads the variant the views load at
     /// the screen's pixel ratio.
     pub(crate) async fn prefetch(src: ImageUrl, sys: System) -> Result<(), JsError> {
+        if src.blob.is_some() {
+            return Ok(());
+        }
         let url = src.pick().0;
         granted(&sys, &url)?;
         crate::prelude::prefetch_image(url)
             .await
             .map_err(|e| failed("prefetch", e))
     }
+}
+
+/// The size the header of a `blob:` URL's image gives.
+fn blob_size(url: &str, data: &ImageData) -> Result<ImageSize, JsError> {
+    let size = crate::picker::image_size(data.bytes()).ok_or_else(|| {
+        JsError::Error(format!(
+            "Image.getSize: {url} is not an image whose header gives its size \
+             (PNG, JPEG, GIF, WebP, HEIC, AVIF, TIFF, BMP)"
+        ))
+    })?;
+    Ok(ImageSize {
+        width: size.width,
+        height: size.height,
+    })
 }
 
 /// The rejection of `Image.{call}` for the core's answer `error`: coded

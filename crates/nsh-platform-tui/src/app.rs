@@ -573,6 +573,20 @@ impl AppView {
 
     /// Routes input against the last completed render. Unused keys and outside-area events are ignored.
     pub fn handle(&mut self, input: Input) -> Handled {
+        // What the user gives input with, before it acts: the focus it
+        // moves shows or not (`focus-visible:`).
+        let modality = match &input {
+            Input::Mouse(mouse) if matches!(mouse.kind, crate::MouseKind::Down(_)) => {
+                Some(nsh_core::platform::InputModality::Pointer)
+            }
+            Input::Key { release: false, .. } | Input::KeyRepeat { .. } => {
+                Some(nsh_core::platform::InputModality::Keyboard)
+            }
+            _ => None,
+        };
+        if let (Some(modality), Some(engine)) = (modality, &self.surface.engine) {
+            engine.control().set_input_modality(modality);
+        }
         // Ctrl+C is never the diagnostics panel's: it copies or quits.
         #[cfg(feature = "dev")]
         let interrupt = matches!(&input, Input::Key { key, modifiers, .. }
@@ -1453,6 +1467,7 @@ impl AppView {
                 Message::Frame => self.surface.request_frame(),
                 Message::Resized(size) => self.surface.laid_out = size,
                 Message::Focused(moved) => self.keyboard.caught_up(moved),
+                Message::Run(task) => task.run(),
                 #[cfg(feature = "dev")]
                 Message::Reload => {
                     if let Some(mut dev) = self.dev.take() {

@@ -63,8 +63,8 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
-of their packages, [below](#infoplist-keys-and-entitlements)) and `updater`, which makes desktop packages update themselves
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk` and `usesCleartextTraffic`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
 still builds with an older one, and the warning catches a typo.
@@ -93,6 +93,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
 | `--abi <abi>` | Android: the ABIs of the APK, repeated or separated by commas (default: `arm64-v8a` and `armeabi-v7a`). |
 | `--format <apk \| aab>` | Android: an APK (default), installed directly, or an Android App Bundle for Google Play ([below](#google-play-app-bundles)). |
+| `--arch <arm64 \| x86_64 \| universal>` | macOS: the processors the app runs on: Apple silicon, Intel, or both in one universal executable ([below](#macos)). Default: this Mac's. |
 | `--run` | Install and launch afterwards: in the iOS simulator, or on the Android device or emulator `adb` sees; macOS, Linux and Windows apps are launched on this machine; a web site is served on this machine and opened in the browser. Not for `--target ios`. |
 | `--asset-url <URL>` | Web: the http(s) URL the site's files are served from, a CDN, as the page names them; `index.html` and `manifest.webmanifest` stay at the page's address (named relatively, as without the flag), and the CDN answers with `Access-Control-Allow-Origin`. Default: next to the page, named relatively. `--run` serves the site from this machine as it is, so it goes without it. |
 
@@ -183,6 +184,20 @@ against that level, so the SDK needs its platform (`sdkmanager "platforms;androi
 }
 ```
 
+### Plain HTTP
+
+Packaged apps make requests over HTTPS. For servers without TLS, such as one on the local network,
+`android.usesCleartextTraffic` lets the app make plain `http://` requests as well
+([`android:usesCleartextTraffic`](https://developer.android.com/guide/topics/manifest/application-element#usesCleartextTraffic)):
+
+```json
+{
+  "android": { "usesCleartextTraffic": true }
+}
+```
+
+Development builds (`nsh run --target android`) always allow plain HTTP: they load the app from the dev server over it.
+
 ### Google Play: App Bundles
 
 Google Play takes Android App Bundles, not APKs. `--format aab` writes `.nsh/out/<Name>.aab` instead of the APK, from
@@ -205,8 +220,17 @@ nsh package --target macos --run
 ```
 
 Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/assets/…`, `nsh/app.json` (the window
-title and the app's appearance) and a TSX app's `nsh/bundle.nshc` in `Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
+title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
+`Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
 later; to distribute it, sign it with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
+
+The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel Macs, `arm64` for Apple silicon, or
+`universal` for both in one executable. A runner for another processor needs its Rust target:
+
+```sh
+rustup target add x86_64-apple-darwin
+nsh package --target macos --arch universal
+```
 
 ## Linux
 
@@ -214,9 +238,9 @@ later; to distribute it, sign it with a Developer ID and notarize it. See [macOS
 nsh package --target linux --run
 ```
 
-Writes `.nsh/out/<Name>/` (the executable `<Name>`, `nsh/assets/…`, `nsh/app.json` with the window title and the
-application id, a TSX app's `nsh/bundle.nshc`, `<id>.desktop` and the icon `<id>.png`) and the same as
-`.nsh/out/<Name>.tar.gz`. Package on
+Writes `.nsh/out/<Name>/` (the executable `<Name>`, `nsh/assets/…`, `nsh/app.json` with the window title, the
+application id and nsh.json's window options, a TSX app's `nsh/bundle.nshc`, `<id>.desktop` and the icon
+`<id>.png`) and the same as `.nsh/out/<Name>.tar.gz`. Package on
 Linux: the runner is built for the machine it is built on. GTK 4 (4.14 or later), Pango and WebKitGTK 6.0 (for web
 views) must be installed where the app runs. Installing it and the desktop entry: [Linux](./linux.md#packaging).
 
@@ -227,8 +251,9 @@ nsh package --target windows --run
 ```
 
 Writes `.nsh\out\<Name>\` (the executable `<Name>.exe` with the app's icon, `nsh\assets\…`, `nsh\app.json` with the
-window title, the app id, the version and the appearance, and a TSX app's `nsh\bundle.nshc`) and the same as
-`.nsh\out\<Name>.zip`. A TSX app needs no tools; a Rust app's runner is built with Visual Studio Build Tools. Package on Windows: the runner is built for the machine it is built on, and only Windows can
+window title, the app id, the version, the appearance and nsh.json's window options, and a TSX app's `nsh\bundle.nshc`)
+and the same as `.nsh\out\<Name>.zip`. A TSX app needs no tools; a Rust app's runner is built with Visual Studio Build
+Tools. Package on Windows: the runner is built for the machine it is built on, and only Windows can
 embed the icon. The app runs from wherever its directory is copied. `nsh package` also writes the Inno Setup script
 `.nsh\out\<Name>.iss` and, when Inno Setup 6 is installed, compiles it to `.nsh\out\<Name>-setup.exe`: a per-user
 installer (no administrator rights) with a Start menu shortcut, an Installed apps entry, and in-place upgrades. See
@@ -289,6 +314,7 @@ says what to set instead:
 | iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
 | iOS: `UIUserInterfaceStyle` | `appearance` |
 | iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
+| macOS: `LSUIElement` | `macos.activationPolicy` ([Menu bar apps](./macos.md#menu-bar-apps)) |
 | `CFBundleExecutable`, `CFBundlePackageType`, `CFBundleSupportedPlatforms`; iOS: `MinimumOSVersion`, `LSRequiresIPhoneOS`, `UIApplicationSceneManifest`, `UIApplicationSupportsMultipleScenes`; macOS: `LSMinimumSystemVersion`, `NSPrincipalClass` | the package itself |
 | Entitlements: `application-identifier`, `com.apple.application-identifier`, `com.apple.developer.team-identifier` | `id` and the provisioning profile |
 

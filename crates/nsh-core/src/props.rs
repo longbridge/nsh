@@ -343,6 +343,12 @@ pub struct ViewProps {
     pub accessibility: Accessibility,
     /// `testID`: an identifier for UI tests.
     pub test_id: Option<Arc<str>>,
+    /// `nativeID`: names the view for the embedding app's native code (a
+    /// watched scroll view, `watchScroll`), apart from `testID`, which is
+    /// for tests.
+    pub native_id: Option<Arc<str>>,
+    /// `web={{ element }}`: the HTML element the web draws the view as.
+    pub web_element: Option<crate::WebElement>,
     /// Where the view goes as a link (`Link`'s `href`): data for the
     /// platform, never shown or read to accessibility clients. A terminal
     /// draws the text inside the view as an OSC 8 hyperlink to it.
@@ -502,10 +508,21 @@ pub enum LayoutCurve {
     EaseOut,
     /// Accelerates, then decelerates.
     EaseInEaseOut,
-    /// A spring with the given damping ratio (0..1).
-    Spring {
-        /// Damping ratio: 1 does not overshoot.
-        damping: f32,
+    /// A spring's physics ([`LayoutTransition::spring`]): it times itself,
+    /// lasting until it settles ([`Spring::settle_ms`]), and moves the same
+    /// on every platform. The transition's `duration_ms` is not used. Its
+    /// `velocity` and `frame_rate` are not either: a layout moves from rest
+    /// at the screen's rate.
+    ///
+    /// [`Spring::settle_ms`]: crate::element::Spring::settle_ms
+    Spring(crate::element::Spring),
+    /// A spring of this damping ratio fitted into the transition's
+    /// duration, which each platform draws with its own spring: the JS
+    /// `LayoutAnimation`'s `type: "spring"` (`springDamping`). Rust prefers
+    /// [`LayoutCurve::Spring`].
+    FittedSpring {
+        /// Damping ratio (0..1): 1 does not overshoot.
+        damping_ratio: f32,
     },
     /// The software keyboard's motion (`type: "keyboard"`): the curve the
     /// system moves its keyboard with, timed from when the keyboard
@@ -559,6 +576,22 @@ impl LayoutTransition {
             delay_ms: 0.0,
         }
     }
+
+    /// On `spring`'s physics ([`LayoutCurve::Spring`]), lasting until it
+    /// settles, appearing views fading.
+    pub fn spring(spring: crate::element::Spring) -> Self {
+        Self::new(LayoutCurve::Spring(spring), spring.settle_ms())
+    }
+
+    /// How long it runs, in milliseconds: its `duration_ms`, or the time
+    /// its spring settles in ([`LayoutCurve::Spring`] times itself). What
+    /// the platforms animate over.
+    pub fn run_ms(&self) -> f32 {
+        match self.curve {
+            LayoutCurve::Spring(spring) => spring.settle_ms(),
+            _ => self.duration_ms,
+        }
+    }
 }
 
 impl LayoutAnimation {
@@ -584,7 +617,7 @@ impl LayoutAnimation {
     pub const SPRING: Self = Self {
         create: Some(LayoutTransition::new(LayoutCurve::Linear, 700.0)),
         update: Some(LayoutTransition::new(
-            LayoutCurve::Spring { damping: 0.4 },
+            LayoutCurve::FittedSpring { damping_ratio: 0.4 },
             700.0,
         )),
         delete: Some(LayoutTransition::new(LayoutCurve::Linear, 700.0)),

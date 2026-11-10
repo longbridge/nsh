@@ -3,6 +3,7 @@ name = "nsh-linux-app"
 description = "Release app runner on Linux: the executable of packaged nsh apps (no development features)."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

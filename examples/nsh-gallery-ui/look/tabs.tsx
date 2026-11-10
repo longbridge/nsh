@@ -26,7 +26,7 @@ export interface TabLook {
   readonly style: ViewStyle;
   readonly hoverStyle: ViewStyle | undefined;
   readonly activeStyle?: ViewStyle;
-  readonly focusStyle: ViewStyle;
+  readonly focusVisibleStyle: ViewStyle;
   readonly disabledStyle: ViewStyle;
 }
 
@@ -103,7 +103,7 @@ export function segmentedLook(o?: SegmentedLookOptions) {
         get hoverStyle() {
           return hoverOf(state);
         },
-        get focusStyle() {
+        get focusVisibleStyle() {
           return focusRing();
         },
         disabledStyle: { opacity: 0.4 },
@@ -158,7 +158,7 @@ export function tabsLook() {
         get hoverStyle() {
           return hoverOf(state);
         },
-        get focusStyle() {
+        get focusVisibleStyle() {
           return focusRing();
         },
         disabledStyle: { opacity: 0.4 },
@@ -196,7 +196,7 @@ export function underlineTabsLook() {
           return hoverOf(state);
         },
         activeStyle: { opacity: 0.7 },
-        get focusStyle() {
+        get focusVisibleStyle() {
           return focusRing();
         },
         disabledStyle: { opacity: 0.4 },

@@ -114,7 +114,7 @@ export function toggleLook(o?: ToggleLookOptions) {
     get activeStyle(): ViewStyle | undefined {
       return read(o?.disabled) ? undefined : sink(0.92);
     },
-    get focusStyle(): ViewStyle {
+    get focusVisibleStyle(): ViewStyle {
       return focusRing(1);
     },
     disabledStyle: { opacity: 0.4 } as ViewStyle,
