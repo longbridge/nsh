@@ -811,9 +811,10 @@ impl Items {
                 current.set(None);
             }
         });
+        // The menu's own state may go before the item.
         cleanup(move || {
-            if current.get_untracked() == Some(key) {
-                current.set(None);
+            if untracked(|| current.try_get()) == Some(Some(key)) {
+                current.try_set(None);
             }
         });
         let items = self.clone();
