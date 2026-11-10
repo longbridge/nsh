@@ -1107,6 +1107,12 @@ inside (`indicator`) follows them through `group-checked:` with `group` on the p
 part's own `checked:` styles. A new value rebinds that item's state and its indicator's projection alone, so only the
 item and its indicator are sent (`crates/nsh-base/tests/base/menu.rs`).
 
+**Menu lists.** `MenuList` (Rust, `menu.rs`) puts a level's items in a virtualized list of the menu's own. The menu
+counts it as one place per row among the level's items, made or not, so its keys walk the rows by index: a row not
+made yet is scrolled to and focused once the list has made it, and a disabled row is passed over as an item is. A
+`virtual_list` of the app's own in a menu is no such list: its rows are made under the app's view, out of the menu's
+reach (`crates/nsh-base/tests/base/menu_list.rs`).
+
 **Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
 toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
 `Popover`'s, `HoverCard`'s, `Menu`'s and `ContextMenu`'s `popupStartingClass` / `popupStartingStyle` and `popupEndingClass` /
