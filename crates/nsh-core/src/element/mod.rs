@@ -40,6 +40,7 @@ pub(crate) mod call;
 mod callback;
 pub(crate) mod class;
 mod component;
+mod component_styles;
 pub mod description;
 pub mod desktop;
 mod element_ref;
@@ -137,6 +138,7 @@ pub use self::{
         MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
         ScrollbarSource, declarations,
     },
+    component_styles::{ComponentStyle, set_component_style},
     element_ref::{ComponentRef, ElementRef, FollowTarget},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
