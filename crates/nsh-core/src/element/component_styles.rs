@@ -93,8 +93,7 @@ impl ComponentStyle {
 
     /// The Tailwind classes of the variant `name`.
     pub fn variant_classes(mut self, name: &str, classes: &str) -> Self {
-        self.variants
-            .insert(name.to_owned(), Look::classes(classes));
+        self.variants.entry(name.to_owned()).or_default().classes = Look::classes(classes).classes;
         self
     }
 
