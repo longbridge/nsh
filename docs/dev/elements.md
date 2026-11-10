@@ -227,8 +227,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   listens, with the path of listening nodes (`EventPayload::Touch`, sent to the root; moves are merged per engine turn). The
   negotiation runs as in React Native, natively (`nsh-js` `touch.rs`), asking the app's handlers. A grant returning true
   (PanResponder's default) sends `SetJsResponder`: scroll
-  views around stop taking the touches (UIKit: their pan recognizer is disabled; Android: `ScrollBox.jsBlocked`); a native
-  scroll view that starts dragging first cancels the JS touches. The `…ShouldSetResponder` handlers also get a
+  views around stop taking the touches (UIKit: their pan recognizer is disabled; Android: `ScrollBox.jsBlocked`), and the
+  presses of the views around it end with no long press or press after them (UIKit: their `PressRecognizer`s are
+  cancelled; Android: `Box.cancelPress`, `Pressable.cancel`); a native scroll view that starts dragging first cancels the
+  JS touches. The `…ShouldSetResponder` handlers also get a
   `gestureState` (`ResponderGestureState`: `dx`, `dy`, `vx`, `vy`, `moveX`, `moveY`, `x0`, `y0`, `numberActiveTouches`,
   since the first finger went down; `nsh_core::element::PanGesture`, the same the core gives Rust claims). Rust components'
   nodes on the path hear the same event first and negotiate their own responder in the core (`claim_touches`,
