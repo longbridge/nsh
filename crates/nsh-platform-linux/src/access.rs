@@ -714,6 +714,8 @@ fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Gtk {
         Role::Navigation => Gtk::Navigation,
         Role::Tree => Gtk::Tree,
         Role::TreeItem => Gtk::TreeItem,
+        Role::Dialog => Gtk::Dialog,
+        Role::AlertDialog => Gtk::AlertDialog,
     }
 }
 
@@ -2358,6 +2360,8 @@ mod tests {
             (Role::TreeItem, Gtk::TreeItem),
             (Role::MenuItemCheckbox, Gtk::MenuItemCheckbox),
             (Role::MenuItemRadio, Gtk::MenuItemRadio),
+            (Role::Dialog, Gtk::Dialog),
+            (Role::AlertDialog, Gtk::AlertDialog),
         ] {
             assert_eq!(
                 role_for(&with_role(role), ViewKind::View, false),

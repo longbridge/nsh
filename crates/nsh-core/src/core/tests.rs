@@ -7744,6 +7744,8 @@ fn pressed_current_and_level_decode_from_js() {
         ("treeitem", R::TreeItem),
         ("menuitemcheckbox", R::MenuItemCheckbox),
         ("menuitemradio", R::MenuItemRadio),
+        ("dialog", R::Dialog),
+        ("alertdialog", R::AlertDialog),
     ] {
         assert_eq!(role(name), r);
     }

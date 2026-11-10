@@ -25,13 +25,14 @@ final class A11y extends View.AccessibilityDelegate {
         "android.widget.GridView", "android.view.View", "android.view.View", "android.view.View", "android.view.View",
         "android.widget.ListView", "android.view.View", "android.view.View", "android.view.View",
         "android.view.View", "android.view.View", "android.view.View", "android.view.View", "android.view.View",
+        "android.view.View", "android.view.View",
     };
     /** Spoken role descriptions for roles without a widget class. */
     private static final String[] ROLE_DESCRIPTIONS = {
         null, null, "link", null, null, null, null, null, null, null, "summary", "alert", null, null, "menu",
         "menu bar", "menu item", null, null, null, "scroll bar", null, null, "tab", "tab list", "timer", null,
         null, null, null, "row", "cell", "column header", "row group", null, "option", null, "region",
-        "navigation", "tree", "tree item", "menu item", "menu item",
+        "navigation", "tree", "tree item", "menu item", "menu item", "dialog", "alert dialog",
     };
     /** Spoken states of `accessibilityState.current`, by its kind in the state's bits 11 to 13. */
     private static final String[] CURRENT_DESCRIPTIONS = {

@@ -365,6 +365,8 @@ prop id:role-tree role tree
 prop id:role-treeitem role treeitem
 prop id:role-menuitemcheckbox role menuitemcheckbox
 prop id:role-menuitemradio role menuitemradio
+prop id:role-dialog role dialog
+prop id:role-alertdialog role alertdialog
 covers [props] accessible
 covers [props] accessibilityHint
 covers [props] accessibilityState
