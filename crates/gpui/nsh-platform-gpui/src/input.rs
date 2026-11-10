@@ -1126,8 +1126,14 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             motion(surface, key, x, y, time);
         }
         PointerKind::Up => {
-            if mouse && event.button != 0 {
-                return;
+            if mouse {
+                surface.input.last.set(Some((x, y)));
+                if let Some(released) = mouse_button(event.button) {
+                    mouse_up(surface, x, y, event.modifiers, released);
+                }
+                if event.button != 0 {
+                    return;
+                }
             }
             up(surface, key, Some((x, y)), time, false);
         }
@@ -2513,6 +2519,38 @@ fn mouse_event(
         button,
     );
     surface.event(id, kind, EventPayload::Mouse(event));
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(
+    surface: &Surface,
+    x: f32,
+    y: f32,
+    modifiers: Modifiers,
+    button: nsh_core::MouseButton,
+) {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(&view, x, y);
+        let event = nsh_core::MouseButtonEvent::new(
+            nsh_core::geometry::point(Points(location_x), Points(location_y)),
+            nsh_core::geometry::point(Points(x), Points(y)),
+            modifiers.core(),
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::MouseButton(event));
+    }
 }
 
 /// A mouse button numbered as [`PointerEvent::button`] numbers them.
