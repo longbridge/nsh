@@ -3,6 +3,7 @@ name = "nsh-cli"
 description = "The nsh command line tool: build, package and run apps."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

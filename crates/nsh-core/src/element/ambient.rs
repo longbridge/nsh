@@ -881,6 +881,20 @@ pub fn web_input_available() -> Answer<bool> {
     answer
 }
 
+/// Whether a web view shows a page here (TS: `WebView.available()`): the
+/// platform shows web views and the app's capabilities grant `webview`.
+/// Where it answers `false`, a web view reports `onError` (`code`
+/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform shows none,
+/// `ERR_ACCESS_DENIED` where `webview` is not granted). A web engine that
+/// fails only when a web view starts (Windows without the WebView2
+/// runtime) answers `true` and reports the error on the web view. To
+/// await in a task.
+pub fn web_view_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebViewAvailable(slot));
+    answer
+}
+
 /// Starts recognizing what the user says (dictation; TS: `Speech.start`),
 /// as `request` asks: the session's events come from
 /// [`SpeechRecognition::next`], in a task. One session runs at a time:

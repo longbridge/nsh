@@ -40,7 +40,9 @@ use std::{
 
 use nsh_core::{
     Color, EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
-    desktop::{DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, menu_icon},
+    desktop::{
+        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, WindowRequest, menu_icon,
+    },
     geometry::{Edges, Points},
 };
 use windows::{
@@ -355,6 +357,23 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     match command {
         DesktopCommand::SetAttributes(diff) => crate::shell::apply(surface, hwnd, diff),
         DesktopCommand::Request(request) => {
+            // SAFETY: a plain query on the surface's live window.
+            let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+            match request {
+                // A main window hidden at launch (nsh.json
+                // `defaultVisible: false`) shows as it would have then:
+                // drawn before DWM composites it, in the mode it opens in.
+                WindowRequest::Show | WindowRequest::Focus
+                    if surface.main_unshown.get() && !visible =>
+                {
+                    crate::app::show_main(surface, hwnd);
+                }
+                // The app's own mode replaces the one it was to open in.
+                WindowRequest::SetMode(_) | WindowRequest::SetPlacement(_) => {
+                    surface.main_opening_mode.take();
+                }
+                _ => {}
+            }
             if !crate::shell::request(hwnd, request) {
                 // `Request(Close)`: past `closeOnPress`.
                 crate::window_close::close(surface);

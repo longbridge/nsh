@@ -170,9 +170,9 @@ view()
 | `onMouseEnter` / `onMouseLeave` | `.on_mouse_enter` / `.on_mouse_leave` | `MouseEvent` | The mouse came over the view (or a view inside it) / left it or the window ([hover](./index.md#hover)); `onMouseLeave`'s is where it was last. |
 | `onMouseMove` | `.on_mouse_move` | `MouseEvent` | The mouse moved over the view (or a view inside it), with or without a button down, or a modifier key was pressed or released while it rests there with none down: `position`, `pagePosition` (`Point`s), `modifiers` and `pressedButton` (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"` or `null`); at most once a frame. |
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | A context menu was asked for over the view: the secondary button, the keyboard in the browser or a screen reader on macOS and Windows ([context menus](./index.md#context-menus)). |
-| `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list. |
+| `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list and their types. |
 | `onFileDragLeave` | `.on_file_drag_leave` | none | A local-file drag left the active desktop destination. |
-| `onFileDrop` | `.on_file_drop` | `{ uris: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the desktop destination. |
+| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the desktop destination. |
 | `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | A drag bound with `pan` started / ended; `cancelled` is true when the system cancels it. |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
@@ -184,46 +184,55 @@ Touch and responder events: see [common props](./index.md#raw-touches-and-the-re
 ## Desktop file drops
 
 On AppKit, GTK, Win32 and GPUI, a view with `onFileDrop` receives local files and directories dragged from another
-application. `onFileDragEnter` and `onFileDrop` receive `{ uris: string[] }` in the native file-list order. Each entry is an absolute `file:` URL with escaped spaces and
+application. `onFileDragEnter` and `onFileDrop` receive `{ uris: string[], mimeTypes: string[] }` in the native file-list order. Each entry of `uris` is an absolute `file:` URL with escaped spaces and
 non-ASCII characters. Parse the URL to obtain a filesystem path rather than removing the prefix by hand.
+`mimeTypes[i]` is the MIME type of `uris[i]` by its file name (`image/png` for `a.png`), and `""` when the name
+names none, a directory for instance, as the DOM's `File.type`. It is the same on every platform, and no file is read
+to give it.
 
-Use the entry list to preview filenames or counts before release. It contains metadata only; validate the files
+Use the entry list to preview filenames, counts or kinds before release ("Release to add 2 images"). It contains metadata only; validate the files
 again at drop time. AppKit resolves Finder file references to path URLs. GTK reports entry when its asynchronous
 file-list preload finishes, including when the pointer stays still, and ignores completion after leave or reset.
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
 preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
 
 ```rust tabs
-let hovering = signal(false);
+let hint = signal(String::new());
 let files = signal(Vec::<String>::new());
 
 view()
     .min_h(px(160.0))
     .p_6()
-    .on_file_drag_enter(move || hovering.set(true))
-    .on_file_drag_leave(move || hovering.set(false))
+    .on_file_drag_enter(move |event: &FileDragEvent| {
+        let images = event.mime_types.iter().filter(|t| t.starts_with("image/")).count();
+        hint.set(format!("Release to add {images} of {} files as images", event.uris.len()));
+    })
+    .on_file_drag_leave(move || hint.set(String::new()))
     .on_file_drop(move |event: &FileDropEvent| {
         files.set(event.uris.clone());
-        hovering.set(false);
+        hint.set(String::new());
     })
-    .child(text(move || if hovering.get() { "Release files here" } else { "Drop files here" }))
+    .child(text(move || if hint.get().is_empty() { "Drop files here".into() } else { hint.get() }))
     .child(text(move || files.get().join("\n")))
 ```
 
 ```tsx tabs
-const hovering = signal(false);
+const hint = signal("");
 const files = signal<string[]>([]);
 
 <View
-  onFileDragEnter={() => hovering.set(true)}
-  onFileDragLeave={() => hovering.set(false)}
+  onFileDragEnter={(event) => {
+    const images = event.mimeTypes.filter((t) => t.startsWith("image/")).length;
+    hint.set(`Release to add ${images} of ${event.uris.length} files as images`);
+  }}
+  onFileDragLeave={() => hint.set("")}
   onFileDrop={(event) => {
     files.set(event.uris);
-    hovering.set(false);
+    hint.set("");
   }}
   style={{ minHeight: 160, padding: 24 }}
 >
-  <Text>{hovering() ? "Release files here" : "Drop files here"}</Text>
+  <Text>{hint() || "Drop files here"}</Text>
   <Text>{files().join("\n")}</Text>
 </View>
 ```

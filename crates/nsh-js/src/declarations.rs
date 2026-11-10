@@ -276,7 +276,7 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
         "InputRef",
         Some("ViewRef"),
         "An `<Input>`'s ref.",
-        &["setSelection"],
+        &["setSelection", "insertText"],
     ),
     (
         "ScrollRef",

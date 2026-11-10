@@ -43,8 +43,9 @@ pub(crate) enum Report {
     Main(WindowState),
     /// A window of the app's own reports this, on its root.
     Window(NodeId, WindowEvent),
-    /// A window of the app's own came on the screen (`false`) or left it
-    /// (`true`): its views are found or not.
+    /// A window came on the screen (`false`) or left it (`true`): its views
+    /// are found or not (the main window's, `ROOT_ID`: those outside the
+    /// windows of the app's own).
     Hidden(NodeId, bool),
     /// The content of a window of the app's own is this size: its root
     /// view's (`EngineControl::set_root_size`).
@@ -107,6 +108,14 @@ impl Windows {
             reports: Vec::new(),
             main_resize: None,
         }
+    }
+
+    /// The main window starts hidden (nsh.json `window.defaultVisible:
+    /// false`): made, unseen and unfocused, until the app shows it.
+    pub(crate) fn start_hidden(&mut self) {
+        self.main.visible = false;
+        self.main.focused = false;
+        self.focused = None;
     }
 
     /// The displays there are: one, the primary.
@@ -539,8 +548,13 @@ impl Windows {
     /// not taken yet: the last one), and whether it is on screen.
     fn report(&mut self, root: NodeId) {
         if root == ROOT_ID {
-            self.reports.retain(|r| !matches!(r, Report::Main(_)));
+            self.reports.retain(|r| {
+                !matches!(r, Report::Main(_))
+                    && !matches!(r, Report::Hidden(id, _) if *id == ROOT_ID)
+            });
             self.reports.push(Report::Main(self.main));
+            self.reports
+                .push(Report::Hidden(ROOT_ID, !self.main.visible));
             return;
         }
         let Some(w) = self.own.iter().find(|w| w.root == root) else {
@@ -644,6 +658,30 @@ mod tests {
         assert!(reports.contains(&Report::Main(w.main())));
         assert!(reports.contains(&Report::Window(NOTES, WindowEvent::State(Box::new(state)))));
         assert!(reports.contains(&Report::Hidden(NOTES, false)));
+    }
+
+    #[test]
+    fn a_main_window_hidden_at_launch_shows_when_the_app_asks() {
+        let mut w = windows();
+        w.start_hidden();
+        let main = w.main();
+        assert!(!main.visible && !main.focused && !main.minimized);
+        assert_eq!(w.focused(), None);
+        // A window of the app's own opens as ever, the main one unseen.
+        open(&mut w, NOTES, "notes", WindowKind::Panel);
+        assert!(w.state(NOTES).unwrap().visible);
+        assert!(!w.main().visible);
+        w.take_reports();
+        request(&mut w, ROOT_ID, WindowRequest::Show);
+        assert!(w.main().visible && !w.main().focused);
+        let reports = w.take_reports();
+        assert!(reports.contains(&Report::Main(w.main())));
+        assert!(reports.contains(&Report::Hidden(ROOT_ID, false)));
+        request(&mut w, ROOT_ID, WindowRequest::Hide);
+        assert!(w.take_reports().contains(&Report::Hidden(ROOT_ID, true)));
+        request(&mut w, ROOT_ID, WindowRequest::Focus);
+        assert!(w.main().visible && w.main().focused);
+        assert_eq!(w.focused(), Some(ROOT_ID));
     }
 
     #[test]

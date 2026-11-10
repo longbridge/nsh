@@ -867,7 +867,9 @@ pub struct Tray {
     /// [`Self::click`] is 0); empty for none.
     pub menu: Arc<[MenuItem]>,
     /// Reported as [`crate::EventKind::Menu`] when the icon is clicked
-    /// (primary button); 0: the click opens the menu.
+    /// (primary button), with `bounds`: the icon's frame in screen points
+    /// (as [`WindowState::bounds`]), left out where the platform does not
+    /// know it; 0: the click opens the menu.
     pub click: u32,
 }
 

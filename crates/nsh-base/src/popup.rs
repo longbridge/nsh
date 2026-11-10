@@ -41,8 +41,9 @@ pub enum OpenChangeReason {
     /// tooltip's); left its trigger and itself (a hover card's).
     Hover,
     /// The keyboard focus came to its trigger, or left it (a hover
-    /// card's); Tab or Shift+Tab moved it on from a select or combobox
-    /// whose list was open (the focus goes where Tab takes it).
+    /// card's); moved to another item of its menu (a submenu's); Tab or
+    /// Shift+Tab moved it on from a select or combobox whose list was open
+    /// (the focus goes where Tab takes it).
     Focus,
     /// A finger was held on its trigger (a context menu's on touch
     /// screens).

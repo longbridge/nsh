@@ -507,6 +507,16 @@ mod imp {
                     if !WARNED.swap(true, Ordering::Relaxed) {
                         log::warn!(target: "js", "web views cannot show: {why}");
                     }
+                    // The app hears it and shows what it has instead.
+                    self.emitter.emit(EventKind::Error, || {
+                        EventPayload::Map(vec![
+                            ("message", PayloadValue::Str(why)),
+                            (
+                                "code",
+                                PayloadValue::Str(nsh_core::element::codes::UNAVAILABLE.into()),
+                            ),
+                        ])
+                    });
                     self.failed.set(Some(shown));
                     self.queued.borrow_mut().clear();
                 }

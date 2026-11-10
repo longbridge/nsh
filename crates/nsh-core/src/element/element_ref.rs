@@ -187,6 +187,15 @@ impl ElementRef {
         self.send(Command::SetSelection { start, end });
     }
 
+    /// Inserts `text` into an input in place of its selection, as the
+    /// user's edit ([`Command::InsertText`]): reported by `on_change`, a
+    /// step of the input's undo history where the platform keeps one. With
+    /// [`crate::PasteBehavior::Report`], what `on_paste` reported goes in
+    /// this way once the app allows it (or what the app made of it).
+    pub fn insert_text(&self, text: impl Into<String>) {
+        self.send(Command::InsertText(text.into()));
+    }
+
     /// Opens the system's edit menu over `bounds` (in the root view) on a
     /// focused input, offering `actions` ([`Command::OpenEditMenu`]): a
     /// chosen action comes back as [`super::EventKind::EditAction`], a

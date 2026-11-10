@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use nsh_bundler::{BundleError, BundleOptions};
+use nsh_bundler::{AppInfo, BundleError, BundleOptions};
 
 use crate::ui;
 
@@ -195,19 +195,49 @@ impl BuildError {
 /// Bundles `entry` and compiles it to bytecode: one bundle, holding what
 /// `import()` loads too (native packages).
 pub(crate) fn compile(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, false, release.into())
+    compile_with(entry, release, false, release.into(), AppInfo::default())
+}
+
+/// [`compile`] in release mode for a package of `config`'s app (`split`:
+/// as [`compile_split`] does, for web apps), giving it `config`'s version
+/// and build number (`--version`, `--build`).
+pub(crate) fn compile_package(
+    entry: &Path,
+    split: bool,
+    config: &crate::package::AppConfig,
+) -> Result<Built, BuildError> {
+    compile_with(entry, true, split, true.into(), app_info(entry, config))
 }
 
 /// [`compile`], with what `import()` loads split into chunks
 /// ([`Built::chunks`]) loaded on demand (web apps).
 pub(crate) fn compile_split(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, true, release.into())
+    compile_with(entry, release, true, release.into(), AppInfo::default())
 }
 
 /// [`compile`] in release mode (minified), with the bytecode stripped as
-/// `strip` says (signed packages keep their line tables by default).
-pub(crate) fn compile_release(entry: &Path, strip: nsh_js::Strip) -> Result<Built, BuildError> {
-    compile_with(entry, true, false, strip)
+/// `strip` says (signed packages keep their line tables by default), giving
+/// the app `config`'s version and build number.
+pub(crate) fn compile_release(
+    entry: &Path,
+    strip: nsh_js::Strip,
+    config: &crate::package::AppConfig,
+) -> Result<Built, BuildError> {
+    compile_with(entry, true, false, strip, app_info(entry, config))
+}
+
+/// The identity a package of `config`'s app carries (after `--id`,
+/// `--name`, `--version` and `--build`, with the defaults the package
+/// writers use: [`crate::package::name_and_id`], `1.0.0`, build `1`), so
+/// `appInfo()` reports what the package says it is.
+fn app_info(entry: &Path, config: &crate::package::AppConfig) -> AppInfo {
+    let (name, id) = crate::package::name_and_id(entry, config);
+    let mut info = AppInfo::default();
+    info.id = Some(id);
+    info.name = Some(name);
+    info.version = Some(config.version.clone().unwrap_or_else(|| "1.0.0".to_owned()));
+    info.build = Some(u64::from(config.build.unwrap_or(1)));
+    info
 }
 
 fn compile_with(
@@ -215,13 +245,16 @@ fn compile_with(
     release: bool,
     split: bool,
     strip: nsh_js::Strip,
+    app: AppInfo,
 ) -> Result<Built, BuildError> {
     let start = Instant::now();
     let mut bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: release,
+        development: !release,
         split,
         ui_sets: crate::ui_sets().to_vec(),
+        app,
     })?;
     let dir = dunce::canonicalize(entry)
         .ok()

@@ -3358,6 +3358,7 @@
 			"stopLoading",
 			"injectJavaScript",
 			"postMessage",
+			"insertText",
 			"sendInput",
 			"load",
 			"seek"
@@ -5155,6 +5156,22 @@
 		const keys = Object.keys(a);
 		return keys.length === Object.keys(b).length && keys.every((key) => same(a[key], b[key], depth - 1));
 	}
+	/** `appInfo()`'s object from the build's JSON, its fields typed as
+	* nsh-js's `AppInfo` reads them. */
+	function readAppInfo(json) {
+		let info = {};
+		try {
+			info = JSON.parse(json) ?? {};
+		} catch {}
+		const text = (value) => typeof value === "string" ? value : null;
+		return {
+			id: text(info.id),
+			name: text(info.name),
+			version: text(info.version),
+			build: Number.isFinite(info.build) ? info.build : null,
+			development: info.development === true
+		};
+	}
 	function createEnvironment(reactive, invoke, dom) {
 		const fields = Object.fromEntries(Object.entries({
 			window: {
@@ -5232,10 +5249,12 @@
 			reduceMotion: () => fields.reduceMotion(),
 			screenReaderEnabled: () => fields.screenReader()
 		};
+		let appInfo = readAppInfo("{}");
 		return {
 			api: {
 				...device,
 				...accessibility,
+				appInfo: () => appInfo,
 				safeArea: () => fields.safeArea(),
 				safeAreaInsets: () => insets(),
 				keyboardFrame: () => fields.keyboard(),
@@ -5284,7 +5303,7 @@
 					fields.locale.set(tag);
 				});
 			},
-			setup(tailwind, theme, scheme, statusBar) {
+			setup(tailwind, theme, scheme, statusBar, app) {
 				if (typeof tailwind === "string") dom.rootProp("tailwindTheme", tailwind);
 				if (typeof theme === "string") {
 					dom.rootProp("uiTheme", theme);
@@ -5297,6 +5316,7 @@
 					"system"
 				].includes(scheme)) setColorScheme(scheme);
 				if (typeof statusBar === "string") invoke(405, [statusBar]);
+				if (typeof app === "string") appInfo = readAppInfo(app);
 			}
 		};
 	}

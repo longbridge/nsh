@@ -5620,6 +5620,11 @@ impl<M: TextEngine> Core<M> {
                     self.components.environment.web_input && self.access.allows_web_input();
                 answer.borrow_mut().deliver(available);
             }
+            Action::WebViewAvailable(answer) => {
+                let available =
+                    self.components.environment.web_views && self.access.allows_webviews();
+                answer.borrow_mut().deliver(available);
+            }
             Action::PickScreenColor(answer) => {
                 if !self.components.environment.screen_color {
                     answer.borrow_mut().deliver(None);

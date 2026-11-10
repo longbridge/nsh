@@ -1305,6 +1305,9 @@ pub struct Core<M: TextEngine> {
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
+    /// The main window has been on screen, or it opens shown: its reports
+    /// are where the user left it ([`Core::keep_window_placement`]).
+    main_shown: bool,
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
@@ -1380,6 +1383,7 @@ impl<M: TextEngine> Core<M> {
             windows: Default::default(),
             window_ids: Default::default(),
             keep_main_placement: false,
+            main_shown: false,
             clipboard: None,
             picker: None,
             window_backend: None,
@@ -1635,6 +1639,7 @@ impl<M: TextEngine> Core<M> {
     /// to open it there ([`crate::desktop::MainWindowOptions::kept_placement`]).
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
         self.keep_main_placement = options.restore_bounds;
+        self.main_shown |= options.visible_at_launch();
         if let Some(state) = self.components.environment.window_state {
             self.keep_window_placement(crate::ROOT_ID, &state);
         }
@@ -2624,12 +2629,25 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Keeps the placement of window `id` (its root node) a platform
-    /// reported, when the app asked to restore its bounds.
+    /// reported, when the app asked to restore its bounds. A main window
+    /// hidden since launch (`defaultVisible: false`) is not where the user
+    /// left it until it first shows: it has yet to take the mode it opens
+    /// in, and GTK has yet to size it. Once it has shown, its reports are,
+    /// hidden ones too: one hidden right after a move or resize reports
+    /// where it was left only then. (A development host's reload starts a
+    /// new core: there such a window shown before the reload counts as
+    /// hidden since launch until it shows again.)
     pub(crate) fn keep_window_placement(
         &mut self,
         id: NodeId,
         state: &crate::desktop::WindowState,
     ) {
+        if id == crate::ROOT_ID {
+            self.main_shown |= state.visible;
+            if !self.main_shown {
+                return;
+            }
+        }
         let key = if id == crate::ROOT_ID {
             self.keep_main_placement
                 .then(|| crate::desktop::window::placement_key("main"))
@@ -3154,7 +3172,30 @@ impl<M: TextEngine> Core<M> {
         self.nodes[key as usize].layout = Some(layout);
         self.sync_grid_role(key);
         self.became(key, style);
+        if kind == Kind::WebView && !self.components.environment.web_views {
+            self.web_view_unavailable(id);
+        }
         Ok(())
+    }
+
+    /// A web view on a platform that shows none fails at once (`onError`
+    /// with `code` `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). Always reported:
+    /// the `onError` listener is set after the node is made.
+    fn web_view_unavailable(&mut self, id: NodeId) {
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                (
+                    "message",
+                    PayloadValue::Str("web views are not available on this platform".into()),
+                ),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
+                ),
+            ]),
+        ));
     }
 
     /// Whether node `key` is a control: a view with a control's
@@ -3754,11 +3795,12 @@ impl<M: TextEngine> Core<M> {
         } else {
             node.view_style != view
         };
-        // A span's background is part of its block's text.
-        let span_background_changed = node.inline
+        // A span's background and visibility are part of its block's text.
+        let span_drawing_changed = node.inline
             && node.kind == Kind::Text
-            && span_background(&node.view_style, node.id) != span_background(&view, node.id);
-        let text_changed = node.text_style != text || span_background_changed;
+            && (span_background(&node.view_style, node.id) != span_background(&view, node.id)
+                || node.view_style.hidden != view.hidden);
+        let text_changed = node.text_style != text || span_drawing_changed;
         // What its children inherit as `currentColor`.
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
         let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
@@ -5712,6 +5754,12 @@ impl<M: TextEngine> Core<M> {
                     .insert_child_at_index(parent_layout, index as usize, child_layout);
             }
             self.needs_layout = true;
+            // A dialog opening in content a scroll view has not made yet
+            // makes the views around it: it shows over everything.
+            let parent_created = parent_created
+                || (child_kind == Kind::Modal
+                    && self.nodes[parent as usize].culled
+                    && self.uncull(parent));
             // An overlay's native view goes to its root view
             // (`sync_overlays`).
             if parent_created
@@ -6880,6 +6928,7 @@ impl<M: TextEngine> Core<M> {
         let layout = self.nodes[key as usize]
             .layout
             .expect("text block has layout");
+        let colors_at_draw = self.text_engine.draws_colors_from_text();
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
         if *cx.text == text && cx.alignments == alignments {
@@ -6898,11 +6947,33 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
+        // Only colors changed, and the platform draws them from the text:
+        // its typesetting, measurements and final layout all stand; the new
+        // text is mounted with the layout drawn (a fitted text has a layout
+        // of its own text, made again).
+        if !inserted
+            && cx.alignments == alignments
+            && colors_at_draw
+            && cx
+                .laid_out
+                .as_ref()
+                .is_none_or(|l| Arc::ptr_eq(&l.text, &cx.text))
+            && cx.text.same_but_colors(&text)
+        {
+            let text = Arc::new(text);
+            if let Some(laid) = &mut cx.laid_out {
+                laid.text = text.clone();
+            }
+            cx.text = text;
+            cx.metadata_changed = true;
+            return true;
+        }
         cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
-        // Platform typesetting state embeds colors too: always rebuild it.
+        // Platform typesetting state embeds colors too (unless it draws
+        // them from the text, above): rebuild it.
         cx.prepared = None;
         cx.min_content = None;
         cx.laid_out = None;
@@ -6953,6 +7024,11 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
+                    // `visibility: "hidden"` on a span hides its characters,
+                    // and those of the spans inside it, where they stand.
+                    if inner.hidden || child.view_style.hidden {
+                        inner = inner.hide();
+                    }
                     let press = pressable(child.events);
                     let hinted = child.overlay_watched & overlay::watch::HINT != 0;
                     self.collect_text(c, inner, out, alignments, in_press || press);
@@ -6963,7 +7039,9 @@ impl<M: TextEngine> Core<M> {
                     // its hint: no press, no stop of Tab. Inside a span that
                     // takes presses it is none, so that span, the innermost
                     // link there, keeps the press of those characters.
-                    if press || (hinted && !in_press) {
+                    // Hidden characters take no presses, as CSS's hidden
+                    // elements take no pointer events.
+                    if !inner.hidden && (press || (hinted && !in_press)) {
                         let mut events = child.events;
                         if hinted {
                             events.set(EventKind::MouseEnter, true);

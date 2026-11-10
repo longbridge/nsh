@@ -189,7 +189,9 @@ handler reads them (`event id:video onProgress currentTime=3.25 duration=12.5`),
 `touch move|end|cancel [<x> <y>]` move one finger through the touch handlers and the responder system,
 `type <selector> <text>` types into an input (`onKeyPress`, `onChange` and `onSelectionChange` per character),
 `key <selector> <key>` presses a key, `scroll <selector> <x> <y>` scrolls a scroll view (`onScroll`),
-`keyboard <height> <duration>` shows the software keyboard (at height 0, hides it), `pixelratio <ratio>` moves the
+`keyboard <height> <duration>` shows the software keyboard (at height 0, hides it), `tray click [<x> <y> <width>
+<height>]` clicks the app's tray icon (its `onClick`, with the icon's frame on the screen when given, else `null`
+as on Linux), `pixelratio <ratio>` moves the
 surface to a screen of that pixel ratio (1 at the start) as a window moved to another screen does, and
 `state <selector> pressed|hovered|focused|none...` reports a view's interaction states as a platform does
 (`activeStyle`, `hover:`, ...), failing when the core did not ask the platform to track them. Props and style keys

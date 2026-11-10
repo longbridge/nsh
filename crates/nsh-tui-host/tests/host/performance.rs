@@ -155,6 +155,7 @@ fn bench_terminal_scroll() {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            ..Default::default()
         })
         .unwrap();
         let mut options = AppOptions::default();

@@ -64,6 +64,7 @@ mount(() => <Text>{{shown()}}</Text>);
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap();
         let bundle = Bundle::source(bundled.code)

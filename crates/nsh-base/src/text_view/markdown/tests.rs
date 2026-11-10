@@ -302,11 +302,19 @@ fn bare_urls_end_at_cjk_text() {
             strong(vec![t("数据")]),
         ])]
     );
-    // A path with CJK characters ends there; angle brackets and links keep
-    // the whole URL.
+    // A path keeps its CJK characters and ends at CJK punctuation; angle
+    // brackets and links keep the whole URL.
     assert_eq!(
         blocks("https://zh.wikipedia.org/wiki/中文"),
-        vec![p(vec![url("https://zh.wikipedia.org/wiki/"), t("中文")])]
+        vec![p(vec![url("https://zh.wikipedia.org/wiki/中文")])]
+    );
+    assert_eq!(
+        blocks("见https://zh.wikipedia.org/wiki/中文（维基）。"),
+        vec![p(vec![
+            t("见"),
+            url("https://zh.wikipedia.org/wiki/中文"),
+            t("（维基）。"),
+        ])]
     );
     assert_eq!(
         blocks("<https://zh.wikipedia.org/wiki/中文> [维基](https://zh.wikipedia.org/wiki/中文)"),
