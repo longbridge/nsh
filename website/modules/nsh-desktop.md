@@ -660,6 +660,8 @@ Roles:
 | `undo`, `redo`, `cut`, `copy`, `paste`, `selectAll` | Edit the focused text field (its own shortcuts stay its own) | All |
 | `minimize`, `zoom`, `toggleFullScreen`, `close` | The window | All |
 
+On macOS, the first top-level menu holding a window role is the app's Window menu: macOS adds "Bring All to Front" and the open windows (by title) at its end, and keeps them up to date. The default menu bar's Window menu does the same. Other platforms have no such list.
+
 A role's item has the platform's label and shortcut unless it sets its own (macOS adds the app's name to `about`, `hide` and `quit`).
 
 Menu shortcuts come first, as in native apps: a key an item takes never reaches the focused text field or NSH's own keys. Only a binding of [`keymap`](./nsh.md#keymap) of the same keystroke comes before them. So give the editing shortcuts (`mod+c`, `mod+v`, `mod+x`, `mod+a`, `mod+z`) only to the edit roles, which pass them to the text field, and avoid keys without a modifier (`escape`, the arrows, letters), which would take them from text fields and from back navigation. On the GPUI backend, `when: "auto"` lets an item share a key with text fields: `delete` or `mod+z` choose the item while no field has the focus and edit the text while one has it.

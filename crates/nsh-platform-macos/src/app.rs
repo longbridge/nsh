@@ -975,7 +975,10 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    app.setMainMenu(Some(&main_menu(mtm, &options.title)));
+    let (bar, windows) = main_menu(mtm, &options.title);
+    app.setMainMenu(Some(&bar));
+    // AppKit lists the open windows at the end of the Window menu.
+    app.setWindowsMenu(Some(&windows));
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
@@ -1156,8 +1159,8 @@ fn secondary(frames: &[NSRect]) -> Option<usize> {
 
 /// The app menu (About, Hide, Quit), Edit (the text commands fields
 /// answer: undo, cut, copy, paste, select all) and Window (minimize, zoom,
-/// full screen, close).
-fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
+/// full screen, close), with the Window menu.
+fn main_menu(mtm: MainThreadMarker, title: &str) -> (Retained<NSMenu>, Retained<NSMenu>) {
     let bar = NSMenu::new(mtm);
     let item = |menu: &NSMenu, title: &str, action: Option<objc2::runtime::Sel>, key: &str| {
         // SAFETY: the actions are AppKit's standard ones, sent down the
@@ -1228,7 +1231,7 @@ fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
     );
     window.addItem(&NSMenuItem::separatorItem(mtm));
     item(&window, "Close", Some(sel!(performClose:)), "w");
-    bar
+    (bar, window)
 }
 
 #[cfg(test)]

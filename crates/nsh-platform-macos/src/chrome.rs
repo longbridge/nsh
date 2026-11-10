@@ -85,7 +85,7 @@ thread_local! {
     static APP_NAME: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The main menu before an app set its own: `setApplicationMenu(null)`
     /// brings it back.
-    static ORIGINAL_MENU: RefCell<Option<Option<Retained<NSMenu>>>> = const { RefCell::new(None) };
+    static ORIGINAL_MENU: RefCell<Option<(Option<Retained<NSMenu>>, Option<Retained<NSMenu>>)>> = const { RefCell::new(None) };
 }
 
 /// Names the app for the app menu's roles.
@@ -967,7 +967,7 @@ fn set_menu(surface: &Surface, items: Option<&[MenuItem]>) {
     ORIGINAL_MENU.with(|o| {
         let mut o = o.borrow_mut();
         if o.is_none() {
-            *o = Some(app.mainMenu());
+            *o = Some((app.mainMenu(), app.windowsMenu()));
         }
     });
     let Some(items) = items else {
@@ -978,7 +978,9 @@ fn set_menu(surface: &Surface, items: Option<&[MenuItem]>) {
     };
     let bar = NSMenu::new(mtm);
     let mut loads = Vec::new();
-    for item in items {
+    let window_menu = MenuItem::window_menu(items);
+    let mut windows_menu = None;
+    for (index, item) in items.iter().enumerate() {
         // A top-level item that is not a submenu gets one of its own.
         let (label, enabled, sub_items) = match item {
             MenuItem::Submenu {
@@ -990,9 +992,15 @@ fn set_menu(surface: &Surface, items: Option<&[MenuItem]>) {
             MenuItem::Action(action) => (title(action), true, vec![item.clone()]),
             MenuItem::Separator => continue,
         };
-        bar.addItem(&holder(surface, &label, enabled, &sub_items, &mut loads));
+        let ns = holder(surface, &label, enabled, &sub_items, &mut loads);
+        if window_menu == Some(index) {
+            windows_menu = ns.submenu();
+        }
+        bar.addItem(&ns);
     }
     app.setMainMenu(Some(&bar));
+    // AppKit lists the open windows at the end of the Window menu.
+    app.setWindowsMenu(windows_menu.as_deref());
     *surface.chrome.menu.borrow_mut() = Some(bar);
     *surface.chrome.menu_icons.borrow_mut() = loads;
 }
@@ -1003,8 +1011,9 @@ fn restore_menu(app: &NSApplication) {
         .try_with(|o| o.borrow_mut().take())
         .ok()
         .flatten();
-    if let Some(original) = original {
-        app.setMainMenu(original.as_deref());
+    if let Some((main, windows)) = original {
+        app.setMainMenu(main.as_deref());
+        app.setWindowsMenu(windows.as_deref());
     }
 }
 
