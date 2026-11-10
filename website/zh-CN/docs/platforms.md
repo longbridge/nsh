@@ -70,15 +70,35 @@ Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::
 
 ### 共享移动宿主的 Tokio 运行时
 
-链接 Rust 的移动宿主可以让 NSH 的异步任务使用应用已有的 Tokio 运行时。iOS 在创建 `AppView` 前设置
-`SurfaceOptions.runtime = Some(runtime.handle().clone())`。Android 在 UI 线程上，用存活的 `NshView` 的原生句柄调用
-`unsafe { nsh::set_runtime(handle, Some(runtime.handle().clone())) }`，然后再加载应用或连接开发服务器。
-Android 的配置属于单个视图，后续更改从下一次加载起生效；运行中的引擎继续使用启动时的运行时。
+链接 Rust 的移动宿主可以让 NSH 的异步任务运行在应用已有的 Tokio 运行时上。每个视图保存运行时 `Handle` 的一份克隆；运行时归应用所有，应用保持它（启用 IO 和时间驱动）运转到视图停止。`None` 使用 NSH 共享的运行时。
 
-应用保留运行时的所有权，并保持启用了 IO 和时间驱动的运行时运转，直到视图停止。销毁或重建视图后，宿主仍可继续使用该运行时。
-`None` 选择 NSH 共享的默认运行时。Android 开启混淆时，使用 keep 规则保留 NSH 字段和自定义 JNI 桥接类的名称；
-分发的 AAR 已包含保留 NSH 包的消费者规则。两个平台的代码、完整 JNI 入口和自定义打包规则见
-[Rust 链接移动宿主示例](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)。
+iOS 在 `AppView`（或 `Surface`）的选项里设置运行时，视图的每次加载都使用它：
+
+```rust
+let mut options = SurfaceOptions::default();
+options.runtime = Some(runtime.handle().clone());
+let view = AppView::new(mtm, frame, options);
+view.load(bundle);
+```
+
+Android 在 UI 线程上用 `NshView` 的原生句柄（它的 `handle` 字段）调用 `nsh::set_runtime`，时机在视图加载应用或连接开发服务器之前。设置属于这个视图，从它的下一次加载起生效；运行中的引擎继续使用启动时的运行时。应用自己库里的 JNI 函数读取句柄：
+
+```rust
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_example_app_RuntimeBridge_configure(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    view: JObject<'_>,
+) {
+    let Ok(handle) = env.get_field(&view, "handle", "J").and_then(|v| v.j()) else {
+        return;
+    };
+    // SAFETY: called on the UI thread with a live NshView of this library.
+    unsafe { nsh::set_runtime(handle, Some(app_runtime().clone())) };
+}
+```
+
+开启混淆时，保留桥接类的名称（`-keep class com.example.app.RuntimeBridge { *; }`）；分发的 AAR 已保留 `com.longbridge.nsh` 包，包括 `NshView.handle`。
 
 ## 为每个平台编写
 

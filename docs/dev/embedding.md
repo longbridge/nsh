@@ -47,8 +47,7 @@
   while Java code names few of them, so R8 removed or renamed them (`ClassNotFoundException: TextLayouts`). The rule
   keeps the whole package rather than a list that a new JNI lookup would have to extend, including the
   package-private `NshView.handle` field custom Rust hosts read. Hosts packaging the Java sources or `classes.jar`
-  themselves include the same consumer rule, plus rules preserving their own JNI bridge names
-  (`examples/embedded-runtime.md`).
+  themselves include the same consumer rule, plus rules keeping their own JNI bridge names.
 - Fonts the host ships: `NshView.registerFont(byte[])` and `NshAppView.registerFont(_:)` register a TrueType, OpenType, WOFF or WOFF2 file with the view, before a load or while an app runs. Apps then set `fontFamily` to the family name in the file and do not import it, so the file is not packed into each bundle. The same file registered again is kept once.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
@@ -68,16 +67,10 @@
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
   one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
 - **An application-owned Tokio runtime (Rust-linked mobile hosts)**: iOS `SurfaceOptions::runtime` and Android
-  `nsh::set_runtime(handle, runtime)` forward an optional `tokio::runtime::Handle` to
-  `EngineConfig::runtime`. The setting belongs to one view; `None` keeps the process-wide NSH default. On Android,
-  call the unsafe Rust hook on the UI thread with that live `NshView`'s native `handle`, before loading an app or
-  connecting a dev server. Changes apply to subsequent engine starts, including a load waiting for its first size;
-  an already running engine keeps its runtime. iOS `AppView` retains its options across loads and clones the handle
-  into every new surface. The application owns the runtime and keeps it running until all engines using it stop;
-  disposing a view drops only its handles. Use an IO/time-enabled runtime with workers, or keep a current-thread
-  runtime driven on another thread. The stock Swift/JNI SDKs continue to select the default; a Rust handle stays
-  inside a custom-linked Rust host. Examples for both platforms are in `examples/embedded-runtime.md`. The engine's
-  `runtime` tests check runtime identity, per-engine selection, reuse after disposal and the unchanged shared default.
+  `nsh::set_runtime(handle, runtime)` (`host.rs`) forward an optional `tokio::runtime::Handle` to
+  `EngineConfig::runtime`, per view; `None` keeps the process-wide shared runtime. Both are read each time an engine
+  starts, so a change applies from the next load and a running engine keeps its runtime. NSH only clones the handle;
+  the app owns the runtime. The engine's `runtime` tests cover it (`nsh-engine/tests/engine/runtime.rs`).
 - **Native components** (`nsh`'s `nativeComponent`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`

@@ -70,18 +70,35 @@ A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `Ap
 
 ### Share a mobile host's Tokio runtime
 
-A Rust-linked mobile host can run NSH's async tasks on its application's existing Tokio runtime. On iOS, set
-`SurfaceOptions.runtime = Some(runtime.handle().clone())` before creating `AppView`. On Android, call
-`unsafe { nsh::set_runtime(handle, Some(runtime.handle().clone())) }` on the UI thread with the
-live `NshView`'s native handle, before loading an app or connecting a dev server. Android keeps this setting per
-view and applies changes from the next load; a running engine keeps the runtime it started with.
+A Rust-linked mobile host can run NSH's async tasks on the Tokio runtime it already has. Each view keeps a clone of the runtime's `Handle`; the app owns the runtime and keeps it running (with IO and time enabled) until its views stop. `None` uses NSH's shared runtime.
 
-The application retains ownership and keeps its IO/time-enabled runtime running until the views stop. Disposing
-or recreating a view leaves that runtime available to the host. `None` selects NSH's shared default runtime.
-For minified Android builds, preserve the NSH fields and your custom JNI bridge's names with keep rules;
-the distributed AARs already supply the NSH package's consumer rule. See the
-[Rust-linked mobile example](https://github.com/longbridge/nsh/blob/main/examples/embedded-runtime.md)
-for both platforms, the complete JNI entry point and the custom-packaging rules.
+On iOS, set the runtime in the options of `AppView` (or `Surface`); every load of the view uses it:
+
+```rust
+let mut options = SurfaceOptions::default();
+options.runtime = Some(runtime.handle().clone());
+let view = AppView::new(mtm, frame, options);
+view.load(bundle);
+```
+
+On Android, call `nsh::set_runtime` on the UI thread with the `NshView`'s native handle (its `handle` field), before the view loads an app or connects to a dev server. The setting belongs to that view and applies from its next load; a running engine keeps the runtime it started with. A JNI function in the app's own library reads the handle:
+
+```rust
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_example_app_RuntimeBridge_configure(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    view: JObject<'_>,
+) {
+    let Ok(handle) = env.get_field(&view, "handle", "J").and_then(|v| v.j()) else {
+        return;
+    };
+    // SAFETY: called on the UI thread with a live NshView of this library.
+    unsafe { nsh::set_runtime(handle, Some(app_runtime().clone())) };
+}
+```
+
+In minified builds, keep the bridge class's names (`-keep class com.example.app.RuntimeBridge { *; }`); the distributed AARs already keep the `com.longbridge.nsh` package, `NshView.handle` included.
 
 ## Writing for every platform
 
