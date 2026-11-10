@@ -5,7 +5,7 @@
 import type { AnimatedValue, ViewStyle } from "nsh";
 import { reduceMotion, View } from "nsh";
 import { Icon } from "../icons";
-import { colors, finish, focusRing, follow, radius, terminal, TERMINAL_ROW, tints } from "../theme";
+import { alpha, colors, finish, focusRing, follow, isDark, radius, terminal, TERMINAL_ROW, tints } from "../theme";
 import { pressSink } from "./press";
 import { controlSize } from "./surface";
 
@@ -30,10 +30,15 @@ const dims = (scale = 1) => ({
   dot: Math.round(controlSize.dot * scale),
 });
 
-/** The fill of a box or ring that is off, the field's well: spread it after
- * the box's `borderWidth` (a quick setting's icon lights up from it too,
- * under a `ChoiceLight`). */
-export const choiceWell = (): ViewStyle => ({ backgroundColor: colors.field, backgroundImage: "none", borderColor: colors.fieldBorder, boxShadow: finish.field.boxShadow });
+/** The fill of a box or ring that is off: spread it after the box's
+ * `borderWidth` (a quick setting's icon lights up from it too, under a
+ * `ChoiceLight`). Light, the field's well; dark, a step above the card
+ * (shadcn's `dark:bg-input/30`) inside an edge a step brighter than a
+ * field's, so an empty box still stands out, dimmed too. */
+export const choiceWell = (): ViewStyle =>
+  isDark()
+    ? { backgroundColor: alpha(colors.fieldBorder, 0.3), backgroundImage: "none", borderColor: alpha(colors.text, 0.2), boxShadow: finish.field.boxShadow }
+    : { backgroundColor: colors.field, backgroundImage: "none", borderColor: colors.fieldBorder, boxShadow: finish.field.boxShadow };
 
 /** A layer over the whole of its parent, its content centered: layers that cross over in place. */
 const centered = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" } as const;
@@ -54,7 +59,7 @@ export interface CheckboxLook {
 /**
  * A checkbox's box, as the props of `Checkbox`'s indicator (spread them:
  * `<Checkbox class="group" {...checkboxLook()} indicator={<CheckboxMark mark={..} />}>`):
- * sunk like a field (the field's color and edge), 16 points with a pointer,
+ * sunk like a field (`choiceWell`), 16 points with a pointer,
  * 22 on a touch screen, its corners 5 / 7 (`round`: a circle), sinking to
  * 90% while its row (the `group`) is pressed. `CheckboxMark` fills it.
  */
@@ -169,7 +174,7 @@ const read = <T,>(v: Live<T> | undefined): T | undefined => (typeof v === "funct
 
 /** Options of `choiceTileLook`. */
 export interface ChoiceTileOptions {
-  /** No hover and no press; dimmed to 40%. Pass the same value to the control's `disabled`. */
+  /** No hover and no press; dimmed to half. Pass the same value to the control's `disabled`. */
   disabled?: Live<boolean | undefined>;
   /** More style (a width, a gap), over the card's. */
   style?: Live<ViewStyle | undefined>;
@@ -224,6 +229,6 @@ export function choiceTileLook(on: Live<boolean>, o?: ChoiceTileOptions): Choice
     get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
-    disabledStyle: { opacity: 0.4 },
+    disabledStyle: { opacity: 0.5 },
   };
 }

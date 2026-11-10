@@ -103,7 +103,7 @@ export function AccordionDemo() {
                       borderRadius: 7,
                       alignItems: "center",
                       justifyContent: "center",
-                      backgroundColor: open().includes(q.value) ? colors.accentFill : colors.inset,
+                      backgroundColor: open().includes(q.value) ? colors.accentFill : colors.raised,
                       boxShadow: open().includes(q.value) ? finish.light.boxShadow : finish.chip.boxShadow,
                     }}
                     class="transition-colors duration-200 motion-reduce:transition-none"

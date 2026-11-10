@@ -12,6 +12,7 @@ import {
   commandClasses,
   DemoPage,
   desktop,
+  finish,
   Icon,
   mono,
   Spinner,
@@ -115,8 +116,10 @@ export function CommandDemo() {
       >
         <Button
           onPress={() => show(true)}
-          class="flex-row items-center gap-2 rounded-lg border border-border bg-raised px-3 transition-colors motion-reduce:transition-none hover:bg-hover active:opacity-70 focus-visible:outline-2 focus-visible:outline-ring"
+          class="flex-row items-center gap-2 rounded-lg border border-border bg-raised px-3 transition-colors motion-reduce:transition-none active:opacity-70 focus-visible:outline-2 focus-visible:outline-ring"
           style={{ height: desktop() ? 36 : 44 }}
+          // A raised control's hover, as a secondary button's: a fill over the raised one would replace it.
+          hoverStyle={finish.hover}
         >
           <Icon name="search" size={16} tint={colors.muted} />
           <Text style={{ flex: 1, fontSize: 14, color: colors.muted }}>Search commands…</Text>

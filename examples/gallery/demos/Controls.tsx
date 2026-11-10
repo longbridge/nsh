@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, DateTrigger, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
+import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -124,8 +124,10 @@ function Dot(props: { color: string; size?: number }) {
   );
 }
 
-/** A person's initials on their tone's tint, edged in it. */
-function Avatar(props: { name: string; tone: Tone; size?: number; ring?: boolean }) {
+/** A person's initials on their tone's tint, edged in it; the tint is opaque
+ * on `on`, the color of what the face sits on (default the card), so faces
+ * that overlap hide each other, and a `ring` (in a stack) is that color too. */
+function Avatar(props: { name: string; tone: Tone; size?: number; ring?: boolean; on?: string }) {
   const d = props.size ?? 22;
   return (
     <View
@@ -135,10 +137,10 @@ function Avatar(props: { name: string; tone: Tone; size?: number; ring?: boolean
         borderRadius: d / 2,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: props.tone === "neutral" ? colors.inset : toneTint(props.tone),
+        backgroundColor: solidTint(props.tone, props.on ?? colors.surface),
         borderWidth: props.ring ? 2 : 1,
-        // In a stack, a ring of the card's color parts the faces.
-        borderColor: props.ring ? colors.surface : alpha(props.tone === "neutral" ? colors.text : toneColor(props.tone), 0.25),
+        // In a stack, a ring of the color under the faces parts them.
+        borderColor: props.ring ? (props.on ?? colors.surface) : alpha(props.tone === "neutral" ? colors.text : toneColor(props.tone), 0.25),
       }}
     >
       <Text style={{ fontSize: Math.round(d * 0.42), fontWeight: "600", color: props.tone === "neutral" ? colors.muted : toneColor(props.tone) }}>{initials(props.name)}</Text>
@@ -178,7 +180,7 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
       <BaseButton
         accessibilityLabel={props.remove}
         onPress={props.onRemove}
-        class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
+        class="items-center justify-center rounded-full enabled:hover:bg-foreground/8 active:bg-track"
         // Nearly the chip's height under a finger; a terminal's is its mark, as text.
         style={terminal ? undefined : { width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
         focusVisibleStyle={focusRing()}
@@ -1623,10 +1625,10 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             triggerButton={<ComboToggle id="assignees-toggle" open={open()} />}
             prefix={
               <>
-              {/* The faces overlap, each ringed in the card's color; a terminal's initials stand a Cell apart, then a gap. */}
+              {/* The faces overlap, each ringed in the field's color; a terminal's initials stand a Cell apart, then a gap. */}
               <If when={people().length}>
                 <View style={{ flexDirection: "row", marginRight: terminal ? TERMINAL_GAP : 6 }}>
-                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? (terminal ? TERMINAL_COLUMN : -6) : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
+                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? (terminal ? TERMINAL_COLUMN : -6) : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring on={colors.field} /></View>}</Each>
                 </View>
               </If>
               </>
@@ -1638,7 +1640,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             renderItem={(item) => (
               <OptionRow
                 item={item}
-                lead={<Avatar name={item.title} tone={person(item.value).tone} size={pointer ? 24 : 30} />}
+                lead={<Avatar name={item.title} tone={person(item.value).tone} size={pointer ? 24 : 30} on={colors.raised} />}
                 detail={person(item.value).role}
               />
             )}
@@ -1649,7 +1651,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             {(v) => (
               <Chip
                 label={person(v()).title}
-                lead={<Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 18 : 24} />}
+                lead={<Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 18 : 24} on={colors.raised} />}
                 remove={`Remove ${person(v()).title}`}
                 onRemove={() => set(people().filter((p) => p !== v()))}
               />
@@ -2679,7 +2681,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                         minHeight: 2,
                         borderTopLeftRadius: 2,
                         borderTopRightRadius: 2,
-                        backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
+                        backgroundColor: inRange(i(), price()) ? chart.s1 : alpha(colors.text, 0.1),
                       }}
                     />
                   )}
@@ -3048,7 +3050,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               readonly
               accessibilityLabel="Interest rate"
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }), color: colors.muted }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3313,7 +3315,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                     width: 28,
                     height: 4,
                     borderRadius: 2,
-                    backgroundColor: done() > i() ? colors.accent : colors.track,
+                    backgroundColor: done() > i() ? colors.accent : alpha(colors.text, 0.1),
                     transitionProperty: "background-color",
                     transitionDuration: reduceMotion() ? 0 : 200,
                   }}
