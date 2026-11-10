@@ -245,8 +245,8 @@ pub use crate::element::{
 pub use crate::element::{
     Delay, Each, If, IntoElements, IntoReactive, KeyOptions, Memo, Owner, Prop, Reactive,
     ReadSignal, Resource, ResourceInfo, ResourceState, Scope, Signal, SignalEquals, Spawned,
-    Stored, after_answer, animate_layout, animated_value, announce_for_accessibility, app_url,
-    apple_keys, batch, can_pick_screen_color, catch_error, cleanup, clipboard_files,
+    Stored, after_answer, animate_layout, animated_value, announce_for_accessibility, app_data_dir,
+    app_url, apple_keys, batch, can_pick_screen_color, catch_error, cleanup, clipboard_files,
     clipboard_has_image, clipboard_has_string, clipboard_image, clipboard_string,
     close_notification, color, component, component_ref, computed, dark, dismiss_keyboard, dynamic,
     each, effect, element_ref, engine_context, fetch, font_scale, fps_enabled, global, haptic,

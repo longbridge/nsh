@@ -47,6 +47,8 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The app's own data directory ([`app_data_dir`]).
+    data_dir: Option<std::path::PathBuf>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
     /// Whether the performance monitor measures, as the platform reports
@@ -141,6 +143,12 @@ impl super::Runtime {
     pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
         let _entered = self.enter();
         with_data(|d| d.ambient.storage = Some(storage));
+    }
+
+    /// The app's own data directory ([`app_data_dir`]).
+    pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.data_dir = dir);
     }
 
     /// How text is measured (the core's text engine).
@@ -566,6 +574,19 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
             .clone()
     });
     f(&storage)
+}
+
+/// The app's own data directory (TS: `process.dataDir`): where its files
+/// are kept, `<data_dir>/<app id>` of the engine, beside its
+/// `storage.json`, on every platform. `None` when the host keeps no files
+/// for the app (the web). The directory may not exist yet: create it
+/// before writing.
+///
+/// ```ignore
+/// let db = app_data_dir().map(|dir| dir.join("app.sqlite"));
+/// ```
+pub fn app_data_dir() -> Option<std::path::PathBuf> {
+    with_data(|d| d.ambient.data_dir.clone())
 }
 
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
