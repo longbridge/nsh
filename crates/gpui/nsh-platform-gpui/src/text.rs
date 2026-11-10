@@ -2337,7 +2337,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     {
         let tint = selection_tint(text);
         // Hidden characters show no highlight, as nothing of them shows.
-        for shown in text.shown_ranges(range.0..range.1) {
+        for shown in text.visible_ranges(range.0..range.1) {
             layout.selection_rects((shown.start, shown.end), |x, y, w, h| {
                 cx.fill_rect(crate::geom::rect(ox + x, oy + y, w, h), [0.0; 4], tint);
             });
@@ -4031,7 +4031,13 @@ mod tests {
             return;
         };
         let mut t = text(&[("ab ", plain(16.0))]);
-        t.push("\u{1F389} cd", plain(16.0).hide());
+        // As the core hides a span.
+        let hidden = ResolvedTextStyle {
+            hidden: true,
+            color: nsh_core::Color::TRANSPARENT,
+            ..plain(16.0)
+        };
+        t.push("\u{1F389} cd", hidden);
         let (_, layout) = layout_of(&engine, &t, None);
         let l = layout.downcast::<GpuiLayout>().unwrap();
         let shown: Vec<u32> = l.shown_glyphs(&t).map(|g| g.style).collect();

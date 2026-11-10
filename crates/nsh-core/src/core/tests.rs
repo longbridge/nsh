@@ -1227,12 +1227,12 @@ fn hidden_spans_keep_their_place_and_stay_out_of_copies() {
     assert_eq!(visible.links.len(), 1);
     assert_eq!(text.uniform_color(), None);
     // Copies and screen readers leave them out.
-    assert_eq!(text.shown_text(), "a  d");
+    assert_eq!(text.visible_text(), "a  d");
     assert_eq!(text.copied_text(0..6), "a  d");
     assert_eq!(text.copied_text(2..4), "");
     assert_eq!(text.copied_text(1..5), "  ");
     assert_eq!(visible.copied_text(1..5), " bc ");
-    assert_eq!(visible.shown_text(), "a bc d");
+    assert_eq!(visible.visible_text(), "a bc d");
 
     // Shown again: drawn again, without measuring or moving anything.
     apply(
@@ -1343,20 +1343,20 @@ fn attachments_of_hidden_spans_are_hidden_with_them() {
 }
 
 #[test]
-fn shown_ranges_leave_hidden_runs_out() {
+fn visible_ranges_leave_hidden_runs_out() {
     let plain = ResolvedTextStyle::default();
     let mut t = AttributedText::default();
     t.push("ab", plain);
     t.push("cd", plain.hide());
     t.push("ef", plain);
     t.push("g", plain.hide());
-    assert_eq!(t.shown_ranges(0..7), vec![0..2, 4..6]);
-    assert_eq!(t.shown_ranges(1..5), vec![1..2, 4..5]);
-    assert_eq!(t.shown_ranges(2..4), Vec::<std::ops::Range<u32>>::new());
+    assert_eq!(t.visible_ranges(0..7), vec![0..2, 4..6]);
+    assert_eq!(t.visible_ranges(1..5), vec![1..2, 4..5]);
+    assert_eq!(t.visible_ranges(2..4), Vec::<std::ops::Range<u32>>::new());
     assert!(t.hidden_at(2) && t.hidden_at(6) && !t.hidden_at(4));
     let mut shown = AttributedText::default();
     shown.push("abc", plain);
-    assert_eq!(shown.shown_ranges(1..3), vec![1..3]);
+    assert_eq!(shown.visible_ranges(1..3), vec![1..3]);
 }
 
 #[test]
@@ -1370,7 +1370,7 @@ fn copied_text_skips_hidden_runs_and_attachments() {
     // a 😀(2) b c ￼ d 😀(2) e: 10 UTF-16 units.
     assert_eq!(t.len_utf16(), 10);
     assert_eq!(t.copied_text(0..10), "a\u{1F600}d\u{1F600}e");
-    assert_eq!(t.shown_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
+    assert_eq!(t.visible_text(), "a\u{1F600}\u{FFFC}d\u{1F600}e");
     assert_eq!(t.copied_text(1..4), "\u{1F600}");
     assert_eq!(t.copied_text(3..7), "d");
     // A range past the end is clamped; one inside a surrogate pair starts

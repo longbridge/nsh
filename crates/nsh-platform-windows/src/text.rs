@@ -2500,7 +2500,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     if let Some(range) = range.or_else(|| drawn.area_range.get()) {
         let brush = cx.solid(selection_tint(&drawn.text));
         // Hidden characters show no highlight, as nothing of them shows.
-        for shown in drawn.text.shown_ranges(range.0..range.1) {
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
             layout.range_rects((shown.start, shown.end), |x, y, w, h| {
                 // SAFETY: a COM call between BeginDraw and EndDraw.
                 unsafe { cx.dc.FillRectangle(&rect_f(ox + x, oy + y, w, h), brush) };

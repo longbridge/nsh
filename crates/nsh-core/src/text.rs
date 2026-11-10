@@ -57,7 +57,7 @@ pub struct ResolvedTextStyle {
     /// run is in, or on one around it): its characters keep their place in
     /// the lines, are not drawn (the core makes the run transparent, with
     /// no background) and are left out of copies and of what screen readers
-    /// read ([`AttributedText::copied_text`], [`AttributedText::shown_text`]).
+    /// read ([`AttributedText::copied_text`], [`AttributedText::visible_text`]).
     pub hidden: bool,
 }
 
@@ -245,7 +245,7 @@ impl ResolvedTextStyle {
     /// The style hidden ([`Self::hidden`]): nothing of it is drawn, glyphs,
     /// decoration lines and background alike, and its metrics stay.
     #[must_use]
-    pub fn hide(self) -> Self {
+    pub(crate) fn hide(self) -> Self {
         Self {
             color: Color::TRANSPARENT,
             decoration_color: None,
@@ -612,7 +612,7 @@ impl AttributedText {
 
     /// The text a screen reader reads: all of it but its hidden runs
     /// ([`ResolvedTextStyle::hidden`]); borrowed when none is.
-    pub fn shown_text(&self) -> std::borrow::Cow<'_, str> {
+    pub fn visible_text(&self) -> std::borrow::Cow<'_, str> {
         if !self.has_hidden() {
             return std::borrow::Cow::Borrowed(&self.text);
         }
@@ -667,7 +667,7 @@ impl AttributedText {
     /// The pieces of the UTF-16 range `range` that no hidden run covers
     /// ([`ResolvedTextStyle::hidden`]), in order: where a selection's
     /// highlight is drawn. The whole range when no run is hidden.
-    pub fn shown_ranges(&self, range: Range<u32>) -> Vec<Range<u32>> {
+    pub fn visible_ranges(&self, range: Range<u32>) -> Vec<Range<u32>> {
         if !self.has_hidden() {
             return vec![range];
         }

@@ -507,7 +507,7 @@ impl Screen {
                 {
                     let view = self.nodes.entry(*id).or_default();
                     // What the user sees: hidden runs are not.
-                    view.text = Some(text.shown_text().into_owned());
+                    view.text = Some(text.visible_text().into_owned());
                     view.attributed = Some(Arc::clone(text));
                     view.text_content = *content;
                 }

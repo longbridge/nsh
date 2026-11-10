@@ -120,9 +120,9 @@
   text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring),
   and they make no links; attachments inside them are hidden views (`Core::hide_attachments`). Each backend skips the
   hidden runs when it draws (glyphs, color emoji, decorations, shadows, animated colors), never relying on the
-  transparent color alone, and leaves them out of selection highlights (`AttributedText::shown_ranges`). What leaves
+  transparent color alone, and leaves them out of selection highlights (`AttributedText::visible_ranges`). What leaves
   the text through the user goes through `AttributedText::copied_text` (copies: hidden runs and attachments'
-  placeholders left out) and `shown_text` (screen readers, the test model's texts); selectable views copy through
+  placeholders left out) and `visible_text` (screen readers, the test model's texts); selectable views copy through
   `SelectionTexts::copied`. Android marks the runs with a span of their own in the laid out text, which its drawing,
   copies and TalkBack read; the web gives the runs `visibility: hidden`.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own

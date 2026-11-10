@@ -1309,7 +1309,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
         let mut rects = drawn.selection_rects.borrow_mut();
         rects.clear();
         // Hidden characters show no highlight, as nothing of them shows.
-        for shown in drawn.text.shown_ranges(range.0..range.1) {
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
             layout.range_rects(shown, &mut rects);
         }
         for r in rects.iter() {
@@ -2584,10 +2584,15 @@ mod tests {
             };
             let built = |hidden: bool| {
                 let mut t = text(&[("ab ", plain)]);
-                let style = if hidden {
-                    underlined.hide()
-                } else {
-                    underlined
+                // As the core hides a span.
+                let style = ResolvedTextStyle {
+                    hidden,
+                    color: if hidden {
+                        Color::TRANSPARENT
+                    } else {
+                        plain.color
+                    },
+                    ..underlined
                 };
                 t.push("\u{1F389} cd", style);
                 t.shadow = Some(nsh_core::TextShadow {

@@ -1401,7 +1401,7 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
         let tint = Color((tint.0 & !0xff) | (alpha * 255.0).round() as u32);
         CGContext::set_fill_color_with_color(c, Some(&cg_color(tint)));
         // Hidden characters show no highlight, as nothing of them shows.
-        for shown in drawn.text.shown_ranges(range.0..range.1) {
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
             for rect in selection_rects(text, content, (shown.start, shown.end)) {
                 CGContext::fill_rect(c, rect);
             }
