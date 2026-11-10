@@ -1072,6 +1072,28 @@ How users get it (`website/docs/installation.md`):
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.
 - mise: its `github:` backend picks the archive by OS and architecture, strips `nsh/` and finds `bin/`.
 
+### Self-hosted runners
+
+The release's Apple silicon macOS, x86_64 Linux and x86_64 Windows builds, its `Plan`, `Release` and `Nightly`
+jobs, and the Website workflow's build and deployment of the published site run on the organization's self-hosted
+runners, the machines longbridge-pro releases on: `[self-hosted, macOS, ARM64]`, `[self-hosted, Linux, Packager]`
+and `[self-hosted, Windows]`. Their runner groups allow this public repository. They take no pull request: a pull
+request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
+events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
+
+`.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
+`~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds
+only what changed. What the workflows install on GitHub's runners is installed on these machines beforehand:
+
+- every one: rustup, `git`, `curl`, `gh`, `jq`, `zip`;
+- macOS: Xcode (the iOS SDKs) and its command line tools;
+- Linux: Ubuntu 24.04 (the Linux runtime's glibc and GTK), the packages of `release.yml`'s "Install clang, GTK 4
+  and GPUI's libraries" step, `envsubst`, Java 17 and an Android SDK with an NDK (`ANDROID_HOME`), Node.js,
+  Python 3 with `venv`, and Playwright's system libraries for Chromium, Firefox and WebKit
+  (`playwright install-deps`);
+- Windows: the MSVC Build Tools, the Windows SDK, LLVM in `C:\Program Files\LLVM` and Git for Windows, whose
+  `bash` is the first on `PATH`.
+
 ### Homebrew publishing setup and recovery
 
 A maintainer must configure the existing `HOMEBREW_TAP_TOKEN` Actions secret in `longbridge/nsh` (or an organization
