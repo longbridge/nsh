@@ -5,34 +5,11 @@ name: Linux
 # gallery's real-platform tests in GPUI windows on a virtual X11 display.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "crates/gpui/**"
-      - "crates/nsh-bundler/**"
-      - "crates/nsh-cli/**"
-      - "crates/nsh-core/**"
-      - "crates/nsh-dev/**"
-      - "crates/nsh-engine/**"
-      - "crates/nsh-i18n/**"
-      - "crates/nsh-js/**"
-      - "crates/nsh-linux-app/**"
-      - "crates/nsh-linux-host/**"
-      - "crates/nsh-macros/**"
-      - "crates/nsh-package/**"
-      - "crates/nsh-updater/**"
-      - "crates/nsh-platform-linux/**"
-      - "crates/nsh-testing/**"
-      - "crates/nsh-base/**"
-      - "crates/xtask/**"
-      - "examples/counter/**"
-      - "examples/gallery/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo/**"
-      - "rust-toolchain.toml"
-      - ".github/workflows/linux.yml"
-      - ".github/actions/cargo/**"
+  # Pull requests test every change before it merges; main runs once a day
+  # instead of on every push, which only tested again what its pull request
+  # had, and saves the dependencies' caches pull requests restore.
+  schedule:
+    - cron: "0 19 * * *"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -88,10 +65,7 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
-    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
-    # anyone's, stay on GitHub's.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-24.04' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       # Wry embeds GTK 3 web views in X11 child windows. Mesa's software
@@ -107,7 +81,6 @@ jobs:
           echo "TMPDIR=$RUNNER_TEMP/tmp" >> "$GITHUB_ENV"
 
       - name: Install GPUI, Vulkan and Xvfb dependencies
-        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -155,10 +128,7 @@ jobs:
       name: ci-debounce
       deployment: false
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs.
-    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
-    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
-    # anyone's, stay on GitHub's.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-24.04' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -168,7 +138,6 @@ jobs:
       # decodes and mixes sounds; its base and good plug-ins are what the
       # sound tests decode (WAV) and mix with.
       - name: Install clang, GTK 4, WebKitGTK and GStreamer
-        if: runner.environment == 'github-hosted'
         run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb xauth at-spi2-core python3 libxtst6 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - name: Setup Rust

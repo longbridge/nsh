@@ -5,33 +5,11 @@ name: Windows
 # --target windows`, `cargo run` on Windows).
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "crates/nsh-bundler/**"
-      - "crates/nsh-cli/**"
-      - "crates/nsh-core/**"
-      - "crates/nsh-dev/**"
-      - "crates/nsh-engine/**"
-      - "crates/nsh-i18n/**"
-      - "crates/nsh-js/**"
-      - "crates/nsh-macros/**"
-      - "crates/nsh-package/**"
-      - "crates/nsh-updater/**"
-      - "crates/nsh-platform-windows/**"
-      - "crates/nsh-testing/**"
-      - "crates/nsh-base/**"
-      - "crates/nsh-windows-app/**"
-      - "crates/nsh-windows-host/**"
-      - "crates/xtask/**"
-      - "examples/counter/**"
-      - "examples/gallery/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo/**"
-      - "rust-toolchain.toml"
-      - ".github/workflows/windows.yml"
-      - ".github/actions/cargo/**"
+  # Pull requests test every change before it merges; main runs once a day
+  # instead of on every push, which only tested again what its pull request
+  # had, and saves the dependencies' caches pull requests restore.
+  schedule:
+    - cron: "0 19 * * *"
   pull_request:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
@@ -89,10 +67,7 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
-    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
-    # anyone's, stay on GitHub's.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'windows-latest' || fromJSON('["self-hosted", "Windows"]') }}
+    runs-on: windows-latest
     env:
       # QuickJS is C: bindgen needs libclang, which the image's LLVM has.
       LIBCLANG_PATH: C:\Program Files\LLVM\bin

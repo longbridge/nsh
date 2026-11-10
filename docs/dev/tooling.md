@@ -1078,15 +1078,17 @@ How users get it (`website/docs/installation.md`):
 
 ### Self-hosted runners
 
-Every workflow's runs from `main` (pushes, the schedule, manual runs), the release (its builds and its `Plan`,
-`Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's
-build and deployment of the published site run on the organization's self-hosted runners, the machines
-longbridge-pro releases on: `[self-hosted, macOS, ARM64]`, `[self-hosted, Linux, Packager]` and
-`[self-hosted, Windows]`. A job on `ubuntu-*`, `macos-15` or `windows-latest` for pull requests takes the self-hosted
-runner of the same OS. Their runner groups allow this public repository. They take no pull request: a pull
+The release (its builds, its `Plan`, `Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's
+update) and the Website workflow's build and deployment of the published site run on the organization's self-hosted
+runners, the machines longbridge-pro releases on: `[self-hosted, macOS, ARM64]`, `[self-hosted, Linux, Packager]`
+and `[self-hosted, Windows]`. Their runner groups allow this public repository. They take no pull request: a pull
 request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
-events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines. Steps
-that install system packages (`apt-get`) run only on GitHub's runners.
+events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
+
+The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` once
+a day (19:00 UTC) and on manual runs, never on every push: a push to `main` is a pull request that already passed
+them. The daily run is on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
+macOS check runs only in the daily run.
 
 `.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
 `~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds
