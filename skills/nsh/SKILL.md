@@ -23,9 +23,11 @@ Define theme colors centrally and consume semantic tokens throughout pages,
 components and states: `theme()` in Rust; token classes or `token()` in TSX.
 Do not introduce raw hex, RGBA/HSLA or palette classes in presentation code. Add
 missing roles to the theme first. User-selected or data colors remain data.
-Declare complete component styles for the feature's controls, then compose pages
-by naming variants and sizes (`variant="primary" size="sm"`). Pages do not restyle
-base controls: add a missing look to the declaration as a variant, not to the page.
+Declare complete component styles for the feature's controls that take `variant`
+and `size` (`Button`), and style the other base controls once in the app's shared
+components; then compose pages by naming variants and sizes (`variant="primary"
+size="sm"`) and using those components. Pages do not restyle base controls: add a
+missing look to the declaration as a variant, not to the page.
 
 Choose the app's Desktop, Mobile, Web and TUI targets explicitly. Adapt density,
 navigation, input and overlays to those targets, preserving shared semantics.
@@ -136,9 +138,9 @@ A floor, not a substitute for the guides.
   store with private signals. In Rust with TSX, one side owns each piece of state.
 - **The look is the app's.** `nsh_base` / `nsh/base` has behavior and no look, and NSH
   has no styled component library. Draw with theme tokens: `theme().primary` in Rust,
-  `bg-primary` in TSX. Declare each base control's looks once (component styles) and
-  name them in pages with `variant` / `size`; compose patterns of several controls in
-  the app's own UI module.
+  `bg-primary` in TSX. Declare `Button`'s looks once (component styles) and name them
+  in pages with `variant` / `size`; style the other base controls, and patterns of
+  several controls, once in the app's own UI module.
 - **Parts draw nothing until styled.** A switch with no track and thumb style shows no
   switch, and a test still passes. Style every part, and look at the result.
 - **Use the semantic component.** Button, Menu, Popover, Sheet, Dialog and Select bring

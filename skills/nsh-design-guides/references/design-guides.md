@@ -55,13 +55,12 @@ come from these tokens throughout screens, reusable components, overlays and int
 RGBA or HSLA values belong in the token definitions; when a role is missing, add it there before using it. A token
 named after a role such as `warning` communicates more than a palette name such as `amber-500`.
 
-Declare the app's component styles before composing pages: the looks of the `nsh/base` controls the app needs,
-once per control, in the app's Rust theme code or in `nsh.json` `"components"`. Cover the controls and their parts
-needed by the app: buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback. Controls
-that take `variant` and `size` (`Button`) are declared by name; the app composes the others into its own components
-from the same tokens. Give them coherent variants, sizes, density and hover, pressed, focus, selected, disabled,
-loading and validation states.
-Pages compose controls by naming their variants and sizes; they do not restyle base controls. When a screen needs a
+Declare the app's component styles before composing pages: the looks of the controls that take `variant` and `size`
+(`Button`), once per control, in the app's Rust theme code or in `nsh.json` `"components"`. Style the other `nsh/base`
+controls the app needs, with their parts, once in its own shared components from the same tokens. Together they
+cover buttons, fields, selection controls, navigation, surfaces, menus, dialogs and feedback, with coherent variants,
+sizes, density and hover, pressed, focus, selected, disabled, loading and validation states. Pages name the declared
+variants and sizes and use the shared components; they do not restyle base controls. When a screen needs a
 look the declarations lack, add the variant or size to the declaration, then name it in the screen. Grow the
 declarations with the app's actual needs, keeping every control used in a feature complete rather than prebuilding
 an unrelated catalog.

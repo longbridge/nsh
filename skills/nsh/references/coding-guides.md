@@ -27,12 +27,13 @@ Use this development order:
 1. Identify the app's Desktop, Mobile, Web and TUI targets and their input, navigation and density requirements.
 2. Define the app's semantic color roles and light/dark values in its theme file (`nsh.json` `"theme"`), together
    with the typography, spacing, radius and size scales the components use.
-3. Declare the component styles: the looks of `nsh/base`'s controls, once per control, by variant and size, with
-   their interaction states. Declare them in the app's Rust theme code (`set_component_style`) or in `nsh.json`
-   `"components"`. Compose controls into the app's own components where a pattern needs more than one control.
-   Verify a representative composition on the supported targets before replicating it across pages.
-4. Compose pages by naming variants and sizes (`.variant("primary")` in Rust, `variant="primary"` in TSX). Pages
-   do not restyle base controls: when a page needs a look the declarations lack, add the variant, size or token to
+3. Declare the component styles: the looks of the controls that take `variant` and `size` (`Button`), once per
+   control, by variant and size, with their interaction states, in the app's Rust theme code
+   (`set_component_style`) or in `nsh.json` `"components"`. Style the other `nsh/base` controls, parts and states
+   included, once in the app's own shared components, and compose controls there where a pattern needs more than
+   one. Verify a representative composition on the supported targets before replicating it across pages.
+4. Compose pages by naming variants and sizes (`.variant("primary")` in Rust, `variant="primary"` in TSX) and by
+   using the shared components. Pages do not restyle base controls: when a page needs a look the declarations lack, add the variant, size or token to
    the declaration first, then name it in the page. A change to a declaration updates every use of the control
    consistently.
 

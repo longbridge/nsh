@@ -1542,7 +1542,7 @@ panic = \"abort\"
                  /// no TSX serves (their files, such as fonts), so that its module links only\n\
                  /// the base components the app's code uses.\n\
                  pub fn app_ui_sets() -> Vec<nsh_core::element::Registry> {{\n    {}\n}}\n\n\
-                 /// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and status bar.\n\
+                 /// The app's root (`nsh.json` `\"root\"`), with its theme, appearance, status bar and component styles.\n\
                  pub fn root() -> nsh_core::element::Root {{\n    app_root()\n}}\n{}{}",
                 self.sets(),
                 self.app_only_sets(),
@@ -2633,8 +2633,8 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
         ));
     }
     format!(
-        "\n/// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and\n\
-         /// status bar.\n\
+        "\n/// The app's root (`nsh.json` `\"root\"`), with its theme, appearance, status\n\
+         /// bar and component styles.\n\
          {cfg}fn app_root() -> nsh_core::element::Root {{\n    {make}\n}}\n"
     )
 }
