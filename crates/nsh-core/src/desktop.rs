@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::{
     ImageSource,
+    color::Hsla,
     element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Point, Points},
     keymap::{self, Keystroke, Modifiers, When},
@@ -853,6 +854,18 @@ impl DesktopCommand {
     }
 }
 
+/// A run of a tray's title ([`Tray::title`]): text in one color, as GPUI's
+/// `TextRun`s are.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct TrayTitleRun {
+    /// The text.
+    pub text: String,
+    /// Its color; `None`: the panel's text color (on macOS the menu bar's,
+    /// which follows its appearance).
+    pub color: Option<Hsla>,
+}
+
 /// The app's icon in the system tray ([`DesktopCommand::SetTray`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
@@ -863,6 +876,10 @@ pub struct Tray {
     pub icon: Option<ImageSource>,
     /// Shown when the pointer rests on it; `""` for the app's name.
     pub tooltip: String,
+    /// Text beside the icon, in runs each of its own color: what the app
+    /// keeps in sight (a price, a count). macOS's menu bar shows it; the
+    /// other platforms' trays show the icon alone. Empty: the icon alone.
+    pub title: Vec<TrayTitleRun>,
     /// Its menu: opened by a secondary click (a primary one too when
     /// [`Self::click`] is 0); empty for none.
     pub menu: Arc<[MenuItem]>,
