@@ -680,6 +680,12 @@ struct Node {
     /// "hidden"`): hidden with the span's characters, from sight, touches
     /// and assistive technology ([`Core::hide_attachments`]).
     hidden_in_text: bool,
+    /// A list cell the render window left behind as the list scrolled: it
+    /// shows a row out of the window where that row was laid out last, so
+    /// it is left in sight (it is out of it, and soon reused) but hidden
+    /// from assistive technology, which reads the window's rows in their
+    /// order ([`Core::set_left_behind`]).
+    left_behind: bool,
     /// `android={{ elevation }}`.
     elevation: Points,
     /// `ios={{ backdropMaterial }}`.
@@ -829,7 +835,7 @@ impl Node {
         if self.states & crate::tailwind::state::DISABLED != 0 {
             props.accessibility.state.disabled = true;
         }
-        if self.spare || self.hidden_in_text {
+        if self.spare || self.hidden_in_text || self.left_behind {
             props.accessibility.hidden = true;
         }
         if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
@@ -934,6 +940,7 @@ impl Node {
             escapes: false,
             spare: false,
             hidden_in_text: false,
+            left_behind: false,
         }
     }
 }
@@ -8767,6 +8774,25 @@ impl<M: TextEngine> Core<M> {
         self.mount.push(MountItem::ViewProps { id, props });
     }
 
+    /// Hides list cell `key`, which the render window left behind, from
+    /// assistive technology, or reads it again as its list places it: its
+    /// frame is where its row was laid out last, which rows measured since
+    /// may have moved past. Its props only: it stays drawn, out of sight.
+    fn set_left_behind(&mut self, key: Key, left_behind: bool) {
+        let node = &mut self.nodes[key as usize];
+        if node.left_behind == left_behind {
+            return;
+        }
+        node.left_behind = left_behind;
+        if !node.created || node.spare {
+            // Its new view gets them (`ensure_created`), or `set_spare`
+            // sends them as it shows the cell again.
+            return;
+        }
+        let (id, props) = (node.id, node.mounted_props());
+        self.mount.push(MountItem::ViewProps { id, props });
+    }
+
     /// [`Core::update_lists`] for list `key`; `outer`: where a list in its
     /// parent's viewport is in the view it is virtualized against.
     fn update_list(
@@ -9023,7 +9049,10 @@ impl<M: TextEngine> Core<M> {
         // jumped) would show through: move them out of sight. They, the ones
         // never placed and, once the items changed, all of them are hidden
         // until placed again ([`Core::set_spare`]); the few the window leaves
-        // behind while scrolling are out of sight already and soon reused.
+        // behind while scrolling are out of sight already and soon reused,
+        // so they stay drawn, but screen readers skip them: they would read
+        // rows out of the window, by frames rows measured since may have
+        // passed ([`Core::set_left_behind`]).
         let (window_start, window_end) = list.render_window();
         // In its parent's viewport, the cells start inside the list's
         // border and padding.
@@ -9056,6 +9085,8 @@ impl<M: TextEngine> Core<M> {
             if start + size <= window_start || start >= window_end {
                 if changed {
                     self.set_spare(cell, true);
+                } else {
+                    self.set_left_behind(cell, true);
                 }
                 continue;
             }
@@ -9092,6 +9123,7 @@ impl<M: TextEngine> Core<M> {
                 rect(x, main_at, width, size.height)
             };
             this.set_frame(cell, frame);
+            this.set_left_behind(cell, false);
             this.set_spare(cell, false);
             if std::mem::take(&mut this.nodes[cell as usize].relaid) {
                 let children = std::mem::take(&mut this.nodes[cell as usize].children);
