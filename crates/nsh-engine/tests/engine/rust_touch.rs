@@ -76,6 +76,7 @@ fn touch(phase: TouchPhase, path: &[u32], x: f32, y: f32, t: f64) -> EventPayloa
             page: nsh_core::geometry::point(px(x), px(y + 100.0)),
             location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
+            pointer_type: nsh_core::PointerType::Touch,
         }],
     }))
 }

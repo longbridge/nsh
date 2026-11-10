@@ -1648,6 +1648,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: point(Points(p.x), Points(p.y)),
                     location: point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()

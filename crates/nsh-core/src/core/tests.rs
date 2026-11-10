@@ -14730,6 +14730,7 @@ mod touch {
                 page: point(px(x), px(100.0)),
                 location: point(px(x - 10.0), px(5.0)),
                 changed: true,
+                pointer_type: crate::PointerType::Touch,
             }],
         }))
     }
@@ -24168,6 +24169,7 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             page: point(px(5.0), px(6.0)),
             location: point(px(5.0), px(6.0)),
             changed: true,
+            pointer_type: crate::PointerType::Touch,
         }],
         activated: None,
     }))

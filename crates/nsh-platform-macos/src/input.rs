@@ -1993,6 +1993,7 @@ fn report(surface: &Surface, phase: TouchPhase, p: &Pointer, activated: Option<N
         page: point(Points(p.x), Points(p.y)),
         location: point(Points(lx), Points(ly)),
         changed: true,
+        pointer_type: nsh_core::PointerType::Mouse,
     };
     let event = TouchEvent {
         phase,
