@@ -133,6 +133,18 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   merges moves (`State::mouse_moves`): the latest per view, delivered at most once per `MOUSE_MOVE_INTERVAL` (8 ms) and
   always before the next other event, so a view hears where the mouse went before it hears it leave; mice report up to
   1000 moves a second, and a crosshair needs one per frame.
+- **`onWheel`** (any element; the DOM's `wheel`, GPUI's `ScrollWheelEvent`): a mouse wheel or touchpad scrolled over a
+  view. `EventPayload::Wheel` / `WheelEvent { position, page_position, delta, modifiers }`, `delta` a `WheelDelta`
+  (`Lines` for notches, `Points` for precise deltas, as GPUI's `ScrollDelta`; positive toward the end, the DOM's sign);
+  JS `{ position, pagePosition, delta, deltaMode: "lines" | "points", modifiers }`. The platform decides on the main
+  thread, before it scrolls, from the mounted event masks (`input::wheel_listener`): walking out from the view under
+  the pointer, the first view that listens hears it; it takes the wheel (no native scroll, Ctrl + wheel zoom or pinch)
+  when no scroll view (nor a multiline field on Windows / GPUI, nor a hosted widget scrolling itself on Linux / macOS)
+  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. There is no
+  `preventDefault`: events reach JS after the fact, so the rule is what is mounted, as with `onContextMenu`. Linux
+  `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
+  (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
+  `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first

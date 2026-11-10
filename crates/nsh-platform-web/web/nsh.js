@@ -919,6 +919,8 @@ class Player {
     container.append(this.root);
     this.views = new Map();
     this.mouseTracked = new Set();
+    /** Views listening to `onWheel`; wheels look for none without. */
+    this.wheelTracked = new Set();
     // Shader views (`op_sh`), drawn on one WebGL 2 context (`shaderGl`).
     this.shaderViews = new Set();
     // Of the views' own style rules (`op_css`).
@@ -1569,6 +1571,7 @@ class Player {
     root.append(this.live);
     this.views.clear();
     this.mouseTracked.clear();
+    this.wheelTracked.clear();
     root._id = ROOT_ID;
     root._kind = "root";
     root._events = new Set();
@@ -2213,6 +2216,7 @@ class Player {
     if (!el) return;
     this.views.delete(id);
     this.mouseTracked.delete(id);
+    this.wheelTracked.delete(id);
     if (el._shader) this.dropShader(el);
     if (el._video) {
       // A removed media element keeps playing until it is collected.
@@ -2539,6 +2543,8 @@ class Player {
     el._events = new Set(events);
     if (el._events.has("onMouseMove")) this.mouseTracked.add(id);
     else this.mouseTracked.delete(id);
+    if (el._events.has("onWheel")) this.wheelTracked.add(id);
+    else this.wheelTracked.delete(id);
     const pressable = PRESS_EVENTS.some((e) => el._events.has(e));
     el._pressable = pressable;
     this.updateFocusable(el);
@@ -7817,6 +7823,12 @@ class Player {
    * pinches the view under the pointer and never zooms the page.
    */
   wheel(e) {
+    // A view listening to `onWheel` nearer than the scroll views under the
+    // pointer takes the wheel: nothing scrolls, zooms or pinches.
+    if (this.wheelEvent(e)) {
+      e.preventDefault();
+      return;
+    }
     if (e.ctrlKey) {
       e.preventDefault();
       // Over a zoomable scroll view it zooms that, else it pinches.
@@ -7866,6 +7878,37 @@ class Player {
     // deltas. Its magnitude cannot distinguish a notch from a finger.
     const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
+  }
+
+  /**
+   * `onWheel` of the nearest view around `e`'s target that listens; true
+   * when it takes the wheel: no scroll view is nearer, nor is it one
+   * (`input::wheel_listener`). Deltas are lines for `DOM_DELTA_LINE`,
+   * points otherwise (a page is the viewport's height).
+   */
+  wheelEvent(e) {
+    if (!this.wheelTracked?.size) return false;
+    const view = this.viewOf(e.target);
+    if (!view) return false;
+    let scrollSeen = false;
+    for (const el of this.ancestors(view)) {
+      const scrolls = el._kind === "scroll";
+      if (el._events?.has("onWheel")) {
+        const r = el.getBoundingClientRect();
+        const [pageX, pageY] = this.point(e);
+        const page = e.deltaMode === 2 ? this.size[1] : 1;
+        this.event(el._id, "onWheel", {
+          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          pagePosition: { x: pageX, y: pageY },
+          delta: { x: e.deltaX * page, y: e.deltaY * page },
+          deltaMode: e.deltaMode === 1 ? "lines" : "points",
+          modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+        });
+        return !scrollSeen && !scrolls;
+      }
+      scrollSeen ||= scrolls;
+    }
+    return false;
   }
 
   /** Moves `el` by (`dx`, `dy`), gliding there when `smooth`; once it

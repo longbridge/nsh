@@ -836,6 +836,51 @@ fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> 
     false
 }
 
+/// A wheel by `(dx, dy)` (`lines`: notches, else points) at `(x, y)` (root
+/// coordinates): the nearest view around the one under it that listens
+/// to `onWheel` hears it ([`input::wheel_listener`]). Returns whether that
+/// view takes the wheel, so nothing scrolls natively.
+fn wheel_event(
+    surface: &Surface,
+    x: f32,
+    y: f32,
+    lines: bool,
+    dx: f32,
+    dy: f32,
+    state: gdk::ModifierType,
+) -> bool {
+    if dx == 0.0 && dy == 0.0 {
+        return false;
+    }
+    let Some(hit) = pick(&event_root(surface), x, y) else {
+        return false;
+    };
+    // A hosted widget scrolling itself (a web page, a text view) keeps it.
+    let native_scrolls = hit.native.as_ref().is_some_and(scrolls_itself);
+    let Some((view, takes)) = input::wheel_listener(
+        chain(&hit.view),
+        |v| v.state().events.contains(EventKind::Wheel),
+        |v| v.kind() == ViewKind::Scroll,
+    ) else {
+        return false;
+    };
+    let (location_x, location_y) = local(surface, &view, x, y);
+    let delta = if lines {
+        nsh_core::WheelDelta::Lines(point(dx, dy))
+    } else {
+        nsh_core::WheelDelta::Points(point(Points(dx), Points(dy)))
+    };
+    let event = nsh_core::WheelEvent::new(
+        point(Points(location_x), Points(location_y)),
+        point(Points(x), Points(y)),
+        delta,
+        modifiers(state),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(event));
+    takes && !native_scrolls
+}
+
 /// The event's position in the root's coordinates (`None` for events of
 /// other surfaces, such as popovers of hosted widgets).
 fn root_point(root: &NshView, event: &gdk::Event) -> Option<(f32, f32)> {
@@ -896,6 +941,11 @@ fn scroll_event(
         }
     };
     let modifiers = event.modifier_state();
+    // A view listening to `onWheel` nearer than the scroll views under the
+    // pointer takes the wheel, Ctrl + wheel included (a canvas zooming).
+    if kind != WheelInput::Stop && wheel_event(surface, x, y, kind == notches, dx, dy, modifiers) {
+        return glib::Propagation::Stop;
+    }
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops.
     if let WheelInput::Step { .. } = kind
         && modifiers.contains(gdk::ModifierType::CONTROL_MASK)
@@ -1001,8 +1051,10 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             mouse_moved(surface, x, y, gdk::ModifierType::empty());
         }
         Simulated::Wheel(x, y, dx, dy) => {
-            let step = WheelInput::Step { notches: false };
-            wheel_input(surface, x, y, dx, dy, time, step);
+            if !wheel_event(surface, x, y, false, dx, dy, held) {
+                let step = WheelInput::Step { notches: false };
+                wheel_input(surface, x, y, dx, dy, time, step);
+            }
         }
         Simulated::Hover(x, y) => {
             surface.input.last_state.set(Some(held));

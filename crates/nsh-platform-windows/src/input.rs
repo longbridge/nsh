@@ -1025,6 +1025,47 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     })
 }
 
+/// `onWheel` for a wheel from the window: the nearest view around the one
+/// under the pointer that listens hears it ([`input::wheel_listener`]),
+/// in lines of 16 points for notches (`WM_MOUSEWHEEL`'s default), in
+/// points for precise deltas. Returns whether that view takes the wheel,
+/// so nothing scrolls or zooms natively.
+fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
+    let (x, y) = (event.x, event.y);
+    if event.dx == 0.0 && event.dy == 0.0 {
+        return false;
+    }
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return false;
+    };
+    let Some((view, takes)) = input::wheel_listener(
+        chain(&hit.view),
+        |v| v.state().events.contains(EventKind::Wheel),
+        // A multiline field scrolls its own lines.
+        |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+    ) else {
+        return false;
+    };
+    let delta = if event.precise {
+        nsh_core::WheelDelta::Points(nsh_core::geometry::point(
+            Points(event.dx),
+            Points(event.dy),
+        ))
+    } else {
+        nsh_core::WheelDelta::Lines(nsh_core::geometry::point(event.dx / 16.0, event.dy / 16.0))
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let wheel = nsh_core::WheelEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        delta,
+        event.modifiers.core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    takes
+}
+
 /// A wheel event from the window.
 pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     let (x, y) = (event.x, event.y);
@@ -1032,6 +1073,9 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
         return;
     }
     surface.input.last.set(Some((x, y)));
+    if wheel_event(surface, &event) {
+        return;
+    }
     let (mut dx, mut dy) = (event.dx, event.dy);
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
     // (precision touchpads pinch this way too).
