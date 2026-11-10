@@ -444,8 +444,12 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:
-  the room on that side, what a menu may grow to). A view inside an overlay measures in the root
-  view's coordinates.
+  the room on that side, what a menu may grow to). An overlay whose max size along its side is the `available` it was
+  told (a select's or a date picker's popup, held to the room and scrolling past it) chooses its side at its natural
+  size, not the size that room gave it (`Core::natural_extent`, `nsh_core::overlay::place_fitted`): one that grew
+  past the room below, or opens again with the last room below still set, goes above when it fits there whole; on
+  the side with more room, limited to it, when it fits on neither. The core measures it without that limit only
+  while the limit holds it, once per layout. A view inside an overlay measures in the root view's coordinates.
 - **Covering the anchor** (`OverlayConfig::cover`, `OverlayProp::Cover`; Rust `overlay().cover(&element_ref, shown)`;
   no JS prop): instead of on a side, the overlay starts where the anchor does, with a view inside it centered on the
   anchor vertically (a select's selected row over its trigger, title on title: shadcn/ui's `item-aligned`), then moved
