@@ -17,6 +17,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
+mod window_hover;
+#[cfg(target_os = "macos")]
 mod window_press;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
@@ -30,6 +32,7 @@ fn main() {
                 mount::run();
             } else {
                 window_press::run();
+                window_hover::run();
                 title_bar::run();
                 mount::run();
             }
