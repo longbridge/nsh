@@ -1401,6 +1401,11 @@ pub enum ImageProp {
     /// Native).
     #[prop(js = "fadeDuration", min = 0, on = IMAGE)]
     FadeDuration(Option<f32>),
+    /// Set by `svg()` where the platform draws the SVG itself (the web): its
+    /// `currentColor` is the element's text color
+    /// ([`crate::mount::ImageOptions::current_color`]).
+    #[prop(js = "svgCurrentColor", internal)]
+    SvgCurrentColor(bool),
 }
 
 /// A behavior property of a scroll view or list.
@@ -1881,6 +1886,11 @@ pub enum Command {
     /// the web replaces the current history entry's, the native platforms
     /// keep none ([`crate::url_scheme`]).
     SetAppUrl(String),
+    /// The app's address as an entry of its own after the current one
+    /// (`UrlScheme.setUrl(url, { history: "push" })`, `set_app_url_with`; on
+    /// the root): the web pushes one unless the same turn pushed a page's
+    /// or it is the address shown; the native platforms keep none.
+    PushAppUrl(String),
     /// What the back button does when none of the app's listeners took
     /// it: the innermost stack pops (or asks, with `popOnBack` false); with
     /// none, the app leaves on Android (on the root).
@@ -1967,6 +1977,13 @@ pub enum Command {
         /// End.
         end: u32,
     },
+    /// Insert text into an input in place of its selection, as the user's
+    /// edit: the input's `maxLength` and line rules apply, `onChangeText`
+    /// reports it, no key is reported, and where the platform keeps an
+    /// undo history it is a step of it (unlike a new `value`). With
+    /// `pasteBehavior` `"report"`, the app inserts a paste it allowed or
+    /// rewrote this way.
+    InsertText(String),
     /// Have the screen reader read a message (on the root).
     Announce(String),
     /// Turn the performance monitor on or off (on the root;

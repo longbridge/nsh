@@ -61,6 +61,7 @@ pub use nsh_core::{
     element::{EngineContext, Root, Tokens},
     geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
+    main_thread::MainThreadTask,
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HourCycle, HttpBody,
         HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, LocaleSettings,
@@ -707,6 +708,15 @@ pub trait MountSink: Send + 'static {
     /// A development update ([`EngineControl::hot_update`]) could not be
     /// applied in place: reload the latest full bundle.
     fn hot_update_failed(&self) {}
+
+    /// Runs `task` on the UI thread, after the batches submitted before it
+    /// (`nsh_core::element::run_on_main_thread`). By default it runs here,
+    /// on the engine thread: what a host without a main thread of its own
+    /// does (headless tests, the web, where the engine runs on the page's
+    /// thread).
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        task.run();
+    }
 
     /// The engine laid the app out at `size` ([`EngineControl::resize`]):
     /// called after the commit of the turn that applied the resize (if it
@@ -2163,6 +2173,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             sink.submit(batch);
         }
+        state.run_on_main_thread(&**sink);
         if let Some(trial) = trial {
             start_trial(trial);
         }
@@ -2417,6 +2428,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                 );
             }
         }
+        state.run_on_main_thread(&**sink);
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
@@ -2463,6 +2475,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(batch) = self.state.commit(Some(script)) {
                 self.sink.submit(batch);
             }
+            self.state.run_on_main_thread(&*self.sink);
         }
     }
 
@@ -3083,6 +3096,14 @@ impl<M: TextEngine> State<M> {
         }
     }
 
+    /// Hands the sink the functions the app asked to run on the main thread
+    /// this turn, after the turn's batch.
+    fn run_on_main_thread(&mut self, sink: &dyn MountSink) {
+        for task in self.core.take_main_thread_tasks() {
+            sink.run_on_main_thread(task);
+        }
+    }
+
     /// Registers fonts imported by JS. Blocking: text using them must not be
     /// measured with a fallback font first.
     fn load_fonts(
@@ -3337,6 +3358,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         audio: env.audio,
         cell: env.cell,
         web_input: env.web_input,
+        web_views: env.web_views,
     }
 }
 

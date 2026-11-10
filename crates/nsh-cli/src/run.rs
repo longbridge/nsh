@@ -182,6 +182,12 @@ pub(crate) fn run(
         );
     }
     window.check(target, crate::rust_app::is_root(entry))?;
+    if matches!(
+        target,
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+    ) {
+        crate::package::note_hidden_main_window(entry);
+    }
     if release {
         // The app's crates and NSH's in the host, optimized as in a
         // package: a debug host measures debug code.
@@ -271,7 +277,8 @@ pub(crate) fn run(
             run_local(&session, &mut command, "the Linux host")
         }
         // In place too: the AppKit host makes itself a regular app (menu
-        // bar, Dock icon) without an app bundle around it.
+        // bar, Dock icon) without an app bundle around it, or the menu bar
+        // app `nsh.json` `macos.activationPolicy` says, from the start.
         Target::Macos => {
             // The menu bar and the window show the app's name; `--name`
             // overrides it (a host run for one of the app's windows can
@@ -286,6 +293,7 @@ pub(crate) fn run(
                 .args(&args)
                 .args(["--name", name, "--app-id", &id])
                 .args(["-ApplePersistenceIgnoreState", "YES"])
+                .args(config.macos.host_args())
                 .args(window.args());
             run_local(&session, &mut command, "the macOS host")
         }
@@ -373,7 +381,8 @@ fn run_rust_app(
     let (name, id) = crate::package::name_and_id(&entry, &config);
     let built = crate::build::rust_root();
     // The package's `nsh` directory for the runners that run in place:
-    // the crates' assets and the window's name, id and appearance.
+    // the crates' assets and the window's name, id, appearance and
+    // activation policy.
     let resources = |dir: &Path| -> anyhow::Result<()> {
         if dir.exists() {
             fs::remove_dir_all(dir)?;
@@ -388,6 +397,8 @@ fn run_rust_app(
         if let Some(appearance) = &config.appearance {
             info["appearance"] = appearance.as_str().into();
         }
+        // A menu bar app on macOS (the other runners leave it).
+        config.macos.add_to_app_json(&mut info);
         // The main window's launch options, as a package's `app.json`.
         if let Some(window) = &config.window {
             info["window"] = window.clone();
@@ -835,6 +846,7 @@ pub(crate) fn install_android_host(
                 target_sdk: android::DEFAULT_TARGET_SDK,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
+                cleartext: true,
                 notifications: true,
                 schemes: &[],
                 rust: false,

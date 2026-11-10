@@ -201,7 +201,14 @@ impl Native for LinuxNative {
                     .then(|| crate::window::root_view(s, target))
                     .flatten()
                     .unwrap_or_else(|| s.root.clone());
-                (root.width() as f32, root.height() as f32)
+                if root.width() > 0 && root.height() > 0 {
+                    (root.width() as f32, root.height() as f32)
+                } else {
+                    // A main window not shown yet: the size its app is laid
+                    // out at (`window::launch_hidden`).
+                    let size = root.state().frame.size;
+                    (size.width.0, size.height.0)
+                }
             })
             .unwrap_or((0.0, 0.0));
         Size::new(Points(width), Points(height))
@@ -433,6 +440,10 @@ impl Native for LinuxNative {
             }
             K::Char('a') if m.ctrl && !m.alt && !m.cmd => {
                 self.with_key_window(|_, w| synth::select_all(w));
+            }
+            K::Char('z') if m.ctrl && !m.alt && !m.cmd => {
+                let redo = m.shift;
+                self.with_key_window(move |_, w| synth::undo(w, redo));
             }
             K::Char(c) if plain => {
                 let c = if m.shift { shifted(c) } else { c };

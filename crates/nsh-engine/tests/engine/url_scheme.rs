@@ -64,6 +64,7 @@ fn bundle_of(app: &str, name: &str) -> Bundle {
         minify: false,
         split: false,
         ui_sets: ui_sets.iter().map(Into::into).collect(),
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(
@@ -99,6 +100,25 @@ fn run_app(
     launch: &[String],
     later: impl Fn(&EngineControl),
 ) -> String {
+    run_app_with(
+        bundle,
+        schemes,
+        |control| {
+            for url in launch {
+                open(control, url);
+            }
+        },
+        later,
+    )
+}
+
+/// [`run_app`] with what the platform sends before the engine starts.
+fn run_app_with(
+    bundle: Bundle,
+    schemes: &[&str],
+    setup: impl FnOnce(&EngineControl),
+    later: impl Fn(&EngineControl),
+) -> String {
     let config = EngineConfig {
         viewport: Size::new(px(400.0), px(600.0)),
         ui_sets: vec![nsh_base::registry()],
@@ -107,17 +127,7 @@ fn run_app(
     let (tx, rx) = crossbeam_channel::unbounded();
     // The launch links before the engine starts, as a platform sends the
     // link it was launched with.
-    let engine = Engine::start_with(
-        config,
-        || ApproxTextEngine,
-        ChannelSink(tx),
-        |control| {
-            for url in launch {
-                open(control, url);
-            }
-        },
-    )
-    .unwrap();
+    let engine = Engine::start_with(config, || ApproxTextEngine, ChannelSink(tx), setup).unwrap();
     let control = engine.control();
     let mut text = String::new();
     let mut sent_later = false;
@@ -236,4 +246,95 @@ fn a_late_first_url_reads_the_cores_address() {
         |_| {},
     );
     assert_eq!(text, "url:late:myapp://launch done");
+}
+
+/// Listens to `change` and `open` and says each; once it heard the
+/// platform's last move, says what `url()` reads and `done`.
+const CHANGE_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+function App() {
+  const said = signal("");
+  const note = (s: string) => said.set(`${said()} ${s}`);
+  note(`start:${UrlScheme.url()}`);
+  UrlScheme.on("change", ({ url, cause }) => {
+    note(`${cause}:${url}`);
+    if (url.endsWith("last")) note(`now:${UrlScheme.url()} done`);
+  });
+  UrlScheme.on("open", ({ url }) => note(`open:${url}`));
+  setTimeout(() => note("later:"), 300);
+  return <Text>{`url:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
+fn page_event(control: &EngineControl, url: &str, change: Option<&str>) {
+    let mut payload = vec![
+        (nsh_core::url_scheme::URL, PayloadValue::Str(url.into())),
+        ("page", PayloadValue::Bool(true)),
+    ];
+    if let Some(cause) = change {
+        payload.push(("change", PayloadValue::Str(cause.into())));
+    }
+    control.dispatch_event(ROOT_ID, EventKind::UrlScheme, EventPayload::Map(payload));
+}
+
+#[test]
+fn address_moves_the_app_did_not_make_reach_change_with_their_cause() {
+    let text = run_app_with(
+        bundle_of(CHANGE_APP, "nsh-app-url-change"),
+        &[],
+        // Before anything listened: the address, but no change.
+        |control| page_event(control, "https://a.test/early", Some("back")),
+        |control| {
+            page_event(control, "https://a.test/inbox#archive", Some("address"));
+            page_event(control, "https://a.test/inbox", Some("back"));
+            // A cause of a newer platform's is the address alone.
+            page_event(control, "https://a.test/inbox?unknown", Some("teleport"));
+            page_event(control, "https://a.test/inbox#last", Some("forward"));
+        },
+    );
+    // A change is not an `open`, and `url()` has the address.
+    assert_eq!(
+        text,
+        "url: start:https://a.test/early later: address:https://a.test/inbox#archive \
+         back:https://a.test/inbox forward:https://a.test/inbox#last \
+         now:https://a.test/inbox#last done"
+    );
+}
+
+/// Sets its address with `history: "push"` and with a `history` it does
+/// not know; says what `url()` reads after each.
+const PUSH_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+function App() {
+  const said = signal("");
+  const note = (s: string) => said.set(`${said()} ${s}`);
+  UrlScheme.setUrl("myapp://tabs/live", { history: "push" });
+  note(`push:${UrlScheme.url()}`);
+  UrlScheme.setUrl("myapp://tabs/all", { history: "replace" });
+  note(`replace:${UrlScheme.url()}`);
+  try {
+    UrlScheme.setUrl("myapp://tabs/mine", { history: "sideways" as never });
+    note("wrong:none");
+  } catch (error) {
+    note(`wrong:${error instanceof TypeError ? "TypeError" : String(error)}:${UrlScheme.url()}`);
+  }
+  setTimeout(() => note("done"), 300);
+  return <Text>{`url:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
+#[test]
+fn a_pushed_address_reads_back_at_once_and_an_unknown_history_is_a_type_error() {
+    let text = run_app(
+        bundle_of(PUSH_APP, "nsh-app-url-push"),
+        &["myapp"],
+        &[],
+        |_| {},
+    );
+    assert_eq!(
+        text,
+        "url: push:myapp://tabs/live replace:myapp://tabs/all wrong:TypeError:myapp://tabs/all done"
+    );
 }

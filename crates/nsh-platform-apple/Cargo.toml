@@ -3,6 +3,7 @@ name = "nsh-platform-apple"
 description = "Code shared by the macOS and iOS backends: sound playback, the Speech recognizer, the notification center and the URL schemes web views serve from the app."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

@@ -21,6 +21,7 @@ use nsh_core::{
         Arg, Exception, JsClass, JsError, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError,
         Registry, TsTypes,
     },
+    host_channel::ModuleFake,
     prelude::*,
 };
 use nsh_engine::{HostCall, HostChannel, HttpBody, HttpRequest};
@@ -256,7 +257,7 @@ impl Testing {
     /// platform cannot honor rejects (`ERR_NSH_TEST_UNSUPPORTED`, naming
     /// it): `width` and `height` on iOS and Android, a `platform` the
     /// target is not (a phone's on a desktop, a desktop's on a phone, the
-    /// other phone), `host.handlers`, `url`.
+    /// other phone), `host.handlers`, `modules`, `url`.
     pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, JsError> {
         let session = Session::current().map_err(JsError::Error)?;
         let options = options.unwrap_or_default();
@@ -266,7 +267,8 @@ impl Testing {
             .as_ref()
             .and_then(|h| h.handlers.as_ref())
             .is_some_and(|h| !h.0.is_empty());
-        let (host, record) = host_setup(options.host, &mut server);
+        let module_fakes = options.modules.as_ref().is_some_and(|m| !m.0.is_empty());
+        let (host, record) = host_setup(options.host, options.modules, &mut server);
         let manual_clock = options.clock.is_some();
         let launch = Launch {
             storage: options.storage.unwrap_or_default(),
@@ -285,6 +287,7 @@ impl Testing {
                 .map(|c| c.time.map_or_else(std::time::SystemTime::now, |t| t.0)),
             host,
             host_handlers,
+            module_fakes,
             url_scheme: options.url_scheme,
         };
         let opening = blocking(move || session.open(&entry, launch));
@@ -436,6 +439,113 @@ pub struct OpenOptions {
     /// `schemes`), as from the system. Headless runs only: with
     /// `--target` it rejects (`ERR_NSH_TEST_UNSUPPORTED`).
     pub url_scheme: Option<String>,
+    /// Stand-ins for exports of the native modules the app imports (its
+    /// crate's, `nsh/base`'s, the runtime's), by the module's specifier,
+    /// then by export (`"save"`) or member of one (`"Keychain.get"`): a
+    /// value takes the export's place (a function's stand-in returns it at
+    /// once, synchronously); a function answers each of the app's calls,
+    /// which return a promise even where the export returns at once: of
+    /// what it returns (or of what its promise resolves to), rejected with
+    /// what it throws. The app's imports get them; Rust
+    /// code calling the module directly runs the module. Headless runs
+    /// only: with `--target` it rejects (`ERR_NSH_TEST_UNSUPPORTED`).
+    pub modules: Option<ModuleFakes>,
+}
+
+/// `open`'s `modules`: by specifier, the stand-ins of its exports.
+#[derive(Debug, Default)]
+pub struct ModuleFakes(pub Vec<(String, Vec<(String, ModuleFakeOption)>)>);
+
+/// A stand-in of `open`'s `modules`.
+#[derive(Debug)]
+pub enum ModuleFakeOption {
+    /// The value in the export's place.
+    Value(JsonValue),
+    /// The function answering the app's calls, with their arguments.
+    Function(Callback<FakeArgs, JsonValue>),
+}
+
+/// The arguments of an app's call of a stand-in, as the test's function
+/// gets them: one by one.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct FakeArgs(pub Vec<JsonValue>);
+
+impl nsh_core::element::CallbackArgs for FakeArgs {
+    const ARITY: usize = 0;
+
+    fn ts_params(_types: &mut TsTypes, _names: &[&str]) -> String {
+        "...args: any[]".into()
+    }
+
+    fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
+        self.0
+            .into_iter()
+            .map(|value| nsh_core::element::Ret::into_js(value, host))
+            .collect()
+    }
+
+    fn classes(_out: &mut Vec<&'static nsh_core::element::ClassDef>) {}
+}
+
+impl JsValue for ModuleFakes {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        // Not `unknown | …`, which is `unknown` and leaves the arrows untyped.
+        "Record<string, Record<string, {} | null | ((...args: any[]) => unknown)>>".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.kind() != JsKind::Object {
+            return Err(value.expected("an object of modules"));
+        }
+        let mut modules = Vec::new();
+        for specifier in value.keys()? {
+            let exports = value.field(&specifier)?;
+            let exports = exports.get();
+            if exports.kind() != JsKind::Object {
+                return Err(PropError(format!(
+                    "`{specifier}`: {}",
+                    exports.expected("an object of exports").0
+                )));
+            }
+            let mut fakes = Vec::new();
+            for path in exports.keys()? {
+                let field = exports.field(&path)?;
+                let field = field.get();
+                let fake = if field.kind() == JsKind::Function {
+                    <Callback<FakeArgs, JsonValue> as Arg>::from_js(field)
+                        .map(ModuleFakeOption::Function)
+                } else {
+                    field.to_json().map(ModuleFakeOption::Value)
+                };
+                fakes.push((
+                    path.clone(),
+                    fake.map_err(|e| PropError(format!("`{specifier}`: `{path}`: {}", e.0)))?,
+                ));
+            }
+            modules.push((specifier, fakes));
+        }
+        Ok(ModuleFakes(modules))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        // A stand-in's function stays JS's: only values go back.
+        let json = JsonValue::Object(
+            self.0
+                .iter()
+                .map(|(specifier, fakes)| {
+                    let values = fakes
+                        .iter()
+                        .filter_map(|(path, fake)| match fake {
+                            ModuleFakeOption::Value(v) => Some((path.clone(), v.clone())),
+                            ModuleFakeOption::Function(_) => None,
+                        })
+                        .collect();
+                    (specifier.clone(), JsonValue::Object(values))
+                })
+                .collect(),
+        );
+        Ok(JsOwned::new(host, host.json(&json)?))
+    }
 }
 
 /// Locale settings a test gives the user (`open`'s `localeSettings`,
@@ -625,11 +735,12 @@ pub struct HostMessage {
 type HostRecord = Arc<Mutex<Vec<(HostMessage, bool)>>>;
 
 /// The embedding app's channel `options` describe, for the app the test
-/// opens, and the record of what its handlers get. The handlers' JS
-/// functions join `server`, which answers their calls on the test file's
-/// VM.
+/// opens, with the stand-ins of `modules`, and the record of what its
+/// handlers get. The handlers' and the stand-ins' JS functions join
+/// `server`, which answers their calls on the test file's VM.
 fn host_setup(
     options: Option<HostOptions>,
+    modules: Option<ModuleFakes>,
     server: &mut Option<RouteServer>,
 ) -> (HostChannel, HostRecord) {
     let channel = HostChannel::new();
@@ -639,7 +750,8 @@ fn host_setup(
         channel.set_params(params.0);
     }
     let handlers = options.handlers.unwrap_or_default().0;
-    if handlers.is_empty() {
+    let modules = modules.unwrap_or_default().0;
+    if handlers.is_empty() && modules.is_empty() {
         return (channel, record);
     }
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -662,7 +774,7 @@ fn host_setup(
             }),
             HostHandlerOption::Function(function) => {
                 let index = functions.len();
-                functions.push((name.clone(), function));
+                functions.push((name.clone(), HostFunction::Host(function)));
                 let tx = tx.clone();
                 channel.handle(name, move |call| {
                     remember(&call);
@@ -670,6 +782,24 @@ fn host_setup(
                     let _ = tx.send((index, call));
                 });
             }
+        }
+    }
+    for (specifier, fakes) in modules {
+        for (path, fake) in fakes {
+            let fake = match fake {
+                ModuleFakeOption::Value(value) => ModuleFake::Value(value),
+                ModuleFakeOption::Function(function) => {
+                    let name = format!("{specifier}#{path}");
+                    let index = functions.len();
+                    functions.push((name.clone(), HostFunction::Module(function)));
+                    let tx = tx.clone();
+                    channel.handle_module_fake(name.clone(), move |call| {
+                        let _ = tx.send((index, call));
+                    });
+                    ModuleFake::Call(name)
+                }
+            };
+            channel.fake_module_export(specifier.clone(), path, fake);
         }
     }
     if !functions.is_empty() {
@@ -1301,6 +1431,8 @@ pub(crate) struct Launch {
     pub(crate) host: HostChannel,
     /// Whether `open`'s `host` has handlers (a headless run's only).
     pub(crate) host_handlers: bool,
+    /// Whether `open` has `modules` (a headless run's only).
+    pub(crate) module_fakes: bool,
     /// The link that launched the app (a headless run's only).
     pub(crate) url_scheme: Option<String>,
 }
@@ -1323,15 +1455,23 @@ struct RouteCall {
     reply: StubReply,
 }
 
+/// A JS function of the test that answers the app's calls.
+enum HostFunction {
+    /// Of `open`'s `host.handlers`: it gets the call's data.
+    Host(Callback<JsonValue, JsonValue>),
+    /// Of `open`'s `modules`: it gets the call's arguments.
+    Module(Callback<FakeArgs, JsonValue>),
+}
+
 /// The JS functions of an app's routes, and the requests waiting for them:
 /// answered while the app's steps run ([`serve`]).
 pub(crate) struct RouteServer {
     keys: Vec<String>,
     handlers: Vec<Callback<StubRequest, JsonValue>>,
     calls: RefCell<tokio::sync::mpsc::UnboundedReceiver<RouteCall>>,
-    /// The JS functions of `open`'s `host.handlers`, by name, and the
-    /// app's calls and posts waiting for them.
-    host_handlers: Vec<(String, Callback<JsonValue, JsonValue>)>,
+    /// The JS functions of `open`'s `host.handlers` and `modules`, by
+    /// name, and the app's calls and posts waiting for them.
+    host_handlers: Vec<(String, HostFunction)>,
     host_calls: RefCell<tokio::sync::mpsc::UnboundedReceiver<(usize, HostCall)>>,
 }
 
@@ -1352,7 +1492,16 @@ impl RouteServer {
     /// to handle, not the test's failure).
     async fn answer_host(&self, index: usize, mut call: HostCall) {
         let data = call.take_data();
-        let answer = self.host_handlers[index].1.call_async(data).await;
+        let answer = match &self.host_handlers[index].1 {
+            HostFunction::Host(function) => function.call_async(data).await,
+            HostFunction::Module(function) => {
+                let args = match data {
+                    JsonValue::Array(args) => args,
+                    other => vec![other],
+                };
+                function.call_async(FakeArgs(args)).await
+            }
+        };
         match answer {
             Ok(value) => call.resolve(value),
             Err(error) => call.reject(error.to_string()),
@@ -2043,6 +2192,13 @@ impl App {
     /// when there is nothing to go back from.
     pub async fn back(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, |app| app.back()).await
+    }
+
+    /// Goes forward in the browser's history, as its forward button does.
+    /// Only `nsh test --target web` has one; elsewhere it rejects
+    /// (`ERR_NSH_TEST_UNSUPPORTED`).
+    pub async fn forward(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.forward()).await
     }
 
     /// Answers the dialogs the app shows from now on (`AlertDialog.show`, action

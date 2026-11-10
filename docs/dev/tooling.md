@@ -447,6 +447,14 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   calls go over a channel to `RouteServer`, which `serve` answers on the test file's VM while a step runs, as a route's
   function; each call and post the handlers get is recorded for `app.host.calls()` / `posts()`), and
   `app.host.send` is `Headless::send_host_event`, a step;
+- `open`'s `modules` are stand-ins on the same channel (`HostChannel::fake_module_export`, read by the app's VM
+  through `HostBridge::module_fakes`): when the VM makes a native module's exports (`nsh-js` `modules.rs` `init`,
+  `host_module`), a faked export or member (`Export.member`, and a flat default module's object member) becomes the
+  stand-in (`host_channel.rs` `stand_in`): a value, a function returning it, or a function whose calls cross as
+  `HostBridge::call_module_fake` of `<specifier>#<path>`, its arguments a JSON array, without the `host` capability's
+  check or a time limit, answered by the test's function like a handler's. Their handlers
+  (`HostChannel::handle_module_fake`) are kept apart from the embedding app's: `host.call` never reaches them, and
+  they leave the channel unconfigured, so `host.available()` and a page host (`web.host`) stay as they were;
 - images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
@@ -562,9 +570,11 @@ it gets `--background` unless `nsh test --foreground` (`AppOptions::background`)
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
 without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
 the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
-"Checking a change"). A left button press into a web view of the inactive app goes to the `WKWebView` directly
-(`agent::mouse`), since AppKit gives an inactive window's first click only to views that accept the first mouse. A
-window that is not the
+"Checking a change"). It gets `--activation-policy` too when nsh.json's `macos.activationPolicy` is not the default
+(`MacosConfig::host_args`, as under `nsh run`): `--background` takes precedence, so the app runs with its policy under
+`--foreground` (`docs/dev/macos.md` "Activation policy"). A left button press into a web view of the inactive app goes
+to the `WKWebView` directly (`agent::mouse`), since AppKit gives an inactive window's first click only to views that
+accept the first mouse. A window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
 for a Command key the window's own key equivalents, and for any key the main menu's item for it (`synth::key_equivalent`:
 Select All, Undo, an app's own item, Control and function-key shortcuts too), sent as the application sends them for its
@@ -649,13 +659,13 @@ test plays the embedding app there too, through the view's own channel (`Model::
 `open`'s `host.params` arrive in the setup (`TestEnvironment::host_params`), `app.host.send` is
 `TestStep::HostSend` (the model's `send_host_event`, then the agent settles; the web's page answers
 `SceneQuery::HostSend`), and the channel's URL handler records each URL the app opens and takes it, so nothing
-opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` runs headless only: the calls would need
-the test's functions over the dev server. `open` checks its options against the target before it starts a host
+opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` and `modules` run headless only: the calls would
+need the test's functions over the dev server. `open` checks its options against the target before it starts a host
 (`run.rs`'s `check_launch`, against `TestRun::target`, a `HostTarget` the CLI makes: `test_host::host_target`), so
 no option is dropped: `width` / `height` where the app fills a device's screen (iOS, Android: `HostTarget::sized`
 false), a `platform` of another kind of device than the target's (`HostTarget::platform`, GPUI's the machine's
 desktop: a desktop's `platform`, the way a test asks for a mouse and keys headless, runs on every desktop and the web
-as the target's; `ios` and `android` only on their own) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`
+as the target's; `ios` and `android` only on their own), `host.handlers` and `modules` reject with `ERR_NSH_TEST_UNSUPPORTED`
 (`failure::unsupported`), naming the option and the target.
 Every other option reaches the host (storage, routes, the environment, the clipboard, a manual clock, `host.params`).
 

@@ -175,6 +175,10 @@ pub struct Screen {
     /// Those not on screen (minimized, hidden, closed by a policy of
     /// theirs), as the driver keeps them: their views are not found.
     hidden_windows: HashSet<NodeId>,
+    /// The main window is not on screen (hidden at launch, hidden,
+    /// minimized): its views are not found, those of the windows of the
+    /// app's own are.
+    main_hidden: bool,
     /// The id the next canvas node gets.
     next_canvas_node: NodeId,
 }
@@ -506,7 +510,8 @@ impl Screen {
             } => {
                 {
                     let view = self.nodes.entry(*id).or_default();
-                    view.text = Some(text.text.clone());
+                    // What the user sees: hidden runs are not.
+                    view.text = Some(text.visible_text().into_owned());
                     view.attributed = Some(Arc::clone(text));
                     view.text_content = *content;
                 }
@@ -785,8 +790,10 @@ impl Screen {
                     .filter(|t| &*t.test_id == want)
                     .map(|t| (t.start < t.end).then_some(t.start))
                     .collect(),
+                // Hidden characters (`visibility: "hidden"`) are not seen.
                 Matcher::Text(want) => char_starts(&text.text, want)
                     .into_iter()
+                    .filter(|&at| !text.hidden_at(at))
                     .map(Some)
                     .collect(),
                 Matcher::Any(want) => {
@@ -799,6 +806,7 @@ impl Screen {
                     if ids.is_empty() {
                         char_starts(&text.text, &TextMatch::Exact(want.trim().to_owned()))
                             .into_iter()
+                            .filter(|&at| !text.hidden_at(at))
                             .map(Some)
                             .collect()
                     } else {
@@ -848,21 +856,29 @@ impl Screen {
     /// took away.
     fn attached(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
-        let mut stack = vec![ROOT];
-        while let Some(id) = stack.pop() {
+        // A view, and whether it is in a window of the app's own.
+        let mut stack = vec![(ROOT, false)];
+        while let Some((id, own)) = stack.pop() {
             if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
-            if id != ROOT {
+            let own = own || self.is_window(id);
+            if id != ROOT && self.on_screen(own) {
                 out.push(id);
             }
             if self.kind(id) == Some(ViewKind::Stack) {
-                stack.extend(self.screens(id).last());
+                stack.extend(self.screens(id).last().map(|s| (*s, own)));
             } else if let Some(children) = self.children.get(&id) {
-                stack.extend(children.iter().rev());
+                stack.extend(children.iter().rev().map(|c| (*c, own)));
             }
         }
         out
+    }
+
+    /// Whether a view of a window of the app's own (`own`), or else of the
+    /// main window, is on screen as far as its window goes.
+    fn on_screen(&self, own: bool) -> bool {
+        own || !self.main_hidden
     }
 
     /// The views of [`Screen::attached`] (below the root, of a stack only
@@ -872,12 +888,14 @@ impl Screen {
     pub fn layout_nodes(&self) -> Vec<LayoutNode> {
         let mut out = Vec::new();
         // A view, the view it is in, the origin of that view's content in
-        // the root's points, and whether a view around it is hidden.
-        let mut stack = vec![(ROOT, ROOT, Point::default(), false)];
-        while let Some((id, parent, origin, hidden)) = stack.pop() {
+        // the root's points, whether a view around it is hidden, and whether
+        // it is in a window of the app's own.
+        let mut stack = vec![(ROOT, ROOT, Point::default(), false, false)];
+        while let Some((id, parent, origin, hidden, own)) = stack.pop() {
             if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
+            let own = own || self.is_window(id);
             let root = View::default();
             let view = match self.nodes.get(&id) {
                 Some(view) if view.span.is_some() => continue,
@@ -902,9 +920,8 @@ impl Screen {
             if let Some(scroll) = &view.scroll {
                 content -= Point::new(scroll.x, scroll.y);
             }
-            if id != ROOT
-                && let Some(kind) = view.kind
-            {
+            let listed = view.kind.filter(|_| id != ROOT && self.on_screen(own));
+            if let Some(kind) = listed {
                 out.push(LayoutNode {
                     id,
                     kind,
@@ -931,7 +948,16 @@ impl Screen {
             } else {
                 self.children.get(&id).cloned().unwrap_or_default()
             };
-            stack.extend(children.into_iter().rev().map(|c| (c, id, content, hidden)));
+            // What a view left out holds (a hidden main window's views
+            // hold the windows of the app's own) is in the view around it
+            // that is listed.
+            let parent = if listed.is_some() { id } else { parent };
+            stack.extend(
+                children
+                    .into_iter()
+                    .rev()
+                    .map(|c| (c, parent, content, hidden, own)),
+            );
         }
         out
     }
@@ -950,13 +976,14 @@ impl Screen {
             Clip::Within(Bounds::new(Point::default(), size))
         });
         // A view, the origin of its parent's content and its clip in the
-        // root's points, whether a view around it is hidden, and whether its
-        // parent shows.
-        let mut stack = vec![(ROOT, Point::default(), window, false, true)];
-        while let Some((id, origin, clip, hidden, parent_shown)) = stack.pop() {
+        // root's points, whether a view around it is hidden, whether its
+        // parent shows, and whether it is in a window of the app's own.
+        let mut stack = vec![(ROOT, Point::default(), window, false, true, false)];
+        while let Some((id, origin, clip, hidden, parent_shown, own)) = stack.pop() {
             if self.closed.contains(&id) || self.hidden_windows.contains(&id) {
                 continue;
             }
+            let own = own || self.is_window(id);
             // The root is the platform's: no batch creates it.
             let root = View::default();
             let view = match self.nodes.get(&id) {
@@ -989,7 +1016,7 @@ impl Screen {
             } else {
                 !hidden && (placed || (!bounds.is_empty() && clip.shows(&bounds)))
             };
-            if id != ROOT && shows {
+            if id != ROOT && shows && self.on_screen(own) {
                 out.push(id);
             }
             let mut inner = if matches!(
@@ -1059,7 +1086,7 @@ impl Screen {
                 children
                     .into_iter()
                     .rev()
-                    .map(|child| (child, content, inner, hidden, shows || id == ROOT)),
+                    .map(|child| (child, content, inner, hidden, shows || id == ROOT, own)),
             );
         }
         out
@@ -1188,10 +1215,13 @@ impl Screen {
             .map(|(root, _)| *root)
     }
 
-    /// Window `root` of the app's own is on screen (`!hidden`) or not
-    /// (minimized, hidden, closed by a policy until the app removes it).
+    /// Window `root` (the main window's root, or a window of the app's
+    /// own's) is on screen (`!hidden`) or not (minimized, hidden, closed by
+    /// a policy until the app removes it).
     pub(crate) fn set_window_hidden(&mut self, root: NodeId, hidden: bool) {
-        if hidden {
+        if root == ROOT {
+            self.main_hidden = hidden;
+        } else if hidden {
             self.hidden_windows.insert(root);
         } else {
             self.hidden_windows.remove(&root);
@@ -2612,6 +2642,33 @@ mod tests {
                 .iter()
                 .all(|n| n.parent == ROOT || ids.contains(&n.parent))
         );
+    }
+
+    #[test]
+    fn layout_nodes_of_a_hidden_main_window_hold_its_app_windows_in_the_root() {
+        let mut screen = Screen::default();
+        // 2 is a view of the main window, 4 in it the root of a window of
+        // the app's own, and 6 in that window.
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::Modal),
+            create(6, ViewKind::View),
+            frame(2, 0.0, 0.0, 100.0, 100.0),
+            frame(4, 0.0, 0.0, 100.0, 20.0),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(4, 6),
+        ]));
+        screen.windows.push((4, "tools".into()));
+        screen.set_window_hidden(ROOT, true);
+        let nodes = screen.layout_nodes();
+        let parents: Vec<_> = nodes.iter().map(|n| (n.id, n.parent)).collect();
+        assert_eq!(parents, [(4, ROOT), (6, 4)]);
+        screen.set_window_hidden(ROOT, false);
+        let nodes = screen.layout_nodes();
+        let parents: Vec<_> = nodes.iter().map(|n| (n.id, n.parent)).collect();
+        assert_eq!(parents, [(2, ROOT), (4, 2), (6, 4)]);
     }
 
     #[test]

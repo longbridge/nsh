@@ -67,7 +67,15 @@ pub(crate) struct ThemeSetup {
     /// (`"locales"`), as the runtime's `i18n` takes them: a module of their
     /// own the entry imports first ([`I18N_MODULE`]).
     pub(crate) i18n: Option<String>,
+    /// What `appInfo()` reports (JSON): handed to the runtime by a module
+    /// of its own the entry imports first ([`APP_MODULE`]).
+    pub(crate) app: String,
 }
+
+/// The module that hands the runtime the app's information (`appInfo()`),
+/// imported first by the entry, before the modules that may read it.
+pub(crate) const APP_MODULE: &str = "virtual:nsh-app";
+const APP_ID: &str = "\0nsh-app";
 
 /// The module that hands the runtime the app's translations and language
 /// data, imported first by the entry so that it runs before any other
@@ -317,10 +325,15 @@ impl NshPlugin {
             None => "null".to_owned(),
         };
         let setup = &self.tailwind;
+        let app = (!setup.app.is_empty()).then(|| format!("import {APP_MODULE:?};\n"));
         let i18n = setup
             .i18n
             .is_some()
             .then(|| format!("import {I18N_MODULE:?};\n"));
+        let i18n = match (app, i18n) {
+            (None, None) => None,
+            (app, i18n) => Some(app.unwrap_or_default() + &i18n.unwrap_or_default()),
+        };
         let call = (setup.json.is_some()
             || setup.ui.is_some()
             || setup.appearance.is_some()
@@ -431,6 +444,9 @@ impl Plugin for NshPlugin {
         if spec == I18N_MODULE && self.tailwind.i18n.is_some() {
             return Ok(Some(HookResolveIdOutput::from_id(I18N_ID)));
         }
+        if spec == APP_MODULE && !self.tailwind.app.is_empty() {
+            return Ok(Some(HookResolveIdOutput::from_id(APP_ID)));
+        }
         if self.modules.contains(spec) {
             // Hot factories keep external import() expressions. Preloading
             // their namespaces would turn an optional native API into an
@@ -512,6 +528,18 @@ impl Plugin for NshPlugin {
             let code = format!(
                 "import {{ i18n }} from \"nsh:rt\";\ni18n({});",
                 serde_json::Value::String(json.clone())
+            );
+            return Ok(Some(HookLoadOutput {
+                code: code.into(),
+                module_type: Some(ModuleType::Js),
+                ..Default::default()
+            }));
+        }
+        if args.id == APP_ID && !self.tailwind.app.is_empty() {
+            // `setup`'s fifth argument; a runtime that predates it ignores it.
+            let code = format!(
+                "import {{ setup }} from \"nsh:rt\";\nsetup(null, null, null, null, {});",
+                serde_json::Value::String(self.tailwind.app.clone())
             );
             return Ok(Some(HookLoadOutput {
                 code: code.into(),
@@ -699,6 +727,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
     }
 
@@ -738,6 +767,88 @@ mod tests {
             bundle.code
         );
         assert_eq!(assets(&bundle), ["sounds/tap.wav"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The entry hands the runtime the app's information first, from
+    /// `nsh.json`, a release build saying it is one, and the version and
+    /// build a package gives in place of `nsh.json`'s.
+    #[test]
+    fn the_entry_hands_over_the_apps_information_first() {
+        let dir = std::env::temp_dir().join(format!("nsh-app-info-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "name": "Notes", "id": "com.example.notes", "version": "1.2.0", "build": 4 }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("early.ts"),
+            "import { appInfo } from \"nsh\";\nexport const early = appInfo();\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text } from \"nsh\";\nimport { early } from \"./early\";\nmount(() => <Text>{early.version}</Text>);\n",
+        )
+        .unwrap();
+        let info = |code: &str| {
+            let at = code.find("setup(null, null, null, null, ").expect(code);
+            let early = code.find("appInfo()").expect(code);
+            assert!(at < early, "the information comes first: {code}");
+            let json: String = serde_json::from_str(
+                code[at + "setup(null, null, null, null, ".len()..]
+                    .split(");")
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap();
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()
+        };
+        let options = |development: bool| BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: !development,
+            development,
+            ..Default::default()
+        };
+        let development = info(&bundle(&options(true)).unwrap().code);
+        assert_eq!(
+            development,
+            serde_json::json!({
+                "id": "com.example.notes", "name": "Notes", "version": "1.2.0", "build": 4,
+                "development": true,
+            })
+        );
+        let mut release = options(false);
+        // A nested entry still reads the app's root configuration.
+        std::fs::create_dir_all(dir.join("screens")).unwrap();
+        std::fs::write(
+            dir.join("screens/Home.tsx"),
+            "import { mount, Text } from \"nsh\";\nimport { early } from \"../early\";\nmount(() => <Text>{early.version}</Text>);\n",
+        )
+        .unwrap();
+        let nested = BundleOptions {
+            entry: dir.join("screens/Home.tsx"),
+            ..options(true)
+        };
+        assert_eq!(info(&bundle(&nested).unwrap().code), development);
+        release.app = crate::AppInfo {
+            id: Some("com.acme.renamed".into()),
+            version: Some("2.0.0".into()),
+            build: Some(9),
+            ..Default::default()
+        };
+        // Minified: the JSON as the minifier quotes it.
+        let release = bundle(&release).unwrap().code.replace('\\', "");
+        for part in [
+            r#""id":"com.acme.renamed""#,
+            r#""version":"2.0.0""#,
+            r#""build":9"#,
+            r#""development":false"#,
+        ] {
+            assert!(release.contains(part), "{part}: {release}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

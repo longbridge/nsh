@@ -689,7 +689,7 @@ final class Mounter {
                 v = modal.root;
                 break;
             }
-            case 12: v = new WebBox(context, this, id); break;
+            case 12: v = WebBox.make(context, this, id); break;
             case 13: v = new VideoBox(context, this, host, id); break;
             case 14: v = new CanvasBox(context, this, id); break;
             case 15: v = new ComponentBox(context, this, id); break;

@@ -330,7 +330,8 @@ fn own_name(view: &NshView, s: &ViewState, role: Option<Role>) -> Option<String>
         return Some(label.to_string());
     }
     if let Some(t) = &s.text {
-        return Some(t.text.text.clone());
+        // Hidden runs are not read.
+        return Some(t.text.visible_text().into_owned());
     }
     if !role.is_some_and(|r| groups(s, r)) {
         return None;
@@ -360,7 +361,8 @@ fn content_name(view: &NshView, out: &mut String) {
                     .accessibility
                     .label
                     .as_deref()
-                    .or(s.text.as_ref().map(|t| t.text.text.as_str())),
+                    .map(std::borrow::Cow::Borrowed)
+                    .or_else(|| s.text.as_ref().map(|t| t.text.visible_text())),
             };
             match own {
                 Some(text) => {

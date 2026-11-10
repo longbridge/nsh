@@ -63,6 +63,10 @@ impl SelectionTexts for Texts {
         &self.contents[i].text
     }
 
+    fn copied(&self, i: usize, range: std::ops::Range<u32>) -> String {
+        self.contents[i].copied_text(range)
+    }
+
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.frames[i]
     }
@@ -334,12 +338,13 @@ impl AreaSelection {
             .is_some_and(|a| !a.model.is_empty())
     }
 
-    /// The selected text, as a copy gives it (`None` without a selection).
+    /// The selected text, as a copy gives it (`None` without a selection,
+    /// or one of hidden characters only).
     pub(crate) fn text(&self) -> Option<String> {
         let active = self.active.borrow();
         let active = active.as_ref().filter(|a| !a.model.is_empty())?;
         let texts = collect(&active.area()?);
-        Some(active.model.text(&texts))
+        Some(active.model.text(&texts)).filter(|t| !t.is_empty())
     }
 
     /// Selects every text of the area last pressed (Cmd+A). False without

@@ -50,6 +50,9 @@ pub(crate) struct Host {
     /// Animation items of submitted batches, by batch number, applied on the
     /// UI thread once Java has applied that batch.
     animation_queue: Mutex<VecDeque<(u64, Vec<MountItem>)>>,
+    /// Functions the app runs on the UI thread
+    /// ([`MountSink::run_on_main_thread`]), until Java's post runs them.
+    main_thread_tasks: Mutex<VecDeque<nsh_engine::MainThreadTask>>,
     seq: AtomicU64,
     ui: Mutex<UiAnimation>,
     epoch: Instant,
@@ -505,6 +508,27 @@ impl MountSink for Sink {
         });
     }
 
+    fn run_on_main_thread(&self, task: nsh_engine::MainThreadTask) {
+        self.0
+            .main_thread_tasks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back(task);
+        let view = &self.0.view;
+        with_env(|env| {
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_method_unchecked(
+                    view.as_obj(),
+                    java().view_run_main_thread_tasks,
+                    ReturnType::Primitive(Primitive::Void),
+                    &[],
+                )
+            }
+            .map(|_| ())
+        });
+    }
+
     #[cfg(feature = "dev")]
     fn hot_update_failed(&self) {
         if let Some(dev) = self.0.dev.lock().ok().as_ref().and_then(|d| d.as_ref()) {
@@ -599,6 +623,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             ..Environment::default()
         }),
         animation_queue: Mutex::new(VecDeque::new()),
+        main_thread_tasks: Mutex::new(VecDeque::new()),
         seq: AtomicU64::new(0),
         ui: Mutex::new(UiAnimation::default()),
         epoch: Instant::now(),
@@ -1773,6 +1798,27 @@ extern "system" fn Java_com_longbridge_nsh_Native_afterBatch(
     }
     finish(host, &mut ui);
     floats(&env, &ui.outputs())
+}
+
+/// Runs the next function the app asked to run on the UI thread
+/// ([`MountSink::run_on_main_thread`]). On the UI thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_runMainThreadTasks(
+    _env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    // One post per task, so a task never runs ahead of a batch posted after an earlier task.
+    let task = host
+        .main_thread_tasks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop_front();
+    if let Some(task) = task {
+        task.run();
+    }
 }
 
 /// A `Choreographer` frame (nanoseconds).

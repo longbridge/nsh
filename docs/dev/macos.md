@@ -167,6 +167,13 @@ belong to the app, which owns retention and its storage budget.
   it is: AppKit would shrink a window taller than its screen when it shows it, and a test's window keeps the size the
   test opens it at on a shorter secondary display. nsh.json `window` applies before the window shows (its attributes,
   size, place, display and mode; with `restoreBounds` the placement the engine kept in the app's storage, which the runner reads first).
+  With `defaultVisible: false` the window is made and its app runs, but it is not ordered in: the mode it opens in
+  waits on the surface (`main_open_mode`) for the first `show()` / `focus()`, a link (`application:openURLs:`) or
+  the Dock's reopen to show it (`window::main_shown`). A development host holds its first show until the first app
+  came (`Running::held`): the app's `defaultVisible` decides whether it shows, at the host's size and in the normal
+  mode, as every app's window (the other launch options apply where a runner makes the window). An error shows the
+  window while it is hidden (held, or hidden by the app: a tray app whose startup failed), so it is seen; a reload
+  leaves it as it is.
   The standalone event loop
   ends when its window closes, a minimized one too; `windowWillClose:` schedules
   its stop after the close callback. `set_ui_sets`
@@ -188,7 +195,7 @@ belong to the app, which owns retention and its storage budget.
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
 | Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container's bounds origin when it contains inputs, otherwise by its layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view |
 | Input | `input.rs`, `nsh_core::input` | The root's `hitTest:` takes every mouse event inside it, and NSH picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where NSH's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what NSH draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onMouseEnter` / `onMouseLeave` / `onMouseMove`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back; the decisions over plain data (a press's events, `panActivation` gates, hover changes, hit areas, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
-| Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
+| Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point; hidden while the input or its content box has no area, as in a `display: none` subtree, since it does not clip), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
 | Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; a page the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a dialog; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
 | Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored) |
 | Shaders | `shader.rs` | `Shader` frames as a sublayer's IOSurface (the GPU renders into it; a `CGImage` read back without Metal) under the children; effects and transitions draw their children through the shader from `renderInContext:` pictures of their container, masked while the frames show over it; a page's or a dialog's `transitionShader` as a layer over the stack or the root (`NavOverlay`); see [shaders.md](shaders.md) |
@@ -411,6 +418,20 @@ Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while
 hidden, a test's quit, and cleanup after run_app returns. Source implementation
 and CI compilation alone do not prove those runtime behaviors.
+
+## Activation policy
+
+`AppOptions::activation_policy` (`ActivationPolicy::Regular` by default, `Accessory` for a menu bar app) is what
+`run_app` gives `NSApplication.setActivationPolicy` before the app starts; `background` (Prohibited) takes precedence
+(`app.rs` `activation_policy`). nsh.json's `macos.activationPolicy` reaches it on every path that starts a standalone
+app, before the app's code runs: `nsh package` writes `LSUIElement` into the `Info.plist` (a key NSH reserves,
+`nsh-cli` `apple.rs`) and `activationPolicy` into `app.json`, which `nsh-macos-app` reads (packages, and Rust apps
+`nsh run` runs in place); `nsh run` and `nsh test` pass the development host `--activation-policy`
+(`MacosConfig::host_args`). A dev server or a hot reload never changes it, and an embedded `AppView` leaves it to its
+host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in_background`, the agent's
+`activate`): an accessory app's windows become key as a regular app's do. The Dock's features (the badge, the
+attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
+shows its window itself (`focus()` from its tray).
 
 ## Keyboard focus for views
 

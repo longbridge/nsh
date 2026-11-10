@@ -165,7 +165,23 @@ export function createBrowserHost(player) {
           // errors retain their filename and original rejection value.
           bootstrap.crossOrigin = "anonymous";
           bootstrap.src = new URL("./bootstrap.js", import.meta.url).href;
-          bootstrap.onerror = () => finish(false, new Error("could not load the browser facade"));
+          bootstrap.onerror = async () => {
+            let detail = bootstrap.src;
+            // A stalled probe must not hide the load failure. Stop it early.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3000);
+            try {
+              const response = await fetch(bootstrap.src, { cache: "no-store", signal: controller.signal });
+              const type = response.headers.get("content-type") ?? "no content-type";
+              detail += ` (status ${response.status}, ${type})`;
+              response.body?.cancel();
+            } catch (error) {
+              detail += ` (fetch failed: ${error})`;
+            } finally {
+              clearTimeout(timer);
+            }
+            finish(false, new Error(`could not load the browser facade: ${detail}`));
+          };
           bootstrap.onload = () => finish(false, new Error("the browser facade did not initialize"));
           realm.addEventListener("error", failed);
           try { doc.head.append(bootstrap); } catch (error) { finish(false, error); }

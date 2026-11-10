@@ -309,7 +309,9 @@ impl WebItem {
         });
     }
 
-    /// No web view: the placeholder shows.
+    /// No web view: the placeholder shows, and the app hears why
+    /// (`onError`, `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`) to show what it
+    /// has instead.
     fn unavailable(&self, why: &str) {
         self.failed.set(true);
         self.portal.borrow_mut().take();
@@ -320,6 +322,18 @@ impl WebItem {
                 "WebView is not available ({why}; is the WebView2 runtime installed?): it shows a placeholder"
             );
         }
+        self.emitter.emit(EventKind::Error, || {
+            EventPayload::Map(vec![
+                (
+                    "message",
+                    PayloadValue::Str(format!("WebView is not available: {why}")),
+                ),
+                (
+                    "code",
+                    PayloadValue::Str(nsh_core::element::codes::UNAVAILABLE.into()),
+                ),
+            ])
+        });
         self.invalidate();
     }
 

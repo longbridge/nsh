@@ -14,7 +14,7 @@ Native components: the app's own views, used from JS with `nativeComponent` (`ns
 `MainActivity` registers `embed.badge`, which `examples/embedded` shows:
 
 ```java
-nsh.registerComponent("embed.badge", context -> new Badge(this, context));  // Badge implements NshComponent
+nsh.registerComponent("embed.badge", Badge::new);  // Badge implements NshComponent; context.getContext() makes its views
 ```
 
 The component gets its props (`setProp`, JSON as maps and lists) and commands, emits events with

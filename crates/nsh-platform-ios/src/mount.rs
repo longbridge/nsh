@@ -1784,6 +1784,10 @@ impl Mounter {
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
+            // Not carried out on iOS yet: the app's paste is lost, so say so.
+            (Command::InsertText(_), _) => {
+                log::warn!("insertText is not supported on iOS yet; nothing inserted")
+            }
             (Command::OpenEditMenu { bounds, actions }, Native::Input(input)) => {
                 let view = input.editor_view();
                 let rect = CGRect::new(

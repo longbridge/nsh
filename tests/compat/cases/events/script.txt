@@ -105,6 +105,12 @@ prop id:paste pasteBehavior report
 expect Pasted: none
 event id:paste onPaste text=hello
 expect Pasted: hello html 0 files 0 uris 0
+expect Inserted: none
+# The app inserts a paste it allowed (`insertText`): the call is made
+# without throwing; what it inserts is the platforms' (nsh-testing's paste
+# tests check it headless).
+event id:paste onPaste text=insert:hi
+expect Pasted: insert:hi html 0 files 0 uris 0
 covers [events] onPaste
 prop id:paste pasteBehavior report
 covers [props] pasteBehavior

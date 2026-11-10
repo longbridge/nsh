@@ -25,7 +25,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size,
 };
-use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
+use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink};
 use rustc_hash::FxHashMap;
 use windows::Win32::Foundation::{HWND, RECT};
 
@@ -44,6 +44,9 @@ enum Message {
     HotUpdateFailed,
     /// The engine laid the app out at this size ([`MountSink::resized`]).
     Resized(Size<Points>),
+    /// A function the app runs on the main thread
+    /// ([`MountSink::run_on_main_thread`]), after the batches before it.
+    Run(MainThreadTask),
 }
 
 /// How long the main thread waits for the layout at a new window size
@@ -104,6 +107,10 @@ impl MountSink for Sink {
 
     fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
+    }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
     }
 }
 
@@ -251,6 +258,12 @@ pub(crate) struct Surface {
     composed: RefCell<Vec<Rc<dyn Hosted>>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// A top-level window that has not shown yet: its first show paints it
+    /// before DWM composites it ([`crate::app::show_main`]).
+    pub(crate) main_unshown: Cell<bool>,
+    /// The mode the top-level window takes when it first shows (nsh.json
+    /// `window`, [`AppView::place_main_window`](crate::AppView)).
+    pub(crate) main_opening_mode: Cell<Option<nsh_core::desktop::WindowMode>>,
     /// Called after the surface is resized (development overlays).
     pub(crate) on_resized: RefCell<Vec<ResizeHandler>>,
     /// The engine missed the deadline of a resize ([`RESIZE_WAIT`]): later
@@ -329,6 +342,8 @@ impl Surface {
             windows: RefCell::default(),
             input_root: RefCell::default(),
             chrome: Default::default(),
+            main_unshown: Cell::new(true),
+            main_opening_mode: Cell::new(None),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -820,6 +835,7 @@ impl Surface {
                 }
             }
             Message::Resized(_) => self.resize_late.set(false),
+            Message::Run(task) => task.run(),
         }
         false
     }

@@ -104,6 +104,10 @@ const BAR_HOLD = 700;
  * FADE_MS, both easing out cubically (1 - (1 - t)^3, exactly). */
 const SLIDE_MS = 300;
 const FADE_MS = 200;
+/** How long a back that popped pages waits for the app's answer (a page's
+ * `onDismiss` follows its slide; an app's own motion may last longer)
+ * before its address is the app's `change` (`settlePop`). */
+const POP_ANSWER_MS = 1500;
 const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
 // Browsers that order Tab and screen readers by `reading-order`
@@ -939,6 +943,11 @@ class Player {
     // Browser blob URLs of the in-memory images (`data:` URIs, blobs) the
     // views show, by the source's URI (`image_bytes`).
     this.inlineImages = new Map();
+    // `svg()`s drawn in their text color: the SVG's text by its address
+    // (a promise while it loads), and its blob URL by address and color
+    // (`svgInColor`).
+    this.svgTexts = new Map();
+    this.coloredSvgs = new Map();
     this.pointers = new Map();
     this.requests = new Map();
     this.websockets = new Map();
@@ -1038,12 +1047,18 @@ class Player {
           // The key names the media type (`data:<type>;nsh-key=…`): browsers
           // draw an SVG blob only with its type.
           const type = uri.startsWith("data:") ? uri.slice(5, uri.indexOf(";")) : "";
-          this.inlineImages.set(uri, URL.createObjectURL(new Blob([this.bytes(dp, dl).slice()], { type })));
+          const blob = URL.createObjectURL(new Blob([this.bytes(dp, dl).slice()], { type }));
+          if (old) this.forgetColoredSvgs(old);
+          this.inlineImages.set(uri, blob);
+          if (type === "image/svg+xml") this.svgTexts.set(blob, new TextDecoder().decode(this.bytes(dp, dl)));
         },
         release_image: (p, l) => {
           const uri = this.str(p, l);
           const url = this.inlineImages.get(uri);
-          if (url) URL.revokeObjectURL(url);
+          if (url) {
+            URL.revokeObjectURL(url);
+            this.forgetColoredSvgs(url);
+          }
           this.inlineImages.delete(uri);
         },
         submit: (p, l) => {
@@ -2877,7 +2892,7 @@ class Player {
    * Any URL the browser loads works: `asset:/` and http(s); `data:` URIs and
    * `blob:` URLs arrive as bytes (`image_bytes`) and show as browser blob URLs.
    */
-  op_img([, id, uri, mode, placeholder, blur, fade, position]) {
+  op_img([, id, uri, mode, placeholder, blur, fade, position, color]) {
     const el = this.view(id);
     if (!el?._img) return;
     const img = el._img;
@@ -2904,7 +2919,29 @@ class Player {
         el._ph = null;
       }
     }
-    const src = this.asset(uri ?? "");
+    let src = this.asset(uri ?? "");
+    // An `svg()`: its `currentColor` is `color`, its text color, written
+    // into a copy of it (an SVG an `<img>` draws sees no page CSS), shown
+    // once that copy is made.
+    if (color && src) {
+      const key = `${src}\n${color}`;
+      if (el._srcKey === key) return;
+      el._srcKey = key;
+      const colored = this.svgInColor(src, color);
+      if (typeof colored !== "string") {
+        colored.then(() => {
+          if (el._srcKey !== key || !el._img) return;
+          el._srcKey = null;
+          this.op_img([, id, uri, mode, placeholder, blur, fade, position, color]);
+        });
+        if (el._src) return;
+        src = "";
+      } else {
+        src = colored;
+      }
+    } else {
+      el._srcKey = null;
+    }
     if (el._src === src) return;
     el._src = src;
     el._failed = false;
@@ -2922,6 +2959,43 @@ class Player {
     // Only an image that had to load fades in (the native backends').
     if (img.complete) img.style.opacity = "";
     this.applyTint(el);
+  }
+
+  /** `src`, an SVG, with its `currentColor` painted `color`: its blob URL,
+   * or a promise while its text loads. An SVG without `currentColor`, or
+   * one that does not load as text, is `src` itself. */
+  svgInColor(src, color) {
+    const key = `${src}\n${color}`;
+    const done = this.coloredSvgs.get(key);
+    if (done) return done;
+    let text = this.svgTexts.get(src);
+    if (text === undefined) {
+      text = fetch(src).then((r) => (r.ok ? r.text() : "")).catch(() => "");
+      this.svgTexts.set(src, text);
+    }
+    const make = (text) => {
+      const url = /currentcolor/i.test(text)
+        ? URL.createObjectURL(new Blob([text.replace(/currentcolor/gi, color)], { type: "image/svg+xml" }))
+        : src;
+      this.coloredSvgs.set(key, url);
+      return url;
+    };
+    if (typeof text === "string") return make(text);
+    return text.then((loaded) => {
+      if (this.svgTexts.get(src) === text) this.svgTexts.set(src, loaded);
+      return this.coloredSvgs.get(key) ?? make(loaded);
+    });
+  }
+
+  /** Drops the colored copies of in-memory SVG `blob`, released. */
+  forgetColoredSvgs(blob) {
+    this.svgTexts.delete(blob);
+    const prefix = `${blob}\n`;
+    for (const [key, url] of this.coloredSvgs) {
+      if (!key.startsWith(prefix)) continue;
+      if (url !== blob) URL.revokeObjectURL(url);
+      this.coloredSvgs.delete(key);
+    }
   }
 
   applyTint(el) {
@@ -5038,8 +5112,14 @@ class Player {
     }
     stack._top = below ?? null;
     screen._popping = true;
-    // The screen goes, then the app is told (and removes it).
-    const dismissed = () => this.event(screen._id, "onDismiss");
+    // The screen goes, then the app is told (and removes it); an address
+    // the browser's back moved waits for the app's answer (`settlePop`).
+    this.dismissing = (this.dismissing ?? 0) + 1;
+    const dismissed = () => {
+      this.dismissing -= 1;
+      this.event(screen._id, "onDismiss");
+      if (this.popAnswer) setTimeout(() => this.settlePop(), 0);
+    };
     // Through its shader, with its own motion, or at once.
     this.moveScreens(screen, below, false, dismissed);
     this.syncHistorySoon();
@@ -5217,7 +5297,11 @@ class Player {
   // History: one entry per screen over the bottom one of each shown stack
   // and per presented modal, so that the browser's back button goes back
   // in the app. Entries the app takes away itself are gone back over
-  // (`history.go`), their `popstate` ignored.
+  // (`history.go`), their `popstate` ignored. Each entry has its depth
+  // (`nsh`) and its place among this load's entries (`nshIndex`): an
+  // address the user typed is an entry at the depth it was typed at, and
+  // a back or forward between entries of one depth moves the app's
+  // address (`change`).
 
   installHistory() {
     this.historyDepth = 0;
@@ -5225,6 +5309,10 @@ class Player {
     // Entries are this page load's: those of an earlier load (a reload
     // keeps them, with their depths) are foreign, below this one's.
     this.historySession = newHistorySession();
+    // The current entry's place, and the depth of each entry up to the
+    // newest (what a back of the app's own goes back over).
+    this.historyIndex = 0;
+    this.historyDepths = [0];
     history.replaceState(this.historyState(0), "");
     // The address of the app's first entry, where every run starts, and of
     // the entry shown (a page the app keeps on a back keeps it).
@@ -5232,26 +5320,51 @@ class Player {
     window.addEventListener("popstate", (e) => this.popState(e));
   }
 
-  historyState(depth) {
-    return { ...(history.state ?? {}), nsh: depth, nshSession: this.historySession };
+  historyState(depth, index = this.historyIndex) {
+    return { ...(history.state ?? {}), nsh: depth, nshSession: this.historySession, nshIndex: index };
   }
 
   /** A new run starts at the app's first entry. */
   resetHistory() {
     if (!this.history) return;
     this.pageUrl = null;
-    if (!this.historyDepth) return;
-    this.ignoredPops++;
-    history.go(-this.historyDepth);
+    this.pageUrlPush = false;
+    this.endPopAnswer();
+    const index = this.historyIndex;
+    this.historyIndex = 0;
+    this.historyDepths = [0];
     this.historyDepth = 0;
+    if (!index) return;
+    this.ignoredPops++;
+    history.go(-index);
+  }
+
+  /** A new entry after the current one, at `depth`, with address `url`
+   * (the current one's when not given): those after it go. */
+  pushEntry(depth, url) {
+    const index = this.historyIndex + 1;
+    history.pushState(this.historyState(depth, index), "", url);
+    this.historyDepths.length = index;
+    this.historyDepths.push(depth);
+    this.historyIndex = index;
+  }
+
+  /** The newest entry before the current one at most `depth` deep: where
+   * a back of the app's own to `depth` goes. */
+  entryAtDepth(depth) {
+    for (let i = this.historyIndex - 1; i > 0; i--) if (this.historyDepths[i] <= depth) return i;
+    return 0;
   }
 
   /** `UrlScheme.setUrl` / `set_app_url`: the current entry's address, once
    * the entries of the pages pushed or popped with it exist
-   * (`syncHistory`). Resolved as `replaceState` resolves it (against
+   * (`syncHistory`); with `push` (`history: "push"`) an entry of its own
+   * after it, unless the turn pushed a page's (which takes the address) or
+   * it is the address shown. In one turn the last address wins, and a push
+   * wins over a replace. Resolved as `replaceState` resolves it (against
    * `<base href>`); one of another origin is dropped (TS's `setUrl` throws
    * for it first, in `runtime.js`). */
-  setPageUrl(url) {
+  setPageUrl(url, push = false) {
     if (!this.history) return;
     let resolved;
     try {
@@ -5265,6 +5378,7 @@ class Player {
       return;
     }
     this.pageUrl = resolved.href;
+    if (push) this.pageUrlPush = true;
     this.pageUrlSets = (this.pageUrlSets ?? 0) + 1;
     this.syncHistorySoon();
   }
@@ -5290,23 +5404,37 @@ class Player {
   syncHistory() {
     const depth = this.backDepth();
     const have = this.historyDepth;
-    for (let i = have + 1; i <= depth; i++) history.pushState(this.historyState(i), "");
+    for (let i = have + 1; i <= depth; i++) this.pushEntry(i);
     if (depth < have) {
+      // Back over the entries above `depth`, the addresses the user typed
+      // at those depths included; a level that has no entry left gets one
+      // once the traversal lands.
+      const to = this.entryAtDepth(depth);
+      const delta = to - this.historyIndex;
+      // Where it lands, before it may (a browser lands later).
+      this.historyIndex = to;
+      this.historyDepth = Math.min(depth, this.historyDepths[to] ?? 0);
       this.ignoredPops++;
-      history.go(depth - have);
+      history.go(delta);
+    } else {
+      this.historyDepth = depth;
     }
-    this.historyDepth = depth;
     // The address goes to the entry the traversal lands on (its
     // `popstate` syncs again).
     if (this.pageUrl != null && !this.ignoredPops) {
       const url = this.pageUrl;
+      // An entry of its own, at the depth of the pages shown, when the
+      // turn pushed no page's and the address is not the one shown.
+      const push = this.pageUrlPush && depth <= have && url !== location.href;
       this.pageUrl = null;
+      this.pageUrlPush = false;
       try {
         // Resolved as `replaceState` does, against `<base href>` when the
         // page has one.
-        history.replaceState(history.state, "", url);
+        if (push) this.pushEntry(depth, url);
+        else history.replaceState(history.state, "", url);
         this.shownUrl = url;
-        if (!this.historyDepth) this.firstUrl = url;
+        if (!this.historyIndex) this.firstUrl = url;
       } catch (error) {
         this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
       }
@@ -5318,17 +5446,35 @@ class Player {
       if (--this.ignoredPops) return;
       // A traversal of the player's own landed: the address waiting for it
       // goes to the entry, or the core takes the entry's (the app did not
-      // set one).
+      // set one). Levels the entry lacks get theirs.
+      if (this.historyDepth < this.backDepth()) this.syncHistorySoon();
       if (this.pageUrl != null) this.syncHistorySoon();
       else this.tellAddress(false);
       return;
     }
+    // A move of the user's: an answer the app owed for the one before is
+    // not waited for any more.
+    this.endPopAnswer();
     const have = this.historyDepth;
     if (e.state?.nshSession !== this.historySession) {
+      if (e.state?.nsh == null && location.href !== this.shownUrl) {
+        // An address the user gave the page (a `#fragment` typed in the
+        // address bar): an entry after the current one, at its depth, as
+        // if the app had pushed it. The app's pages stay; it shows what
+        // the address names (`change`).
+        const index = this.historyIndex + 1;
+        this.historyDepths.length = index;
+        this.historyDepths.push(have);
+        this.historyIndex = index;
+        history.replaceState(this.historyState(have, index), "");
+        this.tellAddress("address");
+        return;
+      }
       // Back past the app's first entry: the app goes back to its start.
       // An earlier load's entries (a reload keeps them) are passed over,
       // as if the page had been left from its first screen.
       this.historyDepth = 0;
+      this.historyIndex = 0;
       for (let i = 0; i < have; i++) if (!this.back()) break;
       if (e.state?.nsh == null) return;
       // An earlier load's entry (a reload keeps them): an address the app
@@ -5336,12 +5482,18 @@ class Player {
       // app's first, in a session of its own, so this load's entries after
       // it are an earlier load's too.
       this.historySession = newHistorySession();
+      this.historyDepths = [0];
       history.replaceState(this.historyState(0), "");
       this.firstUrl = location.href;
       this.tellAddress(true);
       return;
     }
     const at = e.state.nsh ?? 0;
+    // This load's entries all have their place; which way the user went.
+    const index = Number.isInteger(e.state.nshIndex) ? e.state.nshIndex : at;
+    const cause = index < this.historyIndex ? "back" : "forward";
+    this.historyIndex = index;
+    this.historyDepths[index] = at;
     if (at > have) {
       // Forward to a screen the stack no longer has: an address the app is
       // handed from outside, as a link (`open`), and its pages' entries go
@@ -5352,9 +5504,18 @@ class Player {
       this.syncHistorySoon();
       return;
     }
+    if (at === have) {
+      // Between entries of one depth (addresses the user typed): the app's
+      // pages are as the entry has them, and it shows what the address
+      // names.
+      if (!index) this.firstUrl = location.href;
+      this.tellAddress(location.href !== this.shownUrl ? cause : false);
+      return;
+    }
     // A pop the app hears at once (no motion, a modal) may give the address
     // itself from `onChange`, before the entry's below.
     const sets = this.pageUrlSets;
+    const before = this.shownUrl;
     if (at < have) {
       // Back (several entries from the back button's menu): what the app
       // does not let go back gets its entry again.
@@ -5372,16 +5533,56 @@ class Player {
     // The app went back: the address is the entry's (`UrlScheme.url()`),
     // with no `open`, as its stack went back already; a `setUrl` from its
     // `onChange` wins, whether it came during the pops or comes after.
-    if (!at) this.firstUrl = location.href;
-    if (this.pageUrlSets === sets) this.tellAddress(false);
-    else this.shownUrl = location.href;
+    if (!index) this.firstUrl = location.href;
+    if (this.pageUrlSets !== sets) {
+      this.shownUrl = location.href;
+      return;
+    }
+    this.tellAddress(false);
+    // An app whose pages do not set the address (no `onChange` for them)
+    // hears an entry's address that differs from the one it had
+    // (`change`), once the pages it popped are dismissed: it answers the
+    // dismissal after their slide, and an address it sets then wins.
+    if (location.href !== before) this.awaitPopAnswer({ sets, url: location.href, cause });
+  }
+
+  /** Waits for the app's answer to a back that popped its pages (`popped`:
+   * `sets`, `url`, `cause`), at most `POP_ANSWER_MS`. */
+  awaitPopAnswer(popped) {
+    this.popAnswer = popped;
+    popped.timer = setTimeout(() => {
+      popped.expired = true;
+      this.settlePop();
+    }, POP_ANSWER_MS);
+    setTimeout(() => this.settlePop(), 0);
+  }
+
+  /** Once the pages a back popped are dismissed: the address is a
+   * `change` unless the app set one meanwhile. */
+  settlePop() {
+    const popped = this.popAnswer;
+    if (!popped || (this.dismissing > 0 && !popped.expired)) return;
+    this.endPopAnswer();
+    if (this.pageUrlSets !== popped.sets || location.href !== popped.url) return;
+    this.tellAddress(popped.cause);
+  }
+
+  endPopAnswer() {
+    clearTimeout(this.popAnswer?.timer);
+    this.popAnswer = null;
   }
 
   /** Tells the core the entry's address: with `open` when the app is handed
-   * it from outside, else as the address only (`quiet`). */
-  tellAddress(open) {
+   * it from outside (`true`), as a move the app did not make when `how` is
+   * its cause (`"back"`, `"forward"`, `"address"`: `change`), else as the
+   * address only (`quiet`). */
+  tellAddress(how) {
     this.shownUrl = location.href;
-    this.event(ROOT_ID, "onUrlScheme", open ? { url: this.shownUrl, page: true } : { url: this.shownUrl, page: true, quiet: true });
+    const url = this.shownUrl;
+    const payload = how === true
+      ? { url, page: true }
+      : typeof how === "string" ? { url, page: true, change: how } : { url, page: true, quiet: true };
+    this.event(ROOT_ID, "onUrlScheme", payload);
   }
 
   stackChanged(stack, added) {
@@ -5895,6 +6096,23 @@ class Player {
         else document.activeElement?.blur?.();
         break;
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
+      case "insertText": {
+        // As the user's typing: the browser's undo history keeps it and
+        // `input` reports it. `execCommand` edits the focused field only.
+        const field = el?._field;
+        if (!field) break;
+        if (field._composing) {
+          // The input method's text would be committed around it (as on Linux).
+          console.warn("insertText: an input method is composing; nothing inserted");
+          break;
+        }
+        if (document.activeElement !== field) field.focus();
+        if (!document.execCommand("insertText", false, args[0])) {
+          field.setRangeText(args[0], field.selectionStart, field.selectionEnd, "end");
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        break;
+      }
       case "scrollTo":
         if (!el) break;
         // A textarea's text (a built-in bar's drags).
@@ -5967,6 +6185,7 @@ class Player {
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
+      case "pushAppUrl": this.setPageUrl(args[0], true); break;
       case "exitApp": {
         const app = this.app;
         // Finish the current engine call before releasing its surface.
@@ -7417,12 +7636,14 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) are left out, as the native
-   * platforms copy. */
+   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
+   * the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
-    if (out === null) return;
+    // Nothing selectable selected, or hidden characters only: the
+    // clipboard keeps what it has.
+    if (!out) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", out);
   }
@@ -7463,6 +7684,12 @@ class Player {
         last = run.parentNode;
         lastArea = area;
         lastBox = box;
+      }
+      // A hidden run (`visibility: hidden` on a span) keeps its place but
+      // is not copied; the line's break after it still is.
+      if (getComputedStyle(run).visibility === "hidden") {
+        if (to === text.length && run._after) out += run._after;
+        continue;
       }
       const part = text.slice(from, to);
       out += area ? part.replaceAll("\uFFFC", "") : part;

@@ -340,6 +340,17 @@ final class SelectableView implements SelectionHandle.Owner {
     }
 
     /**
+     * The UTF-16 range {@code start..end} of text {@code i} as a copy gives
+     * it (called from Rust within a native call): without attachments and
+     * hidden runs.
+     */
+    String copiedText(int i, int start, int end) {
+        if (i < 0 || i >= texts.size()) return "";
+        Layout layout = texts.get(i).layout();
+        return layout == null ? "" : TextLayouts.shown(layout.getText(), start, end);
+    }
+
+    /**
      * The model's hit test (called from Rust within a native call): the
      * UTF-16 offset of text {@code i} nearest the area point ({@code x},
      * {@code y}) in dp.
@@ -523,7 +534,8 @@ final class SelectableView implements SelectionHandle.Owner {
                 if (handle == 0) return false;
                 int itemId = item.getItemId();
                 if (itemId == android.R.id.copy) {
-                    SystemUi.setClipboard(view.getContext(), nativeText(handle, SelectableView.this));
+                    String copied = nativeText(handle, SelectableView.this);
+                    if (copied != null && !copied.isEmpty()) SystemUi.setClipboard(view.getContext(), copied);
                     clear();
                     return true;
                 }
