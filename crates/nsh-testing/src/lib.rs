@@ -106,16 +106,20 @@ pub fn test_sets() -> Vec<Registry> {
 /// once for several tests and clone it.
 #[cfg(feature = "bundle")]
 pub fn compile_tsx(entry: impl AsRef<Path>, ui_sets: &[Registry]) -> Result<Bundle, String> {
-    let (app, map) = build(entry.as_ref(), ui_sets)?;
+    let (app, map, _) = build(entry.as_ref(), ui_sets)?;
     Ok(match map {
         Some(map) => app.with_source_map(map),
         None => app,
     })
 }
 
-/// `entry` built against `ui_sets`: its bytecode and source map.
+/// `entry` built against `ui_sets`: its bytecode, its source map and the
+/// directory its assets are named from (`nsh_bundler::Bundle::asset_root`).
 #[cfg(feature = "bundle")]
-fn build(entry: &Path, ui_sets: &[Registry]) -> Result<(Bundle, Option<String>), String> {
+fn build(
+    entry: &Path,
+    ui_sets: &[Registry],
+) -> Result<(Bundle, Option<String>, std::path::PathBuf), String> {
     let sets: Vec<SetDescription> = ui_sets
         .iter()
         .flat_map(Registry::sets)
@@ -142,7 +146,7 @@ fn build(entry: &Path, ui_sets: &[Registry]) -> Result<(Bundle, Option<String>),
         // packaged app's runner reads them.
         .with_url_schemes(bundle.url_schemes)
         .with_main_window(bundle.main_window.as_deref());
-    Ok((app, bundle.source_map))
+    Ok((app, bundle.source_map, bundle.asset_root))
 }
 
 /// Builds the entries of `nsh test` ([`TestRun::compile`]) in this
@@ -156,7 +160,7 @@ pub fn compiler(ui_sets: Vec<Registry>) -> Compile {
         } else {
             entry.to_owned()
         };
-        let (bundle, map) = match kind {
+        let (bundle, source_map, asset_root) = match kind {
             Entry::App => build(entry, &ui_sets)?,
             Entry::TestFile => {
                 let mut sets = ui_sets.clone();
@@ -164,7 +168,11 @@ pub fn compiler(ui_sets: Vec<Registry>) -> Compile {
                 build(entry, &sets)?
             }
         };
-        Ok(Built::Js(Box::new(bundle), map))
+        Ok(Built::Js {
+            bundle: Box::new(bundle),
+            source_map,
+            asset_root,
+        })
     })
 }
 

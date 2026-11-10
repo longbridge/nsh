@@ -26,6 +26,9 @@ use crate::compile::{NativeModules, compile_native};
 pub(crate) struct NshPlugin {
     /// Paths in error messages are shown relative to this directory.
     pub(crate) root: PathBuf,
+    /// What `asset:/` URLs and the bundle's assets are named relative to:
+    /// the app's directory (`Bundle::asset_root`), canonical.
+    pub(crate) asset_root: PathBuf,
     /// The first compile error, already formatted. Rolldown wraps plugin
     /// errors in its own report; the bundler shows this one instead.
     pub(crate) error: Arc<Mutex<Option<String>>>,
@@ -254,6 +257,25 @@ fn has_density(path: &Path) -> bool {
         .is_some_and(|d| d.parse::<f64>().is_ok())
 }
 
+/// `path` from `base` (`../shared/logo.png`), `/`-separated, for messages;
+/// `path` itself when they share no root (another drive).
+fn relative(path: &Path, base: &Path) -> String {
+    let parts: Vec<_> = path.components().collect();
+    let from: Vec<_> = base.components().collect();
+    let common = parts.iter().zip(&from).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return path.to_string_lossy().replace('\\', "/");
+    }
+    std::iter::repeat_n(Cow::Borrowed(".."), from.len() - common)
+        .chain(
+            parts[common..]
+                .iter()
+                .map(|c| c.as_os_str().to_string_lossy()),
+        )
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The pixel-density variants of image `path` (a file without a density
 /// suffix): its siblings `<stem>@<scale>x.<ext>` for the scales of
 /// [`nsh_core::IMAGE_SCALES`] above 1 that exist. Stat calls only: no
@@ -362,8 +384,9 @@ impl NshPlugin {
         anyhow!(message)
     }
 
-    /// `path` relative to the app's directory with `/` separators, as asset
-    /// URLs, module ids and messages name it on every system.
+    /// `path` relative to the entry's directory with `/` separators, as
+    /// module ids and messages name it on every system (asset URLs:
+    /// [`NshPlugin::ship`]).
     fn rel(&self, path: &Path) -> String {
         path.strip_prefix(&self.root)
             .unwrap_or(path)
@@ -371,19 +394,49 @@ impl NshPlugin {
             .replace('\\', "/")
     }
 
+    /// Ships the asset `path` with the app and names it (its `asset:/` URL
+    /// without the scheme): its path in the app's directory, `/`-separated
+    /// on every system. A file outside it fails the build: the files an app
+    /// imports ship with it, and a package holds only its directory.
+    fn ship(&self, path: &Path) -> anyhow::Result<String> {
+        // The resolver's ids are real paths, as the root is; a spelling of
+        // its own (a drive letter's case) is compared once canonical.
+        let canonical;
+        let rel = match path.strip_prefix(&self.asset_root) {
+            Ok(rel) => Ok(rel),
+            Err(_) => {
+                canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+                canonical.strip_prefix(&self.asset_root)
+            }
+        };
+        let Ok(rel) = rel else {
+            return Err(self.refuse(format!(
+                "`{}` is outside the app's directory {}: the files an app imports ship with it, so move it inside",
+                relative(path, &self.asset_root),
+                self.asset_root.display()
+            )));
+        };
+        let name = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        // As named: the bundle lists it relative to the root.
+        let file = self.asset_root.join(rel);
+        self.assets.lock().expect("assets lock").push(file);
+        Ok(name)
+    }
+
     /// A module whose default export is the `asset:/` URL of `path`, which
     /// ships with the app.
-    fn url_module(&self, path: &Path) -> HookLoadOutput {
-        self.assets
-            .lock()
-            .expect("assets lock")
-            .push(path.to_path_buf());
-        let code = format!("export default {:?};", format!("asset:/{}", self.rel(path)));
-        HookLoadOutput {
+    fn url_module(&self, path: &Path) -> anyhow::Result<HookLoadOutput> {
+        let name = self.ship(path)?;
+        let code = format!("export default {:?};", format!("asset:/{name}"));
+        Ok(HookLoadOutput {
             code: code.into(),
             module_type: Some(ModuleType::Js),
             ..Default::default()
-        }
+        })
     }
 
     fn fail(&self, path: &Path, detail: &str) -> anyhow::Error {
@@ -548,7 +601,7 @@ impl Plugin for NshPlugin {
             }));
         }
         if let Some(file) = args.id.strip_suffix(URL_SUFFIX) {
-            return Ok(Some(self.url_module(Path::new(file))));
+            return Ok(Some(self.url_module(Path::new(file))?));
         }
         let path = Path::new(args.id);
         let rel = self.rel(path);
@@ -558,13 +611,10 @@ impl Plugin for NshPlugin {
             let data = std::fs::read(path).map_err(|e| self.fail(path, &e.to_string()))?;
             let family = font_family(&data)
                 .map_err(|e| self.fail(path, &format!("cannot read font: {e}")))?;
-            self.assets
-                .lock()
-                .expect("assets lock")
-                .push(path.to_path_buf());
+            let name = self.ship(path)?;
             let code = format!(
                 "import {{ font }} from \"nsh:rt\";\nexport default font({uri:?}, {family:?});",
-                uri = format!("asset:/{rel}"),
+                uri = format!("asset:/{name}"),
             );
             return Ok(Some(HookLoadOutput {
                 code: code.into(),
@@ -575,7 +625,7 @@ impl Plugin for NshPlugin {
         if has_extension(path, AUDIO_EXTENSIONS) || has_extension(path, VIDEO_EXTENSIONS) {
             // An audio or video import is its URL, for `Sound.load`,
             // `AudioPlayer` and `Video`'s `src`; the file ships with the app.
-            return Ok(Some(self.url_module(path)));
+            return Ok(Some(self.url_module(path)?));
         }
         if !has_extension(path, IMAGE_EXTENSIONS) {
             return Ok(None);
@@ -613,13 +663,12 @@ impl Plugin for NshPlugin {
             }
             ((w.to_string(), h.to_string()), variants)
         };
-        {
-            let mut assets = self.assets.lock().expect("assets lock");
-            assets.push(path.to_path_buf());
-            assets.extend(variants.iter().map(|(_, p)| p.clone()));
+        let name = self.ship(path)?;
+        for (_, variant) in &variants {
+            self.ship(variant)?;
         }
         let scales: Vec<f32> = variants.iter().map(|(s, _)| *s).collect();
-        let code = image_module(&format!("asset:/{rel}"), (w, h), &scales);
+        let code = image_module(&format!("asset:/{name}"), (w, h), &scales);
         Ok(Some(HookLoadOutput {
             code: code.into(),
             module_type: Some(ModuleType::Js),

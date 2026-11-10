@@ -166,6 +166,23 @@ fn fonts_registered_while_the_app_runs_name_their_family() {
     assert_eq!(results.len(), 3);
 }
 
+/// An entry below its app (`tests/SubApp.tsx`) names the files it imports
+/// from the app's directory and reads them from there headless, as a
+/// package of the app holds them (#1483).
+#[test]
+fn an_entry_below_its_app_reads_assets_named_from_the_app() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/asset-root");
+    let results = run_file(
+        &test_run(None),
+        &dir.join("tests/SubApp.test.tsx"),
+        &mut |_| {},
+    )
+    .unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}
+
 #[test]
 fn describe_hooks_skip_only_todo_and_timeouts_behave_as_jest_s() {
     use nsh_testing::TestStatus::{Failed, Passed, Skipped, Todo};
