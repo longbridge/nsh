@@ -255,8 +255,12 @@ export function numberInputSteps(kind: "split" | "pair", w: string, icon: number
   };
 }
 
-/** A time field's well (`DatePicker`'s `timeFieldClass`): a number input's, its segments inside. */
-export const timeFieldClass = [pointer ? "h-8 rounded-md px-2" : "h-11 rounded-lg px-3", "items-center border bg-field", edgeClass({ rest: "border-input", hover: "border-faint", hoverVariant: "enabled:hover" })].join(" ");
+/**
+ * A time field's well (`DatePicker`'s `timeFieldClass`): a number input's, its segments inside. It sits in the
+ * calendar's popup, so in dark it is shadcn's input there (`bg-input/30`, a shade over the popup) rather than the
+ * field color, which is the page's and would read as a hole.
+ */
+export const timeFieldClass = [pointer ? "h-8 rounded-md px-2" : "h-11 rounded-lg px-3", terminal ? "items-center border bg-field" : "items-center border bg-field dark:bg-input/30", edgeClass({ rest: "border-input", hover: "border-faint", hoverVariant: "enabled:hover" })].join(" ");
 
 /** The cells of a code of six: 36 × 44 with a pointer, 44 × 52 on a touch screen. */
 export const otpCells = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";

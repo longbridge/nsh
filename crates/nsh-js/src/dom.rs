@@ -421,6 +421,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         ),
     ),
     (
+        "reveal",
+        1,
+        decl!("(options?: RevealOptions): void"),
+        decl!(
+            "Scrolls the `<Scroll>`s around the view, innermost first, so it shows, once this turn's changes are laid out: `vertical` places it along vertical scroll views (`\"start\"` by default), `horizontal` along horizontal ones (`\"nearest\"` by default), `\"nearest\"` moving only what it must; `animated` defaults to `true`. `\"start\"` and `\"end\"` are physical (top / bottom, left / right). Each scroll view stops at its content's ends, past them by its `contentInset`. An unknown alignment throws a `TypeError`. A `List` keeps its own: use its `scrollToIndex`."
+        ),
+    ),
+    (
         "reload",
         0,
         decl!("(): void"),
@@ -443,6 +451,16 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         0,
         decl!("(): void"),
         decl!("`WebView`: stops loading."),
+    ),
+    (
+        "evaluate",
+        2,
+        decl!(
+            "(script: string, options?: { timeout?: number }): Promise<{ value: null | boolean | number | string | unknown[] | { [key: string]: unknown } }>"
+        ),
+        decl!(
+            "`WebView`: runs `script` in the page and resolves with its result, `{ value }`: the script's completion value, or what a Promise it returns settles to, as JSON (`null`, booleans, finite numbers, strings, arrays, plain objects). Rejects with `code` `ERR_NSH_WEBVIEW_SCRIPT` when the script throws, its Promise rejects or its value is not JSON; `ERR_NSH_WEBVIEW_ABORTED` when the page navigates or the web view goes away first; `ETIMEDOUT` after `options.timeout` milliseconds (30 000 by default); `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where `WebView.evaluateAvailable()` resolves `false`. The value comes from the page: check it before trusting it."
+        ),
     ),
     (
         "injectJavaScript",
@@ -496,6 +514,14 @@ unsafe extern "C" fn node_method(
     let Some(name) = to_string(cx, unsafe { *data }) else {
         return qjs::JS_EXCEPTION;
     };
+    if name == "evaluate" {
+        return crate::components::evaluate(
+            cx,
+            node_id(cx, this),
+            arg(argc, argv, 0),
+            arg(argc, argv, 1),
+        );
+    }
     let Some(id) = node_id(cx, this) else {
         return throw_type(cx, "nsh: not a node");
     };
@@ -4787,6 +4813,27 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(reported(&host), [r#"["light","dark","dark"]"#]);
+    }
+
+    #[test]
+    fn evaluate_rejects_wrong_arguments_and_receivers() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(r#"{REPORT}
+            import {{ element }} from "nsh:rt";
+            const web = element("webview");
+            const results = [web.evaluate(42), web.evaluate.call(null, "1"), web.evaluate("1", 5), web.evaluate("1", {{ timeout: -1 }})];
+            report(results.every(value => value instanceof Promise));
+            Promise.all(results.map(value => value.catch(error => error.name))).then(report);
+            globalThis.keep = web;
+        "#)).unwrap();
+        host.run_jobs();
+        assert_eq!(
+            reported(&host),
+            [
+                "true",
+                r#"["TypeError","TypeError","TypeError","RangeError"]"#
+            ]
+        );
     }
 
     #[test]

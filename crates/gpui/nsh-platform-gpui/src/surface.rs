@@ -178,6 +178,10 @@ pub(crate) struct Surface {
     /// The GPUI view drawing the surface ([`crate::app::AppView`]): notified
     /// when the surface changed.
     pub(crate) entity: Cell<Option<gpui::EntityId>>,
+    /// The GPUI window that view is in, as it was made or last drawn: what
+    /// reaches the window between frames uses it (native components' props
+    /// and commands, [`crate::native`]).
+    pub(crate) main_window: Cell<Option<gpui::AnyWindowHandle>>,
     /// The GPUI text system (fonts the engine thread shapes with, and the
     /// main thread draws with).
     pub(crate) text_system: RefCell<Option<Arc<gpui::TextSystem>>>,
@@ -305,6 +309,7 @@ impl Surface {
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             scale: Cell::new(1.0),
             entity: Cell::new(None),
+            main_window: Cell::new(None),
             text_system: RefCell::new(None),
             origin: Cell::new((0.0, 0.0)),
             invalid: Cell::new(false),
@@ -375,12 +380,17 @@ impl Surface {
     }
 
     /// The GPU device shader views render with ([`crate::shader`]), opened
-    /// the first time one asks.
+    /// the first time one asks; without one the app hears that shader views
+    /// draw nothing (`shadersAvailable()`).
     pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
             .get_or_init(|| {
-                nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra)
-                    .map(Rc::new)
+                let renderer =
+                    nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra);
+                if renderer.is_none() {
+                    self.control(EngineControl::shaders_unavailable);
+                }
+                renderer.map(Rc::new)
             })
             .clone()
     }
@@ -474,6 +484,7 @@ impl Surface {
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
+        crate::key_focus::forget(self);
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::input::reset(self);

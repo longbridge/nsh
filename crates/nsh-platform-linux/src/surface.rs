@@ -216,12 +216,17 @@ pub(crate) enum Next {
 
 impl Surface {
     /// The GPU device shader views render with ([`crate::shader`]), opened
-    /// the first time one asks.
+    /// the first time one asks; without one the app hears that shader views
+    /// draw nothing (`shadersAvailable()`).
     pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
             .get_or_init(|| {
-                nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Rgba)
-                    .map(Rc::new)
+                let renderer =
+                    nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Rgba);
+                if renderer.is_none() {
+                    self.control(EngineControl::shaders_unavailable);
+                }
+                renderer.map(Rc::new)
             })
             .clone()
     }

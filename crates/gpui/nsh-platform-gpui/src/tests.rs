@@ -203,6 +203,8 @@ fn windows(cx: &mut TestAppContext) {
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
     set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
     a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
+    props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx);
+    a_command_without_a_search_field_takes_the_keyboard_on_focus(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -522,6 +524,114 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
     );
     wait_for(&view, cx, "fired revert bound bound new");
 }
+/// A native component that records what it is handed.
+struct Recorder {
+    log: Rc<std::cell::RefCell<Vec<String>>>,
+    rendered: Rc<std::cell::Cell<bool>>,
+}
+
+impl NativeComponent for Recorder {
+    fn render(&mut self, _: &mut Window, _: &mut GpuiApp) -> Option<AnyElement> {
+        self.rendered.set(true);
+        None
+    }
+
+    fn set_prop(
+        &mut self,
+        name: &str,
+        value: Option<&serde_json::Value>,
+        _: &mut Window,
+        _: &mut GpuiApp,
+    ) {
+        let value = value.map_or("none".to_owned(), |v| v.to_string());
+        self.log.borrow_mut().push(format!("{name}={value}"));
+    }
+
+    fn command(&mut self, name: &str, args: &serde_json::Value, _: &mut Window, _: &mut GpuiApp) {
+        self.log.borrow_mut().push(format!("{name} {args}"));
+    }
+}
+
+/// A component whose prop changes right before two commands.
+const COMMANDS_TO_COMPONENT: &str = r#"
+import { mount, nativeComponent, type NativeComponentRef, signal, View } from "nsh";
+
+const Recorder = nativeComponent<{ label: string }, {}>("test.recorder", {
+  props: ["label"],
+  events: [],
+});
+
+function App() {
+  const label = signal("first");
+  let recorder: NativeComponentRef | undefined;
+  setTimeout(() => {
+    label.set("second");
+    recorder?.command("go", { n: 1 });
+    recorder?.command("go", { n: 2 });
+  }, 0);
+  return (
+    <View style={{ flex: 1 }}>
+      <Recorder ref={(node) => (recorder = node)} label={label()} style={{ height: 20 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+/// A view the embedding app holds but does not show (a hidden panel).
+struct Unshown(Entity<AppView>);
+
+impl gpui::Render for Unshown {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().size_full()
+    }
+}
+
+fn props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx: &mut TestAppContext) {
+    use gpui::AppContext as _;
+    let code = nsh_bundler::compile_module("App.tsx", COMMANDS_TO_COMPONENT, &[]).unwrap();
+    let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let rendered = Rc::new(std::cell::Cell::new(false));
+    let (component_log, component_rendered) = (log.clone(), rendered.clone());
+    let (unshown, cx) = cx.add_window_view(|window, cx| {
+        Unshown(cx.new(|cx| AppView::new(AppOptions::default(), window, cx)))
+    });
+    let view = unshown.read_with(cx, |unshown, _| unshown.0.clone());
+    view.update(cx, |view, _| {
+        view.register_component(
+            "test.recorder",
+            Rc::new(move |_| {
+                Box::new(Recorder {
+                    log: component_log.clone(),
+                    rendered: component_rendered.clone(),
+                })
+            }),
+        );
+        view.load(App::Js(Bundle::source(code)));
+    });
+    let expected = [
+        r#"label="first""#,
+        r#"label="second""#,
+        r#"go {"n":1}"#,
+        r#"go {"n":2}"#,
+    ];
+    let start = Instant::now();
+    while log.borrow().len() < expected.len() {
+        cx.run_until_parked();
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the component got {:?}",
+            log.borrow()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Nothing more comes later (each is delivered once), in the order sent.
+    std::thread::sleep(Duration::from_millis(50));
+    cx.run_until_parked();
+    assert_eq!(*log.borrow(), expected);
+    assert!(!rendered.get(), "the view was drawn");
+}
+
 /// The part of the embedding app a view reaches: its engine's context.
 struct Desk(&'static str);
 
@@ -1645,4 +1755,68 @@ fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestApp
         click_count: 1,
     });
     wait_for(&view, cx, "menu 20 15");
+}
+
+/// A command without a search field that the app focuses once mounted;
+/// the item chosen with the keyboard goes to a field.
+const UNSEARCHABLE_COMMAND: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Command, Input } from "nsh/base";
+
+function App() {
+  const log = signal("start");
+  let command: any;
+  let field: any;
+  setTimeout(() => command?.focus(), 0);
+  return (
+    <View style={{ flex: 1, padding: 8, gap: 8 }}>
+      <Input ref={(node) => (field = node)} autoFocus value={log()} style={{ height: 30 }} />
+      <Command
+        ref={(node) => (command = node)}
+        searchable={false}
+        items={[{ id: "alpha", label: "Alpha" }, { id: "beta", label: "Beta" }]}
+        onSelect={({ id }) => { log.set(`selected ${id}`); field?.focus(); }}
+      />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", UNSEARCHABLE_COMMAND, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    // `focus()` moves the keyboard from the field to the command.
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let moved = view.read_with(cx, |view, _| {
+            crate::key_focus::focused(view.surface()).is_some()
+                && crate::text_input::focused(view.surface()).is_none()
+        });
+        if moved {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the command never took the focus"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Its keys reach it: Down moves to the next item, Return chooses it.
+    cx.simulate_keystrokes("down");
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(50));
+    cx.simulate_keystrokes("enter");
+    let text = wait_until(&view, cx, |t| t.starts_with("selected"));
+    assert!(
+        text == "selected alpha" || text == "selected beta",
+        "{text}"
+    );
+    assert!(view.read_with(cx, |view, _| {
+        crate::key_focus::focused(view.surface()).is_none()
+    }));
 }

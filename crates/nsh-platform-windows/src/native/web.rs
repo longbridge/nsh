@@ -28,9 +28,9 @@
 //! made in the background, from the first props (`incognito` makes an
 //! InPrivate controller, whose website data stays in memory). Props and
 //! commands that come before the controller is ready wait for it
-//! ([`WebItem::ready`]). The WebView2 loader is linked statically
-//! (`WebView2LoaderStatic.lib`), so apps do not ship `WebView2Loader.dll`;
-//! the WebView2 runtime itself comes with Windows 11 (and Edge's installer
+//! ([`WebItem::ready`]). With MSVC the WebView2 loader is linked
+//! statically (`WebView2LoaderStatic.lib`), so apps do not ship
+//! `WebView2Loader.dll` (`create_environment`); the WebView2 runtime itself comes with Windows 11 (and Edge's installer
 //! on Windows 10). Without it, a web view draws a neutral placeholder, as
 //! on Linux.
 //!
@@ -139,8 +139,15 @@ use crate::{
 /// Lets pages talk to the app: `window.nsh.postMessage(data)`.
 const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.chrome.webview.postMessage(String(data)); } };";
 
-// The loader, linked statically (webview2-com-sys imports it from
-// `WebView2Loader.dll`, which would have to ship next to every app).
+// `CreateCoreWebView2EnvironmentWithOptions`.
+//
+// With MSVC the loader is linked statically (`WebView2LoaderStatic.lib`,
+// which webview2-com-sys ships and puts on the link path), so apps do not
+// ship `WebView2Loader.dll`. Other toolchains (`windows-gnu`) cannot link
+// that MSVC library: there the loader DLL is loaded when the first web view
+// starts, so an app that never shows one needs neither, and a missing DLL
+// draws the placeholder as a missing runtime does.
+#[cfg(target_env = "msvc")]
 #[link(name = "WebView2LoaderStatic", kind = "static")]
 unsafe extern "system" {
     #[link_name = "CreateCoreWebView2EnvironmentWithOptions"]
@@ -150,6 +157,41 @@ unsafe extern "system" {
         options: *mut std::ffi::c_void,
         handler: *mut std::ffi::c_void,
     ) -> HRESULT;
+}
+
+#[cfg(not(target_env = "msvc"))]
+unsafe fn create_environment(
+    browser_folder: PCWSTR,
+    user_data_folder: PCWSTR,
+    options: *mut std::ffi::c_void,
+    handler: *mut std::ffi::c_void,
+) -> HRESULT {
+    use windows::{
+        Win32::{
+            Foundation::E_NOINTERFACE,
+            System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+        },
+        core::{s, w},
+    };
+    type Create = unsafe extern "system" fn(
+        PCWSTR,
+        PCWSTR,
+        *mut std::ffi::c_void,
+        *mut std::ffi::c_void,
+    ) -> HRESULT;
+    // SAFETY: loading a DLL by name and reading an export of the known
+    // signature; the module stays loaded for the process.
+    unsafe {
+        let Ok(module) = LoadLibraryW(w!("WebView2Loader.dll")) else {
+            return E_NOINTERFACE;
+        };
+        let Some(create) = GetProcAddress(module, s!("CreateCoreWebView2EnvironmentWithOptions"))
+        else {
+            return E_NOINTERFACE;
+        };
+        let create: Create = std::mem::transmute(create);
+        create(browser_folder, user_data_folder, options, handler)
+    }
 }
 
 /// A web view: its visuals and, once made, its controller.

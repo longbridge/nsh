@@ -359,7 +359,7 @@ reasons: `reactive-components.md`.
 | `<List viewport="parent">` (in a `Scroll` with the rest of the page) | `.viewport(ListViewport::Parent)` (`ListLayout`): laid out at its full length, its rows follow the scroll view around it; fixed when the list is made |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
-  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `focus-within:`, `activeStyle` / `hoverStyle` / `focusStyle` / `focusWithinStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)`, `.focus_within(\|s\| ..)` (native, no binding) |
+  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `focus-visible:`, `focus-within:`, `activeStyle` / `hoverStyle` / `focusStyle` / `focusVisibleStyle` / `focusWithinStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)`, `.focus_visible(\|s\| ..)`, `.focus_within(\|s\| ..)` (native, no binding) |
   | `<Button disabled={saving()} onPress={save} class="px-4 active:opacity-60">Save</Button>` | `button().disabled(move \|\| saving.get()).on_press(move \|\| save()).px_4().active(\|s\| s.opacity(0.6)).child(text("Save"))`: a setter per prop, a listener method per event |
   | `<Button class="bg-blue-500 active:opacity-70 selected:bg-green-500">` (state styles on a component) | `button().bg(..).active(\|s\| s.opacity(0.7))`: `ComponentBuilder`'s `active` / `hover` / `focus` / `disabled_style` and `Styled`'s `selected` / `checked`, on the component's root (`Styled::selected(el, \|s\| ..)` where a `selected` prop's setter comes first) |
   | `<NavPage headerClass="bg-white text-black tint-blue-500">` | `nav_page().header_style_with(\|s\| s.bg(..).text_color(..).tint_color(..))` (theme colors follow the appearance natively; `header_style(Style)`, TS `headerStyle`, wins key by key) |
@@ -824,9 +824,10 @@ forgotten.
 A view JS made (`<Chip>` in TSX) is made when its host is first in the root's tree, so it is under the view that
 placed it: it adopts the owner of the nearest component above it (where that one places its JS children, else its
 own owner), and `use_context` and failures reach that far (`owner_above`, `adopt`). Until then it waits
-(`components.waiting`). A component a Rust view passes as a nested component's content (`tabs().child(tab())`)
-joins that host as JS children do (`Instance::joined`) and waits the same way, so it reads the context of the view
-that places it, not only its maker's.
+(`components.waiting`). A component a Rust view passes as a nested component's content (`tabs().child(tab())`),
+directly or inside plain views of that content (`tabs().child(view().child(tab()))`), joins that host as JS
+children do (`Instance::joined`) and waits the same way, so it reads the context of the view that places it, not
+only its maker's.
 
 JS allocates even node ids (from 2), the core odd ones (from 3), so both id spaces stay dense and never collide. JS
 never sees the made nodes; their events are the component's (below).

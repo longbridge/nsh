@@ -649,7 +649,11 @@ impl Graph {
             return false;
         };
         let mut new = Running::new(animation, driver, *value, *velocity);
-        if let Some(start) = start {
+        // Replacing one in motion, it goes on from that one's last frame,
+        // where `value` and `velocity` were taken: started on the next
+        // frame instead, a value retargeted on every frame (one following
+        // the pointer) would never move.
+        if let Some(start) = start.or_else(|| running.as_ref().and_then(Running::last_step)) {
             new = new.starting_at(start);
         }
         if let Some(old) = running.replace(new) {
@@ -1782,6 +1786,56 @@ mod tests {
         );
         assert_eq!(g.value(1), Some(42.0));
         assert!(!g.is_animating());
+    }
+
+    /// A spring given a new target on every frame (a value that follows
+    /// the pointer, #632) still moves on each frame, as far as one that
+    /// keeps its target.
+    #[test]
+    fn a_spring_retargeted_every_frame_keeps_moving() {
+        let spring = |to| Driver::Spring {
+            to,
+            stiffness: 170.0,
+            damping: 26.0,
+            mass: 1.0,
+            velocity: None,
+            frame_rate: None,
+        };
+        let run = |retarget: bool| {
+            let mut g = Graph::default();
+            let mut finished = Vec::new();
+            g.apply(
+                AnimationOp::CreateValue {
+                    node: 1,
+                    value: 0.0,
+                },
+                &mut finished,
+            );
+            let mut trace = Vec::new();
+            for frame in 0..10u32 {
+                if frame == 0 || retarget {
+                    g.apply(
+                        AnimationOp::Start {
+                            node: 1,
+                            animation: frame + 1,
+                            driver: spring(100.0),
+                        },
+                        &mut finished,
+                    );
+                }
+                g.tick(f64::from(frame) / 60.0, &mut finished);
+                trace.push(g.value(1).unwrap());
+            }
+            trace
+        };
+        let steady = run(false);
+        let retargeted = run(true);
+        for (frame, (a, b)) in steady.iter().zip(&retargeted).enumerate() {
+            assert!(
+                (a - b).abs() < 0.5,
+                "frame {frame}: {steady:?} vs {retargeted:?}"
+            );
+        }
     }
 
     fn timing(to: f32, ms: f32) -> Driver {

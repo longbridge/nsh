@@ -64,6 +64,7 @@ use nsh_core::{
     MountItem, NodeId, PayloadValue, Point, Points, PressEvent, ROOT_ID, Size, SubmitBehavior,
     TextEngine,
     geometry::{point, px},
+    platform::InputModality,
 };
 use nsh_engine::{
     AppError, AppErrorKind, Clock, Engine, EngineConfig, EngineControl, Environment, MountSink,
@@ -853,6 +854,12 @@ impl Headless {
         self.step = name.into();
     }
 
+    /// Tells the engine what the step gives input with, as a platform
+    /// does before acting on it: `focus-visible:` follows it.
+    fn input_with(&self, modality: InputModality) {
+        self.engine.control().set_input_modality(modality);
+    }
+
     /// The batches applied so far.
     pub fn applied(&self) -> u64 {
         self.applied
@@ -1607,6 +1614,7 @@ impl Headless {
     pub fn press(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("press({selector})"));
+        self.input_with(InputModality::Pointer);
         let pick = self.screen.pressable(&parsed);
         let mut id = self.picked(pick, selector, "pressable view")?;
         let mut routed = None;
@@ -1680,6 +1688,7 @@ impl Headless {
     pub fn press_at(&mut self, selector: &str, at: Point<Points>) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("pressAt({selector}, {}, {})", at.x.0, at.y.0));
+        self.input_with(InputModality::Pointer);
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
         // `at` is in the view the selector names, which may be inside the
@@ -1766,6 +1775,7 @@ impl Headless {
     pub fn long_press(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("longPress({selector})"));
+        self.input_with(InputModality::Pointer);
         let pick = self.screen.long_pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
         let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
@@ -1791,6 +1801,7 @@ impl Headless {
     /// an edit to nothing.
     pub fn clear(&mut self, selector: &str) -> Result<(), String> {
         let id = self.input_step(selector, format!("clear({selector})"))?;
+        self.input_with(InputModality::Keyboard);
         self.key_press(id, "Backspace");
         if let Some(input) = self.screen.input_mut(id)
             && !input.text.is_empty()
@@ -1818,6 +1829,7 @@ impl Headless {
     /// character past `maxLength` is dropped.
     pub fn type_text(&mut self, selector: &str, text: &str) -> Result<(), String> {
         let id = self.input_step(selector, format!("type({selector}, {text:?})"))?;
+        self.input_with(InputModality::Keyboard);
         for c in text.chars() {
             let multiline = self.screen.input(id).is_some_and(|i| i.config.multiline);
             if c == '\n' && !multiline {
@@ -1903,6 +1915,7 @@ impl Headless {
     /// break in a multiline input.
     pub fn submit(&mut self, selector: &str) -> Result<(), String> {
         let id = self.input_step(selector, format!("submit({selector})"))?;
+        self.input_with(InputModality::Keyboard);
         self.return_key(id);
         self.done()
     }
@@ -1955,6 +1968,7 @@ impl Headless {
                 page: at.unwrap_or_default(),
                 location: location.unwrap_or_default(),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
             activated: None,
         };
@@ -2074,6 +2088,7 @@ impl Headless {
     pub fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("scroll({selector}, {distance})"));
+        self.input_with(InputModality::Pointer);
         let pick = self.screen.scroll_view(&parsed);
         let id = self.picked(pick, selector, "scroll view")?;
         let at = |screen: &Screen| {

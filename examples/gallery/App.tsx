@@ -1,12 +1,12 @@
 import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { fpsEnabled, platform, setColorScheme, setFpsEnabled, windowSize } from "nsh";
+import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
 import { titleBar } from "nsh/desktop";
 import { Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
-import { Icon, LucideIcon } from "./icons";
+import { Icon, LucideIcon, type LucideIconName } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { loadSounds, play, setSoundsOn, soundsOn } from "../nsh-gallery-ui/sound";
@@ -22,7 +22,7 @@ import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton } from "./ui";
+import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, MenuPanel, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl, appearance, setAppearance, type Appearance, segmentedLook } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
 loadSounds({
@@ -255,7 +255,7 @@ function Phone() {
   if (untracked(wasDesktop)) nav.setRoutes([untracked(nav.routes)[0], { name: "demo", demo: untracked(selected) }]);
   effect(() => shownDemo.set(nav.routes().find((r) => r.name === "demo")?.demo ?? null));
   return (
-    <NavStack state={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1, direction: demoDirection() }}>
       {(route) => {
         switch (route.name) {
           case "home":
@@ -293,11 +293,12 @@ const select = (demo: DemoEntry) => {
   selected.set(demo);
 };
 
-/** The sound and theme switches, side by side. */
+/** The sound, direction and theme switches, side by side. */
 function Toggles(props: { bar?: boolean }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: props.bar ? 0 : 2 }}>
       <SoundToggle bar={props.bar} />
+      <DirectionToggle bar={props.bar} />
       <ThemeToggle bar={props.bar} />
     </View>
   );
@@ -388,7 +389,7 @@ function Search() {
     <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 12, paddingBottom: 8 }}>
       <Input
         ref={(node) => (input = node)}
-        {...field({ style: terminal ? undefined : { paddingLeft: 26 } })}
+        {...field({ style: terminal ? undefined : { paddingStart: 26 } })}
         value={query()}
         onChange={({ value }) => query.set(value)}
         onKeyPress={(e) => e.key === "Escape" && query.set("")}
@@ -396,7 +397,7 @@ function Search() {
         accessibilityLabel="Search demos"
       />
       <If when={!terminal}>
-        <View style={{ position: "absolute", left: 20, top: 7, pointerEvents: "none" }}>
+        <View style={{ position: "absolute", start: 20, top: 7, pointerEvents: "none" }}>
           <Icon name="search" size={14} tint={colors.faint} />
         </View>
       </If>
@@ -518,15 +519,26 @@ function DemoList() {
  * row changes at once (0 pt collapsed); the panel slides natively, over the
  * content pane. */
 function Sidebar() {
-  const slide = createAnimatedValue(untracked(sidebarOpen) ? 0 : -SIDEBAR);
+  // Hidden, it is past the window's edge at its start: the left, or the
+  // right while the demos run right to left.
+  const away = (right: boolean) => (right ? SIDEBAR : -SIDEBAR);
+  const slide = createAnimatedValue(untracked(sidebarOpen) ? 0 : away(untracked(rtl)));
   let first = true;
+  let wasRtl = untracked(rtl);
   effect(() => {
     const open = sidebarOpen();
+    const flipped = rtl();
     if (first) {
       first = false;
       return;
     }
-    Animated.timing(slide, { toValue: open ? 0 : -SIDEBAR, duration: 220, easing: Easing.out(Easing.cubic) }).start();
+    // The direction changes the side, at once: only showing and hiding slide.
+    if (flipped !== wasRtl) {
+      wasRtl = flipped;
+      slide.set(open ? 0 : away(flipped));
+      return;
+    }
+    Animated.timing(slide, { toValue: open ? 0 : away(flipped), duration: 220, easing: Easing.out(Easing.cubic) }).start();
   });
   return (
     <View style={{ width: sidebarOpen() ? SIDEBAR : 0, flexShrink: 0, zIndex: 1 }}>
@@ -535,12 +547,12 @@ function Sidebar() {
           position: "absolute",
           top: 0,
           bottom: 0,
-          left: 0,
+          start: 0,
           width: SIDEBAR,
           translate: [slide, 0],
           backgroundColor: colors.sidebar,
-          borderRightWidth: 1,
-          borderRightColor: colors.sidebarBorder,
+          borderEndWidth: 1,
+          borderEndColor: colors.sidebarBorder,
         }}
       >
         <View
@@ -548,12 +560,12 @@ function Sidebar() {
           style={
             terminal
               ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
-              : { height: 44, flexDirection: "row", alignItems: "center", paddingLeft: titleBar().left + 16, paddingRight: 10 }
+              : { height: 44, flexDirection: "row", alignItems: "center", paddingStart: (rtl() ? 0 : titleBar().left) + 16, paddingEnd: 10 }
           }
         >
-          {/* The mark at the sidebar's top left, past the window's controls. */}
+          {/* The mark at the sidebar's top start, past the window's controls (at the left, so right to left the sidebar is clear of them). */}
           {!terminal && <Logo size={22} />}
-          {!terminal && <Text style={{ marginLeft: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
+          {!terminal && <Text style={{ marginStart: 8, fontSize: 15, fontWeight: "600", color: colors.text, letterSpacing: -0.2 }}>NSH</Text>}
           <View style={{ flex: 1 }} />
           <SidebarToggle />
         </View>
@@ -563,7 +575,7 @@ function Sidebar() {
           style={[
             { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.sidebarBorder },
             // The rule takes a whole row in the terminal: the rest of it is padding.
-            terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
+            terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingStart: 16, paddingEnd: 10 },
           ]}
         >
           {/* Where NSH lives, for screenshots of the gallery. */}
@@ -596,7 +608,52 @@ function SettingItem(props: { label: string; icon: JSX.Element; checked: boolean
   );
 }
 
-/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds and the appearance. */
+/** The settings menu's appearance: System, Light and Dark as the segments
+ * of a segmented control, each a radio item of the menu (icons alone; the
+ * terminal, which draws no icons, names them). */
+function ThemeSetting() {
+  const look = segmentedLook({ size: "small" });
+  const option = (value: Appearance, title: string, icon: LucideIconName) => {
+    const on = () => appearance() === value;
+    return (
+      <MenuItem
+        role="menuitemradio"
+        checked={on()}
+        closeOnSelect={false}
+        onSelect={() => setAppearance(value)}
+        accessibilityLabel={title}
+        hoverStyle={on() ? undefined : { backgroundColor: alpha(colors.text, 0.06) }}
+        style={{
+          ...(terminal ? { paddingHorizontal: TERMINAL_COLUMN } : { width: 30 }),
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 6,
+          borderCurve: "continuous",
+          borderWidth: 1,
+          borderColor: "transparent",
+          ...(on() ? look.thumbStyle : {}),
+        }}
+      >
+        <If when={!terminal} else={<Text style={{ color: on() ? colors.text : colors.muted }}>{title}</Text>}>
+          <LucideIcon name={icon} size={14} tint={on() ? colors.text : colors.muted} />
+        </If>
+      </MenuItem>
+    );
+  };
+  return (
+    <View style={{ ...menuItemLook({ style: terminal ? { height: TERMINAL_ROW, gap: TERMINAL_GAP } : { height: 36, gap: 10 } }).style }}>
+      {!terminal && <LucideIcon name={isDark() ? "moon" : "sun"} size={16} tint={colors.muted} />}
+      <Text style={menuItemLabel()}>Theme</Text>
+      <View style={{ ...look.style, alignSelf: "center" }}>
+        {option("system", "System", "monitor")}
+        {option("light", "Light", "sun")}
+        {option("dark", "Dark", "moon")}
+      </View>
+    </View>
+  );
+}
+
+/** The sidebar's settings: the performance monitor (`setFpsEnabled`), sounds, the demos' direction and the appearance. */
 function SettingsMenu() {
   const flipSounds = () => {
     if (soundsOn()) {
@@ -610,16 +667,17 @@ function SettingsMenu() {
   const trigger = terminal ? (
     <Text style={{ color: colors.text }}>Menu</Text>
   ) : (
-    <View accessibilityLabel="Settings menu" hoverStyle={hovered()} activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }} style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}>
+    <View accessibilityLabel="Settings menu" hoverStyle={hovered()} activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }} focusVisibleStyle={focusRing()} style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}>
       <LucideIcon name="settings" size={16} tint={colors.muted} />
     </View>
   );
   return (
     <Menu placement="top" align="end" offset={6} margin={8} trigger={trigger}>
       <MenuPanel side="top" minWidth={210}>
-        <SettingItem label="Performance monitor" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
+        <SettingItem label="FPS" icon={<LucideIcon name="activity" size={16} tint={colors.muted} />} checked={fpsEnabled()} onSelect={() => setFpsEnabled(!fpsEnabled())} />
         <SettingItem label="Sounds" icon={<Icon name="volume-high" size={16} tint={colors.muted} />} checked={soundsOn()} onSelect={flipSounds} />
-        <SettingItem label="Dark appearance" icon={<LucideIcon name="moon" size={16} tint={colors.muted} />} checked={isDark()} onSelect={() => setColorScheme(isDark() ? "light" : "dark")} />
+        <SettingItem label="RTL" icon={<LucideIcon name="pilcrow" size={16} tint={colors.muted} />} checked={rtl()} onSelect={() => rtl.set(!rtl())} />
+        <ThemeSetting />
       </MenuPanel>
     </Menu>
   );
@@ -643,15 +701,17 @@ function DemoPane() {
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 6,
-                  paddingLeft: sidebarOpen() ? 32 : titleBar().left + 12,
-                  paddingRight: 16,
+                  // Clear of the window's controls, at the left: the start
+                  // while the sidebar is hidden, the end right to left.
+                  paddingStart: sidebarOpen() ? 32 : (rtl() ? 0 : titleBar().left) + 12,
+                  paddingEnd: rtl() ? titleBar().left + 12 : 16,
                   borderBottomWidth: 1,
                   borderBottomColor: colors.line,
                 }
           }
         >
           <If when={!sidebarOpen()}>
-            <View style={{ marginRight: terminal ? TERMINAL_COLUMN : 8 }}>
+            <View style={{ marginEnd: terminal ? TERMINAL_COLUMN : 8 }}>
               <SidebarToggle />
             </View>
           </If>
@@ -687,7 +747,7 @@ function Desktop() {
   effect(() => shownDemo.set(selected()));
   keymap.bind("mod+b", toggleSidebar);
   return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
+    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background, direction: demoDirection() }}>
       <Sidebar />
       <NavStack state={nav} style={{ flex: 1 }}>
         {(route) => {

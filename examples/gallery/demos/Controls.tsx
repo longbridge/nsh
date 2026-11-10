@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
+import { alpha, backdrop, Badge, Button, CalendarItem, calendarLook, Chevron, Caption, Card, checkboxLook, DateTrigger, CheckboxMark, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -181,7 +181,7 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
         // Nearly the chip's height under a finger; a terminal's is its mark, as text.
         style={terminal ? undefined : { width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
-        focusStyle={focusRing()}
+        focusVisibleStyle={focusRing()}
       >
         <If when={terminal} else={<Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />}>
           <Text style={{ color: colors.muted }}>×</Text>
@@ -613,6 +613,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           }}
           // The track at the trailing edge, after the label; the icon leads.
           {...listRow({ first: props.first, disabled: () => props.disabled, style: { flexDirection: "row-reverse" } })}
+          trackClass={look.trackClass}
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
         >
@@ -685,7 +686,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             last.set(`${props.name}: ${checked ? "on" : "off"}`);
           }}
           {...choiceTileLook(() => has(props.name), { disabled: () => held(props.name), style: { width: "48%", flex: undefined, gap: 2 } })}
-          trackStyle={{ ...look.trackStyle, position: "absolute", top: 12, right: 12 }}
+          trackClass={look.trackClass}
+          trackStyle={{ ...look.trackStyle, position: "absolute", top: 12, end: 12 }}
           thumbStyle={look.thumbStyle}
         >
           <View style={{ width: 32, height: 32, marginBottom: 8, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1, ...choiceWell(), transform: [{ scale: pop }] }}>
@@ -929,7 +931,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           class="group"
           style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
           activeStyle={pressed}
-          focusStyle={focusRing(2)}
+          focusVisibleStyle={focusRing(2)}
           disabledStyle={dimmed}
           {...checkboxLook({ scale: props.scale })}
           indicator={<CheckboxMark mark={props.mark} scale={props.scale} />}
@@ -1058,7 +1060,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 class="group"
                 style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
                 activeStyle={pressed}
-                focusStyle={focusRing(2)}
+                focusVisibleStyle={focusRing(2)}
                 disabledStyle={dimmed}
               >
                 <RadioRing on={choice() === t().name} scale={t().scale} />
@@ -1346,7 +1348,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 }}
                 hoverStyle={open() ? undefined : hovered()}
                 activeStyle={pressed}
-                focusStyle={focusRing()}
+                focusVisibleStyle={focusRing()}
               >
                 <Text style={{ fontSize: size.detail, color: colors.muted }}>Sort by</Text>
                 <Text style={{ fontSize: size.detail, fontWeight: "500", color: colors.text }}>{sortTitle()}</Text>
@@ -1364,7 +1366,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             onPress={() => set(sort(), !down())}
             class="items-center justify-center rounded-md enabled:hover:bg-accent active:bg-track"
             style={{ width: pointer ? 26 : 34, height: pointer ? 26 : 34 }}
-            focusStyle={focusRing()}
+            focusVisibleStyle={focusRing()}
           >
             <View class="transition-transform duration-200 motion-reduce:transition-none" style={{ transform: [{ rotate: down() ? "0deg" : "180deg" }] }}>
               <Icon name="arrow-down" size={pointer ? 14 : 16} tint={colors.muted} />
@@ -1855,7 +1857,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               cleanable
               clearButtonAccessibilityLabel="Clear the due date"
               {...clearButtonLook({ over: true })}
-              trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
+              trigger={<DateTrigger title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
           <View style={row(false)}>
@@ -1880,13 +1882,13 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               contentStyle={content}
               presetsStyle={calendarLook.presets}
               presetStyle={calendarLook.preset}
-              presetClass="enabled:hover:bg-accent active:opacity-70"
+              presetClass={calendarLook.presetClass}
               calendarStyle={calendar}
               headerStyle={header}
               bodyStyle={terminal ? undefined : { gap: monthGap }}
               itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
-              trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
+              trigger={<DateTrigger title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
             />
           </View>
           <View style={row(false)}>
@@ -1917,9 +1919,9 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               timeAccessibilityLabel="Meeting time"
               timeFieldClass={timeFieldClass}
               segmentClass={segmentClass}
-              separatorStyle={{ color: colors.faint, fontSize: size.label }}
+              separatorStyle={calendarLook.separator}
               renderSegment={(segment) => <TimeSegment label={segment.label} />}
-              trigger={<Picker title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
+              trigger={<DateTrigger title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
             />
           </View>
         </View>
@@ -1979,12 +1981,12 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       return sum;
     };
     const total = () => (nights() ? lodging() + CLEANING : 0);
-    /** One end of the stay in the trigger: a small heading over the day. */
+    /** One end of the stay in the trigger: a small muted heading over the day, the day in the text color or a muted prompt. */
     function End(props: { label: string; value: string | null }) {
       return (
         <View style={{ flex: 1, justifyContent: "center", gap: 1, paddingHorizontal: 12 }}>
-          <Text style={{ fontSize: 10, fontWeight: "600", letterSpacing: 0.6, color: colors.faint }}>{props.label.toUpperCase()}</Text>
-          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.value ? colors.text : colors.faint }}>{props.value ? dayTitle(props.value) : "Add a date"}</Text>
+          <Text style={{ fontSize: 10, fontWeight: "600", letterSpacing: 0.6, color: colors.muted }}>{props.label.toUpperCase()}</Text>
+          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.value ? colors.text : colors.muted }}>{props.value ? dayTitle(props.value) : "Add a date"}</Text>
         </View>
       );
     }
@@ -2028,8 +2030,14 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               }}
               hoverStyle={{ borderColor: colors.faint }}
               activeStyle={pressed}
-              focusStyle={focusRing()}
+              focusVisibleStyle={focusRing()}
             >
+              {/* A date picker's trigger leads with the calendar, as `DateTrigger` does. */}
+              <If when={!terminal}>
+                <View style={{ justifyContent: "center", paddingLeft: 12, marginRight: -4 }}>
+                  <Icon name="calendar" size={pointer ? 16 : 18} tint={colors.muted} />
+                </View>
+              </If>
               <End label="Check-in" value={stay()?.[0] ?? null} />
               <View style={{ width: 1, marginVertical: 8, backgroundColor: colors.line }} />
               <End label="Check-out" value={stay()?.[1] ?? null} />
@@ -2105,15 +2113,15 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               contentStyle={content}
               presetsStyle={calendarLook.presets}
               presetStyle={calendarLook.preset}
-              presetClass="enabled:hover:bg-accent active:opacity-70"
+              presetClass={calendarLook.presetClass}
               renderItem={(item) => <CalendarItem item={item} />}
               {...clearProps("Clear the deadline")}
-              trigger={<Picker title={due() ? dayTitle(due()!) : "None"} open={open()} placeholder={!due()} clearable={due() !== null} />}
+              trigger={<DateTrigger title={due() ? dayTitle(due()!) : "None"} open={open()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
           <View style={row(false)}>
             <RowLabel label="Sprint start" detail="Locked once the sprint began" />
-            <DatePicker value={iso(addDays(today, -9))} disabled accessibilityLabel="Sprint start" trigger={<Picker title={dayTitle(iso(addDays(today, -9)))} open={false} disabled />} />
+            <DatePicker value={iso(addDays(today, -9))} disabled accessibilityLabel="Sprint start" trigger={<DateTrigger title={dayTitle(iso(addDays(today, -9)))} open={false} disabled />} />
           </View>
         </View>
       </Card>
@@ -2165,7 +2173,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             disabledMatcher={closed}
             {...calendarProps()}
             renderItem={(item) => <CalendarItem item={item} />}
-            trigger={<Picker title={day() ? dayTitle(day()!) : "Pick a day"} open={open()} placeholder={!day()} />}
+            trigger={<DateTrigger title={day() ? dayTitle(day()!) : "Pick a day"} open={open()} placeholder={!day()} />}
           />
         </View>
         <View style={settle(t)}>
@@ -2183,7 +2191,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                   style={chip(slot() === s())}
                   activeStyle={{ transform: [{ scale: 0.95 }] }}
                   hoverStyle={slot() === s() ? undefined : { borderColor: colors.faint }}
-                  focusStyle={focusRing()}
+                  focusVisibleStyle={focusRing()}
                   disabledStyle={{ opacity: 0.4 }}
                 >
                   <Text
@@ -2275,7 +2283,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                     last.set(`Keep originals: ${on ? "on" : "off"}`);
                   }}
                   {...listRow({ start: size.gap, style: { flexDirection: "row-reverse" } })}
-                  trackStyle={look.trackStyle}
+                  trackClass={look.trackClass}
+          trackStyle={look.trackStyle}
                   thumbStyle={look.thumbStyle}
                 >
                   <RowDivider show />

@@ -736,6 +736,11 @@ define_class!(
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             match self.input_surface() {
+                // Nothing of this surface scrolls there: its host's turn.
+                // SAFETY: NSResponder's own handling (passes it up).
+                Some(surface) if crate::input::forwards_scroll(&surface, event) => unsafe {
+                    msg_send![super(self), scrollWheel: event]
+                },
                 // Scrolls move views: a frame for the performance monitor.
                 Some(surface) => surface.measure(true, || {
                     crate::input::event(&surface, event);
@@ -771,6 +776,59 @@ define_class!(
             if let Some(surface) = self.input_surface() {
                 crate::text::select_all(&surface);
             }
+        }
+
+        /// The Services menu (and Look Up / Translate in a selection's
+        /// context menu) can take the selected text as plain text.
+        #[unsafe(method(validRequestorForSendType:returnType:))]
+        fn valid_requestor(
+            &self,
+            send: Option<&NSString>,
+            ret: Option<&NSString>,
+        ) -> *mut AnyObject {
+            // SAFETY: an immutable AppKit constant.
+            let text = unsafe { objc2_app_kit::NSPasteboardTypeString };
+            if ret.is_none()
+                && send.is_some_and(|t| t.isEqualToString(text))
+                && self.surface().is_some_and(|s| crate::text::can_copy(&s))
+            {
+                return self as *const Self as *mut AnyObject;
+            }
+            // SAFETY: NSResponder's own handling (asks the next responder).
+            unsafe { msg_send![super(self), validRequestorForSendType: send, returnType: ret] }
+        }
+
+        /// Look Up in a selection's context menu: the system dictionary /
+        /// knowledge panel for the selected text, at the mouse.
+        #[unsafe(method(nshLookUp:))]
+        fn look_up(&self, _sender: Option<&AnyObject>) {
+            let Some(text) = self.surface().and_then(|s| crate::text::selection_text(&s)) else {
+                return;
+            };
+            let Some(window) = self.window() else {
+                return;
+            };
+            let at = self.convertPoint_fromView(window.mouseLocationOutsideOfEventStream(), None);
+            let string = NSString::from_str(&text);
+            // SAFETY: a new attributed string from a valid NSString; the
+            // NSView method takes it and a point in view coordinates.
+            unsafe {
+                let attributed: *mut AnyObject = msg_send![objc2::class!(NSAttributedString), alloc];
+                let attributed: *mut AnyObject = msg_send![attributed, initWithString: &*string];
+                let _: () = msg_send![self, showDefinitionForAttributedString: attributed, atPoint: at];
+                let _: () = msg_send![attributed, release];
+            }
+        }
+
+        /// A service takes the selected text.
+        #[unsafe(method(writeSelectionToPasteboard:types:))]
+        fn write_selection_to_pasteboard(
+            &self,
+            board: &objc2_app_kit::NSPasteboard,
+            _types: &NSArray<NSString>,
+        ) -> bool {
+            self.surface()
+                .is_some_and(|s| crate::text::write_selection(&s, board))
         }
 
         #[unsafe(method(keyDown:))]

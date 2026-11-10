@@ -16,8 +16,8 @@
 //! the `image` crate. A view that grows past its bucket loads the next one.
 //! SVG images (sniffed from their bytes) are drawn by [`nsh_core::svg`] at
 //! the bucket's size; their picture keeps their intrinsic size in points,
-//! which they are laid out with and report. Canvases draw bitmaps only
-//! ([`load_bitmap`]).
+//! which they are laid out with and report. Canvases draw them as their
+//! rasterized bitmap ([`load_bitmap`]).
 //!
 //! A [`Frame`] keeps its pixels (premultiplied BGRA) and makes its Direct2D
 //! bitmap when first drawn, on each UI thread that draws it (a bitmap is a
@@ -654,13 +654,26 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
     ))
 }
 
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size.
+fn from_rgba((w, h, rgba): (u32, u32, &[u8])) -> Result<Picture, String> {
+    let rgba = image::RgbaImage::from_raw(w, h, rgba.to_vec()).ok_or("RGBA of the wrong size")?;
+    Ok(Picture::still(
+        Pixels::from_rgba(rgba),
+        Natural::Pixels(w, h),
+    ))
+}
+
 /// The process's decoded images, in the core's budget.
 fn images() -> &'static Images<Picture> {
     static IMAGES: LazyLock<Images<Picture>> = LazyLock::new(|| {
         Images::with_on_evict(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let picture = decode(bytes, target)?;
+                let picture = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = picture.cost();
                 Ok((picture.clone(), picture.natural, cost))
             },
@@ -853,8 +866,9 @@ pub(crate) fn load_menu_icon(
 
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the UI thread, at its natural size; `done` runs on
-/// the surface's UI thread with the image (an animation's first frame). Canvases
-/// draw bitmaps: an SVG is an image that failed to load.
+/// the surface's UI thread with the image (an animation's first frame). An
+/// SVG is rasterized by the shared SVG renderer and handed over as its
+/// bitmap.
 ///
 /// A cached image is handed over before this returns: callers must not
 /// hold a borrow of view state that `done` takes.
@@ -863,15 +877,7 @@ pub(crate) fn load_bitmap(
     uri: &str,
     done: impl FnOnce(Result<Arc<Frame>, String>) + 'static,
 ) {
-    let name = uri.to_owned();
-    let done = move |result: Result<(Picture, Lease), String>| {
-        done(result.and_then(|(p, _)| match p.natural {
-            Natural::Vector(_) => Err(format!(
-                "{name} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-            )),
-            Natural::Pixels(..) => Ok(p.frame),
-        }));
-    };
+    let done = move |result: Result<(Picture, Lease), String>| done(result.map(|(p, _)| p.frame));
     let source = ImageSource {
         uri: uri.into(),
         size: None,

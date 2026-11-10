@@ -175,6 +175,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | 被按下时。 |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | 指针悬停在视图上时。 |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | 视图获得焦点时。 |
+| `focusVisibleStyle` | `.focus_visible(\|s\| ..)` | `focus-visible:` | 视图获得焦点并显示焦点时：键盘把焦点移到了这里，或应用在按键之后移动了焦点；文本输入框获得焦点时总是显示。按压或轻点给出的焦点不显示。 |
 | `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | 视图自身或其内部的视图获得焦点时（`Overlay` 的内容算在它所在的视图内部）。 |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | `disabled` 时。 |
 | `checkedStyle` | `.checked(\|s\| ..)`、`.checked_style(style)` | `checked:` | `accessibilityState.checked` 为 `true` 时（复选框、开关、单选框；`"mixed"` 不算勾选）。 |
@@ -510,6 +511,7 @@ view()
 |---|---|---|---|
 | `focus()` / `blur()` | `focus()` / `blur()` | `ViewRef` | 让 `<Input>` 获取焦点（弹出键盘），或让可按下的视图获得键盘焦点 / 失去焦点。 |
 | `measure()` | `measure()` | `ViewRef` | [视图的位置](../docs/touch-and-gestures.md)。 |
+| `reveal({ vertical?, horizontal?, animated? })` | `reveal(options)` | `ViewRef` | [滚动视图外围的滚动视图](../docs/scrolling.md#把视图滚到可见处)，让它显示出来。 |
 | `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
 | `insertText(text)` | `insert_text(text)` | `InputRef` | 以用户编辑的方式用 `text` 替换选区，是撤销历史中的一步（Linux、Web、无头测试）。 |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`、`ListRef` | 滚动到某个偏移量。 |

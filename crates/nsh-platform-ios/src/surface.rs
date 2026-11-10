@@ -400,6 +400,9 @@ impl RootView {
             notifications: true,
             // AVAudioEngine and AVPlayer.
             audio: true,
+            web_evaluate: true,
+            // wgpu on Metal, in builds with it, until it finds no GPU.
+            shaders: nsh_engine::shader::LINKED,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()

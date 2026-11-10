@@ -96,7 +96,7 @@ pub(crate) fn launch_args(schemes: &[String]) -> Vec<String> {
 }
 
 /// Whether `arg` is a URL of one of `schemes`.
-fn is_link(arg: &str, schemes: &[String]) -> bool {
+pub(crate) fn is_link(arg: &str, schemes: &[String]) -> bool {
     arg.split_once(':')
         .is_some_and(|(scheme, _)| schemes.iter().any(|s| s.eq_ignore_ascii_case(scheme)))
 }

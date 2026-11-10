@@ -392,6 +392,11 @@ impl Native for LinuxNative {
         use nsh_core::keymap::{Key as K, Keystroke};
         let stroke =
             Keystroke::parse(keys, nsh_core::platform::Os::Linux).map_err(|e| e.to_string())?;
+        // As a keyboard's keys do (`key_focus`), whichever way the
+        // keystroke goes in below.
+        self.on_main(|surface| {
+            surface.control(|c| c.set_input_modality(nsh_core::platform::InputModality::Keyboard))
+        });
         // A real keystroke where there are real key events: GTK's
         // shortcut controllers, the focus' key bindings and the input
         // method see it as they see a keyboard's.

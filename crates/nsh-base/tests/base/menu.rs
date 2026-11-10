@@ -470,6 +470,80 @@ fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
     app.app.wait_for("text:chose:Quit").unwrap();
 }
 
+#[test]
+fn page_down_and_page_up_go_to_the_last_and_first_enabled_items_and_stop() {
+    // Every item is in view: a page is all of them. New is disabled, so
+    // Page Up stops at Open; neither goes around.
+    for (keys, chosen) in [
+        (&["pagedown"][..], "Quit"),
+        (&["pageup"][..], "Open"),
+        (&["down", "pagedown"][..], "Quit"),
+        (&["pagedown", "pagedown"][..], "Quit"),
+        (&["end", "pageup"][..], "Open"),
+        (&["pageup", "pageup"][..], "Open"),
+    ] {
+        let mut app = start_with(Root::of::<FileMenu>());
+        app.app.press("id:file").unwrap();
+        app.app.wait_for("Open").unwrap();
+        for key in keys {
+            app.app.press_key(key).unwrap();
+        }
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{keys:?}: {e}"));
+    }
+}
+
+#[test]
+fn the_keys_start_at_the_item_the_pointer_is_on() {
+    // The pointer on Save, the third item: Down goes on to Quit, Up back
+    // to Open, Space chooses Save itself.
+    for (key, chosen) in [("down", "Quit"), ("up", "Open"), ("space", "Save")] {
+        let mut app = start_with(Root::of::<FileMenu>());
+        app.app.press("id:file").unwrap();
+        app.app.wait_for("Open").unwrap();
+        app.app.hover("label:Save").unwrap();
+        app.app.press_key(key).unwrap();
+        if key != "space" {
+            app.app.press_key("space").unwrap();
+        }
+        app.app
+            .wait_for(&format!("text:chose:{chosen}"))
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
+    }
+}
+
+#[test]
+fn the_pointer_moves_on_from_the_item_the_keys_reached() {
+    // Down three times reaches Quit; the pointer then on Open: Down is
+    // Save, the item after Open.
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.hover("label:Open").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Save").unwrap();
+}
+
+#[test]
+fn the_pointer_leaving_the_items_leaves_none_for_the_keys() {
+    // The pointer on Save, then off the menu: the item it left is no
+    // longer the keys' start, so Down goes to the first enabled item.
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.hover("label:Save").unwrap();
+    app.app.hover("id:file").unwrap();
+    app.app.press_key("down").unwrap();
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Open").unwrap();
+}
+
 /// A document whose context menu's first item is disabled: New
 /// (disabled), Rename, Delete. The text says the item chosen last and how
 /// the last `onContextMenu` of a plain view beside it came.
@@ -681,4 +755,59 @@ fn a_tap_on_a_context_menus_trigger_still_presses() {
     app.app.press("id:row").unwrap();
     app.app.wait_for("text:p1 u1 l0").unwrap();
     assert!(!app.app.shows("Rename"), "a tap opens no menu");
+}
+
+/// Holds a pointer of `pointer_type` still on the row for longer than a
+/// long press, as a platform reports it: a touch on the root with the row
+/// listening.
+fn hold_row(app: &mut App, pointer_type: nsh_core::PointerType) {
+    let row = app.seen.lock().unwrap().test_ids["row"];
+    let touch = |phase| {
+        EventPayload::Touch(Box::new(nsh_core::TouchEvent {
+            phase,
+            timestamp: 0.0,
+            points: vec![nsh_core::TouchPoint {
+                id: 1,
+                target: row,
+                path: if phase == nsh_core::TouchPhase::Start {
+                    vec![row]
+                } else {
+                    Vec::new()
+                },
+                page: point(px(10.0), px(110.0)),
+                location: point(px(10.0), px(10.0)),
+                changed: true,
+                pointer_type,
+            }],
+            activated: None,
+        }))
+    };
+    let control = app.app.engine().control();
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Touch,
+        touch(nsh_core::TouchPhase::Start),
+    );
+    app.app.wait(std::time::Duration::from_millis(600)).unwrap();
+}
+
+#[test]
+fn a_held_mouse_button_opens_no_context_menu() {
+    // Desktops report the mouse as a touch too: holding its button still
+    // is a slow click or the start of a drag, not a request for a menu.
+    let mut app = start_on(Root::of::<PressableRow>(), Os::Windows);
+    hold_row(&mut app, nsh_core::PointerType::Mouse);
+    assert!(
+        !app.app.shows("Rename"),
+        "a held mouse button opens no menu"
+    );
+}
+
+#[test]
+fn a_held_finger_or_pen_reported_as_a_touch_opens_the_menu() {
+    for pointer_type in [nsh_core::PointerType::Touch, nsh_core::PointerType::Pen] {
+        let mut app = start_on(Root::of::<PressableRow>(), Os::Windows);
+        hold_row(&mut app, pointer_type);
+        app.app.wait_for("Rename").unwrap();
+    }
 }

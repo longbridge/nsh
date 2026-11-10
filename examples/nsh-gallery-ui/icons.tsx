@@ -26,6 +26,7 @@ export type IconName =
   | "chat"
   | "smile"
   | "clock"
+  | "calendar"
   | "person"
   | "leaf"
   | "food"
@@ -406,6 +407,13 @@ const glyphs: Record<IconName, Draw> = {
     circle(c, 10, 10, 7);
     line(c, [10, 6, 10, 10, 12.8, 11.8]);
   },
+  // Lucide's `calendar`, in the 20-unit box: the rings over a rounded page and the rule under its top.
+  calendar: (c) => {
+    rect(c, 2.5, 3.3, 15, 15, 1.7);
+    line(c, [6.7, 1.7, 6.7, 5]);
+    line(c, [13.3, 1.7, 13.3, 5]);
+    line(c, [2.5, 8.3, 17.5, 8.3]);
+  },
   person: (c) => {
     circle(c, 10, 7, 3.2);
     c.beginPath();
@@ -703,6 +711,9 @@ const glyphs: Record<IconName, Draw> = {
   },
 };
 
+/** The glyphs that point along the line (forward, back): mirrored right to left. */
+const directional: ReadonlySet<IconName> = new Set<IconName>(["chevron", "back"]);
+
 /** A glyph, stroked with `tint`; `weight` is the stroke in the glyphs' 20-unit box (1.6 by default). */
 export function Icon(props: { name: IconName; size?: number; tint: string; weight?: number }) {
   const size = props.size ?? 20;
@@ -711,6 +722,7 @@ export function Icon(props: { name: IconName; size?: number; tint: string; weigh
   if (terminal && props.name === "check") return <Text style={{ color: props.tint }}>✓</Text>;
   return (
     <Canvas
+      class={directional.has(props.name) ? "rtl:-scale-x-100" : undefined}
       style={{ pointerEvents: "none", width: size, height: size }}
       draw={(cx, { width }) => {
         cx.scale(width / 20, width / 20);

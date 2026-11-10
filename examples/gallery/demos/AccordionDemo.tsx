@@ -152,6 +152,7 @@ export function AccordionDemo() {
             last.set(`${props.label}: ${checked ? "on" : "off"}`);
           }}
           {...listRow({ first: true, style: { flexDirection: "row-reverse" } })}
+          trackClass={look.trackClass}
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
         >

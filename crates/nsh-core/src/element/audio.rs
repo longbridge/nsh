@@ -139,17 +139,73 @@ pub fn audio_available() -> super::Answer<bool> {
     answer
 }
 
-/// Loads the sound at `src` (TS: `Sound.load`), to await in a task: its
-/// bytes (a bundled asset, a relative path, `file:`, `data:` or `http(s)`)
-/// decoded by the platform into memory, so [`Sound::play`] starts at once.
-/// Loading a source this engine has loaded already shares its decoded
-/// audio. Fails when the app's capabilities do not grant `audio` (or
-/// `network` for a remote source), past the engine's limits
+/// What a sound is loaded from ([`load_sound`]; TS: `Sound.load`'s
+/// `string | Uint8Array`): where its file is, or the file's bytes.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum SoundSource {
+    /// A bundled asset (`asset!(...)`'s `uri`), a relative path, `file:`,
+    /// `data:` or an `http(s)` URL.
+    Url(String),
+    /// The encoded bytes of a sound file (WAV, AAC, MP3, ...): one the app
+    /// embeds (`include_bytes!`) or makes. Its format is read from the
+    /// bytes; equal bytes share one decoded sound.
+    Bytes(ImageData),
+}
+
+impl From<&str> for SoundSource {
+    fn from(src: &str) -> Self {
+        Self::Url(src.to_owned())
+    }
+}
+
+impl From<&String> for SoundSource {
+    fn from(src: &String) -> Self {
+        Self::Url(src.clone())
+    }
+}
+
+impl From<String> for SoundSource {
+    fn from(src: String) -> Self {
+        Self::Url(src)
+    }
+}
+
+impl From<ImageData> for SoundSource {
+    fn from(bytes: ImageData) -> Self {
+        Self::Bytes(bytes)
+    }
+}
+
+impl From<Vec<u8>> for SoundSource {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(ImageData::new(bytes))
+    }
+}
+
+impl From<&'static [u8]> for SoundSource {
+    fn from(bytes: &'static [u8]) -> Self {
+        Self::Bytes(ImageData::new(bytes))
+    }
+}
+
+impl<const N: usize> From<&'static [u8; N]> for SoundSource {
+    fn from(bytes: &'static [u8; N]) -> Self {
+        Self::Bytes(ImageData::new(bytes.as_slice()))
+    }
+}
+
+/// Loads a sound (TS: `Sound.load`), to await in a task: its bytes (read
+/// from a bundled asset, a relative path, `file:`, `data:` or `http(s)`, or
+/// given) decoded by the platform into memory, so [`Sound::play`] starts at
+/// once. Loading a source (or bytes) this engine has loaded already shares
+/// its decoded audio. Fails when the app's capabilities do not grant
+/// `audio` (or `network` for a remote source), past the engine's limits
 /// ([`crate::audio`]'s), when the bytes cannot be read or decoded, and
 /// where nothing plays sound.
-pub async fn load_sound(src: &str) -> Result<Sound, AudioFailure> {
+pub async fn load_sound(src: impl Into<SoundSource>) -> Result<Sound, AudioFailure> {
     let executor = executor();
-    let uri = asset_uri(src);
+    let src = src.into();
     // Before any byte is read (the core checks again, and alone on the web,
     // where the platform fetches).
     #[cfg(not(target_arch = "wasm32"))]
@@ -161,7 +217,9 @@ pub async fn load_sound(src: &str) -> Result<Sound, AudioFailure> {
                 "sound is not granted: add `\"audio\": true` to capabilities in nsh.json",
             ));
         }
-        if !access.allows_media(&uri) {
+        if let SoundSource::Url(src) = &src
+            && !access.allows_media(&asset_uri(src))
+        {
             return Err(AudioFailure::new(
                 AudioError::NotAllowed,
                 format!("`{src}` is not granted by capabilities.network in nsh.json"),
@@ -175,9 +233,23 @@ pub async fn load_sound(src: &str) -> Result<Sound, AudioFailure> {
             "nothing plays sound here",
         ));
     }
-    let location = locate(&uri).ok_or_else(|| {
-        AudioFailure::new(AudioError::NotSupported, format!("no sound at `{src}`"))
-    })?;
+    let (location, src) = match src {
+        SoundSource::Url(src) => (
+            locate(&asset_uri(&src)).ok_or_else(|| {
+                AudioFailure::new(AudioError::NotSupported, format!("no sound at `{src}`"))
+            })?,
+            src,
+        ),
+        SoundSource::Bytes(bytes) => {
+            too_big(bytes.len(), "the sound's bytes")?;
+            // Named by its format and a digest of its bytes: the decoders
+            // that go by a name read the format from it, and equal bytes
+            // share one load.
+            let name = crate::image::data_key(crate::audio::sniff(&bytes), &bytes);
+            (Fetch::Bytes(bytes, name.clone()), name)
+        }
+    };
+    let src = src.as_str();
     let key = location.key();
     // Loaded or loading already: share it.
     let existing = match executor.sounds.borrow().sources.get(&key) {
@@ -282,6 +354,8 @@ enum Fetch {
     Read(Location),
     /// A `data:` URI's bytes, decoded here.
     Data(String),
+    /// Bytes the app gave, and the name they go by.
+    Bytes(ImageData, String),
     /// Fetched by the platform from this URL (an `asset:/` URI or an
     /// `http(s)` URL the core checked): the web, where the browser fetches
     /// and the image loader has no threads.
@@ -295,6 +369,7 @@ impl Fetch {
             #[cfg(not(target_arch = "wasm32"))]
             Fetch::Read(location) => location.key(),
             Fetch::Data(uri) => uri.clone(),
+            Fetch::Bytes(_, name) => name.clone(),
             #[cfg(target_arch = "wasm32")]
             Fetch::Url(url) => url.clone(),
         }
@@ -312,6 +387,17 @@ fn locate(uri: &str) -> Option<Fetch> {
     return Some(Fetch::Url(uri.to_owned()));
     #[cfg(not(target_arch = "wasm32"))]
     loader::context().resolve(uri).map(Fetch::Read)
+}
+
+/// Refuses encoded bytes past [`MAX_SOUND_BYTES`]; `what` names them.
+fn too_big(len: usize, what: &str) -> Result<(), AudioFailure> {
+    if len > MAX_SOUND_BYTES {
+        return Err(AudioFailure::new(
+            AudioError::QuotaExceeded,
+            format!("{what} is {len} bytes: a sound is at most {MAX_SOUND_BYTES}"),
+        ));
+    }
+    Ok(())
 }
 
 /// Has the platform decode the sound (its bytes read here first, or
@@ -337,20 +423,13 @@ async fn decode(
                 .map(|(_, bytes)| ImageData::from(bytes))
                 .map_err(|message| AudioFailure::new(AudioError::NotSupported, message))?,
         ),
+        Fetch::Bytes(bytes, _) => Some(bytes),
         #[cfg(target_arch = "wasm32")]
         Fetch::Url(_) => None,
     };
     let command = match (bytes, fetch_url) {
         (Some(bytes), _) => {
-            if bytes.len() > MAX_SOUND_BYTES {
-                return Err(AudioFailure::new(
-                    AudioError::QuotaExceeded,
-                    format!(
-                        "`{src}` is {} bytes: a sound is at most {MAX_SOUND_BYTES}",
-                        bytes.len()
-                    ),
-                ));
-            }
+            too_big(bytes.len(), &format!("`{src}`"))?;
             AudioCommand::Load {
                 id,
                 bytes,

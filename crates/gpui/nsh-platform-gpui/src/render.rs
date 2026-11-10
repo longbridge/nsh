@@ -771,6 +771,7 @@ impl Element for SurfaceElement {
         window.set_focus_handle(&self.focus, cx);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::BlockMouse);
         // Native components and web views take the input over their boxes.
+        surface.main_window.set(Some(window.window_handle()));
         crate::native::prepaint(surface, window, cx);
         hitbox
     }

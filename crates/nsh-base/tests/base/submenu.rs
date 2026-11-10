@@ -126,13 +126,18 @@ fn the_keyboard_on_another_item_closes_a_submenu_the_pointer_opened() {
     app.wait_for("Share").unwrap();
     app.hover("id:share").unwrap();
     app.wait_for("Mail").unwrap();
-    // Down focuses the menu's first item, `New`: the submenu closes, so
-    // one item is highlighted, and Return chooses `New`.
+    // Down goes on from `Share`, under the pointer, to `Export`: the
+    // submenu closes, so one item is highlighted, and Return opens
+    // `Export`.
     app.press_key("down").unwrap();
     shows_log(&mut app, "share open Hover, share close Focus");
     app.wait_for_gone("Mail", WAIT).unwrap();
     app.press_key("enter").unwrap();
-    shows_log(&mut app, "share open Hover, share close Focus, chose new");
+    app.wait_for("PDF").unwrap();
+    shows_log(
+        &mut app,
+        "share open Hover, share close Focus, export open TriggerPress",
+    );
 }
 
 #[test]
@@ -140,13 +145,13 @@ fn the_keyboard_on_a_submenus_own_trigger_keeps_it_open() {
     let mut app = start(Os::MacOs, Idiom::Desktop);
     app.press("id:file").unwrap();
     app.wait_for("Share").unwrap();
-    // The focus on `Share`, then the pointer opens `Export`: Down to
-    // `Export` keeps it open, Up to `Share` closes it.
+    // The focus on `Share`, then the pointer opens `Export` and moves the
+    // focus to its trigger, which keeps it open; Up to `Share` closes it.
     app.press_key("down").unwrap();
     app.press_key("down").unwrap();
     app.hover("id:export").unwrap();
+    app.wait_for("PDF").unwrap();
     shows_log(&mut app, "export open Hover");
-    app.press_key("down").unwrap();
     app.press_key("up").unwrap();
     shows_log(&mut app, "export open Hover, export close Focus");
     // Right on `Share` opens it at `Mail`, Left closes it with the focus

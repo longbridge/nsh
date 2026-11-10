@@ -1,10 +1,10 @@
-import { type JSX, LayoutAnimation, reduceMotion, Scroll, setColorScheme, signal, Text, token, View } from "nsh";
+import { type JSX, LayoutAnimation, reduceMotion, Scroll, signal, Text, token, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu, Toolbar } from "nsh/base";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon, LucideIcon, type LucideIconName } from "../icons";
 import { toast, updateToast } from "../toast";
-import { alpha, backdrop, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, menuHighlight, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, MenuPanel, menuPressed, menuSeparator, menuSheet, mono, Row, Segmented, SubmenuBack, SubmenuRow, terminal, Tip } from "../ui";
+import { alpha, backdrop, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, menuHighlight, setAppearance, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, MenuPanel, menuPressed, menuSeparator, menuSheet, mono, Row, Segmented, SubmenuBack, SubmenuRow, terminal, Tip } from "../ui";
 
 // The look of every menu here is the gallery's (`look/menu.tsx`):
 // `nsh/base` draws none.
@@ -456,7 +456,7 @@ export function Menus() {
               label={isDark() ? "Light appearance" : "Dark appearance"}
               icon={isDark() ? "sun" : "moon"}
               onSelect={() => {
-                setColorScheme(isDark() ? "light" : "dark");
+                setAppearance(isDark() ? "light" : "dark");
                 log("ran Toggle theme");
               }}
             />

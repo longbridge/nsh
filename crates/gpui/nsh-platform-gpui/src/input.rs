@@ -73,6 +73,7 @@ use nsh_core::{
         SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
         laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1061,6 +1062,11 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if matches!(event.kind, PointerKind::Down) {
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -1179,6 +1185,15 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
 /// A key from the window; true when handled. Only key downs (and their
 /// repeats) go to the modules; ups are not acted on.
 pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
+    // Before the key acts: the focus it moves shows (`focus-visible:`). A
+    // modifier alone (Shift, Control, Alt, the Windows / Command keys)
+    // does not count.
+    const MODIFIERS: [u16; 11] = [
+        0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C,
+    ];
+    if event.down && !MODIFIERS.contains(&event.vk) {
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
     if event.down && event.vk == VK_ESCAPE {
         crate::text_input::disarm(surface);
     }
@@ -1210,6 +1225,7 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::text::key(surface, &event)
         || crate::selectable_view::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
+        || crate::key_focus::key(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
             crate::scroll::key(surface, &event, x, y)
@@ -1509,6 +1525,7 @@ fn down(
     let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    crate::key_focus::pointer_down(surface, &hit.view);
     let touch = key != Key::Mouse;
     let mut item = None;
     if let Some(native) = hit.item.take() {
@@ -1894,6 +1911,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: nsh_core::geometry::point(Points(p.x), Points(p.y)),
                     location: nsh_core::geometry::point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()

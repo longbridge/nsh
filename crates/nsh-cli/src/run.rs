@@ -538,6 +538,7 @@ fn package_for_run(
         keystore: None,
         abis,
         format: crate::android::Format::Apk,
+        arch: None,
         run: false,
         asset_url: None,
     })

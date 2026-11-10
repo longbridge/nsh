@@ -8,7 +8,7 @@ use crate::{
     geometry::{Points, Size},
     mount::MountItem,
     ops::NodeId,
-    platform::{Appearance, ColorScheme},
+    platform::{Appearance, ColorScheme, InputModality},
     props::PointerEvents,
     style::{Color, Style, StylePatch, ViewStyle},
     tailwind::{
@@ -67,6 +67,8 @@ pub(super) enum Part {
     Pressed,
     /// `focusWithinStyle`.
     FocusWithin,
+    /// `focusVisibleStyle`.
+    FocusVisible,
     /// A page's `headerStyle` / `headerClass`.
     Header,
     /// A list's `contentClass`.
@@ -87,6 +89,7 @@ impl Part {
             Part::Expanded => (state::EXPANDED, rank::EXPANDED),
             Part::Pressed => (state::ARIA_PRESSED, rank::ARIA_PRESSED),
             Part::FocusWithin => (state::FOCUS_WITHIN, rank::FOCUS_WITHIN),
+            Part::FocusVisible => (state::FOCUS_VISIBLE, rank::FOCUS_VISIBLE),
             _ => return None,
         })
     }
@@ -97,8 +100,8 @@ impl Part {
 pub(super) struct NodeParts {
     /// The classes as set, before the state styles are merged in.
     base: Option<std::rc::Rc<ClassList>>,
-    /// The state styles, by [`Part`] (the first ten).
-    states: [Option<std::rc::Rc<StylePatch>>; 10],
+    /// The state styles, by [`Part`] (the first eleven).
+    states: [Option<std::rc::Rc<StylePatch>>; 11],
     /// The state styles as rules (none without any).
     state_rules: Option<std::rc::Rc<ClassList>>,
     /// The inline styles of the other parts.
@@ -134,7 +137,7 @@ pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
 }
 
 /// The state style parts, by their index in [`NodeParts::states`].
-const STATE_PARTS: [Part; 10] = [
+const STATE_PARTS: [Part; 11] = [
     Part::Active,
     Part::Hover,
     Part::Focus,
@@ -145,6 +148,7 @@ const STATE_PARTS: [Part; 10] = [
     Part::Expanded,
     Part::Pressed,
     Part::FocusWithin,
+    Part::FocusVisible,
 ];
 
 impl<M: TextEngine> Core<M> {
@@ -238,19 +242,85 @@ impl<M: TextEngine> Core<M> {
     /// losing it yet, and a view losing it that is not the focus changes
     /// nothing. The chain is worked out in the next commit round, once for
     /// all the reports before it, so a move reported as a blur then a
-    /// focus leaves the views both chains share as they were. The root
+    /// focus leaves the views both chains share as they were; a blur no
+    /// focus follows in that round waits for the next display frame
+    /// (`blur_held`), so the focus arriving in a later message is still
+    /// the same move. The root
     /// view taking it (macOS's first responder when no view has it) is no
     /// focus.
     fn focus_reported(&mut self, key: Key, focused: bool) {
         let id = self.nodes[key as usize].id;
         if focused {
             self.focus = (key != self.root).then_some((key, id));
+            self.focus_visible = self.focus_shows(key);
+            self.blur_held = false;
         } else if self.focus == Some((key, id)) {
             self.focus = None;
+            self.blur_held = true;
         } else {
             return;
         }
         self.focus_moved = true;
+    }
+
+    /// The platform reports what the user gave the surface input with
+    /// last ([`InputModality`]), before the focus moves it causes: a key
+    /// typed while the focus does not show makes it show, as browsers
+    /// do. A pointer leaves a focus that shows as it is: only a move of
+    /// the focus decides again ([`Self::focus_shows`]).
+    pub fn set_input_modality(&mut self, modality: InputModality) {
+        self.modality = Some(modality);
+        if modality == InputModality::Keyboard && self.focus.is_some() && !self.focus_visible {
+            self.focus_visible = true;
+            self.focus_visible_moved = true;
+        }
+    }
+
+    /// Whether the focus coming to `key` shows (`focus-visible:`), the
+    /// one rule every platform follows, after CSS's `:focus-visible`: an
+    /// input that edits always shows it (it takes typing), any other view
+    /// unless the surface's last input was a pointer, so the keyboard's
+    /// moves show (Tab, a group's arrows, a shortcut) and so does a move
+    /// the app makes (`focus()`, a calendar or a dialog moving it as it
+    /// opens) after a key, while a press, a tap or a move after one does
+    /// not. Before any input it shows, as a browser's `autofocus` does.
+    pub(super) fn focus_shows(&self, key: Key) -> bool {
+        let node = &self.nodes[key as usize];
+        let edits = node.kind == Kind::Input
+            && node
+                .input
+                .as_ref()
+                .is_some_and(|input| input.config.editable);
+        edits || self.modality != Some(InputModality::Pointer)
+    }
+
+    /// Puts `FOCUS_VISIBLE` on the focus while it shows and takes it off
+    /// the view that had it: one view changes, the rest are not touched.
+    pub(super) fn update_focus_visible(&mut self) {
+        let alive = |this: &Self, (k, id): (Key, NodeId)| {
+            this.nodes.get(k as usize).is_some_and(|n| n.id == id)
+        };
+        let target = self.focus.filter(|&f| self.focus_visible && alive(self, f));
+        if target == self.focus_visible_on {
+            return;
+        }
+        if let Some(old) = self.focus_visible_on.take()
+            && alive(self, old)
+        {
+            let node = &mut self.nodes[old.0 as usize];
+            if node.states & state::FOCUS_VISIBLE != 0 {
+                node.states &= !state::FOCUS_VISIBLE;
+                self.states_changed(old.0);
+            }
+        }
+        if let Some((k, _)) = target {
+            let node = &mut self.nodes[k as usize];
+            if node.states & state::FOCUS_VISIBLE == 0 {
+                node.states |= state::FOCUS_VISIBLE;
+                self.states_changed(k);
+            }
+        }
+        self.focus_visible_on = target;
     }
 
     /// Puts `focus-within` on the focus and the views around it, and takes
@@ -262,6 +332,7 @@ impl<M: TextEngine> Core<M> {
     /// is in, as in a React portal.
     pub(super) fn update_focus_within(&mut self) {
         self.focus_moved = false;
+        self.blur_held = false;
         let focus = self
             .focus
             .filter(|&(k, id)| self.nodes.get(k as usize).is_some_and(|n| n.id == id));

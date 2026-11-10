@@ -30,6 +30,13 @@ WORKFLOWS = {
             "website/**", "skills/**", "examples/tasks/**", "examples/tasks-rs/**",
             "examples/gallery/**",
         ],
+        # Pull requests build the site only when it or the web runtime changes:
+        # Rust application's `web` job builds the web runtime for every change
+        # to the crates, and main's deployment builds the site after a merge.
+        "pull_request": [
+            "website/**", "skills/**", "examples/tasks/**", "examples/tasks-rs/**",
+            "crates/nsh-platform-web/**",
+        ],
     },
     "tui.yml": {
         "packages": ["nsh-platform-tui", "nsh-base"],
@@ -159,11 +166,16 @@ def main():
         workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
         on = workflow[True]
         for event in ("push", "pull_request"):
+            if event not in on:
+                continue
             patterns = (on[event] or {}).get("paths")
             if patterns is None and event == "pull_request":
                 patterns = filtered(workflow)
             patterns = patterns or ["**"]
-            missing = [p for p in want if not covered(p, patterns)]
+            wanted = want
+            if event == "pull_request" and "pull_request" in spec:
+                wanted = spec["pull_request"] + ALWAYS + [f".github/workflows/{name}"]
+            missing = [p for p in wanted if not covered(p, patterns)]
             if missing:
                 failed = True
                 print(f"{name} ({event}) does not run on changes to: {', '.join(missing)}")
