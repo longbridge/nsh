@@ -23,6 +23,7 @@ import CoreShaderEffects from "./core-shader-effects";
 import AssetImports from "./asset-imports";
 import ModuleUrl from "./module-url";
 import WebLoad from "./web-load";
+import WebEvaluate from "./web-evaluate";
 import WebAvailable from "./web-available";
 import ShadersAvailable from "./shaders-available";
 import Steps from "./steps";
@@ -49,6 +50,7 @@ const cases: Record<string, () => JSX.Element> = {
   "module-url": ModuleUrl,
   "steps": Steps,
   "web-load": WebLoad,
+  "web-evaluate": WebEvaluate,
   "web-available": WebAvailable,
   "shaders-available": ShadersAvailable,
 };

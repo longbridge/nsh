@@ -3,15 +3,21 @@ package com.longbridge.nsh;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.MotionEvent;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Objects;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 /**
  * `<webview>`: an {@code android.webkit.WebView}. Pages reach the app through
@@ -30,6 +36,25 @@ final class WebBox extends WidgetBox {
     private Object[] source;
     private String injected, injectedBefore, userAgent;
     private boolean scrollable = true;
+    private boolean disposed, processGone;
+    private final Handler evaluationHandler = new Handler(Looper.getMainLooper());
+    private final HashMap<Integer, Evaluation> evaluations = new HashMap<>();
+    // The shared page wrapper enforces the result limit; leave room for its envelope.
+    private static final int MAX_ENVELOPE_BYTES = 1048576 + 1024;
+
+    private final class Evaluation {
+        final int request;
+        final String generation, pollScript, cleanupScript;
+        final Runnable poll;
+
+        Evaluation(int request, String generation, String pollScript, String cleanupScript) {
+            this.request = request;
+            this.generation = generation;
+            this.pollScript = pollScript;
+            this.cleanupScript = cleanupScript;
+            poll = () -> runEvaluation(this, pollScript);
+        }
+    }
 
     private WebBox(Context context, Mounter mounter, int id, WebView web) {
         super(context, mounter, id, web);
@@ -70,7 +95,11 @@ final class WebBox extends WidgetBox {
     private final class Bridge {
         @JavascriptInterface
         public void postMessage(String data) {
-            post(() -> mounter.eventMap(id, Native.MESSAGE, new String[] {"data"}, new Object[] {data}));
+            post(() -> {
+                if (!disposed && !processGone) {
+                    mounter.eventMap(id, Native.MESSAGE, new String[] {"data"}, new Object[] {data});
+                }
+            });
         }
     }
 
@@ -78,6 +107,7 @@ final class WebBox extends WidgetBox {
         /** Top-level navigations stay within the app's `webview` capability. */
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            if (disposed || processGone) return true;
             if (!request.isForMainFrame()) return false;
             String url = request.getUrl().toString();
             if (mounter.allowsWebview(url)) return false;
@@ -89,21 +119,37 @@ final class WebBox extends WidgetBox {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            if (disposed || processGone) return;
+            cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
             if (injectedBefore != null) view.evaluateJavascript(injectedBefore, null);
             state(Native.LOAD_START, url, true);
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            if (disposed || processGone) return;
             if (injected != null) view.evaluateJavascript(injected, null);
             state(Native.LOAD, url, false);
         }
 
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+            if (disposed || processGone) return;
             if (!request.isForMainFrame()) return;
             mounter.eventMap(id, Native.ERROR, new String[] {"message", "url"},
                     new Object[] {String.valueOf(error.getDescription()), request.getUrl().toString()});
+        }
+
+        @Override
+        public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+            if (disposed || processGone) return true;
+            processGone = true;
+            cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web content process terminated");
+            // A WebView with a lost renderer cannot be reused. Handling the
+            // callback and destroying it keeps the embedding app alive.
+            removeView(web);
+            web.destroy();
+            return true;
         }
     }
 
@@ -119,6 +165,8 @@ final class WebBox extends WidgetBox {
     @SuppressWarnings("deprecation") // setSaveFormData: still honored before Android 8.
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
             boolean scrollable, boolean javaScriptEnabled, boolean incognito) {
+        if (disposed || processGone) return;
+        if (!javaScriptEnabled) cancelEvaluations("ERR_NSH_WEBVIEW_SCRIPT", "JavaScript is disabled");
         // Read with the first props: the core keeps it from changing.
         if (this.source == null && incognito) {
             WebSettings settings = web.getSettings();
@@ -139,6 +187,9 @@ final class WebBox extends WidgetBox {
         }
         if (this.source == null || !java.util.Arrays.equals(source, this.source) || scriptsChanged) {
             this.source = source;
+            if ((int) source[0] != 0) {
+                cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
+            }
             switch ((int) source[0]) {
                 case 1: web.loadUrl((String) source[1]); break;
                 case 2: web.loadDataWithBaseURL((String) source[2], (String) source[1], "text/html", "UTF-8", null); break;
@@ -149,6 +200,10 @@ final class WebBox extends WidgetBox {
 
     /** Commands 4–9 of `Mounter.command`. */
     void command(int kind, String text) {
+        if (disposed || processGone) return;
+        if (kind >= 4 && kind <= 6) {
+            cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
+        }
         switch (kind) {
             case 4: web.reload(); break;
             case 5: web.goBack(); break;
@@ -168,11 +223,127 @@ final class WebBox extends WidgetBox {
      * own request; WebView sends them with no subresource or later navigation.
      */
     void load(String url, java.util.Map<String, String> headers) {
+        if (disposed || processGone) return;
+        cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
         web.loadUrl(url, headers);
     }
 
+    /** Starts a request without exposing a page-to-native bridge. */
+    void evaluate(int request, String generation, String start, String poll, String cleanup) {
+        if (disposed) return;
+        if (processGone || !web.getSettings().getJavaScriptEnabled()) {
+            evaluationError(request, generation, processGone ? "ERR_NSH_WEBVIEW_ABORTED" : "ERR_NSH_WEBVIEW_SCRIPT",
+                    processGone ? "The web content process terminated" : "JavaScript is disabled");
+            return;
+        }
+        cancelEvaluation(request);
+        Evaluation evaluation = new Evaluation(request, generation, poll, cleanup);
+        evaluations.put(request, evaluation);
+        // The core keeps the deadline: it cancels the request when the
+        // app's timeout passes.
+        runEvaluation(evaluation, start);
+    }
+
+    private boolean active(Evaluation evaluation) {
+        return !disposed && !processGone && evaluations.get(evaluation.request) == evaluation;
+    }
+
+    private void runEvaluation(Evaluation evaluation, String script) {
+        if (!active(evaluation)) return;
+        try {
+            web.evaluateJavascript(script, encoded -> {
+                if (!active(evaluation)) return;
+                try {
+                    // Android JSON-encodes the string returned by the shared
+                    // wrapper. Decode that one extra layer, not the result value.
+                    if (encoded == null) {
+                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
+                        return;
+                    }
+                    if (encoded.length() > MAX_ENVELOPE_BYTES * 6 + 2) {
+                        failEvaluation(evaluation, "ERR_NSH_QUOTA_EXCEEDED", "The JavaScript result is too large");
+                        return;
+                    }
+                    Object decoded = new JSONTokener(encoded).nextValue();
+                    if (!(decoded instanceof String)) {
+                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
+                        return;
+                    }
+                    String envelope = (String) decoded;
+                    if (envelope.getBytes(StandardCharsets.UTF_8).length > MAX_ENVELOPE_BYTES) {
+                        failEvaluation(evaluation, "ERR_NSH_QUOTA_EXCEEDED", "The JavaScript result is too large");
+                        return;
+                    }
+                    String status = new JSONObject(envelope).getString("status");
+                    if (status.equals("pending")) {
+                        evaluationHandler.postDelayed(evaluation.poll, 25);
+                    } else if (status.equals("ok") || status.equals("error")) {
+                        finishEvaluation(evaluation, envelope);
+                    } else {
+                        failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
+                    }
+                } catch (org.json.JSONException error) {
+                    failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView returned an invalid evaluation response");
+                }
+            });
+        } catch (RuntimeException error) {
+            failEvaluation(evaluation, "ERR_NSH_WEBVIEW_SCRIPT", "WebView could not evaluate JavaScript");
+        }
+    }
+
+    private void evaluationReply(int request, String generation, String envelope) {
+        // Internal completions do not depend on an app event listener.
+        mounter.eventMap(id, Native.WEB_EVALUATION, new String[] {"id", "data", "generation"},
+                new Object[] {Double.valueOf(Integer.toUnsignedLong(request)), envelope, generation});
+    }
+
+    private void evaluationError(int request, String generation, String code, String message) {
+        evaluationReply(request, generation, "{\"status\":\"error\",\"code\":" + JSONObject.quote(code)
+                + ",\"message\":" + JSONObject.quote(message) + "}");
+    }
+
+    private void finishEvaluation(Evaluation evaluation, String envelope) {
+        if (!active(evaluation)) return;
+        cancelEvaluation(evaluation.request);
+        evaluationReply(evaluation.request, evaluation.generation, envelope);
+    }
+
+    private void failEvaluation(Evaluation evaluation, String code, String message) {
+        if (!active(evaluation)) return;
+        cancelEvaluation(evaluation.request);
+        evaluationError(evaluation.request, evaluation.generation, code, message);
+    }
+
+    /** Core cancellation is silent and also removes the page's pending cell. */
+    void cancelEvaluation(int request) {
+        Evaluation evaluation = evaluations.remove(request);
+        if (evaluation == null) return;
+        evaluationHandler.removeCallbacks(evaluation.poll);
+        if (!disposed && !processGone) {
+            try {
+                web.evaluateJavascript(evaluation.cleanupScript, null);
+            } catch (RuntimeException ignored) {
+                // A dead renderer has no remaining page cell to release.
+            }
+        }
+    }
+
+    private void cancelEvaluations(String code, String message) {
+        for (Evaluation evaluation : evaluations.values().toArray(new Evaluation[0])) {
+            cancelEvaluation(evaluation.request);
+            evaluationError(evaluation.request, evaluation.generation, code, message);
+        }
+    }
+
     void destroy() {
-        web.stopLoading();
-        web.destroy();
+        if (disposed) return;
+        cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web view was disposed");
+        disposed = true;
+        evaluationHandler.removeCallbacksAndMessages(null);
+        if (!processGone) {
+            web.stopLoading();
+            removeView(web);
+            web.destroy();
+        }
     }
 }

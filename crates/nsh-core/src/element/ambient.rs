@@ -47,6 +47,8 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The app's own data directory ([`data_dir`]).
+    data_dir: Option<std::path::PathBuf>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
     /// Whether the performance monitor measures, as the platform reports
@@ -141,6 +143,12 @@ impl super::Runtime {
     pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
         let _entered = self.enter();
         with_data(|d| d.ambient.storage = Some(storage));
+    }
+
+    /// The app's own data directory ([`data_dir`]).
+    pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.data_dir = dir);
     }
 
     /// How text is measured (the core's text engine).
@@ -568,6 +576,19 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
     f(&storage)
 }
 
+/// The app's own data directory (TS: `process.dataDir`): where its files
+/// are kept, `<data_dir>/<app id>` of the engine, beside its
+/// `storage.json`, on every platform. `None` when the host keeps no files
+/// for the app (the web). The directory may not exist yet: create it
+/// before writing.
+///
+/// ```ignore
+/// let db = data_dir().map(|dir| dir.join("app.sqlite"));
+/// ```
+pub fn data_dir() -> Option<std::path::PathBuf> {
+    with_data(|d| d.ambient.data_dir.clone())
+}
+
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
 /// in the browser, a `mailto:` or `tel:` link in its app, any scheme
 /// another app registered. The embedding app may take it first (its host
@@ -918,6 +939,17 @@ pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::Histo
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view's ref runs scripts and answers with their results
+/// here (TS: `WebView.evaluateAvailable()`,
+/// [`ElementRef::evaluate`](super::ElementRef::evaluate)): the platform has
+/// it and the app's capabilities grant `webview`. Elsewhere `evaluate`
+/// fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To await in a task.
+pub fn web_evaluate_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebEvaluateAvailable(slot));
     answer
 }
 

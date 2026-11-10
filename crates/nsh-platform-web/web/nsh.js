@@ -53,13 +53,13 @@ const HOVERED = 2;
 const FOCUSED = 4;
 /** `KeyboardEvent.key`s of modifiers: pressed alone, they leave the input
  * modality as it is (`inputWith`). */
-const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
+const MODALITY_KEYS_SKIPPED = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 /** The DOM's `buttons` bits, in the order a held button is named by. */
 const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
 /** The keys whose press or release is reported as a mouse move. */
-const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
 // caret (`caretBounds`).
 const CARET_STYLE = [
@@ -6102,8 +6102,10 @@ class Player {
     const el = this.view(id);
     switch (name) {
       case "focus":
-        if (el?._field) el._field.focus();
-        else if (el) this.focusPressable(el);
+        if (el?._field) {
+          el._field.focus();
+          this.pressFocus = el._field;
+        } else if (el) this.focusPressable(el);
         break;
       case "blur":
         if (el?._field) el._field.blur();
@@ -6653,13 +6655,51 @@ class Player {
     this.event(ROOT_ID, "onClipboard", payload);
   }
 
-  /** `Clipboard.writeImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
-  async writeClipboardImage(uri) {
+  /**
+   * `Clipboard.writeImage`: a `data:` URI's image as a clipboard item.
+   * Browsers write images as PNG only, so another format is decoded and
+   * encoded again. The write starts before that, with the PNG to come:
+   * Safari only writes within the user's gesture, which an `await` loses.
+   * The PNG holds a GIF's first frame only, so another format also goes on
+   * as it is, as browsers' own Copy Image does: an `<img>` of it as HTML,
+   * which pastes give the app, and in Chromium a `web ` format, which
+   * `readClipboardImage` prefers.
+   */
+  writeClipboardImage(uri) {
+    // Decoded here: the CSP of a page whose app restricts `network` keeps `fetch` from `data:` URIs.
+    const base64 = /^data:([^;,]*);base64,/.exec(uri);
+    const original = base64
+      ? Promise.resolve().then(() => new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] }))
+      : fetch(uri).then((response) => response.blob());
+    const png = (async () => {
+      const blob = await original;
+      if (blob.type === "image/png") return blob;
+      const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
+      try {
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        canvas.getContext("2d").drawImage(bitmap, 0, 0);
+        return await canvas.convertToBlob({ type: "image/png" });
+      } finally {
+        bitmap.close();
+      }
+    })();
+    const fail = (err) => console.warn(`[nsh] Clipboard.writeImage: ${err?.message ?? err}`);
+    // Handled by the write; this keeps it from reporting twice when the write never starts.
+    png.catch(() => {});
     try {
-      const blob = await (await fetch(uri)).blob();
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-    } catch {
-      // Denied, an insecure context, or a type the browser does not write.
+      const data = { "image/png": png };
+      // The types go in now, before the image has loaded: `data:` URIs say theirs.
+      const type = base64?.[1] ?? "";
+      if (type !== "image/png") {
+        const src = uri.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        data["text/html"] = new Blob([`<img src="${src}">`], { type: "text/html" });
+        if (type && ClipboardItem.supports?.(`web ${type}`)) data[`web ${type}`] = original;
+      }
+      return navigator.clipboard.write([new ClipboardItem(data)]).catch(fail);
+    } catch (err) {
+      // No clipboard (an insecure context) or no `ClipboardItem`.
+      fail(err);
+      return Promise.resolve();
     }
   }
 
@@ -6790,9 +6830,11 @@ class Player {
     let blob = null;
     try {
       for (const item of (await navigator.clipboard?.read()) ?? []) {
-        const type = item.types.find((t) => t.startsWith("image/"));
+        // The original `writeClipboardImage` kept beside its PNG first.
+        const type = item.types.find((t) => t.startsWith("web image/")) ?? item.types.find((t) => t.startsWith("image/"));
         if (type) {
           blob = await item.getType(type);
+          if (type.startsWith("web ")) blob = new Blob([blob], { type: type.slice(4) });
           break;
         }
       }
@@ -7390,7 +7432,7 @@ class Player {
     // the core shows the focus by it (`focus-visible:`), as the browser
     // decides `:focus-visible`. Only a change crosses to the engine.
     root.addEventListener("pointerdown", () => this.inputWith(1), true);
-    window.addEventListener("keydown", (e) => MODIFIER_KEYS.has(e.key) || this.inputWith(0), true);
+    window.addEventListener("keydown", (e) => MODALITY_KEYS_SKIPPED.has(e.key) || this.inputWith(0), true);
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
     // A link (`Link` with an `href`) is the app's to press: a plain click
     // stays in the app (its `onPress`), a click with a modifier or the
@@ -7404,15 +7446,7 @@ class Player {
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
     // A drag never drags images or text out of the app.
     root.addEventListener("dragstart", (e) => e.preventDefault());
-    // A click leaves the keyboard focus where it is (in a field, too) and
-    // selects nothing, as in native apps; fields, selectable text and
-    // hosted pages and videos take it as usual.
-    root.addEventListener("mousedown", (e) => {
-      if (this.lastPointer === "touch" || this.editable(e.target)) return;
-      e.preventDefault();
-      // Which would also keep the keys from an app in an iframe.
-      if (!document.hasFocus()) window.focus();
-    });
+    root.addEventListener("mousedown", (e) => this.mouseDown(e));
     // No page menu over the app (nor iOS's callout on a long press); fields
     // and selectable text keep theirs.
     root.addEventListener("contextmenu", (e) => this.contextMenu(e) || this.editable(e.target) || e.preventDefault());
@@ -7544,7 +7578,7 @@ class Player {
    * on the next move.
    */
   modifiersChanged(e) {
-    if (!MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons || !this.mouseTracked.size) return;
+    if (!MOUSE_MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons || !this.mouseTracked.size) return;
     const [x, y] = this.hover;
     const target = document.elementFromPoint(x, y);
     if (!target || !this.root.contains(target)) return;
@@ -8101,8 +8135,25 @@ class Player {
     this.call(() => this.withStrings([json], (p, l) => this.wasm.nsh_touch(p, l)));
   }
 
+  /** A click leaves the keyboard focus where it is (in a field, too) and
+   * selects nothing, as in native apps; fields, selectable text and hosted
+   * pages and videos take it as usual. A touch moves the focus as the
+   * browser does (a tap outside a field leaves it, and the keyboard
+   * closes), unless its own press put the focus in a field (an editor's
+   * text): the mouse events the browser makes of the touch would take the
+   * focus to the pressable, and close the keyboard as it opens. */
+  mouseDown(e) {
+    if (this.editable(e.target)) return;
+    if (this.lastPointer === "touch" && !(this.pressFocus && this.pressFocus === document.activeElement)) return;
+    e.preventDefault();
+    // Which would also keep the keys from an app in an iframe.
+    if (!document.hasFocus()) window.focus();
+  }
+
   pointerDown(e) {
     this.lastPointer = e.pointerType;
+    // The field this press makes the app focus, if any (`mouseDown`).
+    this.pressFocus = null;
     // A press without a move still holds a button: a modifier key then
     // fires no hover move (`modifiersChanged`).
     if (e.pointerType === "mouse") this.hoverButtons = e.buttons;

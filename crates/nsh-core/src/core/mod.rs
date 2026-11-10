@@ -20,6 +20,7 @@ mod tests;
 mod touch;
 mod views;
 mod watch;
+mod web_evaluation;
 
 /// Why an image's size cannot be known in a terminal, which decodes no
 /// images (`Image.getSize` / `prefetch` reject with
@@ -1713,6 +1714,12 @@ impl<M: TextEngine> Core<M> {
             .set_storage(crate::storage::Store::new(backend));
     }
 
+    /// The app's own data directory, what [`crate::element::data_dir`]
+    /// gives; `None`: it has none.
+    pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.components.runtime.set_data_dir(dir);
+    }
+
     /// Logs (once) that the app was refused `what`.
     fn deny(&mut self, what: String) {
         if self.denied.len() < 256 && self.denied.insert(what.clone()) {
@@ -2226,6 +2233,15 @@ impl<M: TextEngine> Core<M> {
     /// Applies one op as is (also for the nodes components expand).
     fn apply_op(&mut self, op: Op) -> Result<(), ApplyError> {
         match op {
+            Op::Evaluate {
+                id,
+                call,
+                script,
+                timeout,
+            } => {
+                self.start_js_web_evaluation(id, call, script, timeout);
+                Ok(())
+            }
             Op::Rust(op) => {
                 self.run_rust(op);
                 Ok(())
@@ -5988,6 +6004,7 @@ impl<M: TextEngine> Core<M> {
 
     fn release(&mut self, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
+        self.cancel_web_evaluations(id);
         if key == self.root {
             return Ok(());
         }

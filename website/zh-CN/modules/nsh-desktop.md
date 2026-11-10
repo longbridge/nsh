@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -794,6 +794,8 @@ interface TrayModule {
 | --- | --- |
 | `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 和 Windows 上 SVG 是模板图标，用菜单栏或任务栏的文字颜色绘制。不设时 Windows 显示应用图标。 |
 | `tooltip` | 指针停在图标上时显示；不设时显示应用名。 |
+| `title` | 图标旁边的文字，由若干段文字 `{ text, color? }` 组成，每段可以有自己的颜色（CSS 颜色；不设时用菜单栏的文字颜色）：应用想让用户一直看得到的东西，比如价格。macOS 的菜单栏用菜单栏字体显示。Linux 上支持 AppIndicator 标签的面板（GNOME 的 AppIndicator 扩展、Unity、MATE、Budgie）在图标右边显示它的文字，颜色跟随面板；Plasma、Waybar 和 Windows 的通知区只显示图标。 |
+| `titlePosition` | 文字显示在图标的哪一边：`"right"`（默认）或 `"left"`。仅 macOS 支持；Linux 的面板总是把文字放在图标右边。 |
 | `menu` | 图标的菜单，菜单项与 `Menu` 的相同。右键打开；没有 `onClick` 时左键也打开。 |
 | `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用），参数是 `{ bounds }`：图标在哪里（见[下文](#在图标旁打开窗口)）。 |
 
@@ -812,6 +814,17 @@ Tray.set({
     { type: "separator" },
     { role: "quit" },
   ],
+});
+```
+
+标题让 macOS 菜单栏里图标旁边一直显示一段文字，比如价格，涨跌幅用应用主题里的颜色：
+
+```tsx
+import { token } from "nsh";
+
+Tray.set({
+  icon,
+  title: [{ text: "AAPL 228.00 " }, { text: "+1.33%", color: token("up") }],
 });
 ```
 
@@ -857,7 +870,23 @@ function atIcon(icon: Bounds, size: Size): Point {
 }
 ```
 
-目前只有 TSX 可用，Rust 组件还没有托盘 API。
+在 Rust 中，`set_tray(tray()...)` 与之相同（传 `None` 移除）：`tray()` 是一个 builder，有 `.icon(..)`、`.tooltip(..)`、`.menu(items)`（与 `set_application_menu` 相同的 `MenuItem`）和 `.on_click(|e| ..)`，它的 `TrayClickEvent` 带有 `bounds: Option<Bounds<Points>>`。处理函数在设置它的 owner 下运行，只在该 owner 存活期间有效；放在 `effect` 中会跟随读取的 signal 更新。每个应用只有一个托盘，与 TSX 共用：后设置的生效。
+
+```rust
+use nsh_core::element::desktop::{MenuItem, main_window, quit, set_tray, tray};
+
+set_tray(
+    tray()
+        .icon("tray.svg")
+        .tooltip("Mail")
+        .on_click(|_| main_window().focus())
+        .menu([
+            MenuItem::new("New Message").on_select(compose),
+            MenuItem::separator(),
+            MenuItem::new("Quit").on_select(quit),
+        ]),
+);
+```
 
 ## GlobalShortcut
 
@@ -881,4 +910,17 @@ interface GlobalShortcutModule {
 import { GlobalShortcut, Window } from "nsh/desktop";
 
 const ok = await GlobalShortcut.register("mod+shift+space", () => Window.get("main")?.focus());
+```
+
+在 Rust 中，`register_global_shortcut(keystroke, on_press)` 返回 `Answer<bool>`，可以在 task 中 await，也可以不管它；按键写法无效时会 panic，与 `MenuItem::shortcut` 相同。`unregister_global_shortcut(keystroke)` 和 `unregister_all_global_shortcuts()` 用来注销；注册它的 owner 销毁时，快捷键也会被注销。
+
+```rust
+use nsh_core::element::desktop::{main_window, register_global_shortcut};
+
+let taken = register_global_shortcut("mod+shift+space", || main_window().focus());
+spawn(async move {
+    if !taken.await {
+        log::warn!("mod+shift+space is taken");
+    }
+});
 ```

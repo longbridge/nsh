@@ -1954,6 +1954,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             transport: None,
         });
         core.set_storage(app_storage(&config));
+        core.set_data_dir(
+            config
+                .data_dir
+                .as_ref()
+                .map(|root| root.join(app_dir_name(config.app.app_id()))),
+        );
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
@@ -3402,6 +3408,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         audio: env.audio,
         cell: env.cell,
         web_input: env.web_input,
+        web_evaluate: env.web_evaluate,
         web_views: env.web_views,
         shaders: env.shaders,
     }

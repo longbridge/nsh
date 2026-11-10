@@ -559,7 +559,8 @@ impl GatePlan {
 /// `zlib`'s operations when it imports `zlib`, and shaders when it may
 /// make a shader view (`NativeUse::shader`, or an import of one of
 /// [`SHADER_EXPORTS`]). What the bundler cannot tell apart (no analysis,
-/// `import * as`, an `import()` of a computed specifier) keeps everything,
+/// `import * as` of a namespace used other than by reading its members by
+/// name, an `import()` of a computed specifier) keeps everything,
 /// so a runtime never lacks what an app needs.
 /// An app's own UI sets (`nsh.json` `"rust"`) keep the gate of each one it
 /// imports ([`ui_set_gate`]).
@@ -576,9 +577,9 @@ fn whole_because(uses: &nsh_bundler::NativeUse) -> Option<&'static str> {
         return Some("it loads a module whose name is worked out as it runs, `import(name)`");
     }
     match uses.imports.get(nsh_base::SPECIFIER) {
-        Some(nsh_bundler::Imported::All) => {
-            Some("it takes nsh/base whole, `import * as` or `import(\"nsh/base\")`")
-        }
+        Some(nsh_bundler::Imported::All) => Some(
+            "it takes nsh/base whole, a namespace (`import * as`) used other than by reading its members by name, or `import(\"nsh/base\")`",
+        ),
         _ => None,
     }
 }
@@ -1623,6 +1624,41 @@ mod tests {
         );
         app.computed_import = true;
         assert_eq!(native_exports(Some(&app)), serde_json::json!({}));
+    }
+
+    /// A namespace read by name (`base.EmojiPicker`, so that shells without
+    /// the export still run the app) declares the names read, which the
+    /// browser host's facade exports, and links their parts only.
+    #[test]
+    fn a_namespace_read_by_name_declares_and_links_what_it_reads() {
+        let natives = |s: &str| s == "nsh" || s.starts_with("nsh/");
+        let mut read = nsh_bundler::NativeUse::default();
+        read.add(
+            r#"import * as base from "nsh/base"; import { View } from "nsh";
+            const EmojiPicker = base.EmojiPicker;
+            export const Picker = (p) => (EmojiPicker ? _$c(EmojiPicker, p) : _$c(View, {}));"#,
+            natives,
+        );
+        assert_eq!(
+            native_exports(Some(&read)),
+            serde_json::json!({ "nsh": ["View"], "nsh/base": ["EmojiPicker"] })
+        );
+        assert_eq!(whole_because(&read), None);
+        assert_eq!(
+            linked_gates_of(Some(&read), &[]),
+            ["nsh_part_core", EMOJI_GATE]
+        );
+        // Passed on, it may be read for anything: every export, every gate.
+        let mut passed = nsh_bundler::NativeUse::default();
+        passed.add(
+            r#"import * as base from "nsh/base"; base.EmojiPicker; use(base);"#,
+            natives,
+        );
+        assert_eq!(native_exports(Some(&passed)), serde_json::json!({}));
+        assert!(whole_because(&passed).is_some());
+        let gates = linked_gates_of(Some(&passed), &[]);
+        assert!(gates.contains(&"nsh_part_editor".to_owned()));
+        assert!(gates.contains(&"nsh_feature_shader".to_owned()));
     }
 
     #[test]
