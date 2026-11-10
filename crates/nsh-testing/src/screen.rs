@@ -1767,7 +1767,22 @@ impl Screen {
         if receives != PointerEvents::BoxOnly
             && let Some(children) = self.children.get(&id)
         {
-            for &child in children.iter().rev() {
+            // Header items and input accessories are in the bars the
+            // platform draws over a screen's content (a large title's header
+            // included), wherever they are among its children: they are on
+            // top.
+            let placed = |c: &NodeId| {
+                matches!(
+                    self.kind(*c),
+                    Some(ViewKind::HeaderItem | ViewKind::InputAccessory)
+                )
+            };
+            let order = children
+                .iter()
+                .rev()
+                .filter(|c| placed(c))
+                .chain(children.iter().rev().filter(|c| !placed(c)));
+            for &child in order {
                 let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
