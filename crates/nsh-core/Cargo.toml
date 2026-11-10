@@ -3,6 +3,7 @@ name = "nsh-core"
 description = "Platform-independent core: shadow tree, styles, layout and mount instructions."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

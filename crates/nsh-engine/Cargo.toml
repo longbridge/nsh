@@ -3,6 +3,7 @@ name = "nsh-engine"
 description = "Engine thread that drives the JS host and the core and emits mount batches."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true
