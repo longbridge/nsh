@@ -810,6 +810,94 @@ fn a_clamped_column_is_as_tall_as_its_wrapped_text() {
         text.map(|f| (f.size.width.0, f.size.height.0)),
         Some((160.0, 48.0))
     );
+    // The same when the `flex: 1` item is in a slot holder laid out through.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 7,
+                tag: Tag::View,
+            },
+            style_op(7, &[("alignItems", StyleValue::Str("flex-start"))]),
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &max),
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(6, &[("width", StyleValue::Number(40.0))]),
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::ComponentSlot("default".into()),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("flex", StyleValue::Number(1.0))]),
+            Op::CreateText {
+                id: 5,
+                text: "x".repeat(50),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 8,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 3,
+                child: 8,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 7,
+                child: 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 7,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((200.0, 48.0))
+    );
+    assert_eq!(
+        frame_of(&batch, 4).map(|f| (f.size.width.0, f.size.height.0)),
+        Some((160.0, 48.0))
+    );
     // Text alone: 400pt in 200pt is two lines.
     let (column, _) = max_width_column(&max, false, 50);
     assert_eq!(
