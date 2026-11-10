@@ -1832,23 +1832,24 @@ fn color_change_skips_layout_and_identical_texts_share_measurements() {
     assert_eq!(c.text_engine.layouts.get(), 4);
 }
 
-#[test]
-fn colors_drawn_from_the_text_keep_its_typesetting() {
+/// A text block (10) of three words, each a span of its own (12, 14, 16;
+/// their raw texts 13, 15, 17), on an engine that draws colors from the
+/// text or not; `ops` run before the block's first commit.
+fn three_words(colors_at_draw: bool, ops: Vec<Op>) -> Core<FakeEngine> {
     let mut c = Core::new(
         FakeEngine {
-            colors_at_draw: true,
+            colors_at_draw,
             ..FakeEngine::default()
         },
         size_pt(320.0, 480.0),
     );
-    // A block of three words, each a span of its own.
-    let mut ops = vec![Op::Create {
+    let mut block = vec![Op::Create {
         id: 10,
         tag: Tag::Text,
     }];
     for (i, word) in ["fade ", "in ", "words"].into_iter().enumerate() {
         let (span, raw) = (12 + i as u32 * 2, 13 + i as u32 * 2);
-        ops.extend([
+        block.extend([
             Op::Create {
                 id: span,
                 tag: Tag::Text,
@@ -1869,28 +1870,41 @@ fn colors_drawn_from_the_text_keep_its_typesetting() {
             },
         ]);
     }
-    ops.push(Op::Insert {
+    block.push(Op::Insert {
         parent: ROOT_ID,
         child: 10,
         before: None,
     });
-    apply(&mut c, ops);
-    let mounted = |batch: &MountBatch| {
-        batch.items.iter().find_map(|i| match i {
-            MountItem::Text {
-                id: 10,
-                text,
-                layout,
-                content,
-            } => Some((text.clone(), layout.clone(), *content)),
-            _ => None,
-        })
-    };
+    block.extend(ops);
+    apply(&mut c, block);
+    c
+}
+
+/// The text block 10 mounted in `batch`: its text, layout and content box.
+fn mounted_words(batch: &MountBatch) -> Option<(Arc<AttributedText>, TextLayout, Bounds<Points>)> {
+    batch.items.iter().find_map(|i| match i {
+        MountItem::Text {
+            id: 10,
+            text,
+            layout,
+            content,
+        } => Some((text.clone(), layout.clone(), *content)),
+        _ => None,
+    })
+}
+
+/// How many times the engine typeset, measured and laid out a text.
+fn engine_counts(c: &Core<FakeEngine>) -> (u32, u32, u32) {
+    let e = &c.text_engine;
+    (e.prepares.get(), e.measures.get(), e.layouts.get())
+}
+
+#[test]
+fn colors_drawn_from_the_text_keep_its_typesetting() {
+    let mut c = three_words(true, Vec::new());
+    let mounted = mounted_words;
+    let counts = engine_counts;
     let (_, first, content) = mounted(&c.commit().unwrap()).expect("mounted");
-    let counts = |c: &Core<FakeEngine>| {
-        let e = &c.text_engine;
-        (e.prepares.get(), e.measures.get(), e.layouts.get())
-    };
     let before = counts(&c);
     let color = |c: &mut Core<FakeEngine>, id, color| {
         c.apply(style_op(id, &[("color", StyleValue::Str(color))]))
@@ -1918,6 +1932,78 @@ fn colors_drawn_from_the_text_keep_its_typesetting() {
     let (_, layout, _) = mounted(&c.commit().unwrap()).expect("the new text mounted");
     assert!(!Arc::ptr_eq(&layout.0, &first.0));
     assert!(c.text_engine.prepares.get() > before.0);
+}
+
+#[test]
+fn hidden_words_drawn_from_the_text_keep_its_typesetting() {
+    let visibility = |id, v| style_op(id, &[("visibility", StyleValue::Str(v))]);
+    // The last two words are queued: hidden, in their place in the lines.
+    let mut c = three_words(
+        true,
+        vec![visibility(14, "hidden"), visibility(16, "hidden")],
+    );
+    let (text, first, content) = mounted_words(&c.commit().unwrap()).expect("mounted");
+    assert_eq!(text.visible_text(), "fade ");
+    let before = engine_counts(&c);
+    let show = |c: &mut Core<FakeEngine>, ops: Vec<Op>| {
+        apply(c, ops);
+        let batch = c.commit().unwrap();
+        assert_eq!(batch.items.len(), 1, "only the text: {:?}", batch.items);
+        mounted_words(&batch).expect("the new text mounted")
+    };
+    // A word starts: shown, as a color would change, with the layout
+    // already drawn and nothing typeset, measured or laid out again.
+    let (text, layout, moved) = show(&mut c, vec![visibility(14, "visible")]);
+    assert_eq!(text.visible_text(), "fade in ");
+    assert!(Arc::ptr_eq(&layout.0, &first.0), "the layout drawn before");
+    assert_eq!(moved, content);
+    assert_eq!(engine_counts(&c), before);
+    // The next one starts in a color of its own, and is hidden again.
+    let fading = vec![
+        visibility(16, "visible"),
+        style_op(16, &[("color", StyleValue::Str("rgba(255, 0, 0, 0.5)"))]),
+    ];
+    let (text, layout, _) = show(&mut c, fading);
+    assert_eq!(text.visible_text(), "fade in words");
+    assert!(Arc::ptr_eq(&layout.0, &first.0));
+    let (text, layout, _) = show(&mut c, vec![visibility(16, "hidden")]);
+    assert_eq!(text.visible_text(), "fade in ");
+    assert!(Arc::ptr_eq(&layout.0, &first.0));
+    assert_eq!(engine_counts(&c), before);
+    // New characters, or a new size, are typeset again.
+    c.apply(Op::SetText {
+        id: 17,
+        text: "word".into(),
+    })
+    .unwrap();
+    let (_, layout, _) = mounted_words(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(!Arc::ptr_eq(&layout.0, &first.0));
+    let typeset = engine_counts(&c).0;
+    assert!(typeset > before.0);
+    apply(
+        &mut c,
+        vec![style_op(16, &[("fontSize", StyleValue::Number(20.0))])],
+    );
+    mounted_words(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(engine_counts(&c).0 > typeset);
+}
+
+#[test]
+fn hidden_words_are_typeset_again_where_colors_are_typeset() {
+    let mut c = three_words(
+        false,
+        vec![style_op(14, &[("visibility", StyleValue::Str("hidden"))])],
+    );
+    let (_, first, _) = mounted_words(&c.commit().unwrap()).expect("mounted");
+    let before = engine_counts(&c);
+    apply(
+        &mut c,
+        vec![style_op(14, &[("visibility", StyleValue::Str("visible"))])],
+    );
+    let (text, layout, _) = mounted_words(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(!text.has_hidden());
+    assert!(!Arc::ptr_eq(&layout.0, &first.0));
+    assert!(engine_counts(&c).0 > before.0, "typeset again");
 }
 
 #[test]
@@ -1958,6 +2044,11 @@ fn spans_differing_only_in_colors_are_told_apart_from_other_changes() {
     };
     let green = Some(Color(0x00ff_00ff));
     assert!(text(&[("ab", lined(None))]).same_but_colors(&text(&[("ab", lined(green))])));
+    // Hidden characters keep their place: a run hidden or shown again is
+    // only drawn differently, as one recolored.
+    let hidden = text(&[("ab", style), ("cd", red.hide())]);
+    assert!(plain.same_but_colors(&hidden) && hidden.same_but_colors(&split));
+    assert!(!hidden.same_but_colors(&text(&[("ab", style), ("cd", bold.hide())])));
 }
 
 #[test]
