@@ -17,6 +17,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
+mod window_dialog;
+#[cfg(target_os = "macos")]
 mod window_press;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
@@ -28,9 +30,12 @@ fn main() {
                 mount::bench_alone();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
+            } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {
+                window_dialog::run();
             } else {
                 window_press::run();
                 title_bar::run();
+                window_dialog::run();
                 mount::run();
             }
         }
