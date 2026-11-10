@@ -2254,7 +2254,7 @@ pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String
 /// `validRequestorForSendType:returnType:`. Returns once it closed.
 pub(crate) fn context_menu(surface: &crate::surface::Surface) {
     use nsh_core::desktop::MenuRole;
-    use objc2::{MainThreadMarker, sel};
+    use objc2::{MainThreadMarker, MainThreadOnly, sel};
     use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem, NSPasteboardTypeString};
     use objc2_foundation::{NSArray, NSString};
 
