@@ -108,9 +108,10 @@ nsh test --filter "adds"      # the tests whose name contains "adds"
 error 2 tests: 1 passed, 1 failed (0.9s)
 ```
 
-A failing test shows what was thrown, where in the test file, and the texts on screen of the app it opened. Any failure
-makes `nsh test` exit with a non-zero code. `nsh init` creates an `App.test.tsx` with the app, and `nsh check` type
-checks test files with the rest (`.nsh/types` declares `nsh/test`).
+A failing test shows what was thrown, where in the test file, and the texts on screen of the app it opened. The texts
+are cut to a few KB (`… <n> more characters` marks what is left), so a long document cannot flood the output; `-v`
+shows all of them. Any failure makes `nsh test` exit with a non-zero code. `nsh init` creates an `App.test.tsx` with
+the app, and `nsh check` type checks test files with the rest (`.nsh/types` declares `nsh/test`).
 
 Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
 another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A

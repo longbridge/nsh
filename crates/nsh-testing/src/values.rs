@@ -250,11 +250,31 @@ pub(crate) fn truthy(v: JsIn<'_>) -> bool {
 /// say as JS would (`undefined`, `NaN`, `-0`, `Date(2024-01-01T00:00:00.000Z)`,
 /// `/a+/i`, `Map {"a" => 1}`, `Set {1, 2}`, `Uint8Array [1,2]`, an
 /// instance with its class's name, `[Circular]` for a value inside
-/// itself).
+/// itself). Cut to [`SCREEN_TEXT_LIMIT`](crate::failure::SCREEN_TEXT_LIMIT)
+/// characters with `… <n> more characters` after what is left, so a long
+/// document cannot flood a failure message.
 pub(crate) fn show(v: JsIn<'_>) -> String {
     let mut out = String::new();
     Shower { stack: Vec::new() }.write(v, &mut out);
-    out
+    shorten(out)
+}
+
+/// `shown` cut to [`SCREEN_TEXT_LIMIT`](crate::failure::SCREEN_TEXT_LIMIT)
+/// characters, with `… <n> more characters` after what is left.
+fn shorten(shown: String) -> String {
+    let limit = crate::failure::SCREEN_TEXT_LIMIT;
+    let total = shown.chars().count();
+    if total <= limit {
+        return shown;
+    }
+    let preview: String = shown.chars().take(limit).collect();
+    let rest = total - limit;
+    // A cut string keeps its closing quote, so the message still reads.
+    if shown.starts_with('"') && !preview.ends_with('"') {
+        format!("{preview}…\" ({rest} more characters)")
+    } else {
+        format!("{preview}… ({rest} more characters)")
+    }
 }
 
 /// A number as JS writes it (`1`, `0.5`, `NaN`, `-0`).

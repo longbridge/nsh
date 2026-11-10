@@ -113,6 +113,57 @@ pub(crate) fn web_only(what: &str) -> String {
     )
 }
 
+/// How many characters of the texts on screen a failure shows: enough to
+/// see what the screen held, not the whole of a long document, so a
+/// failure cannot flood a terminal, a log or a tool's output. The CLI
+/// shows all of a screen's texts with `-v`.
+pub const SCREEN_TEXT_LIMIT: usize = 4096;
+
+/// The texts on screen for a failure, as quoted strings joined by `, `
+/// (`"Todos", "0 items left"`), cut to `limit` characters with
+/// `… <n> more characters` after what is left, or all of them when
+/// `limit` is `None`. A cut text keeps its beginning and an ellipsis, so
+/// a long document cannot flood an error.
+pub fn screen_texts<S: AsRef<str>>(texts: &[S], limit: Option<usize>) -> String {
+    let total: usize = texts.iter().map(|t| t.as_ref().chars().count()).sum();
+    let budget = limit.unwrap_or(total);
+    let mut out = String::new();
+    let mut used = 0usize;
+    let mut cut = false;
+    for text in texts {
+        let text = text.as_ref();
+        let room = budget.saturating_sub(used);
+        if room == 0 {
+            cut = true;
+            break;
+        }
+        let length = text.chars().count();
+        if length > room {
+            let preview: String = text.chars().take(room).collect();
+            if !out.is_empty() {
+                out.push_str(", ");
+            }
+            out.push_str(&format!("{:?}", format!("{preview}…")));
+            used += room;
+            cut = true;
+            break;
+        }
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        out.push_str(&format!("{text:?}"));
+        used += length;
+    }
+    if cut {
+        let hidden = total.saturating_sub(used);
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        out.push_str(&format!("… {hidden} more characters"));
+    }
+    out
+}
+
 /// The `code` of a step's failure `message`, made by this module's
 /// functions (with what is on screen after them); `None` for any other
 /// failure (the app threw, a selector that does not parse, ...).
@@ -200,5 +251,44 @@ mod tests {
         for (message, code) in cases {
             assert_eq!(code_of(&message), code, "{message}");
         }
+    }
+}
+
+#[cfg(test)]
+mod screen_tests {
+    use super::*;
+
+    #[test]
+    fn all_texts_when_they_fit() {
+        assert_eq!(
+            screen_texts(&["Count: 2", "Add"], Some(SCREEN_TEXT_LIMIT)),
+            r#""Count: 2", "Add""#
+        );
+        assert_eq!(screen_texts::<&str>(&[], Some(SCREEN_TEXT_LIMIT)), "");
+        assert_eq!(screen_texts(&["a"], None), r#""a""#);
+    }
+
+    #[test]
+    fn a_long_text_is_cut_with_what_is_left_said() {
+        let long = "x".repeat(100);
+        let shown = screen_texts(&[long.as_str()], Some(10));
+        assert!(shown.starts_with(r#""xxxxxxxxxx…""#), "{shown}");
+        assert!(shown.ends_with("… 90 more characters"), "{shown}");
+    }
+
+    #[test]
+    fn the_rest_of_the_screen_is_counted() {
+        let texts = ["a".repeat(8), "b".repeat(100)];
+        let shown = screen_texts(&texts, Some(10));
+        assert!(shown.starts_with(r#""aaaaaaaa", "bb…""#), "{shown}");
+        assert!(shown.ends_with("… 98 more characters"), "{shown}");
+    }
+
+    #[test]
+    fn cutting_keeps_characters_whole() {
+        let text = "é".repeat(20);
+        let shown = screen_texts(&[text.as_str()], Some(5));
+        assert!(shown.starts_with('"'), "{shown}");
+        assert!(shown.ends_with("… 15 more characters"), "{shown}");
     }
 }

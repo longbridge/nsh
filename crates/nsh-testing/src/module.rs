@@ -2093,11 +2093,10 @@ impl App {
             let clock_left = moved.map(|moved| timeout.saturating_sub(moved));
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() && clock_left.is_none_or(|l| l.is_zero()) {
-                let screen = on_app(&app, |a| Ok(format!("{:?}", a.texts()?)))
-                    .await
-                    .map_err(step_error)?;
+                let texts = on_app(&app, |a| a.texts()).await.map_err(step_error)?;
+                let screen = failure::screen_texts(&texts, Some(failure::SCREEN_TEXT_LIMIT));
                 return Err(JsError::Error(format!(
-                    "the condition never held in {} ms; on screen: {screen}",
+                    "the condition never held in {} ms; on screen: [{screen}]",
                     timeout.as_millis()
                 ))
                 .with_code(failure::TIMED_OUT));
@@ -3288,6 +3287,17 @@ const fails = (f, message) => {{
                 () => expect(Promise.resolve(1)).toBe(1),
                 "expected Promise {} to be 1; `expect` was given a promise: check what it settles to with `resolves` or `rejects`",
             );
+        "#);
+    }
+
+    #[test]
+    fn a_long_value_is_cut_in_a_failure_message() {
+        run(r#"
+            const long = "x".repeat(200000);
+            let shown;
+            try { expect(long).toBe("y"); } catch (e) { shown = e.message; }
+            if (!shown || shown.length >= 5000 || !shown.includes("more characters"))
+                throw new Error("a long value was not cut: " + shown?.length);
         "#);
     }
 
