@@ -949,7 +949,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             config.id = id.or(config.id);
             config.version = version.or(config.version);
             config.build = build.or(config.build);
-            config.icon = icon.or(config.icon);
+            config.icon = icon.map(package::AppIcon::All).or(config.icon);
             package::package(package::PackageOptions {
                 entry: &entry,
                 target,

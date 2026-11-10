@@ -52,6 +52,30 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> EventPayload
                 pressed_button,
             ))
         }
+        // `{ position, pagePosition, delta, deltaMode, modifiers }`, as
+        // handlers get it.
+        EventKind::Wheel => {
+            let (position, page_position, modifiers) = pointer_at(&value);
+            let d = |c: &str| {
+                value
+                    .get("delta")
+                    .and_then(|p| p.get(c))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as f32
+            };
+            let (dx, dy) = (d("x"), d("y"));
+            let delta = if value.get("deltaMode").and_then(|v| v.as_str()) == Some("lines") {
+                nsh_core::WheelDelta::Lines(point(dx, dy))
+            } else {
+                nsh_core::WheelDelta::Points(point(Points(dx), Points(dy)))
+            };
+            EventPayload::Wheel(nsh_core::WheelEvent::new(
+                position,
+                page_position,
+                delta,
+                modifiers,
+            ))
+        }
         EventKind::ContextMenu
         | EventKind::Press
         | EventKind::LongPress

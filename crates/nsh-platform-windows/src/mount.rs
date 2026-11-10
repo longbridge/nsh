@@ -105,6 +105,8 @@ impl Mounter {
                 | MountItem::Remove { .. }
                 | MountItem::Delete { .. }
                 | MountItem::ViewProps { .. }
+                | MountItem::Frame { .. }
+                | MountItem::ViewStyle { .. }
         ) {
             crate::selectable_view::tree_changed();
         }

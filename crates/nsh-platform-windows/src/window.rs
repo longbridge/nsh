@@ -1048,6 +1048,8 @@ fn handle(
             // chain's own background color).
             fill_background(surface, hwnd);
             sync_size(surface, hwnd);
+            // The frame's material follows the zoom state.
+            crate::shell::zoom_changed(hwnd);
             // Drawn now, so that the window never shows stretched or
             // stale pixels while it is resized.
             surface.paint();
@@ -1326,6 +1328,7 @@ fn window_api(
             let attrs = shell.attrs();
             let scale = dpi(hwnd) as f32 / 96.0;
             let (l, t, r, b) = frame_extents(hwnd);
+            crate::chrome::nc_max_size(hwnd, info);
             let (min, max) = crate::shell::track_sizes(&attrs, scale, (l + r, t + b));
             match min {
                 Some((x, y)) => info.ptMinTrackSize = POINT { x, y },

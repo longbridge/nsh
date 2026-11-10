@@ -133,6 +133,18 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   merges moves (`State::mouse_moves`): the latest per view, delivered at most once per `MOUSE_MOVE_INTERVAL` (8 ms) and
   always before the next other event, so a view hears where the mouse went before it hears it leave; mice report up to
   1000 moves a second, and a crosshair needs one per frame.
+- **`onWheel`** (any element; the DOM's `wheel`, GPUI's `ScrollWheelEvent`): a mouse wheel or touchpad scrolled over a
+  view. `EventPayload::Wheel` / `WheelEvent { position, page_position, delta, modifiers }`, `delta` a `WheelDelta`
+  (`Lines` for notches, `Points` for precise deltas, as GPUI's `ScrollDelta`; positive toward the end, the DOM's sign);
+  JS `{ position, pagePosition, delta, deltaMode: "lines" | "points", modifiers }`. The platform decides on the main
+  thread, before it scrolls, from the mounted event masks (`input::wheel_listener`): walking out from the view under
+  the pointer, the first view that listens hears it; it takes the wheel (no native scroll, Ctrl + wheel zoom or pinch)
+  when no scroll view (nor a multiline field on Windows / GPUI, nor a hosted widget scrolling itself on Linux / macOS)
+  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. There is no
+  `preventDefault`: events reach JS after the fact, so the rule is what is mounted, as with `onContextMenu`. Linux
+  `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
+  (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
+  `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
@@ -153,7 +165,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
   presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus; it
   shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when the keyboard moved it
-  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`). Focus and presses are separate: `ViewProps::focus_stop` decides, from
+  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`); a part projected focused (a
+  tree's or a list's cursor) shows it too while the control's focus shows. Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
   `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.
@@ -525,3 +538,21 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
 - **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.
+
+## WebView evaluation
+
+`WebViewRef.evaluate(script, { timeout })` (TS, `nsh-js` `components.rs`) and Rust's
+`ElementRef::evaluate(script, EvaluateOptions)` run through the same request table in
+`core/web_evaluation.rs`: it checks `Environment::web_evaluate`, the `webview` grant and
+the limits, keeps each request's deadline (`timeout`; it sends `Command::CancelEvaluate`
+when it passes), and settles the request from the internal `WebEvaluation` event a
+platform replies with, never from page messages. `platform/web_evaluation.rs` and
+`web_evaluation.js` hold the page wrapper (JSON result contract, polling of returned
+Promises, cleanup) that every platform runs. iOS and macOS share
+`nsh-platform-apple`'s `web_evaluation.rs` (WKWebView completions); Android runs it in
+`WebBox.java` (`evaluateJavascript`). The platforms abort requests on a new-document
+navigation, explicit navigation commands, a reloading source, renderer loss and
+disposal; page-initiated same-document history updates keep them. Platforms that leave
+`web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
+`WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
+

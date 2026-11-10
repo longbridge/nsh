@@ -418,6 +418,10 @@ impl Headless {
             config.environment.window_state = Some(windows.main());
         }
         let displays = windows.as_ref().map(|w| w.displays()).unwrap_or_default();
+        // The window is the viewport the app opens in, as the engine starts
+        // it and as a platform reports it: a later `set_environment` sends
+        // this environment whole, so it must not carry an empty window.
+        config.environment.window = config.viewport;
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -1968,6 +1972,7 @@ impl Headless {
                 page: at.unwrap_or_default(),
                 location: location.unwrap_or_default(),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
             activated: None,
         };
@@ -3333,5 +3338,51 @@ mod tests {
         app.press("id:in-settings").unwrap();
         app.press_key("escape").unwrap();
         app.wait_for("keys 1 2").unwrap();
+    }
+
+    /// A layout chosen by the window's width, and the color scheme.
+    #[component]
+    fn ByWidth() -> impl IntoElement {
+        text(move || {
+            let width = nsh_core::element::window().width.0;
+            let layout = if width < 600.0 { "narrow" } else { "wide" };
+            let scheme = if nsh_core::element::dark() {
+                "dark"
+            } else {
+                "light"
+            };
+            format!("{layout} {width} {scheme}")
+        })
+    }
+
+    fn open_by_width(os: nsh_core::platform::Os) -> Headless {
+        let mut config = EngineConfig::new(Root::of::<ByWidth>());
+        config.environment.os = os;
+        config.viewport = Size::new(px(800.0), px(600.0));
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        app
+    }
+
+    #[test]
+    fn a_changed_environment_keeps_the_window_size() {
+        for os in [nsh_core::platform::Os::Ios, nsh_core::platform::Os::MacOs] {
+            let mut app = open_by_width(os);
+            app.wait_for("wide 800 light").unwrap();
+            // A step that changes only the color scheme keeps the window.
+            app.set_environment("setColorScheme(dark)", |env| {
+                env.color_scheme = nsh_core::platform::ColorScheme::Dark;
+            })
+            .unwrap();
+            app.wait_for("wide 800 dark").unwrap();
+            // A resized window, then another change of the environment.
+            app.set_viewport(Size::new(px(390.0), px(844.0))).unwrap();
+            app.wait_for("narrow 390 dark").unwrap();
+            app.set_environment("setColorScheme(light)", |env| {
+                env.color_scheme = nsh_core::platform::ColorScheme::Light;
+            })
+            .unwrap();
+            app.wait_for("narrow 390 light").unwrap();
+        }
     }
 }

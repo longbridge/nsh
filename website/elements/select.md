@@ -313,8 +313,11 @@ In Rust they are `nsh_base::SelectItem`, `SelectEntry` and `SelectGroup`; `value
 | An item's row | the list | `itemClass`, `itemStyle`, `renderItem` (`group-focus:`, `group-selected:`, `group-disabled:` inside, under `group` in `itemClass`) |
 | The empty state | the popup, while no item shows | its own element (`empty`) |
 
-The popup is a column: its height follows the search field and the rows, so a `max-h-*` on `popupClass` caps it and
-the list scrolls within it.
+The popup is a column: its height follows the search field and the rows, and the list scrolls within it. Left to
+itself, the popup is held to the room on its side of the trigger: it opens on the side where it fits whole (with
+neither, the side with more room) and is never taller than that room. A `max-h-*` on `popupClass` caps it instead:
+the popup is at most that high on either side and chooses its side at that height, but no longer keeps to the room,
+so keep the cap short of what a small window leaves.
 
 ## Keyboard
 

@@ -646,6 +646,29 @@ pub fn scroll_target<V>(
         .find(|v| (!any_along || along(v)) && takes(v))
 }
 
+/// The view of `views` (innermost first: the one under the pointer, then
+/// the views around it) that hears a wheel (`onWheel`): the nearest that
+/// `listens`, and whether it takes the wheel (`true`: nothing scrolls or
+/// zooms natively). It takes it when no view nearer, nor itself, is one
+/// that `scrolls` (a scroll view, a hosted widget scrolling itself):
+/// a canvas inside a page hears the wheel instead of the page scrolling,
+/// while a listening scroll view, or a view around one, only observes it.
+pub fn wheel_listener<V>(
+    views: impl IntoIterator<Item = V>,
+    listens: impl Fn(&V) -> bool,
+    scrolls: impl Fn(&V) -> bool,
+) -> Option<(V, bool)> {
+    let mut scroll_seen = false;
+    for v in views {
+        let scrolls = scrolls(&v);
+        if listens(&v) {
+            return Some((v, !scroll_seen && !scrolls));
+        }
+        scroll_seen |= scrolls;
+    }
+    None
+}
+
 // --- The keyboard -------------------------------------------------------------------
 
 /// The Tab stop Tab (Shift + Tab with `back`) moves to among `n` from
@@ -976,6 +999,31 @@ mod tests {
         assert_eq!(tab_stop(Some(2), 3, false, false), None);
         assert_eq!(tab_stop(Some(0), 3, true, false), None);
         assert_eq!(tab_stop(Some(1), 3, true, false), Some(0));
+    }
+
+    #[test]
+    fn wheel_listener_takes_the_wheel_only_inside_scroll_views() {
+        // (id, listens, scrolls), innermost first.
+        let pick = |views: &[(u32, bool, bool)]| {
+            wheel_listener(views.iter().copied(), |v| v.1, |v| v.2).map(|(v, t)| (v.0, t))
+        };
+        // A canvas in a page: it takes the wheel.
+        assert_eq!(
+            pick(&[(3, false, false), (2, true, false), (1, false, true)]),
+            Some((2, true))
+        );
+        // A listening scroll view observes; it still scrolls.
+        assert_eq!(
+            pick(&[(3, false, false), (2, true, true)]),
+            Some((2, false))
+        );
+        // A listener around a scroll view observes.
+        assert_eq!(
+            pick(&[(3, false, false), (2, false, true), (1, true, false)]),
+            Some((1, false))
+        );
+        // No listener.
+        assert_eq!(pick(&[(2, false, true), (1, false, false)]), None);
     }
 
     #[test]

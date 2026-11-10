@@ -25,7 +25,7 @@ export const sliderValueStyle = (): TextStyle => ({ color: alpha(colors.text, 0.
  * 14-point thumb with a pointer (a 20-point band around the rail takes
  * presses), 8 and 20 on a touch screen (a 32-point band). Under the pointer the thumb lightens, the
  * keyboard's focus rings the thumb in the theme's `ring` (not after a press
- * or a drag), a disabled slider fades to 35% (transitions still with reduced
+ * or a drag), a disabled slider fades to 50% (transitions still with reduced
  * motion).
  *
  * Only what never changes is here, so the spread reads no signal: a spread
@@ -45,7 +45,7 @@ export function sliderLook(o: SliderLookOptions = {}) {
   const fade = "transition duration-150 motion-reduce:transition-none";
   return {
     class: o.value ? "flex-row items-center gap-2" : undefined,
-    trackClass: `${band} ${o.value ? "flex-1" : ""} cursor-pointer ${fade} disabled:opacity-35 disabled:cursor-not-allowed`,
+    trackClass: `${band} ${o.value ? "flex-1" : ""} cursor-pointer ${fade} disabled:opacity-50 disabled:cursor-not-allowed`,
     indicatorClass: `${vertical ? (pointer ? "w-1.5" : "w-2") + " h-full" : pointer ? "h-1.5" : "h-2"} rounded-full`,
     get indicatorStyle(): ViewStyle {
       return {

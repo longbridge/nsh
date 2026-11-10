@@ -55,8 +55,9 @@ use crate::{
     Command, EventKind, EventPayload,
     desktop::{
         self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuRole,
-        Shortcut, WindowAttributes, WindowCloseCause, WindowEvent, WindowFrame, WindowKind,
-        WindowMode, WindowOptions, WindowPlacement, WindowPosition, WindowRequest, WindowState,
+        Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes, WindowCloseCause,
+        WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions, WindowPlacement,
+        WindowPosition, WindowRequest, WindowState,
     },
     geometry::{Bounds, Edges, Point, Points, Size},
     keymap::When,
@@ -942,6 +943,48 @@ pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
 
+pub use super::quit::QUIT_TIMEOUT;
+
+/// Runs `f` as the app quits, for its cleanup (TS: `Application.on("quit",
+/// …)`), as GPUI's `App::on_app_quit`: saving what it keeps, closing a
+/// connection. It cannot keep the app running; an app that asks first
+/// quits from a Quit of its own ([`quit`] from a menu item with the `mod+q`
+/// shortcut, after its confirmation). It runs when the app stops: its Quit
+/// item and [`quit`], its last window closing, the system ending it
+/// (logging out), a host app removing its view. The engine waits for the
+/// futures it returns [`QUIT_TIMEOUT`] at most, together, and while it
+/// waits the platform does: keep it short. Removed with the current owner.
+///
+/// ```ignore
+/// on_app_quit(move || {
+///     let draft = draft.get_untracked();
+///     async move { save_draft(draft).await }
+/// });
+/// ```
+pub fn on_app_quit<F>(f: impl FnMut() -> F + 'static)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    let owner = Owner::current();
+    let f = RefCell::new(f);
+    let listener: super::quit::QuitListener = Rc::new(move || {
+        let future = owner.run(|| (f.borrow_mut())());
+        super::ambient::owned(owner, future)
+    });
+    let subscription = add_quit_listener(listener);
+    cleanup(move || drop(subscription));
+}
+
+/// Adds `listener` to what runs as the app quits, until the subscription
+/// drops (`Application.on("quit")` keeps one while the VM lasts).
+pub(crate) fn add_quit_listener(
+    listener: super::quit::QuitListener,
+) -> super::quit::QuitSubscription {
+    let quit = &super::ambient::executor().quit;
+    let id = quit.borrow_mut().add(listener);
+    super::quit::QuitSubscription::new(quit, id)
+}
+
 /// Restarts the app (TS: `Application.restart`): it quits as [`quit`]
 /// does, and once this process has exited the platform starts the same
 /// program again with the arguments it was started with. For a setting
@@ -1287,6 +1330,8 @@ pub struct TrayClickEvent {
 pub struct Tray {
     icon: Option<ImageSrc>,
     tooltip: String,
+    title: Vec<TrayTitleRun>,
+    title_placement: TrayTitlePlacement,
     menu: Vec<MenuItem>,
     on_click: Option<TrayClick>,
 }
@@ -1316,6 +1361,29 @@ impl Tray {
         self
     }
 
+    /// Text beside the icon, in runs each of its own color: what the app
+    /// keeps in sight (a price, a count). macOS's menu bar shows it in its
+    /// font; Linux's panels that show AppIndicator labels show its text
+    /// right of the icon; Windows' notification area shows the icon alone.
+    ///
+    /// ```ignore
+    /// tray().title([
+    ///     TrayTitleRun::new("AAPL 228.00 "),
+    ///     TrayTitleRun::new("+1.33%").color(rgb(0xd92d20)),
+    /// ])
+    /// ```
+    pub fn title(mut self, runs: impl IntoIterator<Item = TrayTitleRun>) -> Self {
+        self.title = runs.into_iter().collect();
+        self
+    }
+
+    /// Which side of the icon the title shows on (macOS; Linux's panels
+    /// draw it right of the icon).
+    pub fn title_placement(mut self, placement: TrayTitlePlacement) -> Self {
+        self.title_placement = placement;
+        self
+    }
+
     /// Its menu, opened by a secondary click (and a primary one without
     /// [`Tray::on_click`]).
     pub fn menu(mut self, items: impl IntoIterator<Item = MenuItem>) -> Self {
@@ -1335,6 +1403,8 @@ impl fmt::Debug for Tray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Tray")
             .field("tooltip", &self.tooltip)
+            .field("title", &self.title)
+            .field("title_placement", &self.title_placement)
             .field("menu", &self.menu)
             .field("on_click", &self.on_click.is_some())
             .finish_non_exhaustive()
@@ -1385,6 +1455,8 @@ pub fn set_tray(tray: impl Into<Option<Tray>>) {
     let command = desktop::Tray {
         icon: tray.icon.as_ref().and_then(ImageSrc::menu_icon),
         tooltip: tray.tooltip,
+        title: tray.title,
+        title_placement: tray.title_placement,
         menu: items.into(),
         click: click.as_ref().map_or(0, |(id, _)| *id),
     };

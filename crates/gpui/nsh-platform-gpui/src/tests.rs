@@ -204,6 +204,7 @@ fn windows(cx: &mut TestAppContext) {
     set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
     a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
     props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx);
+    a_command_without_a_search_field_takes_the_keyboard_on_focus(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -1754,4 +1755,68 @@ fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestApp
         click_count: 1,
     });
     wait_for(&view, cx, "menu 20 15");
+}
+
+/// A command without a search field that the app focuses once mounted;
+/// the item chosen with the keyboard goes to a field.
+const UNSEARCHABLE_COMMAND: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Command, Input } from "nsh/base";
+
+function App() {
+  const log = signal("start");
+  let command: any;
+  let field: any;
+  setTimeout(() => command?.focus(), 0);
+  return (
+    <View style={{ flex: 1, padding: 8, gap: 8 }}>
+      <Input ref={(node) => (field = node)} autoFocus value={log()} style={{ height: 30 }} />
+      <Command
+        ref={(node) => (command = node)}
+        searchable={false}
+        items={[{ id: "alpha", label: "Alpha" }, { id: "beta", label: "Beta" }]}
+        onSelect={({ id }) => { log.set(`selected ${id}`); field?.focus(); }}
+      />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", UNSEARCHABLE_COMMAND, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    // `focus()` moves the keyboard from the field to the command.
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let moved = view.read_with(cx, |view, _| {
+            crate::key_focus::focused(view.surface()).is_some()
+                && crate::text_input::focused(view.surface()).is_none()
+        });
+        if moved {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the command never took the focus"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Its keys reach it: Down moves to the next item, Return chooses it.
+    cx.simulate_keystrokes("down");
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(50));
+    cx.simulate_keystrokes("enter");
+    let text = wait_until(&view, cx, |t| t.starts_with("selected"));
+    assert!(
+        text == "selected alpha" || text == "selected beta",
+        "{text}"
+    );
+    assert!(view.read_with(cx, |view, _| {
+        crate::key_focus::focused(view.surface()).is_none()
+    }));
 }

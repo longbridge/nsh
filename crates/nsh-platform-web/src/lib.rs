@@ -1333,7 +1333,7 @@ pub extern "C" fn nsh_picked(request: u32) -> f64 {
 }
 
 /// Touches, as JSON `{ phase, time, points: [{ id, target, path, pageX,
-/// pageY, x, y, changed }] }` (`phase`: 0 start, 1 move, 2 end, 3
+/// pageY, x, y, changed, pointerType }] }` (`phase`: 0 start, 1 move, 2 end, 3
 /// cancel).
 ///
 /// # Safety
@@ -1375,6 +1375,11 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
                     page: point(Points(f(p, "pageX") as f32), Points(f(p, "pageY") as f32)),
                     location: point(Points(f(p, "x") as f32), Points(f(p, "y") as f32)),
                     changed: p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
+                    pointer_type: p
+                        .get("pointerType")
+                        .and_then(|v| v.as_str())
+                        .and_then(nsh_core::PointerType::from_name)
+                        .unwrap_or(nsh_core::PointerType::Touch),
                 })
                 .collect()
         })

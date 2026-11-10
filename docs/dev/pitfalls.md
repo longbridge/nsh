@@ -286,6 +286,13 @@ Things that were found the hard way. Read the section of the area you change bef
   reads the element's value as soon as the call returns, while the new value comes from the engine thread in a later
   batch: a step whose value arrives after VoiceOver read the old one announces the new one (`NshView::late_step_value`),
   one that arrives before it asked is read by VoiceOver itself.
+- **iOS, a `UIVisualEffectView` takes its shape through `maskView` only**: UIKit's documentation of
+  `UIVisualEffectView` says a mask on the layer of an effect view, or of one of its superviews, breaks the effect.
+  UIKit copies the mask view when it is set, so changing the mask view's geometry afterwards does nothing: a new size
+  or shape needs the mask view set again. A backdrop blur or glass with unequal corner radii gets a new mask view,
+  configured whole before it is set, whenever its size or radii change (`visual.rs` `set_backdrop`); one with a
+  single radius uses the layer's corners. A view with `overflow: hidden` and unequal radii still masks its own layer
+  (`decor.rs`), which is its effect view's superview: the case the documentation names, not changed yet.
 
 ## Android
 
@@ -527,6 +534,12 @@ Things that were found the hard way. Read the section of the area you change bef
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
   binding and older systems no property.
+
+- **TextKit 2 has no rect for text it has not laid out**: an `NSTextView` lays out only the text near its visible part,
+  and `firstRectForCharacterRange:actualRange:` answers `NSZeroRect` for the rest, so input methods open their
+  candidates at the screen's bottom-left corner (macOS 27.2, a standalone probe). A point-wide input, as the editors'
+  sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
+  (`text_input.rs`).
 
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn

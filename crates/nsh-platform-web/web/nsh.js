@@ -419,6 +419,14 @@ function newHistorySession() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 }
 
+/** The current entry's place in the tab's history (the Navigation API's
+ * `navigation.currentEntry.index`), `null` where the browser has no
+ * Navigation API. */
+function navigationIndex() {
+  const index = globalThis.navigation?.currentEntry?.index;
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 /** The offset of local time at `ms` (since the epoch) in seconds east of UTC. */
 function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
@@ -919,6 +927,8 @@ class Player {
     container.append(this.root);
     this.views = new Map();
     this.mouseTracked = new Set();
+    /** Views listening to `onWheel`; wheels look for none without. */
+    this.wheelTracked = new Set();
     // Shader views (`op_sh`), drawn on one WebGL 2 context (`shaderGl`).
     this.shaderViews = new Set();
     // Of the views' own style rules (`op_css`).
@@ -1569,6 +1579,7 @@ class Player {
     root.append(this.live);
     this.views.clear();
     this.mouseTracked.clear();
+    this.wheelTracked.clear();
     root._id = ROOT_ID;
     root._kind = "root";
     root._events = new Set();
@@ -2169,7 +2180,9 @@ class Player {
     child._removing = false;
     child._leftWith = null;
     const host = parent._layer ?? parent;
-    host.insertBefore(child, before && before.parentNode === host ? before : null);
+    // Appended children stay under a border drawn over them.
+    const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
+    host.insertBefore(child, before && before.parentNode === host ? before : last);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
@@ -2213,6 +2226,7 @@ class Player {
     if (!el) return;
     this.views.delete(id);
     this.mouseTracked.delete(id);
+    this.wheelTracked.delete(id);
     if (el._shader) this.dropShader(el);
     if (el._video) {
       // A removed media element keeps playing until it is collected.
@@ -2317,7 +2331,18 @@ class Player {
       el._border.className = `nsh-border ${this.styleClass(border)}`;
       el._border._cornerClass = null;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
-      el.append(el._border);
+      // As on iOS and macOS: a view that does not clip has its border under
+      // its child views (a label on an outlined field covers it), over its
+      // own fills (a shader, text runs); a clipping one (a rounded card with
+      // a full-bleed image) has it over its children, as a layer border.
+      const overflow = CLASSES.rules.get(el._class)?.style.overflow;
+      el._borderOver = !!(overflow && overflow !== "visible") || el.classList.contains("nsh-scroll") || el.classList.contains("nsh-clip");
+      let next = null;
+      if (!el._borderOver) {
+        next = el.firstChild;
+        while (next && (next === el._border || next._kind === undefined)) next = next.nextSibling;
+      }
+      if (el._border.nextSibling !== next || el._border.parentNode !== el) el.insertBefore(el._border, next);
     } else if (el._border) {
       el._border.remove();
       el._border = null;
@@ -2539,6 +2564,8 @@ class Player {
     el._events = new Set(events);
     if (el._events.has("onMouseMove")) this.mouseTracked.add(id);
     else this.mouseTracked.delete(id);
+    if (el._events.has("onWheel")) this.wheelTracked.add(id);
+    else this.wheelTracked.delete(id);
     const pressable = PRESS_EVENTS.some((e) => el._events.has(e));
     el._pressable = pressable;
     this.updateFocusable(el);
@@ -5328,10 +5355,24 @@ class Player {
     this.historyIndex = 0;
     this.historyDepths = [0];
     history.replaceState(this.historyState(0), "");
+    // The app's first entry's place in the tab's history, where the
+    // browser says (`navigationIndex`): a state-less entry before it is the
+    // page's own, from before the player, not an address the user typed.
+    this.historyBase = navigationIndex();
     // The address of the app's first entry, where every run starts, and of
     // the entry shown (a page the app keeps on a back keeps it).
     this.firstUrl = this.shownUrl = location.href;
     window.addEventListener("popstate", (e) => this.popState(e));
+  }
+
+  /** Whether the entry the user went to is before the app's first: the
+   * page's own (a `#fragment` followed while the app loaded, a `pushState`
+   * of the host page's), which looks to `popstate` like an address the user
+   * typed. Only the Navigation API tells them apart; without it a
+   * state-less entry is taken as typed. */
+  beforeFirstEntry() {
+    const index = navigationIndex();
+    return index != null && this.historyBase != null && index < this.historyBase;
   }
 
   historyState(depth, index = this.historyIndex) {
@@ -5471,7 +5512,7 @@ class Player {
     this.endPopAnswer();
     const have = this.historyDepth;
     if (e.state?.nshSession !== this.historySession) {
-      if (e.state?.nsh == null && location.href !== this.shownUrl) {
+      if (e.state?.nsh == null && location.href !== this.shownUrl && !this.beforeFirstEntry()) {
         // An address the user gave the page (a `#fragment` typed in the
         // address bar): an entry after the current one, at its depth, as
         // if the app had pushed it. The app's pages stay; it shows what
@@ -5498,6 +5539,7 @@ class Player {
       this.historySession = newHistorySession();
       this.historyDepths = [0];
       history.replaceState(this.historyState(0), "");
+      this.historyBase = navigationIndex();
       this.firstUrl = location.href;
       this.tellAddress(true);
       return;
@@ -5505,7 +5547,7 @@ class Player {
     const at = e.state.nsh ?? 0;
     // This load's entries all have their place; which way the user went.
     const index = Number.isInteger(e.state.nshIndex) ? e.state.nshIndex : at;
-    const cause = index < this.historyIndex ? "back" : "forward";
+    const reason = index < this.historyIndex ? "back" : "forward";
     this.historyIndex = index;
     this.historyDepths[index] = at;
     if (at > have) {
@@ -5523,7 +5565,7 @@ class Player {
       // pages are as the entry has them, and it shows what the address
       // names.
       if (!index) this.firstUrl = location.href;
-      this.tellAddress(location.href !== this.shownUrl ? cause : false);
+      this.tellAddress(location.href !== this.shownUrl ? reason : false);
       return;
     }
     // A pop the app hears at once (no motion, a modal) may give the address
@@ -5557,11 +5599,11 @@ class Player {
     // hears an entry's address that differs from the one it had
     // (`change`), once the pages it popped are dismissed: it answers the
     // dismissal after their slide, and an address it sets then wins.
-    if (location.href !== before) this.awaitPopAnswer({ sets, url: location.href, cause });
+    if (location.href !== before) this.awaitPopAnswer({ sets, url: location.href, reason });
   }
 
   /** Waits for the app's answer to a back that popped its pages (`popped`:
-   * `sets`, `url`, `cause`), at most `POP_ANSWER_MS`. */
+   * `sets`, `url`, `reason`), at most `POP_ANSWER_MS`. */
   awaitPopAnswer(popped) {
     this.popAnswer = popped;
     popped.timer = setTimeout(() => {
@@ -5578,7 +5620,7 @@ class Player {
     if (!popped || (this.dismissing > 0 && !popped.expired)) return;
     this.endPopAnswer();
     if (this.pageUrlSets !== popped.sets || location.href !== popped.url) return;
-    this.tellAddress(popped.cause);
+    this.tellAddress(popped.reason);
   }
 
   endPopAnswer() {
@@ -5588,7 +5630,7 @@ class Player {
 
   /** Tells the core the entry's address: with `open` when the app is handed
    * it from outside (`true`), as a move the app did not make when `how` is
-   * its cause (`"back"`, `"forward"`, `"address"`: `change`), else as the
+   * its reason (`"back"`, `"forward"`, `"address"`: `change`), else as the
    * address only (`quiet`). */
   tellAddress(how) {
     this.shownUrl = location.href;
@@ -6660,14 +6702,19 @@ class Player {
    * Browsers write images as PNG only, so another format is decoded and
    * encoded again. The write starts before that, with the PNG to come:
    * Safari only writes within the user's gesture, which an `await` loses.
+   * The PNG holds a GIF's first frame only, so another format also goes on
+   * as it is, as browsers' own Copy Image does: an `<img>` of it as HTML,
+   * which pastes give the app, and in Chromium a `web ` format, which
+   * `readClipboardImage` prefers.
    */
   writeClipboardImage(uri) {
     // Decoded here: the CSP of a page whose app restricts `network` keeps `fetch` from `data:` URIs.
     const base64 = /^data:([^;,]*);base64,/.exec(uri);
+    const original = base64
+      ? Promise.resolve().then(() => new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] }))
+      : fetch(uri).then((response) => response.blob());
     const png = (async () => {
-      const blob = base64
-        ? new Blob([this.audioBytesFromBase64(uri.slice(base64[0].length))], { type: base64[1] })
-        : await (await fetch(uri)).blob();
+      const blob = await original;
       if (blob.type === "image/png") return blob;
       const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
       try {
@@ -6682,7 +6729,15 @@ class Player {
     // Handled by the write; this keeps it from reporting twice when the write never starts.
     png.catch(() => {});
     try {
-      return navigator.clipboard.write([new ClipboardItem({ "image/png": png })]).catch(fail);
+      const data = { "image/png": png };
+      // The types go in now, before the image has loaded: `data:` URIs say theirs.
+      const type = base64?.[1] ?? "";
+      if (type !== "image/png") {
+        const src = uri.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        data["text/html"] = new Blob([`<img src="${src}">`], { type: "text/html" });
+        if (type && ClipboardItem.supports?.(`web ${type}`)) data[`web ${type}`] = original;
+      }
+      return navigator.clipboard.write([new ClipboardItem(data)]).catch(fail);
     } catch (err) {
       // No clipboard (an insecure context) or no `ClipboardItem`.
       fail(err);
@@ -6817,9 +6872,11 @@ class Player {
     let blob = null;
     try {
       for (const item of (await navigator.clipboard?.read()) ?? []) {
-        const type = item.types.find((t) => t.startsWith("image/"));
+        // The original `writeClipboardImage` kept beside its PNG first.
+        const type = item.types.find((t) => t.startsWith("web image/")) ?? item.types.find((t) => t.startsWith("image/"));
         if (type) {
           blob = await item.getType(type);
+          if (type.startsWith("web ")) blob = new Blob([blob], { type: type.slice(4) });
           break;
         }
       }
@@ -7842,6 +7899,12 @@ class Player {
    * pinches the view under the pointer and never zooms the page.
    */
   wheel(e) {
+    // A view listening to `onWheel` nearer than the scroll views under the
+    // pointer takes the wheel: nothing scrolls, zooms or pinches.
+    if (this.wheelEvent(e)) {
+      e.preventDefault();
+      return;
+    }
     if (e.ctrlKey) {
       e.preventDefault();
       // Over a zoomable scroll view it zooms that, else it pinches.
@@ -7891,6 +7954,37 @@ class Player {
     // deltas. Its magnitude cannot distinguish a notch from a finger.
     const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
+  }
+
+  /**
+   * `onWheel` of the nearest view around `e`'s target that listens; true
+   * when it takes the wheel: no scroll view is nearer, nor is it one
+   * (`input::wheel_listener`). Deltas are lines for `DOM_DELTA_LINE`,
+   * points otherwise (a page is the viewport's height).
+   */
+  wheelEvent(e) {
+    if (!this.wheelTracked?.size) return false;
+    const view = this.viewOf(e.target);
+    if (!view) return false;
+    let scrollSeen = false;
+    for (const el of this.ancestors(view)) {
+      const scrolls = el._kind === "scroll";
+      if (el._events?.has("onWheel")) {
+        const r = el.getBoundingClientRect();
+        const [pageX, pageY] = this.point(e);
+        const page = e.deltaMode === 2 ? this.size[1] : 1;
+        this.event(el._id, "onWheel", {
+          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          pagePosition: { x: pageX, y: pageY },
+          delta: { x: e.deltaX * page, y: e.deltaY * page },
+          deltaMode: e.deltaMode === 1 ? "lines" : "points",
+          modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+        });
+        return !scrollSeen && !scrolls;
+      }
+      scrollSeen ||= scrolls;
+    }
+    return false;
   }
 
   /** Moves `el` by (`dx`, `dy`), gliding there when `smooth`; once it
@@ -8113,6 +8207,7 @@ class Player {
         x: p.x - left,
         y: p.y - top,
         changed: id === changedId,
+        pointerType: p.pointerType,
       });
     }
     if (!points.length) return;
@@ -8168,6 +8263,7 @@ class Player {
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const p = {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
+      pointerType: e.pointerType,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : this.linkPress(e.target, target) ?? chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       // What presses report: the modifier keys at the press and its clicks.

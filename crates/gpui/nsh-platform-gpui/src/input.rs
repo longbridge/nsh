@@ -68,12 +68,12 @@ use nsh_core::{
     Command, EventKind, EventPayload, GestureValues, NodeId, PayloadValue, PointerEvents, ROOT_ID,
     TouchEvent, TouchPhase, TouchPoint, ViewKind,
     geometry::Points,
-    platform::InputModality,
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
         SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
         laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1145,6 +1145,42 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
     }
 }
 
+/// `onWheel` for a wheel by `delta` from the window: the nearest view
+/// around the one under the pointer that listens hears it
+/// ([`input::wheel_listener`]). Returns whether that view takes the
+/// wheel, so nothing scrolls or zooms natively.
+pub(crate) fn wheel_event(
+    surface: &Rc<Surface>,
+    event: &WheelEvent,
+    delta: nsh_core::WheelDelta,
+) -> bool {
+    let (x, y) = (event.x, event.y);
+    if delta.xy() == (0.0, 0.0) {
+        return false;
+    }
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return false;
+    };
+    let Some((view, takes)) = input::wheel_listener(
+        chain(&hit.view),
+        |v| v.state().events.contains(EventKind::Wheel),
+        // A multiline field scrolls its own lines.
+        |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+    ) else {
+        return false;
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let wheel = nsh_core::WheelEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        delta,
+        event.modifiers.core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    takes
+}
+
 /// A wheel event from the window.
 pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     let (x, y) = (event.x, event.y);
@@ -1225,6 +1261,7 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::text::key(surface, &event)
         || crate::selectable_view::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
+        || crate::key_focus::key(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
             crate::scroll::key(surface, &event, x, y)
@@ -1524,6 +1561,7 @@ fn down(
     let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    crate::key_focus::pointer_down(surface, &hit.view);
     let touch = key != Key::Mouse;
     let mut item = None;
     if let Some(native) = hit.item.take() {
@@ -1909,6 +1947,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: nsh_core::geometry::point(Points(p.x), Points(p.y)),
                     location: nsh_core::geometry::point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()

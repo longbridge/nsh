@@ -112,6 +112,17 @@ SVG 在显示的尺寸下清晰。浏览器以矢量方式绘制它；iOS、macO
 
 **Web 上报告的尺寸。** 浏览器自行测量 SVG，无论是导入的还是远程的：SVG 有 `width` 和 `height` 时，`onLoad` 和 `Image.getSize` 报告这两个值，否则报告浏览器给出的尺寸，浏览器通常由默认尺寸 300 × 150 和 `viewBox` 的宽高比得出它。导入的 SVG 在所有平台上都按打包器给出的尺寸布局。为 SVG 设置 `width` 和 `height`，即可在各处得到相同的报告尺寸。
 
+## 像素缓冲区
+
+自己绘制像素的 Rust 组件（渲染器、相机、在其他线程生成的预览）用 `ImageSrc::rgba(width, height, pixels)` 显示它们：直通（非预乘）的 8 位 RGBA，行自上而下、无填充，共 `width * height * 4` 字节，可放在任意所有者中（`Vec<u8>`、`Arc<[u8]>`）。创建来源时既不编码也不复制。
+
+```rust
+let page: Arc<[u8]> = render_page(); // 1192 × 1684 像素
+image(ImageSrc::rgba(1192, 1684, page)).w_full()
+```
+
+图片按 `width` × `height` 点布局，与 `data:` 图片相同；用样式设置它的尺寸。每个缓冲区都是一张独立的图片：新的一帧就给视图一个新来源，旧的一帧在没有视图显示后由缓存释放。Windows、macOS、Linux 和 GPUI 直接绘制这些像素；iOS、Android 和浏览器只能从编码后的字节加载图片，因此缓冲区在首次显示时会转成未压缩的 PNG（一次复制，不做压缩）。TSX 中持有的字节可使用 `Blob` URL。
+
 ## 远程图片
 
 给元素一个 URL：在 Rust 中是字符串（会变化的 URL 用闭包），在 TSX 中是 URL 字符串：
@@ -131,7 +142,7 @@ image(move || user.with(|u| u.avatar_url.clone()))
 - 加载期间会显示**背景色**，也可以使用占位图（见下文）。
 - 下载是共享的：多个视图显示同一个 URL 时只下载一次，即使它们按不同尺寸解码也是如此。没有任何视图再等待的下载会被取消。
 - 解码后的图片缓存在内存中（内存紧张时会清理），以 URL、解码尺寸和模糊半径为键。
-- 当应用声明了[能力](./sandbox-and-capabilities.md)时，图片的主机必须在 `network` 中被允许；被拒绝的图片会触发错误事件。
+- 当应用声明了[能力](./sandbox-and-capabilities.md)时，图片的主机必须在 `network` 中被允许；被拒绝的图片会触发错误事件。本地文件（绝对路径或 `file:` URL，桌面上的 `onFileDrop`、剪贴板和 `import.meta.url` 给出的就是这种）需要一个包含它的 `fs.read` 根目录，并且只在桌面上加载。
 
 ### 磁盘缓存
 

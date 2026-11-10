@@ -132,6 +132,9 @@ pub struct Context {
     pub read_asset: Option<ReadAsset>,
     /// What the app may load, for the redirects.
     pub access: Arc<Access>,
+    /// The roots the app's local media files are read under (a sound's
+    /// load checks its source against them).
+    pub media_files: Arc<crate::access::MediaFiles>,
     /// The disk cache remote images go through.
     pub disk: Option<DiskCache>,
     /// How remote images download: `None`, the process's
@@ -1009,6 +1012,11 @@ mod http {
         (if direct { &DIRECT } else { &PROXIED }).get_or_init(|| {
             let config = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
+                .tls_config(
+                    ureq::tls::TlsConfig::builder()
+                        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                        .build(),
+                )
                 .http_status_as_error(false)
                 .max_redirects(0)
                 .max_redirects_will_error(false);

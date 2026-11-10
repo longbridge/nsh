@@ -740,11 +740,11 @@ tap text:MenuTrigger
 expect NewItem
 expect Log: menu true triggerPress
 expect Life: menu open
-style parent:parent:text:NewItem backgroundColor #00ff00ff
-frame parent:text:NewItem 4 4 382 17
-style below:parent:parent:text:NewItem backgroundColor #000000ff
-style below:parent:parent:text:NewItem opacity 0.5
-frame id:separator 4 55 382 1
+style parent:parent:parent:text:NewItem backgroundColor #00ff00ff
+frame parent:text:NewItem 0 0 382 17
+style below:parent:parent:parent:text:NewItem backgroundColor #000000ff
+style below:parent:parent:parent:text:NewItem opacity 0.5
+frame id:separator 0 51 382 1
 prop parent:text:OffItem accessibilityState disabled=true
 prop parent:text:KeepItem accessibilityLabel Keep the menu
 tap text:KeepItem
@@ -800,10 +800,10 @@ touch end
 expect CopyItem
 expect Log: context true longPress
 expect Life: context open
-style parent:parent:text:CopyItem backgroundColor #ff0000ff
-frame parent:text:CopyItem 2 2 386 17
-style below:parent:parent:text:CopyItem backgroundColor #0000ffff
-style below:parent:parent:text:CopyItem opacity 0.25
+style parent:parent:parent:text:CopyItem backgroundColor #ff0000ff
+frame parent:text:CopyItem 0 0 386 17
+style below:parent:parent:parent:text:CopyItem backgroundColor #0000ffff
+style below:parent:parent:parent:text:CopyItem opacity 0.25
 tap text:CopyItem
 expect Log: context false select
 absent CopyItem
@@ -3590,6 +3590,19 @@ tap id:bad
 expect theme result refused TypeError
 expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
+# Malformed JSON shapes and colors leave the current theme in force.
+tap id:bad-structure
+expect theme result bad-structure refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-function
+expect theme result bad-function refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-length
+expect theme result bad-length refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
 tap id:built
 expect theme result built
 expect theme up #138a5aff
@@ -4163,6 +4176,7 @@ expect State: text string true false
 expect Attr: true
 expect Split: true 3
 expect Content: Plain line **b**
+expect Html: <h2>T</h2><p>a <em>b</em></p>
 expect Insert: xyb
 expect Dispatch: all xy
 expect Node: true node
