@@ -1180,7 +1180,7 @@ fn parent_bounds(
 }
 
 /// The GPUI window of the window whose root node is `id`.
-fn handle_of(surface: &Surface, id: NodeId) -> Option<AnyWindowHandle> {
+pub(crate) fn handle_of(surface: &Surface, id: NodeId) -> Option<AnyWindowHandle> {
     match id {
         ROOT_ID => surface.chrome.window(),
         id => get(surface, id)?.handle.get(),
