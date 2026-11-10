@@ -5300,11 +5300,16 @@ impl<M: TextEngine> Core<M> {
                             }
                         }
                         None => {
-                            sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
-                            sink.close();
                             let base = self.base_url.as_deref();
                             let capability = crate::access::media_capability(src, base);
                             let advice = crate::access::media_grant_advice(src, base);
+                            // Worded without the app's text: the player's
+                            // error names the capability from it.
+                            sink.send(failed(
+                                AudioError::NotAllowed,
+                                &format!("{}{capability}", super::SOURCE_NOT_GRANTED),
+                            ));
+                            sink.close();
                             self.deny(format!(
                                 "`{src}` is not granted by capabilities.{capability}: {advice}"
                             ));

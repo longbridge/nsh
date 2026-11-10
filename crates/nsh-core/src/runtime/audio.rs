@@ -28,13 +28,7 @@ use crate::{
 fn thrown(failure: AudioFailure, src: &str) -> JsError {
     match failure.error {
         AudioError::NotAllowed => {
-            let permission = if failure.message.contains("capabilities.fs") {
-                "fs"
-            } else if failure.message.contains("network") {
-                "network"
-            } else {
-                "audio"
-            };
+            let permission = permission_of(&failure);
             JsError::access_denied(failure.message, permission, src)
         }
         AudioError::QuotaExceeded => {
@@ -42,6 +36,24 @@ fn thrown(failure: AudioFailure, src: &str) -> JsError {
         }
         AudioError::Unavailable => JsError::Error(failure.message).with_code(codes::UNAVAILABLE),
         error => JsError::Error(failure.message).with_code(error.as_str()),
+    }
+}
+
+/// The capability a refusal names: the one the core recorded, or, for a
+/// player's, the one its message ends with (the core words it without the
+/// app's text, [`crate::core::SOURCE_NOT_GRANTED`]); else as before.
+fn permission_of(failure: &AudioFailure) -> &'static str {
+    if let Some(permission) = failure.permission {
+        return permission;
+    }
+    match failure
+        .message
+        .strip_prefix(crate::core::SOURCE_NOT_GRANTED)
+    {
+        Some("fs") => "fs",
+        Some(_) => "network",
+        None if failure.message.contains("network") => "network",
+        None => "audio",
     }
 }
 
@@ -501,6 +513,7 @@ async fn run(state: Rc<State>, cleanup: Cleanup) {
                         AudioFailure {
                             error,
                             message: message.clone(),
+                            permission: None,
                         },
                         &state.src,
                     )));
@@ -737,5 +750,43 @@ impl AudioPlayer {
     #[getter]
     pub(crate) fn state(&self) -> AudioPlayerState {
         self.state.state()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AudioError, AudioFailure, permission_of};
+
+    /// A refusal names the capability that would grant it, never one read
+    /// from the app's text in its message.
+    #[test]
+    fn refusals_name_the_capability_that_grants_them() {
+        let refused = |capability, message: &str| AudioFailure::refused(capability, message);
+        assert_eq!(
+            permission_of(&refused(
+                "network",
+                "`https://x/capabilities.fs` is not granted"
+            )),
+            "network"
+        );
+        assert_eq!(
+            permission_of(&refused("fs", "`/a/network.wav` is not granted")),
+            "fs"
+        );
+        assert_eq!(
+            permission_of(&refused("audio", "sound is not granted")),
+            "audio"
+        );
+        // A player's, as the core words it.
+        let player = |message: &str| AudioFailure {
+            error: AudioError::NotAllowed,
+            message: message.into(),
+            permission: None,
+        };
+        for (capability, expected) in [("fs", "fs"), ("network", "network")] {
+            let message = format!("{}{capability}", crate::core::SOURCE_NOT_GRANTED);
+            assert_eq!(permission_of(&player(&message)), expected);
+        }
+        assert_eq!(permission_of(&player("sound is not granted")), "audio");
     }
 }

@@ -33122,7 +33122,7 @@ mod audio {
         assert_eq!(
             shown_after::<Voice>(&mut c),
             // Nothing after the failure: the core closed it.
-            "Failed { error: NotAllowed, message: \"the source is not granted\" }|None"
+            "Failed { error: NotAllowed, message: \"the source is not granted by capabilities.network\" }|None"
         );
         assert_eq!(audio.log(), Vec::<String>::new());
     }

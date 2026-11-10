@@ -26,6 +26,10 @@ mod watch;
 /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
 pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
 
+/// The start of a player's error when the core refuses its source; the
+/// capability that would grant it follows (`network`, `fs`).
+pub(crate) const SOURCE_NOT_GRANTED: &str = "the source is not granted by capabilities.";
+
 use std::{rc::Rc, sync::Arc};
 
 use slab::Slab;

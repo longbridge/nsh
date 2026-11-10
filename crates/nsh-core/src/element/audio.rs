@@ -37,6 +37,9 @@ pub struct AudioFailure {
     pub error: AudioError,
     /// What happened, in words.
     pub message: String,
+    /// For [`AudioError::NotAllowed`]: the capability that would grant it
+    /// (`audio`, `network`, `fs`), when the core refused it here.
+    pub(crate) permission: Option<&'static str>,
 }
 
 impl Default for AudioFailure {
@@ -50,6 +53,17 @@ impl AudioFailure {
         Self {
             error,
             message: message.into(),
+            permission: None,
+        }
+    }
+
+    /// A refusal for want of `capability` (made where the core reads a
+    /// sound itself, off the web).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn refused(capability: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            permission: Some(capability),
+            ..Self::new(AudioError::NotAllowed, message)
         }
     }
 }
@@ -262,22 +276,24 @@ fn granted_uri(
     uri: String,
 ) -> Result<String, AudioFailure> {
     if !access.allows_audio() {
-        return Err(AudioFailure::new(
-            AudioError::NotAllowed,
+        return Err(AudioFailure::refused(
+            "audio",
             "sound is not granted: add `\"audio\": true` to capabilities in nsh.json",
         ));
     }
     match access.media_url(&uri, None, Some(files)) {
         Some(std::borrow::Cow::Owned(granted)) => Ok(granted),
         Some(std::borrow::Cow::Borrowed(_)) => Ok(uri),
-        None => Err(AudioFailure::new(
-            AudioError::NotAllowed,
-            format!(
-                "`{src}` is not granted by capabilities.{}: {}",
-                crate::access::media_capability(&uri, None),
-                crate::access::media_grant_advice(&uri, None)
-            ),
-        )),
+        None => {
+            let capability = crate::access::media_capability(&uri, None);
+            Err(AudioFailure::refused(
+                capability,
+                format!(
+                    "`{src}` is not granted by capabilities.{capability}: {}",
+                    crate::access::media_grant_advice(&uri, None)
+                ),
+            ))
+        }
     }
 }
 
