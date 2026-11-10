@@ -24285,6 +24285,74 @@ fn overlays_hear_presses_outside_and_cancel_from_the_top() {
 }
 
 #[test]
+fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::Overlay, 4, &[]);
+    add(&mut c, 8, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 10, Tag::View, 8, &[]);
+    add(&mut c, 12, Tag::View, 6, &[]);
+    add(&mut c, 14, Tag::View, 2, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::PressOutside,
+                enabled: true,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    js_events(&mut c);
+
+    let menu = |pointer_type| {
+        EventPayload::ContextMenu(crate::ContextMenuEvent::new(
+            point(px(1.0), px(2.0)),
+            point(px(5.0), px(46.0)),
+            Default::default(),
+            pointer_type,
+        ))
+    };
+    let mouse = Some(crate::PointerType::Mouse);
+    for (id, pointer_type, outside) in [
+        // Another view, and a view inside it.
+        (8, mouse, true),
+        (10, mouse, true),
+        // The anchor and what is in it, the overlay, one inside it.
+        (2, mouse, false),
+        (14, mouse, false),
+        (4, mouse, false),
+        (12, mouse, false),
+        // The keyboard and a long press do not press.
+        (10, None, false),
+        (10, Some(crate::PointerType::Touch), false),
+    ] {
+        c.component_event(id, EventKind::ContextMenu, &menu(pointer_type));
+        let events = js_events(&mut c);
+        let pressed = events.iter().find_map(|(at, kind, payload)| {
+            (*at == 4 && *kind == EventKind::PressOutside).then_some(payload)
+        });
+        assert_eq!(pressed.is_some(), outside, "{id} {pointer_type:?}");
+        if let Some(payload) = pressed {
+            assert_eq!(
+                payload,
+                &EventPayload::Map(vec![(
+                    "pagePosition",
+                    PayloadValue::Point(point(px(5.0), px(46.0)))
+                )])
+            );
+        }
+    }
+}
+
+#[test]
 fn overlays_in_a_modal_show_in_it() {
     use StyleValue::Number;
     let mut c = core();
