@@ -514,6 +514,13 @@ pub(crate) fn bounds_of(hwnd: HWND) -> Option<Bounds<Points>> {
     with_screens(|screens| Some(screen_of(screens, hwnd, rect)?.bounds(rect)))
 }
 
+/// `rect` (screen pixels) in screen points, converted on the monitor with
+/// most of it: a tray icon's, whose taskbar may be on another monitor than
+/// the app's window.
+pub(crate) fn screen_bounds(rect: RECT) -> Option<Bounds<Points>> {
+    with_screens(|screens| Some(screens.native_screen(rect)?.bounds(rect)))
+}
+
 #[cfg(test)]
 mod tests {
     use nsh_core::geometry::{point, px, size};

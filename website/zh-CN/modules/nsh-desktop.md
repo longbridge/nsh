@@ -768,7 +768,7 @@ interface TrayModule {
 | `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 和 Windows 上 SVG 是模板图标，用菜单栏或任务栏的文字颜色绘制。不设时 Windows 显示应用图标。 |
 | `tooltip` | 指针停在图标上时显示；不设时显示应用名。 |
 | `menu` | 图标的菜单，菜单项与 `Menu` 的相同。右键打开；没有 `onClick` 时左键也打开。 |
-| `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用）。 |
+| `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用），参数是 `{ bounds }`：图标在哪里（见[下文](#在图标旁打开窗口)）。 |
 
 再次调用 `set` 即可修改；放在 `effect` 里时会跟随它读取的 signal 更新。
 
@@ -786,6 +786,48 @@ Tray.set({
     { role: "quit" },
   ],
 });
+```
+
+### 在图标旁打开窗口
+
+`onClick` 的 `bounds` 是点击时图标在屏幕上的框，单位是点，坐标系与 `displays()`、`setBounds` 相同：从主显示器左上角算起，`y` 向下。在 macOS 上它是状态项在菜单栏里的位置，在 Windows 上是图标在通知区域或其溢出区里的位置。在 Linux 上它是 `null`，因为那里由窗口管理器摆放应用的窗口；系统报告的点击不带框时，它也是 `null`。据此打开的弹出窗口出现在图标旁边：屏幕顶部是菜单栏时在图标下方，底部是任务栏时在图标上方。
+
+```tsx
+import type { Bounds, Point, Size } from "nsh";
+import { Tray, Window, displays } from "nsh/desktop";
+import { TrayPanel } from "./TrayPanel";
+
+const size = { width: 320, height: 240 };
+
+Tray.set({
+  icon,
+  onClick: ({ bounds }) => {
+    if (!bounds) return Window.get("main")?.focus();
+    Window.open(TrayPanel, {
+      id: "tray-panel",
+      kind: "popup",
+      defaultSize: size,
+      defaultPosition: atIcon(bounds, size),
+    }).focus();
+  },
+});
+
+/** 以图标为中心，放在它所在显示器上空间更大的一侧，并限制在显示器的可见区域内。 */
+function atIcon(icon: Bounds, size: Size): Point {
+  const inside = (b: Bounds, p: Point) =>
+    p.x >= b.origin.x && p.x < b.origin.x + b.size.width && p.y >= b.origin.y && p.y < b.origin.y + b.size.height;
+  const display = displays().find(d => inside(d.bounds, icon.origin)) ?? displays()[0];
+  if (!display) return { x: icon.origin.x, y: icon.origin.y + icon.size.height };
+  const area = display.visibleBounds;
+  const below = icon.origin.y < area.origin.y + area.size.height / 2;
+  const x = icon.origin.x + (icon.size.width - size.width) / 2;
+  const y = below ? icon.origin.y + icon.size.height + 4 : icon.origin.y - size.height - 4;
+  const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+  return {
+    x: clamp(x, area.origin.x, area.origin.x + area.size.width - size.width),
+    y: clamp(y, area.origin.y, area.origin.y + area.size.height - size.height),
+  };
+}
 ```
 
 目前只有 TSX 可用，Rust 组件还没有托盘 API。
