@@ -1756,9 +1756,7 @@ mod tests {
     fn nsh_json_components_reach_the_prologue() {
         let dir = single(
             "components",
-            "import { mount } from \"nsh\";\n\
-             import { Button } from \"nsh/base\";\n\
-             mount(() => <Button variant=\"primary\" />);\n",
+            "import { mount, View } from \"nsh\";\nmount(() => <View />);\n",
         );
         std::fs::write(
             dir.join("nsh.json"),
