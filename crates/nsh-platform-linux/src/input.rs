@@ -952,14 +952,14 @@ pub(crate) fn hold(keys: gdk::ModifierType, down: bool) {
     });
 }
 
-/// Feeds a simulated pointer action through the same path as real input.
-#[cfg(feature = "dev")]
 /// A button or a finger went down: told before the press acts, so the
 /// focus it moves does not show (`focus-visible:`).
 fn pointer_input(surface: &Surface) {
     surface.control(|c| c.set_input_modality(nsh_core::platform::InputModality::Pointer));
 }
 
+/// Feeds a simulated pointer action through the same path as real input.
+#[cfg(feature = "dev")]
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
     let held = HELD.with(std::cell::Cell::get);
