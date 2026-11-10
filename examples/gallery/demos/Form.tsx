@@ -178,7 +178,7 @@ function FieldButton(props: { icon: IconName; label: string; short: string; show
       accessibilityLabel={props.label}
       disabled={props.show === false}
       hitSlop={4}
-      focusStyle={focusRing()}
+      focusVisibleStyle={focusRing()}
       hoverStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
       activeStyle={{ backgroundColor: alpha(colors.text, 0.12), transform: [{ scale: 0.9 }] }}
       style={{

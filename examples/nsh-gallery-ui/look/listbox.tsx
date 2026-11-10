@@ -145,8 +145,9 @@ export function pickerLook(o?: PickerLookOptions) {
       return read(o?.disabled) || invalid() ? undefined : { borderColor: colors.faint };
     },
     activeStyle: { opacity: 0.7 } as ViewStyle,
-    // The border with the outline, which not every platform draws over it; `focus` is above `hover` in the states' order.
-    get focusStyle(): ViewStyle {
+    // The border with the outline, which not every platform draws over it; `focus-visible` is above `hover` in the
+    // states' order. Only for the keyboard: a click's focus, and the focus a closing list gives back, draw nothing.
+    get focusVisibleStyle(): ViewStyle {
       const tone = invalid() ? colors.danger : colors.accent;
       return terminal ? { borderColor: tone } : { borderColor: tone, outlineColor: tone };
     },
