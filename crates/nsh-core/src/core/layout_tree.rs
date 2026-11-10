@@ -300,6 +300,28 @@ impl<C> LayoutTree<C> {
         }
     }
 
+    /// Whether `node` is aligned by its baseline in its parent: the item of
+    /// a flex or grid container whose `align-self` (or, without one, the
+    /// container's `align-items`) is `baseline`. Only then does its layout
+    /// need its baseline ([`Aligned`]).
+    fn aligned(&self, node: NodeId) -> Aligned {
+        let Some(parent) = self.layout_parent(node) else {
+            return Aligned::Edges;
+        };
+        let parent = &self.nodes[key(parent)].style;
+        let align = self.nodes[key(node)]
+            .style
+            .align_self
+            .unwrap_or(parent.align_items);
+        if matches!(parent.display, Display::Flex | Display::Grid)
+            && align.keyword() == taffy::AlignItemsKeyword::Baseline
+        {
+            Aligned::Baseline
+        } else {
+            Aligned::Edges
+        }
+    }
+
     /// Whether `node` is a holder laid out through: what its parent lays
     /// out in its place is its one child.
     fn through(&self, node: NodeId) -> bool {
@@ -519,17 +541,22 @@ impl<C> LayoutTree<C> {
 
     pub(crate) fn measures_as_before<M>(&mut self, node: NodeId, mut measure: M) -> bool
     where
-        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
     {
         let plain = self.grid.is_some();
+        let aligned = if plain {
+            Aligned::Edges
+        } else {
+            self.aligned(node)
+        };
         let n = &mut self.nodes[key(node)];
         let Some(measured) = &n.measured else {
             return false;
         };
         let style = if plain { &self.plain } else { &n.style };
-        measured
-            .iter()
-            .all(|(input, output)| measure(*input, node, n.context.as_mut(), style) == *output)
+        measured.iter().all(|(input, output)| {
+            measure(*input, node, n.context.as_mut(), style, aligned) == *output
+        })
     }
 
     /// Whether `node` has no cached layout: it changed, or something in it
@@ -552,7 +579,7 @@ impl<C> LayoutTree<C> {
     /// subtrees' frames are new, nothing else's is.
     pub(crate) fn relayout_boundaries<M>(&mut self, measure: M) -> Vec<u32>
     where
-        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
     {
         let mut relaid = Vec::new();
         if self.dirty_boundaries.is_empty() {
@@ -593,7 +620,7 @@ impl<C> LayoutTree<C> {
         available: Size<AvailableSpace>,
         measure: M,
     ) where
-        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
     {
         let mut view = View {
             tree: self,
@@ -616,7 +643,7 @@ fn compute_flex_layout<C, M>(
     mut inputs: LayoutInput,
 ) -> LayoutOutput
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     let n = view.node(node);
     if let (None, AvailableSpace::Definite(space)) =
@@ -663,6 +690,17 @@ fn unstyled(style: &Style) -> bool {
     *style == plain
 }
 
+/// How a leaf is aligned in its parent, which its measure is told: only a
+/// leaf aligned by baseline gives its layout a baseline (a text's first
+/// line's), which would be work wasted on any other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Aligned {
+    /// By its baseline (`align-items: baseline`, `align-self: baseline`).
+    Baseline,
+    /// By its edges or center: every other alignment.
+    Edges,
+}
+
 /// The tree being laid out, with what measures its leaves: what Taffy's
 /// algorithms run over.
 struct View<'t, C, M> {
@@ -675,7 +713,7 @@ struct View<'t, C, M> {
 
 impl<C, M> View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     fn node(&self, node: NodeId) -> &LayoutNode<C> {
         &self.tree.nodes[key(node)]
@@ -686,9 +724,14 @@ where
     /// ([`LayoutNode::measured`]).
     fn measure_leaf(&mut self, node: NodeId, inputs: LayoutInput, plain: bool) -> LayoutOutput {
         let tree = &mut *self.tree;
+        let aligned = if plain {
+            Aligned::Edges
+        } else {
+            tree.aligned(node)
+        };
         let n = &mut tree.nodes[key(node)];
         let style = if plain { &tree.plain } else { &n.style };
-        let output = (self.measure)(inputs, node, n.context.as_mut(), style);
+        let output = (self.measure)(inputs, node, n.context.as_mut(), style, aligned);
         if let Some(measured) = &mut n.measured
             && !measured.iter().any(|(asked, _)| *asked == inputs)
         {
@@ -752,7 +795,7 @@ where
 
 impl<C, M> terminal_layout::Tree for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     fn style(&self, node: NodeId) -> &Style {
         &self.node(node).style
@@ -837,7 +880,7 @@ where
 
 impl<C, M> TraversePartialTree for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     type ChildIter<'a>
         = ChildIds<'a, C>
@@ -880,13 +923,13 @@ impl<C> Iterator for ChildIds<'_, C> {
 }
 
 impl<C, M> TraverseTree for View<'_, C, M> where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput
 {
 }
 
 impl<C, M> LayoutPartialTree for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     type CoreContainerStyle<'a>
         = &'a Style
@@ -932,7 +975,7 @@ where
 
 impl<C, M> LayoutContainingBlock for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     type OofItemStyle<'a>
         = &'a Style
@@ -955,7 +998,7 @@ where
 
 impl<C, M> CacheTree for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     fn cache_get(&mut self, node: NodeId, input: &LayoutInput) -> Option<LayoutOutput> {
         self.tree.nodes[key(node)].cache.get(input)
@@ -972,7 +1015,7 @@ where
 
 impl<C, M> LayoutBlockContainer for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     type BlockContainerStyle<'a>
         = &'a Style
@@ -1003,7 +1046,7 @@ where
 
 impl<C, M> LayoutFlexboxContainer for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     type FlexboxContainerStyle<'a>
         = &'a Style
@@ -1025,7 +1068,7 @@ where
 
 impl<C, M> LayoutGridContainer for View<'_, C, M>
 where
-    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style, Aligned) -> LayoutOutput,
 {
     type GridContainerStyle<'a>
         = &'a Style

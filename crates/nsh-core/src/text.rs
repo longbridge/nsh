@@ -901,6 +901,16 @@ pub trait TextEngine {
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
+    /// How far below the text's top its first line's baseline is, laid out
+    /// `width` wide: a flex container aligning by baseline
+    /// (`align-items: baseline`) lines its items up by it, as CSS does. An
+    /// engine that does not know gives `None`, and the text is aligned by
+    /// its bottom edge, Taffy's fallback for a box without a baseline.
+    fn first_baseline(&self, prepared: &Self::Prepared, width: Points) -> Option<Points> {
+        let _ = (prepared, width);
+        None
+    }
+
     /// Whether each line takes all that fits and [`TextEngine::measure`]'s
     /// width is the widest line's: a maximum width between that width and
     /// the one measured then breaks the lines at the same places, so the
@@ -1012,6 +1022,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
         (**self).measure(prepared, max_width)
+    }
+
+    fn first_baseline(&self, prepared: &Self::Prepared, width: Points) -> Option<Points> {
+        (**self).first_baseline(prepared, width)
     }
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
