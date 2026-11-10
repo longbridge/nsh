@@ -2007,9 +2007,6 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           numberOfMonths={twoMonths() ? 2 : 1}
           disabledMatcher={closed}
           {...calendarProps("start")}
-          // Above the field: the card sits low on the page, and a month of six weeks would not fit under it in a
-          // phone-high window (the popup still turns below when the page has no room above).
-          placement="top"
           bodyStyle={terminal ? undefined : { gap: monthGap }}
           renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
           trigger={
