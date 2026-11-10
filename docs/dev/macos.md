@@ -71,6 +71,8 @@ belong to the app, which owns retention and its storage budget.
   scan last found none (`didAddSubview:`, and `setSubviews:` / `replaceSubview:with:` whatever they bring), and appends
   skip the scan until then (`view.rs` `first_foreign`), so mounting N children no longer scans N² subviews. Backdrops use a mutable
   `identifier`, so their holders conservatively keep scanning, as do holders of hosted views.
+  A subtree a batch deletes leaves the window with its root, in one `removeFromSuperview`: a deleted view whose
+  parent the same batch deletes stays in it (`Mounter::begin_batch`), except a modal or header item, shown elsewhere.
 - **Web views and videos are views among the others**, so window composition needs no surfaces of its own (unlike
   Windows' child windows): a `WKWebView` is a layer-backed subview of its node's view, and the layer WebKit's process
   draws into is composited by Core Animation with the rest. What is above it in the view tree draws over it (later
