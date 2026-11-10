@@ -7,8 +7,8 @@
 //! trigger's again as a menu or popover closes, so Return during its exit
 //! chooses nothing in it and opens it again, its keys working as before. A tooltip's `delay` of `Infinity` never ends and
 //! one of `NaN` is none; the keyboard focus shows a tooltip in every idiom
-//! until it leaves or Escape is pressed. Escape closes a menu whose `open`
-//! the app controls every time, also when the app opened it itself. On a manual clock: time moves only as the test
+//! until it leaves or Escape is pressed. Escape or a choice closes a menu
+//! whose `open` the app controls every time, also when the app opened it itself. On a manual clock: time moves only as the test
 //! says.
 
 use std::{
@@ -502,18 +502,19 @@ fn FlippedMenuScreen() -> impl IntoElement {
         .child(text(move || format!("changes:{}", changes.get())))
 }
 
-#[test]
-fn escape_closes_a_controlled_menu_the_app_opened_itself_each_time() {
+/// Opens [`FlippedMenuScreen`]'s menu with its button and closes it with
+/// `close`, three times, pressing the other button in between.
+fn flipped_menu_closes(how: &str, close: impl Fn(&mut Headless)) {
     let mut app = start(Root::of::<FlippedMenuScreen>(), false);
     for round in 0..3 {
         app.app.press("id:trigger").unwrap();
         app.app.run_for(Duration::from_millis(300)).unwrap();
         assert!(app.app.shows("About"), "round {round}: open");
-        app.app.press_key("escape").unwrap();
+        close(&mut app.app);
         app.app.run_for(Duration::from_millis(300)).unwrap();
         assert!(
             !app.app.shows("About"),
-            "round {round}: closed by Escape ({})",
+            "round {round}: closed by {how} ({})",
             app.app
                 .screen()
                 .texts()
@@ -524,6 +525,16 @@ fn escape_closes_a_controlled_menu_the_app_opened_itself_each_time() {
         app.app.press("id:other").unwrap();
         app.app.run_for(Duration::from_millis(50)).unwrap();
     }
+}
+
+#[test]
+fn escape_closes_a_controlled_menu_the_app_opened_itself_each_time() {
+    flipped_menu_closes("Escape", |app| app.press_key("escape").unwrap());
+}
+
+#[test]
+fn choosing_an_item_closes_a_controlled_menu_the_app_opened_itself_each_time() {
+    flipped_menu_closes("a choice", |app| app.press("id:about").unwrap());
 }
 
 /// A popover fading for 120 ms on its way out, with a button inside whose
