@@ -163,6 +163,10 @@ define_class!(
 
         #[unsafe(method(sendEvent:))]
         fn send_event(&self, event: &NSEvent) {
+            #[cfg(feature = "dev")]
+            if let Some(placed) = crate::synth::placed(event) {
+                return self.sendEvent(&placed);
+            }
             if !self.ivars().background.get() || !self.pass_title_bar_press(event) {
                 // SAFETY: NSWindow's own dispatch of the event.
                 unsafe { msg_send![super(self), sendEvent: event] }
@@ -244,6 +248,17 @@ define_class!(
         #[unsafe(method(canBecomeMainWindow))]
         fn can_become_main(&self) -> bool {
             false
+        }
+
+        #[unsafe(method(sendEvent:))]
+        fn send_event(&self, event: &NSEvent) {
+            // The test agent's events where it made them, as in NshWindow.
+            #[cfg(feature = "dev")]
+            if let Some(placed) = crate::synth::placed(event) {
+                return self.sendEvent(&placed);
+            }
+            // SAFETY: NSWindow's own dispatch of the event.
+            unsafe { msg_send![super(self), sendEvent: event] }
         }
     }
 );
