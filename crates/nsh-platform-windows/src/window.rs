@@ -1039,6 +1039,10 @@ fn handle(
             surface.paint();
             // SAFETY: as above.
             let _ = unsafe { EndPaint(hwnd, &ps) };
+            // Handled: `DefWindowProcW` would validate the window again and
+            // drop an invalidation made while the frame was drawn, leaving
+            // `invalid` set and no `WM_PAINT` to come (#1594).
+            return Some(LRESULT(0));
         }
         WM_ERASEBKGND => return Some(LRESULT(1)),
         WM_SIZE => {
@@ -1048,6 +1052,8 @@ fn handle(
             // chain's own background color).
             fill_background(surface, hwnd);
             sync_size(surface, hwnd);
+            // The frame's material follows the zoom state.
+            crate::shell::zoom_changed(hwnd);
             // Drawn now, so that the window never shows stretched or
             // stale pixels while it is resized.
             surface.paint();
@@ -1326,6 +1332,7 @@ fn window_api(
             let attrs = shell.attrs();
             let scale = dpi(hwnd) as f32 / 96.0;
             let (l, t, r, b) = frame_extents(hwnd);
+            crate::chrome::nc_max_size(hwnd, info);
             let (min, max) = crate::shell::track_sizes(&attrs, scale, (l + r, t + b));
             match min {
                 Some((x, y)) => info.ptMinTrackSize = POINT { x, y },
@@ -1892,6 +1899,76 @@ mod tests {
             assert!(ours(&heard).is_empty() && !moved(&heard), "{heard:?}");
             DestroyWindow(root).unwrap();
         }
+    }
+
+    /// Asks once, while it is drawn, for the window to be drawn again, as a
+    /// web view that leaves does. Counts its frames.
+    struct AsksOnce {
+        surface: std::rc::Weak<Surface>,
+        armed: Cell<bool>,
+        drawn: Cell<u32>,
+    }
+
+    impl crate::view::Hosted for AsksOnce {
+        fn draw(&self, _cx: &mut crate::render::DrawCx<'_>, _size: (f32, f32)) {
+            self.drawn.set(self.drawn.get() + 1);
+            if self.armed.replace(false)
+                && let Some(surface) = self.surface.upgrade()
+            {
+                surface.invalidate();
+            }
+        }
+    }
+
+    fn pump_for(ms: u64) {
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        let mut msg = MSG::default();
+        while std::time::Instant::now() < until {
+            // SAFETY: the test thread's own queue.
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn a_paint_asked_for_while_drawing_comes() {
+        if crate::gfx::get().is_err() {
+            return;
+        }
+        let surface = Surface::new(Default::default());
+        let hwnd = create(&surface, "NSH paint test", (200, 150), None, false).unwrap();
+        let asks = Rc::new(AsksOnce {
+            surface: Rc::downgrade(&surface),
+            armed: Cell::new(false),
+            drawn: Cell::new(0),
+        });
+        let item: Rc<dyn crate::view::Hosted> = asks.clone();
+        surface
+            .root
+            .set_native(&item, crate::geom::rect(0.0, 0.0, 50.0, 50.0));
+        // SAFETY: plain calls on the test's window.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+        pump_for(200);
+        let before = asks.drawn.get();
+        asks.armed.set(true);
+        // SAFETY: as above.
+        unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+            let _ = UpdateWindow(hwnd);
+        }
+        assert_eq!(asks.drawn.get() - before, 1, "drawn by the WM_PAINT");
+        pump_for(200);
+        let after = asks.drawn.get() - before;
+        // SAFETY: as above.
+        unsafe { DestroyWindow(hwnd).unwrap() };
+        assert!(after >= 2, "the frame asked for while drawing never came");
     }
 
     #[test]

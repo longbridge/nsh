@@ -102,10 +102,11 @@
   responder clears, so a surface shows one selection. Android (`selectable_view.rs`, `SelectableView.java`): the
   shared Rust model runs on the UI thread over JNI, hit-testing through a Java callback; a long press selects a word,
   then handles and a floating `ActionMode` (Copy, Select all, Share).
-- **Color changes**: a text whose spans change only their colors (text, decoration and background) keeps its
-  typesetting, measurements and layout where the platform draws colors from the text it mounts
-  (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI): only the new text is mounted with the layout,
-  so a word fading in costs one draw, not a new layout of its paragraph. The other backends typeset it again.
+- **Color changes**: a text whose spans change only their colors (text, decoration and background) or which of them
+  are hidden keeps its typesetting, measurements and layout where the platform draws colors from the text it mounts
+  (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI, which also read `hidden` there): only the new
+  text is mounted with the layout, so a word fading in, or shown after waiting hidden, costs one draw, not a new layout
+  of its paragraph. The other backends typeset it again.
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.
@@ -117,8 +118,8 @@
   the runs.
 - **Hidden spans**: `visibility: "hidden"` on a nested `<Text>` (`.invisible()`) marks its runs, and those of the
   spans inside it, `ResolvedTextStyle::hidden`. The core resolves them in `collect_text`: their characters stay in the
-  text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring),
-  and they make no links; attachments inside them are hidden views (`Core::hide_attachments`). Each backend skips the
+  text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring,
+  and where colors are drawn from the text without typesetting either), and they make no links; attachments inside them are hidden views (`Core::hide_attachments`). Each backend skips the
   hidden runs when it draws (glyphs, color emoji, decorations, shadows, animated colors), never relying on the
   transparent color alone; macOS, Windows, Linux and GPUI also leave them out of selection highlights
   (`AttributedText::visible_ranges`), while iOS and Android highlight a selection over them. What leaves

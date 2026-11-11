@@ -104,6 +104,7 @@ mod tests {
             ("expandedStyle", Prop::ExpandedStyle(None)),
             ("pressedStyle", Prop::PressedStyle(None)),
             ("focusWithinStyle", Prop::FocusWithinStyle(None)),
+            ("focusVisibleStyle", Prop::FocusVisibleStyle(None)),
             ("headerStyle", Prop::HeaderStyle(None)),
         ] {
             assert_eq!(

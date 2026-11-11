@@ -2,7 +2,7 @@ import { signal, Text, View } from "nsh";
 import { type OpenChangeReason, Popover } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
 import { dismissToast, toast } from "../toast";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, hovered, PopIn, popoverLook, type PopupSide, popupSurface, Segmented, Stat, Toggle } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, hovered, PopIn, placementWords, popoverLook, type PopupSide, popupSurface, Segmented, Stat, Toggle } from "../ui";
 import { Avatar, createEvents, Field, pointer, Rule, tap, Trigger } from "./OverlayUi";
 
 // Every popover here comes in with `PopIn` (the gallery's popup surface,
@@ -229,7 +229,7 @@ export function Popovers() {
       if (id) void toast({ id: "reminder", kind: "info", title: `Reminder set for ${current()!.when}`, description: "Review the Q3 roadmap" });
     };
     return (
-      <Card icon="popover" title="Chosen from a list" subtitle="Controlled: choosing closes it, and the trigger shows the choice">
+      <Card icon="popover" title="Chosen from a list" subtitle="Choosing closes it; the trigger shows the choice">
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Popover
             open={open()}
@@ -284,7 +284,7 @@ export function Popovers() {
     const side = signal<PopupSide>("bottom");
     const align = signal<"start" | "center" | "end">("center");
     return (
-      <Card icon="components" title="Where it goes" subtitle="The side and the alignment; it flips where there is no room">
+      <Card icon="components" title="Where it goes" subtitle="A side and an alignment; it flips without room">
         <Segmented
           size="small"
           options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]}
@@ -298,10 +298,10 @@ export function Popovers() {
           onChange={(v) => align.set(v)}
         />
         <View style={{ alignItems: "center", paddingVertical: pointer ? 40 : 28 }}>
-          <Popover placement={side()} align={align()} offset={8} margin={8} onOpenChange={changed("placed")} trigger={<Trigger label={`${side()} · ${align()}`} icon="map-pin" />}>
+          <Popover placement={side()} align={align()} offset={8} margin={8} onOpenChange={changed("placed")} trigger={<Trigger label={placementWords(side(), align())} icon="map-pin" />}>
             <PopIn side={side()} style={{ ...popoverLook({ compact: true }), maxWidth: 220 }}>
               <Text style={{ fontSize: 13, fontWeight: "600", color: colors.text }}>
-                Placed {side()} · {align()}
+                {placementWords(side(), align())}
               </Text>
               <Text style={{ fontSize: 12, color: colors.muted }}>It grows out of the edge that faces its trigger.</Text>
             </PopIn>

@@ -9,7 +9,6 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::MenuLabels,
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -220,11 +219,6 @@ pub struct AppOptions {
     /// too, but never changes the host's window: the embedding app makes its
     /// window nonopaque and clear itself where it wants that.
     pub transparent: bool,
-    /// The labels of the menus [`run_app`] makes in the app's language: its
-    /// standard menu bar (the app menu, Edit and Window) and the items with
-    /// a role and no label of their own in the app's menus. English for
-    /// what it does not label.
-    pub menu_labels: MenuLabels,
 }
 
 impl Default for AppOptions {
@@ -251,7 +245,6 @@ impl Default for AppOptions {
             notifications: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
-            menu_labels: MenuLabels::default(),
         }
     }
 }
@@ -336,7 +329,6 @@ impl AppView {
     /// A view with no app yet; it fills its superview.
     pub fn new(mtm: MainThreadMarker, options: AppOptions) -> Rc<AppView> {
         let surface = Surface::new(mtm, initial_environment());
-        surface.chrome.labels.replace(options.menu_labels.clone());
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
         let frame = NSRect::new(
@@ -556,6 +548,9 @@ fn initial_environment() -> Environment {
         notifications: true,
         audio: true,
         web_input: true,
+        web_evaluate: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -732,8 +727,9 @@ define_class!(
             crate::notifications::enable();
         }
 
-        // The links of the schemes the app claims (`CFBundleURLTypes`), the
-        // one that launched it included.
+        // The links of the schemes the app claims (`CFBundleURLTypes`) and
+        // the files of the types it opens (`CFBundleDocumentTypes`, as
+        // `file://` URLs), those that launched it included.
         #[unsafe(method(application:openURLs:))]
         fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
             for url in urls.iter() {
@@ -979,7 +975,6 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    crate::chrome::show_standard_menu(mtm, &options.menu_labels);
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
@@ -1043,6 +1038,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());
+    crate::chrome::show_standard_menu(view.surface());
     view.surface().standalone.set(true);
     // The standalone window's attributes own its live transparency state;
     // the surface-only flag remains for embedded AppViews.

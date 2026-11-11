@@ -132,6 +132,9 @@ pub struct Context {
     pub read_asset: Option<ReadAsset>,
     /// What the app may load, for the redirects.
     pub access: Arc<Access>,
+    /// The roots the app's local media files are read under (a sound's
+    /// load checks its source against them).
+    pub media_files: Arc<crate::access::MediaFiles>,
     /// The disk cache remote images go through.
     pub disk: Option<DiskCache>,
     /// How remote images download: `None`, the process's
@@ -880,7 +883,9 @@ fn read(
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<ImageData, String> {
     match location {
-        Location::File(path) => read_file(path).map_err(|e| format!("{}: {e}", path.display())),
+        Location::File(path) => {
+            read_file(path, &context.media_files).map_err(|e| format!("{}: {e}", path.display()))
+        }
         Location::Data(uri) => super::decode_data_uri(uri).map(|(_, bytes)| bytes.into()),
         Location::Memory(_, data) => Ok(data.clone()),
         Location::Asset(uri, read) => read(uri).map(ImageData::from),
@@ -899,9 +904,19 @@ pub fn read_now(location: &Location, context: &Context) -> Result<ImageData, Str
     read(location, context, &AtomicBool::new(false), &mut |_, _| {})
 }
 
-fn read_file(path: &std::path::Path) -> Result<ImageData, String> {
+/// Reads the file at `path`: for an app with `fs.read` roots, through the
+/// root that holds it, so a link made after the check is not followed out
+/// of it ([`crate::access::MediaFiles::open`]).
+fn read_file(
+    path: &std::path::Path,
+    files: &crate::access::MediaFiles,
+) -> Result<ImageData, String> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let file = match files.open(path) {
+        Some(file) => file,
+        None => std::fs::File::open(path),
+    }
+    .map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)
@@ -1009,6 +1024,11 @@ mod http {
         (if direct { &DIRECT } else { &PROXIED }).get_or_init(|| {
             let config = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
+                .tls_config(
+                    ureq::tls::TlsConfig::builder()
+                        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                        .build(),
+                )
                 .http_status_as_error(false)
                 .max_redirects(0)
                 .max_redirects_will_error(false);

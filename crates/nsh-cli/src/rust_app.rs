@@ -611,7 +611,7 @@ fn root_config(
             Some(v.to_string())
         }
     };
-    let url_schemes = match config.get("schemes") {
+    let mut url_schemes = match config.get("schemes") {
         None => Vec::new(),
         Some(v) => {
             let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(v);
@@ -623,6 +623,10 @@ fn root_config(
             schemes
         }
     };
+    // The files it opens come as `file:` URLs (`nsh_core::file_type`).
+    if nsh_core::file_type::declares_file_types(config) {
+        url_schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
+    }
     let window = match config.get("window") {
         None => None,
         Some(v) => {
@@ -2124,24 +2128,42 @@ opt-level = \"s\"
     }
 
     /// The development host (`runner` false) or release runner of the app,
-    /// built for `platform`.
-    pub(crate) fn runtime(&self, platform: Platform, runner: bool) -> anyhow::Result<PathBuf> {
-        if self.root.is_some() {
-            return self.rust_runner(platform, runner);
+    /// built for `platform`, for `triple` (`None`: this machine), which is
+    /// the platform's own ([`Platform::triple`]) but for a macOS package
+    /// for another processor.
+    pub(crate) fn runtime(
+        &self,
+        platform: Platform,
+        runner: bool,
+        triple: Option<&str>,
+    ) -> anyhow::Result<PathBuf> {
+        if let Some(triple) = triple
+            && Some(triple) != platform.triple()
+        {
+            // Cargo runs in this directory, so rustup picks its toolchain here.
+            crate::runtime::require_target(None, triple)?;
         }
-        self.host(platform, runner)
+        if self.root.is_some() {
+            return self.rust_runner(platform, runner, triple);
+        }
+        self.host(platform, runner, triple)
     }
 
     /// The development host `nsh test --target` runs the app in: a Rust
     /// app's too, built with its root (its runners have no dev server
     /// client), which it runs when the test session says so.
     pub(crate) fn test_host(&self, platform: Platform) -> anyhow::Result<PathBuf> {
-        self.host(platform, false)
+        self.host(platform, false, platform.triple())
     }
 
     /// The development host (`runner` false) or release runner for
-    /// `platform` with the app's crates.
-    fn host(&self, platform: Platform, runner: bool) -> anyhow::Result<PathBuf> {
+    /// `platform` with the app's crates, built for `triple`.
+    fn host(
+        &self,
+        platform: Platform,
+        runner: bool,
+        triple: Option<&str>,
+    ) -> anyhow::Result<PathBuf> {
         let name = match (platform, runner) {
             (Platform::Linux, false) => "linux-host",
             (Platform::Linux, true) => "linux-app",
@@ -2171,30 +2193,29 @@ opt-level = \"s\"
         } else {
             what
         };
-        self.build(
-            &workspace,
-            &package,
-            platform.triple(),
-            release,
-            features,
-            &what,
-        )
+        let what = format!("{what}{}", crate::runtime::other_triple(platform, triple));
+        self.build(&workspace, &package, triple, release, features, &what)
     }
 
     /// A Rust app's runner for `platform` (`rust-<platform>`): a release
     /// build for packages (`release`), a debug one for `nsh run`. Both run
     /// the app's root with no JS runtime.
-    fn rust_runner(&self, platform: Platform, release: bool) -> anyhow::Result<PathBuf> {
+    fn rust_runner(
+        &self,
+        platform: Platform,
+        release: bool,
+        triple: Option<&str>,
+    ) -> anyhow::Result<PathBuf> {
         let dir = match platform {
             Platform::Linux => "rust-linux",
             Platform::MacOs => "rust-macos",
             Platform::Windows => "rust-windows",
-            Platform::Tui => return self.host(platform, false),
+            Platform::Tui => return self.host(platform, false, triple),
             Platform::Gpui => unreachable!("a Rust app does not run on GPUI's host"),
             Platform::IphoneOs | Platform::IphoneSimulator | Platform::MacCatalyst => "rust-ios",
         };
         let what = format!(
-            "the {} runner of {}{}",
+            "the {} runner of {}{}{}",
             match platform {
                 Platform::Linux => "Linux",
                 Platform::MacOs => "macOS",
@@ -2205,16 +2226,10 @@ opt-level = \"s\"
                 Platform::MacCatalyst => "Mac Catalyst",
             },
             self.packages(),
-            if release { "" } else { " (debug)" }
+            if release { "" } else { " (debug)" },
+            crate::runtime::other_triple(platform, triple)
         );
-        self.build(
-            &self.workspace,
-            &self.bin(dir),
-            platform.triple(),
-            release,
-            &[],
-            &what,
-        )
+        self.build(&self.workspace, &self.bin(dir), triple, release, &[], &what)
     }
 
     /// Waits until `stop` returns true (or the user stops the command);

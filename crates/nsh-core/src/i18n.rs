@@ -145,7 +145,7 @@ pub fn translate(key: &str, locale: Option<&str>, args: &[(&str, &dyn Display)])
 
 /// The language the app's text shows in: the first of the user's preferred
 /// languages it has translations for, else the locale.
-fn shown(translations: &Translations) -> crate::platform::Locale {
+pub(crate) fn shown(translations: &Translations) -> crate::platform::Locale {
     let languages = crate::element::locale_settings().languages;
     translations
         .pick(languages.iter())

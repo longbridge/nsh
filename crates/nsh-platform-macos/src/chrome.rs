@@ -83,9 +83,6 @@ thread_local! {
     /// The app's name for the app menu's roles ("Quit Gallery"), set by
     /// [`crate::run_app`].
     static APP_NAME: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The standard menu bar [`crate::run_app`] showed, made again as the
-    /// labels change ([`relabel`]); none in an app that embeds NSH.
-    static STANDARD_MENU: RefCell<Option<Retained<NSMenu>>> = const { RefCell::new(None) };
     /// The main menu before an app set its own: `setApplicationMenu(null)`
     /// brings it back.
     static ORIGINAL_MENU: RefCell<Option<Option<Retained<NSMenu>>>> = const { RefCell::new(None) };
@@ -139,15 +136,15 @@ define_class!(
 /// A surface's chrome.
 #[derive(Default)]
 pub(crate) struct Chrome {
+    /// The standard menu this standalone surface owns; absent in embedded views.
+    standard_menu: RefCell<Option<Retained<NSMenu>>>,
     /// The target of its menu items (made with the first menu).
     target: RefCell<Option<Retained<MenuTarget>>>,
     /// The main menu it set (`setApplicationMenu`).
     menu: RefCell<Option<Retained<NSMenu>>>,
     /// That menu's items, made again with new labels ([`relabel`]).
     menu_items: RefCell<Option<Arc<[MenuItem]>>>,
-    /// The app's labels of the roles ([`crate::AppOptions::menu_labels`],
-    /// [`DesktopCommand::SetMenuLabels`]): this surface's menus' items with
-    /// a role and no label of their own read them, never another app's.
+    /// The labels the core translates for this surface's language.
     pub(crate) labels: RefCell<MenuLabels>,
     /// The loads of the icons of that menu, given up with it.
     menu_icons: RefCell<Vec<crate::image::Load>>,
@@ -778,7 +775,7 @@ fn title(action: &MenuAction, labels: &MenuLabels) -> String {
 /// where macOS writes it.
 fn role_title(role: MenuRole, labels: &MenuLabels) -> String {
     if let Some(label) = labels.role(role) {
-        return label.to_owned();
+        return label.replace("%{app}", &app_name());
     }
     match role {
         MenuRole::About | MenuRole::Hide | MenuRole::Quit => {
@@ -884,10 +881,10 @@ fn standard_menu(mtm: MainThreadMarker, labels: &MenuLabels) -> Retained<NSMenu>
 
 /// Shows the standard menu bar ([`standard_menu`]) as the app's main menu:
 /// the standalone runner's, which [`relabel`] makes again.
-pub(crate) fn show_standard_menu(mtm: MainThreadMarker, labels: &MenuLabels) {
-    let menu = standard_menu(mtm, labels);
-    NSApplication::sharedApplication(mtm).setMainMenu(Some(&menu));
-    STANDARD_MENU.set(Some(menu));
+pub(crate) fn show_standard_menu(surface: &Surface) {
+    let menu = standard_menu(surface.mtm, &surface.chrome.labels.borrow());
+    NSApplication::sharedApplication(surface.mtm).setMainMenu(Some(&menu));
+    surface.chrome.standard_menu.replace(Some(menu));
 }
 
 /// The app's labels changed ([`DesktopCommand::SetMenuLabels`]): this
@@ -900,7 +897,7 @@ fn relabel(surface: &Surface, labels: &MenuLabels) {
     surface.chrome.labels.replace(labels.clone());
     let mtm = surface.mtm;
     let app = NSApplication::sharedApplication(mtm);
-    if let Some(old) = STANDARD_MENU.take() {
+    if let Some(old) = surface.chrome.standard_menu.take() {
         let menu = standard_menu(mtm, labels);
         if app.mainMenu().is_some_and(|m| m == old) {
             app.setMainMenu(Some(&menu));
@@ -912,7 +909,7 @@ fn relabel(surface: &Surface, labels: &MenuLabels) {
                 *original = Some(menu.clone());
             }
         });
-        STANDARD_MENU.set(Some(menu));
+        surface.chrome.standard_menu.replace(Some(menu));
     }
     let items = surface.chrome.menu_items.borrow().clone();
     if let Some(items) = items {

@@ -2643,6 +2643,21 @@ pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32
     first
 }
 
+/// The box (view coordinates) around the rectangles the characters
+/// `start..end` of the text view with `state` cover (a selectable view's
+/// selection).
+pub(crate) fn range_bounds(state: &ViewState, start: u32, end: u32) -> Option<Bounds<Points>> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<WinLayout>()?;
+    let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+    let mut out: Option<Bounds<Points>> = None;
+    layout.range_rects((start, end), |x, y, w, h| {
+        let line = crate::geom::rect(cx + x, cy + y, w, h);
+        out = Some(out.map_or(line, |b| b.union(&line)));
+    });
+    out
+}
+
 /// The UTF-16 offset of the character at `(x, y)` (view coordinates), if
 /// any (presses on nested text links).
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {

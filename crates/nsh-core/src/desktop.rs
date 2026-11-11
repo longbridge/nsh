@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::{
     ImageSource,
+    color::Hsla,
     element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Point, Points},
     keymap::{self, Keystroke, Modifiers, When},
@@ -661,18 +662,13 @@ impl MenuRole {
     }
 }
 
-/// The labels of the menu items NSH labels itself, in the app's language:
-/// the standard menu bar a standalone app opens with on macOS (`run_app`'s:
-/// the app menu, Edit and Window), the edit menus of text fields and
-/// selectable text where NSH shows its own (Windows), and the items with a
-/// role and no label of their own. English ([`MenuRole::label`]) for what
-/// the app does not label.
+/// The translated labels sent by the core to desktop backends for the
+/// menus NSH builds. These follow the app's language (`nsh/i18n`); apps
+/// override individual menu items through their existing `label` field.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct MenuLabels {
-    /// The label of each role the app labels. On macOS an About, Hide or
-    /// Quit item shows it as it is: it names the app itself (`"About Bex"`),
-    /// where the English one is followed by the app's name.
+    /// Role labels; `%{app}` is replaced with the app name on macOS.
     pub roles: std::collections::HashMap<MenuRole, String>,
     /// The title of the standard menu bar's Edit menu (`"Edit"`).
     pub edit_menu: Option<String>,
@@ -684,6 +680,21 @@ pub struct MenuLabels {
 }
 
 impl MenuLabels {
+    pub(crate) fn for_locale(locale: crate::platform::Locale) -> Self {
+        static TEXTS: std::sync::OnceLock<crate::i18n::Translations> = std::sync::OnceLock::new();
+        let texts = TEXTS.get_or_init(|| {
+            crate::i18n::Translations::from_json(include_str!("desktop/menu.json"))
+                .expect("the built-in menu translations are valid")
+        });
+        let text = |key| texts.lookup(locale.as_str(), key).map(|text| text.into_owned());
+        Self {
+            roles: MenuRole::ALL.iter().filter_map(|role| text(role.label()).map(|label| (*role, label))).collect(),
+            edit_menu: text("Edit"),
+            window_menu: text("Window"),
+            delete: text("Delete"),
+        }
+    }
+
     /// The app's label of `role`, if it labels it.
     pub fn role(&self, role: MenuRole) -> Option<&str> {
         self.roles.get(&role).map(String::as_str)
@@ -838,9 +849,8 @@ pub enum DesktopCommand {
     SetMenu(Option<Arc<[MenuItem]>>),
     /// When the menu bar the window draws for the application menu shows.
     SetMenuBar(MenuBarMode),
-    /// The labels of the menus NSH makes, in place of those the app opened
-    /// with (the host's `AppOptions::menu_labels`): the app's language
-    /// changed. The menus shown take them at once.
+    /// The core translated the labels of NSH's menus for the language
+    /// the app shows. Native backends update their menus at once.
     SetMenuLabels(Box<MenuLabels>),
     /// Shows a context menu at `at` (root coordinates, points) or at the
     /// pointer.
@@ -892,6 +902,45 @@ impl DesktopCommand {
     }
 }
 
+/// A run of a tray's title ([`Tray::title`]): text in one color, as GPUI's
+/// `TextRun`s are.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct TrayTitleRun {
+    /// The text.
+    pub text: String,
+    /// Its color; `None`: the panel's text color (on macOS the menu bar's,
+    /// which follows its appearance).
+    pub color: Option<Hsla>,
+}
+
+impl TrayTitleRun {
+    /// A run of `text` in the panel's text color.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            color: None,
+        }
+    }
+
+    /// The run in `color`.
+    pub fn color(mut self, color: impl Into<Hsla>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+}
+
+/// Which side of the tray's icon its title shows on ([`Tray::title_placement`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum TrayTitlePlacement {
+    /// Right of the icon, as menu bar apps usually show it.
+    #[default]
+    Right,
+    /// Left of the icon. macOS only: Linux's panels draw the title right of
+    /// the icon.
+    Left,
+}
+
 /// The app's icon in the system tray ([`DesktopCommand::SetTray`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
@@ -902,6 +951,15 @@ pub struct Tray {
     pub icon: Option<ImageSource>,
     /// Shown when the pointer rests on it; `""` for the app's name.
     pub tooltip: String,
+    /// Text beside the icon, in runs each of its own color: what the app
+    /// keeps in sight (a price, a count). macOS's menu bar shows it in its
+    /// colors; Linux's panels that show AppIndicator labels (GNOME's
+    /// AppIndicator extension, Unity, MATE, Budgie) show its text right of
+    /// the icon; Windows' notification area shows the icon alone. Empty: the
+    /// icon alone.
+    pub title: Vec<TrayTitleRun>,
+    /// Which side of the icon the title shows on.
+    pub title_placement: TrayTitlePlacement,
     /// Its menu: opened by a secondary click (a primary one too when
     /// [`Self::click`] is 0); empty for none.
     pub menu: Arc<[MenuItem]>,

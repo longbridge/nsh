@@ -234,6 +234,13 @@ Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web
 `linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
+What an app uses is `Bundle::native_use` (`natives.rs`, `native-pipeline.md`). A namespace import read only by
+names the code spells (`import * as base from "nsh/base"; base.EmojiPicker`, the way an app reads an export
+older shells lack without failing to link) counts those names: the runtime links their parts, and the page's
+`nativeExports` declares them, so the host's facade for the module exports them and the namespace has them.
+A namespace used any other way, including as a method call's receiver (`base.method()`), keeps every gate
+and the full catalog (`web::whole_because` says why).
+
 Each part of `nsh/base` (`nsh_base::parts::ALL`) reaches the runtime through its gate, `nsh_part_<name>`, which
 `base_parts!` in `crates/nsh-platform-web/src/lib.rs` exports and `nsh.js` calls at instantiation; a part without
 one is never registered, so an app importing its exports fails to link in the browser ("does not provide an export
@@ -713,10 +720,13 @@ browsers' touches into what phones report:
   stop is blurred), so Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
   `screenOrder`): where the browser takes
   `reading-flow` (Chromium), it is read in the order it is on screen (`orderReading`: `reading-order` on its children,
-  the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`:focus-visible`), and
+  the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`focus-visible:` while it shows, as the browser's `:focus-visible`), and
   they are all that shows it: as the desktop backends, the runtime draws no ring of its own; a popped page gives the focus back to what had it when the page was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
-  text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
+  text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. A touch moves
+  the focus as the browser does (a tap outside a field closes the keyboard), unless its press made the app focus a field
+  (an editor's text): the mouse events the browser makes of the touch then leave the focus in the field (`mouseDown`,
+  `pressFocus`), so the keyboard stays open. The views under the newest
   `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
@@ -803,12 +813,14 @@ browsers' touches into what phones report:
   load's entries (`nshIndex`), and the player mirrors each entry's depth (`historyIndex`, `historyDepths`), so a back
   of the app's own goes to the newest earlier entry at most as deep (`entryAtDepth`) and a `popstate` knows which way
   the user went. The root's `onUrlScheme` event with `change: "back" | "forward" | "address"` (`url_scheme::CHANGE`,
-  `AppUrlChangeCause`; another cause is the address alone, quietly) sets the address and queues an `AppUrlChange` for
+  `AppUrlChangeReason`; another reason is the address alone, quietly) sets the address and queues an `AppUrlChange` for
   `next_app_url_change()`, at most 16, and only once something listened (`hears_changes`: before it the address has
   them); the TS module posts each to the listeners there are and keeps none. The player sends it for a traversal
-  between entries of one depth (`tellAddress(cause)`), for a `#fragment` the user typed (a state-less entry of the
+  between entries of one depth (`tellAddress(reason)`), for a `#fragment` the user typed (a state-less entry of the
   page whose address is not the one shown: it gets this session's state at the depth shown and the next index, and the
-  app's pages stay; before, it sent the app back to its start), and for a back that popped pages when the entry's
+  app's pages stay; before, it sent the app back to its start. Where the browser has the Navigation API, a state-less
+  entry before the app's first (`historyBase`, `beforeFirstEntry`) is the page's own, from before the player, and a
+  back onto it is a back past the first entry), and for a back that popped pages when the entry's
   address is not the one the app showed and the app set none as it answered: the player waits until the pages it
   popped are dismissed (`dismissing`, `goBack`) and the app had a turn after their `onDismiss`, at most
   `POP_ANSWER_MS` (1.5 s; a page's `onDismiss` follows its slide, `settlePop`). A forward to a depth the stack lost
@@ -919,7 +931,11 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
   `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user. An image read
   is the first image item as a `data:` URI the player encodes itself; the core measures it against
-  `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it).
+  `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it). An image written goes on the
+  clipboard as a PNG, the image format browsers write: another format is decoded and encoded again (pitfalls.md
+  "Web, browsers"), and also goes on as it is, as browsers' own Copy Image does: an `<img>` of it as `text/html`
+  (what a paste's `html` carries, `onPaste`) and, in Chromium, the web custom format `web <type>`, which an image read
+  takes before the PNG, so a GIF read back keeps its frames. A write that fails is a console warning; `writeImage` has resolved already.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
   runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `placeholder` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden

@@ -156,6 +156,12 @@ impl Shaders {
         self.views.values().any(|s| is_screen(s.role))
     }
 
+    /// The device was looked for and there is none: shader views draw
+    /// nothing.
+    pub(crate) fn without_device(&self) -> bool {
+        matches!(self.renderer.get(), Some(None))
+    }
+
     /// Mounts `layer` on `host`, view `id` (`None`: it shows nothing of
     /// its own). `children` holds the children an effect or a transition
     /// draws (the root's, for a screen's).

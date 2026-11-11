@@ -86,8 +86,9 @@ pub enum LinkEvent {
 /// data rather than text; while the pointer rests on the link a hint shows
 /// it (its `title`, when given, above it); `openWith` says who opens it (the system, or the
 /// app's `onOpen`). The app's `class` and `style` style it, its states with
-/// `hover:`, `active:`, `focus:` and `disabled:` classes or `hoverStyle`,
-/// `activeStyle`, `focusStyle` and `disabledStyle`, and its children are
+/// `hover:`, `active:`, `focus-visible:` (the keyboard's ring) and
+/// `disabled:` classes or `hoverStyle`, `activeStyle`, `focusVisibleStyle`
+/// and `disabledStyle`, and its children are
 /// its content. `hitSlop` widens where presses count past its bounds, as a
 /// view's does. Inside a `<Text>` it is an inline box of the paragraph, as
 /// every view there is: it stays on one line (`align-text-bottom` sits its

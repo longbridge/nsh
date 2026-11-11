@@ -10,9 +10,7 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::{
-        Backdrop, MainWindowOptions, MenuLabels, WindowMode, WindowPlacement, WindowPosition,
-    },
+    desktop::{Backdrop, MainWindowOptions, WindowMode, WindowPlacement, WindowPosition},
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -195,11 +193,18 @@ pub struct AppOptions {
     /// instance, a later launch with a URL handing it to the running one.
     /// Empty: none of that.
     pub schemes: Vec<String>,
-    /// The labels of the menus the view makes in the app's language: the
-    /// edit menus of its text fields and selectable text, and the items
-    /// with a role and no label of their own in the app's menus. English
-    /// for what it does not label.
-    pub menu_labels: MenuLabels,
+    /// The app runs once (nsh.json `singleInstance`, from the package's
+    /// `nsh\app.json`): [`run_app`] hands a later launch's arguments and
+    /// working directory to the running instance, which brings its window
+    /// forward and tells the app (`Application.on("secondInstance", ...)`),
+    /// and exits before it opens a window.
+    pub single_instance: bool,
+    /// The file types the app opens (nsh.json `fileTypes`, from the
+    /// package's `nsh\app.json`): [`run_app`] registers them for the
+    /// current user (Open With) and hands the files it is started with to
+    /// the app (`Application.on("openFiles", ...)`), a later
+    /// launch with files handing them to the running instance.
+    pub file_types: Vec<nsh_core::file_type::FileType>,
 }
 
 impl Default for AppOptions {
@@ -221,9 +226,10 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             schemes: Vec::new(),
+            single_instance: false,
+            file_types: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
-            menu_labels: MenuLabels::default(),
         }
     }
 }
@@ -281,7 +287,6 @@ impl AppView {
     ) -> windows::core::Result<Rc<AppView>> {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
-        surface.chrome.labels.replace(options.menu_labels.clone());
         if options.notifications {
             crate::notifications::start_app(
                 &options.app_id,
@@ -533,6 +538,8 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -630,9 +637,13 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = OleInitialize(None);
     }
-    if let crate::linking::Start::Forwarded =
-        crate::linking::start(&options.app_id, &options.title, &options.schemes)
-    {
+    if let crate::linking::Start::Forwarded = crate::linking::start(
+        &options.app_id,
+        &options.title,
+        &options.schemes,
+        &options.file_types,
+        options.single_instance,
+    ) {
         return std::process::ExitCode::SUCCESS;
     }
     // The app to run, when it is known now (a dev server's comes later).

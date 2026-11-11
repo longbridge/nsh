@@ -1,4 +1,4 @@
-//! Menu labels changed while the app runs (`set_menu_labels`): the items of
+//! Menu labels changed while the app runs (`nsh/i18n`'s `set_locale`): the items of
 //! the app's menu bar that have a role and no label of their own take them
 //! at once.
 
@@ -8,8 +8,8 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::{MenuLabels, MenuRole},
-    element::desktop::{MenuItem, set_application_menu, set_menu_labels},
+    desktop::MenuRole,
+    element::desktop::{MenuItem, set_application_menu},
     prelude::*,
 };
 use nsh_platform_macos as platform;
@@ -25,6 +25,7 @@ static JAPANESE: AtomicBool = AtomicBool::new(false);
 /// An Edit menu of roles only, labelled in Japanese once asked.
 #[component]
 fn Menus() -> impl IntoElement {
+    nsh_core::i18n::set_locale(Some(nsh_core::platform::Locale::parse("en").unwrap()));
     set_application_menu(vec![
         MenuItem::submenu("App", [MenuItem::role(MenuRole::Quit)]),
         MenuItem::submenu(
@@ -37,9 +38,7 @@ fn Menus() -> impl IntoElement {
     ]);
     set_interval(Duration::from_millis(10), || {
         if JAPANESE.swap(false, Ordering::SeqCst) {
-            let mut labels = MenuLabels::default();
-            labels.roles.insert(MenuRole::Copy, "コピー".into());
-            set_menu_labels(labels);
+            nsh_core::i18n::set_locale(Some(nsh_core::platform::Locale::parse("ja").unwrap()));
         }
     });
     view().flex_1()
@@ -102,7 +101,7 @@ pub(super) fn run() {
     });
     JAPANESE.store(true, Ordering::SeqCst);
     until("the Japanese label", || {
-        titles(mtm) == (Some("コピー".into()), Some("Paste".into()))
+        titles(mtm) == (Some("コピー".into()), Some("ペースト".into()))
     });
 
     println!("menu labels: the app's menu takes new labels while it runs");

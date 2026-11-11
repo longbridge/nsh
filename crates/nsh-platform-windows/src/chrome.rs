@@ -54,8 +54,9 @@ use windows::{
             Gdi::{
                 BI_RGB, BITMAPINFO, BITMAPINFOHEADER, COLOR_GRAYTEXT, COLOR_MENUTEXT,
                 CreateDIBSection, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_HIDEPREFIX,
-                DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, FillRect, GetSysColor,
-                GetWindowDC, HBITMAP, HDC, ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
+                DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, FillRect, GetMonitorInfoW,
+                GetSysColor, GetWindowDC, HBITMAP, HDC, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+                MonitorFromWindow, ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
             },
         },
         System::LibraryLoader::{GetProcAddress, LoadLibraryW},
@@ -140,7 +141,7 @@ pub(crate) type Action = Rc<dyn Fn(&Rc<Surface>)>;
 /// A surface's chrome.
 #[derive(Default)]
 pub(crate) struct Chrome {
-    /// The app's labels of the roles (`AppOptions::menu_labels`): the
+    /// The labels the core translates for this surface's language: the
     /// platform's own menus and the role items with no label of their own
     /// show them.
     pub(crate) labels: RefCell<MenuLabels>,
@@ -622,6 +623,43 @@ pub(crate) fn nc_calc_size(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> Option
             };
     }
     Some(LRESULT(0))
+}
+
+/// `WM_GETMINMAXINFO`: a frameless window's maximized rect is its
+/// monitor's work area grown by the frame border, which `WM_NCCALCSIZE`
+/// insets back out when zoomed. The client then lands on the work area
+/// and the taskbar keeps its strip; left to the system, a frameless
+/// window's maximized rect covers the whole monitor.
+pub(crate) fn nc_max_size(hwnd: HWND, info: &mut MINMAXINFO) {
+    if !frameless(hwnd) {
+        return;
+    }
+    let mut monitor = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: plain calls with a local out value.
+    let ok = unsafe {
+        let m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(m, &mut monitor).as_bool()
+    };
+    if !ok {
+        return;
+    }
+    let (work, origin) = (monitor.rcWork, monitor.rcMonitor);
+    let inset = frame_thickness(hwnd);
+    // `ptMaxPosition` is relative to the monitor's origin, not the
+    // virtual screen: the system places it on the monitor the window
+    // maximizes on. The track sizes stay `track_sizes`', so a user can
+    // still drag the window across monitors.
+    info.ptMaxPosition = POINT {
+        x: work.left - origin.left - inset,
+        y: work.top - origin.top - inset,
+    };
+    info.ptMaxSize = POINT {
+        x: (work.right - work.left) + inset * 2,
+        y: (work.bottom - work.top) + inset * 2,
+    };
 }
 
 /// The visible border the system draws along a window's top edge, in
