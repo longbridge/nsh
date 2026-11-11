@@ -1721,9 +1721,10 @@ impl NshView {
         let Some(layer) = self.container_view().and_then(|c| c.layer()) else {
             return;
         };
+        let scale = self.backing_scale().max(1.0);
         let mut t = IDENTITY;
-        t.m41 = dx as CGFloat;
-        t.m42 = dy as CGFloat;
+        t.m41 = snap_to_scale(dx, scale);
+        t.m42 = snap_to_scale(dy, scale);
         layer.setSublayerTransform(t);
     }
 
@@ -1732,8 +1733,9 @@ impl NshView {
     /// exactly the committed-to-live difference), one subtree walk for
     /// AppKit to learn where things are; none when they are there.
     pub(crate) fn commit_bounds_origin(&self, x: f32, y: f32) {
+        let scale = self.backing_scale().max(1.0);
         let c = self.ensure_container();
-        let origin = NSPoint::new(x as CGFloat, y as CGFloat);
+        let origin = NSPoint::new(snap_to_scale(x, scale), snap_to_scale(y, scale));
         if c.bounds().origin != origin {
             c.setBoundsOrigin(origin);
         }
@@ -2319,9 +2321,28 @@ impl crate::sight::Tree for Planned {
     }
 }
 
+/// Rounds a scroll offset in points to the display's physical backing grid so
+/// stacked cell fills stay pixel-aligned while scrolling and once committed.
+fn snap_to_scale(offset: f32, scale: CGFloat) -> CGFloat {
+    let scale = scale.max(1.0);
+    (offset as CGFloat * scale).round() / scale
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_offsets_snap_to_backing_pixels_consistently_across_commit() {
+        assert_eq!(snap_to_scale(-14.37, 2.0), -14.5);
+        assert_eq!(snap_to_scale(14.37, 2.0), 14.5);
+        // Live delta (`committed - origin`) plus committed origin stays identical
+        // to the snapped target when `commit_bounds_origin` drops the transform.
+        let committed = snap_to_scale(10.12, 2.0);
+        let target: f32 = 24.37;
+        let live_dx = snap_to_scale(committed as f32 - target, 2.0);
+        assert_eq!(committed - live_dx, snap_to_scale(target, 2.0));
+    }
 
     #[test]
     fn scripted_wheels_are_the_event_handled() {
