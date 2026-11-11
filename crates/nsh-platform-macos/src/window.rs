@@ -1121,13 +1121,7 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
     let mtm = surface.mtm;
     match request {
         WindowRequest::Show => show(surface, id, &window, false),
-        WindowRequest::Hide => {
-            if let Some(w) = surface.windows.borrow().get(&id) {
-                w.showing.set(Showing::Done);
-            }
-            window.orderOut(None);
-            lost_key(surface, &window);
-        }
+        WindowRequest::Hide => hide(surface, id, &window),
         WindowRequest::Focus => show(surface, id, &window, true),
         WindowRequest::Close => close_request(surface, id, &window),
         WindowRequest::Minimize => {
@@ -1198,6 +1192,42 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
     report(surface, id);
 }
 
+/// `hide()` (and the main window's close with `keepAliveOnClose`): window
+/// `id` is ordered out, one in full screen once it has left full screen
+/// ([`crate::window_state::hide`]), so its space does not stay behind.
+pub(crate) fn hide(surface: &Surface, id: NodeId, window: &NSWindow) {
+    if let Some(w) = surface.windows.borrow().get(&id) {
+        w.showing.set(Showing::Done);
+    }
+    let now = if id == ROOT_ID {
+        crate::window_state::hide(&surface.window, window)
+    } else {
+        with_watch(surface, id, |watch| {
+            crate::window_state::hide(watch, window)
+        })
+        .unwrap_or(true)
+    };
+    if now {
+        window.orderOut(None);
+        lost_key(surface, window);
+    }
+}
+
+/// A window the app hid in full screen is back on its desktop: it is
+/// ordered out.
+pub(crate) fn hidden_after_full_screen(surface: &Surface, target: Target) {
+    let id = match target {
+        Target::Main => ROOT_ID,
+        Target::Own(id) => id,
+    };
+    let Some(window) = window_of(surface, id) else {
+        return;
+    };
+    window.orderOut(None);
+    lost_key(surface, &window);
+    report(surface, id);
+}
+
 /// `f` with the watch of window `id` (the main window's for the root).
 fn with_target_watch(surface: &Surface, id: NodeId, f: impl FnOnce(&Watch)) {
     if id == ROOT_ID {
@@ -1210,6 +1240,8 @@ fn with_target_watch(surface: &Surface, id: NodeId, f: impl FnOnce(&Watch)) {
 /// Shows window `id` (`focus`: and makes it key); a new window waiting for
 /// its first frame shows with it.
 fn show(surface: &Surface, id: NodeId, window: &NSWindow, focus: bool) {
+    // Shown again while it leaves full screen: it stays.
+    with_target_watch(surface, id, crate::window_state::shown);
     if let Some(w) = surface.windows.borrow().get(&id)
         && let Showing::Waiting(_) = w.showing.get()
     {
@@ -1653,6 +1685,9 @@ pub(crate) fn launched_main(surface: &Surface, mode: Option<WindowMode>, shown: 
 /// The standalone app's main window shows: the first time, it takes the
 /// mode it opens in.
 pub(crate) fn main_shown(surface: &Surface) {
+    // Shown again while it leaves full screen (the Dock icon, a link):
+    // it stays.
+    crate::window_state::shown(&surface.window);
     if let Some(mode) = surface.main_open_mode.take()
         && let Some(window) = surface.root.ns().window()
     {
