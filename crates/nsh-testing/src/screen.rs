@@ -1925,8 +1925,8 @@ impl Screen {
     }
 
     /// `id`, or its nearest ancestor, that `test` accepts.
-    /// The scroll views around `id` (not it), innermost first, with whether
-    /// each scrolls horizontally.
+    /// The scroll views around `id` (not it) up to the modal it is in,
+    /// innermost first, with whether each scrolls horizontally.
     #[cfg(feature = "agent")]
     pub(crate) fn scroll_ancestors(&self, id: NodeId) -> Vec<(NodeId, bool)> {
         let mut out = Vec::new();
@@ -1937,6 +1937,11 @@ impl Screen {
             };
             if let Some(scroll) = &view.scroll {
                 out.push((id, scroll.horizontal));
+            }
+            // A modal shows over the window wherever it is in the tree:
+            // the scroll views around it there do not move it.
+            if view.kind == Some(ViewKind::Modal) {
+                break;
             }
             at = view.parent;
         }
