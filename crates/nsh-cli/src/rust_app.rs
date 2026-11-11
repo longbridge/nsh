@@ -1579,10 +1579,11 @@ panic = \"abort\"
     ///
     /// Best effort: when Cargo cannot say, the hack stays empty and each
     /// program builds as before. It stays empty too when only the
-    /// describing program is built for this machine (packaging for the web,
-    /// iOS or Android): it has nothing to share, and the hack would give it
-    /// the features of this machine's hosts and runners, with the system
-    /// libraries they need (WebKitGTK for Linux's web views).
+    /// describing program is built for this machine (`nsh build`, `nsh
+    /// check`, a package or a host for another target): it has nothing to
+    /// share, and the hack would give it the features of this machine's
+    /// hosts and runners, with the system libraries they need (WebKitGTK
+    /// for Linux's web views).
     fn unify_features(&self, ws: &Path) {
         if !self.unify {
             let current = fs::read_to_string(ws.join("hack/Cargo.toml")).unwrap_or_default();
@@ -3200,7 +3201,7 @@ mod tests {
     }
 
     #[test]
-    fn a_package_for_another_target_describes_with_an_empty_hack() {
+    fn describing_alone_builds_with_an_empty_hack() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-web-hack-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let native = dir.join("native");

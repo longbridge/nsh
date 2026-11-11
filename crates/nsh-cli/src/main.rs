@@ -785,11 +785,21 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             ui::path(entry)
         );
     }
-    // Packaging for another target builds only the describing program
-    // for this machine: nothing to share a build with.
+    // Only commands that build this machine's headless runner, host or
+    // runner after the describing program share one build with it; the
+    // others (a bundle, a check, a package or a host for another target)
+    // build only the describing program for this machine.
+    let here = |target: run::Target| target == run::Target::native() && target != run::Target::Web;
     let unify = match &command {
+        Command::Test { .. } => true,
+        Command::Run { target, .. } => here(*target),
+        Command::Dev {
+            target,
+            server_only: false,
+            ..
+        } => here(*target),
         Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
-        _ => true,
+        _ => false,
     };
     let app = match command.entry_mut() {
         Some(entry) => rust_app::of(entry, unify)?,
