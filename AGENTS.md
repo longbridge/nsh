@@ -626,9 +626,8 @@ CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` install
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
 `main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
-directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The release and the
-website's deployment run on the organization's self-hosted runners, never pull requests (`docs/dev/tooling.md`
-"Self-hosted runners").
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. Every workflow,
+the release and the website's deployment included, runs on GitHub's runners (`docs/dev/tooling.md` "Runners").
 
 ## Parallel agents
 

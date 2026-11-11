@@ -55,8 +55,7 @@ jobs:
   publish:
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs to
     # build when `cargo publish` verifies it.
-    # The organization's self-hosted runner (docs/dev/tooling.md "Self-hosted runners").
-    runs-on: [self-hosted, Linux, Packager]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
