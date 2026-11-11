@@ -679,6 +679,16 @@ impl RichEditorSession {
         Ok(self.session.page_coords_at_pos(pos).map(|b| rect_json(&b)))
     }
 
+    /// The box `{ x, y, width, height }` of the block starting at `pos`, in
+    /// points of the content box of the view showing the editor (where
+    /// `contentOverlay` places its children, scrolling with the text), or
+    /// `null` when none does. Throws a `RangeError` for a position outside
+    /// the document.
+    pub(crate) fn node_rect(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {
+        self.check_pos("nodeRect", pos)?;
+        Ok(self.session.node_rect(pos).map(|b| rect_json(&b)))
+    }
+
     /// The box `{ x, y, width, height }` of the block starting at `pos` in
     /// page coordinates (ProseMirror's `nodeDOM(pos)` measured in the
     /// window's), or `null` before the pointer has been over the editor.

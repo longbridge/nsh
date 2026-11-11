@@ -1,6 +1,7 @@
 // A case of the API's test suite (docs/dev/compatibility.md): the
 // `RichEditor` view's bubble menu: the app's content shown next to the
-// selection while the app passes it, gone when it does not, with the
+// selection while the app passes it, gone when it does not; its layer over
+// the document (`contentOverlay`) and the box of a block in it; the
 // touch selection's handle parts' classes; and a table shown as a grid of
 // its cells, with the table parts' classes; and editors without a height,
 // as tall as their documents, one stopped by its `maxHeight`.
@@ -10,6 +11,9 @@ import { RichEditor, StarterKit, TableKit, createRichEditor } from "nsh/base";
 function App() {
   const editor = createRichEditor({ extensions: [StarterKit], content: "Some text" });
   const open = signal(true);
+  // The layer over the document: a marker the app places at the first block, pressed to read the block's box.
+  const mark = signal("LayerMark");
+  const box = () => editor.nodeRect(0) as { x: number; y: number; width: number; height: number } | null;
   const tables = createRichEditor({
     extensions: [StarterKit, TableKit],
     content: "| CellA | CellB |\n| --- | --- |\n| CellC | CellD |\n",
@@ -32,6 +36,11 @@ function App() {
         bubbleMenu={open() ? <Text>BubbleMenu</Text> : undefined}
         bubbleMenuPlacement="bottom"
         bubbleMenuOffset={4}
+        contentOverlay={
+          <View style={{ position: "absolute", right: 0, top: 0 }} onPress={() => mark.set(`LayerBox ${(box()?.height ?? 0) > 0} ${box()?.x} ${box()?.y}`)}>
+            <Text>{mark()}</Text>
+          </View>
+        }
         classes={{ selectionHandle: "bg-blue-500", selectionHandleStart: "size-3", selectionHandleEnd: "size-3" }}
         styles={{ selectionHandle: { opacity: 0.9 } }}
       />
