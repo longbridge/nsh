@@ -795,6 +795,24 @@ pub fn opens_context_menu(
     menu_key || (modifiers.shift && key == Some(crate::keymap::Key::F(10)))
 }
 
+/// Whether a key down presses the control with the keyboard focus (a view
+/// that takes presses, not a text input): Return / Enter or Space with
+/// neither Control, Alt nor Command / Super held (Shift may be). Such a
+/// key goes to that control before the app's shortcuts and the menus'
+/// key equivalents see it, so a binding of the same key elsewhere (a
+/// dialog's Enter for its main action) cannot act instead of the control
+/// the user moved the focus to.
+pub fn presses_focused_control(
+    key: crate::keymap::Key,
+    modifiers: crate::keymap::Modifiers,
+) -> bool {
+    !(modifiers.ctrl || modifiers.alt || modifiers.cmd)
+        && matches!(
+            key,
+            crate::keymap::Key::Enter | crate::keymap::Key::Char(' ')
+        )
+}
+
 /// Where a context menu asked for without a pointer (the keyboard, an
 /// assistive technology) opens in a view of `size`: its bottom-start
 /// corner, the bottom right one right to left (`rtl`: the surface's

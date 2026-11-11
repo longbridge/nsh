@@ -59,38 +59,36 @@ pub fn main() -> std::process::ExitCode {
 fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     use nsh_platform_macos::{ActivationPolicy, AppOptions, Appearance, AssetBase, Limits};
 
-    /// Run by `nsh run`: the app's own logs go to its terminal too.
-    static DEVELOPMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    struct Logger;
-    impl log::Log for Logger {
-        fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-            printed(m) || collected(m)
+    // Warnings, errors and the app's `js` lines go to the unified log (an
+    // app opened from Finder or the Dock writes stderr to /dev/null). Run by
+    // `nsh run`, the app's own logs go there too, and to its terminal.
+    let development = std::env::var_os("NSH_APP_DIR");
+    let mut logging = nsh_platform_apple::unified_log::Options::default();
+    logging.development = development.is_some();
+    // DevTools' console takes all of nsh's lines and what the unified log
+    // takes, as a development host's logger hands them to it.
+    #[cfg(feature = "devtools")]
+    {
+        struct Console {
+            development: bool,
         }
-        fn log(&self, r: &log::Record<'_>) {
-            #[cfg(feature = "devtools")]
-            if collected(r.metadata()) {
+        impl log::Log for Console {
+            fn enabled(&self, m: &log::Metadata<'_>) -> bool {
+                m.target().starts_with("nsh")
+                    || m.level() <= log::Level::Warn
+                    || m.target() == "js"
+                    || self.development
+            }
+            fn log(&self, r: &log::Record<'_>) {
                 nsh_platform_macos::devtools_record(r);
             }
-            if printed(r.metadata()) {
-                eprintln!("{} {}: {}", r.level(), r.target(), r.args());
-            }
+            fn flush(&self) {}
         }
-        fn flush(&self) {}
+        static CONSOLE: std::sync::OnceLock<Console> = std::sync::OnceLock::new();
+        let development = logging.development;
+        logging.also = Some(CONSOLE.get_or_init(|| Console { development }));
     }
-    /// What goes to the terminal.
-    fn printed(m: &log::Metadata<'_>) -> bool {
-        m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
-    }
-    /// What the DevTools console collects (all of nsh's lines, as a
-    /// development host's logger does).
-    fn collected(m: &log::Metadata<'_>) -> bool {
-        cfg!(feature = "devtools") && (m.target().starts_with("nsh") || printed(m))
-    }
-    static LOGGER: Logger = Logger;
-    let development = std::env::var_os("NSH_APP_DIR");
-    let _ = DEVELOPMENT.set(development.is_some());
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(log::LevelFilter::Info);
+    nsh_platform_apple::unified_log::install(logging);
 
     // `<App>.app/Contents/MacOS/<exe>` -> `<App>.app/Contents/Resources/nsh`.
     let dir = match development {

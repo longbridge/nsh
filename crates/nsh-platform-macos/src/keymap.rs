@@ -127,9 +127,9 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     if composing(&window) {
         return false;
     }
-    if crate::input::control_activation_target(surface, event).is_some() {
-        return false;
-    }
+    // Return and Space on a focused control fire only the focus' own
+    // bindings; else the control takes them (`input::key`).
+    let control = crate::input::control_activation_target(surface, event).is_some();
     let Some(keystroke) = keystroke(event) else {
         return false;
     };
@@ -138,7 +138,7 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         return false;
     }
     // Only the bindings of the window the key is in (and JS's) take it.
-    let found = table.find_in(window_root, keystroke, editing, event.isARepeat());
+    let found = table.find_at(window_root, keystroke, editing, control, event.isARepeat());
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,

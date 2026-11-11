@@ -1513,6 +1513,17 @@ pub trait Interactive: Element {
         )
     }
 
+    /// A mouse button was released over it (or an element inside it): which
+    /// button (`button`), where, and with the modifier keys. The primary
+    /// button's release also reports [`Self::on_press_up`] (the DOM's
+    /// `mouseup`).
+    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.on(
+            EventKind::MouseUp,
+            events::typed(listener.into_listener(), events::mouse),
+        )
+    }
+
     /// The secondary button was pressed over it (a right click,
     /// Control-click on Apple platforms): where, to open a menu at
     /// (`page_x`, `page_y`). The nearest element that listens hears it;
@@ -1889,8 +1900,9 @@ pub trait Interactive: Element {
     /// Whether a desktop press drags the window and a double click follows
     /// the system's title-bar behavior. The nearest explicit value wins;
     /// inputs and press/touch handlers inside a drag region stay interactive.
-    /// On macOS and Linux, background clicks reach the app on release,
-    /// including ancestor press handlers; dragging does not deliver a click.
+    /// On the native desktop backends (AppKit, Win32 and GTK), background
+    /// clicks reach the app on release, including ancestor press handlers;
+    /// dragging does not deliver a click.
     /// Set false on a child to exclude it from its parent's drag region.
     fn window_drag(mut self, enabled: impl IntoReactive<bool>) -> Self {
         super::host::bind_prop(self.node(), enabled, |enabled| {

@@ -94,6 +94,11 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
 
 `.app` 使用 ad hoc 签名，因此可以在构建它的 Mac 上运行。要分发它，请用 Developer ID 签名并进行公证。`--run` 会在打包后打开应用。
 
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：“控制台”应用会显示它们，
+`log stream --predicate 'subsystem == "com.example.notes"'` 也会。从终端启动时（`.nsh/out/<Name>.app/Contents/MacOS/<Name>`），
+它还会把日志打印在终端里；标准错误重定向到文件时（`2> app.log`、`open --stderr app.log`）也会写进文件
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
+
 ## 菜单栏应用
 
 菜单栏应用以[托盘图标](../modules/nsh-desktop.md#tray)的形式待在菜单栏里，不进入 Dock 和应用切换器（Cmd+Tab）。

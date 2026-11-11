@@ -145,6 +145,17 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
   (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
   `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
+- **`onMouseUp`** (any element): a mouse button was released over it or a view inside it (the DOM's `mouseup`):
+  `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and
+  `modifiers` (`EventPayload::Mouse`, `MouseEvent`; Rust `.on_mouse_up`). The primary button's release also
+  reports `onPressUp`. The desktops (Win32, AppKit, GDK and the GPUI backend), the terminal and the web walk out from
+  the view under the pointer, as a move does, and every listener hears it; iOS and Android never report it (an iPad
+  or Android mouse included). On macOS a Control-click's release is the secondary button's (`"right"`), as its press
+  is; a right click's release
+  is what completes it, so an app that waits for it can open its menu without a timer or a press guess. Only a release
+  over the view (or a view inside it) is reported: the event has no pointer capture, so a release after the pointer
+  leaves the view or the window is not heard. The headless
+  driver's `rightClick` and the desktop test agents (Linux's included) release the secondary button too.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
@@ -178,7 +189,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `onBlur` (`EventKind::Focus` / `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first
   responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
-  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included.
+  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included. On a stop
+  that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`: a component's
+  keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
+  it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`).
   A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
   (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
   headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows
@@ -422,7 +437,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
   answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
-  images and files are never inserted. The event comes before the `onChangeText` of the text it inserts (Linux:
+  images and files are never inserted. Inserted text is clipped to what `maxLength` leaves room for, as a browser's
+  `maxlength` clips it (iOS cuts between composed character sequences, the other platforms between code points). The event comes before the `onChangeText` of the text it inserts (Linux:
   maybe after, as GTK's own paste and NSH's read of the clipboard are both asynchronous; with `"report"` nothing is
   inserted, so it comes first). An app that decides per paste uses `"report"` and inserts what it allows with the
   ref's `insertText` (`Command::InsertText`): the text in place of the selection as the user's edit, `maxLength`
@@ -433,7 +449,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
-  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; Android: `setOnReceiveContentListener` (API 31;
+  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
+  themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
   goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
   editor of NSH's (`FieldEditor`, from `FieldCell`'s `fieldEditorForView:`, one per window; masked fields keep

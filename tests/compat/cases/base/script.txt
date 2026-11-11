@@ -1094,13 +1094,14 @@ covers [props] role
 covers [events] onChange
 # base-radio
 tap id:case-base-radio
-# The group is a radio group for screen readers; each radio is a radio
-# of its own, checked and selected while checked: `checkedStyle`, and
+# The group is a radio group for screen readers, named by the app; each
+# radio is a radio of its own, checked and selected while checked: `checkedStyle`, and
 # `group-checked:` of the app's dot (30 wide, a margin of 8) puts the
 # label at 38.
 expect Plan: basic
 expect Changes: 0
 prop id:plans role radiogroup
+prop id:plans accessibilityLabel Plan
 prop id:basic role radio
 prop id:basic accessibilityState selected=true checked=true
 style id:basic backgroundColor #00ff00ff
@@ -3572,6 +3573,7 @@ expect token primary #171717ff
 expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
+style id:faded color #138a5a80
 covers [nsh] token
 
 # base-set-theme

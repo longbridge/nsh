@@ -211,10 +211,11 @@ view()
 | `onMouseEnter` | `.on_mouse_enter(..)` | `(e: MouseEvent) => void` | 鼠标移到视图或其内部的视图上（DOM 的 `mouseenter`）。 |
 | `onMouseMove` | `.on_mouse_move(..)` | `(e: MouseEvent) => void` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键（DOM 的 `mousemove`）。 |
 | `onMouseLeave` | `.on_mouse_leave(..)` | `(e: MouseEvent) => void` | 鼠标离开视图及其内部的视图，或离开窗口；`e` 是鼠标最后所在的位置（DOM 的 `mouseleave`）。 |
+| `onMouseUp` | `.on_mouse_up(..)` | `(e: MouseEvent) => void` | 鼠标按键在视图或其内部的视图上松开（DOM 的 `mouseup`）：`button` 是松开的按键（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"`），另有 `position`、`pagePosition` 和 `modifiers`。指针下视图外围所有监听的视图由内向外都会收到。主按键松开时同时报告 `onPressUp`。视图外松开不会报告（没有指针捕获）。桌面平台（Windows、macOS、Linux、GPUI）、终端和 Web 支持；iOS 和 Android 不报告。 |
 
 与 CSS 的 `:hover` 和 DOM 的 `mouseenter` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onMouseEnter`（由外向内；`onMouseLeave` 由内向外）。事件在发生之后才通知应用，触摸从不触发。从鼠标下方移除的视图会收到 `onMouseLeave`，在 Linux 和 Windows 上要等到鼠标下一次移动。
 
-`MouseEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键），以及 `pressedButton`：按下的按键（`"left"`、`"right"`、`"middle"`、`"back"` 或 `"forward"`，即 GPUI 的 `MouseButton`），没有按键时为 `null`；Rust 中为 `position`、`page_position`、`modifiers` 和 `pressed_button`。在桌面平台和 Web 上，拖动同时也是触摸（`onTouchMove`、响应者系统），它的移动带着 `pressedButton` 到达 `onMouseMove`：只跟随悬停的反馈跳过这些移动即可；iOS 和 Android 的悬停报告的是没有按键按下的指针。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onMouseLeave` 之前到达，因此处理函数可以在每次移动时重绘：
+`MouseEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键），`pressedButton`：按下的按键（`"left"`、`"right"`、`"middle"`、`"back"` 或 `"forward"`，即 GPUI 的 `MouseButton`），没有按键或松开时为 `null`，以及 `button`：本次事件中变化的按键，即 `onMouseUp` 上松开的按键，移动时为 `null`；Rust 中为 `position`、`page_position`、`modifiers`、`pressed_button` 和 `button`。在桌面平台和 Web 上，拖动同时也是触摸（`onTouchMove`、响应者系统），它的移动带着 `pressedButton` 到达 `onMouseMove`：只跟随悬停的反馈跳过这些移动即可；iOS 和 Android 的悬停报告的是没有按键按下的指针。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onMouseLeave` 之前到达，因此处理函数可以在每次移动时重绘：
 
 ```rust tabs
 // 图表上的十字线。

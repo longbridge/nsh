@@ -1458,6 +1458,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: false,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| {

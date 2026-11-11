@@ -3005,7 +3005,7 @@ function App() {
   );
   return (
     <View>
-      <RadioGroup testID="plans" class="flex-row">
+      <RadioGroup testID="plans" class="flex-row" accessibilityLabel="Plan">
         {radio("a", "Basic")}
         {radio("b", "Pro")}
         {radio("c", "Team", true)}
@@ -3018,8 +3018,8 @@ function App() {
 mount(App);
 "##;
 
-/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role on the
-/// group, the radio role and its checked state on each radio alone, a
+/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role and the
+/// app's name on the group, the radio role and its checked state on each radio alone, a
 /// press on an unchecked radio asking for `true` while the app owns which
 /// one is checked, a checked or disabled radio reporting nothing, and the
 /// app's dot inside following the radio with `group-checked:`.
@@ -3089,10 +3089,11 @@ fn a_base_radio_asks_to_be_checked_and_its_group_holds_no_value() {
     let (dot_a, dot_b) = (dot(a), dot(b));
     let initial = std::slice::from_ref(&first);
 
-    // The group: a radio group for screen readers, laid out by the app.
+    // The group: a radio group for screen readers, named by the app
+    // (`accessibilityLabel`) and laid out by it.
     let group = view_props(&first, plans).unwrap();
     assert_eq!(group.accessibility.role, AccessibilityRole::Radiogroup);
-    assert_eq!(group.accessibility.label, None);
+    assert_eq!(group.accessibility.label.as_deref(), Some("Plan"));
 
     // The checked radio: checked and selected for screen readers, its
     // `checkedStyle`, and the app's dot `group-checked:`.

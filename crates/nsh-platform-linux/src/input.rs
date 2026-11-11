@@ -698,6 +698,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
+            mouse_up(surface, x, y, event.modifier_state(), MouseButton::Left);
             let pending = surface.input.window_press.borrow_mut().take();
             if let Some(press) = pending {
                 let same_view = pick(&event_root(surface), press.x, press.y)
@@ -731,6 +732,11 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
                         crate::window::control(&surface, &window, control);
                     }
                 });
+            }
+        }
+        T::ButtonRelease => {
+            if let Some(button) = button().and_then(mouse_button) {
+                mouse_up(surface, x, y, event.modifier_state(), button);
             }
         }
         T::MotionNotify => {
@@ -1085,6 +1091,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
         }
         Simulated::Up(x, y) => {
             release_buttons(surface);
+            mouse_up(surface, x, y, held, MouseButton::Left);
             up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
@@ -1114,8 +1121,11 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             link_cursor(surface, x, y);
             mouse_moved(surface, x, y, held);
         }
+        // A right click: the press opens the menu, the release follows,
+        // as a real one's does.
         Simulated::ContextMenu(x, y) => {
             context_menu(surface, x, y, held);
+            mouse_up(surface, x, y, held, MouseButton::Right);
         }
     }
 }
@@ -2281,6 +2291,32 @@ fn mouse_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
     let hovered = surface.input.hovered.borrow().clone();
     for view in &hovered {
         mouse_event(surface, view, EventKind::MouseMove, x, y, state);
+    }
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType, button: MouseButton) {
+    let Some(hit) = pick(&event_root(surface), x, y) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let s = view.state();
+            if !s.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(surface, &view, x, y);
+        let event = nsh_core::MouseEvent::released(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            modifiers(state),
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
     }
 }
 

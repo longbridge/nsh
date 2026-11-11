@@ -113,6 +113,11 @@ Writes an app bundle:
 The `.app` is signed ad hoc, so it runs on the Mac that built it. To distribute it, sign it with a Developer ID and
 notarize it. `--run` opens the app after packaging it.
 
+The app logs its warnings, its errors and its `console.log` and `console.info` lines to the unified log, with its id
+as the subsystem: Console shows them, and so does `log stream --predicate 'subsystem == "com.example.notes"'`. Its
+standard error gets them too: the terminal it was started from (`.nsh/out/<Name>.app/Contents/MacOS/<Name>`) or a file
+(`2> app.log`, `open --stderr app.log`) ([A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs)).
+
 ## Menu bar apps
 
 A menu bar app lives in the menu bar as its [tray icon](../modules/nsh-desktop.md#tray), outside the Dock and the app

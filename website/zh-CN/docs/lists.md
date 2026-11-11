@@ -173,6 +173,7 @@ const toggle = (id: number) =>
 | `empty` | `.empty(..)` | 组件或元素 | | 没有条目时代替条目显示。 |
 | `separator` | `.separator(\|\| ..)` | 组件或元素 | | 条目之间（单列）。 |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前滚动到该条目。 |
+| `initialScrollAtEnd` | `.initial_scroll_at_end()` | `boolean` | `false` | 首帧前滚动到末尾并在行高测量时保持末尾位置。短内容从顶部排列；TSX 中优先于 `initialScrollIndex`；Rust 中最后调用的初始滚动方法生效。 |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | 接近末尾（见下文）。 |
 | `loadMoreThreshold` | `.load_more_threshold(..)` | `number` | `1` | 距离末尾多少个视口时触发 `onLoadMore`。 |
 | `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | 滚动后接近开头（见下文）。 |
@@ -779,7 +780,7 @@ let list!: ListRef;
 list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 ```
 
-滚动到索引（以及滚动到末尾）由原生根据当时已知的尺寸计算：已测量的行用实测值，其余用预估尺寸。之后在目标附近的行被测量时，列表会持续跟随目标，因此能准确落位，直到用户自己滚动或数据变化为止。要让列表一打开就停在某个条目，请用 `initialScrollIndex`（`.initial_scroll_index(..)`），而不是在第一帧之后再滚动。
+滚动到索引（以及滚动到末尾）由原生根据当时已知的尺寸计算：已测量的行用实测值，其余用预估尺寸。之后在目标附近的行被测量时，列表会持续跟随目标，因此能准确落位，直到用户自己滚动或数据变化为止。要让列表一打开就停在某个条目，请用 `initialScrollIndex`（`.initial_scroll_index(..)`），停在末尾则用 `initialScrollAtEnd`（`.initial_scroll_at_end()`），而不是在第一帧之后再滚动。
 
 <a id="keeping-a-reading-position"></a>
 

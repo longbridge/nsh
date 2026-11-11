@@ -1082,6 +1082,9 @@ fn handle(
             crate::window_state::displays_changed(surface);
         }
         WM_MOUSEMOVE => {
+            if crate::chrome::press_moved(surface, hwnd, lparam) {
+                return Some(LRESULT(0));
+            }
             if !data.tracking.replace(true) {
                 let mut track = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -1139,6 +1142,9 @@ fn handle(
                 return Some(LRESULT(0));
             }
             let button = button_of(msg, wparam);
+            if msg == WM_LBUTTONUP && crate::chrome::press_released(surface, hwnd, point(lparam)) {
+                return Some(LRESULT(0));
+            }
             data.buttons.set(data.buttons.get() & !(1 << button));
             if data.buttons.get() == 0 {
                 // SAFETY: plain call.
@@ -1154,6 +1160,7 @@ fn handle(
             return Some(LRESULT(1));
         }
         WM_CAPTURECHANGED => {
+            crate::chrome::press_cancelled(surface, hwnd);
             if data.buttons.replace(0) != 0 {
                 crate::input::pointer(
                     surface,
@@ -1476,7 +1483,7 @@ fn sys_close(hwnd: HWND, lparam: LPARAM) -> crate::shell::SysClose {
 
 /// True when a mouse message was synthesized from touch or pen input,
 /// which comes as `WM_POINTER*` messages too.
-fn from_touch() -> bool {
+pub(crate) fn from_touch() -> bool {
     // MI_WP_SIGNATURE in the extra info marks synthesized mouse messages.
     // SAFETY: plain call.
     let extra = unsafe { GetMessageExtraInfo() }.0 as usize;
@@ -1553,6 +1560,16 @@ fn mouse_event(
         modifiers: modifiers(),
         clicks,
     }
+}
+
+/// A click of the primary button that the window held back
+/// ([`crate::chrome::WindowPress`]): down at `from`, up at `to` (client
+/// points).
+pub(crate) fn click(surface: &Rc<Surface>, from: (f32, f32), to: (f32, f32)) {
+    let down = mouse_event(PointerKind::Down, from.0, from.1, 0, 1, 1, surface);
+    crate::input::pointer(surface, down);
+    let up = mouse_event(PointerKind::Up, to.0, to.1, 0, 0, 1, surface);
+    crate::input::pointer(surface, up);
 }
 
 /// The pointer moved over a view of the app's title bar that answers as

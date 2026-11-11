@@ -309,7 +309,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         state: Cell::new(None),
     });
     let weak = Rc::downgrade(&window);
-    view.set_invalidate(Rc::new(move |_| {
+    view.set_invalidate(Rc::new(move |_, _| {
         if let Some(window) = weak.upgrade() {
             invalidate(&window);
         }
