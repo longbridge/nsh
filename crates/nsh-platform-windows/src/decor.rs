@@ -287,16 +287,17 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
     let gradients = effects.map_or(&[][..], |e| &e.background_images[..]);
     let fills = usize::from(!bg.is_transparent()) + gradients.len();
     if fills > 0 {
-        let mut shape = BoxShape::new(cx, w, h, radii, under_border(state));
+        let mut shape = BoxShape::new(w, h, radii, under_border(state));
         // Several fills of one rounded shape each cover its edge pixels
         // partly, and stacked they cover them more than once: clipped
         // once, the edge is covered once.
-        let clipped = fills > 1 && shape.geometry.is_some();
-        if clipped {
-            if let Some(g) = shape.geometry.take() {
-                cx.push_clip_geometry(&g);
-            }
+        let clip_geometry = (fills > 1).then(|| shape.geometry(cx)).flatten();
+        if let Some(g) = &clip_geometry {
+            cx.push_clip_geometry(g);
+            // What the fills draw is inside this clip: the corners are
+            // covered by it, so they draw square and the outline is let go.
             shape.radii = [0.0; 4];
+            shape.forget_geometry();
         }
         if !bg.is_transparent() {
             shape.fill(cx, cx.solid(bg));
@@ -305,19 +306,19 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
             match gradient::paint(cx, g, w, h) {
                 Some(Paint::Brush(brush)) => shape.fill(cx, &brush),
                 Some(Paint::Bitmap(baked)) => {
-                    let clip = shape.geometry.is_some();
-                    if let Some(g) = &shape.geometry {
+                    let clip = shape.geometry(cx);
+                    if let Some(g) = &clip {
                         cx.push_clip_geometry(g);
                     }
                     draw_baked(cx, &baked);
-                    if clip {
+                    if clip.is_some() {
                         cx.pop();
                     }
                 }
                 None => {}
             }
         }
-        if clipped {
+        if clip_geometry.is_some() {
             cx.pop();
         }
     }
@@ -364,6 +365,29 @@ fn under_border(state: &ViewState) -> f32 {
         / 2.0
 }
 
+/// How a fill of a box with `radii` is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FillKind {
+    /// Square corners: a plain rectangle.
+    Rectangle,
+    /// Equal corners: a rounded rectangle, no geometry.
+    Rounded,
+    /// Corners that differ: the outline, made when the fill asks.
+    Geometry,
+}
+
+fn fill_kind(radii: [f32; 4]) -> FillKind {
+    if radii.iter().all(|&r| r == radii[0]) {
+        if radii[0] <= 0.0 {
+            FillKind::Rectangle
+        } else {
+            FillKind::Rounded
+        }
+    } else {
+        FillKind::Geometry
+    }
+}
+
 /// The view's rounded box, filled the cheapest way its corners allow.
 struct BoxShape {
     /// How far inside the border box it is.
@@ -371,44 +395,71 @@ struct BoxShape {
     w: f32,
     h: f32,
     radii: [f32; 4],
-    /// The rounded outline when the corners differ.
-    geometry: Option<ID2D1Geometry>,
+    /// The rounded outline, made when a fill or a clip first needs it (a
+    /// uniform fill draws a rounded rectangle without geometry): the outer
+    /// `None` is "not made", the inner one a factory that refused.
+    geometry: RefCell<Option<Option<ID2D1Geometry>>>,
 }
 
 impl BoxShape {
     /// The `w` x `h` box with `radii`, `inset` points inside its edges.
-    fn new(cx: &DrawCx<'_>, w: f32, h: f32, radii: [f32; 4], inset: f32) -> BoxShape {
+    fn new(w: f32, h: f32, radii: [f32; 4], inset: f32) -> BoxShape {
         let (w, h) = ((w - 2.0 * inset).max(0.0), (h - 2.0 * inset).max(0.0));
         let radii = radii.map(|r| (r - inset).max(0.0));
-        let round = radii.iter().any(|&r| r > 0.0);
-        let geometry = round
-            .then(|| cx.rounded_geometry(rect(inset, inset, w, h), radii))
-            .flatten();
         BoxShape {
             inset,
             w,
             h,
             radii,
-            geometry,
+            geometry: RefCell::new(None),
         }
     }
 
+    /// The rounded outline, made at most once for this short-lived shape:
+    /// `None` when no corner is round.
+    fn geometry(&self, cx: &DrawCx<'_>) -> Option<ID2D1Geometry> {
+        self.geometry_with(|| {
+            #[cfg(test)]
+            probe::geometry_made();
+            cx.rounded_geometry(rect(self.inset, self.inset, self.w, self.h), self.radii)
+        })
+    }
+
+    /// [`BoxShape::geometry`], its construction supplied by the caller
+    /// (tests count the calls).
+    fn geometry_with(&self, make: impl FnOnce() -> Option<ID2D1Geometry>) -> Option<ID2D1Geometry> {
+        if !self.radii.iter().any(|&r| r > 0.0) {
+            return None;
+        }
+        let mut geometry = self.geometry.borrow_mut();
+        geometry.get_or_insert_with(make).clone()
+    }
+
+    /// Drops the made outline once a clip used it, so the fills it covers
+    /// make no second one.
+    fn forget_geometry(&mut self) {
+        *self.geometry.get_mut() = None;
+    }
+
     fn fill<B: windows::core::Param<ID2D1Brush>>(&self, cx: &DrawCx<'_>, brush: B) {
-        let uniform = self.radii.iter().all(|&r| r == self.radii[0]);
         let bounds = rect_f(self.inset, self.inset, self.w, self.h);
         // SAFETY: COM calls between BeginDraw and EndDraw.
         unsafe {
-            if self.radii[0] <= 0.0 && uniform {
-                cx.dc.FillRectangle(&bounds, brush);
-            } else if uniform {
-                let rr = D2D1_ROUNDED_RECT {
-                    rect: bounds,
-                    radiusX: self.radii[0],
-                    radiusY: self.radii[0],
-                };
-                cx.dc.FillRoundedRectangle(&rr, brush);
-            } else if let Some(g) = &self.geometry {
-                cx.dc.FillGeometry(g, brush, None);
+            match fill_kind(self.radii) {
+                FillKind::Rectangle => cx.dc.FillRectangle(&bounds, brush),
+                FillKind::Rounded => {
+                    let rr = D2D1_ROUNDED_RECT {
+                        rect: bounds,
+                        radiusX: self.radii[0],
+                        radiusY: self.radii[0],
+                    };
+                    cx.dc.FillRoundedRectangle(&rr, brush);
+                }
+                FillKind::Geometry => {
+                    if let Some(g) = &self.geometry(cx) {
+                        cx.dc.FillGeometry(g, brush, None);
+                    }
+                }
             }
         }
     }
@@ -1236,6 +1287,60 @@ mod tests {
         let q = side_quads(100.0, 100.0, [4.0, 4.0, 4.0, 0.0]);
         assert!(close(q[0][3].0, 0.0));
         assert!(close(q[3][2].0, 0.0) && close(q[3][3].0, 0.0));
+    }
+
+    #[test]
+    fn fills_choose_the_cheapest_shape() {
+        assert_eq!(fill_kind([0.0; 4]), FillKind::Rectangle);
+        assert_eq!(fill_kind([8.0; 4]), FillKind::Rounded);
+        assert_eq!(fill_kind([8.0, 2.0, 8.0, 8.0]), FillKind::Geometry);
+    }
+
+    #[test]
+    fn a_shape_makes_its_geometry_once() {
+        let shape = BoxShape::new(100.0, 50.0, [8.0, 2.0, 8.0, 8.0], 0.0);
+        let calls = std::cell::Cell::new(0);
+        let make = || {
+            calls.set(calls.get() + 1);
+            None
+        };
+        assert!(shape.geometry_with(make).is_none());
+        assert!(shape.geometry_with(make).is_none());
+        assert_eq!(calls.get(), 1, "made once; the refusal is kept");
+    }
+
+    #[test]
+    fn a_uniform_shape_never_asks_for_its_geometry() {
+        let shape = BoxShape::new(100.0, 50.0, [8.0; 4], 0.0);
+        let calls = std::cell::Cell::new(0);
+        // `fill` asks only for `FillKind::Geometry`; this is that branch's
+        // predicate (drawing needs a device).
+        if fill_kind(shape.radii) == FillKind::Geometry {
+            shape.geometry_with(|| {
+                calls.set(calls.get() + 1);
+                None
+            });
+        }
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn a_multi_fill_clip_forgets_its_geometry() {
+        let mut shape = BoxShape::new(100.0, 50.0, [8.0; 4], 0.0);
+        let calls = std::cell::Cell::new(0);
+        let make = || {
+            calls.set(calls.get() + 1);
+            None
+        };
+        // The clip asks for the outline, then the fills draw square inside
+        // it.
+        shape.geometry_with(make);
+        shape.radii = [0.0; 4];
+        shape.forget_geometry();
+        // A bitmap gradient's clip asks again: no corner is round, so none
+        // is made.
+        shape.geometry_with(make);
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]

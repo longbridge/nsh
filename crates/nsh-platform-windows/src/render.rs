@@ -2235,6 +2235,45 @@ mod tests {
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
     }
 
+    /// A uniform background fill draws a rounded rectangle and makes no
+    /// geometry; corners that differ make one.
+    #[test]
+    fn a_uniform_background_fill_makes_no_geometry() {
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let size = (80, 60);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let uniform = view(Some(&root), 2, ViewKind::View, rect(10.0, 10.0, 40.0, 30.0));
+        {
+            let mut s = uniform.state_mut();
+            s.style.background_color = Color(0x224488ff);
+            s.style.border_radius = Points(8.0);
+        }
+        let into = target(&gfx, size);
+        crate::decor::probe::reset();
+        draw_into(&surface, &gfx, &into, 1.0, false, None, None, None).unwrap();
+        assert_eq!(crate::decor::probe::geometries(), 0);
+
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let differing = view(Some(&root), 2, ViewKind::View, rect(10.0, 10.0, 40.0, 30.0));
+        {
+            let mut s = differing.state_mut();
+            s.style.background_color = Color(0x224488ff);
+            s.style.border_radius = Points(8.0);
+            s.style.corner_radius.top_right = Some(Points(2.0));
+        }
+        let into = target(&gfx, size);
+        crate::decor::probe::reset();
+        draw_into(&surface, &gfx, &into, 1.0, false, None, None, None).unwrap();
+        assert_eq!(crate::decor::probe::geometries(), 1);
+    }
+
     /// Damage that meets a parent's own decoration repaints it and the
     /// child in it, while a child outside the damage stays as it was: the
     /// partial frame is the whole frame byte for byte.
