@@ -205,6 +205,11 @@ Things that were found the hard way. Read the section of the area you change bef
   (`UIScreen.mainScreen` and `UIWindow initWithFrame` are deprecated). The window size is fixed to 390×844 through `sizeRestrictions`.
 - Methods in `define_class!` that return `Retained<T>` need `#[unsafe(method_id(...))]`. Classes UIKit instantiates by name (AppDelegate,
   SceneDelegate) cannot have ivars; keep their state in statics or thread locals.
+- **A paste the input's delegate refuses crashes the app at the next undo** (iOS 26, `UITextField` and `UITextView`):
+  UIKit's `paste:` asks the delegate later, after it registered the paste's undo step, and undoing it replaces a
+  range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
+  paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
+  text, asks the delegate and calls `insertText:`, whose undo is right.
 - **UIKit implements the `UITextInputTraits` setters of `UITextField` by message forwarding**: objc2's debug-build signature
   check cannot find them on the class and panics, so `input.rs` sends them with a raw `objc_msgSend`.
 - **objc2 crates are used with `default-features = false`** and an explicit feature list in the root `Cargo.toml` (one feature per
@@ -470,7 +475,8 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **Touches made in process do not move the first responder**: a made-up tap on a text field leaves the keyboard's
   focus where it was, so the agent focuses the input a tap lands in itself (as KIF does).
-- **`UITextField.insertText:` skips the field's delegate** (no `shouldChangeCharactersInRange`, so no `maxLength`):
+- **`insertText:` skips the delegate of `UITextField` and `UITextView`** (no `shouldChangeCharactersInRange`, so no
+  `maxLength`; `input::paste_text`, the agent's paste too, asks it first):
   typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
   controlled input's value comes back lose characters, so keys come at a typist's pace.
 - **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
