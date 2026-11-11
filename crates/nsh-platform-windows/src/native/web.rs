@@ -1087,6 +1087,7 @@ impl WebItem {
         let name = name.to_owned();
         let domain = domain.to_owned();
         let path = path.to_owned();
+        let delete_manager = manager.clone();
         let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
             if !alive.load(Ordering::Acquire) {
                 return Ok(());
@@ -1137,7 +1138,7 @@ impl WebItem {
             for cookie in matching {
                 // SAFETY: a WebView2 call on the live cookie manager and a
                 // cookie from its own store.
-                if let Err(error) = unsafe { manager.DeleteCookie(&cookie) } {
+                if let Err(error) = unsafe { delete_manager.DeleteCookie(&cookie) } {
                     emitter.reply(
                         request,
                         Err(format!("cannot delete the cookie: {}", error.message())),
