@@ -1407,17 +1407,47 @@ fn asset_uris_resolve_in_the_first_directory_that_has_the_file(cx: &mut TestAppC
     assert_eq!(report, "app 2x3|cover 4x5");
 }
 
-/// A focused field showing `LABEL` and the tokens `primary` and
-/// `secondary` of the app's own theme (`setTheme`) as the app reads them.
+/// A box drawn in the token `primary` and a focused field showing `LABEL`
+/// and the tokens `primary` and `secondary` of the app's own theme
+/// (`setTheme`) as the app reads them.
 const THEMED_FIELD: &str = r##"
-import { mount, setTheme, token } from "nsh";
+import { mount, setTheme, token, View } from "nsh";
 import { Input } from "nsh/base";
 
 setTheme({ cssVars: { light: { primary: "#111111", secondary: "#222222" } } });
 mount(() => (
-  <Input autoFocus value={`LABEL ${token("primary")} ${token("secondary")}`} style={{ height: 30 }} />
+  <View style={{ flex: 1 }}>
+    <View class="h-10 w-10 bg-primary" />
+    <Input autoFocus value={`LABEL ${token("primary")} ${token("secondary")}`} style={{ height: 30 }} />
+  </View>
 ));
 "##;
+
+/// Runs the window, with no input, until its last drawn frame has a quad
+/// filled with `rgb` (`0xRRGGBB`).
+fn wait_until_painted(cx: &mut VisualTestContext, rgb: u32) {
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let painted = cx.update(|window, _| {
+            window.painted_quads().iter().any(|quad| {
+                quad.background.as_solid().is_some_and(|color| {
+                    let c = gpui::Rgba::from(color);
+                    let channel = |v: f32, shift: u32| ((v * 255.0).round() as u32) << shift;
+                    channel(c.r, 16) | channel(c.g, 8) | channel(c.b, 0) == rgb && c.a == 1.0
+                })
+            })
+        });
+        if painted {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no quad of #{rgb:06x} drawn"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 
 fn the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx: &mut TestAppContext) {
     let code = |label| {
@@ -1426,17 +1456,24 @@ fn the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx: &mut TestA
     let (view, cx) =
         cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
     view.update(cx, |view, _| {
-        view.set_theme_overrides(Some(
-            r##"{ "cssVars": { "light": { "primary": "#ff0000" } } }"##,
-        ))
-        .unwrap();
-        view.load(App::Js(Bundle::source(code("first"))));
+        view.load(App::Js(Bundle::source(code("first"))))
     });
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "first #111111ff #222222ff");
+    wait_until_painted(cx, 0x111111);
+    // Given to the running app, they are drawn with no input.
+    view.update(cx, |view, cx| {
+        view.set_theme_overrides(
+            Some(r##"{ "cssVars": { "light": { "primary": "#ff0000" } } }"##),
+            cx,
+        )
+        .unwrap();
+    });
+    wait_until_painted(cx, 0xff0000);
     wait_for(&view, cx, "first #ff0000ff #222222ff");
     // A file that does not parse changes nothing.
-    view.update(cx, |view, _| {
-        assert!(view.set_theme_overrides(Some("{")).is_err());
+    view.update(cx, |view, cx| {
+        assert!(view.set_theme_overrides(Some("{"), cx).is_err());
     });
     // An app loaded again starts with them.
     view.update(cx, |view, _| {
@@ -1444,7 +1481,9 @@ fn the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx: &mut TestA
     });
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "again #ff0000ff #222222ff");
-    view.update(cx, |view, _| view.set_theme_overrides(None).unwrap());
+    wait_until_painted(cx, 0xff0000);
+    view.update(cx, |view, cx| view.set_theme_overrides(None, cx).unwrap());
+    wait_until_painted(cx, 0x111111);
     wait_for(&view, cx, "again #111111ff #222222ff");
 }
 

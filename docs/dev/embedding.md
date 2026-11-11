@@ -256,7 +256,7 @@
   in classes included, stay as they are. The layout direction stays the system's language's.
 - **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme
   tokens (brand colors, `radius`, ...) at run time: Rust `AppView::set_theme_overrides(Option<&str>)` (AppKit, GTK,
-  Win32, GPUI; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
+  Win32; GPUI's takes `cx` as well; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
   `NshView.setThemeOverrides`. The value is a theme file in the format of `nsh.json`'s `"theme"` (shadcn's `cssVars`:
   `theme`, `light` and `dark` sections, values as CSS writes them; `components.md` "The theme"); it is parsed on the
   calling thread by `nsh_base::theme_overrides`, which keeps only the tokens the file sets (a `var()` it names and

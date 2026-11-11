@@ -517,10 +517,15 @@ impl AppView {
     /// ([`AppView::set_theme`]) they win over that one's tokens instead;
     /// each stays when the other changes. `None` gives the app its own
     /// theme back. Fails, changing nothing, on a file that does not parse.
-    pub fn set_theme_overrides(&self, json: Option<&str>) -> Result<(), ThemeError> {
+    pub fn set_theme_overrides(
+        &self,
+        json: Option<&str>,
+        cx: &mut GpuiApp,
+    ) -> Result<(), ThemeError> {
         let tokens = json.map(nsh_base::theme_overrides).transpose()?;
         *self.surface.host_overrides.borrow_mut() = tokens;
         self.surface.host_tokens_changed();
+        crate::rt::flush(cx);
         Ok(())
     }
 
