@@ -541,7 +541,13 @@ export function BlockEditorDemo() {
   // above the keymap holds them, so no other binding takes them first.
   const keys = new RichEditorPlugin("blockKeys");
   const blockKeys = defineExtension({ name: "blockKeys", priority: 900, addProseMirrorPlugins: () => [keys] });
-  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, columns, column, slash, blockKeys], content: DOC, format: "markdown" });
+  // A run of whole blocks, as Notion selects them: Escape starts it at the caret's block and Shift-Up / Down grow
+  // it over the siblings; Backspace deletes the run. Its keys are taken only while a run is selected, so
+  // Shift-arrows select text the rest of the time.
+  const rangeKeys = new RichEditorPlugin("blockRange");
+  const blockRange = defineExtension({ name: "blockRange", priority: 950, addProseMirrorPlugins: () => [rangeKeys] });
+  const range = signal<{ anchor: number; head: number } | null>(null);
+  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, columns, column, slash, blockRange, blockKeys], content: DOC, format: "markdown" });
   // What the parts read: the revision follows every change of the document and the selection.
   const revision = signal(editor.revision);
 
@@ -648,6 +654,7 @@ export function BlockEditorDemo() {
       seen = 0;
     }
     const sel = editor.selection;
+    if (range() && sel.type !== "node") selectRange(null);
     // A range of text, or the whole document (Select All): the toolbar shows and the handle goes.
     if (!(sel.type === "all" || (sel.type === "text" && sel.anchor !== sel.head))) coloring.set(false);
     selected.set((sel.type === "all" || (sel.type === "text" && sel.anchor !== sel.head)) && !editor.isActive("codeBlock"));
@@ -667,6 +674,7 @@ export function BlockEditorDemo() {
       joining = false;
       depth = editor.undoDepth;
     }
+    if (range()) selectRange(null);
     if (dragging()) return;
     handle.set(null);
     menu.set(null);
@@ -749,6 +757,40 @@ export function BlockEditorDemo() {
     editor.focus();
     return moved;
   };
+  /** The run's ends in the document: from its first block's start to its last block's end. */
+  const span = (r: { anchor: number; head: number }) => ({ from: Math.min(r.anchor, r.head), to: blockEnd(editor, Math.max(r.anchor, r.head)) });
+  /** Selects the run `r` (`null`: none) and tints its blocks. */
+  const selectRange = (r: { anchor: number; head: number } | null) => {
+    range.set(r);
+    rangeKeys.capturing = r !== null;
+    const tints = [];
+    if (r) {
+      const { from, to } = span(r);
+      for (let pos = from; pos < to; ) {
+        const node = editor.nodeAt(pos) as DocNode | null;
+        if (!node) break;
+        const size = nodeSize(node);
+        tints.push({ from: pos, to: pos + size, kind: "node" as const, attrs: { class: "bg-primary/10 rounded-md" } });
+        pos += size;
+      }
+    }
+    editor.setDecorations("blockRange", tints);
+  };
+  rangeKeys.captureKeys(["Shift-ArrowDown", "Shift-ArrowUp", "Backspace", "Delete"], (key) => {
+    const r = range();
+    if (!r) return;
+    if (key === "Backspace" || key === "Delete") {
+      const { from, to } = span(r);
+      selectRange(null);
+      editor.run(deleteRange({ from, to }));
+      return;
+    }
+    const around = neighbors(editor, r.head);
+    if (!around) return;
+    const head = key === "Shift-ArrowDown" ? (around.after === null ? null : r.head + around.size) : around.before;
+    if (head !== null) selectRange({ anchor: r.anchor, head });
+  });
+
   /** The block the caret is in (a list's item, else the top-level block). */
   const caretBlock = () => {
     const head = editor.selection.head;
@@ -759,7 +801,10 @@ export function BlockEditorDemo() {
     // Escape selects the caret's block whole, as in Notion: Backspace then deletes it, and typing replaces it.
     if (key === "Escape") {
       const block = caretBlock();
-      if (block !== null && editor.selection.type !== "node") editor.run(setNodeSelection(block));
+      if (block !== null && editor.selection.type !== "node") {
+        editor.run(setNodeSelection(block));
+        selectRange({ anchor: block, head: block });
+      }
       return;
     }
     const start = caretBlock();

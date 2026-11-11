@@ -414,3 +414,21 @@ test("the toolbar colors the selection's text, and Default takes the color off",
   await app.press("role:button[Default color]");
   expect(app.spanStyle(`text:${REVIEW}`).color).toBe(plain);
 });
+
+test("Escape then Shift-Down selects a run of blocks, which Backspace deletes; Shift-arrows select text otherwise", async () => {
+  const app = await openDemo();
+  await app.press("Confirm the launch date");
+  await app.keyboard.press("escape");
+  await app.keyboard.press("shift+down");
+  await app.keyboard.press("shift+down");
+  // Back up one: the run is the first two items.
+  await app.keyboard.press("shift+up");
+  await app.keyboard.press("backspace");
+  await app.waitFor("text:Brief the regional leads", { state: "gone" });
+  expect(app.count("text:Confirm the launch date")).toBe(0);
+  expect(app.shows("text:Open the beta to five percent of traffic")).toBe(true);
+  // With a caret, Shift-Down selects text: the toolbar shows.
+  await app.press(REVIEW);
+  await app.keyboard.press("shift+down");
+  await app.waitFor("role:toolbar[Format]");
+});
