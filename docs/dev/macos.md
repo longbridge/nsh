@@ -309,7 +309,10 @@ the agent targets (the main one or a window of the app's own), keys to the windo
 the background never activates, so AppKit makes none of its windows key: the window that would be, the one last
 shown, focused or pressed, is the focused one in its state and gets the keys), a view's bounds are in its own window's content, a window's state is read
 from it as it would be reported, pressing a window's close button clicks its standard close button, so the
-window's close policy answers it; a window's screenshot is its content, as the main window's, and dark mode is the
+window's close policy answers it; a window's screenshot is its content, as the main window's, a viewport's size is
+the content size, the window then moved only as far as it takes to stay within its display's visible frame (a larger
+one keeps its top left corner in it; grown from that corner it could reach past the edge, where a screenshot shows
+nothing), and dark mode is the
 application's appearance, which every window follows but one with a color scheme of its own. `dev.rs`'s `Tester` attaches
 the agent's model to the surface when the server says it runs a test session, before the first bundle. A step ends
 once the app is quiet and no native animation runs (`Surface::animating`: the animation graph, the platform's own
