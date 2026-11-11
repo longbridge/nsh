@@ -35,8 +35,17 @@ struct Entry {
     inline: bool,
 }
 
+/// How deep submenus nest: past it, an entry's `items` are dropped, so a
+/// prop nested without end cannot exhaust the main thread's stack while the
+/// menu is parsed and made.
+const MAX_DEPTH: usize = 8;
+
 /// The entries of an `items` prop; anything but objects is skipped.
 fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
+    parse_level(items, 0)
+}
+
+fn parse_level(items: &[JsonValue], depth: usize) -> Vec<Entry> {
     items
         .iter()
         .filter_map(JsonValue::as_object)
@@ -55,11 +64,16 @@ fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
                 checked: item.get("checked").and_then(JsonValue::as_bool),
                 disabled: flag("disabled"),
                 destructive: flag("destructive"),
-                items: parse_items(
-                    item.get("items")
-                        .and_then(JsonValue::as_array)
-                        .map_or(&[], |v| v),
-                ),
+                items: if depth + 1 < MAX_DEPTH {
+                    parse_level(
+                        item.get("items")
+                            .and_then(JsonValue::as_array)
+                            .map_or(&[], |v| v),
+                        depth + 1,
+                    )
+                } else {
+                    Vec::new()
+                },
                 inline: flag("inline"),
             }
         })
@@ -261,7 +275,22 @@ pub(crate) fn factory() -> ComponentFactory {
 mod tests {
     use serde_json::json;
 
-    use super::{Entry, parse_items};
+    use super::{Entry, MAX_DEPTH, parse_items};
+
+    #[test]
+    fn submenus_past_the_depth_limit_are_dropped() {
+        let mut items = json!([{ "id": "leaf", "label": "Leaf" }]);
+        for level in 0..MAX_DEPTH * 4 {
+            items = json!([{ "id": format!("m{level}"), "label": "More", "items": items }]);
+        }
+        let mut entries = parse_items(items.as_array().unwrap());
+        let mut depth = 0;
+        while let Some(entry) = entries.first() {
+            depth += 1;
+            entries = entry.items.clone();
+        }
+        assert_eq!(depth, MAX_DEPTH);
+    }
 
     #[test]
     fn entries_carry_sections_submenus_and_states() {
