@@ -7751,6 +7751,45 @@ fn pressed_current_and_level_decode_from_js() {
     }
 }
 
+/// `accessibilityDescription` from JS, and what platforms with one place
+/// for everything read after the name get from it.
+#[test]
+fn a_description_decodes_and_joins_the_hint() {
+    use crate::{
+        Accessibility, AccessibilityProp,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |v: serde_json::Value| {
+        AccessibilityProp::decode("accessibilityDescription", &J(v), &mut HostCx::default())
+            .expect("decodes")
+            .expect("a value")
+    };
+    assert_eq!(
+        decode(serde_json::json!("This can't be undone.")),
+        AccessibilityProp::Description(Some("This can't be undone.".into()))
+    );
+    assert_eq!(
+        decode(serde_json::Value::Null),
+        AccessibilityProp::Description(None)
+    );
+    let mut a = Accessibility::default();
+    assert_eq!(a.help_text(None), None);
+    a.description = Some("The whole album".into());
+    assert_eq!(a.help_text(None).as_deref(), Some("The whole album"));
+    a.hint = Some("Plays it".into());
+    assert_eq!(
+        a.help_text(None).as_deref(),
+        Some("The whole album. Plays it")
+    );
+    assert_eq!(
+        a.help_text(Some("3 of 10")).as_deref(),
+        Some("3 of 10. The whole album. Plays it")
+    );
+    // An empty one adds nothing.
+    a.description = Some("".into());
+    assert_eq!(a.help_text(None).as_deref(), Some("Plays it"));
+}
+
 /// The new accessibility props go with the view's props, and nothing is
 /// sent for a view that sets none of them.
 #[test]

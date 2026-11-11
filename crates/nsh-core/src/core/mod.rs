@@ -5539,6 +5539,7 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::Accessible(v) => a.accessible = v,
                     AccessibilityProp::Label(v) => a.label = v,
                     AccessibilityProp::Hint(v) => a.hint = v,
+                    AccessibilityProp::Description(v) => a.description = v,
                     AccessibilityProp::Role(v) => a.role = v,
                     AccessibilityProp::State(v) => a.state = v,
                     AccessibilityProp::Value(v) => a.value = v,

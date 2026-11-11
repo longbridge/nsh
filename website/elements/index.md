@@ -576,6 +576,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessible` | `.accessible(..)` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `.label(..)` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | More about the element than its name, read after it (a dialog's message). |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |

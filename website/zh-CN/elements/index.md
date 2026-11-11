@@ -492,6 +492,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessible` | `.accessible(..)` | `boolean` | 视图对辅助技术而言是一个整体元素，子元素不再单独暴露。 |
 | `accessibilityLabel` | `.label(..)` | `string` | 屏幕阅读器朗读的内容。没有标签的视图会朗读其中的文本。 |
 | `accessibilityHint` | `.hint(..)` | `string` | 激活该元素会发生什么。 |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | 名字之外对元素的说明，在名字之后朗读（对话框的说明文字）。 |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | 辅助技术报告的状态（`checked` 和 `pressed` 可以是 `"mixed"`；`current` 为 `true` 或 `"page"`、`"step"`、`"location"`、`"date"`、`"time"`）。 |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |

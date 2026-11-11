@@ -249,6 +249,10 @@ pub struct Accessibility {
     pub label: Option<Arc<str>>,
     /// `accessibilityHint`.
     pub hint: Option<Arc<str>>,
+    /// `accessibilityDescription`: more about the element than its name
+    /// (ARIA's `aria-description`): a dialog's message, what a field
+    /// expects.
+    pub description: Option<Arc<str>>,
     /// `role`.
     pub role: AccessibilityRole,
     /// `accessibilityState`.
@@ -272,6 +276,29 @@ impl Accessibility {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+
+    /// What a platform with one place for everything read after the name
+    /// (AT-SPI's and AccessKit's description, AppKit's help, UIKit's
+    /// hint) gets: `value_text` (a value it reads nowhere else), the
+    /// description and the hint, in that order, each a sentence of its
+    /// own; `None` when there is none of them.
+    pub fn help_text(&self, value_text: Option<&str>) -> Option<String> {
+        let mut parts = [
+            value_text,
+            self.description.as_deref(),
+            self.hint.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.is_empty());
+        let first = parts.next()?;
+        let mut out = first.to_owned();
+        for part in parts {
+            out.push_str(". ");
+            out.push_str(part);
+        }
+        Some(out)
+    }
 }
 
 /// One accessibility property, as set from JS.
@@ -287,6 +314,10 @@ pub enum AccessibilityProp {
     /// `accessibilityHint`: what activating the element does.
     #[prop(js = "accessibilityHint")]
     Hint(Option<Arc<str>>),
+    /// `accessibilityDescription`: more about the element than its name,
+    /// read after it: a dialog's message, what a field expects.
+    #[prop(js = "accessibilityDescription")]
+    Description(Option<Arc<str>>),
     /// `role`: what the element is.
     #[prop(js = "role", with = crate::js::host_values::role, reset = AccessibilityProp::Role(AccessibilityRole::None))]
     Role(AccessibilityRole),
