@@ -533,7 +533,7 @@ function MenuRow(props: { icon: LucideIconName; label: string; tone?: string; on
 
 // --- The editor ----------------------------------------------------------------
 
-/** A block's handle: `x` is the editor's margin it stands in, `y` the block's first line; `left` and `width` the block's own box. */
+/** A block's handle, in the content box's points (it is in the editor's layer over the document, so it scrolls with its block): `x` is the margin it stands in, `y` the block's first line; `left` and `width` the block's own box. */
 type Handle = { start: number; x: number; y: number; left: number; width: number };
 
 export function BlockEditorDemo() {
@@ -680,19 +680,6 @@ export function BlockEditorDemo() {
     menu.set(null);
   });
 
-  // The handle is placed in page points, so it does not move with the document. While one shows, its block is
-  // watched: once it has moved (a scroll by wheel, keys or the bar), the handle goes to the block that is now
-  // under the pointer, as a hover does in a browser; with the pointer elsewhere it goes away.
-  const watch = setInterval(() => {
-    const h = handle();
-    if (!h || dragging() || menu()) return;
-    const rect = editor.pageNodeRect(h.start) as Rect | null;
-    if (rect && rect.y === h.y) return;
-    handle.set(null);
-    if (lastPointer.x >= 0) place(lastPointer);
-  }, 32);
-  cleanup(() => clearInterval(watch));
-
   /** The pointer over the editor: the handle goes to the block under it (a list's item, else the top-level block). */
   const onMove = (e: { pagePosition: { x: number; y: number } }) => {
     // The menu's rows hear a move before this does: they compare with where the pointer was.
@@ -706,8 +693,8 @@ export function BlockEditorDemo() {
     if (pos === null) return;
     const target = handleTarget(editor, pos);
     if (!target) return;
-    const rect = editor.pageNodeRect(target.start) as Rect | null;
-    const top = (target.top === target.start ? rect : (editor.pageNodeRect(target.top) as Rect | null)) ?? rect;
+    const rect = editor.nodeRect(target.start) as Rect | null;
+    const top = (target.top === target.start ? rect : (editor.nodeRect(target.top) as Rect | null)) ?? rect;
     if (!rect || !top) return;
     const now = handle();
     if (!now || now.start !== target.start || now.y !== rect.y || now.x !== top.x) handle.set({ start: target.start, x: top.x, y: rect.y, left: rect.x, width: rect.width });
@@ -828,9 +815,10 @@ export function BlockEditorDemo() {
   };
   const turnInto = (h: Handle, block: Block) => {
     menu.set(null);
-    // The caret goes into the block's first line (a point just inside it), then the block turns.
-    const inside = editor.posAtPageCoords({ x: h.left + Math.min(32, h.width / 2), y: h.y + 8 });
-    if (inside !== null) editor.run(setTextSelection(inside));
+    // The caret goes into the block's first line (past the starts of the blocks around it), then the block turns.
+    let inside = h.start + 1;
+    for (let node = editor.nodeAt(h.start) as DocNode | null; node?.content?.[0] && node.content[0].text == null; node = node.content[0]) inside += 1;
+    editor.run(setTextSelection(inside));
     convert(block);
     editor.focus();
   };
@@ -868,6 +856,43 @@ export function BlockEditorDemo() {
     { icon: "undo-2", label: "Undo", run: () => void editor.run(command("undo")) },
     { icon: "redo-2", label: "Redo", run: () => void editor.run(command("redo")) },
   ];
+
+  /** The editor's layer over the document: the handle of the block under the pointer, in the margin beside it. */
+  const layer = () => {
+    const h = handle();
+    if (!pointer || !h || open() || selected()) return undefined;
+    return (
+      <View style={{ position: "absolute", left: h.x - 58, top: h.y }}>
+        <PopIn side="right">
+          <View testID="block-handle" style={{ flexDirection: "row", alignItems: "center", gap: 2, height: 28 }}>
+            <Button
+              accessibilityLabel="Add a block below"
+              onPress={() => addBelow(h)}
+              {...feedback()}
+              style={{ width: 24, height: 24, borderRadius: 6, alignItems: "center", justifyContent: "center" }}
+            >
+              <LucideIcon name="plus" size={16} tint={colors.faint} />
+            </Button>
+            <View
+              role="button"
+              accessibilityLabel="Drag to move, press for the menu"
+              onPress={() => openMenu(h)}
+              {...feedback()}
+              style={{ width: 24, height: 24, borderRadius: 6, alignItems: "center", justifyContent: "center", cursor: "grab" }}
+              {...grip(h)}
+            >
+              <LucideIcon name="grip-vertical" size={16} tint={colors.faint} />
+            </View>
+          </View>
+        </PopIn>
+      </View>
+    );
+  };
+  /** Opens the block's menu under its handle: where the block is on the page now. */
+  const openMenu = (h: Handle) => {
+    const page = editor.pageNodeRect(h.start) as Rect | null;
+    if (page) menu.set({ ...h, x: page.x - (h.left - h.x), y: page.y });
+  };
 
   /** What floats by the caret or the selection: the `/` menu, else the toolbar. */
   const bubble = () => {
@@ -976,6 +1001,7 @@ export function BlockEditorDemo() {
           bubbleMenu={bubble()}
           bubbleMenuPlacement={open() ? "bottom" : "top"}
           bubbleMenuOffset={6}
+          contentOverlay={layer()}
         />
         <If when={!pointer}>
           <View testID="block-bar" role="toolbar" accessibilityLabel="Block" style={{ borderTopWidth: 1, borderColor: colors.line }}>
@@ -996,37 +1022,6 @@ export function BlockEditorDemo() {
               </View>
             </Scroll>
           </View>
-        </If>
-        <If when={pointer && handle() && !open() && !selected()}>
-          {(() => {
-            const h = () => handle()!;
-            return (
-              <Overlay anchor={{ x: h().x, y: h().y }} placement="left" align="start" offset={6}>
-                <PopIn side="right">
-                <View testID="block-handle" style={{ flexDirection: "row", alignItems: "center", gap: 2, height: 28 }}>
-                  <Button
-                    accessibilityLabel="Add a block below"
-                    onPress={() => addBelow(h())}
-                    {...feedback()}
-                    style={{ width: 24, height: 24, borderRadius: 6, alignItems: "center", justifyContent: "center" }}
-                  >
-                    <LucideIcon name="plus" size={16} tint={colors.faint} />
-                  </Button>
-                  <View
-                    role="button"
-                    accessibilityLabel="Drag to move, press for the menu"
-                    onPress={() => menu.set(h())}
-                    {...feedback()}
-                    style={{ width: 24, height: 24, borderRadius: 6, alignItems: "center", justifyContent: "center", cursor: "grab" }}
-                    {...grip(h())}
-                  >
-                    <LucideIcon name="grip-vertical" size={16} tint={colors.faint} />
-                  </View>
-                </View>
-                </PopIn>
-              </Overlay>
-            );
-          })()}
         </If>
         <If when={ghost()}>
           {(g) => (
