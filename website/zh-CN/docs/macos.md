@@ -17,7 +17,7 @@ macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可�
 
 ## 环境要求
 
-- 运行应用的机器需要 **macOS 14** 及以上。
+- 运行应用的机器需要 **macOS 14** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)）。
 - Xcode 命令行工具（`xcode-select --install`），用于构建 Rust 应用的 runner、从源码构建 NSH 的 macOS 运行时以及打包应用
   （`codesign`、`sips`）。在 Mac 上用 `cargo xtask dist` 制作的发行版把 TSX 应用的运行时放在 `runtime/macos/` 中。
 
