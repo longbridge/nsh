@@ -184,7 +184,7 @@ jobs:
       # Each optional feature alone, so that none leans on another.
       - name: Check each optional feature alone
         run: |
-          for feature in shader editor rich-editor plot highlight math zlib crypto websocket updater; do
+          for feature in shader editor rich-editor plot highlight math zlib crypto websocket updater svg net; do
             cargo clippy -p nsh-linux-app --no-default-features --features "$feature" -- -D warnings
           done
 
