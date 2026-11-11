@@ -14,6 +14,7 @@ import {
   insertContentAt,
   liftListItem,
   setNode,
+  setNodeAttribute,
   setNodeSelection,
   setTextSelection,
   sinkListItem,
@@ -113,6 +114,16 @@ const BLOCKS: Block[] = [
       if (row) editor.run(setTextSelection(row.start + 3));
     },
   },
+  {
+    id: "toggle", group: "Insert", title: "Toggle", hint: "Hide and show what is inside", icon: "chevron-right", keywords: "collapse fold details expand",
+    // A title and a body of one paragraph, the caret in the title (past the toggle's and the title's starts).
+    apply: (editor) => {
+      editor.run(insertContent({ type: "toggle", content: [{ type: "toggleTitle" }, { type: "toggleBody", content: [{ type: "paragraph" }] }] }));
+      const head = editor.selection.head;
+      const toggle = head == null ? undefined : blocksAround(editor, head).find((b) => b.type === "toggle");
+      if (toggle) editor.run(setTextSelection(toggle.start + 2));
+    },
+  },
   { id: "table", group: "Insert", title: "Table", hint: "Rows and columns", icon: "table", keywords: "grid", apply: command("insertTable", { rows: 3, cols: 3, withHeaderRow: true }) },
 ];
 
@@ -160,6 +171,29 @@ const TEXT_COLORS: { name: string; label: string; class: string }[] = [
   { name: "blue", label: "Blue", class: "text-sky-500" },
   { name: "purple", label: "Purple", class: "text-violet-500" },
 ];
+
+/**
+ * A toggle, as Notion's: a title and a body that hides. The body carries `open` (a class per value hides it); the
+ * arrow that turns it is the app's, in the editor's layer over the document.
+ */
+const toggle = defineExtension({
+  name: "toggle",
+  node: { content: "toggleTitle toggleBody", group: "block", defining: true, parseDOM: [{ tag: "div[data-toggle]" }], toDOM: ["div", { "data-toggle": "" }, 0] },
+});
+const toggleTitle = defineExtension({
+  name: "toggleTitle",
+  node: { content: "inline*", defining: true, parseDOM: [{ tag: "div[data-toggle-title]" }], toDOM: ["div", { "data-toggle-title": "" }, 0] },
+});
+const toggleBody = defineExtension({
+  name: "toggleBody",
+  node: {
+    content: "block+",
+    defining: true,
+    attrs: { open: { default: true } },
+    parseDOM: [{ tag: "div[data-toggle-body]" }],
+    toDOM: ["div", { "data-toggle-body": "" }, 0],
+  },
+});
 
 /** `/` opens the blocks: Tiptap's Suggestion with its own keys. It ranks above the keymap, so Enter picks before it splits a paragraph. */
 const slash = defineExtension({
@@ -390,6 +424,19 @@ function Sample(props: { id: string }) {
           </View>
         </View>
       );
+    case "toggle":
+      return (
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <LucideIcon name="chevron-right" size={12} tint={colors.muted} />
+            <Bar width={110} strong />
+          </View>
+          <View style={{ paddingLeft: 20, gap: 8 }}>
+            <Bar width={130} />
+            <Bar width={96} />
+          </View>
+        </View>
+      );
     case "divider":
       return (
         <View style={{ gap: 10 }}>
@@ -547,7 +594,7 @@ export function BlockEditorDemo() {
   const rangeKeys = new RichEditorPlugin("blockRange");
   const blockRange = defineExtension({ name: "blockRange", priority: 950, addProseMirrorPlugins: () => [rangeKeys] });
   const range = signal<{ anchor: number; head: number } | null>(null);
-  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, columns, column, slash, blockRange, blockKeys], content: DOC, format: "markdown" });
+  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, columns, column, toggle, toggleTitle, toggleBody, slash, blockRange, blockKeys], content: DOC, format: "markdown" });
   // What the parts read: the revision follows every change of the document and the selection.
   const revision = signal(editor.revision);
 
@@ -857,8 +904,50 @@ export function BlockEditorDemo() {
     { icon: "redo-2", label: "Redo", run: () => void editor.run(command("redo")) },
   ];
 
-  /** The editor's layer over the document: the handle of the block under the pointer, in the margin beside it. */
-  const layer = () => {
+  // The toggles of the document's top level, where each is in the content box: their arrows stand in the layer.
+  // Read again a moment after each change, once the document is laid out anew.
+  const settled = signal(0);
+  editor.on("update", () => void setTimeout(() => settled.set(settled() + 1), 48));
+  const toggles = () => {
+    revision();
+    settled();
+    const found: { pos: number; body: number; open: boolean; x: number; y: number }[] = [];
+    let pos = 0;
+    for (const block of ((editor.doc as DocNode).content ?? []) as (DocNode & { attrs?: { open?: boolean } })[]) {
+      if (block.type === "toggle" && block.content?.[1]) {
+        const rect = editor.nodeRect(pos) as Rect | null;
+        const body = block.content[1] as DocNode & { attrs?: { open?: boolean } };
+        if (rect) found.push({ pos, body: pos + 1 + nodeSize(block.content[0]), open: body.attrs?.open !== false, x: rect.x, y: rect.y });
+      }
+      pos += nodeSize(block);
+    }
+    return found;
+  };
+  const flip = (t: { body: number; open: boolean }) => {
+    editor.run(setNodeAttribute(t.body, "open", !t.open));
+  };
+
+  /** The editor's layer over the document: the toggles' arrows, and the handle of the block under the pointer in the margin beside it. */
+  const layer = () => (
+    <>
+      <Each of={toggles()}>
+        {(t) => (
+          <Button
+            accessibilityLabel={t().open ? "Collapse" : "Expand"}
+            onPress={() => flip(t())}
+            {...feedback()}
+            style={{ position: "absolute", left: t().x, top: t().y + 2, width: 22, height: 22, borderRadius: 5, alignItems: "center", justifyContent: "center" }}
+          >
+            <View style={{ transform: [{ rotate: t().open ? "90deg" : "0deg" }], transitionProperty: "transform", transitionDuration: 150 }}>
+              <LucideIcon name="chevron-right" size={14} tint={colors.muted} />
+            </View>
+          </Button>
+        )}
+      </Each>
+      {handleLayer()}
+    </>
+  );
+  const handleLayer = () => {
     const h = handle();
     if (!pointer || !h || open() || selected()) return undefined;
     return (
@@ -994,7 +1083,9 @@ export function BlockEditorDemo() {
               highlight: "bg-primary/30 rounded",
               ...Object.fromEntries(TEXT_COLORS.map((c) => [`textStyle[color=${c.name}]`, c.class])),
             },
-            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3", columns: "flex-row gap-6", column: "flex-1 min-w-0 gap-3" },
+            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3", columns: "flex-row gap-6", column: "flex-1 min-w-0 gap-3",
+              // A toggle leaves room for its arrow; a closed body is not shown.
+              toggle: "gap-1 pl-7", toggleTitle: "leading-relaxed font-medium", toggleBody: "gap-3", "toggleBody[open=false]": "hidden" },
             selectedNode: "bg-primary/10 rounded-md",
             dropCursor: "bg-primary rounded-full",
           }}

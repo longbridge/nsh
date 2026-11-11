@@ -27,7 +27,7 @@ test("/ opens the blocks and typing narrows them", async () => {
   await app.type("label:Document", "/");
   await app.waitFor("role:listbox[Blocks]");
   expect(app.shows("text:Heading 1")).toBe(true);
-  expect(app.count("role:option")).toBe(13);
+  expect(app.count("role:option")).toBe(14);
   await app.type("label:Document", "list");
   // Three lists match: bulleted, numbered, to-do.
   await app.waitFor("role:option[Divider]", { state: "gone" });
@@ -205,8 +205,8 @@ test("the arrows keep the highlighted block in view in a list taller than the me
   await newLine(app);
   await app.type("label:Document", "/");
   await app.waitFor("role:listbox[Blocks]");
-  // Table is the last of thirteen blocks, below what the menu shows at first.
-  for (let i = 0; i < 12; i++) await app.keyboard.press("down");
+  // Table is the last of fourteen blocks, below what the menu shows at first.
+  for (let i = 0; i < 13; i++) await app.keyboard.press("down");
   expect(app.shows("role:option[Table]")).toBe(true);
   await app.keyboard.press("enter");
   await app.waitFor("role:listbox[Blocks]", { state: "gone" });
@@ -431,4 +431,25 @@ test("Escape then Shift-Down selects a run of blocks, which Backspace deletes; S
   await app.press(REVIEW);
   await app.keyboard.press("shift+down");
   await app.waitFor("role:toolbar[Format]");
+});
+
+test("a toggle hides and shows its body with its arrow", async () => {
+  const app = await openDemo();
+  await newLine(app);
+  await app.type("label:Document", "/toggle");
+  await app.keyboard.press("enter");
+  await app.waitFor("role:listbox[Blocks]", { state: "gone" });
+  await app.type("label:Document", "Details");
+  await app.keyboard.press("right");
+  await app.type("label:Document", "Hidden words");
+  await app.waitFor("text:Hidden words");
+  // What the screen shows (a hidden view is still made, so selectors find it).
+  const shown = (text: string) => app.texts().includes(text);
+  await app.press("role:button[Collapse]");
+  await app.waitFor("role:button[Expand]");
+  expect(shown("Hidden words")).toBe(false);
+  expect(shown("Details")).toBe(true);
+  await app.press("role:button[Expand]");
+  await app.waitFor("role:button[Collapse]");
+  expect(shown("Hidden words")).toBe(true);
 });
