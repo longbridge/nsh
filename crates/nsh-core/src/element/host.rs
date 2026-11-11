@@ -1425,9 +1425,13 @@ pub enum Orientation {
     PortraitUpsideDown,
     /// Either landscape.
     Landscape,
-    /// Landscape, the top on the left.
+    /// Landscape with the device turned clockwise from upright, its home
+    /// side on the left: UIKit's `landscapeLeft`, Android's reverse
+    /// landscape.
     LandscapeLeft,
-    /// Landscape, the top on the right.
+    /// Landscape with the device turned counterclockwise from upright, its
+    /// home side on the right: UIKit's `landscapeRight`, Android's
+    /// landscape.
     LandscapeRight,
 }
 
