@@ -2166,3 +2166,59 @@ fn env_in_arbitrary_spacing() {
     );
     assert_eq!(list.unknown().len(), 5, "{:?}", list.unknown());
 }
+
+/// `bg-[image:…]`: Tailwind's type hint for an arbitrary background image.
+/// The gradient after it is drawn as the one written without the hint.
+mod bg_image_hint {
+    use super::*;
+
+    fn images(classes: &str) -> Vec<crate::effects::Gradient> {
+        styled(classes)
+            .view
+            .effects
+            .map(|e| e.background_images.clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_hinted_gradient_is_the_gradient() {
+        for gradient in [
+            "linear-gradient(#000,#fff)",
+            "linear-gradient(45deg,#f00,#00f)",
+            "linear-gradient(to_right,#ff0000,#0000ff_60%)",
+            "radial-gradient(circle_at_center,#ff0000,#0000ff)",
+            "conic-gradient(from_45deg,#ff0000,#0000ff)",
+            "repeating-linear-gradient(45deg,#000_0,#fff_10px)",
+            "linear-gradient(currentColor,#0000ff)",
+        ] {
+            let hinted = images(&format!("bg-[image:{gradient}]"));
+            assert!(!hinted.is_empty(), "{gradient}");
+            assert_eq!(hinted, images(&format!("bg-[{gradient}]")), "{gradient}");
+        }
+        // Under a variant, and over a color of the same list.
+        let theme = themed();
+        let list = parse(
+            &theme,
+            "bg-red-500 hover:bg-[image:linear-gradient(#000,#fff)]",
+        );
+        assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    }
+
+    #[test]
+    fn what_is_no_gradient_stays_unknown() {
+        let theme = themed();
+        for class in [
+            "bg-[image:#ff0000]",
+            "bg-[image:url(a.png)]",
+            "bg-[image:linear-gradient(nonsense)]",
+            "bg-[image:]",
+        ] {
+            assert_eq!(parse(&theme, class).unknown().len(), 1, "{class}");
+        }
+        // A color keeps its own hint.
+        assert_eq!(
+            styled("bg-[color:#ff0000]").view.background_color,
+            Color(0xff00_00ff)
+        );
+    }
+}
