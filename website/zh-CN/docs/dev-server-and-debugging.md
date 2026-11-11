@@ -189,8 +189,9 @@ xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.note
 ```
 
 错误是统一日志里的错误（谓词中写 `messageType == error`），警告以 `WARN` 开头；超过约 1 KB 的一行会接着写入后面的几条。
-从终端启动的 Mac 应用还会把日志打印在终端里。嵌入了 `NativeShell.xcframework` 的 iOS 应用以它自己的 bundle identifier
-记录同样的日志，由 Xcode 运行时 Xcode 控制台也会显示。
+Mac 应用还会把日志写到它的标准错误所指向的地方：启动它的终端、文件（`2> app.log`、`open --stderr app.log`、launchd 的
+`StandardErrorPath`）或管道。嵌入了 `NativeShell.xcframework` 的 iOS 应用以它自己的 bundle identifier 记录同样的日志，由 Xcode
+运行时 Xcode 控制台也会显示，scheme 中设了 `OS_ACTIVITY_MODE=disable` 时也一样。
 
 Android 应用写入 logcat（`adb logcat -s nsh`），Windows 应用写入调试器输出（`OutputDebugString`，DebugView 和 Visual
 Studio 会显示），Linux 应用写入标准错误。

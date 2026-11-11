@@ -18,11 +18,14 @@
 //!   can be; a NUL in it is written `\0`.
 //! - What is logged is the runners' rule: warnings, errors and the app's `js`
 //!   lines, everything from info up in development.
-//! - Lines also go to stderr where someone reads it: always when run by
-//!   `nsh run`, and from a shell (stderr a terminal) unless a debugger's
-//!   console shows the log already: Xcode streams it into its console (Xcode
-//!   15 on, which sets `IDE_DISABLED_OS_ACTIVITY_DT_MODE`) or has it copied to
-//!   stderr (`OS_ACTIVITY_DT_MODE`).
+//! - Lines also go to stderr wherever it goes but `/dev/null`: always when
+//!   run by `nsh run`, and otherwise to a terminal, a file or a pipe
+//!   (`2> app.log`, `open --stderr`, launchd's `StandardErrorPath`) unless a
+//!   debugger's console shows the log already: Xcode streams it into its
+//!   console (Xcode 15 on, which sets `IDE_DISABLED_OS_ACTIVITY_DT_MODE`) or
+//!   has it copied to stderr (`OS_ACTIVITY_DT_MODE`). A scheme that turns the
+//!   process's log off to quiet the system's lines (`OS_ACTIVITY_MODE=disable`)
+//!   gets them on stderr under Xcode too.
 //!
 //! `os_log_with_type` is a C macro, so `os_log.c` wraps it in a function,
 //! compiled by the crate's `build.rs`.
@@ -31,7 +34,9 @@ use std::{
     collections::HashMap,
     ffi::{CStr, CString, c_char, c_void},
     fmt::Write as _,
-    io::{IsTerminal as _, Write as _},
+    io::Write as _,
+    mem::MaybeUninit,
+    os::fd::RawFd,
     ptr::NonNull,
     sync::{Mutex, OnceLock, PoisonError},
 };
@@ -93,8 +98,9 @@ impl Logger {
             everything: options.development,
             stderr: stderr_too(
                 options.development,
-                std::io::stderr().is_terminal(),
+                goes_somewhere(libc::STDERR_FILENO),
                 debugger_console(),
+                log_disabled(),
             ),
             stderr_prefix: options.stderr_prefix,
             subsystem: c_string(subsystem()),
@@ -278,10 +284,41 @@ fn subsystem() -> String {
 }
 
 /// Whether lines go to stderr as well: where `nsh run` shows it
-/// (`development`), or a shell (a `terminal`) unless a debugger's console
-/// shows the log already.
-fn stderr_too(development: bool, terminal: bool, debugger_console: bool) -> bool {
-    development || (terminal && !debugger_console)
+/// (`development`), or wherever else stderr goes (`goes_somewhere`) unless a
+/// debugger's console shows the log already, which it does not while the
+/// process's log is off (`log_disabled`).
+fn stderr_too(
+    development: bool,
+    goes_somewhere: bool,
+    debugger_console: bool,
+    log_disabled: bool,
+) -> bool {
+    development || (goes_somewhere && (log_disabled || !debugger_console))
+}
+
+/// Whether `fd` is open and not `/dev/null`, where launchd points the
+/// stderr of an app opened from Finder, the Dock or the Home screen: a
+/// terminal, a file or a pipe someone may read.
+fn goes_somewhere(fd: RawFd) -> bool {
+    let mut file = MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: `fstat` only writes the buffer, and fills it when it succeeds;
+    // a closed or invalid `fd` makes it fail.
+    if unsafe { libc::fstat(fd, file.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    // SAFETY: `fstat` succeeded, so it filled the buffer.
+    let file = unsafe { file.assume_init() };
+    let mut null = MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: a NUL-terminated path; `stat` only writes the buffer, and fills
+    // it when it succeeds.
+    if unsafe { libc::stat(c"/dev/null".as_ptr(), null.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    // SAFETY: `stat` succeeded, so it filled the buffer.
+    let null = unsafe { null.assume_init() };
+    // The null device, by whichever node it was opened.
+    let device = |st: &libc::stat| st.st_mode & libc::S_IFMT == libc::S_IFCHR;
+    !(device(&file) && device(&null) && file.st_rdev == null.st_rdev)
 }
 
 /// Whether a debugger's console shows the unified log: Xcode's, which
@@ -293,6 +330,13 @@ fn debugger_console() -> bool {
         .any(|name| std::env::var_os(name).is_some())
 }
 
+/// Whether the process's log is off: `OS_ACTIVITY_MODE=disable`, which an
+/// Xcode scheme sets to quiet the system's own lines, and which turns off
+/// this logger's entries as well.
+fn log_disabled() -> bool {
+    std::env::var_os("OS_ACTIVITY_MODE").is_some_and(|mode| mode == "disable")
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -300,7 +344,8 @@ mod tests {
     use log::{Level, Log, Metadata, Record};
 
     use super::{
-        Categories, ENTRY_BYTES, LogType, Logger, c_string, entry, parts, stderr_too, subsystem,
+        Categories, ENTRY_BYTES, LogType, Logger, c_string, entry, goes_somewhere, parts,
+        stderr_too, subsystem,
     };
 
     fn logger(everything: bool) -> Logger {
@@ -395,14 +440,37 @@ mod tests {
 
     #[test]
     fn lines_go_to_stderr_where_someone_reads_it() {
-        // `nsh run`, whatever the environment says; a shell.
-        assert!(stderr_too(true, false, false));
-        assert!(stderr_too(true, true, true));
-        assert!(stderr_too(false, true, false));
+        // `nsh run`, whatever the rest says.
+        assert!(stderr_too(true, false, false, false));
+        assert!(stderr_too(true, true, true, false));
+        // A terminal, a file (`2> app.log`, launchd's `StandardErrorPath`),
+        // a pipe.
+        assert!(stderr_too(false, true, false, false));
         // Finder, the Dock, the Home screen: /dev/null.
-        assert!(!stderr_too(false, false, false));
-        // Xcode's console shows the log already.
-        assert!(!stderr_too(false, true, true));
+        assert!(!stderr_too(false, false, false, false));
+        assert!(!stderr_too(false, false, false, true));
+        // Xcode's console shows the log already...
+        assert!(!stderr_too(false, true, true, false));
+        // ...unless the scheme turned the log off (`OS_ACTIVITY_MODE=disable`).
+        assert!(stderr_too(false, true, true, true));
+    }
+
+    #[test]
+    fn dev_null_is_nowhere() {
+        use std::os::fd::AsRawFd as _;
+
+        let null = std::fs::File::open("/dev/null").unwrap();
+        assert!(!goes_somewhere(null.as_raw_fd()));
+        let path = std::env::temp_dir().join(format!("nsh-unified-log-{}", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        assert!(goes_somewhere(file.as_raw_fd()));
+        drop(file);
+        std::fs::remove_file(&path).unwrap();
+        let (reader, writer) = std::io::pipe().unwrap();
+        assert!(goes_somewhere(writer.as_raw_fd()));
+        drop(reader);
+        // Closed.
+        assert!(!goes_somewhere(-1));
     }
 
     #[test]

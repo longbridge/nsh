@@ -223,9 +223,10 @@ xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.note
 ```
 
 Errors are the log's errors (`messageType == error` in a predicate) and warnings start with `WARN`; a line longer than
-about 1 KB continues in the entries after it. A Mac app started from a terminal prints its lines there too. An iOS app
-embedding `NativeShell.xcframework` logs the same lines under its own bundle identifier, and Xcode's console shows them
-while Xcode runs it.
+about 1 KB continues in the entries after it. A Mac app also prints its lines to its standard error wherever that goes:
+the terminal it was started from, a file (`2> app.log`, `open --stderr app.log`, launchd's `StandardErrorPath`) or a
+pipe. An iOS app embedding `NativeShell.xcframework` logs the same lines under its own bundle identifier, and Xcode's
+console shows them while Xcode runs it, also with `OS_ACTIVITY_MODE=disable` in the scheme.
 
 Android apps log to logcat (`adb logcat -s nsh`), Windows apps to the debugger's output (`OutputDebugString`, which
 DebugView and Visual Studio show) and Linux apps to their standard error.
