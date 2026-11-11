@@ -3151,11 +3151,6 @@ impl<M: TextEngine> Core<M> {
                 }
                 continue;
             }
-            // A web view whose policy is not in force does not navigate,
-            // whatever asked it to.
-            if self.web_navigation_refused(key, &command) {
-                continue;
-            }
             let node = &self.nodes[key as usize];
             if id != crate::ROOT_ID
                 && let Some(backend) = &self.window_backend
@@ -4425,95 +4420,6 @@ impl<M: TextEngine> Core<M> {
             }
             _ => {}
         }
-    }
-
-    /// A web view policy this platform cannot carry out
-    /// ([`NativeProp::ContentRules`], [`NativeProp::WebDownloadBehavior`])
-    /// fails as `onError` on the web view. The policy stays what the app
-    /// asked for, and [`Self::web_view_policy_blocked`] keeps the page
-    /// from loading: a refused filter must not reach the network
-    /// unfiltered, and a refused manual download must not run.
-    fn check_web_policy(&mut self, key: Key, prop: &NativeProp) {
-        let (id, web) = {
-            let node = &self.nodes[key as usize];
-            (node.id, node.kind == Kind::WebView)
-        };
-        if !web
-            || !self.components.environment.web_views
-            || self.components.environment.webview_requests
-        {
-            return;
-        }
-        let message = match prop {
-            NativeProp::ContentRules(rules) if !rules.is_empty() => format!(
-                "content rule lists are not supported by this platform's web view ({}): the page is not loaded",
-                self.components.environment.platform_name()
-            ),
-            NativeProp::WebDownloadBehavior(crate::webview::WebDownloadBehavior::Manual) => {
-                "manual downloads are not supported by this platform's web view: the page is not loaded"
-                    .to_owned()
-            }
-            _ => return,
-        };
-        self.events.push(crate::element::JsEvent::Event(
-            id,
-            EventKind::Error,
-            EventPayload::Map(vec![("message", PayloadValue::Str(message.clone()))]),
-        ));
-        self.deny(message);
-    }
-
-    /// Whether `props` asks a web view for a policy this platform cannot
-    /// carry out (`crate::webview`): filtering without a backend that
-    /// compiles rules, or manual downloads. Such a view is replaced by an
-    /// inert page ([`block_web_page`]): nothing may load or run before the
-    /// app's policy is in force, and clearing the rules or going back to
-    /// automatic downloads lets the app's page load again.
-    fn web_view_policy_blocked(&self, props: &crate::WebProps) -> bool {
-        !self.components.environment.webview_requests
-            && (!props.content_rules.is_empty()
-                || props.download_behavior == crate::webview::WebDownloadBehavior::Manual)
-    }
-
-    /// A navigation command (`load`, `reload`, `goBack`, `goForward`) or
-    /// `injectJavaScript` on a web view whose policy the platform cannot
-    /// carry out is refused and reported as `onError`, not sent. Injecting
-    /// a script would let it navigate or fetch through `location.href` or
-    /// `fetch`, past the refused policy (the native setting only disables
-    /// the page's own scripts); the operation decides, never the script's
-    /// text. Once the rules are cleared or downloads are automatic, the
-    /// same commands go through; input, screenshots and cookies still
-    /// work while blocked.
-    fn web_navigation_refused(&mut self, key: Key, command: &Command) -> bool {
-        if !matches!(
-            command,
-            Command::Load(_)
-                | Command::Reload
-                | Command::GoBack
-                | Command::GoForward
-                | Command::InjectJavaScript(_)
-        ) {
-            return false;
-        }
-        let blocked = self.nodes[key as usize]
-            .control
-            .as_deref()
-            .is_some_and(|control| match control {
-                crate::NativeProps::WebView(props) => self.web_view_policy_blocked(props),
-                _ => false,
-            });
-        if !blocked {
-            return false;
-        }
-        let id = self.nodes[key as usize].id;
-        let message = "the web view does not navigate or run injected scripts while its content rule lists or manual downloads are not supported by this platform: clear them to load the page";
-        self.events.push(crate::element::JsEvent::Event(
-            id,
-            EventKind::Error,
-            EventPayload::Map(vec![("message", PayloadValue::Str(message.into()))]),
-        ));
-        self.deny(message.to_owned());
-        true
     }
 
     /// `prop` with what the app may not reach removed: a refused image,
@@ -5881,9 +5787,6 @@ impl<M: TextEngine> Core<M> {
                     // `disabled:` classes, on any element.
                     self.set_disabled(key, d);
                 }
-                // A policy this platform's web view cannot carry out is
-                // reported rather than silently ignored.
-                self.check_web_policy(key, &prop);
                 let node = &mut self.nodes[key as usize];
                 // The platforms make a web view with its website data store
                 // and the URL schemes it serves, from its first props.
@@ -7081,16 +6984,10 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::NATIVE != 0
                 && let Some(control) = &node.control
             {
-                let mut props = (**control).clone();
-                // A web view policy the platform cannot carry out replaces
-                // the page with an inert one; the app's props stay on the
-                // node and load again once the policy is cleared.
-                if let crate::NativeProps::WebView(web) = &mut props
-                    && self.web_view_policy_blocked(web)
-                {
-                    block_web_page(web);
-                }
-                self.mount.push(MountItem::NativeProps { id, props });
+                self.mount.push(MountItem::NativeProps {
+                    id,
+                    props: (**control).clone(),
+                });
             }
             if flags & dirty::MODAL != 0
                 && let Some(root) = &node.root
@@ -10073,30 +9970,6 @@ fn media_not_granted(what: &str, uri: &str, base: Option<&str>) -> String {
     format!("{what} {uri} is not granted: {advice}")
 }
 
-/// The page a web view shows while its app's policy is not in force: an
-/// inert, nonempty document that replaces whatever it showed. It is
-/// nonempty on purpose: a backend that treats empty HTML as "nothing to
-/// do" would leave the old page, and its scripts, running.
-const BLOCKED_WEB_PAGE: &str =
-    "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
-
-/// Replaces what a blocked web view would load with [`BLOCKED_WEB_PAGE`]
-/// and disables what runs in it (`src`, `baseUrl`, injected scripts,
-/// JavaScript, back/forward gestures). The node keeps the app's own props,
-/// which the next emit restores once the policy is cleared.
-fn block_web_page(web: &mut crate::WebProps) {
-    web.source = crate::WebSource::Html {
-        html: BLOCKED_WEB_PAGE.into(),
-        base_url: None,
-    };
-    web.src = None;
-    web.base_url = None;
-    web.javascript_enabled = false;
-    web.injected_js = None;
-    web.injected_js_before = None;
-    web.back_forward_gestures = false;
-}
-
 /// Applies one property to a control.
 fn apply_native(control: &mut NativeProps, prop: NativeProp) {
     use NativeProp as P;
@@ -10144,8 +10017,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
         (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
         (NativeProps::WebView(p), P::UrlSchemes(v)) => p.url_schemes = v,
-        (NativeProps::WebView(p), P::ContentRules(v)) => p.content_rules = v,
-        (NativeProps::WebView(p), P::WebDownloadBehavior(v)) => p.download_behavior = v,
+        (NativeProps::WebView(p), P::Inspectable(v)) => p.inspectable = v,
         (NativeProps::Video(p), P::Source(v)) => {
             p.source = match v {
                 crate::WebSource::Uri(uri) => Some(uri),

@@ -61,6 +61,7 @@ mount(Browser);
 | `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
 | `incognito` | `boolean` | `false` | 页面的网站数据（cookie、存储、缓存）只与网页视图同存亡，与应用的数据分开；Android 上网页视图加载时不使用 HTTP 缓存、不保存表单数据（见[网站数据](../docs/web-view-and-video.md#网站数据)）。在网页视图创建时读取。 |
+| `inspectable` | `boolean` | `false` | 启用桌面原生后端的检查器；修改后更新已挂载的视图。参见[平台矩阵](../elements/web-view.md#原生截图与检查器)。 |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | 仅 iOS：从边缘轻扫以后退和前进。 |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS：双指在触控板上轻扫以后退和前进；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 
@@ -70,11 +71,10 @@ mount(Browser);
 |---|---|---|
 | `onLoadStart` | `WebViewNavigation` | 页面开始加载。 |
 | `onLoad` | `WebViewNavigation` | 页面加载完成。 |
+| `onLoadProgress` | `{ progress: number \| null }` | 桌面原生页面的加载比例，未知时为 `null`。 |
 | `onError` | `{ message: string }` | 页面加载失败。 |
 | `onNavigationStateChange` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
 | `onMessage` | `{ data: string }` | 页面调用了 `window.nsh.postMessage(data)`。 |
-| `onLoadProgress` | `{ progress: number \| null }` | 桌面页面加载进度变化；`null` 表示无法估计。 |
-| `onDownload` | `WebViewDownload` | 桌面下载开始、完成或失败；文件保存在应用数据目录。 |
 
 ```ts
 interface WebViewNavigation {
@@ -99,9 +99,7 @@ interface WebViewNavigation {
 | `postMessage(data)` | 向页面发送 `data`（字符串）：在 `window` 上触发 `message` 事件，`event.data` 即为 `data`。 |
 | `load({ src, headers? })` | 加载 `src`，只给页面自身的请求带上 `headers`（`Record<string, string>`），子资源、之后的导航和重新加载都不带；用于已登录的页面（`Authorization`）。主机必须是 `webview.hosts` 允许的。请求头无效时抛出 `TypeError`。浏览器后端不做任何事。见[已登录的页面](../docs/web-view-and-video.md#已登录的页面请求头)。 |
 
-Rust 宿主还可通过[桌面控制](../elements/web-view.md#rust-桌面控制)使用截图、Cookie、检查工具、手动下载决策及内容过滤。
-这些操作使用宿主的权限；上表列出 TSX 模块可调用的方法。
-
+可见页面截图和程序化打开开发者工具是 [Rust 宿主方法](../elements/web-view.md#原生截图与检查器)。TSX 通过 `inspectable` 控制检查器，通过 `onLoadProgress` 接收进度。
 
 ## 与页面通信
 

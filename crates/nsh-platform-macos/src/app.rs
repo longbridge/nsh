@@ -551,8 +551,8 @@ fn initial_environment() -> Environment {
         audio: true,
         web_input: true,
         web_evaluate: true,
-        // `Command::WebViewRequest`: WebKit answers screenshots, cookies,
-        // inspectable and downloads. Where it cannot make a web view at
+        // `Command::WebViewRequest`: WebKit answers screenshots, and its
+        // web views take `inspectable`. Where it cannot make a web view at
         // all, its controls answer an error rather than leaving the
         // request hanging.
         webview_requests: true,

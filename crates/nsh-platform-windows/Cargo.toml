@@ -56,11 +56,8 @@ windows.workspace = true
 windows-core.workspace = true
 windows-numerics.workspace = true
 webview2-com.workspace = true
-# Screenshots (base64 in the reply), content blocker regexes, and correct
-# registrable-domain (public suffix list) party semantics.
+# Screenshots (base64 in the reply).
 base64.workspace = true
-regex.workspace = true
-psl.workspace = true
 # GIF and WebP animations (WIC decodes the first frame of everything else).
 image = { workspace = true, features = ["gif", "webp"] }
 rustc-hash.workspace = true

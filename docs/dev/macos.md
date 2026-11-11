@@ -52,15 +52,6 @@ tracked from adoption through completion or failure; dropping `WebHost` cancels 
 removes their directories in cancellation completion handlers, after WebKit stops writing. Completed files
 belong to the app, which owns retention and its storage budget.
 
-The [desktop WebView controls](elements.md#desktop-webview-controls) use `WKWebView` snapshots and its own
-`WKHTTPCookieStore`, preserving the configured website data store. Inspection uses the public `inspectable`
-property; programmatically opening developer tools returns an unsupported-operation error. Manual downloads
-extend the existing adoption and completion path by holding the destination callback until the host decides;
-automatic mode retains the behavior above. `WKContentRuleList` compilation is asynchronous: install the new
-policy before its navigation, retain the old policy on failure, and ignore stale results after replacement or
-teardown.
-
-
 - **One view per node.** Each node is an `NshView` (`view.rs`, a flipped, layer-backed `NSView` subclass holding the
   node's `ViewState`). The core lays everything out: a view sits at its frame (`place()`: the origin, a sticky shift,
   mirrored lists), and its transform, opacity and visibility are its layer's. AppKit resets a layer-backed view's

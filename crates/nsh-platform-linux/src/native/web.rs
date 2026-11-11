@@ -41,23 +41,6 @@
 //! scheme (`prefers-color-scheme`) through GTK's settings, which the
 //! surface sets from it (`crate::system`).
 //!
-//! `contentRules` are WebKit user content filters, which are the same
-//! content blocker rules `WKContentRuleList` takes: WebKit compiles each
-//! list in its `UserContentFilterStore`
-//! (`$XDG_CACHE_HOME/nsh-content-filters`) and matches the page's loads
-//! itself, cancelling the blocked ones and hiding what the
-//! `css-display-none` rules name. They apply to the loads from when the
-//! filter is added; nothing is injected into the page in place of
-//! blocking. The rules must be installed before a page they govern loads:
-//! a source that arrives while a changed set compiles waits for it, the
-//! app's navigation commands (load, reload, back, forward) queue in order
-//! until it is in, and a page's own navigations are refused with
-//! `onError` meanwhile, so nothing reaches the network with the wrong
-//! policy. A set WebKit cannot compile leaves the installed rules (and
-//! the held page and commands) as they were and reports `onError`;
-//! clearing the rules (or installing another set) releases them. Requests
-//! (screenshots, cookies, the inspector) keep working throughout.
-//!
 //! Website data (cookies, local storage, IndexedDB, the cache) is kept per
 //! app id, in a `NetworkSession` of the app's own:
 //! `$XDG_DATA_HOME/<app id>/webkit` and `$XDG_CACHE_HOME/<app id>/webkit`
@@ -73,28 +56,9 @@
 //! instead, made with it: its data stays in memory and goes with it.
 //!
 //! [`Command::WebViewRequest`]s answer with [`EventKind::WebViewReply`]: a
-//! screenshot (a base64 PNG of the visible page), the view's session's
-//! cookies (read and written, with Unix-millisecond expiries), WebKit's
-//! inspector (developer extras, off until asked) and downloads. Page load
-//! progress is WebKit's own estimate (`onLoadProgress`).
-//!
-//! Downloads follow `downloadBehavior` (a Rust prop). `Automatic` (the
-//! default) is the app's `onDownload` opt-in: when it listens, WebKit's
-//! downloads are saved to `<data dir>/<app id>/downloads/<id>/<filename>`
-//! and reported as they start, finish (with their size) or fail; a page
-//! the app does not listen to downloads nothing. `Manual` reports each
-//! download's choice of destination first (`onDownloadPending`) and
-//! writes nothing until the app accepts a path (`AcceptDownload`) or
-//! cancels it; an accepted download writes to a hidden staging file
-//! beside that path and is moved onto it only once it finished (never
-//! replacing an existing file unless `overwrite` was accepted), so a
-//! cancel or a failure removes the staging file and leaves the app's
-//! file as it was. `CancelDownload` is answered once the transfer stopped
-//! and what it wrote is gone; a pending decision nobody answers is
-//! cancelled (and reported as failed) after a minute, and one nobody
-//! listens to at all is cancelled at once. Accepted destinations must be
-//! absolute, in an existing folder, and must not exist unless `overwrite`
-//! says so.
+//! screenshot (a base64 PNG of the visible page) and WebKit's inspector
+//! (developer extras, off until `inspectable` or a request allows it).
+//! Page load progress is WebKit's own estimate (`onLoadProgress`).
 //!
 //! The URL schemes the app serves (`WebView::url_scheme`) are registered on
 //! the web context and answered per web view (`super::web_scheme`).
@@ -110,28 +74,23 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    path::{Path, PathBuf},
-    rc::{Rc, Weak},
+    path::PathBuf,
+    rc::Rc,
     sync::Arc,
-    time::Duration,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
-    Command, ContentRuleList, EventKind, EventPayload, JsonValue, NodeId, PayloadValue, WebProps,
-    WebSource,
-    webview::{
-        self, CookieSameSite, WebCookie, WebDownloadBehavior, WebViewOperation, WebViewRequest,
-    },
+    Command, EventKind, EventPayload, JsonValue, PayloadValue, WebProps, WebSource,
+    webview::{self, WebViewOperation, WebViewRequest},
 };
 use nsh_engine::Access;
 use webkit6::{
-    CookiePersistentStorage, Download, DownloadError, LoadEvent, NavigationPolicyDecision,
-    NetworkError, NetworkSession, PolicyDecisionType, PolicyError, ResponsePolicyDecision,
-    SnapshotOptions, SnapshotRegion, URIRequest, UserContentFilter, UserContentFilterStore,
-    UserContentInjectedFrames, UserContentManager, UserMediaPermissionRequest, UserScript,
-    UserScriptInjectionTime, UserStyleLevel, UserStyleSheet, WebView, prelude::*, soup,
+    CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkError, NetworkSession,
+    PolicyDecisionType, PolicyError, ResponsePolicyDecision, SnapshotOptions, SnapshotRegion,
+    URIRequest, UserContentInjectedFrames, UserContentManager, UserMediaPermissionRequest,
+    UserScript, UserScriptInjectionTime, UserStyleLevel, UserStyleSheet, WebView, prelude::*,
 };
 
 use super::{Emitter, UNSCROLLABLE, error, fill_sized};
@@ -146,289 +105,6 @@ const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) 
 /// `scrollable: false`: the top document does not scroll.
 const NO_SCROLL: &str = "html, body { overflow: hidden !important; }";
 
-/// Where WebKit keeps the content blocker filters it compiled.
-const FILTERS_DIR: &str = "nsh-content-filters";
-
-/// How long a manual download waits for the app's destination.
-const PENDING_TIMEOUT: Duration = Duration::from_secs(60);
-
-type FilterWaiter = Box<dyn FnOnce(Result<&UserContentFilter, String>)>;
-
-/// The content blocker filters WebKit compiled, by their identity, and
-/// the views waiting for the ones compiling (with WebKit's error when one
-/// cannot be compiled, so a view can report it instead of waiting).
-#[derive(Default)]
-struct Filters {
-    ready: HashMap<String, UserContentFilter>,
-    pending: HashMap<String, Vec<FilterWaiter>>,
-}
-
-thread_local! {
-    /// The filters compiled on this (main) thread.
-    static FILTERS: RefCell<Filters> = RefCell::default();
-    /// WebKit's filter store: one directory of compiled filters.
-    static STORE: RefCell<Option<UserContentFilterStore>> = const { RefCell::new(None) };
-}
-
-/// The filter store, made once: WebKit compiles a filter there, keeping
-/// it for the next run.
-fn store() -> UserContentFilterStore {
-    STORE.with(|cell| {
-        if let Some(store) = &*cell.borrow() {
-            return store.clone();
-        }
-        let dir = glib::user_cache_dir().join(FILTERS_DIR);
-        if let Err(err) = std::fs::create_dir_all(&dir) {
-            log::warn!("web view: cannot make the filter store's directory: {err}");
-        }
-        let store = UserContentFilterStore::new(&dir.to_string_lossy());
-        *cell.borrow_mut() = Some(store.clone());
-        store
-    })
-}
-
-/// The filters of one view's wanted rule set: those already compiled,
-/// those still compiling, and the first failure.
-struct Install {
-    surface: Weak<Surface>,
-    owner: Weak<Shared>,
-    node: NodeId,
-    generation: u64,
-    remaining: Cell<usize>,
-    filters: RefCell<Vec<UserContentFilter>>,
-    failed: RefCell<Option<String>>,
-}
-
-/// Starts installing `rules` for the view at `node` (generation
-/// `generation`): every list is taken from the cache or compiled, and
-/// only when they are all ready does [`finish_install`] replace the
-/// view's filters at once and load the source that waited. Nothing is
-/// removed first: the rules already installed keep applying while these
-/// compile. Lists are identified by their identifier *and* a hash of
-/// their rules: a reused identifier (`dogo-ads-0`, over changed lists)
-/// never gets the compiled filter of the old rules.
-fn start_rules(
-    surface: Weak<Surface>,
-    owner: Weak<Shared>,
-    node: NodeId,
-    generation: u64,
-    rules: &[ContentRuleList],
-) {
-    let install = Rc::new(Install {
-        surface,
-        owner,
-        node,
-        generation,
-        remaining: Cell::new(0),
-        filters: RefCell::new(Vec::new()),
-        failed: RefCell::new(None),
-    });
-    let mut compiling = Vec::new();
-    for rule in rules {
-        let identity = rule_identity(rule);
-        if let Some(filter) = FILTERS.with(|f| f.borrow().ready.get(&identity).cloned()) {
-            install.filters.borrow_mut().push(filter);
-        } else {
-            install.remaining.set(install.remaining.get() + 1);
-            compiling.push((identity, rule.rules.clone()));
-        }
-    }
-    for (identity, rules) in compiling {
-        let waiter_install = install.clone();
-        let waiter: FilterWaiter = Box::new(move |result| match result {
-            Ok(filter) => {
-                waiter_install.filters.borrow_mut().push(filter.clone());
-                let left = waiter_install.remaining.get() - 1;
-                waiter_install.remaining.set(left);
-                if left == 0 {
-                    finish_install(&waiter_install);
-                }
-            }
-            Err(error) => {
-                *waiter_install.failed.borrow_mut() = Some(error);
-                let left = waiter_install.remaining.get() - 1;
-                waiter_install.remaining.set(left);
-                if left == 0 {
-                    finish_install(&waiter_install);
-                }
-            }
-        });
-        let vacant = FILTERS.with(|f| {
-            let mut f = f.borrow_mut();
-            match f.pending.entry(identity.clone()) {
-                std::collections::hash_map::Entry::Occupied(mut queued) => {
-                    queued.get_mut().push(waiter);
-                    false
-                }
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(vec![waiter]);
-                    true
-                }
-            }
-        });
-        if vacant {
-            compile_filter(identity, rules);
-        }
-    }
-    if install.remaining.get() == 0 {
-        // Everything was cached: install after this call returns (the
-        // hosts are borrowed while props are applied).
-        let install = install.clone();
-        glib::idle_add_local_once(move || finish_install(&install));
-    }
-}
-
-/// Replaces the view's filters with the complete set at once (only when
-/// the generation still holds), then loads the source that waited for
-/// them and the app's navigations issued meanwhile. A set WebKit could
-/// not compile leaves the installed rules and the page alone, keeps the
-/// source and commands waiting, and reports the error: only a complete
-/// set, or blocking cleared, lets a page out.
-///
-/// Everything that reaches WebKit (a load, a navigation) runs after the
-/// hosts' borrow is dropped: WebKit calls back into this module while it
-/// loads, and none of those calls may meet a borrowed hosts map.
-fn finish_install(install: &Rc<Install>) {
-    /// What to apply once the hosts are free (no WebKit call runs under
-    /// a borrow: its filters, then the source and the app's commands).
-    struct Apply {
-        shared: Rc<Shared>,
-        content: UserContentManager,
-        filters: Vec<UserContentFilter>,
-        web: WebView,
-        pending: Rc<RefCell<Option<WebSource>>>,
-        source: Option<WebSource>,
-        queued: Vec<Command>,
-    }
-    let Some(owner) = install.owner.upgrade().filter(|owner| owner.live.get()) else {
-        return;
-    };
-    let Some(surface) = install.surface.upgrade() else {
-        return;
-    };
-    let filters = std::mem::take(&mut *install.filters.borrow_mut());
-    let failed = install.failed.borrow_mut().take();
-    let mut apply = None;
-    let mut failure = None;
-    {
-        let mut hosts = surface.native.hosts.borrow_mut();
-        let Some(super::Host::Web(Some(host))) = hosts.get_mut(&install.node) else {
-            return;
-        };
-        if !Rc::ptr_eq(&owner, &host.shared) || host.rules_gen.get() != install.generation {
-            return; // the original view or its requested rules have changed
-        }
-        match failed {
-            None => {
-                apply = Some(Apply {
-                    shared: host.shared.clone(),
-                    content: host.content.clone(),
-                    filters,
-                    web: host.web.clone(),
-                    pending: host.pending.clone(),
-                    source: host.rules_waiting.take(),
-                    queued: std::mem::take(&mut host.navigation),
-                });
-            }
-            Some(error) => {
-                // The installed rules keep applying, and the waiting
-                // source and commands stay queued: a page must not go out
-                // before the rules it asked for are in.
-                failure = Some((host.shared.clone(), error));
-            }
-        }
-    }
-    if let Some((shared, message)) = failure {
-        shared.emit(EventKind::Error, || {
-            error(format!("content rules: {message}"))
-        });
-        return;
-    }
-    let Some(apply) = apply else { return };
-    // The complete set replaces the old one in one step; only then may
-    // anything load, so no request escapes the requested policy.
-    apply.content.remove_all_filters();
-    for filter in &apply.filters {
-        apply.content.add_filter(filter);
-    }
-    apply.shared.rules_ready.set(true);
-    // The source that waited loads now, then what the app asked for while
-    // the rules compiled, in order.
-    if let Some(source) = &apply.source {
-        load_into(&apply.web, &apply.pending, source);
-    }
-    for navigation in apply.queued {
-        command(&apply.web, &navigation);
-    }
-}
-
-/// The identity of a content rule list: its identifier and a hash of its
-/// rules. WebKit's filter store and this cache keep compiled filters by
-/// it, since an identifier alone may be reused for other rules. WebKit
-/// stores each compiled filter under its identifier, so only file-name
-/// characters of it are kept, bounded.
-fn rule_identity(rule: &ContentRuleList) -> String {
-    let mut id: String = rule
-        .id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(64)
-        .collect();
-    if id.is_empty() {
-        id.push('_');
-    }
-    format!("{id}-{:016x}", rules_hash(&rule.rules))
-}
-
-/// A hash of a rule list's JSON: tells the same list from a replaced one
-/// of the same identifier.
-fn rules_hash(rules: &str) -> u64 {
-    use std::hash::{Hash as _, Hasher as _};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    rules.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Compiles `rules` as the list WebKit knows by `identity`, in WebKit's
-/// loop (the store and its compiler live on the main thread), then hands
-/// it to the views waiting (or their views the error).
-fn compile_filter(identity: String, rules: Arc<str>) {
-    glib::idle_add_local_once(move || {
-        let bytes = glib::Bytes::from(rules.as_bytes());
-        let key = identity.clone();
-        store().save(
-            &identity,
-            &bytes,
-            None::<&gio::Cancellable>,
-            move |result| {
-                let waiters =
-                    FILTERS.with(|f| f.borrow_mut().pending.remove(&key).unwrap_or_default());
-                match result {
-                    Ok(filter) => {
-                        FILTERS.with(|f| f.borrow_mut().ready.insert(key, filter.clone()));
-                        for waiter in waiters {
-                            waiter(Ok(&filter));
-                        }
-                    }
-                    Err(err) => {
-                        log::warn!("web view: content rules {key}: {err}");
-                        let message = err.to_string();
-                        for waiter in waiters {
-                            waiter(Err(message.clone()));
-                        }
-                    }
-                }
-            },
-        );
-    });
-}
-
 /// What a web view's signal handlers share.
 pub(super) struct Shared {
     emitter: Emitter,
@@ -439,19 +115,6 @@ pub(super) struct Shared {
     access: Option<Arc<Access>>,
     /// The current navigation failed (WebKit still finishes it).
     failed: Cell<bool>,
-    /// Whether the wanted content rules are installed: a source, a
-    /// navigation command or a page's navigation waits until they are
-    /// (see [`start_rules`]).
-    rules_ready: Cell<bool>,
-    /// Where automatic downloads are saved (the app's data directory's
-    /// `downloads`); `None`: nothing is downloaded.
-    downloads_root: Option<PathBuf>,
-    /// How this view treats downloads ([`WebProps::download_behavior`]).
-    download_behavior: Cell<WebDownloadBehavior>,
-    /// Downloads WebKit started for this page, by their id.
-    downloads: RefCell<HashMap<String, Rc<DownloadState>>>,
-    /// The id the next download is reported with.
-    next_download: Cell<u64>,
 }
 
 impl Shared {
@@ -470,123 +133,20 @@ impl Shared {
         self.emitter
             .reply(EventKind::WebViewReply, webview::reply(id, result));
     }
-
-    /// Whether this page's downloads are wanted: `onDownload` in automatic
-    /// mode (with a directory to save them in), `onDownloadPending` in
-    /// manual mode.
-    fn wants_downloads(&self) -> bool {
-        match self.download_behavior.get() {
-            WebDownloadBehavior::Automatic => {
-                self.downloads_root.is_some() && self.emitter.listens(EventKind::Download)
-            }
-            WebDownloadBehavior::Manual => self.emitter.listens(EventKind::DownloadPending),
-            // A behavior this backend does not know: nothing may be
-            // written without the app's say.
-            _ => false,
-        }
-    }
-}
-
-/// A download WebKit started for a page: reported, then either saved to a
-/// directory of its own (automatic) or held without one (nothing is
-/// written) until the app accepts a destination or cancels.
-///
-/// A manual download writes to a staging file of its own beside the app's
-/// destination and is published there only once it finished; a cancel or
-/// a failure removes the staging file, never the destination (which may
-/// hold an older file of the app's).
-struct DownloadState {
-    download: Download,
-    /// Handlers on `download`, disconnected when it ends.
-    handlers: RefCell<Vec<glib::SignalHandlerId>>,
-    /// The id its events use.
-    id: String,
-    url: String,
-    /// The name WebKit suggested, sanitized.
-    filename: RefCell<String>,
-    /// Where it is reported: the app's destination once accepted (manual)
-    /// or its file in the app's data directory (automatic).
-    path: RefCell<Option<PathBuf>>,
-    /// What WebKit writes: `path` itself for an automatic download, a
-    /// hidden file beside it for a manual one until it is published.
-    staging: RefCell<Option<PathBuf>>,
-    /// The app's destination is a staging file to publish (manual).
-    manual: Cell<bool>,
-    /// The app asked to replace the destination's file.
-    overwrite: Cell<bool>,
-    /// The `AcceptDownload` request (its core id) waiting for WebKit to
-    /// create the destination file.
-    accepting: Cell<Option<u64>>,
-    /// The `CancelDownload` request (its core id) waiting for the transfer
-    /// to stop, so it can answer once what was written is gone.
-    cancelling: Cell<Option<u64>>,
-    /// A destination was accepted (it cannot be chosen twice).
-    accepted: Cell<bool>,
-    /// WebKit finished it: it can no longer be accepted.
-    finished: Cell<bool>,
-    /// A manual decision was reported (once).
-    pending: Cell<bool>,
-    /// Its `started` event was reported.
-    started: Cell<bool>,
-    /// The timeout that withdraws an unanswered manual decision.
-    expiry: RefCell<Option<glib::SourceId>>,
-}
-
-impl DownloadState {
-    /// Stops listening (so the download's handlers do not keep this for
-    /// ever).
-    fn disconnect(&self) {
-        for id in self.handlers.borrow_mut().drain(..) {
-            self.download.disconnect(id);
-        }
-    }
-
-    fn clear_expiry(&self) {
-        if let Some(source) = self.expiry.borrow_mut().take() {
-            source.remove();
-        }
-    }
-
-    /// Cancels the download for teardown, keeping its terminal callbacks
-    /// connected: what it wrote (a staging file, or the backend's own
-    /// directory) goes only once WebKit reports the transfer stopped.
-    fn cancel_for_cleanup(&self) {
-        self.clear_expiry();
-        if !self.finished.get() {
-            self.download.cancel();
-        }
-    }
 }
 
 /// A web view: the page filling its node's view.
 pub(super) struct WebHost {
     web: WebView,
     content: UserContentManager,
-    /// The app's network session (cookies, downloads).
-    session: NetworkSession,
-    /// What the handlers share (replies, downloads).
+    /// What the handlers share.
     shared: Rc<Shared>,
     /// Handlers on `web` (disconnected when the host goes).
     handlers: Vec<glib::SignalHandlerId>,
-    /// The session's `download-started` handler: this view's downloads.
-    download_started: Option<glib::SignalHandlerId>,
     /// The script message handler, on `content`.
     message: Option<glib::SignalHandlerId>,
     /// The props applied (`None` before the first).
     props: Option<WebProps>,
-    /// Counts the content rule changes, so a filter WebKit compiles for
-    /// rules a view no longer has is not applied (see [`start_rules`]).
-    rules_gen: Rc<Cell<u64>>,
-    /// The surface and node (content rules finish asynchronously and are
-    /// applied back to this host).
-    surface: Weak<Surface>,
-    node: NodeId,
-    /// The source that waits for the content rules.
-    rules_waiting: Option<WebSource>,
-    /// The app's navigation commands issued while the wanted content
-    /// rules compile (or failed to): they run in order once the rules are
-    /// installed or cleared, and never before.
-    navigation: Vec<Command>,
     /// WebKit's own background (white), for views without an opaque one.
     default_background: gdk::RGBA,
     /// A page to load once the web view is mapped ([`WebHost::load`]).
@@ -611,11 +171,6 @@ impl WebHost {
             live: Cell::new(true),
             access: surface.native.access.borrow().clone(),
             failed: Cell::new(false),
-            rules_ready: Cell::new(true),
-            downloads_root: surface.native.downloads.borrow().clone(),
-            download_behavior: Cell::new(p.download_behavior),
-            downloads: RefCell::default(),
-            next_download: Cell::new(0),
         });
         let content = UserContentManager::new();
         content.register_script_message_handler(HANDLER, None);
@@ -654,17 +209,6 @@ impl WebHost {
                 log::warn!(target: "js", "web view: the page's process ended ({reason:?})");
             }),
         ];
-        let download_started = {
-            let shared = shared.clone();
-            let page = web.clone();
-            session.connect_download_started(move |_, download| {
-                // Every page of the app hears the app's session: only the
-                // page that started it answers for it.
-                if download.web_view().is_some_and(|view| view == page) {
-                    started_download(&shared, download);
-                }
-            })
-        };
         let pending: Rc<RefCell<Option<WebSource>>> = Rc::default();
         handlers.push(web.connect_map({
             let pending = pending.clone();
@@ -680,18 +224,11 @@ impl WebHost {
         WebHost {
             web,
             content,
-            session,
             shared,
             handlers,
-            download_started: Some(download_started),
             message: Some(message),
             pending,
             props: None,
-            rules_gen: Rc::new(Cell::new(0)),
-            surface: Rc::downgrade(surface),
-            node: view.id(),
-            rules_waiting: None,
-            navigation: Vec::new(),
             default_background,
             _schemes: schemes,
         }
@@ -713,7 +250,6 @@ impl WebHost {
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
-        self.shared.download_behavior.set(p.download_behavior);
         let scripts_changed = first
             || p.injected_js != old.injected_js
             || p.injected_js_before != old.injected_js_before;
@@ -736,26 +272,6 @@ impl WebHost {
                 add(js, UserScriptInjectionTime::End);
             }
         }
-        if first || p.content_rules != old.content_rules {
-            self.rules_gen.set(self.rules_gen.get().wrapping_add(1));
-            if p.content_rules.is_empty() {
-                // Blocking off: clear at once and let the page load.
-                self.content.remove_all_filters();
-                self.shared.rules_ready.set(true);
-            } else {
-                // The rules in place keep applying while these compile;
-                // the page must not go out before they are the wanted
-                // ones (its first request could be an ad).
-                self.shared.rules_ready.set(false);
-                start_rules(
-                    self.surface.clone(),
-                    Rc::downgrade(&self.shared),
-                    self.node,
-                    self.rules_gen.get(),
-                    &p.content_rules,
-                );
-            }
-        }
         if first || p.scrollable != old.scrollable {
             self.content.remove_all_style_sheets();
             if p.scrollable {
@@ -775,6 +291,15 @@ impl WebHost {
             settings.set_user_agent(p.user_agent.as_deref());
             settings.set_enable_javascript_markup(p.javascript_enabled);
             settings.set_enable_back_forward_navigation_gestures(p.back_forward_gestures);
+            // Whether the user may inspect the page: off unless the app
+            // says so. Turned off, an inspector left open closes.
+            settings.set_enable_developer_extras(p.inspectable);
+            if !p.inspectable
+                && (first || p.inspectable != old.inspectable)
+                && let Some(inspector) = web.inspector()
+            {
+                inspector.close();
+            }
         }
         // An opaque background of the view shows until the page paints
         // (and behind pages without one of their own), as on Windows.
@@ -784,55 +309,11 @@ impl WebHost {
         } else {
             web.set_background_color(&self.default_background);
         }
-        // Scripts apply to pages loaded from now on: load again, once the
-        // wanted content rules are the ones applied (a page loaded before
-        // that would send its first requests unblocked).
-        let wants_load = first || p.source != old.source || scripts_changed;
+        // Scripts apply to pages loaded from now on: load again.
+        if first || p.source != old.source || scripts_changed {
+            self.load(&p.source);
+        }
         self.props = Some(p.clone());
-        if wants_load {
-            if self.shared.rules_ready.get() {
-                self.rules_waiting = None;
-                self.load(&p.source);
-            } else {
-                self.rules_waiting = Some(p.source.clone());
-            }
-        } else if self.shared.rules_ready.get() {
-            // The rules are complete now (the user cleared blocking, or
-            // changed to rules that installed): the page that waited for
-            // them may load. A set that failed leaves them not ready, so
-            // its page stays held.
-            let source = self.rules_waiting.take();
-            if let Some(source) = source {
-                self.load(&source);
-            }
-        }
-        // Cleared, or new rules installed: what the app asked to navigate
-        // to while they compiled runs now, in order, and never before.
-        if self.shared.rules_ready.get() {
-            self.release_navigation();
-        }
-    }
-
-    /// Holds `command` while the wanted content rules are not installed
-    /// (or failed to compile): whether it was held (`false`: run it now).
-    /// Only the app's navigations wait; scripts, messages and the
-    /// requests (screenshots, cookies, the inspector) do not.
-    pub(super) fn queue_navigation(&mut self, command: &Command) -> bool {
-        if !waits_for_rules(self.shared.rules_ready.get(), command) {
-            return false;
-        }
-        self.navigation.push(command.clone());
-        true
-    }
-
-    /// The app's navigations that waited for the content rules, in the
-    /// order they came. Taken first, so a command's WebKit callbacks (and
-    /// a further `set`) cannot reach this queue.
-    fn release_navigation(&mut self) {
-        let queued = std::mem::take(&mut self.navigation);
-        for navigation in queued {
-            command(&self.web, &navigation);
-        }
     }
 }
 
@@ -843,49 +324,26 @@ pub(super) fn request(web: &WebView, shared: &Rc<Shared>, request: &WebViewReque
     let id = request.id;
     match &request.operation {
         WebViewOperation::CapturePage => capture(web, shared, id),
-        WebViewOperation::GetCookies { uri } => {
-            get_cookies(web, shared, id, uri.as_deref());
-        }
-        WebViewOperation::SetCookies { cookies } => {
-            set_cookies(web, shared, id, cookies);
-        }
         WebViewOperation::OpenDevtools => open_devtools(web, shared, id),
-        WebViewOperation::SetInspectable { enabled } => {
-            set_inspectable(web, shared, id, *enabled);
-        }
-        WebViewOperation::AcceptDownload {
-            id: download,
-            path,
-            overwrite,
-        } => {
-            accept_download(shared, download, id, path, *overwrite);
-        }
-        WebViewOperation::CancelDownload { id: download } => {
-            cancel_download(shared, download, id);
-        }
         // A newer core's operation: answered, never left waiting.
         _ => shared.reply(id, Err("unsupported web view operation".into())),
     }
 }
 
 impl WebHost {
-    /// Loads `source`, once the web view is mapped ([`load_into`]).
+    /// Loads `source`, once the web view is mapped. With WebKit's DMA-BUF
+    /// renderer, a page loaded before its web view is mapped sometimes
+    /// never shows (about one in six, on X11 and Wayland alike): it
+    /// loads, but the view stays blank for good, whatever happens to it
+    /// later. Loaded once mapped, as WebKit's MiniBrowser does, it always
+    /// shows.
     fn load(&self, source: &WebSource) {
-        load_into(&self.web, &self.pending, source);
-    }
-}
-
-/// Loads `source`, once the web view is mapped. With WebKit's DMA-BUF
-/// renderer, a page loaded before its web view is mapped sometimes never
-/// shows (about one in six, on X11 and Wayland alike): it loads, but the
-/// view stays blank for good, whatever happens to it later. Loaded once
-/// mapped, as WebKit's MiniBrowser does, it always shows.
-fn load_into(web: &WebView, pending: &RefCell<Option<WebSource>>, source: &WebSource) {
-    if web.is_mapped() {
-        pending.borrow_mut().take();
-        load(web, source);
-    } else {
-        *pending.borrow_mut() = Some(source.clone());
+        if self.web.is_mapped() {
+            self.pending.borrow_mut().take();
+            load(&self.web, source);
+        } else {
+            *self.pending.borrow_mut() = Some(source.clone());
+        }
     }
 }
 
@@ -906,40 +364,12 @@ impl Drop for WebHost {
         for id in self.handlers.drain(..) {
             self.web.disconnect(id);
         }
-        if let Some(id) = self.download_started.take() {
-            self.session.disconnect(id);
-        }
-        // Downloads of this page still under way: cancelled. Their
-        // terminal callbacks stay connected (they only clean up now): what
-        // an automatic one wrote in the backend's own directory, or a
-        // manual one's staging file, goes once WebKit reports the
-        // transfer stopped. The app's destinations are never touched.
-        let downloads = std::mem::take(&mut *self.shared.downloads.borrow_mut());
-        for download in downloads.into_values() {
-            download.cancel_for_cleanup();
-        }
         if let Some(id) = self.message.take() {
             self.content.disconnect(id);
         }
         self.content
             .unregister_script_message_handler(HANDLER, None);
     }
-}
-
-/// Whether `command` navigates the page: the app-driven navigations,
-/// which wait while the wanted content rules are not installed.
-fn is_navigation(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Reload | Command::Load(_) | Command::GoBack | Command::GoForward
-    )
-}
-
-/// Whether `command` must wait for the requested content rules: nothing
-/// may load or navigate before they are installed (or cleared), so a page
-/// cannot reach the network with the wrong policy.
-fn waits_for_rules(rules_ready: bool, command: &Command) -> bool {
-    !rules_ready && is_navigation(command)
 }
 
 /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
@@ -978,12 +408,8 @@ pub(super) fn command(web: &WebView, command: &Command) {
     }
 }
 
-/// Navigations stay within the app's `webview` capability, and none
-/// starts while the requested content rules are not installed: the app's
-/// commands wait in the host's queue, a page's own navigation is refused
-/// with `onError` until the rules are in. A response the page cannot
-/// show, or sent as an attachment, is downloaded when the app wants
-/// downloads and ignored otherwise.
+/// Navigations stay within the app's `webview` capability; responses
+/// WebKit cannot show are not downloaded.
 fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
     let shared = shared.clone();
     web.connect_decide_policy(move |_, decision, kind| match kind {
@@ -995,26 +421,6 @@ fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
                 .and_then(|r| r.uri())
                 .map(|u| u.to_string())
                 .unwrap_or_default();
-            // A page's own navigation (a link, a script, a form) waits for
-            // the requested content rules too: an already-loaded page may
-            // keep the rules installed before them, but nothing new goes
-            // out unfiltered. The app's commands wait in the host's queue
-            // (`queue_navigation`).
-            if !shared.rules_ready.get() {
-                decision.ignore();
-                log::warn!(
-                    target: "js",
-                    "web view navigation to {url} waits for the content rules"
-                );
-                let message = format!("navigation to {url} waits for the content rules");
-                shared.emit(EventKind::Error, || {
-                    EventPayload::Map(vec![
-                        ("message", PayloadValue::Str(message)),
-                        ("url", PayloadValue::Str(url.clone())),
-                    ])
-                });
-                return true;
-            }
             if allows(shared.access.as_deref(), &url) {
                 // WebKit's own handling: it loads (a new window opens
                 // nothing, as there is no `create` handler).
@@ -1036,18 +442,6 @@ fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
             true
         }
         PolicyDecisionType::Response => match decision.downcast_ref::<ResponsePolicyDecision>() {
-            Some(response) if is_download(response) => {
-                if shared.wants_downloads() {
-                    // WebKit hands it to the session's downloads, which
-                    // hold it for the destination the host decides.
-                    decision.download();
-                } else {
-                    // Nothing listens: refused like a page WebKit cannot
-                    // show, so nothing goes to the system's Downloads.
-                    response.ignore();
-                }
-                true
-            }
             Some(response) if !response.is_mime_type_supported() => {
                 response.ignore();
                 true
@@ -1101,22 +495,6 @@ fn allows(access: Option<&Access>, url: &str) -> bool {
         "about:srcdoc" => access.allows_webviews(),
         _ => access.allows_webview(url),
     }
-}
-
-/// Whether a response is a file to save: the main frame's, of a type
-/// WebKit cannot show or sent as an attachment.
-fn is_download(decision: &ResponsePolicyDecision) -> bool {
-    if !decision.is_main_frame_main_resource() {
-        return false;
-    }
-    if !decision.is_mime_type_supported() {
-        return true;
-    }
-    decision
-        .response()
-        .and_then(|response| response.http_headers())
-        .and_then(|headers| headers.content_disposition())
-        .is_some_and(|(kind, _)| kind.eq_ignore_ascii_case("attachment"))
 }
 
 fn load_changed(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
@@ -1184,140 +562,6 @@ fn capture(web: &WebView, shared: &Rc<Shared>, id: u64) {
     );
 }
 
-/// The app's cookie manager (this view's network session's).
-fn cookie_manager(web: &WebView) -> Option<webkit6::CookieManager> {
-    web.network_session()?.cookie_manager()
-}
-
-/// The cookies of `uri`, or every cookie in this view's session when
-/// omitted.
-fn get_cookies(web: &WebView, shared: &Rc<Shared>, id: u64, uri: Option<&str>) {
-    let Some(manager) = cookie_manager(web) else {
-        shared.reply(id, Err("the web view has no cookie manager".into()));
-        return;
-    };
-    let shared = shared.clone();
-    let done = move |result: Result<Vec<soup::Cookie>, glib::Error>| match result {
-        Ok(cookies) => {
-            let cookies: Vec<WebCookie> = cookies.into_iter().map(web_cookie).collect();
-            match serde_json::to_value(&cookies) {
-                Ok(value) => shared.reply(id, Ok(value)),
-                Err(err) => shared.reply(id, Err(err.to_string())),
-            }
-        }
-        Err(err) => shared.reply(id, Err(err.message().to_owned())),
-    };
-    match uri {
-        Some(uri) => manager.cookies(uri, None::<&gio::Cancellable>, done),
-        None => manager.all_cookies(None::<&gio::Cancellable>, done),
-    }
-}
-
-/// A cookie of the view's store, for the core (expiry in Unix
-/// milliseconds).
-fn web_cookie(mut cookie: soup::Cookie) -> WebCookie {
-    let mut out = WebCookie::default();
-    out.name = cookie.name().map(|s| s.to_string()).unwrap_or_default();
-    out.value = cookie.value().map(|s| s.to_string()).unwrap_or_default();
-    out.domain = cookie.domain().map(|s| s.to_string()).unwrap_or_default();
-    out.path = cookie.path().map(|s| s.to_string()).unwrap_or_default();
-    out.expires = cookie
-        .expires()
-        .map(|expires| expires.to_unix().saturating_mul(1000));
-    out.http_only = cookie.is_http_only();
-    out.secure = cookie.is_secure();
-    out.same_site = match cookie.same_site_policy() {
-        soup::SameSitePolicy::None => Some(CookieSameSite::None),
-        soup::SameSitePolicy::Lax => Some(CookieSameSite::Lax),
-        soup::SameSitePolicy::Strict => Some(CookieSameSite::Strict),
-        // Not a policy WebKit stores.
-        _ => None,
-    };
-    out
-}
-
-/// Stores `cookies` in the view's cookie manager.
-fn set_cookies(web: &WebView, shared: &Rc<Shared>, id: u64, cookies: &[WebCookie]) {
-    let Some(manager) = cookie_manager(web) else {
-        shared.reply(id, Err("the web view has no cookie manager".into()));
-        return;
-    };
-    // All converted first: an invalid cookie stores none of them.
-    let mut soup_cookies = Vec::with_capacity(cookies.len());
-    for cookie in cookies {
-        match soup_cookie(cookie) {
-            Ok(cookie) => soup_cookies.push(cookie),
-            Err(err) => {
-                shared.reply(id, Err(err));
-                return;
-            }
-        }
-    }
-    if soup_cookies.is_empty() {
-        shared.reply(id, Ok(JsonValue::Null));
-        return;
-    }
-    // WebKit adds cookies one by one: answered when the last one is in
-    // (the first error, if any, is the answer).
-    let remaining = Rc::new(Cell::new(soup_cookies.len()));
-    let error: Rc<RefCell<Option<String>>> = Rc::default();
-    for cookie in soup_cookies {
-        let remaining = remaining.clone();
-        let error = error.clone();
-        let shared = shared.clone();
-        manager.add_cookie(&cookie, None::<&gio::Cancellable>, move |result| {
-            if let Err(err) = result
-                && error.borrow().is_none()
-            {
-                *error.borrow_mut() = Some(err.message().to_owned());
-            }
-            let left = remaining.get() - 1;
-            remaining.set(left);
-            if left == 0 {
-                match error.borrow_mut().take() {
-                    Some(error) => shared.reply(id, Err(error)),
-                    None => shared.reply(id, Ok(JsonValue::Null)),
-                }
-            }
-        });
-    }
-}
-
-/// A core cookie as the cookie manager's (WebKit's `set_expires` takes
-/// seconds).
-fn soup_cookie(cookie: &WebCookie) -> Result<soup::Cookie, String> {
-    let mut out = soup::Cookie::new(
-        &cookie.name,
-        &cookie.value,
-        &cookie.domain,
-        &cookie.path,
-        -1,
-    );
-    if let Some(expires) = cookie.expires {
-        let date = glib::DateTime::from_unix_utc(expires.div_euclid(1000))
-            .map_err(|err| format!("cookie `{}` expiry: {err}", cookie.name))?;
-        out.set_expires(&date);
-    }
-    out.set_http_only(cookie.http_only);
-    out.set_secure(cookie.secure);
-    // Without one, the attribute is left out (libsoup's default, `Lax`).
-    if let Some(same_site) = cookie.same_site.as_ref() {
-        let policy = match same_site {
-            CookieSameSite::None => soup::SameSitePolicy::None,
-            CookieSameSite::Lax => soup::SameSitePolicy::Lax,
-            CookieSameSite::Strict => soup::SameSitePolicy::Strict,
-            _ => {
-                return Err(format!(
-                    "cookie `{}` has an unknown SameSite policy",
-                    cookie.name
-                ));
-            }
-        };
-        out.set_same_site_policy(policy);
-    }
-    Ok(out)
-}
-
 /// Opens WebKit's inspector (its developer extras on).
 fn open_devtools(web: &WebView, shared: &Rc<Shared>, id: u64) {
     let Some(settings) = WebViewExt::settings(web) else {
@@ -1335,541 +579,6 @@ fn open_devtools(web: &WebView, shared: &Rc<Shared>, id: u64) {
             Err("WebKitGTK has no inspector for this web view".into()),
         ),
     }
-}
-
-/// Whether the page can be inspected (WebKit's developer extras): off
-/// until a command turns it on.
-fn set_inspectable(web: &WebView, shared: &Rc<Shared>, id: u64, enabled: bool) {
-    let Some(settings) = WebViewExt::settings(web) else {
-        shared.reply(id, Err("the web view has no settings".into()));
-        return;
-    };
-    if !enabled && let Some(inspector) = web.inspector() {
-        inspector.close();
-    }
-    settings.set_enable_developer_extras(enabled);
-    shared.reply(id, Ok(JsonValue::Null));
-}
-
-/// WebKit reported a download of this page: reported and either saved
-/// (automatic) or held without a destination (manual) until the app
-/// decides.
-fn started_download(shared: &Rc<Shared>, download: &Download) {
-    let n = shared.next_download.get();
-    shared.next_download.set(n + 1);
-    let at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| since.as_nanos());
-    let state = Rc::new(DownloadState {
-        download: download.clone(),
-        handlers: RefCell::default(),
-        id: download_id(at, n),
-        url: download
-            .request()
-            .and_then(|request| request.uri())
-            .map(|uri| uri.to_string())
-            .unwrap_or_default(),
-        filename: RefCell::default(),
-        path: RefCell::default(),
-        staging: RefCell::default(),
-        manual: Cell::new(false),
-        overwrite: Cell::new(false),
-        accepting: Cell::new(None),
-        cancelling: Cell::new(None),
-        accepted: Cell::new(false),
-        finished: Cell::new(false),
-        pending: Cell::new(false),
-        started: Cell::new(false),
-        expiry: RefCell::default(),
-    });
-    shared
-        .downloads
-        .borrow_mut()
-        .insert(state.id.clone(), state.clone());
-    let mut handlers = Vec::new();
-    {
-        let shared = shared.clone();
-        let state = state.clone();
-        handlers.push(
-            download.connect_decide_destination(move |download, suggested| {
-                // `true` in every case: WebKit never chooses a destination of
-                // its own (`~/Downloads`); the host does, or cancels.
-                decide_destination(&shared, &state, download, suggested);
-                true
-            }),
-        );
-    }
-    {
-        let shared = shared.clone();
-        let state = state.clone();
-        handlers.push(download.connect_created_destination(move |_, _| {
-            // The app's destination is created: answer its request, then
-            // report the download as started.
-            let Some(request) = state.accepting.take() else {
-                return;
-            };
-            shared.reply(request, Ok(JsonValue::Null));
-            if !state.started.replace(true) {
-                let started = download_event("started", &state, None);
-                shared.emit(EventKind::Download, || started);
-            }
-        }));
-    }
-    {
-        let shared = shared.clone();
-        let state = state.clone();
-        handlers.push(download.connect_failed(move |_, err| {
-            let cancelled = err.matches(DownloadError::CancelledByUser);
-            state.finished.set(true);
-            state.clear_expiry();
-            state.disconnect();
-            shared.downloads.borrow_mut().remove(&state.id);
-            // The transfer stopped: what it wrote is gone (a staging file,
-            // or the backend's own directory).
-            cleanup(&shared, &state);
-            if let Some(request) = state.accepting.take() {
-                shared.reply(
-                    request,
-                    Err(if cancelled {
-                        "download cancelled".into()
-                    } else {
-                        err.message().to_owned()
-                    }),
-                );
-            }
-            if let Some(request) = state.cancelling.take() {
-                // The app's cancel is answered now that nothing of it
-                // remains.
-                shared.reply(request, Ok(JsonValue::Null));
-                return;
-            }
-            if cancelled {
-                return;
-            }
-            log::warn!("web view: download failed: {err}");
-            let failed = failed_event(&state, err.message().to_owned());
-            shared.emit(EventKind::Download, || failed);
-        }));
-    }
-    {
-        let shared = shared.clone();
-        let state = state.clone();
-        handlers.push(download.connect_finished(move |_| {
-            state.finished.set(true);
-            state.clear_expiry();
-            state.disconnect();
-            shared.downloads.borrow_mut().remove(&state.id);
-            if let Some(request) = state.cancelling.take() {
-                // A cancel arrived before the last bytes were taken: what
-                // it wrote is discarded, and nothing is published.
-                cleanup(&shared, &state);
-                if let Some(accepting) = state.accepting.take() {
-                    shared.reply(accepting, Err("download cancelled".into()));
-                }
-                shared.reply(request, Ok(JsonValue::Null));
-                return;
-            }
-            // A manual download's staging file becomes the app's file
-            // only now; an automatic one is already at its path.
-            if state.manual.get() {
-                let staging = state.staging.borrow().clone();
-                let destination = state.path.borrow().clone();
-                if let (Some(staging), Some(destination)) = (staging, destination)
-                    && let Err(error) = publish(&staging, &destination, state.overwrite.get())
-                {
-                    cleanup(&shared, &state);
-                    if let Some(request) = state.accepting.take() {
-                        shared.reply(request, Err(error.clone()));
-                    }
-                    let failed = failed_event(&state, error);
-                    shared.emit(EventKind::Download, || failed);
-                    return;
-                }
-                state.staging.borrow_mut().take();
-            }
-            // WebKit creates the destination before it finishes; a reply
-            // still waiting resolves here anyway.
-            if let Some(request) = state.accepting.take() {
-                shared.reply(request, Ok(JsonValue::Null));
-            }
-            if !state.started.get() {
-                return;
-            }
-            let bytes = state
-                .path
-                .borrow()
-                .as_ref()
-                .and_then(|path| std::fs::metadata(path).ok())
-                .map(|meta| meta.len());
-            let finished = download_event("finished", &state, bytes);
-            shared.emit(EventKind::Download, || finished);
-        }));
-    }
-    *state.handlers.borrow_mut() = handlers;
-}
-
-/// WebKit asks where a download goes: `Automatic` saves it in the app's
-/// data directory, `Manual` reports the choice and holds it.
-fn decide_destination(
-    shared: &Rc<Shared>,
-    state: &Rc<DownloadState>,
-    download: &Download,
-    suggested: &str,
-) {
-    if !shared.wants_downloads() {
-        // No one could accept it: nothing may be written.
-        state.finished.set(true);
-        state.clear_expiry();
-        state.disconnect();
-        shared.downloads.borrow_mut().remove(&state.id);
-        download.cancel();
-        return;
-    }
-    let filename = file_name(suggested);
-    *state.filename.borrow_mut() = filename.clone();
-    match shared.download_behavior.get() {
-        WebDownloadBehavior::Automatic => {
-            let Some(root) = shared.downloads_root.clone() else {
-                // No directory to save in (the app started without one).
-                state.finished.set(true);
-                state.disconnect();
-                shared.downloads.borrow_mut().remove(&state.id);
-                download.cancel();
-                return;
-            };
-            // A directory of its own: two files of the same name never
-            // meet, and a failed one takes its partial file with it.
-            let dir = root.join(&state.id);
-            let path = dir.join(&filename);
-            if let Err(err) = std::fs::create_dir_all(&dir) {
-                log::warn!("web view download into {}: {err}", dir.display());
-                let _ = std::fs::remove_dir_all(&dir);
-                state.finished.set(true);
-                state.disconnect();
-                shared.downloads.borrow_mut().remove(&state.id);
-                let failed = failed_event(state, err.to_string());
-                shared.emit(EventKind::Download, || failed);
-                download.cancel();
-                return;
-            }
-            *state.path.borrow_mut() = Some(path.clone());
-            *state.staging.borrow_mut() = Some(path.clone());
-            state.started.set(true);
-            let started = download_event("started", state, None);
-            shared.emit(EventKind::Download, || started);
-            download.set_destination(&path.to_string_lossy());
-        }
-        WebDownloadBehavior::Manual => {
-            // Reported once; the app answers with AcceptDownload or
-            // CancelDownload. An unanswered one is withdrawn.
-            if state.pending.replace(true) {
-                return;
-            }
-            let pending = webview::download_pending_payload(&state.id, &state.url, &filename);
-            shared.emit(EventKind::DownloadPending, || pending);
-            let shared = shared.clone();
-            let pending_state = state.clone();
-            let expiry = glib::timeout_add_local_once(PENDING_TIMEOUT, move || {
-                expire_pending(&shared, &pending_state);
-            });
-            *state.expiry.borrow_mut() = Some(expiry);
-        }
-        // A behavior this backend does not know: cancelled, nothing
-        // written.
-        _ => {
-            state.finished.set(true);
-            state.disconnect();
-            shared.downloads.borrow_mut().remove(&state.id);
-            download.cancel();
-        }
-    }
-}
-
-/// A manual download nobody chose a destination for: cancelled, and
-/// reported as failed (nothing was written, so there is nothing to
-/// remove).
-fn expire_pending(shared: &Rc<Shared>, state: &Rc<DownloadState>) {
-    state.clear_expiry();
-    if state.accepted.get() || state.finished.get() {
-        return;
-    }
-    // Nothing was accepted yet: WebKit holds it without a destination, so
-    // the terminal `failed` removes only the tracked state.
-    state.download.cancel();
-    shared.downloads.borrow_mut().remove(&state.id);
-    let failed = failed_event(state, "no download destination was accepted in time".into());
-    shared.emit(EventKind::Download, || failed);
-}
-
-/// Writes download `id` to the app's chosen `path`, through a staging
-/// file of its own that only a finished transfer publishes there.
-fn accept_download(shared: &Rc<Shared>, id: &str, request: u64, path: &Path, overwrite: bool) {
-    let Some(state) = shared.downloads.borrow().get(id).cloned() else {
-        shared.reply(request, Err(format!("unknown download {id}")));
-        return;
-    };
-    if state.finished.get() {
-        shared.reply(request, Err(format!("download {id} already finished")));
-        return;
-    }
-    if state.accepted.get() {
-        shared.reply(request, Err(format!("download {id} is already accepted")));
-        return;
-    }
-    if state.cancelling.get().is_some() {
-        shared.reply(request, Err(format!("download {id} is being cancelled")));
-        return;
-    }
-    if state.started.get() {
-        // An automatic download already writes where the platform chose.
-        shared.reply(
-            request,
-            Err(format!("download {id} is already writing its file")),
-        );
-        return;
-    }
-    if let Err(error) = check_destination(path, overwrite) {
-        shared.reply(request, Err(error));
-        return;
-    }
-    let staging = match stage_path(path, id) {
-        Ok(staging) => staging,
-        Err(error) => {
-            shared.reply(request, Err(error));
-            return;
-        }
-    };
-    state.manual.set(true);
-    state.overwrite.set(overwrite);
-    state.accepted.set(true);
-    state.clear_expiry();
-    *state.path.borrow_mut() = Some(path.to_path_buf());
-    *state.staging.borrow_mut() = Some(staging.clone());
-    state.accepting.set(Some(request));
-    // The staging file is new, so it must not be replaced: only the
-    // finished file goes to `path`, where `overwrite` decides.
-    state.download.set_allow_overwrite(false);
-    // The answer waits for WebKit: `created-destination` (ok) or
-    // `failed` (its error). `set_destination` may call back at once.
-    state.download.set_destination(&staging.to_string_lossy());
-}
-
-/// Cancels download `id`: answered once WebKit reports the transfer
-/// stopped and what it wrote is gone.
-fn cancel_download(shared: &Rc<Shared>, id: &str, request: u64) {
-    let Some(state) = shared.downloads.borrow().get(id).cloned() else {
-        shared.reply(request, Err(format!("unknown download {id}")));
-        return;
-    };
-    if state.finished.get() {
-        shared.reply(request, Err(format!("download {id} already finished")));
-        return;
-    }
-    if state.cancelling.get().is_some() {
-        shared.reply(request, Err(format!("download {id} is being cancelled")));
-        return;
-    }
-    state.clear_expiry();
-    state.cancelling.set(Some(request));
-    // The terminal `failed` (or a race's `finished`) removes the staging
-    // file or the backend's directory, then answers both this request and
-    // a waiting acceptance.
-    state.download.cancel();
-}
-
-/// A safe id for a download: hex digits only, so it names a directory
-/// without escaping it. Fixed widths, so no two differ only in where the
-/// clock's digits end.
-fn download_id(at: u128, n: u64) -> String {
-    format!("{at:032x}{n:016x}")
-}
-
-/// A file name for a server's suggested one: its last component, without
-/// separators or a leading dot, at most 200 bytes; `download` when nothing
-/// is left.
-fn file_name(suggested: &str) -> String {
-    let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
-    let mut name: String = last
-        .chars()
-        .filter(|c| {
-            !c.is_control()
-                && !matches!(c, ':' | '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{206f}')
-        })
-        .collect::<String>()
-        .trim()
-        .trim_start_matches('.')
-        .to_owned();
-    if name.len() > 200 {
-        // Preserve a normal extension while shortening the stem on UTF-8
-        // boundaries.
-        let extension = name
-            .rsplit_once('.')
-            .map(|(_, ext)| format!(".{ext}"))
-            .filter(|ext| ext.len() + name.chars().next().map_or(0, char::len_utf8) <= 200);
-        if let Some(extension) = &extension {
-            name.truncate(name.len() - extension.len());
-        }
-        let limit = 200 - extension.as_ref().map_or(0, String::len);
-        while name.len() > limit {
-            name.pop();
-        }
-        if let Some(extension) = extension {
-            name.push_str(&extension);
-        }
-    }
-    if name.is_empty() {
-        "download".to_owned()
-    } else {
-        name
-    }
-}
-
-/// Whether `path` may be a download's destination: absolute, in an
-/// existing folder, a file (replaced only when `overwrite` says so).
-fn check_destination(path: &Path, overwrite: bool) -> Result<(), String> {
-    let Some(text) = path.to_str() else {
-        return Err("a download destination must be a UTF-8 path".into());
-    };
-    if text.is_empty() || text.contains('\0') {
-        return Err("a download destination must be a valid path".into());
-    }
-    if !path.is_absolute() {
-        return Err(format!("download destination {text} is not absolute"));
-    }
-    if path.file_name().is_none() {
-        return Err(format!("download destination {text} has no file name"));
-    }
-    let Some(parent) = path.parent() else {
-        return Err(format!("download destination {text} has no folder"));
-    };
-    if !parent.is_dir() {
-        return Err(format!(
-            "the download destination's folder {} does not exist",
-            parent.display()
-        ));
-    }
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_dir() => {
-            Err(format!("download destination {text} is a folder"))
-        }
-        Ok(_) if !overwrite => Err(format!(
-            "download destination {text} exists (accept with overwrite to replace it)"
-        )),
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(format!("cannot use download destination {text}: {err}")),
-    }
-}
-
-/// Where a manual download writes before it is published: a hidden file
-/// of its own beside the app's destination, so a cancel or a failure
-/// never leaves a part of it there.
-fn stage_path(destination: &Path, id: &str) -> Result<PathBuf, String> {
-    let Some(parent) = destination.parent() else {
-        return Err(format!(
-            "download destination {} has no folder",
-            destination.display()
-        ));
-    };
-    let mut staging = parent.join(format!(".nsh-download-{id}.part"));
-    if staging == destination {
-        staging = parent.join(format!(".nsh-download-{id}.part.tmp"));
-    }
-    match std::fs::symlink_metadata(&staging) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(staging),
-        Ok(_) => Err(format!(
-            "the download's staging file {} exists",
-            staging.display()
-        )),
-        Err(err) => Err(format!("cannot use {}: {err}", staging.display())),
-    }
-}
-
-/// Moves a finished manual download from its staging file to the app's
-/// destination: replacing it only when the app said so (`overwrite`), else
-/// never clobbering a file that appeared meanwhile.
-fn publish(staging: &Path, destination: &Path, overwrite: bool) -> Result<(), String> {
-    if overwrite {
-        return std::fs::rename(staging, destination)
-            .map_err(|err| format!("cannot replace {}: {err}", destination.display()));
-    }
-    match std::fs::hard_link(staging, destination) {
-        Ok(()) => {
-            if let Err(err) = std::fs::remove_file(staging) {
-                log::warn!("web view: cannot remove {}: {err}", staging.display());
-            }
-            Ok(())
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
-            "{} exists (accept with overwrite to replace it)",
-            destination.display()
-        )),
-        Err(err) => Err(format!(
-            "cannot publish {} without replacing an existing file: {err}",
-            destination.display()
-        )),
-    }
-}
-
-/// Removes what a failed or cancelled download wrote: its staging file,
-/// or the backend's own directory in the app's data directory. Never the
-/// app's destination, which may hold an older file of its own.
-fn cleanup(shared: &Shared, state: &DownloadState) {
-    let dir = automatic_dir(shared, state);
-    let staging = state.staging.borrow_mut().take();
-    if state.manual.get() {
-        if let Some(staging) = staging {
-            let _ = std::fs::remove_file(staging);
-        }
-    } else if let Some(dir) = dir {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-}
-
-/// The folder an automatic download made for itself (`downloads/<id>`),
-/// which only this backend writes in; `None` for a manual download.
-fn automatic_dir(shared: &Shared, state: &DownloadState) -> Option<PathBuf> {
-    if state.manual.get() {
-        return None;
-    }
-    let root = shared.downloads_root.as_ref()?;
-    let staging = state.staging.borrow();
-    let dir = staging.as_ref()?.parent()?;
-    (dir == root.join(&state.id)).then(|| dir.to_path_buf())
-}
-
-/// `onDownload`'s payload for a download that failed, with why.
-fn failed_event(state: &DownloadState, message: String) -> EventPayload {
-    let mut event = download_event("failed", state, None);
-    if let EventPayload::Map(fields) = &mut event {
-        fields.push(("message", PayloadValue::Str(message)));
-    }
-    event
-}
-
-/// `onDownload`'s payload: `state`, `id`, `url`, `filename`, `path` and,
-/// once finished, `bytes`.
-fn download_event(state: &str, download: &DownloadState, bytes: Option<u64>) -> EventPayload {
-    let path = download
-        .path
-        .borrow()
-        .as_ref()
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut fields = vec![
-        ("state", PayloadValue::Str(state.to_owned())),
-        ("id", PayloadValue::Str(download.id.clone())),
-        ("url", PayloadValue::Str(download.url.clone())),
-        (
-            "filename",
-            PayloadValue::Str(download.filename.borrow().clone()),
-        ),
-        ("path", PayloadValue::Str(path)),
-    ];
-    if let Some(bytes) = bytes {
-        fields.push(("bytes", PayloadValue::Number(bytes as f64)));
-    }
-    EventPayload::Map(fields)
 }
 
 /// `{ url, title, loading, canGoBack, canGoForward }` of a page.
@@ -2142,177 +851,5 @@ mod tests {
             history_key(gdk::Key::Left, M::ALT_MASK | M::LOCK_MASK),
             Some(History::Back)
         );
-    }
-
-    #[test]
-    fn filter_identity_follows_the_rules() {
-        // dogo's `__adblock` names its lists `dogo-ads-0`, `dogo-ads-1`,
-        // … again for other filters: a compiled filter is only good for
-        // the rules it was compiled from, not for a reused identifier.
-        let list = |id: &str, rules: &str| {
-            let mut list = ContentRuleList::default();
-            list.id = id.into();
-            list.rules = rules.into();
-            list
-        };
-        let rules_a = list("dogo-ads-0", r#"[{"trigger":{"url-filter":"a"}}]"#);
-        let rules_b = list("dogo-ads-0", r#"[{"trigger":{"url-filter":"b"}}]"#);
-        let same = list("dogo-ads-0", r#"[{"trigger":{"url-filter":"a"}}]"#);
-        let other = list("dogo-ads-1", r#"[{"trigger":{"url-filter":"a"}}]"#);
-        assert_eq!(rule_identity(&rules_a), rule_identity(&same));
-        assert_ne!(rule_identity(&rules_a), rule_identity(&rules_b));
-        assert_ne!(rule_identity(&rules_a), rule_identity(&other));
-        assert!(rule_identity(&rules_a).starts_with("dogo-ads-0-"));
-        // WebKit names the compiled filter's file after the identifier.
-        let unsafe_id = list("a/b:c d", "[]");
-        let identity = rule_identity(&unsafe_id);
-        assert!(identity.starts_with("a_b_c_d-"), "{identity}");
-        assert!(!identity.contains('/'), "{identity}");
-    }
-
-    #[test]
-    fn names_download_file_names_safely() {
-        assert_eq!(file_name("report.pdf"), "report.pdf");
-        // A server can suggest a path: only its last part is a name.
-        assert_eq!(file_name("../../etc/passwd"), "passwd");
-        assert_eq!(file_name(r"..\..\boot.ini"), "boot.ini");
-        // A leading dot hides it, control characters break terminals.
-        assert_eq!(file_name(".profile"), "profile");
-        assert_eq!(file_name("a\u{0}b\u{7}.txt"), "ab.txt");
-        assert_eq!(file_name("   "), "download");
-        assert_eq!(file_name(""), "download");
-        assert_eq!(file_name("/"), "download");
-        // Bounded, keeping a normal extension.
-        let long = format!("{}.gz", "é".repeat(400));
-        let name = file_name(&long);
-        assert!(name.len() <= 200, "{} bytes", name.len());
-        assert!(name.ends_with(".gz"), "{name}");
-        // Right-to-left overrides could disguise the extension.
-        assert_eq!(file_name("invoice\u{202e}fdp.exe"), "invoicefdp.exe");
-    }
-
-    #[test]
-    fn names_download_directories_without_traversal() {
-        let id = download_id(0x1234_5678_9abc_def0, 42);
-        assert!(!id.is_empty());
-        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()));
-        // Different downloads of one run never share a directory.
-        assert_ne!(id, download_id(0x1234_5678_9abc_def0, 43));
-        assert_ne!(id, download_id(0x1234_5678_9abc_def1, 42));
-        assert_eq!(Path::new(&id).components().count(), 1);
-    }
-
-    #[test]
-    fn checks_download_destinations() {
-        let dir = std::env::temp_dir().join(download_id(u128::from(std::process::id()), 7));
-        std::fs::create_dir_all(&dir).unwrap();
-        let target = dir.join("file.txt");
-        assert!(check_destination(Path::new("relative.txt"), false).is_err());
-        assert!(check_destination(Path::new(""), false).is_err());
-        assert!(check_destination(&dir.join("missing").join("file"), false).is_err());
-        assert!(check_destination(&target, false).is_ok());
-        std::fs::write(&target, b"kept").unwrap();
-        // Never replaced without saying so.
-        assert!(check_destination(&target, false).is_err());
-        assert!(check_destination(&target, true).is_ok());
-        // A folder is not a file to write.
-        assert!(check_destination(&dir, true).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn publishes_staged_downloads_without_clobbering() {
-        let dir = std::env::temp_dir().join(download_id(u128::from(std::process::id()), 8));
-        std::fs::create_dir_all(&dir).unwrap();
-        let destination = dir.join("file.txt");
-        let staging = stage_path(&destination, "abc123").unwrap();
-        assert_eq!(
-            staging.file_name().and_then(|name| name.to_str()),
-            Some(".nsh-download-abc123.part")
-        );
-        assert_eq!(staging.parent(), Some(dir.as_path()));
-        // A fresh destination: the staged bytes become the file.
-        std::fs::write(&staging, b"new").unwrap();
-        assert!(publish(&staging, &destination, false).is_ok());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
-        assert!(!staging.exists());
-        // A file that appeared meanwhile is never replaced without
-        // `overwrite`, and the staging file stays for cleanup.
-        std::fs::write(&staging, b"newer").unwrap();
-        assert!(publish(&staging, &destination, false).is_err());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
-        assert_eq!(std::fs::read(&staging).unwrap(), b"newer");
-        // With it, the staged file replaces the destination.
-        assert!(publish(&staging, &destination, true).is_ok());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"newer");
-        assert!(!staging.exists());
-        // A legitimate destination can itself use the usual staging name.
-        let collision = dir.join(".nsh-download-collision.part");
-        let separate = stage_path(&collision, "collision").unwrap();
-        assert_ne!(separate, collision);
-        std::fs::write(&separate, b"complete").unwrap();
-        assert!(!collision.exists());
-        publish(&separate, &collision, false).unwrap();
-        assert_eq!(std::fs::read(&collision).unwrap(), b"complete");
-        assert!(!separate.exists());
-        // A staging file is never reused, and each download has its own.
-        std::fs::write(&staging, b"x").unwrap();
-        assert!(stage_path(&destination, "abc123").is_err());
-        assert_ne!(stage_path(&destination, "def456").unwrap(), staging);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn navigation_waits_for_requested_content_rules() {
-        let load =
-            Command::Load(nsh_core::WebLoad::new("https://example.test/file", Vec::new()).unwrap());
-        // Every app-driven navigation waits while the requested rules are
-        // not installed (or failed), and none does once they are.
-        for command in [Command::Reload, load, Command::GoBack, Command::GoForward] {
-            assert!(is_navigation(&command));
-            assert!(waits_for_rules(false, &command));
-            assert!(!waits_for_rules(true, &command));
-        }
-        // What does not navigate (scripts, messages, stopping) runs even
-        // while the rules compile, as do requests (capture, cookies).
-        for command in [
-            Command::InjectJavaScript("1".into()),
-            Command::PostMessage("hi".into()),
-            Command::StopLoading,
-        ] {
-            assert!(!is_navigation(&command));
-            assert!(!waits_for_rules(false, &command));
-        }
-    }
-
-    #[test]
-    fn translates_cookie_expiries_and_same_site() {
-        let date = glib::DateTime::from_unix_utc(1_700_000_000).unwrap();
-        let mut cookie = soup::Cookie::new("sid", "v", "example.com", "/", -1);
-        cookie.set_expires(&date);
-        cookie.set_http_only(true);
-        cookie.set_secure(true);
-        cookie.set_same_site_policy(soup::SameSitePolicy::Strict);
-        let web = web_cookie(cookie);
-        // The core speaks Unix milliseconds.
-        assert_eq!(web.expires, Some(1_700_000_000_000));
-        assert!(web.http_only && web.secure);
-        assert!(matches!(
-            web.same_site.as_ref(),
-            Some(CookieSameSite::Strict)
-        ));
-        // And WebKit takes seconds back: milliseconds are floored.
-        let mut web = web;
-        web.expires = Some(1_700_000_000_999);
-        let mut out = soup_cookie(&web).unwrap();
-        assert_eq!(
-            out.expires().map(|date| date.to_unix()),
-            Some(1_700_000_000)
-        );
-        assert!(matches!(
-            out.same_site_policy(),
-            soup::SameSitePolicy::Strict
-        ));
-        assert!(out.is_http_only() && out.is_secure());
     }
 }

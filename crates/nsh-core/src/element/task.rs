@@ -319,8 +319,6 @@ impl FileAnswer {
 pub(crate) enum WebAnswer {
     /// The page's PNG (its bytes), or why it could not be taken.
     CapturePage(AnswerSlot<Result<Vec<u8>, String>>),
-    /// The cookies, or why they could not be read.
-    Cookies(AnswerSlot<Result<Vec<crate::webview::WebCookie>, String>>),
     /// A request without a value, or why it failed.
     Done(AnswerSlot<Result<(), String>>),
 }
@@ -333,10 +331,6 @@ impl WebAnswer {
             WebAnswer::CapturePage(slot) => slot.borrow_mut().deliver(match error {
                 Some(error) => Err(error),
                 None => crate::webview::capture_png(value),
-            }),
-            WebAnswer::Cookies(slot) => slot.borrow_mut().deliver(match error {
-                Some(error) => Err(error),
-                None => crate::webview::cookies(value),
             }),
             WebAnswer::Done(slot) => slot.borrow_mut().deliver(match error {
                 Some(error) => Err(error),

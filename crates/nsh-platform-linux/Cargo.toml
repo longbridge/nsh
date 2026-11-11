@@ -71,5 +71,4 @@ ttf-parser.workspace = true
 crossbeam-channel.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
 nsh-testing = { workspace = true, features = ["agent"], optional = true }
-# 2.42: downloads (`WebKitDownload`), content filters, `NetworkSession`s.
-webkit6 = { workspace = true, optional = true, features = ["v2_42"] }
+webkit6 = { workspace = true, optional = true }

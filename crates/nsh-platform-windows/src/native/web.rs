@@ -54,87 +54,48 @@
 //! - `desktop={{ allowsBackForwardNavigationGestures }}`: WebView2's swipe navigation
 //!   (`IsSwipeNavigationEnabled`, touch swipes).
 //!
-//! # Controls, progress and downloads
+//! # Controls and the inspector
 //!
 //! The core's [`nsh_core::webview`] requests are answered as
 //! [`EventKind::WebViewReply`]: [`WebViewOperation::CapturePage`] is
-//! `CapturePreview` (a PNG, base64 in the reply), the cookie operations
-//! use the web view's own cookie manager (an InPrivate view has its own
-//! in-memory store), and the inspection operations use `SetAreDevToolsEnabled`
-//! and `OpenDevToolsWindow` (off until a host asks for them, as on macOS).
-//! Every request id is answered exactly once; a view that closes answers
-//! what was still in flight with an error.
+//! `CapturePreview` (a PNG, base64 in the reply), and
+//! [`WebViewOperation::OpenDevtools`] uses `OpenDevToolsWindow`. The
+//! `inspectable` prop enables `SetAreDevToolsEnabled` (off by default, as
+//! on macOS); without it, opening the developer tools enables them for the
+//! request. Every request id is answered exactly once; a view that closes
+//! answers what was still in flight with an error.
 //!
 //! A navigation reports [`EventKind::WebViewProgress`]: `None` while it
 //! loads (WebView2 measures no percentage) and `1` once it completed. A
 //! failure reports `None` again rather than a fabricated percentage; the
 //! failure itself is the [`EventKind::Error`] event.
-//!
-//! `download_behavior` (default [`WebDownloadBehavior::Automatic`]):
-//!
-//! - **Automatic** with an `onDownload` listener saves into the app's
-//!   data directory, `downloads/<id>/<sanitized filename>`, and reports
-//!   `started`, `finished` (with the file's bytes) and `failed` through
-//!   [`EventKind::Download`], as macOS does. Without a listener WebView2's
-//!   own download UI is left alone.
-//! - **Manual** holds the download's `DownloadStarting` event open with a
-//!   deferral and reports [`EventKind::DownloadPending`] (`id`, `url`,
-//!   `filename`); nothing is written until an `AcceptDownload` names an
-//!   absolute, writable destination (existing files need `overwrite`),
-//!   after which the same `started`/`finished`/`failed` lifecycle
-//!   continues. `CancelDownload` cancels a pending or running download.
-//!   A pending download without a listener is cancelled at once, and one
-//!   unanswered for [`PENDING_DOWNLOAD_TIMEOUT`] is cancelled and reported
-//!   failed. Closing the view cancels pending and running transfers and
-//!   removes only the partial output this backend created.
-//!
-//! `content_rules` are applied by this backend ([`rules`]), because
-//! WebView2 has no content rule engine: `block` and
-//! `ignore-previous-rules` rules filter `WebResourceRequested` (a blocked
-//! load is answered with `403`), and `css-display-none` rules become a
-//! script in the main frame. The parser is strict: a malformed list, an
-//! unknown key, or an action/condition this backend cannot apply rejects
-//! the whole set (the previously installed rules keep applying and the
-//! error reaches `onError`) instead of silently weakening the policy. The
-//! first navigation waits until the compiled rules are installed, so it
-//! cannot load under no filtering.
 
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
     rc::{Rc, Weak},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use nsh_core::access::WebMedia;
 use nsh_core::{
-    Color, Command, ContentRuleList, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
-    WebProps, WebSource,
-    webview::{
-        self, CookieSameSite, WebCookie, WebDownloadBehavior, WebViewOperation, WebViewRequest,
-    },
+    Color, Command, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID, WebProps, WebSource,
+    access::WebMedia,
+    webview::{self, WebViewOperation, WebViewRequest},
 };
-use rules::{Blocker, Decision, Resource, Top};
 use serde_json::Value as JsonValue;
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler, CapturePreviewCompletedHandler,
     CreateCoreWebView2CompositionControllerCompletedHandler,
     CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
-    DownloadStartingEventHandler, FocusChangedEventHandler, GetCookiesCompletedHandler,
+    FocusChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, COREWEBVIEW2_COLOR,
-        COREWEBVIEW2_COOKIE_SAME_SITE_KIND, COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX,
-        COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE, COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT,
-        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON, COREWEBVIEW2_DOWNLOAD_STATE,
-        COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
-        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_MOUSE_EVENT_KIND,
-        COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL, COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
+        COREWEBVIEW2_MOUSE_EVENT_KIND, COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL,
+        COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOUBLE_CLICK,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOWN,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_UP,
@@ -150,22 +111,14 @@ use webview2_com::{
         COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
         COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
         COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_POINTER_EVENT_KIND,
-        COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_RESOURCE_CONTEXT,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET,
-        ICoreWebView2, ICoreWebView2_2, ICoreWebView2_4, ICoreWebView2CompositionController,
-        ICoreWebView2Controller, ICoreWebView2Controller2, ICoreWebView2Controller3,
-        ICoreWebView2Cookie, ICoreWebView2CookieList, ICoreWebView2CookieManager,
-        ICoreWebView2Deferral, ICoreWebView2DownloadOperation,
-        ICoreWebView2DownloadStartingEventArgs, ICoreWebView2Environment,
+        COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2,
+        ICoreWebView2_2, ICoreWebView2CompositionController, ICoreWebView2Controller,
+        ICoreWebView2Controller2, ICoreWebView2Controller3, ICoreWebView2Environment,
         ICoreWebView2Environment2, ICoreWebView2Environment3, ICoreWebView2Environment10,
-        ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2NavigationStartingEventArgs,
-        ICoreWebView2Settings2, ICoreWebView2Settings6,
+        ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2Settings2, ICoreWebView2Settings6,
     },
     MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
-    NavigationStartingEventHandler, PermissionRequestedEventHandler, StateChangedEventHandler,
+    NavigationStartingEventHandler, PermissionRequestedEventHandler,
     WebMessageReceivedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::{
@@ -181,7 +134,7 @@ use windows::{
             },
             Gdi::ScreenToClient,
         },
-        System::Com::{CoCreateGuid, IStream, STREAM_SEEK_SET},
+        System::Com::{IStream, STREAM_SEEK_SET},
         UI::{
             Input::{
                 KeyboardAndMouse::{GetFocus, SetFocus},
@@ -206,24 +159,6 @@ use crate::{
     surface::Surface,
     view::{Hosted, ItemPointer, NshView},
 };
-
-#[path = "web_rules.rs"]
-mod rules;
-
-/// How long a manual download waits for the app to accept or cancel it
-/// before it is cancelled and reported failed (nothing is written).
-const PENDING_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
-type RuleCache = HashMap<Vec<(Arc<str>, Arc<str>)>, Arc<Blocker>>;
-type DocumentScripts = (Option<Arc<str>>, Option<Arc<str>>);
-
-thread_local! {
-    /// Compiled content blockers by the rules they were compiled from:
-    /// browser panes with the same rules share one, and a set compiles
-    /// once. The key is the lists' id and JSON, so a changed list never
-    /// reuses another's rules.
-    static BLOCKERS: RefCell<RuleCache> = RefCell::default();
-}
 
 /// Lets pages talk to the app: `window.nsh.postMessage(data)`.
 const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.chrome.webview.postMessage(String(data)); } };";
@@ -283,158 +218,10 @@ unsafe fn create_environment(
     }
 }
 
-/// A download WebView2 started and the app must decide on (Manual): its
-/// event stays open through a deferral until the app accepts or cancels,
-/// and nothing is written until then.
-struct PendingDownload {
-    args: ICoreWebView2DownloadStartingEventArgs,
-    deferral: ICoreWebView2Deferral,
-    url: String,
-    filename: String,
-}
-
-impl PendingDownload {
-    /// Cancels the download and answers its event (nothing is written).
-    fn cancel(&self) {
-        // SAFETY: WebView2 calls on the live event and its deferral; the
-        // deferral is completed once, which ends the event.
-        unsafe {
-            let _ = self.args.SetCancel(true);
-            let _ = self.deferral.Complete();
-        }
-    }
-
-    /// The operation it downloads, while its event is still open.
-    fn operation(&self) -> Option<ICoreWebView2DownloadOperation> {
-        // SAFETY: a WebView2 getter on the live event.
-        unsafe { self.args.DownloadOperation() }.ok()
-    }
-}
-
-/// A download under way (Automatic, or a Manual one the app accepted):
-/// what it reports and what to remove if it does not complete.
-struct ActiveDownload {
-    operation: ICoreWebView2DownloadOperation,
-    id: String,
-    url: String,
-    filename: String,
-    /// The file the app hears about.
-    path: PathBuf,
-    /// Where WebView2 writes a Manual download until it completes (a
-    /// unique sibling of `path`, so a failure never touches an existing
-    /// file there).
-    staging: Option<PathBuf>,
-    /// A Manual download replaces an existing `path` only when the app
-    /// asked for it.
-    overwrite: bool,
-    /// The directory this backend made for an automatic download (only
-    /// that is removed whole; an app-chosen destination is not).
-    owned_directory: Option<PathBuf>,
-    /// The request id waiting for this transfer to stop before its
-    /// cancellation is answered.
-    cancel_request: Cell<Option<u64>>,
-}
-
-impl ActiveDownload {
-    /// Its state, when WebView2 reports one.
-    fn state(&self) -> Option<COREWEBVIEW2_DOWNLOAD_STATE> {
-        let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
-        // SAFETY: a WebView2 getter on the live operation.
-        unsafe { self.operation.State(&mut state) }
-            .ok()
-            .map(|()| state)
-    }
-
-    /// Stops the transfer (teardown) and removes its partial output. A
-    /// transfer that already completed is published instead, so its file
-    /// is kept. The app's destination is never deleted.
-    fn cancel(&self) {
-        if self.state() == Some(COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED) {
-            if self.publish().is_err() {
-                self.cleanup();
-            }
-            return;
-        }
-        // SAFETY: a WebView2 call on the live operation.
-        let _ = unsafe { self.operation.Cancel() };
-        self.cleanup();
-    }
-
-    /// Moves a completed Manual download from its staging file to the
-    /// app's destination: without replacement when the app did not ask for
-    /// it, atomically replacing otherwise. The old destination is never
-    /// removed before the new file is ready.
-    fn publish(&self) -> Result<(), String> {
-        let Some(staging) = &self.staging else {
-            return Ok(()); // an automatic download wrote its final path
-        };
-        if self.overwrite {
-            return std::fs::rename(staging, &self.path).map_err(|error| {
-                format!(
-                    "cannot move the download to {}: {error}",
-                    self.path.display()
-                )
-            });
-        }
-        match std::fs::hard_link(staging, &self.path) {
-            Ok(()) => {
-                if std::fs::remove_file(staging).is_err() {
-                    remove_later(staging.clone(), false);
-                }
-                Ok(())
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
-                "the download path already exists: {}",
-                self.path.display()
-            )),
-            Err(error) => Err(format!(
-                "cannot publish {} without replacing an existing file: {error}",
-                self.path.display()
-            )),
-        }
-    }
-
-    /// Removes the partial output this backend wrote, never the app's
-    /// existing destination.
-    fn cleanup(&self) {
-        if let Some(directory) = &self.owned_directory {
-            remove_later(directory.clone(), true);
-        } else if let Some(staging) = &self.staging {
-            remove_later(staging.clone(), false);
-        }
-    }
-
-    /// Removes the partial output after WebView2 reported that writing
-    /// stopped: synchronously when possible (the cancellation answer
-    /// follows the deletion), with a retry only for the owned staging file.
-    fn cleanup_after_stop(&self) {
-        if let Some(directory) = &self.owned_directory {
-            remove_later(directory.clone(), true);
-        } else if let Some(staging) = &self.staging {
-            match std::fs::remove_file(staging) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => remove_later(staging.clone(), false),
-            }
-        }
-    }
-}
-
-/// How installing a compiled rule set went.
-enum Install {
-    /// The blocker (and its cosmetic script, if any) is live now.
-    Committed,
-    /// A cosmetic script registration is still completing; the previous
-    /// policy stays live until it succeeds.
-    Waiting,
-    /// Registration failed immediately; the previous policy stays live and
-    /// the requested policy was not installed.
-    Failed,
-}
-
 /// The request ids this view must still answer, so a close settles what
 /// WebView2 would otherwise never call back for; a request is answered
-/// once.
+/// once, and a callback that outlives its view (a capture) cannot answer
+/// for a replacement view that reuses this surface and node.
 #[derive(Clone)]
 struct Replies {
     emitter: Emitter,
@@ -481,12 +268,6 @@ impl Replies {
 pub(crate) struct WebItem {
     emitter: Emitter,
     surface: Weak<Surface>,
-    /// A weak self, for event handlers that outlive the call that made
-    /// them.
-    me: RefCell<Weak<WebItem>>,
-    /// Identity of this view for worker completions: a replacement view
-    /// reusing the same surface and node is a different `Arc`.
-    alive: Arc<AtomicBool>,
     /// Its view.
     id: NodeId,
     /// The window it is in (`ROOT_ID`: the main one) and its native window,
@@ -517,81 +298,16 @@ pub(crate) struct WebItem {
     queued: RefCell<Vec<Command>>,
     /// The ids of the app's document scripts (removed when they change).
     scripts: Rc<RefCell<Vec<String>>>,
-    /// The script pair actually installed now (`None, None` when inert).
-    scripts_installed: RefCell<DocumentScripts>,
-    /// Counts script installs/clears: a late registration for an older
-    /// desired state is removed instead of restored.
-    scripts_gen: Rc<Cell<u64>>,
-    /// The effective `scrollable` state installed (`None`: inert, no
-    /// scroll script).
-    scroll_applied: Cell<Option<bool>>,
     /// The id of the document script that keeps the page from scrolling.
     scroll_script: Rc<RefCell<Option<String>>>,
-    /// Counts scroll-script installs/clears: a late registration for an
-    /// older state is removed.
-    scroll_gen: Rc<Cell<u64>>,
-    /// The compiled content blocker rules (WebView2 has no engine of its
-    /// own: the request handler and the cosmetic script apply them). It is
-    /// shared with the request handler, which reads it on every load.
-    blocker: Rc<RefCell<Option<Arc<Blocker>>>>,
-    /// The request handler that matches loads against `blocker` was
-    /// registered.
-    blocker_handler: Cell<bool>,
-    /// The id of the document script that hides what the cosmetic rules
-    /// name.
-    cosmetic_script: Rc<RefCell<Option<String>>>,
-    /// Counts cosmetic script changes: an older script whose id arrives
-    /// late is removed instead of replacing the current one.
-    cosmetic_gen: Rc<Cell<u64>>,
-    /// Counts the content rule changes: a blocker compiled off this thread
-    /// for replaced rules is dropped.
-    rules_gen: Cell<u64>,
-    /// Whether `blocker` holds the wanted rules: a page that must load
-    /// waits for them (`pending_source`) instead of going out under the
-    /// old rules (the first one) or none.
-    rules_ready: Cell<bool>,
-    /// The source that waits for the content rules.
-    pending_source: RefCell<Option<WebSource>>,
-    /// The app's navigation commands (`load`, `reload`, back, forward)
-    /// that wait, in order, for the content rules.
-    pending_commands: RefCell<Vec<Command>>,
-    /// Where automatic downloads are saved (the app's data directory's
-    /// `downloads`); `None` without one.
-    downloads_root: Option<PathBuf>,
-    /// Downloads waiting for the app's answer (Manual), by their id (their
-    /// event stays open through a deferral until it does).
-    downloads: RefCell<HashMap<String, PendingDownload>>,
-    /// Downloads under way (Automatic, or accepted Manual), by their id.
-    active_downloads: RefCell<HashMap<String, ActiveDownload>>,
-    /// This runtime reports downloads (`DownloadStarting`; WebView2
-    /// 1.0.902 and later).
-    downloads_supported: Cell<bool>,
-    /// A Manual policy is requested while this runtime cannot defer
-    /// downloads: the view is inert and refuses navigations until
-    /// Automatic is restored.
-    manual_unavailable: Cell<bool>,
-    /// The committed top-level document's URL.
-    top_url: RefCell<String>,
-    /// The URL of a top-level navigation in progress, until its document
-    /// request is claimed.
-    top_target: RefCell<Option<String>>,
-    /// WebView2's id for that navigation, so an older completion cannot
-    /// clear a newer navigation's state.
-    top_navigation_id: Cell<u64>,
-    /// The main document of `top_target` was requested (so other document
-    /// loads are frames).
-    main_claimed: Cell<bool>,
-    /// The developer tools are enabled (`SetAreDevToolsEnabled`; off until
-    /// a host asks for them).
-    devtools: Cell<bool>,
-    /// The requests this view still owes an answer.
-    replies: Replies,
     /// The engine's own user agent (restored when the app's is removed).
     default_agent: RefCell<Option<String>>,
     /// The HTML served at its base URL (`baseUrl`).
     html: RefCell<Option<(String, Arc<str>)>>,
     /// The document requests are watched (for `html`).
     serving: Cell<bool>,
+    /// The requests this view still owes an answer.
+    replies: Replies,
     /// Where the last frame put it.
     at: Cell<Option<Placement>>,
     /// The controller's bounds applied (window pixels; `None`: hidden).
@@ -612,11 +328,9 @@ pub(crate) struct WebItem {
 
 impl WebItem {
     pub(crate) fn new(surface: &Rc<Surface>, view: &NshView) -> Rc<Self> {
-        let item = Rc::new(WebItem {
+        Rc::new(WebItem {
             emitter: Emitter::new(surface, view.id()),
             surface: Rc::downgrade(surface),
-            me: RefCell::new(Weak::new()),
-            alive: Arc::new(AtomicBool::new(true)),
             id: view.id(),
             host: Cell::new(None),
             portal: RefCell::new(None),
@@ -632,33 +346,11 @@ impl WebItem {
             applied: RefCell::new(None),
             queued: RefCell::new(Vec::new()),
             scripts: Rc::default(),
-            scripts_installed: RefCell::new((None, None)),
-            scripts_gen: Rc::default(),
-            scroll_applied: Cell::new(None),
             scroll_script: Rc::default(),
-            scroll_gen: Rc::default(),
-            blocker: Rc::default(),
-            blocker_handler: Cell::new(false),
-            cosmetic_script: Rc::default(),
-            cosmetic_gen: Rc::default(),
-            rules_gen: Cell::new(0),
-            rules_ready: Cell::new(true),
-            pending_source: RefCell::new(None),
-            pending_commands: RefCell::default(),
-            downloads_root: surface.native.downloads(),
-            downloads: RefCell::default(),
-            active_downloads: RefCell::default(),
-            downloads_supported: Cell::new(false),
-            manual_unavailable: Cell::new(false),
-            top_url: RefCell::new(String::new()),
-            top_target: RefCell::new(None),
-            top_navigation_id: Cell::new(0),
-            main_claimed: Cell::new(false),
-            devtools: Cell::new(false),
-            replies: Replies::new(Emitter::new(surface, view.id())),
             default_agent: RefCell::new(None),
             html: RefCell::new(None),
             serving: Cell::new(false),
+            replies: Replies::new(Emitter::new(surface, view.id())),
             at: Cell::new(None),
             bounds: Cell::new(None),
             raster: Cell::new(0.0),
@@ -667,9 +359,7 @@ impl WebItem {
             hovered: Cell::new(false),
             focused: Cell::new(false),
             buttons: Cell::new(0),
-        });
-        *item.me.borrow_mut() = Rc::downgrade(&item);
-        item
+        })
     }
 
     /// The native window its page is in, once bound.
@@ -740,7 +430,6 @@ impl WebItem {
     fn unavailable(&self, why: &str) {
         self.failed.set(true);
         self.portal.borrow_mut().take();
-        self.pending_commands.borrow_mut().clear();
         self.fail_queued("the web view is not available");
         self.replies.fail_all("the web view is not available");
         static WARNED: AtomicBool = AtomicBool::new(false);
@@ -864,7 +553,8 @@ impl WebItem {
             let _ = controller.SetIsVisible(false);
             if let Ok(settings) = webview.Settings() {
                 let _ = settings.SetIsStatusBarEnabled(false);
-                // Inspectable off until a host asks for it, as on macOS.
+                // Inspectable off until the app's prop asks for it, as on
+                // macOS.
                 let _ = settings.SetAreDevToolsEnabled(false);
                 if let Ok(settings) = settings.cast::<ICoreWebView2Settings2>() {
                     let mut agent = PWSTR::null();
@@ -879,8 +569,6 @@ impl WebItem {
             );
         }
         self.listen(&webview);
-        self.listen_blocking(&webview);
-        self.listen_downloads(&webview);
         self.listen_input(&composition, &controller);
         *self.composition.borrow_mut() = Some(composition);
         *self.controller.borrow_mut() = Some(controller);
@@ -898,26 +586,6 @@ impl WebItem {
         }
     }
 
-    /// Refuses a navigation explicitly: cancels it and reports why with its
-    /// URL.
-    fn refuse_navigation(&self, args: &ICoreWebView2NavigationStartingEventArgs, message: &str) {
-        let mut uri = PWSTR::null();
-        // SAFETY: WebView2 calls on the event's live objects.
-        let url = unsafe { args.Uri(&mut uri).map(|()| take_pwstr(uri)) }.unwrap_or_default();
-        // SAFETY: a WebView2 call on the event's live object.
-        let _ = unsafe { args.SetCancel(true) };
-        self.emitter.emit(EventKind::Error, || {
-            EventPayload::Map(vec![
-                ("message", PayloadValue::Str(message.to_owned())),
-                (
-                    "code",
-                    PayloadValue::Str(nsh_core::element::codes::ACCESS_DENIED.into()),
-                ),
-                ("url", PayloadValue::Str(url)),
-            ])
-        });
-    }
-
     /// Reports the web view's navigations and messages.
     fn listen(self: &Rc<Self>, webview: &ICoreWebView2) {
         let mut token = 0i64;
@@ -929,24 +597,7 @@ impl WebItem {
             let mut uri = PWSTR::null();
             // SAFETY: WebView2 calls on the event's live objects.
             let url = unsafe { args.Uri(&mut uri).map(|()| take_pwstr(uri)) }.unwrap_or_default();
-            if url != "about:blank" {
-                if item.manual_unavailable.get() {
-                    item.refuse_navigation(
-                        &args,
-                        "navigation is refused while manual downloads are unavailable",
-                    );
-                    return Ok(());
-                }
-                if !item.rules_ready.get() {
-                    // The requested content policy is not installed (or was
-                    // rejected): a page or user navigation must not go out
-                    // unfiltered. Refuse it explicitly; the app can ask
-                    // again once the policy is in.
-                    item.refuse_navigation(&args, "navigation is waiting for content rules");
-                    return Ok(());
-                }
-            }
-            if url != "about:blank" && !item.allows(&url) {
+            if !item.allows(&url) {
                 // SAFETY: as above.
                 let _ = unsafe { args.SetCancel(true) };
                 log::warn!(target: "js", "web view navigation to {url} is not granted");
@@ -964,13 +615,7 @@ impl WebItem {
                 return Ok(());
             }
             let mut state = navigation(&sender, true);
-            state.url = url.clone();
-            let mut navigation_id = 0u64;
-            // SAFETY: a WebView2 getter on the event's live object.
-            let _ = unsafe { args.NavigationId(&mut navigation_id) };
-            item.top_navigation_id.set(navigation_id);
-            *item.top_target.borrow_mut() = Some(url);
-            item.main_claimed.set(false);
+            state.url = url;
             item.emitter.emit(EventKind::LoadStart, || state.payload());
             item.emitter
                 .emit(EventKind::NavigationStateChange, || state.payload());
@@ -988,21 +633,13 @@ impl WebItem {
             };
             let mut success = BOOL(0);
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
-            let mut navigation_id = 0u64;
             // SAFETY: WebView2 calls on the event's live objects.
             unsafe {
                 let _ = args.IsSuccess(&mut success);
                 let _ = args.WebErrorStatus(&mut status);
-                let _ = args.NavigationId(&mut navigation_id);
             }
-            let current = navigation_id == item.top_navigation_id.get();
             if success.as_bool() {
                 let state = navigation(&sender, false);
-                if current {
-                    *item.top_url.borrow_mut() = state.url.clone();
-                    item.top_target.borrow_mut().take();
-                    item.main_claimed.set(false);
-                }
                 item.emitter.emit(EventKind::Load, || state.payload());
                 item.emitter
                     .emit(EventKind::NavigationStateChange, || state.payload());
@@ -1011,10 +648,6 @@ impl WebItem {
                     webview::progress_payload(Some(nsh_core::geometry::Percentage(1.0)))
                 });
             } else if let Some(message) = web_error(status.0) {
-                if current {
-                    item.top_target.borrow_mut().take();
-                    item.main_claimed.set(false);
-                }
                 item.emitter
                     .emit(EventKind::Error, || error(message.to_owned()));
                 // A failed navigation did not complete: do not report a
@@ -1022,11 +655,6 @@ impl WebItem {
                 item.emitter.emit(EventKind::WebViewProgress, || {
                     webview::progress_payload(None)
                 });
-            } else if current {
-                // Cancelled/replaced (`OPERATION_CANCELED` has no message):
-                // its top-document state must not outlive it.
-                item.top_target.borrow_mut().take();
-                item.main_claimed.set(false);
             }
             Ok(())
         }));
@@ -1077,442 +705,17 @@ impl WebItem {
             // SAFETY: as above.
             unsafe { args.SetState(state) }
         }));
-        let weak = Rc::downgrade(self);
-        let frame_starting = NavigationStartingEventHandler::create(Box::new(move |_, args| {
-            if let (Some(item), Some(args)) = (weak.upgrade(), args) {
-                let mut uri = PWSTR::null();
-                // SAFETY: WebView2 calls on the event's live object.
-                let url =
-                    unsafe { args.Uri(&mut uri).map(|()| take_pwstr(uri)) }.unwrap_or_default();
-                if url != "about:blank" {
-                    if item.manual_unavailable.get() {
-                        item.refuse_navigation(
-                            &args,
-                            "frame navigation is refused while manual downloads are unavailable",
-                        );
-                    } else if !item.rules_ready.get() {
-                        item.refuse_navigation(
-                            &args,
-                            "frame navigation is waiting for content rules",
-                        );
-                    }
-                }
-            }
-            Ok(())
-        }));
         // SAFETY: WebView2 calls on the live web view; the handlers hold the
         // item weakly, and go with the web view.
         unsafe {
             let _ = webview.add_PermissionRequested(&permission, &mut token);
             let _ = webview.add_NavigationStarting(&starting, &mut token);
             let _ = webview.add_NavigationCompleted(&completed, &mut token);
-            if let Err(error) = webview.add_FrameNavigationStarting(&frame_starting, &mut token) {
-                log::warn!("web view: cannot watch frame navigations: {error}");
-            }
             let _ = webview.add_WebMessageReceived(&message, &mut token);
         }
     }
 
-    /// `DownloadStarting`: saves into the app's data directory when the app
-    /// listens for downloads, holds a Manual download for the app's
-    /// decision, or leaves WebView2's own UI alone.
-    fn listen_downloads(self: &Rc<Self>, webview: &ICoreWebView2) {
-        let Ok(webview) = webview.cast::<ICoreWebView2_4>() else {
-            log::debug!("web view: this WebView2 runtime does not report downloads");
-            return;
-        };
-        let weak = Rc::downgrade(self);
-        let started = DownloadStartingEventHandler::create(Box::new(move |_, args| {
-            if let (Some(item), Some(args)) = (weak.upgrade(), args) {
-                item.download_started(args);
-            }
-            Ok(())
-        }));
-        let mut token = 0i64;
-        // SAFETY: WebView2 calls on the live web view; the handler holds
-        // the item weakly and goes with the web view.
-        let added = unsafe { webview.add_DownloadStarting(&started, &mut token) };
-        self.downloads_supported.set(added.is_ok());
-        if let Err(error) = added {
-            log::debug!("web view: cannot report downloads: {error}");
-        }
-    }
-
-    /// WebView2 started a download: Automatic (with a listener) writes it
-    /// into the app's downloads directory; Manual holds its event open
-    /// until the app accepts a destination or cancels it.
-    fn download_started(self: &Rc<Self>, args: ICoreWebView2DownloadStartingEventArgs) {
-        if self.closed.get() || self.manual_unavailable.get() {
-            // A Manual policy this runtime cannot honor must not fall back
-            // to WebView2's own download UI.
-            // SAFETY: a WebView2 call on the live event.
-            let _ = unsafe { args.SetCancel(true) };
-            return;
-        }
-        let operation = {
-            // SAFETY: a WebView2 getter on the live event.
-            unsafe { args.DownloadOperation() }.ok()
-        };
-        let (mut url, mut suggested) = (String::new(), String::new());
-        if let Some(operation) = &operation {
-            // SAFETY: WebView2 getters on the live operation; the strings
-            // are freed by `take_pwstr`.
-            unsafe {
-                let mut uri = PWSTR::null();
-                if operation.Uri(&mut uri).is_ok() {
-                    url = take_pwstr(uri);
-                }
-                let mut path = PWSTR::null();
-                if operation.ResultFilePath(&mut path).is_ok() {
-                    suggested = take_pwstr(path);
-                }
-            }
-        }
-        if suggested.is_empty() {
-            // SAFETY: a WebView2 getter on the live event.
-            unsafe {
-                let mut path = PWSTR::null();
-                if args.ResultFilePath(&mut path).is_ok() {
-                    suggested = take_pwstr(path);
-                }
-            }
-        }
-        let filename = download_name(&suggested, &url);
-        let manual = self
-            .props
-            .borrow()
-            .as_ref()
-            .is_some_and(|p| matches!(&p.download_behavior, WebDownloadBehavior::Manual));
-        if manual {
-            // No one to ask: the download is not written rather than left
-            // waiting forever.
-            if !self.emitter.listens(EventKind::DownloadPending) {
-                // SAFETY: a WebView2 call on the live event.
-                let _ = unsafe { args.SetCancel(true) };
-                return;
-            }
-            let id = next_download_id();
-            // SAFETY: WebView2 calls on the live event: the default dialog
-            // stays away (the app decides), and its deferral keeps it open
-            // until the app answers.
-            let pending = unsafe {
-                match args.GetDeferral() {
-                    Ok(deferral) => {
-                        let _ = args.SetHandled(true);
-                        Some(PendingDownload {
-                            args: args.clone(),
-                            deferral,
-                            url: url.clone(),
-                            filename: filename.clone(),
-                        })
-                    }
-                    Err(why) => {
-                        log::warn!("web view: cannot hold a download for the app: {why}");
-                        self.emitter.emit(EventKind::Error, || {
-                            error(format!("cannot hold a download for the app: {why}"))
-                        });
-                        let _ = args.SetCancel(true);
-                        None
-                    }
-                }
-            };
-            let Some(pending) = pending else { return };
-            self.downloads.borrow_mut().insert(id.clone(), pending);
-            self.arm_download_deadline(&id);
-            self.emitter.emit(EventKind::DownloadPending, || {
-                webview::download_pending_payload(&id, &url, &filename)
-            });
-            return;
-        }
-        // Automatic: an app that listens for downloads opts into the app's
-        // data directory; without a listener WebView2's own UI is intact.
-        if !self.emitter.listens(EventKind::Download) {
-            return;
-        }
-        let Some(root) = self.downloads_root.as_ref() else {
-            // SAFETY: a WebView2 call on the live event.
-            let _ = unsafe { args.SetCancel(true) };
-            let id = next_download_id();
-            self.emit_download(
-                "failed",
-                &id,
-                &url,
-                &filename,
-                Path::new(""),
-                None,
-                Some("the app has no data directory to download into".to_owned()),
-            );
-            return;
-        };
-        let Some(operation) = operation else {
-            // SAFETY: a WebView2 call on the live event.
-            let _ = unsafe { args.SetCancel(true) };
-            let id = next_download_id();
-            self.emit_download(
-                "failed",
-                &id,
-                &url,
-                &filename,
-                Path::new(""),
-                None,
-                Some("the download has no operation".to_owned()),
-            );
-            return;
-        };
-        let id = next_download_id();
-        let directory = root.join(&id);
-        let path = directory.join(&filename);
-        if let Err(error) = std::fs::create_dir_all(&directory) {
-            // SAFETY: a WebView2 call on the live event.
-            let _ = unsafe { args.SetCancel(true) };
-            self.emit_download(
-                "failed",
-                &id,
-                &url,
-                &filename,
-                &path,
-                None,
-                Some(format!(
-                    "cannot make the download directory {}: {error}",
-                    directory.display()
-                )),
-            );
-            remove_later(directory, true);
-            return;
-        }
-        if path.exists() {
-            // SAFETY: a WebView2 call on the live event.
-            let _ = unsafe { args.SetCancel(true) };
-            self.emit_download(
-                "failed",
-                &id,
-                &url,
-                &filename,
-                &path,
-                None,
-                Some(format!(
-                    "the download path already exists: {}",
-                    path.display()
-                )),
-            );
-            remove_later(directory, true);
-            return;
-        }
-        // SAFETY: WebView2 calls on the live event: the file goes to the
-        // app's directory (the default dialog stays away).
-        let result = unsafe {
-            let mut result = args.SetResultFilePath(&HSTRING::from(&*path.to_string_lossy()));
-            if result.is_ok() {
-                result = args.SetCancel(false);
-            }
-            if result.is_ok() {
-                result = args.SetHandled(true);
-            }
-            result
-        };
-        if let Err(error) = result {
-            // SAFETY: a WebView2 call on the live event.
-            let _ = unsafe { args.SetCancel(true) };
-            self.emit_download(
-                "failed",
-                &id,
-                &url,
-                &filename,
-                &path,
-                None,
-                Some(format!("cannot save the download: {}", error.message())),
-            );
-            remove_later(directory, true);
-            return;
-        }
-        self.track_download(
-            operation,
-            &id,
-            &url,
-            &filename,
-            &path,
-            None,
-            false,
-            Some(directory),
-        );
-        self.emit_download("started", &id, &url, &filename, &path, None, None);
-    }
-
-    /// Keeps a Manual download's decision bounded: after the timeout its
-    /// event is answered (cancelled) and the app hears it failed.
-    fn arm_download_deadline(&self, id: &str) {
-        let Some(surface) = self.surface.upgrade() else {
-            return;
-        };
-        let surface_key = surface.key();
-        let node = self.emitter.id;
-        let id = id.to_owned();
-        let ui = crate::window::UiThread::current();
-        std::thread::spawn(move || {
-            std::thread::sleep(PENDING_DOWNLOAD_TIMEOUT);
-            ui.invoke(move || {
-                if let Some(surface) = Surface::by_key(surface_key)
-                    && let Some(item) = super::web_item(&surface, node)
-                {
-                    item.expire_download(&id);
-                }
-            });
-        });
-    }
-
-    /// A Manual download waited too long for the app: cancel it (nothing
-    /// is written) and report why.
-    fn expire_download(&self, id: &str) {
-        let Some(pending) = self.downloads.borrow_mut().remove(id) else {
-            return;
-        };
-        let (url, filename) = (pending.url.clone(), pending.filename.clone());
-        pending.cancel();
-        self.emit_download(
-            "failed",
-            id,
-            &url,
-            &filename,
-            Path::new(""),
-            None,
-            Some(format!(
-                "the download was not accepted within {} seconds",
-                PENDING_DOWNLOAD_TIMEOUT.as_secs()
-            )),
-        );
-    }
-
-    /// Follows a running download to its completed or interrupted end.
-    #[allow(clippy::too_many_arguments)]
-    fn track_download(
-        &self,
-        operation: ICoreWebView2DownloadOperation,
-        id: &str,
-        url: &str,
-        filename: &str,
-        path: &Path,
-        staging: Option<PathBuf>,
-        overwrite: bool,
-        owned_directory: Option<PathBuf>,
-    ) {
-        let weak = self.me.borrow().clone();
-        let key = id.to_owned();
-        let handler = StateChangedEventHandler::create(Box::new(move |sender, _| {
-            if let (Some(item), Some(operation)) = (weak.upgrade(), sender) {
-                item.download_state(&key, &operation);
-            }
-            Ok(())
-        }));
-        let mut token = 0i64;
-        // SAFETY: a WebView2 call on the live operation; the handler holds
-        // the item weakly and goes with the operation.
-        unsafe {
-            let _ = operation.add_StateChanged(&handler, &mut token);
-        }
-        self.active_downloads.borrow_mut().insert(
-            id.to_owned(),
-            ActiveDownload {
-                operation,
-                id: id.to_owned(),
-                url: url.to_owned(),
-                filename: filename.to_owned(),
-                path: path.to_path_buf(),
-                staging,
-                overwrite,
-                owned_directory,
-                cancel_request: Cell::new(None),
-            },
-        );
-    }
-
-    /// A tracked download changed state: report its completion or failure.
-    fn download_state(&self, id: &str, operation: &ICoreWebView2DownloadOperation) {
-        let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
-        // SAFETY: a WebView2 getter on the live operation.
-        if unsafe { operation.State(&mut state) }.is_err() {
-            return;
-        }
-        if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
-            let Some(entry) = self.active_downloads.borrow_mut().remove(id) else {
-                return;
-            };
-            let published = entry.publish();
-            let bytes = std::fs::metadata(&entry.path).map(|m| m.len()).ok();
-            let failure = match published {
-                Ok(()) => {
-                    self.emit_download(
-                        "finished",
-                        &entry.id,
-                        &entry.url,
-                        &entry.filename,
-                        &entry.path,
-                        bytes,
-                        None,
-                    );
-                    None
-                }
-                Err(message) => {
-                    // The app's destination was not replaced: it was never
-                    // touched before the publish.
-                    entry.cleanup();
-                    self.emit_download(
-                        "failed",
-                        &entry.id,
-                        &entry.url,
-                        &entry.filename,
-                        &entry.path,
-                        None,
-                        Some(message.clone()),
-                    );
-                    Some(message)
-                }
-            };
-            if let Some(request) = entry.cancel_request.take() {
-                self.replies
-                    .settle(request, failure.map_or(Ok(JsonValue::Null), Err));
-            }
-        } else if state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
-            let Some(entry) = self.active_downloads.borrow_mut().remove(id) else {
-                return;
-            };
-            let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON(0);
-            // SAFETY: a WebView2 getter on the live operation.
-            let _ = unsafe { operation.InterruptReason(&mut reason) };
-            // Writing has stopped: only this backend's staging file (or
-            // its automatic directory) goes.
-            entry.cleanup_after_stop();
-            self.emit_download(
-                "failed",
-                &entry.id,
-                &entry.url,
-                &entry.filename,
-                &entry.path,
-                None,
-                Some(interrupt_message(reason.0)),
-            );
-            if let Some(request) = entry.cancel_request.take() {
-                self.replies.settle(request, Ok(JsonValue::Null));
-            }
-        }
-    }
-
-    /// Reports a download through the app's existing `onDownload`
-    /// lifecycle.
-    #[allow(clippy::too_many_arguments)]
-    fn emit_download(
-        &self,
-        state: &str,
-        id: &str,
-        url: &str,
-        filename: &str,
-        path: &Path,
-        bytes: Option<u64>,
-        message: Option<String>,
-    ) {
-        self.emitter.emit(EventKind::Download, || {
-            download_payload(state, id, url, filename, path, bytes, message)
-        });
-    }
+    /// Follows the page's cursor and keyboard focus.
     fn listen_input(
         self: &Rc<Self>,
         composition: &ICoreWebView2CompositionController,
@@ -1591,48 +794,6 @@ impl WebItem {
         self.focused.set(false);
     }
 
-    /// The top-document context of a load, and the URL to match its
-    /// top-dependent conditions against. A document that cannot be proven
-    /// main or frame is `Top::Unknown`: a top-dependent rule then refuses
-    /// the load rather than guessing.
-    fn rules_top(&self, resource: Resource, page: &str, url: &str) -> (Top, String) {
-        if resource != Resource::Document {
-            // A resource's top document is the document that requested it
-            // (`sender.Source()`), with the committed top as a fallback.
-            let top = if !page.is_empty() {
-                Some(page.to_owned())
-            } else {
-                let committed = self.top_url.borrow().clone();
-                (!committed.is_empty()).then_some(committed)
-            };
-            return match top {
-                Some(top) => (Top::Frame, top),
-                None => (Top::Unknown, String::new()),
-            };
-        }
-        if let Some(target) = self.top_target.borrow().clone() {
-            if !self.main_claimed.get() && same_document(url, &target) {
-                // The top navigation's own document request.
-                self.main_claimed.set(true);
-                return (Top::Main, url.to_owned());
-            }
-            // The target is provisional and this is another document: use
-            // the document that actually requested it, never the target.
-            // A same-URL/unknown requester stays unknown.
-            if !page.is_empty() && !same_document(page, url) {
-                return (Top::Frame, page.to_owned());
-            }
-            return (Top::Unknown, String::new());
-        }
-        // No navigation in progress: a frame document's top is the
-        // requesting document only when that is provably another URL. A
-        // same-URL nested load stays unknown.
-        if !page.is_empty() && !same_document(page, url) {
-            return (Top::Frame, page.to_owned());
-        }
-        (Top::Unknown, String::new())
-    }
-
     /// True when the app may show `url` at the top level.
     fn allows(&self, url: &str) -> bool {
         // Pages the app gave as HTML.
@@ -1680,35 +841,16 @@ impl WebItem {
             return;
         };
         let old = self.applied.borrow_mut().replace(p.clone());
-        let manual_blocked =
-            manual_downloads_unavailable(&p.download_behavior, self.downloads_supported.get());
-        let was_blocked = self.manual_unavailable.replace(manual_blocked);
-        if manual_blocked && !was_blocked {
-            self.emitter.emit(EventKind::Error, || {
-                EventPayload::Map(vec![
-                    (
-                        "message",
-                        PayloadValue::Str(
-                            "manual downloads need a WebView2 runtime that reports downloads"
-                                .to_owned(),
-                        ),
-                    ),
-                    (
-                        "code",
-                        PayloadValue::Str(nsh_core::element::codes::UNAVAILABLE.into()),
-                    ),
-                ])
-            });
-        }
-        let recovered = was_blocked && !manual_blocked;
-        let inert = self.manual_unavailable.get();
-        let mut scripts_changed = false;
-        let javascript = p.javascript_enabled && !inert;
-        let swipe = p.back_forward_gestures && !inert;
+        let scripts_changed = old.as_ref().is_none_or(|o| {
+            o.injected_js != p.injected_js || o.injected_js_before != p.injected_js_before
+        });
         // SAFETY: WebView2 calls on the live web view, on its thread.
         unsafe {
             if let Ok(settings) = webview.Settings() {
-                let _ = settings.SetIsScriptEnabled(javascript);
+                let _ = settings.SetIsScriptEnabled(p.javascript_enabled);
+                // The `inspectable` prop applies on every change; off
+                // unless the app asks, as on macOS.
+                let _ = settings.SetAreDevToolsEnabled(p.inspectable);
                 if let Ok(settings) = settings.cast::<ICoreWebView2Settings2>() {
                     let agent = p
                         .user_agent
@@ -1720,53 +862,23 @@ impl WebItem {
                     }
                 }
                 if let Ok(settings) = settings.cast::<ICoreWebView2Settings6>() {
-                    let _ = settings.SetIsSwipeNavigationEnabled(swipe);
+                    let _ = settings.SetIsSwipeNavigationEnabled(p.back_forward_gestures);
                 }
             }
-            // Effective scripts: the app's, or none while inert.
-            let desired = if inert {
-                (None, None)
-            } else {
-                (p.injected_js_before.clone(), p.injected_js.clone())
-            };
-            if *self.scripts_installed.borrow() != desired {
-                scripts_changed = true;
-                self.scripts_gen.set(self.scripts_gen.get().wrapping_add(1));
-                let generation = self.scripts_gen.get();
+            if scripts_changed {
                 for id in self.scripts.borrow_mut().drain(..) {
                     let _ = webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
                 }
-                *self.scripts_installed.borrow_mut() = desired.clone();
                 let scripts = [
-                    desired.0.as_deref().map(before_content),
-                    desired.1.as_deref().map(after_content),
+                    p.injected_js_before.as_deref().map(before_content),
+                    p.injected_js.as_deref().map(after_content),
                 ];
                 for script in scripts.into_iter().flatten() {
                     let ids = Rc::downgrade(&self.scripts);
-                    let gens = Rc::downgrade(&self.scripts_gen);
-                    let weak = self.me.borrow().clone();
                     let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(
                         Box::new(move |result, id| {
-                            if result.is_err() {
-                                return Ok(());
-                            }
-                            let Some(item) = weak.upgrade() else {
-                                return Ok(());
-                            };
-                            let current =
-                                gens.upgrade().is_some_and(|gens| gens.get() == generation)
-                                    && !item.closed.get()
-                                    && !item.manual_unavailable.get();
-                            if current {
-                                if let Some(ids) = ids.upgrade() {
-                                    ids.borrow_mut().push(id);
-                                }
-                            } else if let Some(webview) = item.webview.borrow().clone() {
-                                // This script belongs to a cleared or
-                                // superseded state: remove the id the
-                                // page would otherwise keep running.
-                                let _ = webview
-                                    .RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
+                            if let (Ok(()), Some(ids)) = (result, ids.upgrade()) {
+                                ids.borrow_mut().push(id);
                             }
                             Ok(())
                         }),
@@ -1775,374 +887,38 @@ impl WebItem {
                         .AddScriptToExecuteOnDocumentCreated(&HSTRING::from(script), &handler);
                 }
             }
-        }
-        let desired_scroll = (!inert).then_some(p.scrollable);
-        if self.scroll_applied.replace(desired_scroll) != desired_scroll {
-            match desired_scroll {
-                Some(enabled) => self.set_scrolls(&webview, enabled),
-                None => self.clear_scroll_script(&webview),
+            if old.as_ref().is_none_or(|o| o.scrollable) != p.scrollable {
+                self.set_scrolls(&webview, p.scrollable);
             }
-        }
-        if manual_blocked && !was_blocked {
-            // Settings, scripts and scrolling are inert before the blank
-            // page loads: nothing from the app can run or download.
-            // SAFETY: WebView2 calls on the live web view, on its thread.
-            unsafe {
-                let _ = webview.Stop();
-                let _ = webview
-                    .NavigateToString(&HSTRING::from("<!doctype html><meta charset=\"utf-8\">"));
-            }
-        }
-        if old
-            .as_ref()
-            .is_none_or(|o| o.content_rules != p.content_rules)
-        {
-            self.rules_gen.set(self.rules_gen.get().wrapping_add(1));
-            if p.content_rules.is_empty() {
-                // Blocking off: nothing applies at once, and the page may
-                // load.
-                let generation = self.rules_gen.get();
-                match self.install_blocker(Arc::new(Blocker::default()), generation) {
-                    Install::Committed => self.rules_ready.set(true),
-                    Install::Waiting | Install::Failed => {}
-                }
-            } else {
-                // The old rules keep applying while these compile.
-                self.rules_ready.set(false);
-                self.start_rules(&p.content_rules);
-            }
-        }
-        if self.manual_unavailable.get() {
-            // The inert page stays; recovery navigates the current source.
-            return;
-        }
-        let navigate =
-            scripts_changed || recovered || old.as_ref().is_none_or(|o| o.source != p.source);
-        if navigate {
-            if self.rules_ready.get() {
-                self.pending_source.borrow_mut().take();
-                self.navigate(&webview, &p.source);
-                self.flush_pending_commands();
-            } else {
-                // The page must not go out before its rules are the wanted
-                // ones: the first request it makes (an ad, say) would not
-                // be blocked.
-                *self.pending_source.borrow_mut() = Some(p.source.clone());
-            }
-        } else if self.rules_ready.get() {
-            // The rules are complete now (the user cleared blocking, or
-            // changed to rules that compiled): the page that waited may
-            // load.
-            self.release_waiting(&webview);
-        }
-    }
-
-    /// Navigates what waited for the content rules: the source, then the
-    /// app's navigation commands in the order they came, under the
-    /// installed policy.
-    fn release_waiting(&self, webview: &ICoreWebView2) {
-        if !self.rules_ready.get() || self.manual_unavailable.get() {
-            return;
-        }
-        let source = self.pending_source.borrow_mut().take();
-        if let Some(source) = source {
-            self.navigate(webview, &source);
-        }
-        self.flush_pending_commands();
-    }
-
-    /// Runs the navigation commands that waited for the content rules, in
-    /// order.
-    fn flush_pending_commands(&self) {
-        let commands = std::mem::take(&mut *self.pending_commands.borrow_mut());
-        for command in commands {
-            self.command(&command);
-        }
-    }
-
-    /// Loads `source` (the base URL's HTML answered by [`Self::serve_html`]).
-    fn navigate(&self, webview: &ICoreWebView2, source: &WebSource) {
-        // SAFETY: WebView2 calls on the live web view, on its thread.
-        let result = unsafe {
-            match source {
-                WebSource::Uri(uri) => {
-                    self.html.borrow_mut().take();
-                    webview.Navigate(&HSTRING::from(&**uri))
-                }
-                WebSource::Html {
-                    html,
-                    base_url: Some(base),
-                } if !base.is_empty() => {
-                    *self.html.borrow_mut() = Some((base.to_string(), html.clone()));
-                    self.serve_html(webview);
-                    webview.Navigate(&HSTRING::from(&**base))
-                }
-                WebSource::Html { html, .. } => {
-                    self.html.borrow_mut().take();
-                    webview.NavigateToString(&HSTRING::from(&**html))
-                }
-                WebSource::None => {
-                    self.html.borrow_mut().take();
-                    webview.Navigate(w!("about:blank"))
-                }
-            }
-        };
-        if let Err(err) = result {
-            let message = err.message();
-            self.emitter.emit(EventKind::Error, || error(message));
-        }
-    }
-
-    /// Compiles the wanted `rules` for the next load (never on this
-    /// thread: a list is tens of thousands of regexes) and installs them
-    /// when every list compiled. The rules in place keep applying
-    /// meanwhile; only when the whole set is ready does the blocker (and
-    /// its cosmetic script) become the new one, after which the source
-    /// that waited navigates. A set that fails to compile leaves the old
-    /// rules and the page as they are, and reports the error: a page never
-    /// goes out unfiltered while a policy is wanted.
-    fn start_rules(&self, rules: &[ContentRuleList]) {
-        let generation = self.rules_gen.get();
-        let key = rules_key(rules);
-        if let Some(blocker) = BLOCKERS.with(|cache| cache.borrow().get(&key).cloned()) {
-            match self.install_blocker(blocker, generation) {
-                Install::Committed => self.rules_ready.set(true),
-                Install::Waiting | Install::Failed => {}
-            }
-            return;
-        }
-        let Some(surface) = self.surface.upgrade() else {
-            return;
-        };
-        let surface_key = surface.key();
-        let node = self.emitter.id;
-        let alive = self.alive.clone();
-        let rules = rules.to_vec();
-        let ui = crate::window::UiThread::current();
-        std::thread::spawn(move || {
-            let compiled = Blocker::compile(&rules);
-            ui.invoke(move || {
-                // The originating view is gone (its surface/node may now be
-                // a replacement): its completion belongs to nothing.
-                if !alive.load(Ordering::Acquire) {
-                    return;
-                }
-                let Some(surface) = Surface::by_key(surface_key) else {
-                    return;
+            let navigate = scripts_changed || old.as_ref().is_none_or(|o| o.source != p.source);
+            if navigate {
+                let result = match &p.source {
+                    WebSource::Uri(uri) => {
+                        self.html.borrow_mut().take();
+                        webview.Navigate(&HSTRING::from(&**uri))
+                    }
+                    WebSource::Html {
+                        html,
+                        base_url: Some(base),
+                    } if !base.is_empty() => {
+                        *self.html.borrow_mut() = Some((base.to_string(), html.clone()));
+                        self.serve_html(&webview);
+                        webview.Navigate(&HSTRING::from(&**base))
+                    }
+                    WebSource::Html { html, .. } => {
+                        self.html.borrow_mut().take();
+                        webview.NavigateToString(&HSTRING::from(&**html))
+                    }
+                    WebSource::None => {
+                        self.html.borrow_mut().take();
+                        webview.Navigate(w!("about:blank"))
+                    }
                 };
-                let Some(item) = super::web_item(&surface, node) else {
-                    return;
-                };
-                if item.closed.get()
-                    || !Arc::ptr_eq(&item.alive, &alive)
-                    || item.rules_gen.get() != generation
-                {
-                    return; // other rules compile now, the view was replaced, or it is gone
-                }
-                match compiled {
-                    Ok(blocker) => {
-                        let blocker = Arc::new(blocker);
-                        BLOCKERS.with(|cache| cache.borrow_mut().insert(key, blocker.clone()));
-                        match item.install_blocker(blocker, generation) {
-                            Install::Committed => {
-                                item.rules_ready.set(true);
-                                if let Some(webview) = item.webview.borrow().clone() {
-                                    item.release_waiting(&webview);
-                                }
-                            }
-                            // The script completes (and releases) later, or
-                            // failed and keeps the previous policy while
-                            // navigation stays gated.
-                            Install::Waiting | Install::Failed => {}
-                        }
-                    }
-                    Err(failure) => {
-                        item.emitter.emit(EventKind::Error, || {
-                            error(format!("content rules: {failure}"))
-                        });
-                        // `rules_ready` stays false: the requested policy
-                        // was not installed, so no navigation (app command
-                        // or page one) may go out until a working policy,
-                        // or an explicit clear, arrives. The installed
-                        // rules keep filtering the existing page.
-                    }
-                }
-            });
-        });
-    }
-
-    /// Installs `blocker` (the rules of desired generation `rules_generation`)
-    /// transactionally: the previous blocker and cosmetic script stay live
-    /// until the new policy is complete. A policy with nothing to hide
-    /// commits at once; one with a cosmetic script commits when WebView2
-    /// confirms its registration. Registration failure keeps the previous
-    /// policy and leaves the requested navigation gated.
-    fn install_blocker(&self, blocker: Arc<Blocker>, rules_generation: u64) -> Install {
-        let script = blocker
-            .cosmetic_script()
-            .map(|script| before_content(&script));
-        let generation = self.cosmetic_gen.get().wrapping_add(1);
-        self.cosmetic_gen.set(generation);
-        let Some(webview) = self.webview.borrow().clone() else {
-            *self.blocker.borrow_mut() = Some(blocker);
-            return Install::Committed;
-        };
-        let Some(script) = script else {
-            // Nothing to hide: commit synchronously, dropping the old
-            // cosmetic script with the old policy.
-            *self.blocker.borrow_mut() = Some(blocker);
-            // SAFETY: WebView2 calls on the live web view, on its thread.
-            unsafe {
-                if let Some(id) = self.cosmetic_script.borrow_mut().take() {
-                    let _ = webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
+                if let Err(err) = result {
+                    let message = err.message();
+                    self.emitter.emit(EventKind::Error, || error(message));
                 }
             }
-            return Install::Committed;
-        };
-        // The new script is registered before the old policy is touched.
-        let slot = Rc::downgrade(&self.cosmetic_script);
-        let weak = self.me.borrow().clone();
-        let desired = blocker;
-        let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
-            move |result, id| {
-                let Some(item) = weak.upgrade() else {
-                    return Ok(());
-                };
-                let current = item.cosmetic_gen.get() == generation
-                    && item.rules_gen.get() == rules_generation
-                    && item.alive.load(Ordering::Acquire);
-                if let Err(why) = result {
-                    if current {
-                        // The previous complete policy stays live and the
-                        // requested navigation stays held.
-                        item.emitter.emit(EventKind::Error, || {
-                            error(format!(
-                                "content rules: cannot hide elements: {}",
-                                why.message()
-                            ))
-                        });
-                    }
-                    return Ok(());
-                }
-                if !current {
-                    // A newer requested policy (or a closed/replaced view)
-                    // owns the outcome: remove this script, which nothing
-                    // else knows about yet.
-                    if let Some(webview) = item.webview.borrow().clone() {
-                        // SAFETY: this callback runs on the owning WebView2 UI thread.
-                        let _ = unsafe {
-                            webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id))
-                        };
-                    }
-                    return Ok(());
-                }
-                // Commit the whole policy now: network rules and script.
-                *item.blocker.borrow_mut() = Some(desired.clone());
-                // SAFETY: WebView2 calls on the live web view.
-                unsafe {
-                    if let Some(old) = item.cosmetic_script.borrow_mut().take()
-                        && let Some(webview) = item.webview.borrow().clone()
-                    {
-                        let _ = webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(old));
-                    }
-                }
-                if let Some(slot) = slot.upgrade() {
-                    *slot.borrow_mut() = Some(id);
-                }
-                item.rules_ready.set(true);
-                if let Some(webview) = item.webview.borrow().clone() {
-                    item.release_waiting(&webview);
-                }
-                Ok(())
-            },
-        ));
-        // SAFETY: WebView2 calls on the live web view; the handler holds the
-        // item weakly and takes the new blocker with it.
-        let added = unsafe {
-            webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(script), &handler)
-        };
-        if let Err(why) = added {
-            self.emitter.emit(EventKind::Error, || {
-                error(format!(
-                    "content rules: cannot hide elements: {}",
-                    why.message()
-                ))
-            });
-            // The old blocker and old script are untouched; the requested
-            // policy is not installed and navigation stays gated.
-            return Install::Failed;
-        }
-        Install::Waiting
-    }
-
-    /// Matches every load against the content blocker (`WebResourceRequested`):
-    /// a blocked one is answered with `403 Forbidden` instead of its
-    /// resource, so nothing of it reaches the page.
-    fn listen_blocking(&self, webview: &ICoreWebView2) {
-        if self.blocker_handler.replace(true) {
-            return;
-        }
-        let Some(env) = self.env.borrow().clone() else {
-            return;
-        };
-        let blocker = Rc::clone(&self.blocker);
-        let weak = self.me.borrow().clone();
-        let handler = WebResourceRequestedEventHandler::create(Box::new(move |sender, args| {
-            let (Some(item), Some(sender), Some(args)) = (weak.upgrade(), sender, args) else {
-                return Ok(());
-            };
-            let Some(blocker) = blocker.borrow().clone() else {
-                return Ok(());
-            };
-            // SAFETY: WebView2 calls on the event's live objects, on this
-            // thread.
-            unsafe {
-                let request = args.Request()?;
-                let mut uri = PWSTR::null();
-                request.Uri(&mut uri)?;
-                let url = take_pwstr(uri);
-                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
-                let _ = args.ResourceContext(&mut context);
-                let mut source = PWSTR::null();
-                let page = sender
-                    .Source(&mut source)
-                    .map(|()| take_pwstr(source))
-                    .unwrap_or_default();
-                let resource = resource_context(context);
-                let (top, top_page) = item.rules_top(resource, &page, &url);
-                match blocker.blocks(&top_page, &url, resource, top) {
-                    Decision::Allow => return Ok(()),
-                    Decision::Block => {}
-                    Decision::Unknown => {
-                        // A matching rule depends on the top document,
-                        // which this load cannot prove: refuse it rather
-                        // than apply a guess.
-                        log::warn!(
-                            target: "js",
-                            "web view: content rules cannot decide {url} without its top document; refusing it"
-                        );
-                    }
-                }
-                let Some(stream) = SHCreateMemStream(Some(&b"Blocked"[..])) else {
-                    return Ok(());
-                };
-                let response = env.CreateWebResourceResponse(
-                    &stream,
-                    403,
-                    w!("Forbidden"),
-                    w!("Content-Type: text/plain; charset=utf-8"),
-                )?;
-                args.SetResponse(&response)?;
-            }
-            Ok(())
-        }));
-        let mut token = 0i64;
-        // SAFETY: WebView2 calls on the live web view; every resource
-        // context is filtered (a document too).
-        unsafe {
-            let _ = webview
-                .AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
-            let _ = webview.add_WebResourceRequested(&handler, &mut token);
         }
     }
 
@@ -2150,8 +926,6 @@ impl WebItem {
     /// put in the page now and in every page loaded later).
     fn set_scrolls(&self, webview: &ICoreWebView2, enabled: bool) {
         let none = None::<&ICoreWebView2ExecuteScriptCompletedHandler>;
-        self.scroll_gen.set(self.scroll_gen.get().wrapping_add(1));
-        let generation = self.scroll_gen.get();
         // SAFETY: WebView2 calls on the live web view, on its thread.
         unsafe {
             if let Some(id) = self.scroll_script.borrow_mut().take() {
@@ -2159,26 +933,10 @@ impl WebItem {
             }
             if !enabled {
                 let slot = Rc::downgrade(&self.scroll_script);
-                let gens = Rc::downgrade(&self.scroll_gen);
-                let weak = self.me.borrow().clone();
                 let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(
                     Box::new(move |result, id| {
-                        if result.is_err() {
-                            return Ok(());
-                        }
-                        let Some(item) = weak.upgrade() else {
-                            return Ok(());
-                        };
-                        let current = gens.upgrade().is_some_and(|gens| gens.get() == generation)
-                            && !item.closed.get()
-                            && !item.manual_unavailable.get();
-                        if current {
-                            if let Some(slot) = slot.upgrade() {
-                                *slot.borrow_mut() = Some(id);
-                            }
-                        } else if let Some(webview) = item.webview.borrow().clone() {
-                            let _ =
-                                webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
+                        if let (Ok(()), Some(slot)) = (result, slot.upgrade()) {
+                            *slot.borrow_mut() = Some(id);
                         }
                         Ok(())
                     }),
@@ -2189,18 +947,6 @@ impl WebItem {
                 );
             }
             let _ = webview.ExecuteScript(&HSTRING::from(scroll_style(enabled)), none);
-        }
-    }
-
-    /// Removes the scroll script without registering another (the view is
-    /// inert).
-    fn clear_scroll_script(&self, webview: &ICoreWebView2) {
-        self.scroll_gen.set(self.scroll_gen.get().wrapping_add(1));
-        // SAFETY: WebView2 calls on the live web view, on its thread.
-        unsafe {
-            if let Some(id) = self.scroll_script.borrow_mut().take() {
-                let _ = webview.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(id));
-            }
         }
     }
 
@@ -2259,7 +1005,6 @@ impl WebItem {
     /// `injectJavaScript()`, `postMessage()`, `load()` and the app's
     /// [`nsh_core::webview`] requests.
     pub(crate) fn command(&self, command: &Command) {
-        // Cloned out first: answering a request may reach the app.
         let webview = self.webview.borrow().clone();
         let Some(webview) = webview else {
             if let Command::WebViewRequest(request) = command {
@@ -2271,37 +1016,13 @@ impl WebItem {
                 } else {
                     self.queued.borrow_mut().push(command.clone());
                 }
-            } else if !self.failed.get() && !self.closed.get() {
+            } else if !self.failed.get() {
                 self.queued.borrow_mut().push(command.clone());
             }
             return;
         };
         if let Command::WebViewRequest(request) = command {
             self.request(request);
-            return;
-        }
-        if self.manual_unavailable.get() && inert_refuses(command) {
-            self.emitter.emit(EventKind::Error, || {
-                EventPayload::Map(vec![
-                    (
-                        "message",
-                        PayloadValue::Str(
-                            "the web view is inert while manual downloads are unavailable"
-                                .to_owned(),
-                        ),
-                    ),
-                    (
-                        "code",
-                        PayloadValue::Str(nsh_core::element::codes::ACCESS_DENIED.into()),
-                    ),
-                ])
-            });
-            return;
-        }
-        if navigates(command) && !self.rules_ready.get() {
-            // A navigation must not go out before the content rules it was
-            // asked to run under are installed. Commands keep their order.
-            self.pending_commands.borrow_mut().push(command.clone());
             return;
         }
         let none = None::<&ICoreWebView2ExecuteScriptCompletedHandler>;
@@ -2328,18 +1049,7 @@ impl WebItem {
         self.replies.begin(request.id);
         match &request.operation {
             WebViewOperation::CapturePage => self.capture_page(request.id),
-            WebViewOperation::GetCookies { uri } => self.get_cookies(request.id, uri.as_deref()),
-            WebViewOperation::SetCookies { cookies } => self.set_cookies(request.id, cookies),
             WebViewOperation::OpenDevtools => self.open_devtools(request.id),
-            WebViewOperation::SetInspectable { enabled } => {
-                self.set_inspectable(request.id, *enabled)
-            }
-            WebViewOperation::AcceptDownload {
-                id,
-                path,
-                overwrite,
-            } => self.accept_download(request.id, id, path, *overwrite),
-            WebViewOperation::CancelDownload { id } => self.cancel_download(request.id, id),
             // A newer core's operation: answered, never left waiting.
             _ => self
                 .replies
@@ -2360,6 +1070,14 @@ impl WebItem {
                 self.replies.reply(request.id, Err(why.to_owned()));
             }
         }
+    }
+
+    /// The live web view, or why a request cannot be answered now.
+    fn ready_webview(&self) -> Result<ICoreWebView2, String> {
+        self.webview
+            .borrow()
+            .clone()
+            .ok_or_else(|| "the web view is not ready".to_owned())
     }
 
     /// The page as a PNG (`CapturePreview`), base64 in the reply.
@@ -2404,104 +1122,21 @@ impl WebItem {
         }
     }
 
-    /// The cookies of `uri`, or every cookie of this view's store when
-    /// omitted (an InPrivate view's store is its own, in memory).
-    fn get_cookies(&self, request: u64, uri: Option<&str>) {
-        let manager = match self.cookie_manager() {
-            Ok(manager) => manager,
-            Err(error) => return self.replies.settle(request, Err(error)),
-        };
-        let replies = self.replies.clone();
-        let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
-            let value = match (result, list) {
-                (Ok(()), Some(list)) => serde_json::to_value(cookies_of(&list))
-                    .map_err(|error| format!("cannot report the cookies: {error}")),
-                (Ok(()), None) => Ok(JsonValue::Array(Vec::new())),
-                (Err(error), _) => Err(format!("cannot read the cookies: {}", error.message())),
-            };
-            replies.settle(request, value);
-            Ok(())
-        }));
-        let uri = uri.map(HSTRING::from);
-        let uri = uri
-            .as_ref()
-            .map_or(PCWSTR::null(), |uri| PCWSTR(uri.as_ptr()));
-        // SAFETY: a WebView2 call on the live cookie manager; it keeps the
-        // handler until it calls it.
-        if let Err(error) = unsafe { manager.GetCookies(uri, &handler) } {
-            self.replies.settle(
-                request,
-                Err(format!("cannot read the cookies: {}", error.message())),
-            );
-        }
-    }
-
-    /// Adds or updates the app's cookies in this view's store
-    /// (`CreateCookie`, `AddOrUpdateCookie`).
-    fn set_cookies(&self, request: u64, cookies: &[WebCookie]) {
-        let result = self.store_cookies(cookies);
-        self.replies.settle(request, result);
-    }
-
-    fn store_cookies(&self, cookies: &[WebCookie]) -> Result<JsonValue, String> {
-        let manager = self.cookie_manager()?;
-        // The SameSite policies first: a bad one fails the whole request
-        // before a cookie is written.
-        let same_sites = cookies
-            .iter()
-            .map(|cookie| cookie.same_site.as_ref().map(same_site_kind).transpose())
-            .collect::<Result<Vec<_>, String>>()?;
-        for (index, (cookie, same_site)) in cookies.iter().zip(same_sites).enumerate() {
-            // SAFETY: WebView2 calls on the live cookie manager and the
-            // cookie it makes; nothing is kept after the loop.
-            unsafe {
-                let created = manager
-                    .CreateCookie(
-                        &HSTRING::from(cookie.name.as_str()),
-                        &HSTRING::from(cookie.value.as_str()),
-                        &HSTRING::from(cookie.domain.as_str()),
-                        &HSTRING::from(cookie.path.as_str()),
-                    )
-                    .map_err(|error| format!("cookie {index}: {}", error.message()))?;
-                if let Some(expires) = cookie.expires {
-                    created
-                        .SetExpires(expires_seconds(expires))
-                        .map_err(|error| format!("cookie {index}: {}", error.message()))?;
-                }
-                created
-                    .SetIsHttpOnly(cookie.http_only)
-                    .map_err(|error| format!("cookie {index}: {}", error.message()))?;
-                created
-                    .SetIsSecure(cookie.secure)
-                    .map_err(|error| format!("cookie {index}: {}", error.message()))?;
-                if let Some(same_site) = same_site {
-                    created
-                        .SetSameSite(same_site)
-                        .map_err(|error| format!("cookie {index}: {}", error.message()))?;
-                }
-                manager
-                    .AddOrUpdateCookie(&created)
-                    .map_err(|error| format!("cookie {index}: {}", error.message()))?;
-            }
-        }
-        Ok(JsonValue::Null)
-    }
-
     /// Opens the developer tools (`OpenDevToolsWindow`), enabling them when
-    /// a [`WebViewOperation::SetInspectable`] turned them off.
+    /// the `inspectable` prop left them off.
     fn open_devtools(&self, request: u64) {
         let result = (|| -> Result<JsonValue, String> {
             let webview = self.ready_webview()?;
             // SAFETY: WebView2 calls on the live web view and its settings.
             unsafe {
-                if !self.devtools.get() {
-                    let settings = webview.Settings().map_err(|error| {
-                        format!("cannot enable the developer tools: {}", error.message())
-                    })?;
+                let settings = webview.Settings().map_err(|error| {
+                    format!("cannot open the developer tools: {}", error.message())
+                })?;
+                let mut enabled = BOOL(0);
+                if settings.AreDevToolsEnabled(&mut enabled).is_err() || !enabled.as_bool() {
                     settings.SetAreDevToolsEnabled(true).map_err(|error| {
                         format!("cannot enable the developer tools: {}", error.message())
                     })?;
-                    self.devtools.set(true);
                 }
                 webview.OpenDevToolsWindow().map_err(|error| {
                     format!("cannot open the developer tools: {}", error.message())
@@ -2510,222 +1145,6 @@ impl WebItem {
             Ok(JsonValue::Null)
         })();
         self.replies.settle(request, result);
-    }
-
-    /// Whether the page is inspectable (`SetAreDevToolsEnabled`; off by
-    /// default).
-    fn set_inspectable(&self, request: u64, enabled: bool) {
-        let result = (|| -> Result<JsonValue, String> {
-            let webview = self.ready_webview()?;
-            // SAFETY: WebView2 calls on the live web view and its settings.
-            unsafe {
-                let settings = webview.Settings().map_err(|error| {
-                    format!("cannot change the developer tools: {}", error.message())
-                })?;
-                settings.SetAreDevToolsEnabled(enabled).map_err(|error| {
-                    format!("cannot change the developer tools: {}", error.message())
-                })?;
-            }
-            self.devtools.set(enabled);
-            Ok(JsonValue::Null)
-        })();
-        self.replies.settle(request, result);
-    }
-
-    /// Writes the waiting download `id` to the app's `path`.
-    fn accept_download(&self, request: u64, id: &str, path: &Path, overwrite: bool) {
-        let result = (|| -> Result<JsonValue, String> {
-            if !self.downloads.borrow().contains_key(id) {
-                return Err(self.no_download(id));
-            }
-            self.check_destination(path, overwrite)?;
-            let staging = staging_path(path, id)?;
-            if staging.exists() {
-                return Err(format!(
-                    "the temporary download path already exists: {}",
-                    staging.display()
-                ));
-            }
-            let Some(pending) = self.downloads.borrow_mut().remove(id) else {
-                return Err(self.no_download(id));
-            };
-            let Some(operation) = pending.operation() else {
-                pending.cancel();
-                return Err("the download has no operation".to_owned());
-            };
-            let filename = path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| pending.filename.clone());
-            // SAFETY: WebView2 calls on the live event and its deferral: the
-            // staged file goes next to the app's path (the default dialog
-            // stays away) and completing the deferral ends the event.
-            let applied = unsafe {
-                let mut applied = pending
-                    .args
-                    .SetResultFilePath(&HSTRING::from(&*staging.to_string_lossy()));
-                if applied.is_ok() {
-                    applied = pending.args.SetCancel(false);
-                }
-                if applied.is_ok() {
-                    applied = pending.args.SetHandled(true);
-                }
-                if applied.is_ok() {
-                    applied = pending.deferral.Complete();
-                }
-                applied
-            };
-            if let Err(error) = applied {
-                // Not left open: a download the app cannot take is no
-                // download.
-                pending.cancel();
-                remove_later(staging, false);
-                return Err(format!("cannot take the download: {}", error.message()));
-            }
-            self.track_download(
-                operation,
-                id,
-                &pending.url,
-                &filename,
-                path,
-                Some(staging),
-                overwrite,
-                None,
-            );
-            self.emit_download("started", id, &pending.url, &filename, path, None, None);
-            Ok(JsonValue::Null)
-        })();
-        self.replies.settle(request, result);
-    }
-
-    /// Cancels the waiting or running download `id`: nothing is written
-    /// (or what was written is removed). A running transfer's answer waits
-    /// for WebView2's state-changed callback, which confirms writing
-    /// stopped.
-    fn cancel_download(&self, request: u64, id: &str) {
-        let mut waiting = false;
-        let result = (|| -> Result<JsonValue, String> {
-            let pending = self.downloads.borrow_mut().remove(id);
-            if let Some(pending) = pending {
-                pending.cancel();
-                return Ok(JsonValue::Null);
-            }
-            let completed;
-            let operation;
-            {
-                let active = self.active_downloads.borrow();
-                let Some(entry) = active.get(id) else {
-                    return Err(self.no_download(id));
-                };
-                if entry.cancel_request.get().is_some() {
-                    return Err(format!("a cancellation is already in progress for {id}"));
-                }
-                completed = entry.state() == Some(COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED);
-                operation = entry.operation.clone();
-                if !completed {
-                    entry.cancel_request.set(Some(request));
-                }
-            }
-            if completed {
-                let entry = self.active_downloads.borrow_mut().remove(id);
-                let Some(entry) = entry else {
-                    return Err(self.no_download(id));
-                };
-                match entry.publish() {
-                    Ok(()) => self.emit_download(
-                        "finished",
-                        &entry.id,
-                        &entry.url,
-                        &entry.filename,
-                        &entry.path,
-                        std::fs::metadata(&entry.path).map(|m| m.len()).ok(),
-                        None,
-                    ),
-                    Err(message) => {
-                        entry.cleanup();
-                        self.emit_download(
-                            "failed",
-                            &entry.id,
-                            &entry.url,
-                            &entry.filename,
-                            &entry.path,
-                            None,
-                            Some(message.clone()),
-                        );
-                        return Err(message);
-                    }
-                }
-                return Ok(JsonValue::Null);
-            }
-            // SAFETY: a WebView2 call on the live operation.
-            if let Err(error) = unsafe { operation.Cancel() } {
-                let entry = self.active_downloads.borrow_mut().remove(id);
-                if let Some(entry) = entry {
-                    entry.cleanup();
-                    self.emit_download(
-                        "failed",
-                        &entry.id,
-                        &entry.url,
-                        &entry.filename,
-                        &entry.path,
-                        None,
-                        Some(format!("cannot cancel the download: {}", error.message())),
-                    );
-                }
-                return Err(format!("cannot cancel the download: {}", error.message()));
-            }
-            // The state-changed callback completes this request after the
-            // transfer stopped and its staging file is gone.
-            waiting = true;
-            Ok(JsonValue::Null)
-        })();
-        if !waiting {
-            self.replies.settle(request, result);
-        }
-    }
-
-    /// Why download `id` is not waiting or running.
-    fn no_download(&self, id: &str) -> String {
-        if self.downloads_supported.get() {
-            format!("no download is waiting with id {id}")
-        } else {
-            "this WebView2 runtime does not report downloads".to_owned()
-        }
-    }
-
-    /// Whether `path` is a destination this app can accept: absolute, in an
-    /// existing directory, not a directory, not taken (unless `overwrite`),
-    /// and not another running download's.
-    fn check_destination(&self, path: &Path, overwrite: bool) -> Result<(), String> {
-        let active: Vec<PathBuf> = self
-            .active_downloads
-            .borrow()
-            .values()
-            .map(|active| active.path.clone())
-            .collect();
-        destination_error(path, overwrite, &active)
-    }
-
-    /// The page's cookie manager (WebView2 1.0.705 and later).
-    fn cookie_manager(&self) -> Result<ICoreWebView2CookieManager, String> {
-        let webview = self.ready_webview()?;
-        let webview = webview.cast::<ICoreWebView2_2>().map_err(|error| {
-            format!(
-                "this WebView2 runtime has no cookie manager: {}",
-                error.message()
-            )
-        })?;
-        // SAFETY: WebView2 calls on the live web view.
-        unsafe { webview.CookieManager() }
-            .map_err(|error| format!("cannot reach the cookies: {}", error.message()))
-    }
-
-    /// The web view once it is made.
-    fn ready_webview(&self) -> Result<ICoreWebView2, String> {
-        self.webview
-            .borrow()
-            .clone()
-            .ok_or_else(|| "the web view is not ready".to_owned())
     }
 
     /// `load()`: a navigation whose own request carries the app's headers
@@ -2838,27 +1257,10 @@ impl WebItem {
         if self.closed.replace(true) {
             return;
         }
-        // Worker completions for this view must not reach a replacement
-        // view that reuses its surface and node.
-        self.alive.store(false, Ordering::Release);
         if self.focused.get() {
             self.focus_window();
         }
-        // A download waiting for the app writes nothing, and its event must
-        // be completed (before the page's objects go) or WebView2 keeps it
-        // open. A running transfer is stopped and its partial output, which
-        // this backend made, is removed.
-        let pending = std::mem::take(&mut *self.downloads.borrow_mut());
-        for (_, pending) in pending {
-            pending.cancel();
-        }
-        let active = std::mem::take(&mut *self.active_downloads.borrow_mut());
-        for (_, active) in active {
-            active.cancel();
-        }
         self.webview.borrow_mut().take();
-        self.pending_commands.borrow_mut().clear();
-        self.pending_source.borrow_mut().take();
         self.fail_queued("the web view closed");
         self.replies.fail_all("the web view closed");
         self.composition.borrow_mut().take();
@@ -3277,529 +1679,6 @@ fn scroll_style(enabled: bool) -> String {
     )
 }
 
-/// Whether the requested Manual policy cannot be honored because this
-/// runtime has no download events.
-fn manual_downloads_unavailable(behavior: &WebDownloadBehavior, supported: bool) -> bool {
-    !supported && matches!(behavior, WebDownloadBehavior::Manual)
-}
-
-/// Whether an inert view (Manual unavailable) must refuse `command`: a
-/// navigation, or anything that executes app script.
-fn inert_refuses(command: &Command) -> bool {
-    navigates(command)
-        || matches!(
-            command,
-            Command::InjectJavaScript(_) | Command::PostMessage(_)
-        )
-}
-
-/// Whether `command` makes the page navigate (and so must wait for the
-/// content rules).
-fn navigates(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Reload | Command::GoBack | Command::GoForward | Command::Load(_)
-    )
-}
-
-/// The content rule lists as a cache key: their ids and JSON, so changed
-/// rules never reuse another set's compiled blocker.
-fn rules_key(rules: &[ContentRuleList]) -> Vec<(Arc<str>, Arc<str>)> {
-    rules
-        .iter()
-        .map(|rule| (rule.id.clone(), rule.rules.clone()))
-        .collect()
-}
-
-/// What WebView2 reports a load as, in WebKit's `resource-type` names.
-fn resource_context(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> Resource {
-    if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT {
-        Resource::Document
-    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET {
-        Resource::StyleSheet
-    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE {
-        Resource::Image
-    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA {
-        Resource::Media
-    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT {
-        Resource::Font
-    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT {
-        Resource::Script
-    } else if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING {
-        Resource::Ping
-    } else {
-        // Fetch, XHR, WebSocket, manifests, event sources and everything
-        // else: WebKit's `raw`.
-        Resource::Raw
-    }
-}
-
-/// `onDownload`'s payload: `state`, `id`, `url`, `filename`, `path` and,
-/// once finished, `bytes`; `message` when it failed.
-fn download_payload(
-    state: &str,
-    id: &str,
-    url: &str,
-    filename: &str,
-    path: &Path,
-    bytes: Option<u64>,
-    message: Option<String>,
-) -> EventPayload {
-    let mut fields = vec![
-        ("state", PayloadValue::Str(state.to_owned())),
-        ("id", PayloadValue::Str(id.to_owned())),
-        ("url", PayloadValue::Str(url.to_owned())),
-        ("filename", PayloadValue::Str(filename.to_owned())),
-        (
-            "path",
-            PayloadValue::Str(path.to_string_lossy().into_owned()),
-        ),
-    ];
-    if let Some(bytes) = bytes {
-        fields.push(("bytes", PayloadValue::Number(bytes as f64)));
-    }
-    if let Some(message) = message {
-        fields.push(("message", PayloadValue::Str(message)));
-    }
-    EventPayload::Map(fields)
-}
-
-/// A safe file name for a download: the server's suggestion, or the URL's
-/// last segment when it has none.
-fn download_name(suggested: &str, url: &str) -> String {
-    let name = Path::new(suggested)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let name = if name.is_empty() {
-        url_file_name(url).to_owned()
-    } else {
-        name
-    };
-    sanitize_file_name(&name)
-}
-
-/// A file name Windows accepts: its last path component without a
-/// separator, control character or reserved character, no leading or
-/// trailing dot/space, no reserved device name, at most 200 bytes;
-/// `download` when nothing is left.
-fn sanitize_file_name(suggested: &str) -> String {
-    let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
-    let mut name: String = last
-        .chars()
-        .filter(|c| {
-            !c.is_control()
-                && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
-                && !matches!(
-                    c,
-                    '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{206f}'
-                )
-        })
-        .collect::<String>()
-        .trim()
-        .trim_end_matches(['.', ' '])
-        .to_owned();
-    name = name.trim_start_matches('.').to_owned();
-    if name.is_empty() {
-        return "download".to_owned();
-    }
-    if is_reserved_name(&name) {
-        name.insert(0, '_');
-    }
-    if name.len() > 200 {
-        // Preserve a normal extension while shortening the stem on UTF-8
-        // boundaries.
-        let extension = name
-            .rsplit_once('.')
-            .map(|(_, ext)| format!(".{ext}"))
-            .filter(|ext| ext.len() < 200);
-        if let Some(extension) = &extension {
-            name.truncate(name.len() - extension.len());
-        }
-        let limit = 200 - extension.as_ref().map_or(0, String::len);
-        while name.len() > limit {
-            name.pop();
-        }
-        name = name.trim_end_matches(['.', ' ']).to_owned();
-        if let Some(extension) = extension {
-            name.push_str(&extension);
-        }
-    }
-    if name.is_empty() {
-        "download".to_owned()
-    } else {
-        name
-    }
-}
-
-/// Whether `name` is a Windows device name (`CON`, `NUL`, `COM1`, …),
-/// which no file (with or without an extension) may be called.
-fn is_reserved_name(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
-    matches!(
-        stem.as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
-    )
-}
-
-/// The last path segment of `url`, without its query or fragment.
-fn url_file_name(url: &str) -> &str {
-    let end = url.find(['?', '#']).unwrap_or(url.len());
-    url[..end].rsplit('/').next().unwrap_or_default()
-}
-
-/// An id for a download: a random GUID in lowercase hex, so the directory
-/// it names (`downloads/<id>`) cannot collide with another transfer's or
-/// leave the directory (it has no separators).
-fn next_download_id() -> String {
-    static FALLBACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    // SAFETY: `CoCreateGuid` writes into a local GUID.
-    match unsafe { CoCreateGuid() } {
-        Ok(guid) => format!(
-            "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            guid.data1,
-            guid.data2,
-            guid.data3,
-            guid.data4[0],
-            guid.data4[1],
-            guid.data4[2],
-            guid.data4[3],
-            guid.data4[4],
-            guid.data4[5],
-            guid.data4[6],
-            guid.data4[7]
-        ),
-        Err(_) => {
-            // OLE is unavailable (it is not on this thread): a time and a
-            // counter are still unique enough, and contain no separator.
-            let n = FALLBACK.fetch_add(1, Ordering::Relaxed);
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos());
-            format!("{nanos:x}-{n:x}")
-        }
-    }
-}
-
-/// A cookie's expiry in WebView2's seconds since the Unix epoch (the core's
-/// is milliseconds).
-fn expires_seconds(milliseconds: i64) -> f64 {
-    milliseconds as f64 / 1000.0
-}
-
-/// WebView2's `Expires` (seconds since the Unix epoch) in the core's
-/// milliseconds; `None` for a session cookie.
-fn expires_millis(seconds: f64, session: bool) -> Option<i64> {
-    (!session && seconds.is_finite() && seconds >= 0.0).then_some((seconds * 1000.0).round() as i64)
-}
-
-/// The WebView2 SameSite policy of the core's.
-fn same_site_kind(kind: &CookieSameSite) -> Result<COREWEBVIEW2_COOKIE_SAME_SITE_KIND, String> {
-    Ok(match kind {
-        CookieSameSite::None => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE,
-        CookieSameSite::Lax => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX,
-        CookieSameSite::Strict => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT,
-        // A policy this runtime does not know is an error, not Lax.
-        _ => return Err("unknown SameSite value".to_owned()),
-    })
-}
-
-/// The core's SameSite policy of a WebView2 one, `None` for one it does not
-/// name.
-fn same_site_name(kind: COREWEBVIEW2_COOKIE_SAME_SITE_KIND) -> Option<CookieSameSite> {
-    if kind == COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE {
-        Some(CookieSameSite::None)
-    } else if kind == COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX {
-        Some(CookieSameSite::Lax)
-    } else if kind == COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT {
-        Some(CookieSameSite::Strict)
-    } else {
-        None
-    }
-}
-
-/// A WebView2 cookie list as the core's cookies.
-fn cookies_of(list: &ICoreWebView2CookieList) -> Vec<WebCookie> {
-    let mut cookies = Vec::new();
-    let mut count = 0u32;
-    // SAFETY: WebView2 getters on the live list; the cookies are copied.
-    unsafe {
-        if list.Count(&mut count).is_err() {
-            return cookies;
-        }
-        for index in 0..count {
-            if let Ok(cookie) = list.GetValueAtIndex(index) {
-                cookies.push(cookie_of(&cookie));
-            }
-        }
-    }
-    cookies
-}
-
-/// A WebView2 cookie as the core's (`Expires` is Unix milliseconds there:
-/// a session cookie has none).
-fn cookie_of(cookie: &ICoreWebView2Cookie) -> WebCookie {
-    let mut name = PWSTR::null();
-    let mut value = PWSTR::null();
-    let mut domain = PWSTR::null();
-    let mut path = PWSTR::null();
-    let mut expires = 0.0;
-    let mut http_only = BOOL(0);
-    let mut secure = BOOL(0);
-    // A cookie whose session state could not be read keeps no expiry.
-    let mut session = BOOL(1);
-    let mut same_site = COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX;
-    // SAFETY: WebView2 getters on the live cookie; `take_pwstr` frees the
-    // strings.
-    unsafe {
-        let _ = cookie.Name(&mut name);
-        let _ = cookie.Value(&mut value);
-        let _ = cookie.Domain(&mut domain);
-        let _ = cookie.Path(&mut path);
-        let _ = cookie.Expires(&mut expires);
-        let _ = cookie.IsHttpOnly(&mut http_only);
-        let _ = cookie.IsSecure(&mut secure);
-        let _ = cookie.IsSession(&mut session);
-        let _ = cookie.SameSite(&mut same_site);
-    }
-    let mut cookie = WebCookie::default();
-    cookie.name = take_pwstr(name);
-    cookie.value = take_pwstr(value);
-    cookie.domain = take_pwstr(domain);
-    cookie.path = take_pwstr(path);
-    cookie.expires = expires_millis(expires, session.as_bool());
-    cookie.http_only = http_only.as_bool();
-    cookie.secure = secure.as_bool();
-    cookie.same_site = same_site_name(same_site);
-    cookie
-}
-
-/// The bytes of a memory stream, from its start.
-///
-/// # Safety
-/// `stream` must be a live stream nothing else writes to.
-unsafe fn read_stream(stream: &IStream) -> Result<Vec<u8>, String> {
-    // SAFETY: the stream is live; seeking to its start and reading it is
-    // what its caller set up.
-    unsafe {
-        stream
-            .Seek(0, STREAM_SEEK_SET, None)
-            .map_err(|error| format!("cannot rewind the capture: {}", error.message()))?;
-        let mut bytes = Vec::new();
-        let mut buffer = [0u8; 16 * 1024];
-        loop {
-            let mut read = 0u32;
-            let result = stream.Read(
-                buffer.as_mut_ptr().cast(),
-                buffer.len() as u32,
-                Some(&mut read),
-            );
-            if result.is_err() {
-                return Err(format!("cannot read the capture: {}", result.message()));
-            }
-            if read == 0 {
-                return Ok(bytes);
-            }
-            bytes.extend_from_slice(&buffer[..read as usize]);
-        }
-    }
-}
-
-/// The unique sibling a Manual download writes into until it finishes:
-/// beside the app's destination (same volume, so publishing is a link or
-/// rename), named only by the transfer's id so nothing about the final
-/// name can collide with another transfer.
-fn staging_path(final_path: &Path, id: &str) -> Result<PathBuf, String> {
-    let parent = final_path.parent().ok_or_else(|| {
-        format!(
-            "the download path has no directory: {}",
-            final_path.display()
-        )
-    })?;
-    let name = final_path
-        .file_name()
-        .ok_or_else(|| {
-            format!(
-                "the download path has no file name: {}",
-                final_path.display()
-            )
-        })?
-        .to_string_lossy();
-    let first = format!(".nsh-download-{id}.part");
-    let first_path = parent.join(&first);
-    if !name.eq_ignore_ascii_case(&first) && !first_path.exists() {
-        return Ok(first_path);
-    }
-    // The destination itself is the first candidate, or it is occupied: a
-    // second sibling must be free and distinct (Windows compares fixed
-    // names without regard to ASCII case).
-    let second = format!(".nsh-download-{id}.part.1");
-    if name.eq_ignore_ascii_case(&second) {
-        return Err(format!(
-            "cannot choose a temporary download path distinct from {}",
-            final_path.display()
-        ));
-    }
-    let second_path = parent.join(second);
-    if second_path.exists() {
-        return Err(format!(
-            "the temporary download path already exists: {}",
-            second_path.display()
-        ));
-    }
-    Ok(second_path)
-}
-
-/// Why `path` is not a destination an accepted download can use: it must
-/// be absolute, in an existing directory, not a directory, not taken
-/// (unless `overwrite`), and not another running download's.
-fn destination_error(path: &Path, overwrite: bool, active: &[PathBuf]) -> Result<(), String> {
-    if path.as_os_str().is_empty() {
-        return Err("the download path is empty".to_owned());
-    }
-    if !path.is_absolute() {
-        return Err(format!(
-            "the download path is not absolute: {}",
-            path.display()
-        ));
-    }
-    if path.to_string_lossy().contains('\0') {
-        return Err("the download path has a NUL".to_owned());
-    }
-    let Some(name) = path.file_name() else {
-        return Err(format!(
-            "the download path has no file name: {}",
-            path.display()
-        ));
-    };
-    if name.is_empty() {
-        return Err("the download path has no file name".to_owned());
-    }
-    let Some(parent) = path.parent() else {
-        return Err(format!(
-            "the download directory does not exist: {}",
-            path.display()
-        ));
-    };
-    if !parent.is_dir() {
-        return Err(format!(
-            "the download directory does not exist: {}",
-            parent.display()
-        ));
-    }
-    if path.is_dir() {
-        return Err(format!(
-            "the download path is a directory: {}",
-            path.display()
-        ));
-    }
-    if !overwrite && path.exists() {
-        return Err(format!(
-            "the download path already exists: {}",
-            path.display()
-        ));
-    }
-    if active.iter().any(|active| same_path(active, path)) {
-        return Err(format!("another download is writing to {}", path.display()));
-    }
-    Ok(())
-}
-
-/// Removes a file or directory this backend wrote, retrying briefly while
-/// WebView2 closes its handle after a cancellation.
-fn remove_later(path: PathBuf, directory: bool) {
-    std::thread::spawn(move || {
-        for attempt in 0..100 {
-            let result = if directory {
-                std::fs::remove_dir_all(&path)
-            } else {
-                std::fs::remove_file(&path)
-            };
-            match result {
-                Ok(()) => return,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-                Err(error) if attempt == 99 => {
-                    log::warn!(
-                        "web view: cannot remove a cancelled download's output {}: {error}",
-                        path.display()
-                    );
-                    return;
-                }
-                Err(_) => std::thread::sleep(Duration::from_millis(50)),
-            }
-        }
-    });
-}
-
-/// Whether two paths name the same file (Windows treats `/` and `\` alike
-/// and compares without regard to ASCII case).
-fn same_path(a: &Path, b: &Path) -> bool {
-    let normal = |path: &Path| {
-        path.to_string_lossy()
-            .replace('/', "\\")
-            .to_ascii_lowercase()
-    };
-    normal(a) == normal(b)
-}
-
-/// Why a download was interrupted, for `onDownload`'s message.
-fn interrupt_message(reason: i32) -> String {
-    let message = match reason {
-        1 => "the file could not be written",
-        2 => "access to the file was denied",
-        3 => "the disk is full",
-        4 => "the file name is too long",
-        5 => "the file is too large",
-        6 => "the file was found to be malicious",
-        7 => "the file had a transient error",
-        8 => "the file was blocked by policy",
-        9 => "the file failed a security check",
-        10 => "the file was too short",
-        11 => "the file's hash did not match",
-        12 => "the network request failed",
-        13 => "the network request timed out",
-        14 => "the network connection was lost",
-        15 => "the server is down",
-        16 => "the network request was invalid",
-        17 => "the server failed",
-        18 => "the server does not support ranges",
-        19 => "the server returned bad content",
-        20 => "the server requires authentication",
-        21 => "the server's certificate has a problem",
-        22 => "the server forbade the download",
-        23 => "the server sent an unexpected response",
-        24 => "the content length did not match",
-        25 => "the server redirected across origins",
-        26 => "the download was cancelled",
-        27 => "the app is shutting down",
-        28 => "the download was paused",
-        29 => "the download process crashed",
-        _ => "the download was interrupted",
-    };
-    message.to_owned()
-}
-
 /// The page's navigation state, as `WebViewNavigation`.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Navigation {
@@ -3873,6 +1752,37 @@ fn web_error(status: i32) -> Option<&'static str> {
         18 => "Proxy authentication is required.",
         _ => "The page could not be loaded.",
     })
+}
+
+/// The bytes of a memory stream, from its start.
+///
+/// # Safety
+/// `stream` must be a live stream nothing else writes to.
+unsafe fn read_stream(stream: &IStream) -> Result<Vec<u8>, String> {
+    // SAFETY: the stream is live; seeking to its start and reading it is
+    // what its caller set up.
+    unsafe {
+        stream
+            .Seek(0, STREAM_SEEK_SET, None)
+            .map_err(|error| format!("cannot rewind the capture: {}", error.message()))?;
+        let mut bytes = Vec::new();
+        let mut buffer = [0u8; 16 * 1024];
+        loop {
+            let mut read = 0u32;
+            let result = stream.Read(
+                buffer.as_mut_ptr().cast(),
+                buffer.len() as u32,
+                Some(&mut read),
+            );
+            if result.is_err() {
+                return Err(format!("cannot read the capture: {}", result.message()));
+            }
+            if read == 0 {
+                return Ok(bytes);
+            }
+            bytes.extend_from_slice(&buffer[..read as usize]);
+        }
+    }
 }
 
 /// A JS string literal for `s`.
@@ -4159,219 +2069,5 @@ mod tests {
         assert!(scroll_style(false).contains("var on = false"));
         assert!(scroll_style(true).contains("var on = true"));
         assert!(scroll_style(false).contains("overflow: hidden !important"));
-    }
-
-    #[test]
-    fn maps_same_site_policies() {
-        assert_eq!(
-            same_site_kind(&CookieSameSite::None).expect("a policy"),
-            COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE
-        );
-        assert_eq!(
-            same_site_kind(&CookieSameSite::Lax).expect("a policy"),
-            COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX
-        );
-        assert_eq!(
-            same_site_kind(&CookieSameSite::Strict).expect("a policy"),
-            COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT
-        );
-        assert!(matches!(
-            same_site_name(COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT),
-            Some(CookieSameSite::Strict)
-        ));
-        assert!(same_site_name(COREWEBVIEW2_COOKIE_SAME_SITE_KIND(99)).is_none());
-    }
-
-    #[test]
-    fn translates_cookie_expiry_between_milliseconds_and_seconds() {
-        assert_eq!(expires_seconds(1_500), 1.5);
-        assert_eq!(expires_millis(1.5, false), Some(1_500));
-        assert_eq!(expires_millis(1.5, true), None);
-        assert_eq!(expires_millis(-1.0, false), None);
-        assert_eq!(expires_millis(f64::NAN, false), None);
-        assert_eq!(expires_millis(f64::INFINITY, false), None);
-    }
-
-    #[test]
-    fn sanitizes_download_file_names() {
-        assert_eq!(sanitize_file_name(r"..\../evil.txt"), "evil.txt");
-        assert_eq!(sanitize_file_name(r"C:\dir\a:b?.txt"), "ab.txt");
-        assert_eq!(sanitize_file_name("  ..  "), "download");
-        assert_eq!(sanitize_file_name(""), "download");
-        assert_eq!(sanitize_file_name("...hidden"), "hidden");
-        assert_eq!(sanitize_file_name("trailing. "), "trailing");
-        assert_eq!(sanitize_file_name("CON.txt"), "_CON.txt");
-        assert_eq!(sanitize_file_name("lpt9"), "_lpt9");
-        assert_eq!(sanitize_file_name("console.txt"), "console.txt");
-        // A normal extension survives the length limit.
-        let long = format!("{}.txt", "a".repeat(300));
-        let name = sanitize_file_name(&long);
-        assert!(name.len() <= 200, "{}", name.len());
-        assert!(name.ends_with(".txt"), "{name}");
-    }
-
-    #[test]
-    fn names_downloads_from_the_url_when_the_server_suggests_nothing() {
-        assert_eq!(
-            download_name("", "https://example.test/files/report.pdf?token=1#page"),
-            "report.pdf"
-        );
-        assert_eq!(download_name("", "https://example.test/"), "download");
-        assert_eq!(
-            download_name(r"C:\Users\a\Downloads\photo.webp", "https://example.test/"),
-            "photo.webp"
-        );
-    }
-
-    #[test]
-    fn validates_download_destinations() {
-        let base = std::env::temp_dir().join(format!("nsh-web-downloads-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).expect("a temporary directory");
-        let existing = base.join("existing.txt");
-        std::fs::write(&existing, b"x").expect("a file");
-        let directory = base.join("a-directory");
-        std::fs::create_dir_all(&directory).expect("a directory");
-
-        assert!(destination_error(Path::new("relative.txt"), false, &[]).is_err());
-        assert!(destination_error(&base.join("missing").join("a.txt"), false, &[]).is_err());
-        assert!(destination_error(&existing, false, &[]).is_err());
-        assert!(destination_error(&existing, true, &[]).is_ok());
-        assert!(destination_error(&directory, true, &[]).is_err());
-        assert!(destination_error(&base.join("new.txt"), false, &[]).is_ok());
-        assert!(destination_error(&base.join("new.txt"), true, &[base.join("NEW.txt")]).is_err());
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn describes_download_interruptions() {
-        assert_eq!(interrupt_message(2), "access to the file was denied");
-        assert_eq!(interrupt_message(13), "the network request timed out");
-        assert_eq!(interrupt_message(26), "the download was cancelled");
-        assert_eq!(interrupt_message(999), "the download was interrupted");
-    }
-
-    #[test]
-    fn makes_download_payloads() {
-        let payload = download_payload(
-            "finished",
-            "id-1",
-            "https://example.test/a",
-            "a.bin",
-            Path::new(r"C:\d\a.bin"),
-            Some(42),
-            None,
-        );
-        let EventPayload::Map(fields) = payload else {
-            panic!("a download event is a map");
-        };
-        let field = |name: &str| {
-            fields
-                .iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| value)
-        };
-        assert!(matches!(field("state"), Some(PayloadValue::Str(s)) if s.as_str() == "finished"));
-        assert!(matches!(field("id"), Some(PayloadValue::Str(s)) if s.as_str() == "id-1"));
-        assert!(matches!(field("bytes"), Some(PayloadValue::Number(n)) if *n == 42.0));
-        assert!(matches!(field("path"), Some(PayloadValue::Str(s)) if s.ends_with("a.bin")));
-        assert!(field("message").is_none());
-
-        let failed = download_payload(
-            "failed",
-            "id-2",
-            "u",
-            "f",
-            Path::new(""),
-            None,
-            Some("why".to_owned()),
-        );
-        let EventPayload::Map(fields) = failed else {
-            panic!("a download event is a map");
-        };
-        assert!(fields.iter().any(|(key, value)| *key == "message"
-            && matches!(value, PayloadValue::Str(s) if s.as_str() == "why")));
-    }
-
-    #[test]
-    fn stages_manual_downloads_beside_the_destination() {
-        let final_path = Path::new(r"C:\Users\a\Downloads\report.pdf");
-        let staging = staging_path(final_path, "id-1").expect("a staging path");
-        assert_eq!(staging.parent(), final_path.parent());
-        assert_eq!(
-            staging.file_name().unwrap().to_string_lossy(),
-            ".nsh-download-id-1.part"
-        );
-        assert!(!staging.to_string_lossy().contains("report"));
-    }
-
-    #[test]
-    fn staging_never_equals_or_reuses_a_destination() {
-        let base = std::env::temp_dir().join(format!("nsh-web-stage-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).expect("a temporary directory");
-        let id = "abc";
-        let first = base.join(format!(".nsh-download-{id}.part"));
-        // A destination that *is* the first candidate gets the second.
-        let staging = staging_path(&first, id).expect("a distinct staging path");
-        assert_eq!(
-            staging.file_name().unwrap().to_string_lossy(),
-            format!(".nsh-download-{id}.part.1")
-        );
-        // An occupied second candidate is refused.
-        std::fs::write(&staging, b"x").expect("an occupied candidate");
-        assert!(staging_path(&first, id).is_err());
-        // The ordinary destination still gets the first sibling.
-        let ordinary = staging_path(&base.join("report.pdf"), id).expect("a staging path");
-        assert_eq!(
-            ordinary.file_name().unwrap().to_string_lossy(),
-            format!(".nsh-download-{id}.part")
-        );
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn gates_only_navigating_commands() {
-        assert!(manual_downloads_unavailable(
-            &WebDownloadBehavior::Manual,
-            false
-        ));
-        assert!(!manual_downloads_unavailable(
-            &WebDownloadBehavior::Manual,
-            true
-        ));
-        assert!(!manual_downloads_unavailable(
-            &WebDownloadBehavior::Automatic,
-            false
-        ));
-        assert!(navigates(&Command::Reload));
-        assert!(inert_refuses(&Command::Reload));
-        assert!(inert_refuses(&Command::InjectJavaScript("x()".into())));
-        assert!(inert_refuses(&Command::PostMessage("x".into())));
-        assert!(!inert_refuses(&Command::StopLoading));
-        assert!(navigates(&Command::GoBack));
-        assert!(navigates(&Command::GoForward));
-        let load = nsh_core::WebLoad::new("https://example.test/", Vec::new()).expect("a load");
-        assert!(navigates(&Command::Load(load)));
-        assert!(!navigates(&Command::StopLoading));
-        assert!(!navigates(&Command::InjectJavaScript("x()".into())));
-        assert!(!navigates(&Command::PostMessage("x".into())));
-    }
-
-    #[test]
-    fn rule_cache_keys_include_the_lists_and_their_rules() {
-        let mut a = ContentRuleList::default();
-        a.id = "a".into();
-        a.rules = r#"[{"trigger":{"url-filter":"a"},"action":{"type":"block"}}]"#.into();
-        let mut b = ContentRuleList::default();
-        b.id = "b".into();
-        b.rules = r#"[{"trigger":{"url-filter":"b"},"action":{"type":"block"}}]"#.into();
-        assert_eq!(rules_key(&[a.clone()]), rules_key(&[a.clone()]));
-        assert_ne!(rules_key(&[a.clone()]), rules_key(&[b.clone()]));
-        // Replacing only the JSON does not reuse the old compiled rules.
-        let mut changed = a;
-        changed.rules = r#"[{"trigger":{"url-filter":"c"},"action":{"type":"block"}}]"#.into();
-        assert_ne!(rules_key(&[b]), rules_key(&[changed]));
     }
 }

@@ -322,15 +322,6 @@ impl AppView {
         };
         self.surface.native.set_access(Arc::new(access));
         let options = self.options.borrow();
-        let data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
-        // Automatic web view downloads go to the app's data directory,
-        // `<app id>/downloads`, as on macOS.
-        self.surface
-            .native
-            .set_downloads(data_dir.as_ref().map(|root| {
-                root.join(nsh_engine::app_dir_name(app.app_id()))
-                    .join("downloads")
-            }));
         let config = EngineConfig {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
@@ -347,7 +338,7 @@ impl AppView {
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
-            data_dir: data_dir.clone(),
+            data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             cache: options.cache.clone(),
             storage: options.storage.clone(),
             clock: Default::default(),
@@ -449,9 +440,8 @@ fn initial_environment() -> Environment {
         audio: true,
         // WebKitGTK, in builds with it.
         web_views: cfg!(feature = "webview"),
-        // A real WebKitGTK can screenshot, read and write cookies, open
-        // the inspector and answer download requests: only then does the
-        // core send them.
+        // A real WebKitGTK can screenshot a page and open its inspector:
+        // only then does the core send those requests.
         webview_requests: cfg!(feature = "webview"),
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,

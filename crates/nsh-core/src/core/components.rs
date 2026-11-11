@@ -6086,10 +6086,9 @@ impl<M: TextEngine> Core<M> {
     /// Sends `operation` to the web view `node` (an element ref's web view
     /// methods, [`crate::webview`]) and keeps `answer` for the platform's
     /// reply. Fails at once where the platform has no such controls, the
-    /// app holds no `webview` grant, the node is no web view, or the
-    /// operation's own input is invalid (a URL filter, a cookie, a
-    /// download's destination); otherwise the answer fails too if it comes
-    /// after [`crate::webview::REPLY_TIMEOUT`] or the node unmounts.
+    /// app holds no `webview` grant, or the node is no web view;
+    /// otherwise the answer fails too if it comes after
+    /// [`crate::webview::REPLY_TIMEOUT`] or the node unmounts.
     fn web_view_request(
         &mut self,
         node: NodeId,
@@ -6112,10 +6111,6 @@ impl<M: TextEngine> Core<M> {
             .is_some_and(|key| self.nodes[key as usize].kind == Kind::WebView);
         if !web {
             answer.fail(crate::webview::NOT_A_WEB_VIEW.into());
-            return;
-        }
-        if let Err(error) = crate::webview::check_operation(&operation) {
-            answer.fail(error);
             return;
         }
         // Ids are unique among the requests pending: a reply settles the

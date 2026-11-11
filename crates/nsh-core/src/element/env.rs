@@ -89,6 +89,7 @@ pub struct Environment {
     pub web_views: bool,
     /// The platform carries out web views' controls beyond loading a page
     /// ([`crate::platform::Environment::webview_requests`]).
+    #[doc(hidden)]
     pub webview_requests: bool,
     /// The platform draws shader views
     /// ([`crate::platform::Environment::shaders`]).

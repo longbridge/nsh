@@ -201,7 +201,7 @@ pub struct ImageProgress {
     pub total: f64,
 }
 
-/// A web view's page loaded further (`WebView::on_progress`): the
+/// A web view's page loaded further (`WebView::on_load_progress`): the
 /// fraction, `None` when the platform cannot tell.
 pub(crate) fn web_progress(p: &EventPayload) -> Option<Cow<'_, crate::webview::WebProgress>> {
     let EventPayload::Json(value) = p else {
@@ -215,45 +215,6 @@ pub(crate) fn web_progress(p: &EventPayload) -> Option<Cow<'_, crate::webview::W
             .map(|f| crate::geometry::Percentage(f as f32)),
     };
     Some(Cow::Owned(crate::webview::WebProgress { progress }))
-}
-
-/// An accepted web view download started, finished or failed
-/// (`WebView::on_download`, the platform's `onDownload` payload).
-pub(crate) fn web_download(p: &EventPayload) -> Option<Cow<'_, crate::webview::WebDownload>> {
-    let EventPayload::Map(entries) = p else {
-        return None;
-    };
-    let text = |key: &str| match entries.iter().find(|(k, _)| *k == key) {
-        Some((_, PayloadValue::Str(value))) => Some(value.clone()),
-        _ => None,
-    };
-    let number = |key: &str| match entries.iter().find(|(k, _)| *k == key) {
-        Some((_, PayloadValue::Number(n))) => Some(*n),
-        _ => None,
-    };
-    Some(Cow::Owned(crate::webview::WebDownload {
-        state: crate::webview::WebDownloadState::parse(text("state")?.as_str())?,
-        id: text("id")?,
-        url: text("url")?,
-        filename: text("filename")?,
-        path: std::path::PathBuf::from(text("path")?),
-        bytes: number("bytes").map(|n| n.max(0.0) as u64),
-        message: text("message"),
-    }))
-}
-
-/// A web view's page asked to download a file (`WebView::on_download_pending`).
-pub(crate) fn web_download_pending(
-    p: &EventPayload,
-) -> Option<Cow<'_, crate::webview::WebDownloadPending>> {
-    let EventPayload::Json(value) = p else {
-        return None;
-    };
-    Some(Cow::Owned(crate::webview::WebDownloadPending {
-        id: value.get("id")?.as_str()?.to_owned(),
-        url: value.get("url")?.as_str()?.to_owned(),
-        filename: value.get("filename")?.as_str()?.to_owned(),
-    }))
 }
 
 /// An event of a registered native component (`on_native_event`).

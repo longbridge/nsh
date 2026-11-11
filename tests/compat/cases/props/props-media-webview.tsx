@@ -25,6 +25,7 @@ function App() {
         userAgent="CompatAgent/1"
         scrollable={false}
         incognito
+        inspectable={!html()}
         ios={{ allowsBackForwardNavigationGestures: true }}
         style={{ width: 200, height: 120 }}
       />

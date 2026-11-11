@@ -209,10 +209,6 @@ pub(crate) struct NativeState {
     /// The application id: web views keep their data under it.
     #[cfg(feature = "webview")]
     app_id: RefCell<String>,
-    /// Where the running app's web views save automatic downloads (its
-    /// data directory's `<app id>/downloads`); `None` before an app starts.
-    #[cfg(feature = "webview")]
-    downloads: RefCell<Option<std::path::PathBuf>>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
 }
@@ -256,17 +252,6 @@ impl NativeState {
     #[cfg(not(feature = "webview"))]
     pub(crate) fn set_app_id(&self, _app_id: &str) {}
 
-    /// Where the app that starts saves its web views' automatic downloads:
-    /// its data directory's `<app id>/downloads`.
-    #[cfg(feature = "webview")]
-    pub(crate) fn set_downloads(&self, downloads: Option<std::path::PathBuf>) {
-        *self.downloads.borrow_mut() = downloads;
-    }
-
-    /// Where automatic downloads go (nothing to save without web views).
-    #[cfg(not(feature = "webview"))]
-    pub(crate) fn set_downloads(&self, _downloads: Option<std::path::PathBuf>) {}
-
     /// Whether any web view is mounted (input then keeps pointer events
     /// from the parts of pages nsh clips off).
     #[cfg(feature = "webview")]
@@ -295,7 +280,7 @@ enum Host {
     Video(VideoHost),
     /// A web view; `None` until its first props make it.
     #[cfg(feature = "webview")]
-    Web(Option<Box<web::WebHost>>),
+    Web(Option<web::WebHost>),
     /// A web view's placeholder (kept by the view).
     #[cfg(not(feature = "webview"))]
     Web,
@@ -350,10 +335,7 @@ pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
 pub(crate) fn props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) {
     // A web view is made with its first props (`incognito` picks its
     // network session; the core keeps it from changing afterwards),
-    // outside the hosts' borrow. Then it is taken out to be configured:
-    // applying props can load a page (and wait for content rules), and
-    // WebKit calls back into this module while it does, which must not
-    // meet a borrowed hosts map.
+    // outside the hosts' borrow.
     #[cfg(feature = "webview")]
     if let NativeProps::WebView(p) = props {
         let unmade = matches!(
@@ -361,27 +343,11 @@ pub(crate) fn props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) 
             Some(Host::Web(None))
         );
         if unmade {
-            let web = Box::new(web::WebHost::new(surface, view, p));
+            let web = web::WebHost::new(surface, view, p);
             if let Some(Host::Web(slot)) = surface.native.hosts.borrow_mut().get_mut(&view.id()) {
                 *slot = Some(web);
             }
         }
-        let mut host = {
-            let mut hosts = surface.native.hosts.borrow_mut();
-            match hosts.get_mut(&view.id()) {
-                Some(Host::Web(slot)) => slot.take(),
-                _ => None,
-            }
-        };
-        if let Some(host) = host.as_mut() {
-            host.set(view, p);
-        }
-        if let Some(host) = host
-            && let Some(Host::Web(slot)) = surface.native.hosts.borrow_mut().get_mut(&view.id())
-        {
-            *slot = Some(host);
-        }
-        return;
     }
     let mut hosts = surface.native.hosts.borrow_mut();
     match (hosts.get_mut(&view.id()), props) {
@@ -389,6 +355,8 @@ pub(crate) fn props(surface: &Rc<Surface>, view: &NshView, props: &NativeProps) 
             let base = surface.native.asset_base.borrow();
             video.set(view, p, base.as_ref());
         }
+        #[cfg(feature = "webview")]
+        (Some(Host::Web(Some(web))), NativeProps::WebView(p)) => web.set(view, p),
         // Nothing to configure on the placeholder.
         #[cfg(not(feature = "webview"))]
         (Some(Host::Web), NativeProps::WebView(_)) => {}
@@ -462,22 +430,12 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
         }
         #[cfg(feature = "webview")]
         _ => {
-            // The hosts' borrow ends before WebKit may call back at once.
-            // An app navigation issued while the requested content rules
-            // are not installed is held (the host queues it) rather than
-            // dispatched.
-            let (web, held) = {
-                let mut hosts = surface.native.hosts.borrow_mut();
-                match hosts.get_mut(&view.id()) {
-                    Some(Host::Web(Some(host))) => {
-                        (Some(host.web()), host.queue_navigation(command))
-                    }
-                    _ => (None, false),
-                }
+            // Outside the hosts' borrow: WebKit may call back at once.
+            let web = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(Some(web))) => Some(web.web()),
+                _ => None,
             };
-            if let Some(web) = web
-                && !held
-            {
+            if let Some(web) = web {
                 web::command(&web, command);
             }
         }

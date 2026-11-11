@@ -46,25 +46,6 @@ The Windows binaries are built for the machine itself, so the CLI finds them in 
 Features: `js` (default; JS apps; without it the crate only runs Rust apps and links no QuickJS) and `dev` (the dev
 server client, log forwarding, the error overlay: `dev.rs`). The host turns on `dev`, the runner only `js`.
 
-## WebView controls
-
-`native/web.rs` implements the [desktop WebView request protocol](elements.md#desktop-webview-controls) with
-WebView2 `CapturePreview`, the view's cookie manager, developer tools and native download operations. Progress is
-indeterminate while the engine cannot provide a fraction. Automatic downloads use the app's data directory;
-manual mode holds the download deferral until the host accepts or cancels it. Completion and failure report
-through the existing `onDownload` payload.
-
-Content filtering validates its supported WebKit-style rules before installing network filters and cosmetic
-styles. Unsupported or malformed rules return an error rather than being ignored. The matching tests must
-distinguish the top document from a requested resource and preserve exception ordering. Failed replacements
-retain the active rules. Releasing a host cancels downloads and ignores stale native callbacks.
-Worker and script-registration completions are tied to their original view and desired rules generation. The
-new network blocker and cosmetic registration commit together; failure leaves the previous complete policy
-installed and navigation held. Both top-level and frame navigations use the readiness gate. Ambiguous document
-requests refuse matching top-dependent rules; first-party matching uses the Public Suffix List and exact IP
-address identity, rather than a two-label heuristic. Manual mode on a runtime without download deferrals replaces
-the page with inert content and refuses injected scripts as well as navigation until automatic mode is restored.
-
 ## Architecture
 
 - **One retained view per node, one window per surface.** Each node is an `NshView` (`view.rs`): an `Rc` node with

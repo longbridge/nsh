@@ -61,6 +61,7 @@ mount(Browser);
 | `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
 | `incognito` | `boolean` | `false` | The pages' website data (cookies, storage, the cache) lives only as long as the web view, apart from the app's; on Android the web view loads without the HTTP cache and saves no form data ([website data](../docs/web-view-and-video.md#website-data)). Read when the web view is made. |
+| `inspectable` | `boolean` | `false` | Enables inspection on the native desktop backends; changes update the mounted view. See the [platform matrix](../elements/web-view.md#native-capture-and-inspection). |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | iOS only: swipe from the edges to go back and forward. |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS: two-finger trackpad swipes go back and forward; Windows: touchscreen swipes; Linux: touchpad swipes. |
 
@@ -70,11 +71,10 @@ mount(Browser);
 |---|---|---|
 | `onLoadStart` | `WebViewNavigation` | A page starts loading. |
 | `onLoad` | `WebViewNavigation` | A page finished loading. |
+| `onLoadProgress` | `{ progress: number \| null }` | A native desktop page's loading fraction, or `null` when unknown. |
 | `onError` | `{ message: string }` | A page failed to load. |
 | `onNavigationStateChange` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `{ data: string }` | The page called `window.nsh.postMessage(data)`. |
-| `onLoadProgress` | `{ progress: number \| null }` | Desktop page loading advanced; `null` is indeterminate. |
-| `onDownload` | `WebViewDownload` | A desktop download started, finished or failed; files are saved in the app's data directory. |
 
 ```ts
 interface WebViewNavigation {
@@ -99,10 +99,7 @@ interface WebViewNavigation {
 | `postMessage(data)` | Sends `data` (a string) to the page: a `message` event on `window`, with `data` as `event.data`. |
 | `load({ src, headers? })` | Loads `src` with `headers` (`Record<string, string>`) on the page's own request only, not on its subresources, later navigations or reloads; for a signed-in page (`Authorization`). The host must be one `webview.hosts` allows. An invalid header throws a `TypeError`. The browser backend does nothing. See [Signed-in pages](../docs/web-view-and-video.md#signed-in-pages-request-headers). |
 
-Rust hosts also use the [desktop controls](../elements/web-view.md#desktop-controls-in-rust) for screenshots,
-Cookie access, inspection, manual download decisions and content filtering. Their privileges belong to the host;
-the table above lists the methods exposed to TSX modules.
-
+Visible-page capture and programmatic developer tools are [Rust host methods](../elements/web-view.md#native-capture-and-inspection). TSX controls inspection with `inspectable` and receives progress through `onLoadProgress`.
 
 ## Talking to the page
 

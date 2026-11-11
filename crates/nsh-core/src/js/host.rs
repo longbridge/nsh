@@ -1001,9 +1001,6 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     // The platform's answer to `Command::WebViewRequest`: the core resolves
     // the request's typed result with it.
     EventKind::WebViewReply,
-    // A manual download waiting for the app's destination: Rust's
-    // `WebView::on_download_pending`.
-    EventKind::DownloadPending,
     EventKind::ViewableItemsChange,
     // `NavPage`'s `onDismiss` / `onBackPress` and `Dialog`'s `onClose` /
     // `onCancel` / `onOpenChange` / `onOpen`: the navigation's handlers
