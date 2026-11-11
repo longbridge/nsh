@@ -3114,6 +3114,66 @@ mod tests {
             }))
     }
 
+    /// A page with two buttons and a dialog over it, open at first, with
+    /// two buttons of its own.
+    #[component]
+    fn PageUnderDialog() -> impl IntoElement {
+        let open = signal(true);
+        let button = move |id: &'static str| {
+            view()
+                .test_id(id)
+                .on_press(move || {
+                    if id == "close" {
+                        open.set(false);
+                    }
+                })
+                .child(text(id))
+        };
+        view()
+            .flex_1()
+            .child(button("settings"))
+            .child(button("help"))
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog()
+                        .child(button("confirm"))
+                        .child(button("close"))
+                })
+            }))
+    }
+
+    #[test]
+    fn tab_stays_in_the_newest_dialog_as_on_the_desktops() {
+        let mut config = EngineConfig::new(Root::of::<PageUnderDialog>());
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (confirm, close) = (id(&app, "id:confirm"), id(&app, "id:close"));
+        // Into the dialog, around inside it, never to the page under it.
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(confirm));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(close));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(confirm));
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(close));
+        // Closed: Tab goes through the page again.
+        app.press_key("return").unwrap();
+        app.wait_for_gone("id:close", Duration::from_secs(2))
+            .unwrap();
+        let (settings, help) = (id(&app, "id:settings"), id(&app, "id:help"));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(settings));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(help));
+    }
+
     #[test]
     fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
         let mut config = EngineConfig::new(Root::of::<FocusStops>());

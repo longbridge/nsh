@@ -212,10 +212,17 @@ impl Headless {
     }
 
     /// Tab (`back`: Shift+Tab): the keyboard focus moves to the next stop
-    /// ([`crate::screen::Screen::tab_stops`]), around from the last.
+    /// ([`crate::screen::Screen::tab_stops`]), around from the last; with
+    /// a dialog shown over the window of the focus, among the dialog's
+    /// stops only ([`crate::screen::Screen::focus_scope`]), as the
+    /// platforms keep it there.
     fn tab(&mut self, back: bool) {
-        let stops = self.screen.tab_stops();
         let current = self.screen.focused().or(self.screen.key_focus());
+        let window = current.map_or(ROOT_ID, |id| self.screen.window_of(id));
+        let mut stops = self.screen.tab_stops();
+        if let Some(scope) = self.screen.focus_scope(window) {
+            stops.retain(|&id| self.screen.within(id, scope));
+        }
         let at = current.and_then(|id| stops.iter().position(|s| *s == id));
         let Some(next) = nsh_core::input::tab_stop(at, stops.len(), back, true) else {
             return;
