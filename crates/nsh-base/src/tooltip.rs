@@ -1,6 +1,10 @@
 //! `Tooltip`: the hint an element's `tooltip` shows, as GPUI's
 //! `.tooltip(..)`: a hint overlay of the core (`nsh_core::element::Overlay::hint`)
-//! with the app's look, placement, delay and events. The core shows it for
+//! with the app's look, placement, delay and events. Once the pointer
+//! showed one, the next trigger it comes to within the tooltip's
+//! `gracePeriod` shows its tooltip at once (the core's
+//! `Overlay::hint_grace_period`, `gpui-base`'s `TooltipDefaults` grace
+//! period), so moving along a toolbar reads each tool. The core shows it for
 //! the focus the keyboard moves to its trigger too (Tab, an arrow, a
 //! shortcut, the app's `focus()` after a key), in every idiom, and hides it
 //! on Escape (WAI-ARIA's tooltip pattern). A press, a tap or a click that
@@ -48,6 +52,14 @@ pub struct TooltipProps {
     /// only when the app opens it.
     #[prop(default = 500.0)]
     pub delay: Prop<f64>,
+    /// Milliseconds after the pointer left a trigger whose tooltip it
+    /// showed during which coming to this trigger shows this one at once,
+    /// without `delay` (default 300, `gpui-base`'s grace period), so moving
+    /// along a toolbar shows each tool's in turn; also while a tooltip the
+    /// pointer showed is still up. A press on a trigger or Escape ends the
+    /// period. 0: it always waits `delay`.
+    #[prop(default = 300.0)]
+    pub grace_period: Prop<f64>,
     /// No tooltip: it neither shows nor asks to.
     #[prop(default)]
     pub disabled: Prop<bool>,
@@ -104,14 +116,26 @@ fn delay(ms: f64) -> Option<Duration> {
     }
 }
 
+/// `ms` milliseconds as the grace period of a tooltip whose delay is
+/// `delay_ms`, read as [`delay`] reads a delay (one that never ends is the
+/// longest a timer waits); none with an endless delay, which the pointer
+/// never ends.
+fn grace_period(delay_ms: f64, ms: f64) -> Duration {
+    match delay(delay_ms) {
+        None => Duration::ZERO,
+        Some(_) => delay(ms).unwrap_or(LONGEST),
+    }
+}
+
 /// A hint about an element, given as the element's `tooltip`
 /// (`<View tooltip={<Tooltip>…</Tooltip>}>`, Rust
 /// `.tooltip(tooltip().child(..))`), as GPUI's `.tooltip(..)`: shown on top
 /// of everything next to the element on the desktops while the pointer
-/// rests on it (after `delay`), until the pointer leaves or presses it, and
-/// in every idiom at once when the keyboard moves the focus to it (Tab, an
-/// arrow, a shortcut, the app's `focus()` after a key), until the focus
-/// leaves; Escape hides it. A press that focuses the element (a click, a
+/// rests on it (after `delay`; at once within `gracePeriod` after the
+/// pointer left an element whose tooltip it showed), until the pointer
+/// leaves or presses it, and in every idiom at once when the keyboard
+/// moves the focus to it (Tab, an arrow, a shortcut, the app's `focus()`
+/// after a key), until the focus leaves; Escape hides it. A press that focuses the element (a click, a
 /// tap) leaves it to the pointer. Touch screens show it otherwise only when
 /// the app opens it (`open`). It never
 /// takes the pointer or presses, so the element works as it does without
@@ -168,6 +192,7 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
     // its end asks nothing.
     overlay()
         .hint(move || delay(props.delay.get()).unwrap_or(LONGEST))
+        .hint_grace_period(move || grace_period(props.delay.get(), props.grace_period.get()))
         .hint_open(move || Some(presence.mounted()))
         .placement(props.placement)
         .align(props.align)
@@ -204,6 +229,7 @@ fn terminal_tooltip(
             Some(_) => Duration::ZERO,
             None => LONGEST,
         })
+        .hint_grace_period(move || grace_period(props.delay.get(), props.grace_period.get()))
         .hint_open(move || Some(on_line.get()))
         .pointer_events(PointerEvents::None)
         .focusable(false)

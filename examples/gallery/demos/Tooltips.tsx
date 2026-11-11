@@ -90,16 +90,18 @@ export function Tooltips() {
   }
 
   function Delays() {
+    // No grace period: each waits for its own delay, even right after the
+    // one beside it showed (the toolbar's tools show at once then).
     return (
       <Card icon="tooltip" title="When it shows" subtitle="The pointer rests for the tooltip's delay first">
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          <View tooltip={<Tip label="Shows at once" delay={0} />}>
+          <View tooltip={<Tip label="Shows at once" delay={0} gracePeriod={0} />}>
             <Button label="Instant" variant="secondary" onPress={() => log("pressed Instant")} />
           </View>
-          <View tooltip={<Tip label="After half a second" />}>
+          <View tooltip={<Tip label="After half a second" gracePeriod={0} />}>
             <Button label="Default" variant="secondary" onPress={() => log("pressed Default")} />
           </View>
-          <View tooltip={<Tip label="After 1.2 seconds" delay={1200} />}>
+          <View tooltip={<Tip label="After 1.2 seconds" delay={1200} gracePeriod={0} />}>
             <Button label="Patient" variant="secondary" onPress={() => log("pressed Patient")} />
           </View>
         </View>

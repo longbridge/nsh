@@ -27121,6 +27121,255 @@ fn a_tooltip_shows_for_a_focus_before_any_input() {
     assert!(tooltip_shown(&c, 2));
 }
 
+/// Gives element `id` a `tooltip` that is hint overlay `overlay` itself (as
+/// `nsh-base`'s `Tooltip` makes it), waiting half a second, with `grace`
+/// as its grace period when given.
+fn give_hint_tooltip(
+    c: &mut Core<FakeEngine>,
+    id: NodeId,
+    overlay: NodeId,
+    grace: Option<std::time::Duration>,
+) {
+    let mut ops = vec![
+        Op::Create {
+            id: overlay,
+            tag: Tag::Overlay,
+        },
+        overlay_prop(
+            overlay,
+            crate::OverlayProp::Hint(Some(std::time::Duration::from_millis(500))),
+        ),
+    ];
+    if let Some(grace) = grace {
+        ops.push(overlay_prop(
+            overlay,
+            crate::OverlayProp::HintGracePeriod(Some(grace)),
+        ));
+    }
+    ops.push(Op::SetProp {
+        id,
+        prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(overlay)),
+    });
+    apply(c, ops);
+}
+
+/// A core on a desktop with the tools of a toolbar: views `ids` in the
+/// root.
+fn toolbar_core(ids: &[NodeId]) -> Core<FakeEngine> {
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::MacOs,
+        idiom: crate::platform::Idiom::Desktop,
+        ..crate::element::Environment::default()
+    });
+    for &id in ids {
+        add(
+            &mut c,
+            id,
+            Tag::View,
+            ROOT_ID,
+            &[
+                ("width", StyleValue::Number(40.0)),
+                ("height", StyleValue::Number(40.0)),
+            ],
+        );
+    }
+    c
+}
+
+#[test]
+fn a_tooltip_shows_at_once_after_the_pointer_left_one_it_showed() {
+    let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+    let _clock = clock.enter();
+    let mut c = toolbar_core(&[2, 8, 14]);
+    give_tooltip(&mut c, 2, 4, "Move");
+    give_tooltip(&mut c, 8, 10, "Pen");
+    give_tooltip(&mut c, 14, 16, "Text");
+    c.commit();
+    let mouse = EventPayload::Mouse(crate::MouseEvent::default());
+    let wait = |c: &mut Core<FakeEngine>, ms: u64| {
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(ms));
+        c.run_component_tasks();
+        c.commit();
+    };
+    // The pointer rests on the first tool: its tooltip shows after its
+    // delay.
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    wait(&mut c, 499);
+    assert!(!tooltip_shown(&c, 2));
+    wait(&mut c, 1);
+    assert!(tooltip_shown(&c, 2));
+    // It moves on to the next tool: that one's shows at once.
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    c.component_event(8, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+    assert!(tooltip_shown(&c, 8), "at once after one the pointer showed");
+    // Off the toolbar for a moment, then on the third: still at once.
+    c.component_event(8, EventKind::MouseLeave, &mouse);
+    wait(&mut c, 299);
+    assert!(!tooltip_shown(&c, 8));
+    c.component_event(14, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(tooltip_shown(&c, 14), "within the grace period");
+    // Back to the tool it just left: at once too.
+    c.component_event(14, EventKind::MouseLeave, &mouse);
+    c.component_event(14, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(tooltip_shown(&c, 14));
+    // Away for the whole grace period: the next waits its delay again.
+    c.component_event(14, EventKind::MouseLeave, &mouse);
+    wait(&mut c, 300);
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    wait(&mut c, 499);
+    assert!(!tooltip_shown(&c, 2), "the grace period is over");
+    wait(&mut c, 1);
+    assert!(tooltip_shown(&c, 2));
+    // The pointer comes to a tool inside another whose tooltip it shows
+    // (it left none): at once.
+    let inner = 20;
+    add(
+        &mut c,
+        inner,
+        Tag::View,
+        2,
+        &[("height", StyleValue::Number(10.0))],
+    );
+    give_tooltip(&mut c, inner, 22, "Inner");
+    c.commit();
+    c.component_event(inner, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(
+        tooltip_shown(&c, inner),
+        "while one the pointer showed is up"
+    );
+    assert!(tooltip_shown(&c, 2));
+}
+
+#[test]
+fn a_press_or_escape_ends_the_tooltips_grace_period_and_the_focus_starts_none() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+    let _clock = clock.enter();
+    let mut c = toolbar_core(&[2, 8, 26]);
+    give_tooltip(&mut c, 2, 4, "Move");
+    give_tooltip(&mut c, 8, 10, "Pen");
+    c.commit();
+    let mouse = EventPayload::Mouse(crate::MouseEvent::default());
+    let wait = |c: &mut Core<FakeEngine>, ms: u64| {
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(ms));
+        c.run_component_tasks();
+        c.commit();
+    };
+    let escape = |c: &mut Core<FakeEngine>| {
+        c.component_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            &EventPayload::Value(PayloadValue::Number(overlay::ESCAPE_BINDING as f64)),
+        );
+        c.commit();
+    };
+    // Shown on the first tool, then at once on the second.
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    wait(&mut c, 500);
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    c.component_event(8, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(tooltip_shown(&c, 8));
+    // A press on the second hides its tooltip and ends the grace period:
+    // back on the first, it waits its delay.
+    c.component_event(ROOT_ID, EventKind::Touch, &touch_down(vec![8, ROOT_ID]));
+    c.commit();
+    assert!(!tooltip_shown(&c, 8));
+    c.component_event(8, EventKind::MouseLeave, &mouse);
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2), "a press ends the grace period");
+    wait(&mut c, 500);
+    assert!(tooltip_shown(&c, 2));
+    // Escape the same: shown at once on the second, Escape hides it, and
+    // the first waits again.
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    c.component_event(8, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(tooltip_shown(&c, 8));
+    escape(&mut c);
+    assert!(!tooltip_shown(&c, 8), "Escape hides it");
+    c.component_event(8, EventKind::MouseLeave, &mouse);
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2), "Escape ends the grace period");
+    wait(&mut c, 500);
+    assert!(tooltip_shown(&c, 2));
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    wait(&mut c, 300);
+    // The keyboard's focus shows the first at once; the pointer coming to
+    // the second waits its delay, and the focus leaving starts nothing.
+    c.set_input_modality(InputModality::Keyboard);
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(
+        tooltip_shown(&c, 2),
+        "the keyboard's focus shows it at once"
+    );
+    c.component_event(8, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 8), "a hint the focus shows starts none");
+    c.component_event(8, EventKind::MouseLeave, &mouse);
+    // Tab to a view with no tooltip.
+    c.set_states(26, FOCUSED);
+    c.set_states(2, 0);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+    c.component_event(8, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 8), "nor does the focus leaving");
+    wait(&mut c, 500);
+    assert!(tooltip_shown(&c, 8));
+}
+
+#[test]
+fn a_tooltips_grace_period_is_its_own() {
+    let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+    let _clock = clock.enter();
+    let mut c = toolbar_core(&[2, 8, 14]);
+    // The default grace period, none and two seconds.
+    give_tooltip(&mut c, 2, 4, "Move");
+    give_hint_tooltip(&mut c, 8, 10, Some(std::time::Duration::ZERO));
+    give_hint_tooltip(&mut c, 14, 16, Some(std::time::Duration::from_secs(2)));
+    c.commit();
+    let mouse = EventPayload::Mouse(crate::MouseEvent::default());
+    let wait = |c: &mut Core<FakeEngine>, ms: u64| {
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(ms));
+        c.run_component_tasks();
+        c.commit();
+    };
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    wait(&mut c, 500);
+    assert!(tooltip_shown(&c, 2));
+    // None: it waits its delay, moving on from a tooltip or not.
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    c.component_event(8, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 8), "no grace period");
+    wait(&mut c, 500);
+    assert!(tooltip_shown(&c, 8));
+    // A second away, past the default, within its two seconds: at once.
+    c.component_event(8, EventKind::MouseLeave, &mouse);
+    wait(&mut c, 1000);
+    c.component_event(14, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(tooltip_shown(&c, 14), "its own grace period");
+    // A second away from it, the default's: its delay.
+    c.component_event(14, EventKind::MouseLeave, &mouse);
+    wait(&mut c, 1000);
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+    wait(&mut c, 500);
+    assert!(tooltip_shown(&c, 2));
+}
+
 /// An image node `id` showing `source` (and `placeholder`), in the root.
 fn image_ops(id: NodeId, source: ImageSource, placeholder: Option<ImageSource>) -> Vec<Op> {
     let mut ops = vec![

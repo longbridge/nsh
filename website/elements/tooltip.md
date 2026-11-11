@@ -9,7 +9,10 @@ demo: el-tooltip
 
 A tooltip is a short hint next to what it is about: what an icon button does, the full text of a truncated label.
 On the desktops and in desktop browsers it shows once the pointer has rested on its trigger for `delay` (500 ms), and
-hides when the pointer leaves or presses the trigger. On every device it also shows at once when the keyboard moves
+hides when the pointer leaves or presses the trigger. Once one tooltip has shown, the pointer reads on without
+waiting: moving to another trigger within `gracePeriod` (300 ms) of leaving shows that one's tooltip at once, so each
+tool of a toolbar tells what it is as the pointer passes; a press on a trigger or Escape ends it, and the next
+tooltip waits for its `delay` again. On every device it also shows at once when the keyboard moves
 the focus to its trigger (Tab, the arrow keys, a shortcut, or the app's `focus()` after a key), and hides when the
 focus leaves or Escape is pressed, so keyboard users read the same hints. A click or a tap that focuses the trigger
 leaves the tooltip to the pointer, as `focus-visible:` styles do: the press hides it, and the pointer resting on the
@@ -99,6 +102,7 @@ once hidden, which it keeps while the `transition-*` classes of its `class` run;
 | `open` | `.open(..)` | `boolean` | none | Shown, controlled by the app. |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Shown at first, without `open`. |
 | `delay` | `.delay(..)` | `number` | `500` | Milliseconds the pointer rests on the trigger before it shows (the focus the keyboard moves there shows it at once); `Infinity`: never by itself, neither for the pointer nor the focus, only when the app opens it. |
+| `gracePeriod` | `.grace_period(..)` | `number` | `300` | Milliseconds after the pointer left a trigger whose tooltip showed during which coming to this trigger shows it at once, without `delay` (also while that tooltip is still up); a press on a trigger or Escape ends it. `0`: it always waits for `delay`. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It never shows. |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"top"` | The side of the trigger it goes on. |
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |

@@ -1875,6 +1875,12 @@ pub enum OverlayProp {
     /// (`nsh-base`'s `Tooltip`).
     #[prop(reset = OverlayProp::Hint(None))]
     Hint(Option<std::time::Duration>),
+    /// A hint shown at once when the pointer comes to its anchor this soon
+    /// after leaving one whose hint it showed
+    /// ([`crate::overlay::OverlayConfig::hint_grace_period`]); set by
+    /// components (`nsh-base`'s `Tooltip`).
+    #[prop(reset = OverlayProp::HintGracePeriod(None))]
+    HintGracePeriod(Option<std::time::Duration>),
     /// A hint shown or hidden whatever the pointer does
     /// ([`crate::overlay::OverlayConfig::open`]); set by components.
     #[prop(reset = OverlayProp::Open(None))]
