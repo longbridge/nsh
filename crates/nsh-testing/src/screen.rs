@@ -205,6 +205,9 @@ struct View {
     /// `focusable`: `Some(true)` makes it a stop of Tab, `Some(false)` keeps
     /// a pressable out ([`nsh_core::ViewProps::focus_stop`]).
     focusable: Option<bool>,
+    /// A shown overlay's place in the Tab order
+    /// ([`nsh_core::ViewProps::tab_after`]).
+    tab_after: Option<NodeId>,
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
@@ -485,6 +488,7 @@ impl Screen {
                 view.role = props.accessibility.role;
                 view.disabled = props.accessibility.state.disabled;
                 view.focusable = props.focusable;
+                view.tab_after = props.tab_after;
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
@@ -1053,43 +1057,50 @@ impl Screen {
             } else if view.clips && id != ROOT {
                 inner = inner.within(bounds);
             }
-            let mut children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
-                self.screens(id).last().copied().into_iter().collect()
-            } else {
-                self.children.get(&id).cloned().unwrap_or_default()
-            };
-            // A scroll view's content, and a list's cells in its parent's
-            // viewport, in the order they are on screen, as macOS, iOS and
-            // Android order Tab and screen readers: a list's recycled cells
-            // are in the order they were made.
-            let horizontal = view.scroll.as_ref().map(|s| s.horizontal).or(view
-                .screen_order
-                .map(|a| a == nsh_core::geometry::Axis::Horizontal));
-            if let Some(horizontal) = horizontal
-                && children.len() > 1
-            {
-                let start = |child: &NodeId| {
-                    let frame = self.nodes.get(child).map(|v| v.frame).unwrap_or_default();
-                    let (main, cross) = if horizontal {
-                        (frame.origin.x, frame.origin.y)
-                    } else {
-                        (frame.origin.y, frame.origin.x)
-                    };
-                    (main.0, cross.0)
-                };
-                children.sort_by(|a, b| {
-                    let (a, b) = (start(a), start(b));
-                    a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
-                });
-            }
             stack.extend(
-                children
+                self.reading_children(id)
                     .into_iter()
                     .rev()
                     .map(|child| (child, content, inner, hidden, shows || id == ROOT, own)),
             );
         }
         out
+    }
+
+    /// `id`'s children in reading order: a stack's top screen; a scroll
+    /// view's content, and a list's cells in its parent's viewport, in the
+    /// order they are on screen, as macOS, iOS and Android order Tab and
+    /// screen readers (a list's recycled cells are in the order they were
+    /// made).
+    fn reading_children(&self, id: NodeId) -> Vec<NodeId> {
+        let mut children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+            self.screens(id).last().copied().into_iter().collect()
+        } else {
+            self.children.get(&id).cloned().unwrap_or_default()
+        };
+        let horizontal = self.nodes.get(&id).and_then(|view| {
+            view.scroll.as_ref().map(|s| s.horizontal).or(view
+                .screen_order
+                .map(|a| a == nsh_core::geometry::Axis::Horizontal))
+        });
+        if let Some(horizontal) = horizontal
+            && children.len() > 1
+        {
+            let start = |child: &NodeId| {
+                let frame = self.nodes.get(child).map(|v| v.frame).unwrap_or_default();
+                let (main, cross) = if horizontal {
+                    (frame.origin.x, frame.origin.y)
+                } else {
+                    (frame.origin.y, frame.origin.x)
+                };
+                (main.0, cross.0)
+            };
+            children.sort_by(|a, b| {
+                let (a, b) = (start(a), start(b));
+                a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+            });
+        }
+        children
     }
 
     /// The window is `size` (what lies outside it is not on screen).
@@ -2285,34 +2296,44 @@ impl Screen {
     }
 
     /// Tab's stops, in tree order (a scroll view's content in screen
-    /// order), as macOS and the web have them: the
+    /// order), a shown overlay's content right after the view it follows
+    /// where the app put it ([`nsh_core::input::tab_order`]: a popover's
+    /// after its trigger): the
     /// inputs that edit and the views [`nsh_core::ViewProps::focus_stop`]
     /// takes (those that take presses unless `focusable={false}`, and
     /// `focusable={true}` ones whether or not they do), shown and enabled.
     pub(crate) fn tab_stops(&self) -> Vec<NodeId> {
-        self.shown()
-            .into_iter()
-            .filter(|&id| {
-                let Some(v) = self.nodes.get(&id) else {
-                    return false;
-                };
-                if let Some(input) = &v.input {
-                    return input.config.editable && !self.disabled_from(id, None);
-                }
-                // A link in a text view is a stop after it, in text order
-                // (`TextLink::focus_stop`).
-                if v.span.is_some() {
-                    return v.focusable == Some(true) && !self.disabled_from(id, None);
-                }
-                // Disabled is the ancestors' too here (`disabled_from`).
-                let props = nsh_core::ViewProps {
-                    focusable: v.focusable,
-                    ..Default::default()
-                };
-                props.focus_stop(v.events.contains(EventKind::Press))
-                    && !self.disabled_from(id, None)
-            })
-            .collect()
+        let shown: HashSet<NodeId> = self.shown().into_iter().collect();
+        nsh_core::input::tab_order(
+            ROOT,
+            |&id| self.reading_children(id),
+            |&id| id,
+            |&id| self.nodes.get(&id).and_then(|v| v.tab_after),
+        )
+        .into_iter()
+        .filter(|&id| {
+            if !shown.contains(&id) {
+                return false;
+            }
+            let Some(v) = self.nodes.get(&id) else {
+                return false;
+            };
+            if let Some(input) = &v.input {
+                return input.config.editable && !self.disabled_from(id, None);
+            }
+            // A link in a text view is a stop after it, in text order
+            // (`TextLink::focus_stop`).
+            if v.span.is_some() {
+                return v.focusable == Some(true) && !self.disabled_from(id, None);
+            }
+            // Disabled is the ancestors' too here (`disabled_from`).
+            let props = nsh_core::ViewProps {
+                focusable: v.focusable,
+                ..Default::default()
+            };
+            props.focus_stop(v.events.contains(EventKind::Press)) && !self.disabled_from(id, None)
+        })
+        .collect()
     }
 
     /// The stop a press on `id` gives the focus to in a terminal: `id` or
@@ -2329,9 +2350,13 @@ impl Screen {
             at = self.nodes.get(&id).and_then(|v| v.parent);
         }
         let point = self.bounds_in_root(id)?.center();
-        stops.iter().rev().copied().find(|&stop| {
-            self.bounds_in_root(stop)
-                .is_some_and(|bounds| bounds.contains(&point))
+        // Topmost by how they are stacked, not by Tab's order (an
+        // overlay's content is not last there).
+        self.shown().into_iter().rev().find(|stop| {
+            stops.contains(stop)
+                && self
+                    .bounds_in_root(*stop)
+                    .is_some_and(|bounds| bounds.contains(&point))
         })
     }
 

@@ -192,6 +192,7 @@ fn windows(cx: &mut TestAppContext) {
     mouse_events_carry_the_position_button_and_modifiers(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
     text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx);
+    a_popovers_field_follows_its_trigger_in_the_tab_order(cx);
     the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
     js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
@@ -378,6 +379,58 @@ fn text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx: &mut TestA
         }
     };
     typed_ahead(cx, down(0x4E, modifiers));
+}
+
+/// A focused field, an open popover with a field in it, and a field
+/// after the popover.
+const POPOVER_FIELDS: &str = r#"
+import { mount, Text, View } from "nsh";
+import { Input, Popover } from "nsh/base";
+
+function App() {
+  return (
+    <View style={{ flex: 1, padding: 8, gap: 8 }}>
+      <Input autoFocus value="before" style={{ height: 30 }} />
+      <Popover defaultOpen trigger={<Text>Open</Text>}>
+        <Input value="inside" style={{ width: 100, height: 30 }} />
+      </Popover>
+      <Input value="after" style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_popovers_field_follows_its_trigger_in_the_tab_order(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", POPOVER_FIELDS, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "before");
+    let tab = |view: &Entity<AppView>, cx: &mut VisualTestContext, shift: bool| {
+        view.update(cx, |view, _| {
+            let modifiers = crate::input::Modifiers {
+                shift,
+                ..crate::input::Modifiers::default()
+            };
+            let surface = view.surface().clone();
+            assert!(crate::input::key(
+                &surface,
+                down(crate::keys::VK_TAB, modifiers)
+            ));
+        });
+    };
+    // Into the popover, which is shown at the end of the root view, then
+    // on to the field after it, and back.
+    tab(&view, cx, false);
+    wait_for(&view, cx, "inside");
+    tab(&view, cx, false);
+    wait_for(&view, cx, "after");
+    tab(&view, cx, true);
+    wait_for(&view, cx, "inside");
+    tab(&view, cx, true);
+    wait_for(&view, cx, "before");
 }
 
 struct KeyLog {

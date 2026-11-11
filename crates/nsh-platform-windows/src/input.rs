@@ -1178,22 +1178,31 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 }
 
 /// The enabled text fields shown under `view`, in tree order (a scroll
-/// view's content as it is on screen).
+/// view's content as it is on screen; a shown overlay's content after the
+/// view it follows, [`input::tab_order`]).
 fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
-    {
+    let skipped = |view: &NshView| {
         let s = view.state();
-        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
-            return;
+        s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None
+    };
+    let order = input::tab_order(
+        view.clone(),
+        |view| {
+            if skipped(view) {
+                return Vec::new();
+            }
+            view.with_children_in_reading_order(<[NshView]>::to_vec)
+        },
+        NshView::id,
+        |view| view.state().props.tab_after,
+    );
+    out.extend(order.into_iter().filter(|view| {
+        if skipped(view) {
+            return false;
         }
-        if s.kind == ViewKind::Input && !s.props.accessibility.state.disabled {
-            out.push(view.clone());
-        }
-    }
-    view.with_children_in_reading_order(|children| {
-        for child in children {
-            collect_fields(child, out);
-        }
-    });
+        let s = view.state();
+        s.kind == ViewKind::Input && !s.props.accessibility.state.disabled
+    }));
 }
 
 // --- Hit testing --------------------------------------------------------------------

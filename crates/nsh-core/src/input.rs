@@ -671,6 +671,88 @@ pub fn wheel_listener<V>(
 
 // --- The keyboard -------------------------------------------------------------------
 
+/// The views under `root` (itself first) in Tab order: depth first, each
+/// before its children in the order `children` gives them, except that a
+/// shown overlay's view (`tab_after`: its [`crate::ViewProps::tab_after`])
+/// goes right after the view it names and before that view's children,
+/// not among the children of the root view it is in. So a popover's
+/// content follows its trigger, as WAI-ARIA's non-modal popups have it.
+/// An overlay whose view is not met stays where it is.
+///
+/// For the backends that order Tab themselves: they filter the views it
+/// returns for their stops, and leave out of `children` what Tab passes
+/// over (hidden subtrees, the screens under the top one).
+pub fn tab_order<V>(
+    root: V,
+    children: impl FnMut(&V) -> Vec<V>,
+    id: impl FnMut(&V) -> NodeId,
+    tab_after: impl FnMut(&V) -> Option<NodeId>,
+) -> Vec<V> {
+    let mut walk = TabWalk {
+        children,
+        id,
+        tab_after,
+        waiting: rustc_hash::FxHashMap::default(),
+        out: Vec::new(),
+    };
+    walk.visit(root);
+    walk.out
+}
+
+/// [`tab_order`]'s walk.
+struct TabWalk<V, C, I, A> {
+    children: C,
+    id: I,
+    tab_after: A,
+    /// The overlays met, by the view they go after, until it is.
+    waiting: rustc_hash::FxHashMap<NodeId, Vec<V>>,
+    out: Vec<V>,
+}
+
+impl<V, C, I, A> TabWalk<V, C, I, A>
+where
+    C: FnMut(&V) -> Vec<V>,
+    I: FnMut(&V) -> NodeId,
+    A: FnMut(&V) -> Option<NodeId>,
+{
+    fn visit(&mut self, view: V) {
+        let own = (self.id)(&view);
+        let children = (self.children)(&view);
+        self.out.push(view);
+        let mut placed = Vec::new();
+        let mut rest = Vec::with_capacity(children.len());
+        for child in children {
+            match (self.tab_after)(&child) {
+                Some(after) => {
+                    placed.push((after, (self.id)(&child)));
+                    self.waiting.entry(after).or_default().push(child);
+                }
+                None => rest.push(child),
+            }
+        }
+        for overlay in self.waiting.remove(&own).unwrap_or_default() {
+            self.visit(overlay);
+        }
+        for child in rest {
+            self.visit(child);
+        }
+        // Not met under this view: where they are.
+        for (after, placed) in placed {
+            let Some(waiting) = self.waiting.get_mut(&after) else {
+                continue;
+            };
+            let Some(at) = waiting.iter().position(|v| (self.id)(v) == placed) else {
+                continue;
+            };
+            let overlay = waiting.remove(at);
+            if waiting.is_empty() {
+                self.waiting.remove(&after);
+            }
+            self.visit(overlay);
+        }
+    }
+}
+
 /// The Tab stop Tab (Shift + Tab with `back`) moves to among `n` from
 /// `current`: past the ends it wraps around with `wrap`, else leaves them
 /// (`None`).
@@ -987,6 +1069,30 @@ mod tests {
         assert_eq!(target(5.0, 0.0, &views), Some(1));
         // Only a horizontal view: it takes vertical wheels too.
         assert_eq!(target(0.0, 5.0, &views[..2].to_vec()), Some(1));
+    }
+
+    #[test]
+    fn tab_order_puts_overlays_after_the_view_they_follow() {
+        // (id, tab_after, children): the root view holds a trigger with a
+        // label, a button after it, then its overlays: one after the
+        // label, one inside that one's content, one after a view that is
+        // not there, one after the root view itself.
+        let tree: &[(NodeId, Option<NodeId>, &[NodeId])] = &[
+            (1, None, &[2, 4, 5, 10, 7, 9]),
+            (2, None, &[3]),
+            (3, None, &[]),
+            (4, None, &[]),
+            (5, Some(3), &[6]),
+            (6, None, &[]),
+            (10, Some(6), &[11]),
+            (11, None, &[]),
+            (7, Some(99), &[8]),
+            (8, None, &[]),
+            (9, Some(1), &[]),
+        ];
+        let node = |id: NodeId| tree.iter().find(|n| n.0 == id).unwrap();
+        let order = tab_order(1, |&id| node(id).2.to_vec(), |&id| id, |&id| node(id).1);
+        assert_eq!(order, vec![1, 9, 2, 3, 5, 6, 10, 11, 4, 7, 8]);
     }
 
     #[test]

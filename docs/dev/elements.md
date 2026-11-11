@@ -186,6 +186,17 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
   recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows and GPUI
   move the focus between fields and native components only so far; iOS and Android move it between inputs.
+  A shown overlay's content is in the Tab order where the app put the overlay, not where its native view is (at the
+  end of its root view), as WAI-ARIA's non-modal popups have it: a popover's content right after its trigger, so
+  Shift+Tab from it goes back to the trigger and Tab past its last stop goes on to what follows the popover. A list
+  of options or a menu (a select's list, a `Menu`) keeps its place: those move the focus with their own keys, and
+  Tab leaves them for the control after their trigger. The core
+  sets `ViewProps::tab_after` on each shown overlay (the view it follows), and the platforms that order Tab
+  themselves walk with `nsh_core::input::tab_order`: the headless driver, Windows and GPUI; the TUI orders Tab by
+  `MountItem::TreeOrder`, which has overlays there already. On macOS, Linux and the web the toolkit orders Tab
+  (AppKit's key view loop and GTK's focus chain by position on screen, the browser by the DOM, where an overlay's
+  view is the last of its root view). Dialogs keep the focus inside them (the newest modal is the focus scope)
+  whatever this order.
   A link in text (a nested `<Text>` that takes presses, `AttributedText::links`) is a stop of its own: the core marks
   each `TextLink` with `focus_stop` (the span's `ViewProps::focus_stop(true)`: unless `focusable={false}` or
   disabled), Tab reaches it after its text view, in text order (nested links inside the one around them), the
