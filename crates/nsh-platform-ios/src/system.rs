@@ -1,6 +1,6 @@
 //! System UI driven from JS: the status bar and alerts / action sheets.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, ptr::NonNull, rc::Rc};
 
 use block2::RcBlock;
 use nsh_core::{
@@ -10,22 +10,23 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    AllocAnyThread, MainThreadMarker, MainThreadOnly,
+    AllocAnyThread, ClassType, MainThreadMarker, MainThreadOnly,
     rc::Retained,
     runtime::{AnyObject, Bool},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSAttributedString, NSData, NSDictionary, NSObjectProtocol, NSPropertyListReadOptions,
+    NSAttributedString, NSData, NSDictionary, NSError, NSObjectProtocol, NSPropertyListReadOptions,
     NSPropertyListSerialization, NSRange, NSString, NSURL,
 };
 use objc2_ui_kit::{
     NSAttributedStringDocumentFormats, NSDocumentTypeDocumentAttribute,
     NSDocumentTypeDocumentOption, NSHTMLTextDocumentType, NSRTFDTextDocumentType,
     NSRTFTextDocumentType, UIAlertAction, UIAlertActionStyle, UIAlertController,
-    UIAlertControllerStyle, UIApplication, UIDevice, UIInterfaceOrientationMask,
-    UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle, UIUserInterfaceIdiom,
-    UIUserInterfaceStyle, UIView, UIViewController,
+    UIAlertControllerStyle, UIApplication, UIDevice, UIDeviceOrientation, UIInterfaceOrientation,
+    UIInterfaceOrientationMask, UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle,
+    UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewController,
+    UIWindowSceneGeometryPreferencesIOS,
 };
 
 thread_local! {
@@ -164,6 +165,11 @@ pub(crate) fn page_orientations() -> Option<UIInterfaceOrientationMask> {
 /// asks the controllers of `view`'s window to rotate to them.
 pub(crate) fn set_orientations(bits: u8, view: &UIView) {
     ORIENTATIONS.set(orientation_mask(bits));
+    // The device's orientation, read when the orientations widen again.
+    let device = UIDevice::currentDevice(view.mtm());
+    if !device.isGeneratingDeviceOrientationNotifications() {
+        device.beginGeneratingDeviceOrientationNotifications();
+    }
     let Some(window) = view.window() else { return };
     let mut controller = window.rootViewController();
     // iOS 16 asks each controller again; before, one call for the window.
@@ -174,10 +180,51 @@ pub(crate) fn set_orientations(bits: u8, view: &UIView) {
         UIViewController::attemptRotationToDeviceOrientation(view.mtm());
         return;
     }
+    let mut top = None;
     while let Some(c) = controller {
         c.setNeedsUpdateOfSupportedInterfaceOrientations();
         controller = c.presentedViewController();
+        top = Some(c);
     }
+    // iOS 16 only turns the screen when its orientation is no longer
+    // allowed: when the orientations widen again (back from a landscape
+    // page), the screen would stay as the page turned it, whichever way
+    // the device is held. Turn it to the device's, as iOS did before;
+    // only in NSH's own window (a host app's turns as its controllers say).
+    let own = window
+        .rootViewController()
+        .is_some_and(|c| c.isKindOfClass(crate::app::RootController::class()));
+    let (true, Some(top), Some(scene)) = (own, top, window.windowScene()) else {
+        return;
+    };
+    // A device turned left shows the interface turned right, and back.
+    let wanted = match device.orientation() {
+        UIDeviceOrientation::Portrait => UIInterfaceOrientation::Portrait,
+        UIDeviceOrientation::PortraitUpsideDown => UIInterfaceOrientation::PortraitUpsideDown,
+        UIDeviceOrientation::LandscapeLeft => UIInterfaceOrientation::LandscapeRight,
+        UIDeviceOrientation::LandscapeRight => UIInterfaceOrientation::LandscapeLeft,
+        // Flat or unknown: no way the user holds it to follow.
+        _ => return,
+    };
+    let mask = UIInterfaceOrientationMask(1 << wanted.0);
+    if scene.effectiveGeometry().interfaceOrientation() == wanted
+        || !top.supportedInterfaceOrientations().contains(mask)
+    {
+        return;
+    }
+    let preferences = UIWindowSceneGeometryPreferencesIOS::initWithInterfaceOrientations(
+        UIWindowSceneGeometryPreferencesIOS::alloc(),
+        mask,
+    );
+    let failed = RcBlock::new(|error: NonNull<NSError>| {
+        // SAFETY: UIKit passes a valid NSError for the call.
+        let error = unsafe { error.as_ref() };
+        log::warn!(
+            "the screen did not turn to the device's orientation: {}",
+            error.localizedDescription()
+        );
+    });
+    scene.requestGeometryUpdateWithPreferences_errorHandler(&preferences, Some(&failed));
 }
 
 /// The controller to present over: the top one of `view`'s window.

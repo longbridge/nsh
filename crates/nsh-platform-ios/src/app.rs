@@ -173,7 +173,7 @@ define_class!(
     /// and takes the orientations of the page shown.
     #[unsafe(super(UIViewController, UIResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    struct RootController;
+    pub(crate) struct RootController;
 
     impl RootController {
         #[unsafe(method(preferredStatusBarStyle))]
