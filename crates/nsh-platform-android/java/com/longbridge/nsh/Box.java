@@ -865,7 +865,9 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         if (contentWrapper) return false;
         if (pointerEvents == 2) return false;
         boolean pressable = pressable(), pannable = pannable(), twoFinger = twoFinger();
-        if (!pressable && !pannable && !twoFinger) return false;
+        // A pan gate keeps the touches that go down on it, as UIKit's hit test gives them to it: left untaken, the
+        // down falls through to a scroll view under it (a chat's composer over its messages), which then scrolls.
+        if (!pressable && !pannable && !twoFinger) return mounter.panActivation(id) != null;
         float density = mounter.density;
         if (pressable) at.track(e);
         switch (e.getActionMasked()) {

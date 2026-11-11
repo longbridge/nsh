@@ -359,6 +359,10 @@ Things that were found the hard way. Read the section of the area you change bef
   iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
   While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
   the view that took the down, and the release is what ends the feedback.
+- **Android, a pan view over a scroll view**: a `Box` that handles nothing leaves the down untaken, and Android then
+  offers it to the views under it: a scroll view the box lies over (a chat's composer over its messages) took the
+  drag and scrolled, and the box's pan never activated. A `Box` with a `panActivation` takes the down, as UIKit's hit
+  test gives the touch to the topmost view; a press handler of a view around it then gets no press from it.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
