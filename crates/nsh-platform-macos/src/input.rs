@@ -761,6 +761,11 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
+            // Every plain press clears the latch: a text context menu tracks
+            // the mouse synchronously and consumes its release, so a
+            // Control-click's latch can outlive its press and would
+            // otherwise report this release as the secondary button.
+            input.control_click.set(false);
             if window_part_press(surface, event, x, y) {
                 return;
             }
