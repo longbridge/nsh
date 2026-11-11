@@ -228,7 +228,8 @@ impl Script {
             .with_filesystem(system.filesystem)
             .with_app_url(system.app_url)
             .with_base_url(bundle.base_url.clone())
-            .with_os(environment.os);
+            .with_os(environment.os)
+            .with_clipboard_images(environment.clipboard_images);
             script.0.initialize(Services {
                 system: services,
                 host: system.host,

@@ -1262,6 +1262,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.pixel_ratio = v[9];
     environment.screen_reader = v[10] != 0.0;
     environment.os = nsh_engine::Os::Android;
+    // Android's backend holds text only on the clipboard.
+    environment.clipboard_images = false;
     environment.notifications = true;
     environment.audio = true;
     environment.os_version = (v[11] as u16, 0);

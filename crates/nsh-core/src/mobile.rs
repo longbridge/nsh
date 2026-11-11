@@ -1,14 +1,16 @@
 //! Capabilities specific to iOS and Android (TS
 //! `nsh/mobile`): the system's tab bar ([`TabBar`]), a native component the
-//! two backends register themselves ([`TAB_BAR_COMPONENT`]). Elsewhere a
-//! component takes no room and shows nothing. Common controls belong to
+//! two backends register themselves ([`TAB_BAR_COMPONENT`]). Elsewhere, and
+//! on a platform built outside NSH without one
+//! ([`crate::platform::Environment::tab_bar`]), a component takes no room
+//! and shows nothing. Common controls belong to
 //! `nsh/base`; this module exposes mobile-specific semantics rather than
 //! a parallel set of system-styled controls.
 
 use crate::{
     JsonValue,
     element::{NativeEvent, native},
-    platform::{Os, TAB_BAR_COMPONENT},
+    platform::TAB_BAR_COMPONENT,
     prelude::*,
 };
 
@@ -80,7 +82,7 @@ pub enum TabBarEvent {
 /// nothing, and the app shows its tabs with `nsh/base`'s `Tabs`.
 #[component]
 pub fn TabBar(props: TabBarProps, cx: Scope<TabBarEvent>) -> impl IntoElement {
-    if !matches!(os(), Os::Ios | Os::Android) {
+    if !crate::element::has_tab_bar() {
         return view().hidden().into_element();
     }
     let items = props.items;

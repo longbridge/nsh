@@ -1215,6 +1215,7 @@ impl JsHost for CallHost<'_> {
         )
         // SAFETY: a short read of the live renderer state.
         .with_os(unsafe { (*crate::state::state(self.cx)).dom.os() })
+        .with_clipboard_images(crate::env::current(self.cx).clipboard_images)
     }
 
     fn image_blob(&self, url: &str) -> Option<(std::sync::Arc<str>, nsh_core::ImageData)> {

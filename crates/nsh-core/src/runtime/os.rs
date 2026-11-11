@@ -4,6 +4,15 @@ use std::path::PathBuf;
 
 use crate::element::{JsError, codes, module};
 
+/// The native operating system's name (`process.platform`, `os.platform()`):
+/// Rust's `std::env::consts::OS`, but `"harmonyos"` on HarmonyOS, whose
+/// target (`target_env = "ohos"`) Rust counts as Linux.
+pub(crate) const SYSTEM: &str = if cfg!(target_env = "ohos") {
+    "harmonyos"
+} else {
+    std::env::consts::OS
+};
+
 /// Native OS metadata. Returned paths confer no filesystem access.
 #[module]
 #[derive(Default)]
@@ -17,9 +26,10 @@ impl Os {
 
     /// The native operating system's name, as Rust's `std::env::consts::OS`
     /// and gpui-shell's say it: `"macos"`, `"windows"`, `"linux"`, `"ios"`,
-    /// `"android"` (not Node's `"darwin"` / `"win32"`).
+    /// `"android"` (not Node's `"darwin"` / `"win32"`); `"harmonyos"` on
+    /// HarmonyOS, which Rust's target calls Linux.
     pub(crate) fn platform() -> String {
-        std::env::consts::OS.to_owned()
+        SYSTEM.to_owned()
     }
 
     /// The native CPU architecture's name, as Rust's

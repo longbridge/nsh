@@ -3534,6 +3534,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         speech: env.speech,
         notifications: env.notifications,
         audio: env.audio,
+        tab_bar: env.tab_bar,
         cell: env.cell,
         web_input: env.web_input,
         web_evaluate: env.web_evaluate,

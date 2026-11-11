@@ -105,6 +105,14 @@ the simulated device's `system`. The OS's props (`ios={{…}}`, `android={{…}}
 the backend skips the mount items it does not show. `Idiom` says whether desktop behavior applies (`Idiom::Desktop`)
 or mobile (`Phone`, `Pad`).
 
+What the platform provides on that OS is in the environment as well, as NSH's own backends say it:
+`Environment::tab_bar` (on by default) is the system's tab bar on iOS and Android (`nsh/mobile`'s `TabBar`, which
+mounts the native component `TAB_BAR_COMPONENT` the platform registers; off: `TabBar` takes no room and `isAvailable` is
+false), and `Environment::clipboard_images` (on by default; Android's backend turns it off) is images on the clipboard
+(off: `Clipboard`'s image calls reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` before reaching the platform). The
+Mini Program platform turns both off. The other services follow the same pattern (`screen_color`, `file_requests`,
+`speech`, `notifications`, `audio`: what the platform answers).
+
 ## WebAssembly hosts
 
 On `wasm32-unknown-unknown`, NSH's crates import a few functions from their host, module `nsh`, which a platform
