@@ -81,9 +81,15 @@ pub struct Environment {
     /// The platform gives web views trusted input
     /// ([`crate::platform::Environment::web_input`]).
     pub web_input: bool,
+    /// The platform answers awaitable WebView evaluations
+    /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
+    pub web_evaluate: bool,
     /// The platform shows web views
     /// ([`crate::platform::Environment::web_views`]).
     pub web_views: bool,
+    /// The platform draws shader views
+    /// ([`crate::platform::Environment::shaders`]).
+    pub shaders: bool,
 }
 
 impl Environment {
@@ -126,7 +132,9 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
+            web_evaluate: false,
             web_views: true,
+            shaders: true,
         }
     }
 }

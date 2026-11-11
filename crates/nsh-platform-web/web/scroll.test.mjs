@@ -406,3 +406,35 @@ test('pixel-mode inertia crosses 40 without starting or cancelling a glide', (t)
   t.mock.timers.tick(200);
   assert.equal(el._driven, 0);
 });
+
+test('a view listening to onWheel inside a scroll view takes the wheel', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  const sent = [];
+  p.event = (id, name, payload) => sent.push([id, name, payload]);
+  p.point = (e) => [e.clientX, e.clientY];
+  const canvas = {
+    _id: 2, _kind: 'view', _events: new Set(['onWheel']), parentNode: el,
+    getBoundingClientRect: () => ({ left: 10, top: 20 }),
+  };
+  p.views.set(2, canvas);
+  p.wheelTracked = new Set([2]);
+  let prevented = false;
+  const e = { deltaMode: 1, deltaX: 0, deltaY: -3, clientX: 15, clientY: 30, ctrlKey: true, target: canvas, preventDefault() { prevented = true; } };
+  p.wheel(e);
+  assert.equal(el.scrollTop, 0, 'the scroll view around does not scroll');
+  assert.ok(prevented);
+  assert.deepEqual(sent, [[2, 'onWheel', {
+    position: { x: 5, y: 10 }, pagePosition: { x: 15, y: 30 }, delta: { x: 0, y: -3 }, deltaMode: 'lines',
+    modifiers: { control: true, alt: undefined, shift: undefined, platform: undefined },
+  }]]);
+  // The scroll view itself listening only observes: it still scrolls.
+  sent.length = 0;
+  canvas._events = new Set();
+  el._events = new Set(['onWheel']);
+  el.getBoundingClientRect = () => ({ left: 0, top: 0 });
+  p.wheel({ ...wheel(el, 20), clientX: 0, clientY: 0 });
+  assert.equal(sent.length, 1);
+  assert.equal(el.scrollTop, 20);
+});

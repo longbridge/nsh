@@ -57,7 +57,7 @@ pub struct ResolvedTextStyle {
     /// run is in, or on one around it): its characters keep their place in
     /// the lines, are not drawn (the core makes the run transparent, with
     /// no background) and are left out of copies and of what screen readers
-    /// read ([`AttributedText::copied_text`], [`AttributedText::shown_text`]).
+    /// read ([`AttributedText::copied_text`], [`AttributedText::visible_text`]).
     pub hidden: bool,
 }
 
@@ -245,7 +245,7 @@ impl ResolvedTextStyle {
     /// The style hidden ([`Self::hidden`]): nothing of it is drawn, glyphs,
     /// decoration lines and background alike, and its metrics stay.
     #[must_use]
-    pub fn hide(self) -> Self {
+    pub(crate) fn hide(self) -> Self {
         Self {
             color: Color::TRANSPARENT,
             decoration_color: None,
@@ -270,7 +270,7 @@ impl ResolvedTextStyle {
 }
 
 /// Whether two span lists over one string style every character alike
-/// but for the colors ([`AttributedText::same_but_colors`]).
+/// but for the colors and what is hidden ([`AttributedText::same_but_colors`]).
 fn spans_same_but_colors(a: &[TextSpan], b: &[TextSpan]) -> bool {
     let colorless = |s: &ResolvedTextStyle| ResolvedTextStyle {
         color: Color::TRANSPARENT,
@@ -279,6 +279,9 @@ fn spans_same_but_colors(a: &[TextSpan], b: &[TextSpan]) -> bool {
             color: Color::TRANSPARENT,
             ..b
         }),
+        // Hidden characters keep their place in the lines: whether a run is
+        // drawn is decided when drawing, as its colors are.
+        hidden: false,
         ..*s
     };
     // Both cover the string end to end: walk the pieces where they overlap.
@@ -612,7 +615,7 @@ impl AttributedText {
 
     /// The text a screen reader reads: all of it but its hidden runs
     /// ([`ResolvedTextStyle::hidden`]); borrowed when none is.
-    pub fn shown_text(&self) -> std::borrow::Cow<'_, str> {
+    pub fn visible_text(&self) -> std::borrow::Cow<'_, str> {
         if !self.has_hidden() {
             return std::borrow::Cow::Borrowed(&self.text);
         }
@@ -662,6 +665,45 @@ impl AttributedText {
     pub fn span_at(&self, index: u32) -> Option<&TextSpan> {
         let i = self.spans.partition_point(|s| s.end <= index);
         self.spans.get(i.min(self.spans.len().saturating_sub(1)))
+    }
+
+    /// The pieces of the UTF-16 range `range` that no hidden run covers
+    /// ([`ResolvedTextStyle::hidden`]), in order: where a selection's
+    /// highlight is drawn. The whole range when no run is hidden.
+    pub fn visible_ranges(&self, range: Range<u32>) -> Vec<Range<u32>> {
+        if !self.has_hidden() {
+            return vec![range];
+        }
+        let mut out: Vec<Range<u32>> = Vec::new();
+        let mut at = range.start;
+        let first = self.spans.partition_point(|s| s.end <= at);
+        for s in &self.spans[first..] {
+            if at >= range.end {
+                break;
+            }
+            let to = s.end.min(range.end);
+            if !s.style.hidden && to > at {
+                match out.last_mut() {
+                    Some(last) if last.end == at => last.end = to,
+                    _ => out.push(at..to),
+                }
+            }
+            at = at.max(to);
+        }
+        // Characters past the runs count as shown.
+        if at < range.end {
+            match out.last_mut() {
+                Some(last) if last.end == at => last.end = range.end,
+                _ => out.push(at..range.end),
+            }
+        }
+        out
+    }
+
+    /// Whether the character at the UTF-16 offset `index` is in a hidden
+    /// run ([`ResolvedTextStyle::hidden`]): nothing of it is drawn.
+    pub fn hidden_at(&self, index: u32) -> bool {
+        self.span_at(index).is_some_and(|s| s.style.hidden)
     }
 
     /// The background of the character at the UTF-16 offset `index`.
@@ -744,9 +786,11 @@ impl AttributedText {
     }
 
     /// Whether the two texts differ at most in their spans' colors (text,
-    /// decoration and background) and test metadata: the same characters
-    /// in the same styles but for those, wherever the spans begin and end
-    /// (neighbors that take the same color merge into one span).
+    /// decoration and background), which of them are hidden
+    /// ([`ResolvedTextStyle::hidden`]) and test metadata: the same
+    /// characters in the same styles but for those, wherever the spans
+    /// begin and end (neighbors that take the same color merge into one
+    /// span).
     pub(crate) fn same_but_colors(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
         let Self {
@@ -923,11 +967,12 @@ pub trait TextEngine {
     /// Whether the platform draws a text's colors from the
     /// [`AttributedText`] mounted with its layout, not from the
     /// typesetting state: the spans' text, decoration and background
-    /// colors, looked up by character when drawing. The prepared state and
+    /// colors and which spans are hidden ([`ResolvedTextStyle::hidden`]),
+    /// looked up by character when drawing. The prepared state and
     /// layouts then hold for any text that differs from theirs only in
-    /// those colors (wherever its spans begin and end), so a change of
-    /// colors alone keeps them: no new typesetting, measurement or layout,
-    /// only the new text mounted with the layout already drawn.
+    /// those (wherever its spans begin and end), so a change of colors or
+    /// of what is hidden alone keeps them: no new typesetting, measurement
+    /// or layout, only the new text mounted with the layout already drawn.
     fn draws_colors_from_text(&self) -> bool {
         false
     }

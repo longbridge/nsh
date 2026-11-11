@@ -205,6 +205,11 @@ Things that were found the hard way. Read the section of the area you change bef
   (`UIScreen.mainScreen` and `UIWindow initWithFrame` are deprecated). The window size is fixed to 390×844 through `sizeRestrictions`.
 - Methods in `define_class!` that return `Retained<T>` need `#[unsafe(method_id(...))]`. Classes UIKit instantiates by name (AppDelegate,
   SceneDelegate) cannot have ivars; keep their state in statics or thread locals.
+- **A paste the input's delegate refuses crashes the app at the next undo** (iOS 26, `UITextField` and `UITextView`):
+  UIKit's `paste:` asks the delegate later, after it registered the paste's undo step, and undoing it replaces a
+  range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
+  paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
+  text, asks the delegate and calls `insertText:`, whose undo is right.
 - **UIKit implements the `UITextInputTraits` setters of `UITextField` by message forwarding**: objc2's debug-build signature
   check cannot find them on the class and panics, so `input.rs` sends them with a raw `objc_msgSend`.
 - **objc2 crates are used with `default-features = false`** and an explicit feature list in the root `Cargo.toml` (one feature per
@@ -286,9 +291,23 @@ Things that were found the hard way. Read the section of the area you change bef
   reads the element's value as soon as the call returns, while the new value comes from the engine thread in a later
   batch: a step whose value arrives after VoiceOver read the old one announces the new one (`NshView::late_step_value`),
   one that arrives before it asked is read by VoiceOver itself.
+- **iOS, a `UIVisualEffectView` takes its shape through `maskView` only**: UIKit's documentation of
+  `UIVisualEffectView` says a mask on the layer of an effect view, or of one of its superviews, breaks the effect.
+  UIKit copies the mask view when it is set, so changing the mask view's geometry afterwards does nothing: a new size
+  or shape needs the mask view set again. A backdrop blur or glass with unequal corner radii gets a new mask view,
+  configured whole before it is set, whenever its size or radii change (`visual.rs` `set_backdrop`); one with a
+  single radius uses the layer's corners. A view with `overflow: hidden` and unequal radii still masks its own layer
+  (`decor.rs`), which is its effect view's superview: the case the documentation names, not changed yet.
 
 ## Android
 
+- **Android, responders inside pressable views**: a view that takes no press of its own (a `RichEditor`'s selection
+  handle) leaves the touch to the nearest pressable ancestor, which keeps tracking it: it raised its long press while a
+  finger held the handle and its press on the lift. `SetJsResponder` with a block ends the presses of the ancestors
+  (`Box.cancelPress`, `Pressable.cancel`), as iOS cancels their `PressRecognizer`s. A floating `ActionMode` keeps its
+  content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
+  caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
+  root view (`InputBox.openEditMenu`).
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
   a local frame (`java::with_env`), or local references pile up.
 - **Android, text**: `StaticLayout` ignores `maxLines` without an ellipsis (clip mode counts lines itself and the view clips);
@@ -395,6 +414,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Linux, GTK
 
+- **OpenGL on NVIDIA's driver gives wgpu an adapter but no device**: wgpu 29 makes a compute pipeline for its
+  validation of indirect calls when it opens a device, and the GL context it gets lacks compute shaders, so the device
+  fails (`Features(BUFFER_STORAGE | COMPUTE_SHADER | DYNAMIC_ARRAY_SIZE)`); with that validation off it opens, but
+  reads its uniforms and pictures as zero. `nsh_engine::shader::Renderer::new` goes on to Vulkan, which draws them
+  (`nsh-engine`'s shader tests, an RTX 3060 Ti on 615.78).
 - **inotify reports reads** (`Access` events), FSEvents does not: file watchers (`nsh dev`, `cargo run`'s xtask) ignore
   `Access` events, or the build's own reads of the sources start the next build, forever. inotify also reports paths
   under the watched one as given: watch a canonical path (a `..` in it makes every path look like a dot entry).
@@ -451,7 +475,8 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **Touches made in process do not move the first responder**: a made-up tap on a text field leaves the keyboard's
   focus where it was, so the agent focuses the input a tap lands in itself (as KIF does).
-- **`UITextField.insertText:` skips the field's delegate** (no `shouldChangeCharactersInRange`, so no `maxLength`):
+- **`insertText:` skips the delegate of `UITextField` and `UITextView`** (no `shouldChangeCharactersInRange`, so no
+  `maxLength`; `input::paste_text`, the agent's paste too, asks it first):
   typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
   controlled input's value comes back lose characters, so keys come at a typist's pace.
 - **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
@@ -516,10 +541,22 @@ Things that were found the hard way. Read the section of the area you change bef
   built-in screen and a 60 Hz external one). `Surface::follow_screen` asks for the range again when the screen's
   `maximumFramesPerSecond` differs from the one it was made for.
 
+- **The unified log stores about 1 KB of an entry's text** (iOS too): a `%{public}s` message of 1010 bytes came back
+  whole from `log show` and one of 1016 bytes cut (measured, macOS 26.6), so `nsh_platform_apple::unified_log` logs
+  in entries of at most 960 bytes, split between lines. A packaged app opened from Finder, the Dock or the Home screen
+  has stderr on `/dev/null`, which is why its lines go there. In a non-interactive zsh (scripts, agents' shells) `log`
+  is zsh's builtin, which `/etc/zshrc` disables only for interactive shells: call `/usr/bin/log`.
+
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
   binding and older systems no property.
+
+- **TextKit 2 has no rect for text it has not laid out**: an `NSTextView` lays out only the text near its visible part,
+  and `firstRectForCharacterRange:actualRange:` answers `NSZeroRect` for the rest, so input methods open their
+  candidates at the screen's bottom-left corner (macOS 27.2, a standalone probe). A point-wide input, as the editors'
+  sinks, wraps a line per character and soon holds such text. `TextArea` answers its visible part instead
+  (`text_input.rs`).
 
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
   Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
@@ -541,7 +578,9 @@ Things that were found the hard way. Read the section of the area you change bef
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
   400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
   `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
-  the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
+  the bar's height whatever the window's, and uses `contentLayoutRect` only without one; a measure from it runs
+  again on the next main-queue turn, once AppKit has laid the window out, since the root view's size may not change
+  again to trigger one.
 
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
@@ -558,9 +597,15 @@ Things that were found the hard way. Read the section of the area you change bef
   hand them to the view under the pointer.
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
-- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked. What ends
-  an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
-  one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
+- `NSView`'s display link fires only while some of the view's window shows on a screen: not while the window is
+  hidden (ordered out, or never shown), minimized, wholly covered or off every screen, or the screen is locked. A
+  surface's one link drives all of its windows, so a link made from the root of a hidden main window (a tray app's,
+  `window.defaultVisible: false`) gave the app's other windows no frames at all: made from the hidden window's view
+  it fired 0 times in a second, from a shown window's 126, and in a `Window.open` window a trackpad scroll froze
+  under the fingers and jumped into place when the gesture ended (`settle`), and animations did not run. The link is
+  made from a window that shows and made again when that one hides (`window::link_root`, `macos.md` "Frames"). What
+  ends an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with
+  a one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
 - **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
   makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its
@@ -715,6 +760,11 @@ Things that were found the hard way. Read the section of the area you change bef
   "Progressive blur", inside continuous-cornered cards). Either one alone is fine, as are circular corners. A clipping
   view with continuous corners (`nsh-curve-clip`) takes circular corners of its radius while a backdrop-filtered view
   (`nsh-backdrop`) is inside it (`nsh.js`, `placeCorners`).
+- **The async clipboard writes only PNG images**: a `ClipboardItem` of `image/jpeg` or `image/webp` is rejected
+  (Chrome 156; the clipboard kept what it held), and Safari writes only within the user's gesture, which an `await`
+  before `clipboard.write` loses. `writeClipboardImage` (`nsh.js`) starts the write at once with a promise of the
+  PNG, the image encoded again when it is another format, and logs a failure with a warning. It decodes a `data:` URI
+  itself: the `connect-src` of a published page whose app restricts `network` refuses `fetch` of `data:` URIs.
 - **Canvas `measureText` gives color emoji their 1x advance, the DOM draws them at the screen's pixel ratio**:
   Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
   emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of
@@ -750,3 +800,6 @@ Things that were found the hard way. Read the section of the area you change bef
   after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms
   (as in React Native); Android's stylus handwriting mode (on by default on recent
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.
+
+- **Windows RichEdit**: never set `TXTBIT_ADVANCEDINPUT` on a windowless RichEdit host; msftedit aborts (0x40000015) on focus. Enable TSF with `EM_SETEDITSTYLE SES_USECTF` instead.
+- **Windows RichEdit invalidates while it draws**: `TxDrawD2D` and the client-rectangle updates around it call `TxInvalidateRect` inside the window's `WM_PAINT`; a paint asked for there never comes back as another `WM_PAINT`, which left the surface waiting forever (typed text not shown until something else repainted). The field ignores what RichEdit invalidates while it is drawn (`Editor::drawing`), and `Surface::paint` asks again, once the frame is done, for what was requested during it.

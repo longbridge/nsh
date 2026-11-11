@@ -47,8 +47,8 @@ use windows::{
             Direct2D::{
                 CLSID_D2D1Shadow,
                 Common::{D2D1_COLOR_F, D2D1_COMPOSITE_MODE_SOURCE_OVER},
-                D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_ROUND, D2D1_DASH_STYLE_CUSTOM,
-                D2D1_DASH_STYLE_SOLID, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                D2D1_ANTIALIAS_MODE_ALIASED, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_ROUND,
+                D2D1_DASH_STYLE_CUSTOM, D2D1_DASH_STYLE_SOLID, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
                 D2D1_INTERPOLATION_MODE_LINEAR, D2D1_LINE_JOIN_ROUND, D2D1_PROPERTY_TYPE_FLOAT,
                 D2D1_PROPERTY_TYPE_VECTOR4, D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION,
                 D2D1_SHADOW_PROP_COLOR, D2D1_STROKE_STYLE_PROPERTIES1,
@@ -2268,26 +2268,64 @@ impl Painter<'_> {
         };
         for run in &layout.runs {
             let baseline = oy + run.baseline;
-            if let (Some(layers), None) = (&run.layers, over) {
-                let s = style(run.indices.first().copied().unwrap_or(0));
-                for l in layers.iter() {
-                    self.glyphs(
-                        &l.face.0,
-                        l.size,
-                        &l.glyphs,
-                        &l.advances,
-                        &l.offsets,
-                        run.bidi,
-                        ox + run.x + l.dx,
-                        baseline + l.dy,
-                        l.color.unwrap_or(s.color),
-                    );
-                }
-                self.decorate(s, &run.font, ox + run.left(), run.width(), baseline, None);
-                continue;
-            }
             let rtl = run.rtl();
             let n = run.glyphs.len();
+            if let (Some(layers), None) = (&run.layers, over) {
+                let s = style(run.indices.first().copied().unwrap_or(0));
+                let draw_layers = |s: &ResolvedTextStyle| {
+                    for l in layers.iter() {
+                        self.glyphs(
+                            &l.face.0,
+                            l.size,
+                            &l.glyphs,
+                            &l.advances,
+                            &l.offsets,
+                            run.bidi,
+                            ox + run.x + l.dx,
+                            baseline + l.dy,
+                            l.color.unwrap_or(s.color),
+                        );
+                    }
+                };
+                let hidden = |i: usize| style(run.indices[i]).hidden;
+                if !text.has_hidden() || !(0..n).any(hidden) {
+                    draw_layers(s);
+                    self.decorate(s, &run.font, ox + run.left(), run.width(), baseline, None);
+                    continue;
+                }
+                // Hidden runs draw nothing, and a color layer's glyphs (in
+                // the font's own colors) do not map back to the run's: each
+                // shown piece of the run is drawn clipped to its extent.
+                let mut pen = 0.0;
+                let mut i = 0;
+                while i < n {
+                    let h = hidden(i);
+                    let mut j = i + 1;
+                    while j < n && hidden(j) == h {
+                        j += 1;
+                    }
+                    let w: f32 = run.advances[i..j].iter().sum();
+                    let left = if rtl { run.x - pen - w } else { run.x + pen };
+                    if !h {
+                        let s = style(run.indices[i]);
+                        let size = run.font.size;
+                        let clip = rect_f(ox + left, baseline - 2.0 * size, w, 4.0 * size);
+                        // SAFETY: COM calls between BeginDraw and EndDraw,
+                        // the clip popped after the layers are drawn.
+                        unsafe {
+                            self.dc
+                                .PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED)
+                        };
+                        draw_layers(s);
+                        // SAFETY: as above.
+                        unsafe { self.dc.PopAxisAlignedClip() };
+                        self.decorate(s, &run.font, ox + left, w, baseline, None);
+                    }
+                    pen += w;
+                    i = j;
+                }
+                continue;
+            }
             let mut pen = 0.0;
             let mut i = 0;
             while i < n {
@@ -2299,6 +2337,13 @@ impl Painter<'_> {
                 let s = text.spans.get(span).map_or(&default, |s| &s.style);
                 let w: f32 = run.advances[i..j].iter().sum();
                 let origin = if rtl { run.x - pen } else { run.x + pen };
+                if s.hidden {
+                    // Nothing of a hidden run is drawn, in a shadow's or an
+                    // animated color either.
+                    pen += w;
+                    i = j;
+                    continue;
+                }
                 self.glyphs(
                     &run.font.face.0,
                     run.font.size,
@@ -2454,10 +2499,13 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     let range = drawn.selection.as_ref().and_then(|s| s.range.get());
     if let Some(range) = range.or_else(|| drawn.area_range.get()) {
         let brush = cx.solid(selection_tint(&drawn.text));
-        layout.range_rects(range, |x, y, w, h| {
-            // SAFETY: a COM call between BeginDraw and EndDraw.
-            unsafe { cx.dc.FillRectangle(&rect_f(ox + x, oy + y, w, h), brush) };
-        });
+        // Hidden characters show no highlight, as nothing of them shows.
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
+            layout.range_rects((shown.start, shown.end), |x, y, w, h| {
+                // SAFETY: a COM call between BeginDraw and EndDraw.
+                unsafe { cx.dc.FillRectangle(&rect_f(ox + x, oy + y, w, h), brush) };
+            });
+        }
     }
     if layout.runs.is_empty() {
         return;
@@ -2593,6 +2641,21 @@ pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32
         first.get_or_insert((cx + x, cy + y, w, h));
     });
     first
+}
+
+/// The box (view coordinates) around the rectangles the characters
+/// `start..end` of the text view with `state` cover (a selectable view's
+/// selection).
+pub(crate) fn range_bounds(state: &ViewState, start: u32, end: u32) -> Option<Bounds<Points>> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<WinLayout>()?;
+    let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+    let mut out: Option<Bounds<Points>> = None;
+    layout.range_rects((start, end), |x, y, w, h| {
+        let line = crate::geom::rect(cx + x, cy + y, w, h);
+        out = Some(out.map_or(line, |b| b.union(&line)));
+    });
+    out
 }
 
 /// The UTF-16 offset of the character at `(x, y)` (view coordinates), if
@@ -2880,7 +2943,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
         vec![
             LocalItem::Item {
                 role: Some(MenuRole::Copy),
-                label: "",
+                label: String::new(),
                 enabled: selected,
                 action: Rc::new(move |_| {
                     if let Some(text) = selected_text(&copy) {
@@ -2890,7 +2953,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
             },
             LocalItem::Item {
                 role: Some(MenuRole::SelectAll),
-                label: "",
+                label: String::new(),
                 enabled: true,
                 action: Rc::new(move |s| {
                     let len = all.state().text.as_ref().map_or(0, |t| t.text.len_utf16());
@@ -2906,7 +2969,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    Some(state.text.as_ref()?.text.copied_text(a..b))
+    Some(state.text.as_ref()?.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
 /// Keys for the text selection (Ctrl+C, Ctrl+A, Escape); true when

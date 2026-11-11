@@ -42,6 +42,8 @@ mod state;
 mod timers;
 mod touch;
 mod web;
+#[cfg(test)]
+mod web_evaluation;
 mod web_page;
 mod window;
 

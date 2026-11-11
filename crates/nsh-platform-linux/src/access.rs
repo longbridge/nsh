@@ -10,7 +10,8 @@
 //!   element), `Generic` otherwise;
 //! - its label (`accessibilityLabel`, or a text view's text; GTK computes
 //!   the name of buttons, links, headings, ... without a label from the
-//!   text inside them), its description (`accessibilityHint`), its value
+//!   text inside them), its description (`accessibilityDescription` and
+//!   `accessibilityHint`), its value
 //!   (`accessibilityValue`: a range for range roles, else read as part of
 //!   the description) and its states (`accessibilityState`,
 //!   `accessibilityElementsHidden`, which hides the subtree, and
@@ -72,6 +73,8 @@ struct Spec {
     level: Option<u32>,
     expanded: Option<bool>,
     busy: bool,
+    /// The content does not pass the app's checks (AT-SPI's invalid entry).
+    invalid: bool,
     hidden: bool,
 }
 
@@ -356,7 +359,7 @@ pub(crate) fn text_changed(view: &NshView) {
         match old {
             Some(old)
                 if Arc::ptr_eq(&old, &drawn.text)
-                    || old.shown_text() == drawn.text.shown_text() =>
+                    || old.visible_text() == drawn.text.visible_text() =>
             {
                 return;
             }
@@ -383,7 +386,7 @@ fn update(view: &NshView) -> bool {
         // An app-drawn window button is a button, as the system's is.
         let pressable = has_press_role(s.events) || s.props.window_control.is_some();
         // Hidden runs are not read.
-        let text = s.text.as_ref().map(|t| t.text.shown_text());
+        let text = s.text.as_ref().map(|t| t.text.visible_text());
         let spec = spec_for(a, s.kind, pressable, text.as_deref(), s.style.hidden);
         if s.access.spec.as_deref() == Some(&spec) {
             return false;
@@ -529,6 +532,12 @@ fn apply(view: &NshView, old: Option<&Spec>, new: &Spec) {
             gtk::AccessibleState::Busy,
         ),
         (
+            new.invalid,
+            old.map(|o| o.invalid),
+            accessible::State::Invalid(gtk::AccessibleInvalidState::True),
+            gtk::AccessibleState::Invalid,
+        ),
+        (
             new.hidden,
             old.map(|o| o.hidden),
             accessible::State::Hidden(true),
@@ -622,11 +631,7 @@ fn spec_for(
     // Outside range roles, a value is only read as part of the
     // description.
     let value_text = value.and_then(|v| v.text.as_deref()).filter(|_| !ranged);
-    let description = match (value_text, a.hint.as_deref()) {
-        (Some(v), Some(h)) => Some(format!("{v}. {h}")),
-        (Some(t), None) | (None, Some(t)) => Some(t.to_owned()),
-        (None, None) => None,
-    };
+    let description = a.help_text(value_text);
     Spec {
         role,
         label,
@@ -646,6 +651,7 @@ fn spec_for(
         level: a.level,
         expanded: a.state.expanded,
         busy: a.state.busy,
+        invalid: a.state.invalid,
         hidden: a.hidden || invisible,
     }
 }
@@ -705,6 +711,8 @@ fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Gtk {
         Role::Navigation => Gtk::Navigation,
         Role::Tree => Gtk::Tree,
         Role::TreeItem => Gtk::TreeItem,
+        Role::Dialog => Gtk::Dialog,
+        Role::AlertDialog => Gtk::AlertDialog,
     }
 }
 
@@ -731,7 +739,7 @@ fn announce_live(view: &NshView) {
         let live = v.state().props.accessibility.live_region;
         if live != LiveRegion::None {
             if let Some(t) = &view.state().text {
-                view.announce(&t.text.shown_text(), priority(live));
+                view.announce(&t.text.visible_text(), priority(live));
             }
             return;
         }
@@ -2349,6 +2357,8 @@ mod tests {
             (Role::TreeItem, Gtk::TreeItem),
             (Role::MenuItemCheckbox, Gtk::MenuItemCheckbox),
             (Role::MenuItemRadio, Gtk::MenuItemRadio),
+            (Role::Dialog, Gtk::Dialog),
+            (Role::AlertDialog, Gtk::AlertDialog),
         ] {
             assert_eq!(
                 role_for(&with_role(role), ViewKind::View, false),
@@ -2383,6 +2393,21 @@ mod tests {
             spec_for(&checkbox, ViewKind::View, true, None, false).checked,
             None
         );
+    }
+
+    /// An invalid field is AT-SPI's invalid entry (GTK's `Invalid`).
+    #[test]
+    fn invalid() {
+        let field = Accessibility {
+            label: Some("Email".into()),
+            state: AccessibilityState {
+                invalid: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(spec_for(&field, ViewKind::Input, false, None, false).invalid);
+        assert!(!spec_for(&with_role(Role::Button), ViewKind::View, true, None, false).invalid);
     }
 
     #[test]
@@ -2429,6 +2454,24 @@ mod tests {
         let s = spec_for(&button, ViewKind::View, false, None, false);
         assert_eq!(s.range, None);
         assert_eq!(s.description.as_deref(), Some("3 of 10. Plays"));
+        // The app's description goes between the value and the hint.
+        let described = Accessibility {
+            description: Some("The whole album".into()),
+            ..button
+        };
+        let s = spec_for(&described, ViewKind::View, false, None, false);
+        assert_eq!(
+            s.description.as_deref(),
+            Some("3 of 10. The whole album. Plays")
+        );
+        let dialog = Accessibility {
+            role: Role::AlertDialog,
+            label: Some("Delete file?".into()),
+            description: Some("This can't be undone.".into()),
+            ..Default::default()
+        };
+        let s = spec_for(&dialog, ViewKind::View, false, None, false);
+        assert_eq!(s.description.as_deref(), Some("This can't be undone."));
     }
 
     /// `visibility: hidden` hides the view and its subtree as

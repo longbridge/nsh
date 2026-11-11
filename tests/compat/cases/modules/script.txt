@@ -114,6 +114,7 @@ expect Imported: asset:/sounds/click.wav
 tap id:play
 expect Refused: threw RangeError
 expect Sound: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Bytes: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
 expect Player: rejected, error unavailable, idle true 1.5
 covers [nsh] Sound
 covers [nsh] AudioPlayer
@@ -139,11 +140,14 @@ covers [nsh] appInfo
 # mod-url-scheme
 tap id:case-mod-url-scheme
 # the domain claims `compat`: no link opened it, and the listener stops.
+# The app's own `setUrl` is no change of the address it did not make.
 expect Links: none
 expect Listener: listening
 expect Address: null
+expect Changes: none
 tap id:set-url
-expect Address: compat://orders/42, wrong TypeError TypeError
+expect Address: compat://orders/43, wrong TypeError TypeError TypeError
+expect Changes: none
 tap id:stop-links
 expect Listener: stopped
 covers [nsh] UrlScheme
@@ -181,7 +185,7 @@ tap id:menu
 expect Calls: menu done
 expect Popup: closed
 tap id:application
-expect Calls: application done, quit function, restart function
+expect Calls: application done, quit function, restart function, stop function
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] windowState

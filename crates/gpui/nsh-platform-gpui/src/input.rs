@@ -73,6 +73,7 @@ use nsh_core::{
         SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
         laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1061,6 +1062,11 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if matches!(event.kind, PointerKind::Down) {
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -1120,8 +1126,14 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             motion(surface, key, x, y, time);
         }
         PointerKind::Up => {
-            if mouse && event.button != 0 {
-                return;
+            if mouse {
+                surface.input.last.set(Some((x, y)));
+                if let Some(released) = mouse_button(event.button) {
+                    mouse_up(surface, x, y, event.modifiers, released);
+                }
+                if event.button != 0 {
+                    return;
+                }
             }
             up(surface, key, Some((x, y)), time, false);
         }
@@ -1137,6 +1149,42 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             set_hover_item(surface, None, (x, y), event.modifiers);
         }
     }
+}
+
+/// `onWheel` for a wheel by `delta` from the window: the nearest view
+/// around the one under the pointer that listens hears it
+/// ([`input::wheel_listener`]). Returns whether that view takes the
+/// wheel, so nothing scrolls or zooms natively.
+pub(crate) fn wheel_event(
+    surface: &Rc<Surface>,
+    event: &WheelEvent,
+    delta: nsh_core::WheelDelta,
+) -> bool {
+    let (x, y) = (event.x, event.y);
+    if delta.xy() == (0.0, 0.0) {
+        return false;
+    }
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return false;
+    };
+    let Some((view, takes)) = input::wheel_listener(
+        chain(&hit.view),
+        |v| v.state().events.contains(EventKind::Wheel),
+        // A multiline field scrolls its own lines.
+        |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+    ) else {
+        return false;
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let wheel = nsh_core::WheelEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        delta,
+        event.modifiers.core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    takes
 }
 
 /// A wheel event from the window.
@@ -1179,6 +1227,15 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
 /// A key from the window; true when handled. Only key downs (and their
 /// repeats) go to the modules; ups are not acted on.
 pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
+    // Before the key acts: the focus it moves shows (`focus-visible:`). A
+    // modifier alone (Shift, Control, Alt, the Windows / Command keys)
+    // does not count.
+    const MODIFIERS: [u16; 11] = [
+        0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C,
+    ];
+    if event.down && !MODIFIERS.contains(&event.vk) {
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
     if event.down && event.vk == VK_ESCAPE {
         crate::text_input::disarm(surface);
     }
@@ -1210,6 +1267,7 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::text::key(surface, &event)
         || crate::selectable_view::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
+        || crate::key_focus::key(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
             crate::scroll::key(surface, &event, x, y)
@@ -1309,28 +1367,36 @@ fn focus_stop(surface: &Rc<Surface>, view: &NshView) {
 }
 
 /// The Tab stops shown under `view`, in tree order (a scroll view's
-/// content as it is on screen): enabled text fields and
+/// content as it is on screen; a shown overlay's content after the view it
+/// follows, [`input::tab_order`]): enabled text fields and
 /// the native components that take the keyboard.
 fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
-    {
+    let skipped = |view: &NshView| {
         let s = view.state();
-        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
-            return;
+        s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None
+    };
+    let order = input::tab_order(
+        view.clone(),
+        |view| {
+            if skipped(view) {
+                return Vec::new();
+            }
+            view.with_children_in_reading_order(<[NshView]>::to_vec)
+        },
+        NshView::id,
+        |view| view.state().props.tab_after,
+    );
+    out.extend(order.into_iter().filter(|view| {
+        if skipped(view) {
+            return false;
         }
-        let stop = match s.kind {
+        let s = view.state();
+        match s.kind {
             ViewKind::Input => !s.props.accessibility.state.disabled,
             ViewKind::Native => crate::native::focusable(surface, s.id),
             _ => false,
-        };
-        if stop {
-            out.push(view.clone());
         }
-    }
-    view.with_children_in_reading_order(|children| {
-        for child in children {
-            collect_stops(surface, child, out);
-        }
-    });
+    }));
 }
 
 // --- Hit testing --------------------------------------------------------------------
@@ -1509,6 +1575,7 @@ fn down(
     let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    crate::key_focus::pointer_down(surface, &hit.view);
     let touch = key != Key::Mouse;
     let mut item = None;
     if let Some(native) = hit.item.take() {
@@ -1894,6 +1961,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: nsh_core::geometry::point(Points(p.x), Points(p.y)),
                     location: nsh_core::geometry::point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()
@@ -2447,6 +2519,38 @@ fn mouse_event(
         button,
     );
     surface.event(id, kind, EventPayload::Mouse(event));
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(
+    surface: &Surface,
+    x: f32,
+    y: f32,
+    modifiers: Modifiers,
+    button: nsh_core::MouseButton,
+) {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(&view, x, y);
+        let event = nsh_core::MouseEvent::released(
+            nsh_core::geometry::point(Points(location_x), Points(location_y)),
+            nsh_core::geometry::point(Points(x), Points(y)),
+            modifiers.core(),
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
+    }
 }
 
 /// A mouse button numbered as [`PointerEvent::button`] numbers them.

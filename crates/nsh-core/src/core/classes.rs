@@ -8,7 +8,7 @@ use crate::{
     geometry::{Points, Size},
     mount::MountItem,
     ops::NodeId,
-    platform::{Appearance, ColorScheme},
+    platform::{Appearance, ColorScheme, InputModality},
     props::PointerEvents,
     style::{Color, Style, StylePatch, ViewStyle},
     tailwind::{
@@ -67,6 +67,8 @@ pub(super) enum Part {
     Pressed,
     /// `focusWithinStyle`.
     FocusWithin,
+    /// `focusVisibleStyle`.
+    FocusVisible,
     /// A page's `headerStyle` / `headerClass`.
     Header,
     /// A list's `contentClass`.
@@ -87,6 +89,7 @@ impl Part {
             Part::Expanded => (state::EXPANDED, rank::EXPANDED),
             Part::Pressed => (state::ARIA_PRESSED, rank::ARIA_PRESSED),
             Part::FocusWithin => (state::FOCUS_WITHIN, rank::FOCUS_WITHIN),
+            Part::FocusVisible => (state::FOCUS_VISIBLE, rank::FOCUS_VISIBLE),
             _ => return None,
         })
     }
@@ -97,8 +100,8 @@ impl Part {
 pub(super) struct NodeParts {
     /// The classes as set, before the state styles are merged in.
     base: Option<std::rc::Rc<ClassList>>,
-    /// The state styles, by [`Part`] (the first ten).
-    states: [Option<std::rc::Rc<StylePatch>>; 10],
+    /// The state styles, by [`Part`] (the first eleven).
+    states: [Option<std::rc::Rc<StylePatch>>; 11],
     /// The state styles as rules (none without any).
     state_rules: Option<std::rc::Rc<ClassList>>,
     /// The inline styles of the other parts.
@@ -109,7 +112,7 @@ pub(super) struct NodeParts {
 
 /// The [`state`] bits an element is in by its accessibility state `s`:
 /// selected, checked (true), indeterminate (checked mixed), expanded,
-/// pressed (true: a toggle button that is on) and busy.
+/// pressed (true: a toggle button that is on), busy and invalid.
 pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
     use crate::Checked;
     let mut states = 0;
@@ -130,11 +133,14 @@ pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
     if s.busy {
         states |= state::BUSY;
     }
+    if s.invalid {
+        states |= state::INVALID;
+    }
     states
 }
 
 /// The state style parts, by their index in [`NodeParts::states`].
-const STATE_PARTS: [Part; 10] = [
+const STATE_PARTS: [Part; 11] = [
     Part::Active,
     Part::Hover,
     Part::Focus,
@@ -145,6 +151,7 @@ const STATE_PARTS: [Part; 10] = [
     Part::Expanded,
     Part::Pressed,
     Part::FocusWithin,
+    Part::FocusVisible,
 ];
 
 impl<M: TextEngine> Core<M> {
@@ -192,6 +199,11 @@ impl<M: TextEngine> Core<M> {
         }
         let changed = (if env.dark != self.class_env.dark { deps::DARK } else { 0 })
             | (if env.reduce_motion != self.class_env.reduce_motion { deps::MOTION } else { 0 })
+            | (if env.pointer != self.class_env.pointer || env.terminal != self.class_env.terminal {
+                deps::DEVICE
+            } else {
+                0
+            })
             // `ios:` / `android:` never change at run time, but a new
             // platform must reach classes resolved before it was known.
             | (if env.platform != self.class_env.platform { u16::MAX } else { 0 });
@@ -238,19 +250,133 @@ impl<M: TextEngine> Core<M> {
     /// losing it yet, and a view losing it that is not the focus changes
     /// nothing. The chain is worked out in the next commit round, once for
     /// all the reports before it, so a move reported as a blur then a
-    /// focus leaves the views both chains share as they were. The root
+    /// focus leaves the views both chains share as they were; a blur no
+    /// focus follows in that round waits for the next display frame
+    /// (`blur_held`), so the focus arriving in a later message is still
+    /// the same move. The root
     /// view taking it (macOS's first responder when no view has it) is no
     /// focus.
     fn focus_reported(&mut self, key: Key, focused: bool) {
         let id = self.nodes[key as usize].id;
         if focused {
             self.focus = (key != self.root).then_some((key, id));
+            self.focus_visible = self.focus_shows(key);
+            self.focus_by_keyboard = self.keyboard_moves_focus();
+            self.blur_held = false;
         } else if self.focus == Some((key, id)) {
             self.focus = None;
+            self.blur_held = true;
         } else {
             return;
         }
         self.focus_moved = true;
+    }
+
+    /// The platform reports what the user gave the surface input with
+    /// last ([`InputModality`]), before the focus moves it causes: a key
+    /// typed while the focus does not show makes it show, as browsers
+    /// do. A pointer leaves a focus that shows as it is: only a move of
+    /// the focus decides again ([`Self::focus_shows`]). A hint the focus
+    /// shows is decided only as the focus moves
+    /// ([`Self::keyboard_moves_focus`]): a key typed after a press shows
+    /// the focus, never the hint of the view it is on.
+    pub fn set_input_modality(&mut self, modality: InputModality) {
+        self.modality = Some(modality);
+        if modality == InputModality::Keyboard && self.focus.is_some() && !self.focus_visible {
+            self.focus_visible = true;
+            self.focus_visible_moved = true;
+        }
+    }
+
+    /// Whether the focus coming to `key` shows (`focus-visible:`), the
+    /// one rule every platform follows, after CSS's `:focus-visible`: an
+    /// input that edits always shows it (it takes typing), any other view
+    /// when the keyboard moved the focus ([`Self::keyboard_moves_focus`]).
+    pub(super) fn focus_shows(&self, key: Key) -> bool {
+        let node = &self.nodes[key as usize];
+        let edits = node.kind == Kind::Input
+            && node
+                .input
+                .as_ref()
+                .is_some_and(|input| input.config.editable);
+        edits || self.keyboard_moves_focus()
+    }
+
+    /// Whether the focus moving now is the keyboard's, by the surface's
+    /// last input: unless that was a pointer, so the keyboard's moves
+    /// count (Tab, a group's arrows, a shortcut) and so does a move the
+    /// app makes (`focus()`, a calendar or a dialog moving it as it opens)
+    /// after a key, while a press, a tap or a move after one do not.
+    /// Before any input it counts, as a browser's `autofocus` shows its
+    /// focus. `focus-visible:` ([`Self::focus_shows`]) and the hints the
+    /// focus shows (`Core::focus_hints`) follow it; a hint has no
+    /// exception for an input that edits, so a click into a field leaves
+    /// its tooltip to the pointer.
+    fn keyboard_moves_focus(&self) -> bool {
+        self.modality != Some(InputModality::Pointer)
+    }
+
+    /// Puts `FOCUS_VISIBLE` on the focus while it shows and takes it off
+    /// the view that had it: one view changes, the rest are not touched.
+    pub(super) fn update_focus_visible(&mut self) {
+        let alive = |this: &Self, (k, id): (Key, NodeId)| {
+            this.nodes.get(k as usize).is_some_and(|n| n.id == id)
+        };
+        let target = self.focus.filter(|&f| self.focus_visible && alive(self, f));
+        if target == self.focus_visible_on {
+            return;
+        }
+        let flipped = target.is_some() != self.focus_visible_on.is_some();
+        if let Some(old) = self.focus_visible_on.take()
+            && alive(self, old)
+        {
+            let node = &mut self.nodes[old.0 as usize];
+            if node.states & state::FOCUS_VISIBLE != 0 {
+                node.states &= !state::FOCUS_VISIBLE;
+                self.states_changed(old.0);
+            }
+        }
+        if let Some((k, _)) = target {
+            let node = &mut self.nodes[k as usize];
+            if node.states & state::FOCUS_VISIBLE == 0 {
+                node.states |= state::FOCUS_VISIBLE;
+                self.states_changed(k);
+            }
+        }
+        self.focus_visible_on = target;
+        if flipped {
+            self.restyle_projected_focus();
+        }
+    }
+
+    /// The states `key` is styled by: its own and those it shows as a
+    /// part of a control, with `FOCUS_VISIBLE` on a part projected focused
+    /// while the focus shows. Virtual focus is projected while its control
+    /// has the focus, so on its rows `focus:` is the cursor and
+    /// `focus-visible:` the cursor the keyboard is on.
+    pub(super) fn styled_states(&self, key: Key) -> u16 {
+        let node = &self.nodes[key as usize];
+        let states = node.states | node.projected;
+        if node.projected & state::FOCUSED != 0 && self.focus_visible_on.is_some() {
+            states | state::FOCUS_VISIBLE
+        } else {
+            states
+        }
+    }
+
+    /// Restyles the parts projected focused: the focus started or stopped
+    /// showing. Those released since are dropped.
+    fn restyle_projected_focus(&mut self) {
+        let mut parts = std::mem::take(&mut self.projected_focus);
+        parts.retain(|&(k, id)| {
+            self.nodes
+                .get(k as usize)
+                .is_some_and(|n| n.id == id && n.projected & state::FOCUSED != 0)
+        });
+        for &(k, _) in &parts {
+            self.states_changed(k);
+        }
+        self.projected_focus = parts;
     }
 
     /// Puts `focus-within` on the focus and the views around it, and takes
@@ -262,6 +388,7 @@ impl<M: TextEngine> Core<M> {
     /// is in, as in a React portal.
     pub(super) fn update_focus_within(&mut self) {
         self.focus_moved = false;
+        self.blur_held = false;
         let focus = self
             .focus
             .filter(|&(k, id)| self.nodes.get(k as usize).is_some_and(|n| n.id == id));
@@ -396,10 +523,20 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn set_projected_states(&mut self, key: Key, states: u16) {
         let node = &mut self.nodes[key as usize];
         if node.projected != states {
+            let focus_changed = (node.projected ^ states) & state::FOCUSED != 0;
             node.projected = states;
+            let id = node.id;
             if self.mount_projected && node.created {
-                let id = node.id;
                 self.mount.push(MountItem::ProjectStates { id, states });
+            }
+            if focus_changed {
+                // The key's entry before, and those released since, go.
+                let nodes = &self.nodes;
+                self.projected_focus
+                    .retain(|&(k, i)| k != key && nodes.get(k as usize).is_some_and(|n| n.id == i));
+                if states & state::FOCUSED != 0 {
+                    self.projected_focus.push((key, id));
+                }
             }
             self.states_changed(key);
         }
@@ -1015,7 +1152,7 @@ impl<M: TextEngine> Core<M> {
                 .as_ref()
                 .is_some_and(|c| c.groups().iter().any(|g| **g == *name))
             {
-                return node.states | node.projected;
+                return self.styled_states(k);
             }
             k = node.parent;
         }
@@ -1273,7 +1410,7 @@ impl<M: TextEngine> Core<M> {
                 // detached takes the root's), so its sided classes land
                 // right the first time.
                 rtl: self.resolved_rtl(key),
-                states: node.states | node.projected,
+                states: self.styled_states(key),
                 position: pos,
                 group: &group,
             };

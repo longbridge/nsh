@@ -68,7 +68,9 @@ The rules every backend follows:
 - Items a platform does not show are skipped: the batch stays consistent without them.
 
 `MountSink`'s other methods are optional: `request_frame` (call `EngineControl::frame` at the next display frame),
-`report_error` / `report` (show the app's errors), `needs_tree_order` (add logical tree order to batches), `resized`.
+`report_error` / `report` (show the app's errors), `needs_tree_order` (add logical tree order to batches), `resized`,
+`run_on_main_thread` (run an app's `MainThreadTask` on the UI thread after the batches submitted before it; the
+default runs it at once on the engine thread, which suits a platform whose engine runs on its UI thread).
 
 In `nsh-platform-miniprogram`, `encode.rs` turns each batch into JSON operations, and the Mini Program's runtime
 (`runtime/nsh/tree.js`) applies them to a tree of plain objects and updates the page with the fewest `setData` paths;

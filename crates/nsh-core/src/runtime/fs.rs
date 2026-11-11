@@ -11,9 +11,14 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::element::{
-    ClassDef, Held, Instance, JsError, JsHost, JsIn, JsKind, JsObject, JsOwned, JsValue, Later,
-    PropError, Quotas, Ret, System, TsTypes, class, codes, module,
+#[cfg(not(target_arch = "wasm32"))]
+use crate::access::{in_root, resolved};
+use crate::{
+    access::{inside, lexical},
+    element::{
+        ClassDef, Held, Instance, JsError, JsHost, JsIn, JsKind, JsObject, JsOwned, JsValue, Later,
+        PropError, Quotas, Ret, System, TsTypes, class, codes, module,
+    },
 };
 
 /// The largest file `readFile` returns.
@@ -477,44 +482,6 @@ impl Stats {
     }
 }
 
-/// `path` without `.` and `..`, resolved by its text.
-fn lexical(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut out = PathBuf::new();
-    for part in path.components() {
-        match part {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => (),
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-/// The canonical form of the nearest existing ancestor, with the rest
-/// appended.
-#[cfg(not(target_arch = "wasm32"))]
-fn resolved(path: &Path) -> Result<PathBuf, String> {
-    let mut current = path.to_path_buf();
-    let mut tail = Vec::new();
-    loop {
-        if let Ok(mut real) = crate::access::canonicalize(&current) {
-            real.extend(tail.into_iter().rev());
-            return Ok(real);
-        }
-        let name = current
-            .file_name()
-            .ok_or("invalid filesystem path")?
-            .to_owned();
-        if !current.pop() {
-            return Err("invalid filesystem path".into());
-        }
-        tail.push(name);
-    }
-}
-
 /// A checked path: the granted roots it is in (canonical, in the order
 /// of the grants) and the path within each. The work opens the first that
 /// exists, off the engine thread.
@@ -557,33 +524,6 @@ impl Roots {
     }
 }
 
-/// The rest of `path` past `root`, when `path` is in it (component by
-/// component; ignoring ASCII case on Windows, as its file systems do).
-fn inside(path: &Path, root: &Path) -> Option<PathBuf> {
-    let mut rest = path.components();
-    for part in root.components() {
-        let next = rest.next()?;
-        let same = if cfg!(windows) {
-            next.as_os_str()
-                .to_string_lossy()
-                .eq_ignore_ascii_case(&part.as_os_str().to_string_lossy())
-        } else {
-            next == part
-        };
-        if !same {
-            return None;
-        }
-    }
-    Some(rest.collect())
-}
-
-/// The rest of `path` in root `(expanded, canonical)`: under either form
-/// (`/var/…` and `/private/var/…` on macOS).
-#[cfg(not(target_arch = "wasm32"))]
-fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -> Option<PathBuf> {
-    inside(path, canonical).or_else(|| inside(path, expanded))
-}
-
 /// A capability-checked path in the host's private virtual filesystem.
 #[cfg(any(target_arch = "wasm32", test))]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -607,11 +547,7 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
     } else {
         &access.declared.fs.read
     };
-    let available = cfg!(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )) && sys.os.is_desktop();
+    let available = crate::access::native_files(sys.os);
     let available = available || (cfg!(target_arch = "wasm32") && sys.filesystem.is_some());
     if !roots.is_empty() && !available {
         return Err(
@@ -1350,7 +1286,7 @@ impl VirtualGrant {
 
 /// Opening granted roots and the files in them.
 #[cfg(not(target_arch = "wasm32"))]
-mod confined {
+pub(crate) mod confined {
     use std::{io, path::Path};
 
     use cap_std::fs::{Dir, File, Metadata, OpenOptions};
@@ -1372,7 +1308,7 @@ mod confined {
     /// `O_NOFOLLOW` from `/`, so a symlink swapped in after the grant check
     /// cannot redirect the root.
     #[cfg(unix)]
-    pub(super) fn open_root(path: &Path) -> io::Result<Dir> {
+    pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
         use std::{
             ffi::CString,
             os::{
@@ -1431,14 +1367,14 @@ mod confined {
     /// it; the root is the path the grant check resolved, opened through
     /// the ambient filesystem once.
     #[cfg(not(unix))]
-    pub(super) fn open_root(path: &Path) -> io::Result<Dir> {
+    pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
         Dir::open_ambient_dir(path, cap_std::ambient_authority())
     }
 
     /// Opens a regular file to read or to write (created when missing). On
     /// Unix it is opened non-blocking, so a FIFO or device cannot stall the
     /// worker; anything but a regular file is refused before a byte moves.
-    pub(super) fn open_file(dir: &Dir, path: &Path, write: bool) -> io::Result<File> {
+    pub(crate) fn open_file(dir: &Dir, path: &Path, write: bool) -> io::Result<File> {
         let mut options = OpenOptions::new();
         if write {
             options.write(true).create(true);

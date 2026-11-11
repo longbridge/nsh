@@ -15,7 +15,8 @@ or TSX it loads, including signed packages it downloads, under limits and capabi
 
 - **Xcode** on a Mac, with an iOS simulator runtime (`xcodebuild -downloadPlatform iOS` installs one). See
   [Installation](./installation.md#ios-and-mac-catalyst).
-- Apps need **iOS 15.0** or later, on iPhone and iPad.
+- Apps need **iOS 15.0** or later, or the later version an app names
+  ([Minimum system version](./packaging.md#minimum-system-version)), on iPhone and iPad.
 
 ## Running an app
 
@@ -46,6 +47,11 @@ From a Rust app's directory, the app is the iOS runner built with your crate; a 
 
 `--target ios` writes a signed `.ipa` for devices, TestFlight or the App Store. Signing identities, provisioning
 profiles and icons: [Packaging](./packaging.md#ios-devices).
+
+The app logs its warnings, its errors and its `console.log` and `console.info` lines to the unified log, with its id
+as the subsystem: Console shows a connected iPhone's, and
+`xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.notes"'` the simulator's
+([A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs)).
 
 ## Embedding in an iOS app
 
@@ -148,7 +154,7 @@ nsh build App.tsx --release --out MyApp/nsh
 | `bundle.js` | The same app as JS source. |
 | `bundle.js.map` | Its source map (stack traces point at your `.tsx` files). |
 | `capabilities.json` | The [capabilities](./sandbox-and-capabilities.md) the app declares, when `nsh.json` has any. |
-| `assets/` | Images and fonts the app imports, at their paths relative to the entry. |
+| `assets/` | Images and fonts the app imports, at their paths in the app's directory. |
 
 ## Show the app
 
@@ -454,6 +460,10 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
 - **Safe area.** Apps use `safe_area()` in Rust, and `env(safe-area-inset-*)` in padding or
   `safeAreaInsets()` from [`nsh`](../modules/nsh.md#safe-area-and-keyboard) in TSX, as usual. An `NshAppView` placed below your own header gets the insets that apply to it, not the window's.
 - **Mac Catalyst.** The same framework works in Catalyst apps.
+- **Logs.** The apps' warnings, errors and `console.log` and `console.info` lines go to the unified log, under your
+  app's bundle identifier, with the line's target as the category (`js` for `console.*`): Xcode's console shows them
+  while Xcode runs the app, and so do Console and `log stream`
+  ([A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs)).
 
 ## See also
 

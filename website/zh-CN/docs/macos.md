@@ -17,7 +17,7 @@ macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可�
 
 ## 环境要求
 
-- 运行应用的机器需要 **macOS 14** 及以上。
+- 运行应用的机器需要 **macOS 14** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)）。
 - Xcode 命令行工具（`xcode-select --install`），用于构建 Rust 应用的 runner、从源码构建 NSH 的 macOS 运行时以及打包应用
   （`codesign`、`sips`）。在 Mac 上用 `cargo xtask dist` 制作的发行版把 TSX 应用的运行时放在 `runtime/macos/` 中。
 
@@ -93,6 +93,11 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
 ```
 
 `.app` 使用 ad hoc 签名，因此可以在构建它的 Mac 上运行。要分发它，请用 Developer ID 签名并进行公证。`--run` 会在打包后打开应用。
+
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：“控制台”应用会显示它们，
+`log stream --predicate 'subsystem == "com.example.notes"'` 也会。从终端启动时（`.nsh/out/<Name>.app/Contents/MacOS/<Name>`），
+它还会把日志打印在终端里；标准错误重定向到文件时（`2> app.log`、`open --stderr app.log`）也会写进文件
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 菜单栏应用
 

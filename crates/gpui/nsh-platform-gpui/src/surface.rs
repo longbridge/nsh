@@ -27,7 +27,9 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
-use nsh_engine::{AppError, Engine, EngineConfig, EngineControl, Environment, MountSink};
+use nsh_engine::{
+    AppError, Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink,
+};
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -44,6 +46,9 @@ enum Message {
     Frame,
     HotUpdateFailed,
     Handled(u64),
+    /// A function the app runs on the main thread
+    /// ([`MountSink::run_on_main_thread`]), after the batches before it.
+    Run(MainThreadTask),
 }
 
 thread_local! {
@@ -95,6 +100,10 @@ impl MountSink for Sink {
 
     fn handled(&self, events: u64) {
         self.send(Message::Handled(events));
+    }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
     }
 }
 
@@ -169,6 +178,10 @@ pub(crate) struct Surface {
     /// The GPUI view drawing the surface ([`crate::app::AppView`]): notified
     /// when the surface changed.
     pub(crate) entity: Cell<Option<gpui::EntityId>>,
+    /// The GPUI window that view is in, as it was made or last drawn: what
+    /// reaches the window between frames uses it (native components' props
+    /// and commands, [`crate::native`]).
+    pub(crate) main_window: Cell<Option<gpui::AnyWindowHandle>>,
     /// The GPUI text system (fonts the engine thread shapes with, and the
     /// main thread draws with).
     pub(crate) text_system: RefCell<Option<Arc<gpui::TextSystem>>>,
@@ -234,6 +247,9 @@ pub(crate) struct Surface {
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
+    /// The roots the app's `<Image>` files are read under
+    /// ([`nsh_engine::Engine::media_files`]).
+    pub(crate) media_files: RefCell<Arc<nsh_core::access::MediaFiles>>,
     /// What the running app may reach (checked for image redirects).
     pub(crate) access: RefCell<Arc<nsh_core::access::Access>>,
     /// Videos, web views and registered native components.
@@ -296,6 +312,7 @@ impl Surface {
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             scale: Cell::new(1.0),
             entity: Cell::new(None),
+            main_window: Cell::new(None),
             text_system: RefCell::new(None),
             origin: Cell::new((0.0, 0.0)),
             invalid: Cell::new(false),
@@ -323,6 +340,7 @@ impl Surface {
             generation: Cell::new(0),
             asset_base: RefCell::new(None),
             image_cache: RefCell::new(None),
+            media_files: RefCell::default(),
             access: RefCell::new(Arc::default()),
             native: Default::default(),
             keymap: Default::default(),
@@ -366,12 +384,17 @@ impl Surface {
     }
 
     /// The GPU device shader views render with ([`crate::shader`]), opened
-    /// the first time one asks.
+    /// the first time one asks; without one the app hears that shader views
+    /// draw nothing (`shadersAvailable()`).
     pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
             .get_or_init(|| {
-                nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra)
-                    .map(Rc::new)
+                let renderer =
+                    nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra);
+                if renderer.is_none() {
+                    self.control(EngineControl::shaders_unavailable);
+                }
+                renderer.map(Rc::new)
             })
             .clone()
     }
@@ -439,6 +462,7 @@ impl Surface {
             Ok(engine) => {
                 // The app's downloaded images go through its disk cache.
                 crate::image::set_disk_cache(self, engine.image_cache());
+                *self.media_files.borrow_mut() = engine.media_files();
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
@@ -465,6 +489,7 @@ impl Surface {
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
+        crate::key_focus::forget(self);
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
@@ -674,6 +699,7 @@ impl Surface {
                     self.events_handled.set(events);
                     crate::text_input::engine_caught_up(self);
                 }
+                Message::Run(task) => task.run(),
             }
         }
         if applied {

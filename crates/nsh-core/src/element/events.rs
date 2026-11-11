@@ -6,7 +6,7 @@ use std::{borrow::Cow, sync::Arc};
 use super::builder::Listener;
 use crate::{
     Bounds, ContextMenuEvent, EventPayload, JsonValue, MouseEvent, PayloadValue, Point, Points,
-    PressEvent, Size, TouchEvent,
+    PressEvent, Size, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
 };
 
@@ -119,6 +119,15 @@ pub struct TextSelectionEvent {
     /// Where it starts in the copy of the whole view (what a select all
     /// would copy), in UTF-16 code units, when the platform knows it.
     pub start: Option<u32>,
+    /// The box around the selected text in the view's coordinates (its
+    /// border box), when something is selected and the platform knows it:
+    /// a bar of actions on the selection goes above it.
+    pub bounds: Option<Bounds<Points>>,
+    /// The same box in the view's root view (the surface, or the dialog
+    /// around it), as of the event:
+    /// [`crate::overlay::OverlayAnchor::Bounds`] places an overlay against
+    /// it.
+    pub page_bounds: Option<Bounds<Points>>,
 }
 
 /// Where an input's caret is (`on_caret_move`): what opens at it (an `@`
@@ -391,9 +400,15 @@ pub(crate) fn selected_text(p: &EventPayload) -> Option<Cow<'_, TextSelectionEve
         Some(PayloadValue::Number(n)) if *n >= 0.0 => Some(*n as u32),
         _ => None,
     };
+    let optional_bounds = |key| match field(p, key) {
+        Some(PayloadValue::Bounds(b)) => Some(*b),
+        _ => None,
+    };
     Some(Cow::Owned(TextSelectionEvent {
         text: string(p, "text").unwrap_or_default().to_owned(),
         start,
+        bounds: optional_bounds("bounds"),
+        page_bounds: optional_bounds("pageBounds"),
     }))
 }
 
@@ -583,6 +598,13 @@ pub(crate) fn mouse(p: &EventPayload) -> Option<Cow<'_, MouseEvent>> {
 pub(crate) fn context_menu(p: &EventPayload) -> Option<Cow<'_, ContextMenuEvent>> {
     match p {
         EventPayload::ContextMenu(e) => Some(Cow::Borrowed(e)),
+        _ => None,
+    }
+}
+
+pub(crate) fn wheel(p: &EventPayload) -> Option<Cow<'_, WheelEvent>> {
+    match p {
+        EventPayload::Wheel(e) => Some(Cow::Borrowed(e)),
         _ => None,
     }
 }

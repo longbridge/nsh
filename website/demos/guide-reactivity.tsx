@@ -112,7 +112,7 @@ function App() {
                   onPress={() => accent.set(c())}
                   style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: ui()[c()], borderWidth: 3, borderColor: accent() === c() ? ui().text : "transparent" }}
                   hoverStyle={{ opacity: 0.88 }}
-                  focusStyle={focusRing()}
+                  focusVisibleStyle={focusRing()}
                   activeStyle={{ opacity: 0.7 }}
                 />
               )}

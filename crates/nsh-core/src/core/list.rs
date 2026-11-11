@@ -691,6 +691,22 @@ impl ListState {
             })
     }
 
+    /// The row the viewport starts in, by its first item, and how far
+    /// past the row's start the viewport starts, in natural coordinates
+    /// (`ref.measureScrollPosition()`); `None` without items or a
+    /// viewport. Before the first row (a header, padding) it is item 0, a
+    /// negative distance away.
+    pub(super) fn scroll_position(&self) -> Option<(u32, f32)> {
+        if self.count == 0 || self.viewport <= 0.0 {
+            return None;
+        }
+        let top = self.natural_offset();
+        let body = self.blocks().body;
+        let row = (self.rows.find((top - body).max(0.0) as f64) as u32).min(self.row_count() - 1);
+        let index = (row * self.columns).min(self.count - 1);
+        Some((index, top - self.item_at(index)))
+    }
+
     /// Scrolls so item `index` starts `from_top` below the viewport's start
     /// again (a list that is not inverted).
     fn keep_in_place(&mut self, index: u32, from_top: f32) {
@@ -2300,6 +2316,38 @@ mod tests {
     }
 
     #[test]
+    fn the_scroll_position_is_the_row_at_the_viewports_start_and_the_depth_into_it() {
+        assert_eq!(list(0, 50.0, 400.0).scroll_position(), None);
+        // A header, then rows 50 points apart with 8-point gaps.
+        let mut l = list(100, 50.0, 400.0);
+        l.set_content(ListContentStyle {
+            row_gap: px(8.0),
+            ..ListContentStyle::default()
+        });
+        l.add_slot_cell(CellSlot::Header, 7);
+        l.measured_extra(ExtraKind::Header, 30.0);
+        assert_eq!(l.scroll_position(), Some((0, -38.0)));
+        l.measured(1, 90.0);
+        // In row 2, 5 points in.
+        l.offset = 38.0 + 58.0 + 98.0 + 5.0;
+        assert_eq!(l.scroll_position(), Some((2, 5.0)));
+        // In the gap after row 2: past its size.
+        l.offset = 38.0 + 58.0 + 98.0 + 52.0;
+        assert_eq!(l.scroll_position(), Some((2, 52.0)));
+        // Rows of three: the row's first item.
+        l.set_columns(3);
+        l.offset = 38.0 + 58.0 + 10.0;
+        assert_eq!(l.scroll_position(), Some((3, 10.0)));
+        // An inverted list counts from item 0 at the bottom.
+        let mut l = list(100, 50.0, 400.0);
+        l.set_inverted(true);
+        l.anchor_end(0.0);
+        assert_eq!(l.scroll_position(), Some((0, 0.0)));
+        l.offset -= 120.0;
+        assert_eq!(l.scroll_position(), Some((2, 20.0)));
+    }
+
+    #[test]
     fn lists_follow_the_end_within_the_threshold() {
         let mut l = list(100, 50.0, 400.0);
         l.set_follow_end(Some(10.0));
@@ -2958,8 +3006,31 @@ mod tests {
             kept += l.measured(i, size);
         }
         l.offset += kept;
-        l.offset += l.take_splice_anchor();
-        l.anchor_end(kept);
+        // As the core: the splice already moved the offset.
+        let spliced = l.take_splice_anchor();
+        l.anchor_end(kept + spliced);
+    }
+
+    #[test]
+    fn follow_end_list_near_its_start_keeps_a_page_prepended_above() {
+        // #1459: a chat that loads older pages at its start, with
+        // `maintainVisibleContentPosition`, must not follow the end when a
+        // page lands above the reader.
+        let mut l = list(12, 66.0, 449.0);
+        l.follow_end = Some(100.0);
+        lay_out(&mut l, &(0..12).map(|i| (i, 66.0)).collect::<Vec<_>>());
+        l.reported(30.0, 0);
+        lay_out(&mut l, &[]);
+        let before = l.to_content(l.item_at(0), 66.0) - l.offset;
+        l.splice(0, 0, 6);
+        lay_out(&mut l, &(0..6).map(|i| (i, 66.0)).collect::<Vec<_>>());
+        let end = l.content_len() - l.viewport;
+        assert!(
+            l.offset < end - 100.0,
+            "offset {} followed the end {end}",
+            l.offset
+        );
+        assert_eq!(l.to_content(l.item_at(6), 66.0) - l.offset, before);
     }
 
     fn on_screen(l: &ListState, i: u32) -> f32 {
@@ -3033,8 +3104,9 @@ mod tests {
 
 #[cfg(test)]
 mod perf {
-    use super::*;
     use std::time::Instant;
+
+    use super::*;
 
     /// `cargo test -p nsh-core --release perf -- --ignored --nocapture`
     #[test]

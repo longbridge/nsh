@@ -17,6 +17,9 @@
 //! and registered native components (made, removed, made again) are
 //! checked too.
 //!
+//! A subtree deleted in one batch leaves the window with its root alone:
+//! its views stay in the root, out of the window (`deleted_subtree`).
+//!
 //! The benchmark (`bench`) mounts 100, 1 000 and 8 600 rows that are not
 //! virtualized (wall time, process and main thread CPU). It is the
 //! workload of the former `tests/mount.rs`, unchanged, so that runs before
@@ -52,6 +55,9 @@ static ROWS: AtomicUsize = AtomicUsize::new(0);
 /// native component), and how often the test changed them.
 static LIST: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static GENERATION: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether [`Subtree`] shows its group, and how often the test changed it.
+static GROUP: AtomicUsize = AtomicUsize::new(1);
 
 /// The registered native components alive.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -154,6 +160,43 @@ fn Steps() -> impl IntoElement {
                 .h(px(80.0))
                 .child(rows("scrolled-")),
         )
+}
+
+/// A group of rows, each with a child, beside a view that stays: shown
+/// while [`GROUP`] is odd.
+#[component]
+fn Subtree() -> impl IntoElement {
+    let generation = signal(GROUP.load(Ordering::SeqCst));
+    set_interval(Duration::from_millis(5), move || {
+        let now = GROUP.load(Ordering::SeqCst);
+        if generation.get_untracked() != now {
+            generation.set(now);
+        }
+    });
+    view()
+        .size_full()
+        .child(view().test_id("kept").h(px(4.0)))
+        .child(each(
+            move || {
+                if generation.get() % 2 == 1 {
+                    vec![generation.get_untracked()]
+                } else {
+                    vec![]
+                }
+            },
+            |key: &usize| *key,
+            |_, _| {
+                view()
+                    .test_id("group")
+                    .children((0..20).map(|i| {
+                        view()
+                            .test_id(&format!("group-{i}"))
+                            .h(px(2.0))
+                            .child(view().h(px(1.0)))
+                    }))
+                    .into_element()
+            },
+        ))
 }
 
 /// A registered native component: an AppKit view, counted while alive.
@@ -704,6 +747,60 @@ fn ordering(mtm: MainThreadMarker) {
     println!("mount ordering: ok");
 }
 
+/// A subtree deleted in one batch: its root leaves the window, and its
+/// views stay in it rather than each leaving the window on its own. Shown
+/// again, it mounts anew.
+fn deleted_subtree(mtm: MainThreadMarker) {
+    GROUP.store(1, Ordering::SeqCst);
+    let shown = Shown::new(mtm, false);
+    shown.app.load(Root::of::<Subtree>().into());
+    let root = shown.view();
+    until("the group", Duration::from_secs(5), || {
+        find(&root, "group-19").is_some()
+    });
+    let group = find(&root, "group").expect("the group");
+    let rows: Vec<_> = (0..20)
+        .map(|i| find(&group, &format!("group-{i}")).expect("a row"))
+        .collect();
+    let row_holder = superview_of(&rows[0]);
+
+    GROUP.store(2, Ordering::SeqCst);
+    until("the group's deletion", Duration::from_secs(5), || {
+        group.window().is_none()
+    });
+    settle(0.05);
+    // SAFETY: plain getters on the main thread.
+    assert!(
+        unsafe { group.superview() }.is_none(),
+        "the group left its parent"
+    );
+    for row in &rows {
+        // SAFETY: as above.
+        let parent = unsafe { row.superview() };
+        assert!(
+            parent.as_deref() == Some(&*row_holder),
+            "a row of the deleted group stays in it, not detached on its own"
+        );
+        assert!(
+            row.window().is_none(),
+            "a row left the window with the group"
+        );
+    }
+    assert!(find(&root, "kept").is_some(), "the sibling stays");
+    assert!(
+        find(&root, "group").is_none(),
+        "nothing of the group is left"
+    );
+
+    GROUP.store(3, Ordering::SeqCst);
+    until("the group shown again", Duration::from_secs(5), || {
+        find(&root, "group-19").is_some()
+    });
+    let again = find(&root, "group").expect("the group again");
+    assert!(again != group, "the group mounted anew");
+    println!("mount subtree: ok");
+}
+
 /// The superview of `view` (one the test put in a parent).
 fn superview_of(view: &NSView) -> Retained<NSView> {
     // SAFETY: a plain getter on the main thread; AppKit keeps the
@@ -833,6 +930,7 @@ pub(super) fn run() {
     let mtm = MainThreadMarker::new().expect("the main thread");
     let _app = NSApplication::sharedApplication(mtm);
     ordering(mtm);
+    deleted_subtree(mtm);
     if std::env::var_os("NSH_MOUNT_BENCH").is_some() {
         bench(mtm);
     }
