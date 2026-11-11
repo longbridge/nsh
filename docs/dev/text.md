@@ -166,7 +166,10 @@ See also the text pitfalls in [pitfalls.md](pitfalls.md) and the engines in `cra
 `crates/nsh-platform-android/src/text.rs`.
 
 On macOS, inline link accessibility elements interleave with the paragraph's
-static text. Selecting a range in an element's displayed text uses the enclosing
+static text. Headings and app-labelled text keep their name and expose only
+link children. Selectable text whose accessibility value is its drawn text,
+and its link elements, expose `AXSelectedTextRange` and `AXSelectedText`.
+Selecting a range in an element's displayed text uses the enclosing
 selectable view's selection, including its copy behavior and `onSelectionChange`.
 `SelectionModel::select_range` sets UTF-16 positions directly for this path and
 clamps offsets out of surrogate pairs.
