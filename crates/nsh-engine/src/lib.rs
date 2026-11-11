@@ -1237,6 +1237,7 @@ enum Message {
     Kept(Vec<NodeId>),
     ContentCulling(bool),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
+    InputComposing(NodeId, Option<String>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
     AnimationsFinished(Vec<nsh_core::animation::Finished>),
@@ -1379,6 +1380,14 @@ impl EngineControl {
         let _ = self
             .tx
             .send(Message::InputScroll(id, offset, content, viewport));
+    }
+
+    /// Reports what input `id` shows while an input method composes in it
+    /// (its text with the composition at the caret), `None` once the
+    /// composition ends: the core measures the input with it, so it grows
+    /// as the composition wraps (`Core::input_composing`).
+    pub fn input_composing(&self, id: NodeId, shown: Option<String>) {
+        let _ = self.tx.send(Message::InputComposing(id, shown));
     }
 
     /// Reports the zoom scale of a zoomable scroll view (before the offset
@@ -3759,6 +3768,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::InputScroll(id, offset, content, viewport) => {
             state.core.set_input_scroll(id, offset, content, viewport);
         }
+        Message::InputComposing(id, shown) => state.core.input_composing(id, shown.as_deref()),
         Message::Zoom(id, scale) => state.core.set_zoom(id, scale),
         Message::ComponentSize(id, size) => state.core.set_component_size(id, size),
         Message::AnimationsFinished(mut finished) => {
