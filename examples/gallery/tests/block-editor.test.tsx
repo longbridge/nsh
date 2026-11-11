@@ -278,3 +278,50 @@ test("a list started right above one of its kind joins it: the numbers run on", 
   await app.waitFor("text:4.");
   expect(app.count("text:1.")).toBe(1);
 });
+
+test("Mod-Shift-Up and Down move the caret's block, a list item among its list, and Mod-D duplicates it", async () => {
+  const app = await openDemo();
+  const index = order(app);
+  // An item of the numbered list, up one place and back.
+  await app.press("Brief the regional leads");
+  await app.keyboard.press("mod+shift+up");
+  await app.wait(200);
+  expect(index("Brief the regional leads")).toBeLessThan(index("Confirm the launch date"));
+  await app.keyboard.press("mod+shift+down");
+  await app.wait(200);
+  expect(index("Confirm the launch date")).toBeLessThan(index("Brief the regional leads"));
+  // The caret went with the block: typing lands in it.
+  await app.keyboard.press("end");
+  await app.type("label:Document", "!");
+  await app.waitFor("text:Brief the regional leads!");
+  // A top-level block past the one below it.
+  await app.press("Goals");
+  await app.keyboard.press("mod+shift+down");
+  await app.wait(200);
+  expect(index("Move the help center to the new editor")).toBeLessThan(index("Goals"));
+  // A copy right below.
+  const before = app.count("text:Goals");
+  await app.keyboard.press("mod+d");
+  await app.wait(200);
+  expect(app.count("text:Goals")).toBe(before + 1);
+});
+
+test("the toolbar shows the selection's block as pressed, and the menu pictures the highlighted block", async () => {
+  const app = await openDemo(true);
+  await app.press("This week");
+  await app.keyboard.press("home");
+  await app.keyboard.press("shift+end");
+  await app.waitFor("role:toolbar[Format]");
+  // The heading is level 1 in the document's Markdown (`##` is 2).
+  expect(app.count("role:button[Heading 2]")).toBe(1);
+  await app.keyboard.press("right");
+  await newLine(app);
+  await app.type("label:Document", "/");
+  await app.waitFor("id:slash-preview");
+  // The groups' headings stand over their first blocks.
+  expect(app.shows("text:STYLE")).toBe(true);
+  expect(app.shows("text:LISTS")).toBe(true);
+  await app.type("label:Document", "table");
+  await app.waitFor("text:LISTS", { state: "gone" });
+  expect(app.shows("text:INSERT")).toBe(true);
+});

@@ -1,7 +1,8 @@
-import { cleanup, Overlay, platform, Scroll, type ScrollRef, signal, Text, View } from "nsh";
+import { cleanup, type JSX, Overlay, platform, Scroll, type ScrollRef, signal, Text, View } from "nsh";
 import {
   Button,
   RichEditor,
+  RichEditorPlugin,
   StarterKit,
   TableKit,
   chain,
@@ -20,7 +21,7 @@ import {
   type RichEditorSession,
 } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
-import { alpha, colors, focusRing, hovered, popupSurface, richEditorClasses } from "../ui";
+import { alpha, colors, focusRing, hovered, PopIn, popupSurface, richEditorClasses } from "../ui";
 
 // A block editor in the manner of Notion, built from `nsh/base`'s
 // `RichEditor` and Tiptap's extensions. Everything around the document is
@@ -68,22 +69,35 @@ Select some text for the toolbar: **bold**, *italic*, ~~strike~~ and \`code\` ar
 // --- The blocks ------------------------------------------------------------
 
 /** A block the `/` menu and a handle's menu turn text into. */
-type Block = { id: string; title: string; hint: string; icon: LucideIconName; keywords: string; apply: RichCommand; /** A list: it changes the list around the caret, others leave it first. */ list?: boolean };
+type Block = {
+  id: string;
+  /** The heading it stands under in the `/` menu. */
+  group: "Style" | "Lists" | "Insert";
+  title: string;
+  hint: string;
+  icon: LucideIconName;
+  keywords: string;
+  apply: RichCommand;
+  /** A list: it changes the list around the caret, others leave it first. */
+  list?: boolean;
+  /** The node the caret's block is while it is this block (`[type, attrs]`), for the toolbar's pressed state. */
+  node?: [string, Record<string, unknown>?];
+};
 
 const BLOCKS: Block[] = [
-  { id: "text", title: "Text", hint: "Plain text, the start of everything", icon: "pilcrow", keywords: "paragraph plain", apply: command("setParagraph") },
-  { id: "h1", title: "Heading 1", hint: "A big section heading", icon: "heading-1", keywords: "title h1 header", apply: setNode("heading", { level: 1 }) },
-  { id: "h2", title: "Heading 2", hint: "A medium heading", icon: "heading-2", keywords: "subtitle h2 header", apply: setNode("heading", { level: 2 }) },
-  { id: "h3", title: "Heading 3", hint: "A small heading", icon: "heading-3", keywords: "h3 header", apply: setNode("heading", { level: 3 }) },
-  { id: "bullet", list: true, title: "Bulleted list", hint: "A simple list of points", icon: "list", keywords: "ul unordered bullets", apply: command("toggleBulletList") },
-  { id: "numbered", list: true, title: "Numbered list", hint: "A list that counts", icon: "list-ordered", keywords: "ol ordered steps", apply: command("toggleOrderedList") },
-  { id: "todo", list: true, title: "To-do list", hint: "Track tasks with checkboxes", icon: "list-todo", keywords: "task checkbox", apply: command("toggleTaskList") },
-  { id: "quote", title: "Quote", hint: "Set a thought apart", icon: "text-quote", keywords: "blockquote citation", apply: command("toggleBlockquote") },
-  { id: "code", title: "Code", hint: "Code with its own font", icon: "square-code", keywords: "snippet pre", apply: command("toggleCodeBlock") },
-  { id: "divider", title: "Divider", hint: "A line between sections", icon: "minus", keywords: "rule hr separator", // The caret goes on in a new line below the rule, as in Notion.
+  { id: "text", group: "Style", node: ["paragraph"], title: "Text", hint: "Plain text, the start of everything", icon: "pilcrow", keywords: "paragraph plain", apply: command("setParagraph") },
+  { id: "h1", group: "Style", node: ["heading", { level: 1 }], title: "Heading 1", hint: "A big section heading", icon: "heading-1", keywords: "title h1 header", apply: setNode("heading", { level: 1 }) },
+  { id: "h2", group: "Style", node: ["heading", { level: 2 }], title: "Heading 2", hint: "A medium heading", icon: "heading-2", keywords: "subtitle h2 header", apply: setNode("heading", { level: 2 }) },
+  { id: "h3", group: "Style", node: ["heading", { level: 3 }], title: "Heading 3", hint: "A small heading", icon: "heading-3", keywords: "h3 header", apply: setNode("heading", { level: 3 }) },
+  { id: "quote", group: "Style", node: ["blockquote"], title: "Quote", hint: "Set a thought apart", icon: "text-quote", keywords: "blockquote citation", apply: command("toggleBlockquote") },
+  { id: "bullet", group: "Lists", node: ["bulletList"], list: true, title: "Bulleted list", hint: "A simple list of points", icon: "list", keywords: "ul unordered bullets", apply: command("toggleBulletList") },
+  { id: "numbered", group: "Lists", node: ["orderedList"], list: true, title: "Numbered list", hint: "A list that counts", icon: "list-ordered", keywords: "ol ordered steps", apply: command("toggleOrderedList") },
+  { id: "todo", group: "Lists", node: ["taskList"], list: true, title: "To-do list", hint: "Track tasks with checkboxes", icon: "list-todo", keywords: "task checkbox", apply: command("toggleTaskList") },
+  { id: "code", group: "Insert", node: ["codeBlock"], title: "Code", hint: "Code with its own font", icon: "square-code", keywords: "snippet pre", apply: command("toggleCodeBlock") },
+  { id: "divider", group: "Insert", title: "Divider", hint: "A line between sections", icon: "minus", keywords: "rule hr separator", // The caret goes on in a new line below the rule, as in Notion.
     apply: chain([command("setHorizontalRule"), command("createParagraphNear")]),
   },
-  { id: "table", title: "Table", hint: "Rows and columns", icon: "table", keywords: "grid", apply: command("insertTable", { rows: 3, cols: 3, withHeaderRow: true }) },
+  { id: "table", group: "Insert", title: "Table", hint: "Rows and columns", icon: "table", keywords: "grid", apply: command("insertTable", { rows: 3, cols: 3, withHeaderRow: true }) },
 ];
 
 const BLOCK_TITLES = new Map(BLOCKS.map((b) => [b.id, b]));
@@ -93,6 +107,7 @@ const BAR_BLOCKS = ["h1", "h2", "h3", "bullet", "todo"].map((id) => BLOCK_TITLES
 const MARKS: { icon: LucideIconName; label: string; name: string; toggle: string }[] = [
   { icon: "bold", label: "Bold", name: "bold", toggle: "toggleBold" },
   { icon: "italic", label: "Italic", name: "italic", toggle: "toggleItalic" },
+  { icon: "underline", label: "Underline", name: "underline", toggle: "toggleUnderline" },
   { icon: "strikethrough", label: "Strikethrough", name: "strike", toggle: "toggleStrike" },
   { icon: "code", label: "Code", name: "code", toggle: "toggleCode" },
 ];
@@ -148,6 +163,25 @@ function blockEnd(editor: RichEditorSession, start: number): number {
 }
 
 type DocNode = { type?: string; text?: string | null; content?: DocNode[] | null };
+
+/** The block starting at `start` among its siblings: where the one before it starts and how long the one after it is (`null` at an end). */
+function neighbors(editor: RichEditorSession, start: number): { before: number | null; after: number | null; size: number } | null {
+  const node = editor.nodeAt(start) as DocNode | null;
+  if (!node) return null;
+  const at = editor.resolve(start) as Resolved & { index: number };
+  // The siblings before it, from the parent's start.
+  let pos = at.start;
+  let before: number | null = null;
+  for (let i = 0; i < at.index; i++) {
+    const sibling = editor.nodeAt(pos) as DocNode | null;
+    if (!sibling) return null;
+    before = pos;
+    pos += nodeSize(sibling);
+  }
+  const size = nodeSize(node);
+  const next = start + size < at.end ? (editor.nodeAt(start + size) as DocNode | null) : null;
+  return { before, after: next ? nodeSize(next) : null, size };
+}
 
 /** How many positions a node takes: its text's length, one for a leaf, else its content between its two ends. */
 function nodeSize(node: DocNode): number {
@@ -207,52 +241,172 @@ function Tile(props: { icon: LucideIconName }) {
   );
 }
 
-/** The `/` menu's list: how tall it shows, and the height of a row and of the heading over the rows, for keeping the highlighted block in view. */
+/** The `/` menu's list: how tall it shows, and the height of a row and of a group's heading, for keeping the highlighted block in view. */
 const MENU_HEIGHT = 340;
 const ROW = 48;
-const HEADING = 26;
+const HEADING = 28;
 
-/** The `/` menu: the blocks matching what was typed, the highlighted one picked by Enter. */
-function SlashMenu(props: { items: Block[]; index: number; onPick: (block: Block) => void; onHover: (index: number, at: { x: number; y: number }) => void; scroll: (ref: ScrollRef) => void; onScroll: (offset: number) => void }) {
-  return (
-    <View testID="slash-menu" role="listbox" accessibilityLabel="Blocks" style={{ ...popupSurface(), width: 300, padding: 6 }}>
-      <If
-        when={props.items.length > 0}
-        else={<Text style={{ padding: 10, fontSize: 13, color: colors.muted }}>No blocks match</Text>}
-      >
-        <Scroll ref={props.scroll} onScroll={(e) => props.onScroll(e.offset.y)} style={{ maxHeight: MENU_HEIGHT }}>
-          <Text style={{ paddingHorizontal: 8, paddingTop: 4, paddingBottom: 6, fontSize: 11, fontWeight: "600", color: colors.muted }}>BLOCKS</Text>
-          <Each of={props.items}>
-            {(block, i) => (
-              // The pointer moves the highlight, as the arrows do: one row is lit, not a hovered one and a chosen one.
-              <View onMouseMove={(e) => i() !== props.index && props.onHover(i(), e.pagePosition)}>
-              <Button
-                role="option"
-                selected={i() === props.index}
-                accessibilityLabel={block().title}
-                onPress={() => props.onPick(block())}
-                {...feedback()}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: 6,
-                  borderRadius: 8,
-                  backgroundColor: i() === props.index ? alpha(colors.text, 0.07) : undefined,
-                }}
-              >
-                <Tile icon={block().icon} />
-                <View style={{ flex: 1, gap: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "500", color: colors.text }}>{block().title}</Text>
-                  <Text style={{ fontSize: 12, color: colors.muted }}>{block().hint}</Text>
-                </View>
-              </Button>
+/** Whether item `i` starts a group: its heading stands over it. */
+const startsGroup = (items: Block[], i: number) => i === 0 || items[i - 1].group !== items[i].group;
+
+/** Where row `i` starts in the list, the headings over it counted. */
+function rowTop(items: Block[], i: number): number {
+  let top = 0;
+  for (let k = 0; k <= i; k++) if (startsGroup(items, k)) top += HEADING;
+  return top + i * ROW;
+}
+
+/** A line of text in a preview: a bar of the text's color. */
+function Bar(props: { width: number; height?: number; strong?: boolean }) {
+  return <View style={{ width: props.width, height: props.height ?? 6, borderRadius: 3, backgroundColor: alpha(colors.text, props.strong ? 0.55 : 0.18) }} />;
+}
+
+/** What a block looks like, small: the picture beside the menu's highlighted row, as Notion shows one. */
+function Sample(props: { id: string }) {
+  const row = (lead: JSX.Element, width: number) => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      {lead}
+      <Bar width={width} />
+    </View>
+  );
+  const dot = () => <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: alpha(colors.text, 0.55) }} />;
+  const number = (n: number) => <Text style={{ width: 10, fontSize: 10, fontWeight: "600", color: colors.muted }}>{`${n}.`}</Text>;
+  const box = (on: boolean) => (
+    <View style={{ width: 10, height: 10, borderRadius: 3, borderWidth: 1, borderColor: on ? colors.accent : alpha(colors.text, 0.35), backgroundColor: on ? colors.accent : undefined }} />
+  );
+  switch (props.id) {
+    case "h1":
+    case "h2":
+    case "h3": {
+      const size = { h1: 12, h2: 10, h3: 8 }[props.id];
+      return (
+        <View style={{ gap: 8 }}>
+          <Bar width={110} height={size} strong />
+          <Bar width={150} />
+          <Bar width={120} />
+        </View>
+      );
+    }
+    case "bullet":
+      return <View style={{ gap: 8 }}>{row(dot(), 120)}{row(dot(), 96)}{row(dot(), 132)}</View>;
+    case "numbered":
+      return <View style={{ gap: 8 }}>{row(number(1), 120)}{row(number(2), 96)}{row(number(3), 132)}</View>;
+    case "todo":
+      return <View style={{ gap: 8 }}>{row(box(true), 120)}{row(box(true), 96)}{row(box(false), 132)}</View>;
+    case "quote":
+      return (
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <View style={{ width: 3, borderRadius: 2, backgroundColor: alpha(colors.text, 0.35) }} />
+          <View style={{ gap: 8, paddingVertical: 2 }}>
+            <Bar width={140} />
+            <Bar width={104} />
+          </View>
+        </View>
+      );
+    case "code":
+      return (
+        <View style={{ gap: 7, padding: 10, borderRadius: 6, backgroundColor: alpha(colors.text, 0.06) }}>
+          <Bar width={96} strong />
+          <View style={{ paddingLeft: 12, gap: 7 }}>
+            <Bar width={120} />
+            <Bar width={72} />
+          </View>
+          <Bar width={20} strong />
+        </View>
+      );
+    case "divider":
+      return (
+        <View style={{ gap: 10 }}>
+          <Bar width={140} />
+          <View style={{ height: 1, backgroundColor: alpha(colors.text, 0.35) }} />
+          <Bar width={112} />
+        </View>
+      );
+    case "table":
+      return (
+        <View style={{ borderWidth: 1, borderColor: alpha(colors.text, 0.25), borderRadius: 4, overflow: "hidden" }}>
+          <Each of={[0, 1, 2]}>
+            {(r) => (
+              <View style={{ flexDirection: "row", borderTopWidth: r() ? 1 : 0, borderColor: alpha(colors.text, 0.25), backgroundColor: r() ? undefined : alpha(colors.text, 0.06) }}>
+                <Each of={[0, 1, 2]}>
+                  {(c) => (
+                    <View style={{ flex: 1, padding: 6, borderLeftWidth: c() ? 1 : 0, borderColor: alpha(colors.text, 0.25) }}>
+                      <Bar width={28} strong={!r()} />
+                    </View>
+                  )}
+                </Each>
               </View>
             )}
           </Each>
-        </Scroll>
+        </View>
+      );
+    default:
+      return (
+        <View style={{ gap: 8 }}>
+          <Bar width={150} />
+          <Bar width={132} />
+          <Bar width={90} />
+        </View>
+      );
+  }
+}
+
+/** The `/` menu: the blocks matching what was typed under their groups' headings, the highlighted one picked by Enter and pictured beside the list. */
+function SlashMenu(props: { items: Block[]; index: number; onPick: (block: Block) => void; onHover: (index: number, at: { x: number; y: number }) => void; scroll: (ref: ScrollRef) => void; onScroll: (offset: number) => void }) {
+  const lit = () => props.items[props.index];
+  return (
+    <PopIn side="bottom" style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+      <View testID="slash-menu" role="listbox" accessibilityLabel="Blocks" style={{ ...popupSurface(), width: 300, padding: 6 }}>
+        <If
+          when={props.items.length > 0}
+          else={<Text style={{ padding: 10, fontSize: 13, color: colors.muted }}>No blocks match</Text>}
+        >
+          <Scroll ref={props.scroll} onScroll={(e) => props.onScroll(e.offset.y)} style={{ maxHeight: MENU_HEIGHT }}>
+            <Each of={props.items}>
+              {(block, i) => (
+                // The pointer moves the highlight, as the arrows do: one row is lit, not a hovered one and a chosen one.
+                <View onMouseMove={(e) => i() !== props.index && props.onHover(i(), e.pagePosition)}>
+                  <If when={startsGroup(props.items, i())}>
+                    <Text style={{ height: HEADING, paddingHorizontal: 8, paddingTop: 8, fontSize: 11, fontWeight: "600", letterSpacing: 0.4, color: colors.muted }}>{block().group.toUpperCase()}</Text>
+                  </If>
+                  <Button
+                    role="option"
+                    selected={i() === props.index}
+                    accessibilityLabel={block().title}
+                    onPress={() => props.onPick(block())}
+                    {...feedback()}
+                    style={{
+                      height: ROW,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                      paddingHorizontal: 6,
+                      borderRadius: 8,
+                      backgroundColor: i() === props.index ? alpha(colors.text, 0.07) : undefined,
+                    }}
+                  >
+                    <Tile icon={block().icon} />
+                    <View style={{ flex: 1, gap: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: "500", color: colors.text }}>{block().title}</Text>
+                      <Text style={{ fontSize: 12, color: colors.muted }}>{block().hint}</Text>
+                    </View>
+                  </Button>
+                </View>
+              )}
+            </Each>
+          </Scroll>
+        </If>
+      </View>
+      <If when={pointer && lit()}>
+        <View testID="slash-preview" style={{ ...popupSurface(), width: 200, padding: 14, gap: 12 }}>
+          <View style={{ height: 84, justifyContent: "center" }}>
+            {/* Made again for each block: a sample is a picture of one. */}
+            <Each of={[lit().id]}>{(id) => <Sample id={id()} />}</Each>
+          </View>
+          <Text style={{ fontSize: 12, lineHeight: 17, color: colors.muted }}>{lit().hint}</Text>
+        </View>
       </If>
-    </View>
+    </PopIn>
   );
 }
 
@@ -303,7 +457,11 @@ function MenuRow(props: { icon: LucideIconName; label: string; tone?: string; on
 type Handle = { start: number; x: number; y: number; left: number; width: number };
 
 export function BlockEditorDemo() {
-  const editor = createRichEditor({ extensions: [StarterKit, TableKit, slash], content: DOC, format: "markdown" });
+  // The block's keys, as Notion's: Mod-Shift-Up / Down move the caret's block, Mod-D duplicates it. An extension
+  // above the keymap holds them, so no other binding takes them first.
+  const keys = new RichEditorPlugin("blockKeys");
+  const blockKeys = defineExtension({ name: "blockKeys", priority: 900, addProseMirrorPlugins: () => [keys] });
+  const editor = createRichEditor({ extensions: [StarterKit, TableKit, slash, blockKeys], content: DOC, format: "markdown" });
   // What the parts read: the revision follows every change of the document and the selection.
   const revision = signal(editor.revision);
 
@@ -319,11 +477,11 @@ export function BlockEditorDemo() {
   let scrolled = 0;
   const reveal = (i: number) => {
     if (!scroller) return;
-    const top = HEADING + i * ROW;
+    const top = rowTop(items(), i);
     const bottom = top + ROW;
     let y = scrolled;
     if (i === 0) y = 0;
-    else if (top < y) y = top - 6;
+    else if (top < y) y = top - HEADING;
     else if (bottom > y + MENU_HEIGHT) y = bottom - MENU_HEIGHT + 6;
     if (y !== scrolled) scroller.scrollTo({ y, animated: false });
   };
@@ -479,6 +637,34 @@ export function BlockEditorDemo() {
     },
   });
 
+  /** Moves the block starting at `start` one place among its siblings; the caret goes with it. */
+  const move = (start: number, by: -1 | 1) => {
+    const around = neighbors(editor, start);
+    const node = editor.nodeAt(start);
+    if (!around || !node) return false;
+    const to = by < 0 ? around.before : around.after === null ? null : start + around.after;
+    if (to === null) return false;
+    const head = editor.selection.head ?? -1;
+    const inside = head >= start && head <= start + around.size ? head - start : 1;
+    const moved = editor.run(chain([deleteRange({ from: start, to: start + around.size }), insertContentAt(to, node), setTextSelection(to + inside)]));
+    editor.focus();
+    return moved;
+  };
+  /** The block the caret is in (a list's item, else the top-level block). */
+  const caretBlock = () => {
+    const head = editor.selection.head;
+    return head == null ? null : (handleTarget(editor, head)?.start ?? null);
+  };
+  keys.captureKeys(["Mod-Shift-ArrowUp", "Mod-Shift-ArrowDown", "Mod-d"], (key) => {
+    const start = caretBlock();
+    if (start === null) return;
+    if (key === "Mod-d") {
+      const node = editor.nodeAt(start);
+      if (node) editor.run(insertContentAt(blockEnd(editor, start), node));
+    } else move(start, key === "Mod-Shift-ArrowUp" ? -1 : 1);
+  });
+  keys.capturing = true;
+
   /** `+`: a new block below (an item of the same list below an item), with the `/` menu open in it. */
   const addBelow = (h: Handle) => {
     const end = blockEnd(editor, h.start);
@@ -518,15 +704,27 @@ export function BlockEditorDemo() {
     if (!selected()) return undefined;
     revision();
     return (
+      <PopIn side="top">
       <View testID="format-bar" role="toolbar" accessibilityLabel="Format" style={{ ...popupSurface(), flexDirection: "row", alignItems: "center", padding: 3, gap: 1 }}>
         <Each of={BAR_BLOCKS}>
-          {(block) => <BarButton icon={block().icon} label={block().title} onPress={() => editor.run(block().apply)} />}
+          {(block) => (
+            <BarButton
+              icon={block().icon}
+              label={block().title}
+              active={!!block().node && editor.isActive(block().node![0], block().node![1])}
+              onPress={() => {
+                convert(block());
+                editor.focus();
+              }}
+            />
+          )}
         </Each>
         <BarRule />
         <Each of={MARKS}>
           {(mark) => <BarButton icon={mark().icon} label={mark().label} active={editor.isActive(mark().name)} onPress={() => editor.run(command(mark().toggle))} />}
         </Each>
       </View>
+      </PopIn>
     );
   };
 
@@ -561,6 +759,7 @@ export function BlockEditorDemo() {
             const h = () => handle()!;
             return (
               <Overlay anchor={{ x: h().x, y: h().y }} placement="left" align="start" offset={6}>
+                <PopIn side="right">
                 <View testID="block-handle" style={{ flexDirection: "row", alignItems: "center", gap: 2, height: 28 }}>
                   <Button
                     accessibilityLabel="Add a block below"
@@ -581,6 +780,7 @@ export function BlockEditorDemo() {
                     <LucideIcon name="grip-vertical" size={16} tint={colors.faint} />
                   </View>
                 </View>
+                </PopIn>
               </Overlay>
             );
           })()}
@@ -605,13 +805,17 @@ export function BlockEditorDemo() {
               onPressOutside={() => menu.set(null)}
               onCancel={() => menu.set(null)}
             >
+              <PopIn side="bottom">
               <View testID="block-menu" role="menu" accessibilityLabel="Block" style={{ ...popupSurface(), width: 220, padding: 4 }}>
                 <Text style={{ paddingHorizontal: 8, paddingTop: 4, paddingBottom: 4, fontSize: 11, fontWeight: "600", color: colors.muted }}>TURN INTO</Text>
                 <Each of={BLOCKS.slice(0, 8)}>{(block) => <MenuRow icon={block().icon} label={block().title} onPress={() => turnInto(m(), block())} />}</Each>
                 <View style={{ height: 1, marginVertical: 4, backgroundColor: colors.line }} />
+                <MenuRow icon="arrow-up" label="Move up" onPress={() => (menu.set(null), move(m().start, -1))} />
+                <MenuRow icon="arrow-down" label="Move down" onPress={() => (menu.set(null), move(m().start, 1))} />
                 <MenuRow icon="copy" label="Duplicate" onPress={() => duplicate(m())} />
                 <MenuRow icon="trash" label="Delete" tone={colors.down} onPress={() => remove(m())} />
               </View>
+              </PopIn>
             </Overlay>
           )}
         </If>
