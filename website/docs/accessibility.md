@@ -281,6 +281,8 @@ function Upload() {
 
 Announce changes the user would otherwise miss: a background save finishing, an error appearing away from the focus, a timer ending. On Android, `android={{ accessibilityLiveRegion: "polite" }}` on a view makes TalkBack announce its changes by itself.
 
+An alert (`.role(AccessibilityRole::Alert)`, `role="alert"`) is read by itself on macOS and the web: its label, or else the texts inside it, as it appears and again when its content changes, ahead of what the screen reader was saying. An error shown with the role needs no announcement of its own there; on macOS the same text announced in the same update is read once. On the other platforms, announce it as well.
+
 ## Text size
 
 Text and inputs follow the system text size (Dynamic Type on iOS, font size on Android) unless you turn it off (`.allow_font_scaling(false)`, `allowFontScaling={false}`). Rather than turning it off, design for it:

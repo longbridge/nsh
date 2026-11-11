@@ -279,6 +279,8 @@ function Upload() {
 
 播报那些用户否则会错过的变化：后台保存完成、在焦点之外出现的错误、计时结束。在 Android 上，给视图设置 `android={{ accessibilityLiveRegion: "polite" }}`，TalkBack 就会自动播报它的变化。
 
+在 macOS 和 Web 上，警告（`.role(AccessibilityRole::Alert)`、`role="alert"`）会自己被读出：出现时、以及内容变化时，读它的标签，没有标签就读其中的文字，并打断屏幕阅读器正在读的内容。带这个角色显示的错误在这两个平台上不必再自己播报；在 macOS 上，同一次更新里播报的相同文字只读一次。在其他平台上，仍要自己播报。
+
 ## 文字大小
 
 除非关闭它（`.allow_font_scaling(false)`、`allowFontScaling={false}`），文本和输入框都会跟随系统文字大小（iOS 的动态字体，Android 的字体大小）。与其关闭它，不如为它设计：
