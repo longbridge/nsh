@@ -85,9 +85,9 @@ apps (ratatui's, gitui, MS Edit) do is the reference; the desktop look and motio
 components branch on `terminal::is_terminal()` for this, so the desktops and mobile keep their own behavior.
 
 The viewport's bottom row is the status line (`crates/nsh-base/src/status_line.rs`): a toast's message and the
-tooltip of what the focus or the pointer is on show there, one at a time. The components claim it (`claim`) and draw
-it (`line`) through that module, so they share its place and its rule: a toast wins over a hint, and of two claims of a
-kind the newer shows.
+tooltip of what the pointer or the focus the keyboard moved is on show there, one at a time. The components claim it
+(`claim`) and draw it (`line`) through that module, so they share its place and its rule: a toast wins over a hint,
+and of two claims of a kind the newer shows.
 
 A pressable mark of one Cell (a trigger's `▾`, a field's clear `×`, a mask toggle, a stepper's `−` / `+`) takes a slot
 of three Cells, ` ▾ `, and the whole slot takes the press, so a pointer need not land on the glyph itself. Slots

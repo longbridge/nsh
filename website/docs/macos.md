@@ -19,7 +19,8 @@ over the window and a menu bar.
 
 ## Requirements
 
-- **macOS 14** or later, where the app runs.
+- **macOS 14** or later, where the app runs, or the later version the app names
+  ([Minimum system version](./packaging.md#minimum-system-version)).
 - Xcode's command line tools (`xcode-select --install`), to build Rust apps' runners and NSH's macOS runtime from a
   checkout, and to package apps (`codesign`, `sips`). The distribution made with `cargo xtask dist` on a Mac ships the
   runtime of TSX apps in `runtime/macos/`.

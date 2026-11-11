@@ -665,12 +665,13 @@ impl<C> LayoutTree<C> {
     }
 }
 
-/// Taffy's flexbox, with a row's width as CSS's shrink-to-fit has it. In
-/// definite space Taffy adds up the items' flex bases, so an item with
-/// `flex: 1` counts for nothing, however much text it holds: a view around
-/// the row, sized by it, ends up narrower than the width its items' heights
-/// were measured at. The row's width is its max-content width, up to that
-/// space.
+/// Taffy's flexbox, with a container's main size as CSS's shrink-to-fit
+/// has it. In definite space Taffy adds up the items' flex bases, so an
+/// item with `flex: 1` counts for nothing, however much content it holds:
+/// a row sized by it ends up narrower than the width its items' heights
+/// were measured at (#927), and a column inside a row that doesn't stretch
+/// it ends up shorter than its items, which paint past it (#1614). The
+/// container's main size is its max-content size, up to that space.
 fn compute_flex_layout<C, M>(
     view: &mut View<'_, C, M>,
     node: NodeId,
@@ -680,12 +681,19 @@ where
     M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
 {
     let n = view.node(node);
-    if let (None, AvailableSpace::Definite(space)) =
-        (inputs.known_dimensions.width, inputs.available_space.width)
-        && matches!(
-            n.style.flex_direction,
-            FlexDirection::Row | FlexDirection::RowReverse
+    let vertical = matches!(
+        n.style.flex_direction,
+        FlexDirection::Column | FlexDirection::ColumnReverse
+    );
+    let (known, available) = if vertical {
+        (
+            inputs.known_dimensions.height,
+            inputs.available_space.height,
         )
+    } else {
+        (inputs.known_dimensions.width, inputs.available_space.width)
+    };
+    if let (None, AvailableSpace::Definite(space)) = (known, available)
         && n.style.flex_wrap == FlexWrap::NoWrap
         && view
             .child_ids(node)
@@ -693,25 +701,40 @@ where
     {
         let measuring = LayoutInput {
             run_mode: RunMode::ComputeSize,
-            axis: RequestedAxis::Horizontal,
+            axis: if vertical {
+                RequestedAxis::Vertical
+            } else {
+                RequestedAxis::Horizontal
+            },
             ..inputs
         };
-        let bases = compute_flexbox_layout(view, node, measuring).size.width;
-        let content = compute_flexbox_layout(
-            view,
-            node,
-            LayoutInput {
-                available_space: Size {
-                    width: AvailableSpace::MaxContent,
-                    ..inputs.available_space
+        let main = |size: Size<f32>| if vertical { size.height } else { size.width };
+        let bases = main(compute_flexbox_layout(view, node, measuring).size);
+        let mut content_space = inputs.available_space;
+        if vertical {
+            content_space.height = AvailableSpace::MaxContent;
+        } else {
+            content_space.width = AvailableSpace::MaxContent;
+        }
+        let content = main(
+            compute_flexbox_layout(
+                view,
+                node,
+                LayoutInput {
+                    available_space: content_space,
+                    ..measuring
                 },
-                ..measuring
-            },
-        )
-        .size
-        .width;
-        inputs.known_dimensions.width = Some(bases.max(content.min(space)));
-        inputs.known_dimensions_are_definite.width = true;
+            )
+            .size,
+        );
+        let size = Some(bases.max(content.min(space)));
+        if vertical {
+            inputs.known_dimensions.height = size;
+            inputs.known_dimensions_are_definite.height = true;
+        } else {
+            inputs.known_dimensions.width = size;
+            inputs.known_dimensions_are_definite.width = true;
+        }
     }
     compute_flexbox_layout(view, node, inputs)
 }

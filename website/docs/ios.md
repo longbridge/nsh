@@ -15,7 +15,8 @@ or TSX it loads, including signed packages it downloads, under limits and capabi
 
 - **Xcode** on a Mac, with an iOS simulator runtime (`xcodebuild -downloadPlatform iOS` installs one). See
   [Installation](./installation.md#ios-and-mac-catalyst).
-- Apps need **iOS 15.0** or later, on iPhone and iPad.
+- Apps need **iOS 15.0** or later, or the later version an app names
+  ([Minimum system version](./packaging.md#minimum-system-version)), on iPhone and iPad.
 
 ## Running an app
 

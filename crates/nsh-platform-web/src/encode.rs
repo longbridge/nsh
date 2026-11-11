@@ -768,8 +768,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = &a.label {
         let _ = write!(s, ",\"label\":{}", json_str(l));
     }
-    if let Some(h) = &a.hint {
-        let _ = write!(s, ",\"hint\":{}", json_str(h));
+    // `aria-description`: the description, then the hint.
+    if let Some(h) = a.help_text(None) {
+        let _ = write!(s, ",\"hint\":{}", json_str(&h));
     }
     // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
     let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));

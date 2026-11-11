@@ -118,6 +118,20 @@ impl AssetBase {
             }
         }
     }
+
+    /// Whether `path` is one of its bundled files (by its text, `..`
+    /// resolved): those are the app's own, read whatever `fs.read` roots
+    /// it declares.
+    fn holds(&self, path: &std::path::Path) -> bool {
+        let path = crate::access::lexical(path);
+        let dirs = match self {
+            AssetBase::Http(_) => return false,
+            AssetBase::Directory(dir) => std::slice::from_ref(dir),
+            AssetBase::Directories(dirs) => dirs.as_slice(),
+        };
+        dirs.iter()
+            .any(|dir| path.starts_with(crate::access::lexical(dir)))
+    }
 }
 
 /// Reads an `asset:/…` URI (the engine's [`Context::read_asset`]): blocking.
@@ -884,7 +898,19 @@ fn read(
 ) -> Result<ImageData, String> {
     match location {
         Location::File(path) => {
-            read_file(path, &context.media_files).map_err(|e| format!("{}: {e}", path.display()))
+            // A bundled file is the app's own: not one of its `fs.read`
+            // reads.
+            let bundled = context
+                .asset_base
+                .as_ref()
+                .is_some_and(|base| base.holds(path));
+            let none = crate::access::MediaFiles::default();
+            let files = if bundled {
+                &none
+            } else {
+                &*context.media_files
+            };
+            read_file(path, files).map_err(|e| format!("{}: {e}", path.display()))
         }
         Location::Data(uri) => super::decode_data_uri(uri).map(|(_, bytes)| bytes.into()),
         Location::Memory(_, data) => Ok(data.clone()),

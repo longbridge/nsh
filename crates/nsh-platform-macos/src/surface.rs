@@ -298,6 +298,9 @@ pub(crate) struct Surface {
     pub(crate) audio: crate::audio::Speaker,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
+    /// The roots the app's `<Image>` files are read under
+    /// ([`nsh_engine::Engine::media_files`]).
+    pub(crate) media_files: RefCell<Arc<nsh_core::access::MediaFiles>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
     /// What is held of the main window: its policies, title bar and look
@@ -396,6 +399,7 @@ impl Surface {
             asset_base: RefCell::new(None),
             audio: Default::default(),
             image_cache: RefCell::new(None),
+            media_files: RefCell::default(),
             native: Default::default(),
             keymap: Default::default(),
             file_drop: Default::default(),
@@ -475,6 +479,7 @@ impl Surface {
             Ok(engine) => {
                 // The app's downloaded images go through its disk cache.
                 crate::image::set_disk_cache(self, engine.image_cache());
+                *self.media_files.borrow_mut() = engine.media_files();
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
