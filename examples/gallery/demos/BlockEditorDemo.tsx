@@ -686,7 +686,7 @@ export function BlockEditorDemo() {
   const menu = signal<Handle | null>(null);
   const dragging = signal(false);
   // The block being carried: a preview of it follows the pointer.
-  const ghost = signal<{ x: number; y: number; text: string } | null>(null);
+  const ghost = signal<{ x: number; y: number; text: string; nest: -1 | 0 | 1; item: boolean } | null>(null);
 
   // The floating toolbar's selection: a range of text.
   const selected = signal(false);
@@ -819,13 +819,15 @@ export function BlockEditorDemo() {
       dragging.set(true);
       const node = editor.nodeAt(h.start);
       const text = node ? plainText(node) : "";
-      ghost.set({ x: e.pageX, y: e.pageY, text: text.length > 80 ? `${text.slice(0, 80)}…` : text });
+      ghost.set({ x: e.pageX, y: e.pageY, text: text.length > 80 ? `${text.slice(0, 80)}…` : text, nest: 0, item: !!node && ITEMS.has(node.type ?? "") });
       editor.dragBlock(h.start, { x: e.pageX, y: e.pageY });
       return true;
     },
     onResponderMove: (e: { pageX: number; pageY: number }) => {
       const g = ghost();
-      if (g) ghost.set({ ...g, x: e.pageX, y: e.pageY });
+      // How far across it has gone says, while it is carried, whether the drop will nest it or take it out.
+      const moved = across + e.pageX;
+      if (g) ghost.set({ ...g, x: e.pageX, y: e.pageY, nest: !g.item || Math.abs(moved) < INDENT ? 0 : moved > 0 ? 1 : -1 });
       editor.dragTo({ x: e.pageX, y: e.pageY });
     },
     // The drop changes the document, and with it the handle goes.
@@ -1015,15 +1017,21 @@ export function BlockEditorDemo() {
     revision();
     settled();
     const found: { pos: number; body: number; open: boolean; x: number; y: number }[] = [];
-    let pos = 0;
-    for (const block of ((editor.doc as DocNode).content ?? []) as (DocNode & { attrs?: { open?: boolean } })[]) {
-      if (block.type === "toggle" && block.content?.[1]) {
+    // Every toggle, wherever it is nested (in a callout, a column, another toggle's body).
+    const walk = (node: DocNode & { attrs?: { open?: boolean } }, pos: number) => {
+      if (node.type === "toggle" && node.content?.[1]) {
         const rect = editor.nodeRect(pos) as Rect | null;
-        const body = block.content[1] as DocNode & { attrs?: { open?: boolean } };
-        if (rect) found.push({ pos, body: pos + 1 + nodeSize(block.content[0]), open: body.attrs?.open !== false, x: rect.x, y: rect.y });
+        const body = node.content[1] as DocNode & { attrs?: { open?: boolean } };
+        if (rect) found.push({ pos, body: pos + 1 + nodeSize(node.content[0]), open: body.attrs?.open !== false, x: rect.x, y: rect.y });
       }
-      pos += nodeSize(block);
-    }
+      if (node.text != null) return;
+      let at = pos + 1;
+      for (const child of node.content ?? []) {
+        if (child.text == null) walk(child, at);
+        at += nodeSize(child);
+      }
+    };
+    walk(editor.doc as DocNode, -1);
     return found;
   };
   const flip = (t: { body: number; open: boolean }) => {
@@ -1224,6 +1232,12 @@ export function BlockEditorDemo() {
             <Overlay anchor={{ x: g().x, y: g().y }} placement="right" align="start" offset={14} style={{ pointerEvents: "none" }}>
               <View testID="block-ghost" style={{ ...popupSurface(), maxWidth: 360, paddingHorizontal: 12, paddingVertical: 8, opacity: 0.92 }}>
                 <Text style={{ fontSize: 14, color: colors.text }}>{g().text || "Block"}</Text>
+                <If when={g().nest !== 0}>
+                  <View testID="block-ghost-nest" style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+                    <LucideIcon name={g().nest > 0 ? "list-indent-increase" : "list-indent-decrease"} size={14} tint={colors.accent} />
+                    <Text style={{ fontSize: 12, fontWeight: "600", color: colors.accent }}>{g().nest > 0 ? "Drop to indent" : "Drop to outdent"}</Text>
+                  </View>
+                </If>
               </View>
             </Overlay>
           )}

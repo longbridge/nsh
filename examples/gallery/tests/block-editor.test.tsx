@@ -490,3 +490,22 @@ test("a run of blocks moves and duplicates as one", async () => {
   expect(app.count("text:Confirm the launch date")).toBe(2);
   expect(app.count("text:Brief the regional leads")).toBe(2);
 });
+
+test("a list item carried across says what the drop will do, and a toggle nested in a callout has its arrow", async () => {
+  const app = await openDemo(true);
+  const handle = "role:button[Drag to move, press for the menu]";
+  await app.hover("text:Brief the regional leads");
+  await app.waitFor(handle);
+  await app.dragAndHold(handle, { x: 60 });
+  await app.waitFor("text:Drop to indent");
+  await app.drop();
+  await app.waitFor("text:a.");
+  // A toggle inside a callout.
+  await newLine(app);
+  await app.type("label:Document", "/callout");
+  await app.keyboard.press("enter");
+  await app.type("label:Document", "/toggle");
+  await app.keyboard.press("enter");
+  await app.type("label:Document", "Inner");
+  await app.waitFor("role:button[Collapse]");
+});
