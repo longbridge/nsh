@@ -314,6 +314,11 @@ pub struct Headless {
     /// The modifier keys held down (`keyboard.down`), which presses,
     /// drags and hovers carry.
     held: nsh_core::keymap::Modifiers,
+    /// The modals presented on a desktop or the web, oldest first, each
+    /// with the input or Tab stop that had the keyboard focus under it
+    /// when it came, which gets it back when the modal goes
+    /// ([`Headless::modals_closed`]).
+    focus_before: Vec<(NodeId, Option<NodeId>)>,
     /// The finger a `dragAndHold` left down, until `drop()`.
     finger: Option<pointer::Finger>,
     screen: Screen,
@@ -453,6 +458,7 @@ impl Headless {
             errors,
             seen: Vec::new(),
             held: nsh_core::keymap::Modifiers::default(),
+            focus_before: Vec::new(),
             finger: None,
             screen,
             animator: Animator::new(clock.clone()),
@@ -894,8 +900,11 @@ impl Headless {
 
     fn apply(&mut self, batch: &MountBatch) {
         let focused = self.screen.focused();
+        let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
         self.focus_calls(batch, focused);
+        self.modals_presented(before);
+        self.modals_closed();
         self.exited |= batch.items.iter().any(|item| {
             matches!(
                 item,
@@ -1441,6 +1450,7 @@ impl Headless {
                 control.dispatch_event(modal, EventKind::RequestClose, reason);
                 if close_on_escape {
                     self.screen.close(modal);
+                    self.modals_closed();
                     control.dispatch_event(modal, EventKind::Dismiss, EventPayload::None);
                 }
             }
@@ -3213,6 +3223,78 @@ mod tests {
         assert_eq!(app.screen().key_focus(), Some(settings));
         app.press_key("tab").unwrap();
         assert_eq!(app.screen().key_focus(), Some(help));
+    }
+
+    /// A page with a button before the one that opens a dialog, which
+    /// closes on Escape or on its own `close` button.
+    #[component]
+    fn DialogFromButton() -> impl IntoElement {
+        let open = signal(false);
+        let button = move |id: &'static str| {
+            view()
+                .test_id(id)
+                .on_press(move || open.set(id == "open"))
+                .child(text(id))
+        };
+        view()
+            .flex_1()
+            .child(button("other"))
+            .child(button("open"))
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog()
+                        .close_on_escape(true)
+                        .on_close(move || open.set(false))
+                        .child(button("confirm"))
+                        .child(button("close"))
+                })
+            }))
+    }
+
+    #[test]
+    fn a_closed_dialog_gives_the_focus_back_as_on_the_desktops() {
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut config = EngineConfig::new(Root::of::<DialogFromButton>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap())
+            {
+                crate::screen::Pick::One(id) => id,
+                _ => panic!("{s} is shown"),
+            };
+            let opener = id(&app, "id:open");
+            app.press_key("tab").unwrap();
+            app.press_key("tab").unwrap();
+            for close in ["escape", "app"] {
+                assert_eq!(app.screen().key_focus(), Some(opener), "{os:?}");
+                app.press_key("return").unwrap();
+                app.wait_for("id:close").unwrap();
+                // The focus leaves the page under the dialog: Return
+                // presses nothing there.
+                assert_eq!(app.screen().key_focus(), None, "{os:?}");
+                let (confirm, closer) = (id(&app, "id:confirm"), id(&app, "id:close"));
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(confirm), "{os:?}");
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(closer), "{os:?}");
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(confirm), "{os:?}");
+                app.press_key("shift+tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(closer), "{os:?}");
+                if close == "escape" {
+                    app.press_key("escape").unwrap();
+                } else {
+                    app.press_key("return").unwrap();
+                }
+                app.wait_for_gone("id:close", Duration::from_secs(2))
+                    .unwrap();
+                // Back on the button that opened it, whichever way it
+                // closed.
+                assert_eq!(app.screen().key_focus(), Some(opener), "{os:?} {close}");
+            }
+        }
     }
 
     #[test]
