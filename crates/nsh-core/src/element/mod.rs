@@ -57,6 +57,7 @@ pub(crate) mod module;
 mod once;
 pub mod palette;
 mod prop;
+pub(crate) mod quit;
 pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
@@ -112,7 +113,8 @@ pub use self::{
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     audio::{
-        AudioFailure, AudioPlayer, PlayerState, Sound, audio_available, audio_player, load_sound,
+        AudioFailure, AudioPlayer, PlayerState, Sound, SoundSource, audio_available, audio_player,
+        load_sound,
     },
     builder::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
@@ -137,7 +139,7 @@ pub use self::{
         MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
         ScrollbarSource, declarations,
     },
-    element_ref::{ComponentRef, ElementRef, FollowTarget},
+    element_ref::{ComponentRef, ElementRef, EvaluateOptions, Evaluation, FollowTarget},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
@@ -209,12 +211,13 @@ pub use crate::{
     EllipsizeMode, EventKind, EventPayload, Haptic, HapticImpact, HapticNotification,
     HeaderSystemItem, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
     KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
-    ListAlignment, ListViewport, MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial,
-    MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation, MouseButton, MouseEvent,
-    PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents, PointerType, PressEvent,
-    ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
-    StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin,
-    Viewability,
+    ListAlignment, ListScrollPosition, ListViewport, MacOsBackdrop, MacOsBackdropBlending,
+    MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation,
+    MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents,
+    PointerType, PressEvent, ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation,
+    ScrollAlignment, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+    SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    WheelDelta, WheelEvent,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

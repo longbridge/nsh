@@ -550,6 +550,9 @@ fn initial_environment() -> Environment {
         notifications: true,
         audio: true,
         web_input: true,
+        web_evaluate: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -726,8 +729,9 @@ define_class!(
             crate::notifications::enable();
         }
 
-        // The links of the schemes the app claims (`CFBundleURLTypes`), the
-        // one that launched it included.
+        // The links of the schemes the app claims (`CFBundleURLTypes`) and
+        // the files of the types it opens (`CFBundleDocumentTypes`, as
+        // `file://` URLs), those that launched it included.
         #[unsafe(method(application:openURLs:))]
         fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
             for url in urls.iter() {

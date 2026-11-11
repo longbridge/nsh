@@ -1091,6 +1091,25 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### shadersAvailable
+
+```ts
+const shadersAvailable: Accessor<boolean>;
+```
+
+Whether the platform draws shader views (`Shader`, `ShaderEffect`, `ShaderTransition`, `ScreenEffect`,
+`ScreenTransition`), reactive. It is `true` on iOS, Android, macOS, Windows, Linux, GPUI, the web and in headless tests,
+and `false` in a terminal and in apps built with the `shader` feature turned off. It starts `true` and turns `false`
+for good when the first shader mounts on a machine whose GPU NSH cannot open (a browser without WebGL 2), so show the
+shader while it holds and the app's own drawing otherwise ([Shader](../elements/shader.md#whether-shaders-draw)).
+Rust: `shaders_available() -> bool`.
+
+```tsx
+<If when={shadersAvailable()} else={<Image src={backdrop} style={{ flex: 1 }} />}>
+  <Shader source={BACKDROP} style={{ flex: 1 }} />
+</If>
+```
+
 ### platform
 
 ```ts
@@ -1677,7 +1696,10 @@ writeImage(src: string): Promise<void>;
 
 Puts the image of `src`, a base64 `data:` URL or the `url` `readImage` gave, on the clipboard, replacing what it holds.
 Rust: `set_clipboard_image(src)`. On Windows it takes a PNG, the format browsers, Office and the Snipping Tool read. On
-Android it rejects with `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
+the web the image goes on the clipboard as a PNG, the image format browsers write; an image of another format also goes
+on as it is, as HTML (`<img>`, in a paste's `html`) and, in Chromium browsers, as the original `readImage` returns, so a
+GIF keeps its frames. On Android it rejects with
+`"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
 
 ```rust tabs
 set_clipboard_image(image.url.clone());
@@ -1908,7 +1930,7 @@ for (const { file } of picked) {
 
 | Platform | Picker | Filters |
 |---|---|---|
-| macOS | `NSOpenPanel` sheet | All the extensions at once |
+| macOS | `NSOpenPanel`: a sheet of the app's window, or, while that window is out of sight (a tray app's hidden main window), a panel of its own in front | All the extensions at once |
 | Windows | `IFileOpenDialog` | One choice per filter, shown by its name |
 | Linux | `GtkFileDialog` (the portal's where there is one) | One choice per filter, shown by its name |
 | iOS | `UIDocumentPickerViewController`, as copies | All the extensions at once |
@@ -2054,7 +2076,7 @@ An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.op
 const UrlScheme: {
   on(event: "open", listener: (event: { url: string }) => void): () => void;
   /** The address moved without the app moving it (the web's back and forward, an address the user typed). */
-  on(event: "change", listener: (event: { url: string; cause: "back" | "forward" | "address" }) => void): () => void;
+  on(event: "change", listener: (event: { url: string; reason: "back" | "forward" | "address" }) => void): () => void;
   /** The app's address, or null when it has none. */
   url(): string | null;
   /** Sets the address of the page shown; the app's pages stay as they are. */
@@ -2147,7 +2169,7 @@ address and what moved it. `url()` reads the address already, and the app shows 
 UrlScheme.on("change", ({ url }) => tab.set(tabOf(url)));
 ```
 
-| `cause` | When (on the web, the app the whole page) |
+| `reason` | When (on the web, the app the whole page) |
 | --- | --- |
 | `"back"`, `"forward"` | The browser's back or forward went to an entry of the same pages with another address (an address the user typed), or a back popped pages and left an address the app did not set as it answered (no `onChange` sets one) |
 | `"address"` | The user gave the page an address of the app's, a `#fragment` typed in the address bar: a new entry after the current one, with the app's pages as they are |
@@ -2156,7 +2178,7 @@ What the stack accounts for stays as it is: a back that pops pages is the stack'
 stack no longer has is `open`, and the app's own `setUrl` is no `change`. Moves that come while nothing listens are not
 kept: `url()` has them. The native platforms, GPUI hosts and terminals have no history of addresses, so `change` comes
 only on the web. Rust code awaits `next_app_url_change()` of `nsh_core::prelude`, an `AppUrlChange` with the `url` and
-its `cause`.
+its `reason`.
 
 ## Speech
 
@@ -2326,7 +2348,7 @@ import { AudioPlayer, Sound } from "nsh";
 ```ts
 declare class Sound {
   static available(): Promise<boolean>;
-  static load(src: string): Promise<Sound>;
+  static load(src: string | Uint8Array): Promise<Sound>;
   play(options?: { volume?: number; rate?: number }): void;
   stop(): void;
   readonly duration: number;
@@ -2372,8 +2394,10 @@ type AudioErrorCode =
 
 Loads a sound from an imported audio file (`import click from "./sounds/click.wav"`: the import is the file's
 `asset:/` URL, and the file ships with the app), a `file:` URL, a `data:` URI or an `http(s)` URL
-the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
-components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
+the app's `network` capability grants, or from a sound file's bytes (a `Uint8Array` the app made or downloaded; in
+Rust also bytes it embeds, `load_sound(include_bytes!("tick.wav"))`), and decodes it into memory. The bytes' format
+(WAV, AAC, MP3, ...) is read from the bytes themselves. A source the engine loaded already is shared, and so are equal
+bytes: two components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
 component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
 of decoded audio at once; past them `load` rejects with `code` `"ERR_NSH_QUOTA_EXCEEDED"`. Longer audio is an
 `AudioPlayer`'s.

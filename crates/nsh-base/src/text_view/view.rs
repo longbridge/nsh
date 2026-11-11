@@ -197,6 +197,12 @@ pub struct TextViewSelectionEvent {
     /// Where it starts in the view's whole text (UTF-16 units), when the
     /// platform knows it.
     pub start: Option<u32>,
+    /// The box around it in the view, while something is selected and the
+    /// platform knows it.
+    pub bounds: Option<Bounds<Points>>,
+    /// The same box in the root view the view is in, as of the event (an
+    /// `Overlay`'s `anchor`).
+    pub page_bounds: Option<Bounds<Points>>,
 }
 
 /// An action of the code blocks of a [`TextView`] (`codeBlockActions`).
@@ -314,6 +320,8 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
             cx.emit(TextViewEvent::SelectionChange(TextViewSelectionEvent {
                 text: e.text.clone().into(),
                 start: e.start,
+                bounds: e.bounds,
+                page_bounds: e.page_bounds,
             }));
         })
         .map(|mut el| {

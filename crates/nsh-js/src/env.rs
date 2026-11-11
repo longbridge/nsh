@@ -51,9 +51,10 @@ enum Part {
     WindowState,
     Displays,
     Fps,
+    Shaders,
 }
 
-const PARTS: usize = 15;
+const PARTS: usize = 16;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -573,6 +574,9 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.lifecycle == next.lifecycle) {
         writes.push((Part::Lifecycle, string(cx, next.lifecycle.name())));
     }
+    if changed(&|p| p.shaders == next.shaders) {
+        writes.push((Part::Shaders, boolean(next.shaders)));
+    }
     if changed(&|p| p.window_state == next.window_state) {
         writes.push((
             Part::WindowState,
@@ -979,6 +983,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Ts::value(
             "The platform the app runs on, constant while it runs.",
             "PlatformInfo",
+        ),
+    ),
+    (
+        "shadersAvailable",
+        Export::Value(|cx| accessor(cx, Part::Shaders)),
+        Ts::value(
+            "Whether the platform draws shader views (`Shader`, `ShaderEffect`,\n`ShaderTransition`, `ScreenEffect`, `ScreenTransition`) (reactive).\n`false` where the platform was built without a renderer or draws in a\nterminal's cells; elsewhere `true` until the first shader mounts on a\nmachine without a GPU (WebGL 2 in a browser), when it turns `false` for\ngood. Show a shader while it holds and the app's own drawing (a `Canvas`,\nan image) otherwise.",
+            "Accessor<boolean>",
         ),
     ),
 ];

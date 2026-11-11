@@ -352,8 +352,29 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
             modifiers: crate::keys::modifiers(&e.modifiers),
             time: s.clock(),
         };
-        if precise {
-            crate::input::touchpad(&s, event, gesture_phase(e.touch_phase));
+        let phase = gesture_phase(e.touch_phase);
+        // `onWheel` keeps GPUI's unit; positive toward the end, as `dx`.
+        let delta = match e.delta {
+            ScrollDelta::Pixels(_) => nsh_core::WheelDelta::Points(nsh_core::geometry::point(
+                nsh_core::Points(dx),
+                nsh_core::Points(dy),
+            )),
+            ScrollDelta::Lines(l) => {
+                nsh_core::WheelDelta::Lines(nsh_core::geometry::point(-l.x, -l.y))
+            }
+        };
+        if crate::input::wheel_event(&s, &event, delta) {
+            // The view took it; a gesture going on elsewhere still ends.
+            if precise && matches!(phase, GesturePhase::Ended | GesturePhase::Cancelled) {
+                let end = WheelEvent {
+                    dx: 0.0,
+                    dy: 0.0,
+                    ..event
+                };
+                crate::input::touchpad(&s, end, phase);
+            }
+        } else if precise {
+            crate::input::touchpad(&s, event, phase);
         } else {
             crate::input::wheel(&s, event);
         }

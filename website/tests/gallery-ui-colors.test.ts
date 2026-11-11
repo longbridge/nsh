@@ -206,7 +206,8 @@ test('the overlay guards find a menu item without its look and a scrim of its ow
   expect(openingTags('<MenuItems>', 'MenuItem')).toEqual([]);
   expect(backdropViolations('<Dialog open={a()} backdropStyle={{ backgroundColor: tint("#000000", 0.45) }} style={card}>')).toHaveLength(1);
   expect(backdropViolations('<Sheet backdropClass="bg-black/40">')).toEqual(['sets backdropClass']);
-  expect(backdropViolations('<Menu popupStyle={menuSheet()} backdropStyle={backdrop()} trigger={t}>')).toEqual([]);
+  expect(backdropViolations('<Menu popupStyle={popoverLook()} backdropStyle={backdrop()} trigger={t}>')).toEqual([]);
+  expect(backdropViolations('<Menu {...menuPopup()} trigger={t}>')).toEqual([]);
   expect(backdropViolations('<Popover trigger={t}>')).toEqual([]);
 });
 

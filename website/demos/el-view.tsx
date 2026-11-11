@@ -18,13 +18,13 @@ function App() {
         activeStyle={{ backgroundColor: ui().border }}
         style={{ ...sectionSurface(), padding: 16 }}
         hoverStyle={{ opacity: 0.88 }}
-        focusStyle={focusRing()}
+        focusVisibleStyle={focusRing()}
       >
         <Text style={{ color: ui().text, fontSize: wide() ? 14 : 16 }}>activeStyle background ({desktop ? "click" : "tap"} and hold)</Text>
       </View>
 
       <View class="flex-row gap-3">
-        <View class="flex-1 h-20 rounded-xl bg-primary hover:opacity-90 active:opacity-75 items-center justify-center" focusStyle={focusRing()} onPress={() => {}}>
+        <View class="flex-1 h-20 rounded-xl bg-primary hover:opacity-90 active:opacity-75 items-center justify-center" focusVisibleStyle={focusRing()} onPress={() => {}}>
           <Text class="text-primary-foreground font-semibold">active:</Text>
         </View>
         <View class="flex-1 h-20 rounded-xl border border-border bg-card items-center justify-center shadow-lg">

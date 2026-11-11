@@ -79,7 +79,9 @@ impl<M: TextEngine> Core<M> {
             self.ask_row(child);
             return true;
         }
-        let Some(scope) = scope else { return false };
+        let Some(scope) = scope else {
+            return self.pace_hold(child);
+        };
         if self.nodes[child as usize].created || self.never_culled(child) {
             return false;
         }
@@ -313,6 +315,20 @@ impl<M: TextEngine> Core<M> {
                     left = true;
                     continue;
                 }
+                // In the overscan, not in sight: within the turn's budget
+                // (`pace.rs`).
+                let seen = cx < x + w && cy < y + h && cx + cw > x && cy + ch > y;
+                if self.culls_content
+                    && !seen
+                    && !f.origin.x.0.is_nan()
+                    && cw > 0.0
+                    && ch > 0.0
+                    && !self.never_culled(child)
+                    && !self.pace_overscan()
+                {
+                    left = true;
+                    continue;
+                }
                 self.make_culled(parent, child);
                 made = true;
                 if self.nodes[child as usize].kind.is_container() {
@@ -326,7 +342,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Makes culled `child`'s native view in made `parent`'s, at its place
     /// among its siblings, with the frame the core has for it.
-    fn make_culled(&mut self, parent: Key, child: Key) {
+    pub(super) fn make_culled(&mut self, parent: Key, child: Key) {
         self.ensure_created(child);
         let before = self.native_before(parent, child);
         self.mount.push(MountItem::Insert {
@@ -473,6 +489,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
     }
 
     /// View `key` is the placeholder of an `<Each>` row

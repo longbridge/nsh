@@ -101,13 +101,14 @@ enum Owner {
 }
 
 /// The `Info.plist` keys of every Apple package that are NSH's.
-const RESERVED_INFO: [(&str, Owner); 8] = [
+const RESERVED_INFO: [(&str, Owner); 9] = [
     ("CFBundleIdentifier", Owner::Config("id")),
     ("CFBundleName", Owner::Config("name")),
     ("CFBundleDisplayName", Owner::Config("name")),
     ("CFBundleShortVersionString", Owner::Config("version")),
     ("CFBundleVersion", Owner::Config("build")),
     ("CFBundleURLTypes", Owner::Config("schemes")),
+    ("CFBundleDocumentTypes", Owner::Config("fileTypes")),
     ("CFBundleExecutable", Owner::Package),
     ("CFBundlePackageType", Owner::Package),
 ];

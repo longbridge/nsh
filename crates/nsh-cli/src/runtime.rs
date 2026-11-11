@@ -130,10 +130,11 @@ impl Platform {
         }
     }
 
-    /// The file of [`Platform::binary`]: with this machine's executable
-    /// suffix (`.exe`) when it is built for this machine.
-    pub(crate) fn file_name(self, runner: bool) -> String {
-        format!("{}{}", self.binary(runner), exe_suffix(self.triple()))
+    /// The file of [`Platform::binary`] built for `triple` (`None`: this
+    /// machine): with this machine's executable suffix (`.exe`) when it is
+    /// built for this machine.
+    pub(crate) fn file_name(self, runner: bool, triple: Option<&str>) -> String {
+        format!("{}{}", self.binary(runner), exe_suffix(triple))
     }
 
     /// The development host (`runner` false) or release runner for it, as
@@ -501,16 +502,30 @@ pub(crate) fn test_host(platform: Platform) -> anyhow::Result<PathBuf> {
 }
 
 pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> {
+    file_for(platform, runner, platform.triple())
+}
+
+/// [`file`] built for `triple` (`None`: this machine) instead of the
+/// platform's own ([`Platform::triple`]): a macOS package for another
+/// processor (`nsh package --arch`). A prebuilt runtime is the one there
+/// is, built for the processor of the machine that built it; the caller
+/// checks what it holds.
+pub(crate) fn file_for(
+    platform: Platform,
+    runner: bool,
+    triple: Option<&'static str>,
+) -> anyhow::Result<PathBuf> {
     if let Some(app) = crate::rust_app::current() {
-        return app.runtime(platform, runner);
+        return app.runtime(platform, runner, triple);
     }
     let name = platform.binary(runner);
-    let file_name = platform.file_name(runner);
+    let file_name = platform.file_name(runner, triple);
     if let Some(root) = env::var_os("NSH_RUNTIME") {
         return existing(
             PathBuf::from(root).join(platform.dir()).join(&file_name),
             platform,
             name,
+            triple,
         );
     }
     let exe = cli_exe()?;
@@ -538,7 +553,10 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         } else {
             root.clone()
         };
-        if let Some(triple) = platform.triple() {
+        if let Some(triple) = triple {
+            if Some(triple) != platform.triple() {
+                require_target(Some(&workspace), triple)?;
+            }
             args.extend(["--target", triple]);
         }
         match profile.to_str() {
@@ -554,6 +572,7 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
             Some(other) => format!("{} ({other} build)", platform.host(runner)),
             None => platform.host(runner),
         };
+        let what = format!("{what}{}", other_triple(platform, triple));
         cargo(&workspace, &args, &what)?;
         if matches!(platform, Platform::Gpui) {
             host_target = Some(
@@ -567,14 +586,14 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
             .context("cli is not in a target directory")?
             .to_path_buf(),
     );
-    if let Some(triple) = platform.triple() {
+    if let Some(triple) = triple {
         built.push(triple);
     }
     built.push(profile);
     built.push(&file_name);
-    let built = existing(built, platform, name)?;
+    let built = existing(built, platform, name, triple)?;
     match checkout(bin) {
-        Some(root) if cfg!(target_os = "macos") && platform.triple().is_none() => stable_copy(
+        Some(root) if cfg!(target_os = "macos") && triple.is_none() => stable_copy(
             &built,
             &root.join(".nsh/hosts").join(profile).join(&file_name),
         ),
@@ -729,12 +748,58 @@ fn cargo(root: &Path, args: &[&str], what: &str) -> anyhow::Result<()> {
     crate::ui::cargo(cmd.args(args).current_dir(root), what)
 }
 
-fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<PathBuf> {
+/// What the step of a build for `triple` adds to its name when that is not
+/// the platform's own triple: ` for x86_64-apple-darwin`.
+pub(crate) fn other_triple(platform: Platform, triple: Option<&str>) -> String {
+    match triple {
+        Some(triple) if Some(triple) != platform.triple() => format!(" for {triple}"),
+        _ => String::new(),
+    }
+}
+
+/// Fails with the command that adds the Rust target `triple` when the
+/// toolchain cargo builds with in `dir` (`None`: this process's directory)
+/// has no standard library for it. Without a `rustc` to ask, cargo's own
+/// error says it.
+pub(crate) fn require_target(dir: Option<&Path>, triple: &str) -> anyhow::Result<()> {
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
+    let mut command = Command::new(rustc);
+    command.args(["--print", "target-libdir", "--target", triple]);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    let Ok(output) = command.output() else {
+        return Ok(());
+    };
+    if !output.status.success() {
+        return Ok(());
+    }
+    let libdir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if has_core(&libdir) {
+        return Ok(());
+    }
+    bail!("the Rust target {triple} is not installed; add it with: rustup target add {triple}")
+}
+
+/// Whether `libdir` (`rustc --print target-libdir`) holds a target's `core`.
+fn has_core(libdir: &Path) -> bool {
+    fs::read_dir(libdir).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("libcore-"))
+    })
+}
+
+fn existing(
+    path: PathBuf,
+    platform: Platform,
+    name: &str,
+    triple: Option<&str>,
+) -> anyhow::Result<PathBuf> {
     if path.exists() {
         return Ok(path);
     }
-    let target = platform
-        .triple()
+    let target = triple
         .map(|triple| format!(" --target {triple}"))
         .unwrap_or_default();
     bail!(
@@ -786,6 +851,23 @@ mod tests {
         fs::write(&built, b"three").unwrap();
         super::stable_copy(&built, &copy).unwrap();
         assert_eq!(fs::read(&copy).unwrap(), b"three");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A Rust target is installed when its directory holds `core`: rustc
+    /// names the directory of a target it has no library for as well.
+    #[test]
+    fn a_target_is_installed_when_its_library_has_core() {
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!("nsh-target-libdir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!super::has_core(&dir));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(!super::has_core(&dir));
+        fs::write(dir.join("libstd-0123.rlib"), b"").unwrap();
+        assert!(!super::has_core(&dir));
+        fs::write(dir.join("libcore-0123.rlib"), b"").unwrap();
+        assert!(super::has_core(&dir));
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -847,7 +929,7 @@ mod tests {
         assert_eq!(Platform::Gpui.triple(), None);
         assert_eq!(Platform::Gpui.binary(false), "nsh-gpui-host");
         assert_eq!(
-            Platform::Gpui.file_name(false),
+            Platform::Gpui.file_name(false, Platform::Gpui.triple()),
             format!("nsh-gpui-host{}", std::env::consts::EXE_SUFFIX)
         );
         assert_eq!(Platform::Gpui.host(false), "the development host for GPUI");

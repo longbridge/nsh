@@ -70,6 +70,7 @@ use nsh_core::{
         SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
         laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -670,6 +671,29 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
     })
 }
 
+/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
+/// view `view` that sets no cursor of its own: the pointer there wins over
+/// the I-beam of selectable text and the arrow of plain text, as on the
+/// other desktops (#759).
+fn over_link(view: &NshView, x: f32, y: f32) -> bool {
+    {
+        let s = view.state();
+        if css_cursor(s.style.cursor).is_some()
+            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
+        {
+            return false;
+        }
+    }
+    let (lx, ly) = local(view, x, y);
+    let s = view.state();
+    let Some(text) = s.text.as_ref() else {
+        return false;
+    };
+    crate::text::char_at(&s, lx, ly)
+        .and_then(|i| text.text.link_at(i))
+        .is_some_and(|link| has_press(link.events))
+}
+
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
@@ -684,6 +708,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         {
             return c;
         }
+    }
+    if over_link(&hit.view, x, y) {
+        return Cursor::Hand;
     }
     let mut view = Some(hit.view);
     while let Some(v) = view {
@@ -873,6 +900,11 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if event.kind == PointerKind::Down {
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -1056,6 +1088,47 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     })
 }
 
+/// `onWheel` for a wheel from the window: the nearest view around the one
+/// under the pointer that listens hears it ([`input::wheel_listener`]),
+/// in lines of 16 points for notches (`WM_MOUSEWHEEL`'s default), in
+/// points for precise deltas. Returns whether that view takes the wheel,
+/// so nothing scrolls or zooms natively.
+fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
+    let (x, y) = (event.x, event.y);
+    if event.dx == 0.0 && event.dy == 0.0 {
+        return false;
+    }
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return false;
+    };
+    let Some((view, takes)) = input::wheel_listener(
+        chain(&hit.view),
+        |v| v.state().events.contains(EventKind::Wheel),
+        // A multiline field scrolls its own lines.
+        |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+    ) else {
+        return false;
+    };
+    let delta = if event.precise {
+        nsh_core::WheelDelta::Points(nsh_core::geometry::point(
+            Points(event.dx),
+            Points(event.dy),
+        ))
+    } else {
+        nsh_core::WheelDelta::Lines(nsh_core::geometry::point(event.dx / 16.0, event.dy / 16.0))
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let wheel = nsh_core::WheelEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        delta,
+        event.modifiers.core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    takes
+}
+
 /// A wheel event from the window.
 pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     let (x, y) = (event.x, event.y);
@@ -1063,6 +1136,9 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
         return;
     }
     surface.input.last.set(Some((x, y)));
+    if wheel_event(surface, &event) {
+        return;
+    }
     let (mut dx, mut dy) = (event.dx, event.dy);
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
     // (precision touchpads pinch this way too).
@@ -1086,6 +1162,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     let input = &surface.input;
     if MODIFIER_KEYS.contains(&event.vk) && !event.repeat {
         modifiers_changed(surface, event.modifiers);
+    } else if event.down {
+        // Before the key acts: the focus it moves shows (`focus-visible:`).
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
     }
     if !event.down {
         // `DefWindowProc` opens the window menu when Alt is released after
@@ -1136,22 +1215,31 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 }
 
 /// The enabled text fields shown under `view`, in tree order (a scroll
-/// view's content as it is on screen).
+/// view's content as it is on screen; a shown overlay's content after the
+/// view it follows, [`input::tab_order`]).
 fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
-    {
+    let skipped = |view: &NshView| {
         let s = view.state();
-        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
-            return;
+        s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None
+    };
+    let order = input::tab_order(
+        view.clone(),
+        |view| {
+            if skipped(view) {
+                return Vec::new();
+            }
+            view.with_children_in_reading_order(<[NshView]>::to_vec)
+        },
+        NshView::id,
+        |view| view.state().props.tab_after,
+    );
+    out.extend(order.into_iter().filter(|view| {
+        if skipped(view) {
+            return false;
         }
-        if s.kind == ViewKind::Input && !s.props.accessibility.state.disabled {
-            out.push(view.clone());
-        }
-    }
-    view.with_children_in_reading_order(|children| {
-        for child in children {
-            collect_fields(child, out);
-        }
-    });
+        let s = view.state();
+        s.kind == ViewKind::Input && !s.props.accessibility.state.disabled
+    }));
 }
 
 // --- Hit testing --------------------------------------------------------------------
@@ -1687,6 +1775,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: point(Points(p.x), Points(p.y)),
                     location: point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()

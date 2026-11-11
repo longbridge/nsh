@@ -47,6 +47,8 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The app's own data directory ([`data_dir`]).
+    data_dir: Option<std::path::PathBuf>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
     /// Whether the performance monitor measures, as the platform reports
@@ -86,6 +88,7 @@ struct EnvSignals {
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
+    shaders: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -115,6 +118,7 @@ impl EnvSignals {
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
+                shaders: part!(shaders),
             }
         })
     }
@@ -139,6 +143,12 @@ impl super::Runtime {
     pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
         let _entered = self.enter();
         with_data(|d| d.ambient.storage = Some(storage));
+    }
+
+    /// The app's own data directory ([`data_dir`]).
+    pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.data_dir = dir);
     }
 
     /// How text is measured (the core's text engine).
@@ -295,6 +305,18 @@ pub fn reduce_motion() -> bool {
 /// A screen reader runs (TS: `screenReaderEnabled()`).
 pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
+}
+
+/// Whether the platform draws shader views ([`super::shader`] and the
+/// other shader elements; TS: `shadersAvailable()`), reading subscribes.
+/// `false` where the platform was built without a renderer, on a grid
+/// surface, or once the platform found no GPU; it starts `true` elsewhere
+/// and turns `false` (never back) when the first shader mounts on a
+/// machine without one, so an app shows a shader while this holds and
+/// its own drawing (a canvas, an image) otherwise. Whether a source
+/// compiles is [`crate::shader::Shader::compile`]'s answer.
+pub fn shaders_available() -> bool {
+    env(|e| e.shaders)
 }
 
 /// Whether the surface lays out right to left: the root's direction,
@@ -552,6 +574,19 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
             .clone()
     });
     f(&storage)
+}
+
+/// The app's own data directory (TS: `process.dataDir`): where its files
+/// are kept, `<data_dir>/<app id>` of the engine, beside its
+/// `storage.json`, on every platform. `None` when the host keeps no files
+/// for the app (the web). The directory may not exist yet: create it
+/// before writing.
+///
+/// ```ignore
+/// let db = data_dir().map(|dir| dir.join("app.sqlite"));
+/// ```
+pub fn data_dir() -> Option<std::path::PathBuf> {
+    with_data(|d| d.ambient.data_dir.clone())
 }
 
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
@@ -825,6 +860,34 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
+/// The next files the system opens the app with (TS:
+/// `Application.on("openFiles", ...)`, GPUI's `on_open_urls` for files):
+/// files of the types the app declares (`nsh.json` `fileTypes`) the user
+/// opened with it (Open With, a double click, a drop on its icon) at
+/// launch or while it runs, as absolute paths. Those that came before
+/// anything listened, the files that launched the app included, come at
+/// once (at most [`crate::file_type::MAX_PENDING`]). Links of the app's
+/// schemes come apart ([`next_url_scheme_open`]). One call waits at a time,
+/// as with [`next_url_scheme_open`]. To await in a task.
+pub fn next_open_files() -> Answer<Vec<std::path::PathBuf>> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextOpenFiles(slot));
+    answer
+}
+
+/// The next later launch of the app (TS: `Application.on("secondInstance",
+/// ...)`): with `nsh.json` `"singleInstance": true`, a second launch on
+/// Windows or Linux hands the running instance its arguments and working
+/// directory and exits; those that came before anything listened first
+/// ([`crate::single_instance`]). The main window is already brought
+/// forward. Never on macOS (Launch Services activates the running app
+/// instead), iOS, Android or the web. To await in a task.
+pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextSecondInstance(slot));
+    answer
+}
+
 /// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
 /// URL of a scheme the app claims (`nsh.json` `schemes`), those
 /// that came before anything listened first, the one that launched the app
@@ -841,7 +904,10 @@ pub fn next_url_scheme_open() -> Answer<String> {
 /// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
 /// it already. Moves while nothing listened since the app started are not
 /// kept; once something listened, at most
-/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+/// [`crate::url_scheme::MAX_PENDING`] wait. One call waits at a time, as
+/// with [`next_url_scheme_open`]: a newer call takes the next move and the
+/// one before gets none, so an app awaits it in one task (TS's `change`
+/// listeners share one). To await in a task.
 pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
     let (answer, slot) = Answer::new();
     act(Action::NextAppUrlChange(slot));
@@ -904,6 +970,17 @@ pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::Histo
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view's ref runs scripts and answers with their results
+/// here (TS: `WebView.evaluateAvailable()`,
+/// [`ElementRef::evaluate`](super::ElementRef::evaluate)): the platform has
+/// it and the app's capabilities grant `webview`. Elsewhere `evaluate`
+/// fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To await in a task.
+pub fn web_evaluate_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebEvaluateAvailable(slot));
     answer
 }
 
@@ -1144,6 +1221,17 @@ pub fn run_on_main_thread<R: Send + 'static>(
 }
 
 /// A future polled under `owner` ([`Owner::scope`]).
+/// `future`, polled under `owner`, boxed for the executor.
+pub(super) fn owned(
+    owner: Owner,
+    future: impl Future<Output = ()> + 'static,
+) -> std::pin::Pin<Box<dyn Future<Output = ()>>> {
+    Box::pin(Owned {
+        owner,
+        future: Box::pin(future),
+    })
+}
+
 struct Owned<F> {
     owner: Owner,
     future: std::pin::Pin<Box<F>>,
