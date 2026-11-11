@@ -5245,13 +5245,22 @@
 		const tokens = reactive.signal(0);
 		const insets = reactive.context(() => fields.safeArea());
 		const platform = {
+			name: "web",
 			os: "web",
 			version: "0.0",
 			idiom: "desktop",
 			desktop: true,
 			catalyst: false,
 			select(spec) {
-				return "web" in spec ? spec.web : this.desktop ? spec.desktop ?? spec.default : spec.mobile ?? spec.default;
+				if (!spec || typeof spec !== "object") return void 0;
+				const keys = this.name !== this.os ? [this.name, this.os] : [this.os];
+				keys.push(this.desktop ? "desktop" : "mobile");
+				if (this.os !== "web") keys.push("native");
+				keys.push("default");
+				for (const key of keys) {
+					const value = spec[key];
+					if (value !== void 0) return value;
+				}
 			}
 		};
 		let appearance = "system", systemScheme = "light";

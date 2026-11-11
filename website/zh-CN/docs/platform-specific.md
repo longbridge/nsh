@@ -243,7 +243,7 @@ if (platform.os === "android") {
 
 ### platform.select
 
-在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`。在 TSX 中，`platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后按[上面的规则](#桌面与移动端)（`platform.desktop`）查找 `desktop` 或 `mobile`，再是 `native`（除 Web 外的所有平台），最后是 `default`：
+在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`（在 NSH 之外构建的平台可用 `platform_name()`）。在 TSX 中，`platform.select(spec)` 返回当前平台对应的值。它先查找 `platform.name`（在 NSH 之外构建的平台，如 `"miniprogram"`），再查找该操作系统自己的键（`platform.os`），然后按[上面的规则](#桌面与移动端)（`platform.desktop`）查找 `desktop` 或 `mobile`，再是 `native`（除 Web 外的所有平台），最后是 `default`：
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};

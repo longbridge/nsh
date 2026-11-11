@@ -246,7 +246,7 @@ if (platform.os === "android") {
 
 ### platform.select
 
-In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops. In TSX, `platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `desktop` or `mobile` by [the rule above](#desktop-and-mobile) (`platform.desktop`), then `native` (every platform but the web), then `default`:
+In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops (and `platform_name()` for a platform built outside NSH). In TSX, `platform.select(spec)` returns the value for this platform. It looks for `platform.name` first (on a platform built outside NSH, such as `"miniprogram"`), then the OS's own key (`platform.os`), then `desktop` or `mobile` by [the rule above](#desktop-and-mobile) (`platform.desktop`), then `native` (every platform but the web), then `default`:
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};

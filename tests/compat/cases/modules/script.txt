@@ -207,6 +207,7 @@ expect Desktop: false
 expect Catalyst: false
 expect Version: 0.0
 expect Select: ios
+expect Select named: ios
 expect Select mobile: mobile
 expect Ratio: 1
 expect Font scale: 1

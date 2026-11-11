@@ -856,3 +856,107 @@ fn platform_classes_follow_the_os() {
     assert_eq!(background(Os::Android), Some(Color(0x00ff_00ff)));
     assert_eq!(background(Os::Web), Some(Color(0x0000_ffff)));
 }
+
+const SELECT_NAME_APP: &str = r##"import { mount, platform, Text } from "nsh";
+
+let reads = 0;
+const once = platform.select({
+  get ios() {
+    reads += 1;
+    return undefined;
+  },
+  default: "fallback",
+});
+
+const exact = platform.select({
+  harmonyos: "h",
+  miniprogram: "mp",
+  android: "a",
+  ios: "i",
+  mobile: "m",
+  native: "n",
+  default: "d",
+});
+const osFallback = platform.select({
+  harmonyos: undefined,
+  android: "a",
+  ios: "i",
+  mobile: "m",
+  default: "d",
+});
+const kindFallback = platform.select({
+  web: "w",
+  mobile: "m",
+  desktop: "d",
+  default: "-",
+});
+const nativeFallback = platform.select({
+  web: "w",
+  native: "n",
+  default: "-",
+});
+
+mount(() => (
+  <Text>{`${platform.name} ${platform.os} ${exact} ${osFallback} ${kindFallback} ${nativeFallback} ${once}:${reads}`}</Text>
+));
+"##;
+
+#[test]
+fn platform_select_matches_the_platform_name_before_the_os() {
+    let dir = std::env::temp_dir().join(format!("nsh-select-name-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, SELECT_NAME_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
+    })
+    .unwrap();
+    let run = |environment: Environment| {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let config = EngineConfig {
+            environment,
+            ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code.clone())))
+        };
+        let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("first frame")
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                MountItem::Text { text, .. } => Some(text.text.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        run(Environment {
+            os: Os::Android,
+            platform: Some("harmonyos"),
+            idiom: Idiom::Phone,
+            ..Environment::default()
+        }),
+        vec!["harmonyos android h a m n fallback:0"]
+    );
+    assert_eq!(
+        run(Environment {
+            os: Os::Ios,
+            platform: Some("miniprogram"),
+            idiom: Idiom::Phone,
+            ..Environment::default()
+        }),
+        vec!["miniprogram ios mp i m n fallback:1"]
+    );
+    // Built-in platforms have `name == os`, so the OS key is read once.
+    assert_eq!(
+        run(Environment {
+            os: Os::Ios,
+            idiom: Idiom::Phone,
+            ..Environment::default()
+        }),
+        vec!["ios ios i i m n fallback:1"]
+    );
+}
