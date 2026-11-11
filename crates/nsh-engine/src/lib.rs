@@ -3525,6 +3525,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         font_scale: env.font_scale,
         reduce_motion: env.reduce_motion,
         screen_reader: env.screen_reader,
+        reads_active_descendants: env.reads_active_descendants,
         rtl: env.rtl,
         pixel_ratio: env.pixel_ratio,
         os: env.os,
