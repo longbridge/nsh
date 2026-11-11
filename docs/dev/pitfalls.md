@@ -535,6 +535,12 @@ Things that were found the hard way. Read the section of the area you change bef
   built-in screen and a 60 Hz external one). `Surface::follow_screen` asks for the range again when the screen's
   `maximumFramesPerSecond` differs from the one it was made for.
 
+- **The unified log stores about 1 KB of an entry's text** (iOS too): a `%{public}s` message of 1010 bytes came back
+  whole from `log show` and one of 1016 bytes cut (measured, macOS 26.6), so `nsh_platform_apple::unified_log` logs
+  in entries of at most 960 bytes, split between lines. A packaged app opened from Finder, the Dock or the Home screen
+  has stderr on `/dev/null`, which is why its lines go there. In a non-interactive zsh (scripts, agents' shells) `log`
+  is zsh's builtin, which `/etc/zshrc` disables only for interactive shells: call `/usr/bin/log`.
+
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
