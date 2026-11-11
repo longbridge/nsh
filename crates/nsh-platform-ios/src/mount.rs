@@ -1699,7 +1699,8 @@ impl Mounter {
                 | Command::CancelEvaluate { .. }
                 | Command::InjectJavaScript(_)
                 | Command::PostMessage(_)
-                | Command::Load(_)),
+                | Command::Load(_)
+                | Command::WebViewRequest(_)),
                 Native::Web(web),
             ) => web.command(&c),
             (Command::Seek(seconds), Native::Video(video)) => video.seek(seconds),

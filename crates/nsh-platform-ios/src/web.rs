@@ -2,7 +2,14 @@
 //! rather than linked, so apps without web views do not pay for it at
 //! launch.
 
-use std::{ffi::CStr, rc::Rc, sync::OnceLock};
+use std::{
+    ffi::CStr,
+    rc::Rc,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use nsh_core::{EventKind, EventPayload, NodeId, PayloadValue, WebProps, WebSource};
 use nsh_engine::EngineControl;
@@ -176,6 +183,15 @@ impl WebHandler {
         ivars.control.dispatch_event(ivars.id, event, payload);
     }
 
+    /// Answers a web view cookie request: `EventKind::WebViewReply` with
+    /// the core's `{ id, ok, value }` / `{ id, ok, error }` payload.
+    fn web_reply(&self, request: u64, result: Result<nsh_core::JsonValue, String>) {
+        self.send(
+            EventKind::WebViewReply,
+            nsh_core::webview::reply(request, result),
+        );
+    }
+
     fn failed(&self, error: &AnyObject) {
         // SAFETY: `localizedDescription` of an NSError.
         let message: Retained<NSString> = unsafe { msg_send![error, localizedDescription] };
@@ -247,6 +263,9 @@ pub(crate) struct WebHost {
     /// [`Self::make`] ran.
     made: bool,
     handler: Retained<WebHandler>,
+    /// False once this host is dropped: a cookie completion that outlives
+    /// it must not reach a restarted engine's node with the same id.
+    alive: Arc<AtomicBool>,
     evaluations: Rc<nsh_platform_apple::web_evaluation::Evaluations>,
     /// Serves the URL schemes of the first props while the web view is
     /// here.
@@ -275,6 +294,7 @@ impl WebHost {
             web: None,
             made: false,
             handler,
+            alive: Arc::new(AtomicBool::new(true)),
             evaluations,
             schemes: None,
             props: WebProps {
@@ -413,8 +433,13 @@ impl WebHost {
     }
 
     /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
-    /// `injectJavaScript()`, `postMessage()` and `load()`.
+    /// `injectJavaScript()`, `postMessage()`, `load()` and the web view's
+    /// cookie store (`Command::WebViewRequest`).
     pub(crate) fn command(&self, command: &nsh_core::Command) {
+        if let nsh_core::Command::WebViewRequest(request) = command {
+            self.web_request(request);
+            return;
+        }
         match command {
             nsh_core::Command::Evaluate { request, script } => {
                 self.evaluations
@@ -481,10 +506,49 @@ impl WebHost {
             }
         }
     }
+
+    /// Answers a [`nsh_core::Command::WebViewRequest`] through the shared
+    /// `WKHTTPCookieStore` helper, with this view's lifecycle fence. An
+    /// operation the backend does not know, or a view WebKit could not
+    /// make, is answered with an error rather than left waiting.
+    fn web_request(&self, request: &nsh_core::webview::WebViewRequest) {
+        use nsh_core::webview::WebViewOperation;
+        use nsh_platform_apple::web_cookies;
+
+        let Some(web) = &self.web else {
+            self.handler.web_reply(
+                request.id,
+                Err("the web view is not available: WebKit could not be loaded".into()),
+            );
+            return;
+        };
+        let id = request.id;
+        let handler = self.handler.clone();
+        let answer = web_cookies::answer(move |result| handler.web_reply(id, result));
+        match &request.operation {
+            WebViewOperation::GetCookies { url } => {
+                web_cookies::get_cookies(web, url.as_deref(), self.alive.clone(), answer)
+            }
+            WebViewOperation::SetCookie { cookie } => {
+                web_cookies::set_cookie(web, cookie, self.alive.clone(), answer)
+            }
+            WebViewOperation::DeleteCookie { name, domain, path } => {
+                web_cookies::delete_cookie(web, name, domain, path, self.alive.clone(), answer)
+            }
+            // A newer core's operation: answered, never left waiting.
+            _ => self.handler.web_reply(
+                id,
+                Err("this iOS backend does not know the web view operation".into()),
+            ),
+        }
+    }
 }
 
 impl Drop for WebHost {
     fn drop(&mut self) {
+        // From here no cookie completion delivers a reply; cleanup below
+        // still runs.
+        self.alive.store(false, Ordering::Release);
         self.evaluations.dispose();
         let Some(web) = &self.web else { return };
         // SAFETY: breaks the cycle web view -> controller -> handler.

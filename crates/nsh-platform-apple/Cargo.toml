@@ -1,6 +1,6 @@
 [package]
 name = "nsh-platform-apple"
-description = "Code shared by the macOS and iOS backends: sound playback, the Speech recognizer, the notification center, the URL schemes web views serve from the app and web views' script evaluation."
+description = "Code shared by the macOS and iOS backends: sound playback, the Speech recognizer, the notification center, the URL schemes web views serve from the app, web views' script evaluation and their cookie store."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,7 +21,7 @@ nsh-engine.workspace = true
 block2.workspace = true
 dispatch2.workspace = true
 objc2.workspace = true
-objc2-foundation.workspace = true
+objc2-foundation = { workspace = true, features = ["NSHTTPCookie"] }
 serde_json.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
