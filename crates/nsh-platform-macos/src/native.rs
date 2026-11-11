@@ -50,7 +50,7 @@
 
 use std::{
     cell::{Cell, RefCell},
-    ffi::CStr,
+    ffi::{CStr, c_void},
     path::{Path, PathBuf},
     ptr::NonNull,
     rc::{Rc, Weak},
@@ -70,7 +70,7 @@ use nsh_core::{
 };
 use nsh_engine::{Access, App, EngineControl, Policy};
 use objc2::{
-    DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject, Bool, ProtocolObject},
 };
