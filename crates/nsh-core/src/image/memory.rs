@@ -73,11 +73,7 @@ pub fn budget() -> &'static Arc<Budget> {
 /// The budget of decoded images by default: on desktops a sixteenth of the
 /// memory, at most 256 MiB; on phones an eighth, at most 128 MiB.
 pub fn default_budget() -> usize {
-    let (share, cap): (u64, u64) = if cfg!(any(
-        target_os = "ios",
-        target_os = "android",
-        target_env = "ohos"
-    )) {
+    let (share, cap): (u64, u64) = if cfg!(any(target_os = "ios", target_os = "android")) {
         (8, 128 << 20)
     } else {
         (16, 256 << 20)
