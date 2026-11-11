@@ -1,16 +1,21 @@
-//! The three inline atoms of a short post, in the HTML the server stores
-//! (`POST /v2/social/topics`):
+//! The inline atoms of a short post, in the HTML the web editor reads and the
+//! server stores (`longbridge-websites` `packages/blocks/src/social`:
+//! `editor/html-parsers.ts`, `utils/parse-trend.ts`, `rich-text/index.tsx`):
 //!
 //! | Node | HTML |
 //! |---|---|
-//! | `securityTag` | `<span type="security-tag" counter_id="ST/US/TSLA" trend="up">$Tesla</span>` |
-//! | `mention` | `<span class="mention" member_id="1001">@Alice</span>` |
-//! | `hashtag` | `<span class="hashtag">#Earnings</span>` |
+//! | `securityTag` | `<span type="security-tag" counter_id="ST/US/AAPL" name="Apple Inc." trend="1"></span>` |
+//! | `mention` | `<span type="mention" member_id="1001" name="Alice">@Alice</span>` |
+//! | `hashtag` | `<span type="hashtag" name="Earnings" value="#Earnings#">#Earnings#</span>` |
 //!
-//! Each is one position of the document: typed over, deleted and moved as a
-//! whole. `trend` is absent until the author picks one. The text inside a
-//! tag is what the page shows (its trigger and its label); reading HTML back
-//! takes the label from it.
+//! `trend` is `"0"` (neutral), `"1"` (bullish) or `"2"` (bearish) and absent
+//! until picked. A stock tag's span is empty, as the web's fixtures have it:
+//! the editor shows `$name` from the attribute. Reading takes a `counter_id`
+//! of two segments (`US/AAPL`, the web's fallback) or three (`ST/US/AAPL`,
+//! what its search returns and the editor writes), a missing `name` becomes
+//! the code, and a mention may be a `[data-mention]` element as the web reads.
+//! The web editor writes no hashtag span (a picked topic is a separate
+//! `hashtags` list); the node reads and writes the form the server renders.
 
 use std::sync::Arc;
 
@@ -19,7 +24,10 @@ use nsh_base::rich_editor::{
         Extension,
         suggestion::{SuggestionOptions, suggestion},
     },
-    model::{AttrSpec, AttrType, Attrs, DomOutputSpec, NodeSpec, ParseRule, TextRender},
+    model::{
+        AttrParse, AttrSpec, AttrType, Attrs, DomElement, DomOutputSpec, Node, NodeSpec, ParseRule,
+        TextRender,
+    },
     state::{ClickEvent, EditorState, NodeSelection, Plugin, PluginKey, PluginSpec, Transaction},
 };
 use serde_json::Value;
@@ -29,6 +37,7 @@ fn optional(validate: AttrType) -> AttrSpec {
     let mut spec = AttrSpec::default();
     spec.default = Some(Value::Null);
     spec.validate = Some(validate);
+    spec.parse_html = Some(AttrParse::Skip);
     spec.rendered = false;
     spec
 }
@@ -37,71 +46,46 @@ fn optional(validate: AttrType) -> AttrSpec {
 fn required() -> AttrSpec {
     let mut spec = AttrSpec::default();
     spec.validate = Some(AttrType::String);
+    // The parse rules read the DOM attributes (by default each attribute is
+    // read as its own name, a `"1"` as a number); `to_dom` writes them.
+    spec.parse_html = Some(AttrParse::Skip);
     spec.rendered = false;
     spec
 }
 
-/// The label: a string, empty until set.
-fn label() -> AttrSpec {
+/// A string attribute, empty until set.
+fn text_attr() -> AttrSpec {
     let mut spec = required();
     spec.default = Some(Value::from(""));
     spec
 }
 
-/// The label of a tag's text: what follows its trigger.
-fn label_of(text: &str, trigger: char) -> String {
-    text.trim().trim_start_matches(trigger).to_owned()
-}
-
-/// The text a tag shows: its trigger and its label.
-fn shown(node: &nsh_base::rich_editor::model::Node, trigger: char) -> String {
-    let label = node
-        .attrs()
-        .get("label")
+/// The attribute `name` of a node as a string.
+fn str_attr<'a>(node: &'a Node, name: &str) -> &'a str {
+    node.attrs()
+        .get(name)
         .and_then(Value::as_str)
-        .unwrap_or_default();
-    format!("{trigger}{label}")
+        .unwrap_or_default()
 }
 
-/// A tag's HTML: `span` with the fixed and attribute-read attributes, its
-/// trigger and its label.
-fn tag_dom(trigger: &str, attrs: &[(&str, &str)], fixed: &[(&str, &str)]) -> DomOutputSpec {
-    let mut el = DomOutputSpec::tag("span");
-    for (name, value) in fixed {
-        el = el.attr(*name, *value);
-    }
-    for (name, from) in attrs {
-        el = el.attr_of(*name, *from);
-    }
-    el.child(DomOutputSpec::Text(trigger.into()))
-        .child(DomOutputSpec::AttrText("label".into()))
+/// The code of a `counter_id`: its last segment (`ST/US/AAPL` and `US/AAPL`
+/// are both `AAPL`).
+fn code_of(counter_id: &str) -> &str {
+    counter_id.rsplit('/').next().unwrap_or(counter_id)
 }
 
-/// The attributes `el` (an element) gives a tag rule: `copy` maps DOM
-/// attributes to node attributes; the label is the element's text without
-/// its trigger. `None` when a required one is missing.
-fn read(
-    el: &nsh_base::rich_editor::model::DomElement,
-    trigger: char,
-    copy: &[(&str, &str, bool)],
-) -> Option<Attrs> {
-    let mut attrs = Attrs::new();
-    for (dom, name, required) in copy {
-        match el.attr(dom).filter(|v| !v.is_empty()) {
-            Some(v) => {
-                attrs.insert((*name).into(), Value::from(v));
-            }
-            None if *required => return None,
-            None => {
-                attrs.insert((*name).into(), Value::Null);
-            }
-        }
+/// A trend as the web's `parseTrendAttr` reads it: `"0"`, `"1"` and `"2"`
+/// are kept, anything else is not set.
+fn trend_of(raw: Option<&str>) -> Value {
+    match raw.map(str::trim) {
+        Some(t @ ("0" | "1" | "2")) => Value::from(t),
+        _ => Value::Null,
     }
-    attrs.insert(
-        "label".into(),
-        Value::from(label_of(&el.text_content(), trigger)),
-    );
-    Some(attrs)
+}
+
+/// The element's attribute `name`, none when absent or empty.
+fn attr<'a>(el: &'a DomElement, name: &str) -> Option<&'a str> {
+    el.attr(name).filter(|v| !v.is_empty())
 }
 
 fn base() -> NodeSpec {
@@ -157,68 +141,129 @@ impl PluginSpec for SelectTagOnPress {
     }
 }
 
-/// `securityTag`: a stock, `counterId` its id on the server, `label` the
-/// name shown, `trend` `"up"` (bullish), `"down"` (bearish) or `null`. A
-/// press on it selects it, for the page's menu of its trend.
+/// `securityTag`: a stock, `counterId` its id on the server, `name` the name
+/// shown, `trend` `"0"` (neutral), `"1"` (bullish), `"2"` (bearish) or `null`.
+/// A press on it selects it, for the page's menu of its trend.
 pub fn security_tag() -> Extension {
     Extension::node("securityTag", |_| {
         let mut spec = base();
         spec.attrs = vec![
             ("counterId".into(), required()),
-            ("label".into(), label()),
+            ("name".into(), text_attr()),
             ("trend".into(), optional(AttrType::String)),
         ];
         spec.parse_dom = vec![
             ParseRule::tag("span[type=\"security-tag\"]").with_get_attrs(|input| {
-                read(
-                    input.element()?,
-                    '$',
-                    &[("counter_id", "counterId", true), ("trend", "trend", false)],
-                )
+                let el = input.element()?;
+                let counter_id = attr(el, "counter_id")?;
+                let mut attrs = Attrs::new();
+                attrs.insert("counterId".into(), Value::from(counter_id));
+                let name = attr(el, "name").unwrap_or_else(|| code_of(counter_id));
+                attrs.insert("name".into(), Value::from(name));
+                attrs.insert("trend".into(), trend_of(el.attr("trend")));
+                Some(attrs)
             }),
         ];
-        spec.to_dom = Some(tag_dom(
-            "$",
-            &[("counter_id", "counterId"), ("trend", "trend")],
-            &[("type", "security-tag")],
-        ));
-        spec.render_text = Some(TextRender::new(|node| shown(node, '$')));
+        // An empty span: the editor shows `$name` from the attribute.
+        spec.to_dom = Some(
+            DomOutputSpec::tag("span")
+                .attr("type", "security-tag")
+                .attr_of("counter_id", "counterId")
+                .attr_of("name", "name")
+                .attr_of("trend", "trend"),
+        );
+        spec.render_text = Some(TextRender::new(|node| {
+            format!("${}", str_attr(node, "name"))
+        }));
         spec
     })
     .add_plugins(|_| vec![Arc::new(SelectTagOnPress) as Plugin])
 }
 
-/// `mention`: a member, `memberId` their id on the server, `label` the name.
+/// `mention`: a member, `memberId` their id on the server, `name` the name.
 pub fn mention() -> Extension {
     Extension::node("mention", |_| {
         let mut spec = base();
-        spec.attrs = vec![("memberId".into(), required()), ("label".into(), label())];
+        spec.attrs = vec![
+            ("memberId".into(), required()),
+            ("name".into(), text_attr()),
+        ];
+        // `[type="mention"]` or `[data-mention]`, as `parseMentionsFromHTML`.
         let rule = |selector: &str| {
             ParseRule::tag(selector.to_owned()).with_get_attrs(|input| {
-                read(input.element()?, '@', &[("member_id", "memberId", true)])
+                let el = input.element()?;
+                let text = el.text_content();
+                let name = attr(el, "name").map_or_else(
+                    || text.trim().trim_start_matches('@').to_owned(),
+                    str::to_owned,
+                );
+                let id = attr(el, "member_id")
+                    .or_else(|| attr(el, "data-user-id"))
+                    .or_else(|| attr(el, "data-id"))
+                    .map_or_else(|| name.clone(), str::to_owned);
+                if id.is_empty() {
+                    return None;
+                }
+                let mut attrs = Attrs::new();
+                attrs.insert("memberId".into(), Value::from(id));
+                attrs.insert("name".into(), Value::from(name));
+                Some(attrs)
             })
         };
-        spec.parse_dom = vec![rule("span.mention"), rule("a.mention")];
-        spec.to_dom = Some(tag_dom(
-            "@",
-            &[("member_id", "memberId")],
-            &[("class", "mention")],
-        ));
-        spec.render_text = Some(TextRender::new(|node| shown(node, '@')));
+        spec.parse_dom = vec![rule("span[type=\"mention\"]"), rule("[data-mention]")];
+        spec.to_dom = Some(
+            DomOutputSpec::tag("span")
+                .attr("type", "mention")
+                .attr_of("member_id", "memberId")
+                .attr_of("name", "name")
+                .child(DomOutputSpec::Text("@".into()))
+                .child(DomOutputSpec::AttrText("name".into())),
+        );
+        spec.render_text = Some(TextRender::new(|node| {
+            format!("@{}", str_attr(node, "name"))
+        }));
         spec
     })
 }
 
-/// `hashtag`: a topic, `label` its name.
+/// `hashtag`: a topic, `name` its name, as the server renders one
+/// (`value="#name#"`). The web editor does not write it: a picked topic goes
+/// to a separate list there.
 pub fn hashtag() -> Extension {
     Extension::node("hashtag", |_| {
         let mut spec = base();
-        spec.attrs = vec![("label".into(), required())];
+        spec.attrs = vec![("name".into(), required())];
         spec.parse_dom = vec![
-            ParseRule::tag("span.hashtag").with_get_attrs(|input| read(input.element()?, '#', &[])),
+            ParseRule::tag("span[type=\"hashtag\"]").with_get_attrs(|input| {
+                let el = input.element()?;
+                // `name`, else `value="#name#"` (the renderer's two forms).
+                let name = attr(el, "name").map_or_else(
+                    || {
+                        attr(el, "value")
+                            .map(|v| v.trim().trim_matches('#').to_owned())
+                            .unwrap_or_default()
+                    },
+                    str::to_owned,
+                );
+                if name.is_empty() {
+                    return None;
+                }
+                let mut attrs = Attrs::new();
+                attrs.insert("name".into(), Value::from(name));
+                Some(attrs)
+            }),
         ];
-        spec.to_dom = Some(tag_dom("#", &[], &[("class", "hashtag")]));
-        spec.render_text = Some(TextRender::new(|node| shown(node, '#')));
+        spec.to_dom = Some(DomOutputSpec::render(|src| {
+            let name = src.attr("name").and_then(Value::as_str).unwrap_or_default();
+            DomOutputSpec::tag("span")
+                .attr("type", "hashtag")
+                .attr("name", name)
+                .attr("value", format!("#{name}#"))
+                .child(DomOutputSpec::Text(format!("#{name}#")))
+        }));
+        spec.render_text = Some(TextRender::new(|node| {
+            format!("#{}#", str_attr(node, "name"))
+        }));
         spec
     })
 }

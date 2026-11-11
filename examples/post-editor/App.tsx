@@ -12,44 +12,54 @@ import {
 import { PostLength } from "post-editor/native";
 import { type Candidate, host } from "./host";
 
-// A short post: text with three kinds of tag the server stores as HTML.
-// `$` opens a search for a stock, `@` for a member and `#` for a topic; a
-// pick becomes one atom of the document (`securityTag`, `mention`,
-// `hashtag`, from this app's crate), deleted and moved as a whole. A press
-// on a stock tag opens a menu to mark it bullish or bearish. `getHTML()` is
-// what `POST /v2/social/topics` takes, and `setContent(html, "html")` reads
-// it back.
+// A short post: text with tags the server stores as HTML, in the web
+// editor's format. `$` opens a search for a stock and `@` for a member; a
+// pick becomes one atom of the document (`securityTag`, `mention`, from this
+// app's crate), deleted and moved as a whole. A press on a stock tag opens a
+// menu for its trend (0 neutral, 1 bullish, 2 bearish). `#` searches topics,
+// which the web editor keeps outside the text, as a `hashtags` list: a pick
+// takes the `#` away and adds a chip. `getHTML()` is the post's `content`,
+// and `setContent(html, "html")` reads it back.
 
 type Kind = "security" | "mention" | "hashtag";
 
+/** What a pick inserts; none for a topic (a chip). */
+type Node = { type: string; attrs: Record<string, unknown> };
+
 /** What each trigger searches and the node a candidate becomes. */
-const KINDS: Record<Kind, { char: string; title: string; search: (q: string) => Promise<Candidate[]>; node: (c: Candidate) => object }> = {
+const KINDS: Record<Kind, { char: string; title: string; search: (q: string) => Promise<Candidate[]>; node: ((c: Candidate) => Node) | null }> = {
   security: {
     char: "$",
     title: "股票",
     search: host.searchSecurities,
-    node: (c) => ({ type: "securityTag", attrs: { counterId: c.id, label: c.label, trend: null } }),
+    node: (c) => ({ type: "securityTag", attrs: { counterId: c.id, name: c.name, trend: null } }),
   },
   mention: {
     char: "@",
     title: "用户",
     search: host.searchMembers,
-    node: (c) => ({ type: "mention", attrs: { memberId: c.id, label: c.label } }),
+    node: (c) => ({ type: "mention", attrs: { memberId: c.id, name: c.name } }),
   },
   hashtag: {
     char: "#",
     title: "话题",
     search: host.searchTopics,
-    node: (c) => ({ type: "hashtag", attrs: { label: c.label } }),
+    node: null,
   },
 };
 const KIND_LIST = Object.keys(KINDS) as Kind[];
 
 /** The post the page starts from, as the server would send it back. */
 const SAMPLE =
-  '<p>看多 <span type="security-tag" counter_id="ST/US/NVDA" trend="up">$NVIDIA</span> ' +
-  '<span class="mention" member_id="1001">@Alice</span> ' +
-  '<span class="hashtag">#AI 算力</span> 的下一个季度</p>';
+  '<p>看多 <span type="security-tag" counter_id="ST/US/NVDA" name="NVIDIA" trend="1"></span> ' +
+  '<span type="mention" member_id="1001" name="Alice">@Alice</span> 的下一个季度</p>';
+
+/** `trend`, as the web writes it: "0" neutral, "1" bullish, "2" bearish. */
+const TRENDS = [
+  { value: "0", label: "中立", tone: "text-foreground" },
+  { value: "1", label: "看多", tone: "text-up" },
+  { value: "2", label: "看空", tone: "text-down" },
+];
 
 const LOCALE = "zh-CN";
 
@@ -87,8 +97,8 @@ const classes = {
   nodes: {
     paragraph: "leading-relaxed",
     securityTag: "text-primary font-medium",
-    "securityTag[trend=up]": "text-up font-medium",
-    "securityTag[trend=down]": "text-down font-medium",
+    "securityTag[trend=1]": "text-up font-medium",
+    "securityTag[trend=2]": "text-down font-medium",
     mention: "text-info",
     hashtag: "text-primary",
   },
@@ -106,6 +116,7 @@ function App() {
   });
 
   const html = signal(editor.getHTML());
+  // The web counts the text of the HTML (a stock tag's span is empty there).
   const length = () => PostLength.ofHtml(html(), LOCALE);
   const max = PostLength.max(LOCALE);
 
@@ -126,8 +137,19 @@ function App() {
     });
   };
 
+  /** The topics picked: the post's `hashtags`, outside its text. */
+  const topics = signal<string[]>([]);
+
   const choose = (kind: Kind, candidate: Candidate) => {
-    editor.run(command("replaceSuggestion", { key: kind, content: [KINDS[kind].node(candidate), { type: "text", text: " " }] }));
+    const make = KINDS[kind].node;
+    if (make) {
+      editor.run(command("replaceSuggestion", { key: kind, content: [make(candidate), { type: "text", text: " " }] }));
+    } else {
+      // A topic: the `#` and what was typed after it go, a chip comes.
+      const range = editor.suggestion(kind)!.range;
+      editor.run(command("deleteRange", { from: range.from, to: range.to }));
+      if (!topics().includes(candidate.name)) topics.set([...topics(), candidate.name]);
+    }
     editor.focus();
   };
 
@@ -167,7 +189,7 @@ function App() {
     }
   });
 
-  const setTrend = (value: string | null) => {
+  const setTrend = (value: string) => {
     const pos = tagPos();
     if (pos === null) return;
     editor.run(setNodeAttribute(pos, "trend", value));
@@ -193,12 +215,12 @@ function App() {
                   <Button
                     role="option"
                     selected={i() === index()}
-                    accessibilityLabel={`${candidate().label} ${candidate().detail}`}
+                    accessibilityLabel={`${candidate().name} ${candidate().detail}`}
                     onPress={() => choose(kind, candidate())}
                     class="flex-row items-center justify-between rounded-md px-2 py-1.5"
                     style={i() === index() ? { backgroundColor: "rgba(127,127,127,0.15)" } : undefined}
                   >
-                    <Text class="text-sm text-foreground">{candidate().label}</Text>
+                    <Text class="text-sm text-foreground">{candidate().name}</Text>
                     <Text class="text-xs text-muted-foreground">{candidate().detail}</Text>
                   </Button>
                 )}
@@ -211,17 +233,13 @@ function App() {
     if (tagPos() !== null) {
       return (
         <View testID="trend-menu" role="menu" class="flex-row gap-1 rounded-lg border border-border bg-popover p-1 shadow-lg">
-          <Button role="menuitem" accessibilityLabel="看多" onPress={() => setTrend("up")} class="rounded-md px-3 py-1.5">
-            <Text class={trend() === "up" ? "text-sm font-semibold text-up" : "text-sm text-foreground"}>看多</Text>
-          </Button>
-          <Button role="menuitem" accessibilityLabel="看空" onPress={() => setTrend("down")} class="rounded-md px-3 py-1.5">
-            <Text class={trend() === "down" ? "text-sm font-semibold text-down" : "text-sm text-foreground"}>看空</Text>
-          </Button>
-          <If when={trend() !== null}>
-            <Button role="menuitem" accessibilityLabel="清除观点" onPress={() => setTrend(null)} class="rounded-md px-3 py-1.5">
-              <Text class="text-sm text-muted-foreground">清除</Text>
-            </Button>
-          </If>
+          <Each of={TRENDS}>
+            {(item) => (
+              <Button role="menuitem" accessibilityLabel={item().label} onPress={() => setTrend(item().value)} class="rounded-md px-3 py-1.5">
+                <Text class={trend() === item().value ? `text-sm font-semibold ${item().tone}` : "text-sm text-foreground"}>{item().label}</Text>
+              </Button>
+            )}
+          </Each>
         </View>
       );
     }
@@ -268,8 +286,25 @@ function App() {
           </View>
         </View>
 
+        <If when={topics().length > 0}>
+          <View testID="topics" class="flex-row flex-wrap gap-2">
+            <Each of={topics()}>
+              {(name) => (
+                <Button
+                  accessibilityLabel={`移除话题 ${name()}`}
+                  onPress={() => topics.set(topics().filter((t) => t !== name()))}
+                  class="rounded-full border border-border px-3 py-1"
+                >
+                  <Text class="text-sm text-primary">{`#${name()}#  ×`}</Text>
+                </Button>
+              )}
+            </Each>
+          </View>
+        </If>
+
         <Text class="text-xs font-medium text-muted-foreground">getHTML()</Text>
         <Text testID="html-output" class="rounded-lg bg-muted p-3 font-mono text-xs text-foreground">{html()}</Text>
+        <Text testID="hashtags-output" class="font-mono text-xs text-muted-foreground">{`hashtags: ${JSON.stringify(topics())}`}</Text>
 
         <Text class="text-xs font-medium text-muted-foreground">读回 HTML</Text>
         <Input
