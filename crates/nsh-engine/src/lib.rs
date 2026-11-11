@@ -3250,6 +3250,7 @@ impl<M: TextEngine> State<M> {
         if !self.frame_requested
             && (script.is_some_and(Script::wants_frame)
                 || self.core.wants_frame()
+                || self.core.has_paced_mounts()
                 || (script.is_some() && self.core.has_paced_list_binds()))
         {
             self.frame_requested = true;
@@ -3318,6 +3319,8 @@ impl<M: TextEngine> State<M> {
         let mut js = std::time::Duration::ZERO;
         // The overscan bound this turn ([`PACED_BIND_OPS`]).
         let mut paced = PacedBinds::default();
+        // The views made this turn share one budget (`nsh_core`'s `pace.rs`).
+        self.core.begin_mount_turn();
         for _ in 0..MAX_LIST_ROUNDS {
             // Requests from the previous round (or frame) first.
             let js_start = Instant::now();
@@ -3677,6 +3680,21 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
             if event == EventKind::Paste {
                 payload = payload.into_paste();
+            }
+            // A secondary click goes down as a press does: the overlays it
+            // is outside of hear `onPressOutside` first, then the view its
+            // `onContextMenu`, so a context menu open on the view closes
+            // before the view asks for one again where the pointer is.
+            if let EventPayload::ContextMenu(menu) = &payload {
+                for (overlay, pressed) in state.core.context_menu_presses_outside(id, menu) {
+                    if !state
+                        .core
+                        .component_event(overlay, EventKind::PressOutside, &pressed)
+                        && let Some(script) = script
+                    {
+                        script.dispatch_event(overlay, EventKind::PressOutside, &pressed);
+                    }
+                }
             }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {

@@ -754,6 +754,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToIndex { .. }
                     | Command::Reveal(_)
                     | Command::Measure { .. }
+                    | Command::MeasureScrollPosition { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
@@ -1359,6 +1360,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(AccessibilityCurrent::Date) => 5,
         Some(AccessibilityCurrent::Time) => 6,
     } << 11;
+    if s.invalid {
+        flags |= 1 << 14;
+    }
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1457,6 +1461,8 @@ fn role_index(role: AccessibilityRole) -> i32 {
         TreeItem => 40,
         MenuItemCheckbox => 41,
         MenuItemRadio => 42,
+        Dialog => 43,
+        AlertDialog => 44,
     }
 }
 

@@ -2257,7 +2257,11 @@ impl Agent {
     }
 
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.scene.texts().unwrap_or_default())
+        let texts = self.scene.texts().unwrap_or_default();
+        format!(
+            "on screen: [{}]",
+            crate::failure::screen_texts(&texts, Some(crate::failure::SCREEN_TEXT_LIMIT))
+        )
     }
 }
 

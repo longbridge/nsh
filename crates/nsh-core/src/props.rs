@@ -132,6 +132,15 @@ pub enum AccessibilityRole {
     /// (`accessibilityState.checked`).
     #[prop(rename = "menuitemradio")]
     MenuItemRadio,
+    /// A dialog over the rest of the app, named by its `label` (its
+    /// title): what `nsh_base::dialog` is unless the app gives it another
+    /// role.
+    Dialog,
+    /// A dialog that asks the user to confirm something or tells them
+    /// something urgent (a destructive action's confirmation), named by
+    /// its `label`.
+    #[prop(rename = "alertdialog")]
+    AlertDialog,
 }
 
 /// Whether a checkable element is checked (`accessibilityState.checked`).
@@ -188,6 +197,10 @@ pub struct AccessibilityState {
     /// an `expanded` element without it is a disclosure, which shows its
     /// content in place (a collapsible's or an accordion's trigger).
     pub has_popup: bool,
+    /// The content does not pass the app's checks (ARIA's
+    /// `aria-invalid`): a field whose text was rejected, a select left
+    /// empty that must not be.
+    pub invalid: bool,
 }
 
 /// The value of a range or textual element (`accessibilityValue`).

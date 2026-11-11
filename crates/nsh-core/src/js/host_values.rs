@@ -237,7 +237,8 @@ impl HostValue for PanActivation {
 }
 
 /// `{ disabled, selected, checked: true | false | "mixed", busy, expanded,
-/// pressed: true | false | "mixed", current: true | false | "page" | ... }`.
+/// pressed: true | false | "mixed", current: true | false | "page" | ...,
+/// hasPopup, invalid }`.
 impl HostValue for AccessibilityState {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
@@ -261,6 +262,7 @@ impl HostValue for AccessibilityState {
             expanded: input.field("expanded").and_then(|v| v.as_bool()),
             pressed: tristate("pressed"),
             has_popup: flag("hasPopup"),
+            invalid: flag("invalid"),
             // `false` and unknown words are no current item, as ARIA has it.
             current: match current.as_ref().and_then(|c| c.as_bool()) {
                 Some(true) => Some(AccessibilityCurrent::True),
@@ -288,7 +290,9 @@ impl HostValue for AccessibilityState {
              /** The current item of a set (ARIA's `aria-current`): a pagination's page, a wizard's step. */\n  \
              current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n  \
              /** Opens a popup, a menu or a list (ARIA's `aria-haspopup`); `expanded` says whether it is open. */\n  \
-             hasPopup?: boolean;\n}"
+             hasPopup?: boolean;\n  \
+             /** The content does not pass the app's checks (ARIA's `aria-invalid`): a rejected field. */\n  \
+             invalid?: boolean;\n}"
                 .into()
         })
     }

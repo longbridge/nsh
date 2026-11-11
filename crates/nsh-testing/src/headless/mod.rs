@@ -64,7 +64,7 @@ use nsh_core::{
     MountItem, NodeId, PayloadValue, Point, Points, PressEvent, ROOT_ID, Size, SubmitBehavior,
     TextEngine,
     geometry::{point, px},
-    platform::InputModality,
+    platform::{InputModality, Os},
 };
 use nsh_engine::{
     AppError, AppErrorKind, Clock, Engine, EngineConfig, EngineControl, Environment, MountSink,
@@ -169,7 +169,7 @@ fn send_url_scheme(control: &nsh_engine::EngineControl, url: &str) {
 /// the link that launched it, there before the app's code runs (as a
 /// platform sends it).
 fn launch<M, F>(
-    config: EngineConfig,
+    mut config: EngineConfig,
     displays: Vec<nsh_core::desktop::Display>,
     text_engine: F,
     link: Option<&str>,
@@ -178,6 +178,12 @@ where
     M: TextEngine + 'static,
     F: FnOnce() -> M + Send + 'static,
 {
+    // Only iOS and Android draw a header of their own; elsewhere a page's
+    // `header` sits at its top as wide as the window, as those backends
+    // configure the engine.
+    if !matches!(config.environment.os, Os::Ios | Os::Android) {
+        config.header_heights = nsh_core::NO_NATIVE_HEADER;
+    }
     let (batches, batches_rx) = crossbeam_channel::unbounded();
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
@@ -1414,9 +1420,15 @@ impl Headless {
         true
     }
 
-    /// The texts on screen, for errors.
+    /// The texts on screen, for errors: cut to
+    /// [`SCREEN_TEXT_LIMIT`](crate::failure::SCREEN_TEXT_LIMIT) so a long
+    /// document cannot flood the error.
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.screen.texts())
+        let texts = self.screen.texts();
+        format!(
+            "on screen: [{}]",
+            crate::failure::screen_texts(&texts, Some(crate::failure::SCREEN_TEXT_LIMIT))
+        )
     }
 
     /// The first render: waits for the app's first batch ([`WAIT`] at
@@ -2398,6 +2410,68 @@ mod tests {
         app.wait_for("wide true inner 200").unwrap();
     }
 
+    /// A page whose `header` holds a back button, a one-line title far
+    /// wider than the window and a button after it.
+    #[component]
+    fn LongTitle() -> impl IntoElement {
+        let button = |id: &'static str| view().test_id(id).size(px(44.0)).flex_shrink_0();
+        nsh_core::element::stack().flex_1().child(
+            nsh_core::element::screen()
+                .header(
+                    view()
+                        .test_id("bar")
+                        .flex_row()
+                        .child(button("back"))
+                        .child(
+                            view().test_id("title").flex_1().min_w(px(0.0)).child(
+                                text("A title far too long for one line of the header ".repeat(4))
+                                    .number_of_lines(1),
+                            ),
+                        )
+                        .child(button("action")),
+                )
+                .child(view().flex_1()),
+        )
+    }
+
+    /// On a desktop, as its backends run it, a page's `header` is placed
+    /// by NSH as wide as the window: a long title shrinks and the button
+    /// after it stays in the window, whatever the window's width.
+    #[test]
+    fn a_desktop_page_header_is_as_wide_as_the_window() {
+        let mut config = EngineConfig::new(Root::of::<LongTitle>());
+        config.viewport = Size::new(px(360.0), px(600.0));
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        for width in [360.0, 600.0] {
+            app.set_viewport(Size::new(px(width), px(600.0))).unwrap();
+            let nodes = app.screen().layout_nodes();
+            let bounds = |id: &str| {
+                nodes
+                    .iter()
+                    .find(|n| n.test_id.as_deref() == Some(id))
+                    .unwrap_or_else(|| panic!("no {id}"))
+                    .bounds
+            };
+            let header = nodes
+                .iter()
+                .find(|n| n.kind == nsh_core::ViewKind::HeaderItem)
+                .expect("the header")
+                .bounds;
+            assert_eq!(header.size.width, px(width), "the header at {width}");
+            assert_eq!(bounds("bar").size.width, px(width), "its row at {width}");
+            let action = bounds("action");
+            assert_eq!(
+                action.origin.x + action.size.width,
+                px(width),
+                "the button after the title at {width}"
+            );
+            assert_eq!(bounds("title").size.width, px(width - 88.0));
+        }
+    }
+
     /// A press whose task finishes a turn later, with no time passing.
     #[component]
     fn Deferred() -> impl IntoElement {
@@ -2966,7 +3040,7 @@ mod tests {
     #[test]
     fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
         let mut config = EngineConfig::new(Root::of::<FocusStops>());
-        config.environment.os = nsh_core::platform::Os::MacOs;
+        config.environment.os = Os::MacOs;
         config.environment.idiom = nsh_core::platform::Idiom::Desktop;
         let mut app = Headless::start(config).unwrap();
         app.first_render().unwrap();
@@ -3088,6 +3162,84 @@ mod tests {
         assert!(rows.len() > 10, "{rows:?}");
         assert!(rows.windows(2).all(|w| w[1] == w[0] + 1), "{rows:?}");
         assert_eq!(app.screen().tab_stops().len(), rows.len());
+    }
+
+    /// A short list of 30 rows of its own, four on screen, each a button
+    /// that says when it has the focus, and a button after it.
+    #[component]
+    fn TabbedList() -> impl IntoElement {
+        let focused = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                virtual_list(30, move |at| {
+                    view()
+                        .h(px(40.0))
+                        .on_press(|| {})
+                        .on_focus(move || focused.set(format!("row {}", at.index())))
+                        .child(text(move || format!("Row {}", at.index())))
+                })
+                .test_id("list")
+                .estimated_item_size(px(40.0))
+                .h(px(160.0)),
+            )
+            .child(
+                view()
+                    .test_id("after")
+                    .h(px(40.0))
+                    .on_press(|| {})
+                    .on_focus(move || focused.set("after".into()))
+                    .child(text("After")),
+            )
+            .child(text(move || format!("Focused {}.", focused.get())))
+    }
+
+    /// Tab walks a list's rows one by one, those not rendered yet too, the
+    /// list scrolling each into view, and leaves it after its last row;
+    /// Shift+Tab walks them back.
+    #[test]
+    fn tab_walks_every_row_of_a_list() {
+        let mut config = EngineConfig::new(Root::of::<TabbedList>());
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let list = id(&app, "id:list");
+        let shows = |app: &Headless| {
+            let view = app.screen().key_focus().expect("a focus");
+            let (Some(row), Some(list)) = (
+                app.screen().bounds_in_root(view),
+                app.screen().bounds_in_root(list),
+            ) else {
+                return false;
+            };
+            row.origin.y >= list.origin.y
+                && row.origin.y + row.size.height <= list.origin.y + list.size.height
+        };
+        let rows = (0..30).map(|i| format!("row {i}"));
+        for row in rows.clone() {
+            app.press_key("tab").unwrap();
+            app.wait_for(&format!("Focused {row}.")).unwrap();
+            assert!(shows(&app), "{row} is scrolled into view");
+        }
+        app.press_key("tab").unwrap();
+        app.wait_for("Focused after.").unwrap();
+        for row in rows.rev() {
+            app.press_key("shift+tab").unwrap();
+            app.wait_for(&format!("Focused {row}.")).unwrap();
+            assert!(shows(&app), "{row} is scrolled into view");
+        }
+        // Scrolled far from the focus, Tab goes on from it, to the row
+        // after it, not to the rows on screen.
+        app.scroll("id:list", px(900.0)).unwrap();
+        assert!(!shows(&app));
+        app.press_key("tab").unwrap();
+        app.wait_for("Focused row 1.").unwrap();
+        assert!(shows(&app), "row 1 is scrolled into view");
     }
 
     #[cfg(feature = "js")]
@@ -3324,7 +3476,7 @@ mod tests {
     #[test]
     fn a_key_fires_the_bindings_of_the_focused_window() {
         let mut config = EngineConfig::new(Root::of::<WindowKeys>());
-        config.environment.os = nsh_core::platform::Os::MacOs;
+        config.environment.os = Os::MacOs;
         let mut app = Headless::start(config).unwrap();
         app.first_render().unwrap();
         app.wait_for("keys 0 0").unwrap();

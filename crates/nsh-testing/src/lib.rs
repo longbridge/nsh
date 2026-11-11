@@ -88,6 +88,7 @@ pub use self::{
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
 };
 pub use self::{
+    failure::{SCREEN_TEXT_LIMIT, screen_texts},
     screen::{LayoutNode, LayoutScroll, LayoutText, Pick, Screen},
     storage::MemoryStorage,
 };

@@ -85,10 +85,14 @@ pub mod state {
     /// input modality (`Core::set_input_modality`), never reported by the
     /// platform.
     pub const FOCUS_VISIBLE: u16 = 2048;
+    /// The view's content does not pass the app's checks
+    /// (`aria-invalid:`): its `accessibilityState.invalid`. Set by the
+    /// core, never reported by the platform.
+    pub const INVALID: u16 = 4096;
     /// The states the core sets from the accessibility state, which the
     /// platforms never report.
     pub(crate) const ACCESSIBILITY: u16 =
-        SELECTED | CHECKED | INDETERMINATE | EXPANDED | ARIA_PRESSED | BUSY;
+        SELECTED | CHECKED | INDETERMINATE | EXPANDED | ARIA_PRESSED | BUSY | INVALID;
 }
 
 /// The view's place among its siblings (`first:`, `odd:`, ...).
@@ -472,13 +476,14 @@ pub(crate) mod rank {
     pub(crate) const ARIA_BUSY: Key = Key::new(40);
     pub(crate) const ARIA_CHECKED: Key = Key::new(41);
     pub(crate) const EXPANDED: Key = Key::new(42);
-    pub(crate) const ARIA_PRESSED: Key = Key::new(43);
-    pub(crate) const ARIA_SELECTED: Key = Key::new(44);
+    pub(crate) const ARIA_INVALID: Key = Key::new(43);
+    pub(crate) const ARIA_PRESSED: Key = Key::new(44);
+    pub(crate) const ARIA_SELECTED: Key = Key::new(45);
     /// `data-*`, after `aria-*` as Tailwind registers them, in the order
     /// of their names ([`Key::data`]).
-    pub(crate) const DATA: u16 = 45;
-    pub(crate) const MOTION_SAFE: Key = Key::new(46);
-    pub(crate) const MOTION_REDUCE: Key = Key::new(47);
+    pub(crate) const DATA: u16 = 46;
+    pub(crate) const MOTION_SAFE: Key = Key::new(47);
+    pub(crate) const MOTION_REDUCE: Key = Key::new(48);
     /// `max-*` breakpoints, widest first.
     pub(crate) const MAX: u16 = 50;
     /// Breakpoints and `min-*`, narrowest first.
@@ -1247,6 +1252,10 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
             states(cond, EXPANDED);
             rank::EXPANDED
         }
+        "aria-invalid" => {
+            states(cond, INVALID);
+            rank::ARIA_INVALID
+        }
         "aria-pressed" => {
             states(cond, ARIA_PRESSED);
             rank::ARIA_PRESSED
@@ -1346,6 +1355,7 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
                     "aria-busy" => (BUSY, rank::ARIA_BUSY),
                     "aria-checked" => (CHECKED, rank::ARIA_CHECKED),
                     "aria-expanded" => (EXPANDED, rank::EXPANDED),
+                    "aria-invalid" => (INVALID, rank::ARIA_INVALID),
                     "aria-pressed" => (ARIA_PRESSED, rank::ARIA_PRESSED),
                     "aria-selected" => (SELECTED, rank::ARIA_SELECTED),
                     _ => return None,

@@ -23,6 +23,7 @@ export function createDom(invoke, values, reactive, live, wake) {
   prototype.command = function (name, args) { return call(314, [values.nodeIds.get(this), "native", { name, args }]); };
   prototype.scrollToOffset = function (options) { return this.scrollTo({ x: options?.offset, y: options?.offset, animated: options?.animated }); };
   prototype.measure = function () { return measure(this); };
+  prototype.measureScrollPosition = function () { return measure(this, "scrollPosition"); };
   const finalizers = new FinalizationRegistry(id => {
     if (live()) { invoke(307, [id]); values.nodes.delete(id); wake(); }
   });

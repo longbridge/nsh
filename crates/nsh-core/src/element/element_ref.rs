@@ -27,7 +27,8 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
+    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, ListScrollPosition,
+    Measurement, NodeId,
     geometry::{Bounds, Percentage, Point, Points},
 };
 
@@ -378,6 +379,25 @@ impl ElementRef {
         let pending = slot.clone();
         if self
             .reach(|node, executor| executor.act(Action::Measure(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(None);
+        }
+        answer
+    }
+
+    /// Where a list's viewport starts among its rows (TS:
+    /// `ref.measureScrollPosition()`): the row there and how far into it,
+    /// as the list lays its rows out, from the layout of the commit this
+    /// call goes out with. [`ElementRef::scroll_to_index`] with the row
+    /// and a view offset of `-offset` puts the viewport's start back
+    /// there, as for a list made anew. `None` when no rendered list
+    /// carries the ref or it has no items. Await it in a task.
+    pub fn measure_scroll_position(&self) -> Answer<Option<ListScrollPosition>> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::MeasureScrollPosition(node, pending)))
             .is_none()
         {
             slot.borrow_mut().deliver(None);

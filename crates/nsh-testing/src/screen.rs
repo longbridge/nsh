@@ -1767,7 +1767,22 @@ impl Screen {
         if receives != PointerEvents::BoxOnly
             && let Some(children) = self.children.get(&id)
         {
-            for &child in children.iter().rev() {
+            // Header items and input accessories are in the bars the
+            // platform draws over a screen's content (a large title's header
+            // included), wherever they are among its children: they are on
+            // top.
+            let placed = |c: &NodeId| {
+                matches!(
+                    self.kind(*c),
+                    Some(ViewKind::HeaderItem | ViewKind::InputAccessory)
+                )
+            };
+            let order = children
+                .iter()
+                .rev()
+                .filter(|c| placed(c))
+                .chain(children.iter().rev().filter(|c| !placed(c)));
+            for &child in order {
                 let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
@@ -2326,6 +2341,22 @@ impl Screen {
 
     pub(crate) fn scroll_mut(&mut self, id: NodeId) -> Option<&mut Scroll> {
         self.nodes.get_mut(&id)?.scroll.as_mut()
+    }
+
+    /// The scroll views around `id`, innermost first.
+    pub(crate) fn scrolls_around(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut at = self.nodes.get(&id).and_then(|v| v.parent);
+        while let Some(parent) = at {
+            let Some(view) = self.nodes.get(&parent) else {
+                break;
+            };
+            if view.scroll.is_some() {
+                out.push(parent);
+            }
+            at = view.parent;
+        }
+        out
     }
 
     /// How far scroll view `id` goes along its axis: its content past its
