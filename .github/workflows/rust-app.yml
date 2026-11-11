@@ -97,7 +97,7 @@ jobs:
         run: echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
       - name: Install GTK 4 and GStreamer
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -152,7 +152,7 @@ jobs:
       # C code (zstd) clang and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
       - name: Install clang, LLVM, GTK 4 and GStreamer
-        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
