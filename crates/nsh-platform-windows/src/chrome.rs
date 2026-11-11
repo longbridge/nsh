@@ -812,6 +812,19 @@ pub(crate) fn nc_mouse(
     lparam: LPARAM,
 ) -> Option<LRESULT> {
     let shell = crate::window::shell(hwnd)?;
+    // A left press on the frame activates a focusable window, as the system's
+    // non-client path does for the parts Windows handles. NSH carries out
+    // these presses itself, so it must do this too: otherwise a click from
+    // another app deactivates that app and leaves no foreground window, and
+    // this window never comes to the front. The app hears a title-bar press
+    // only on release, which is far too late.
+    // SAFETY: plain calls on this live window.
+    if msg == WM_NCLBUTTONDOWN
+        && shell.attrs().focusable
+        && unsafe { GetForegroundWindow() } != hwnd
+    {
+        let _ = unsafe { SetForegroundWindow(hwnd) };
+    }
     let code = wparam.0 as u32;
     let mut p = POINT {
         x: (lparam.0 & 0xFFFF) as i16 as i32,

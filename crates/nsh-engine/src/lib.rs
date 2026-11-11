@@ -1088,7 +1088,15 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
 /// Native hosts choose these anchors before any application JavaScript runs
 /// (the VM's `fs/promises` and the core's media files read under them).
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
-    let mut paths = bundle.system_paths.clone();
+    system_paths(bundle.system_paths.clone(), !bundle.policy.harden)
+}
+
+/// `paths` with the anchors checked and the home directory filled in; in
+/// `development`, the local `nsh run`'s source directory as the app's.
+fn system_paths(
+    mut paths: nsh_core::access::TrustedPaths,
+    development: bool,
+) -> nsh_core::access::TrustedPaths {
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
     paths.home_dir = trusted_directory(paths.home_dir);
     if paths.home_dir.is_none() {
@@ -1101,7 +1109,7 @@ fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     // Local `nsh run` passes its canonical entry directory directly to the
     // native child process. Remote dev messages never contain this field.
     // A packaged/hardened bundle cannot inherit a development source anchor.
-    if paths.plugin_dir.is_none() && !bundle.policy.harden {
+    if paths.plugin_dir.is_none() && development {
         paths.plugin_dir = std::env::var_os("NSH_DEV_APP_DIR")
             .map(std::path::PathBuf::from)
             .and_then(|path| trusted_directory(Some(path)));
@@ -3531,6 +3539,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         ctrl_for_command: env.ctrl_for_command,
         host: env.host,
         lifecycle: env.lifecycle,
+        wake_count: env.wake_count,
         screen_color: env.screen_color,
         file_requests: env.file_requests,
         speech: env.speech,
@@ -3996,12 +4005,17 @@ fn release_spare_ops(ops: &mut Vec<Op>) {
     }
 }
 
-/// What `app` may reach: a JS app its policy's grant; native code is
-/// trusted, it reaches what the platform allows.
+/// What `app` may reach: a JS app its policy's grant, a Rust app what its
+/// root declares (`nsh.json` `capabilities`); either without a declaration
+/// what an app without one reaches.
 fn app_access(app: &App) -> Access {
     match app {
         App::Js(bundle) => bundle.policy.access(),
-        App::Rust(_) => Policy::default().access(),
+        App::Rust(root) => Policy {
+            declared: root.capabilities_ref().cloned(),
+            ..Policy::default()
+        }
+        .access(),
     }
 }
 
@@ -4019,7 +4033,17 @@ fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::Medi
             &bundle_system_paths(bundle),
             nsh_core::access::native_files(config.environment.os),
         ),
-        _ => nsh_core::access::MediaFiles::default(),
+        App::Rust(root) if root.capabilities_ref().is_some() => nsh_core::access::MediaFiles::new(
+            access,
+            config
+                .data_dir
+                .as_ref()
+                .map(|root| root.join(app_dir_name(config.app.app_id())))
+                .as_deref(),
+            &system_paths(nsh_core::access::TrustedPaths::default(), false),
+            nsh_core::access::native_files(config.environment.os),
+        ),
+        App::Rust(_) => nsh_core::access::MediaFiles::default(),
     }
 }
 
