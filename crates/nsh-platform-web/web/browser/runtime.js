@@ -34,16 +34,20 @@ function facadeURL(specifier, names, late) {
   return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
 }
 
-function addImportMap(doc, imports) {
+// `text`: the map as JSON, kept as it is (a published app's, whose hash a
+// strict `script-src` allows).
+function addImportMap(doc, text) {
   const importMap = doc.createElement("script");
   importMap.type = "importmap";
-  importMap.textContent = JSON.stringify({ imports });
+  importMap.textContent = text;
   doc.head.append(importMap);
 }
 
 export function createBrowserHost(player) {
   let current, pageRealmUsed = false;
   return {
+    // The web views' bridge, loaded by URL (`op_web`).
+    webBridge: new URL("./web-bridge.js", import.meta.url).href,
     bind(wasm) {
       return Object.fromEntries(Object.entries(wasm).map(([name, value]) => [name,
         typeof value === "function" && name !== "nsh_browser_trace"
@@ -62,8 +66,12 @@ export function createBrowserHost(player) {
     // modules (a published app's, `web::native_exports`). Their modules
     // are made before the realm loads any module; their bindings are live,
     // so what a gate called after the start registers (a side module
-    // loaded before the chunk) is filled then.
-    async run(entry, { appId = "", capabilities = "", imports: moduleMap = {}, chunks = {}, nativeExports = {}, params } = {}, owned = []) {
+    // loaded before the chunk) is filled then. `importMap` (JSON): the
+    // realm's whole import map, written with the app's facade modules as
+    // files (`web::static_imports`): no blob URL then, and the map is the
+    // same text on every start, so a strict `script-src` can allow its
+    // hash; `imports` and `chunks` are in it already.
+    async run(entry, { appId = "", capabilities = "", imports: moduleMap = {}, chunks = {}, nativeExports = {}, importMap = null, params } = {}, owned = []) {
       if (current?.stopping) throw new Error("cannot start an app during disposal");
       const [width, height] = player.reset();
       let values;
@@ -119,7 +127,10 @@ export function createBrowserHost(player) {
           realm = window;
           doc = document;
         }
-        if (frame) {
+        // An `about:blank` frame resolves against its creator's base
+        // already; a `<base>` only when that has moved (a strict
+        // `base-uri` refuses it).
+        if (frame && doc.baseURI !== player.baseURL) {
           const baseElement = doc.createElement("base");
           // The page's URL as the player started (`player.baseURL`).
           baseElement.href = player.baseURL;
@@ -135,7 +146,7 @@ export function createBrowserHost(player) {
         const chunkBase = entryURL.protocol === "blob:" ? new URL(player.baseURL) : entryURL;
         if (chunkBase === entryURL) map[new URL("bundle.js", entryURL).href] = entryURL.href;
         for (const [id, url] of Object.entries(chunks)) map[new URL(id, chunkBase).href] = new URL(url, player.baseURL).href;
-        for (const [specifier, names] of Object.entries(nativeExports)) {
+        if (!importMap) for (const [specifier, names] of Object.entries(nativeExports)) {
           const url = facadeURL(specifier, names, names);
           urls.push(url);
           map[specifier] = url;
@@ -301,13 +312,13 @@ export function createBrowserHost(player) {
         // Namespace imports and development bundles need the full module
         // catalog too. One map covers these and the late-bound exports of
         // published chunks, including browsers that accept only one map.
-        for (const [specifier, namespace] of namespaces) {
+        if (!importMap) for (const [specifier, namespace] of namespaces) {
           if (Object.hasOwn(nativeExports, specifier)) continue;
           const url = facadeURL(specifier, Object.keys(namespace), []);
           urls.push(url);
           map[specifier] = url;
         }
-        addImportMap(doc, map);
+        addImportMap(doc, importMap ?? JSON.stringify({ imports: map }));
         const finished = new Promise((resolve, reject) => {
           rejectLoad = reject;
           Object.defineProperty(realm, "__nsh_browser_realm", { value: Object.freeze({

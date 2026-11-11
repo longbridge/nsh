@@ -6038,7 +6038,14 @@ class Player {
     if (html != null) {
       let head = "";
       if (base) head += `<base href="${base.replace(/"/g, "&quot;")}">`;
-      if (el._token) head += `<script>${webBridge(el._token)}</script>`;
+      // By URL where the browser host is (`browser/web-bridge.js`): a
+      // strict `script-src` the web view inherits allows it ('self').
+      const bridge = this.browserHost?.webBridge;
+      if (el._token) {
+        head += bridge
+          ? `<script src="${bridge.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" data-nsh-token="${el._token}"></script>`
+          : `<script>${webBridge(el._token)}</script>`;
+      }
       if (!scroll) head += "<style>html,body{overflow:hidden!important}</style>";
       if (before) head += `<script>${before.replace(/<\/script/gi, "<\\/script")}</script>`;
       const tail = after ? `<script>${after.replace(/<\/script/gi, "<\\/script")}</script>` : "";
