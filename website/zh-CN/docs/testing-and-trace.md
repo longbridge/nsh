@@ -162,7 +162,7 @@ describe("the cart", () => {
 | `locale` | `"en-US"` | 设备的区域设置，BCP 47 标签（`locale()`、`Intl` 的默认值）。 |
 | `localeSettings` | 区域设置的，UTC | 用户的语言与地区设置（`localeSettings()`），列出的项覆盖区域设置的：`languages`（BCP 47 标签，按偏好从高到低排列；`[locale]`）、`timeZone`（IANA 名称；`"UTC"`）、`hourCycle`（`"h12"`、`"h23"`、`"h11"` 或 `"h24"`）、`firstDayOfWeek`（1 是星期一，7 是星期日）、`measurementSystem`（`"metric"`、`"us"` 或 `"uk"`）和 `temperatureUnit`（`"celsius"` 或 `"fahrenheit"`），后四项是区域设置所在地区的。时区只给出名称：`Date` 和 `Intl` 的本地时间仍是这台机器的，`Intl` 给出的时区也是。 |
 | `reducedMotion` | `false` | 用户要求减少动态效果（`reduceMotion()`）。 |
-| `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。使用 `--target` 时，应用以目标平台运行：桌面平台的 `platform` 可用于任何桌面目标和 web，且总以桌面形态运行（在浏览器中无论宽度都是桌面形态，`platform.os` 仍是 `"web"`），`"ios"` 和 `"android"` 只用于各自的目标。 |
+| `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键；桌面平台和 web 上页面的 `header` 放在页面顶部、与窗口同宽，iOS 和 Android 上导航头是系统的）。使用 `--target` 时，应用以目标平台运行：桌面平台的 `platform` 可用于任何桌面目标和 web，且总以桌面形态运行（在浏览器中无论宽度都是桌面形态，`platform.os` 仍是 `"web"`），`"ios"` 和 `"android"` 只用于各自的目标。 |
 | `clock` | 系统时钟 | 手动时钟，它的时间只随测试推进：`{}`，或者用 `{ time }` 从某个 `Date`（或自 Unix 纪元起的毫秒数）开始。见[控制时间](#控制时间)。 |
 | `host` | 无 | 由测试扮演的宿主应用：`{ params, handlers }`。见[扮演宿主应用](#扮演宿主应用)。 |
 | `modules` | 无 | 按模块标识替换应用导入的原生模块的导出：见[替换原生模块](#替换原生模块)。仅限 headless 运行。 |

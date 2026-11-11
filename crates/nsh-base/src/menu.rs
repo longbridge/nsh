@@ -977,8 +977,9 @@ impl Items {
         );
     }
 
-    /// Binds the keys that move the focus from item `key` while `focused`.
-    fn bind_keys(&self, key: u64, focused: Signal<bool>) {
+    /// Binds the keys that move the focus from item `key` while `focused`
+    /// and its level is `open` (none on its way out).
+    fn bind_keys(&self, key: u64, focused: Signal<bool>, open: Memo<bool>) {
         let current = self.focused;
         effect(move || {
             if focused.get() {
@@ -995,7 +996,7 @@ impl Items {
         });
         let items = self.clone();
         crate::keys::bind_while(
-            move || focused.get(),
+            move || focused.get() && open.get(),
             ITEM_KEYS,
             move |step| items.step(key, step),
         );
@@ -1171,24 +1172,31 @@ fn surface(
     // transitions between its looks.
     let motion = SheetMotion::new(move || sheet && open.get(), || Placement::Bottom);
     // The keyboard focus in a trigger's popup as it closes (Escape, an
-    // item chosen) goes back to the trigger once the popup is gone, as a
-    // select's does: the item it was on goes with the popup.
+    // item chosen) goes back to the trigger as the popup starts to go, as
+    // a select's does: a key pressed during its exit is the trigger's, not
+    // the item's it was on. Not after a press outside, which put the focus
+    // where it pressed.
     let trigger = match &at {
         At::Trigger(anchor) | At::Pointer(_, anchor) if !sheet => Some(*anchor),
         _ => None,
     };
-    let inside = stored(false);
-    let refocus = stored(false);
-    if trigger.is_some() {
-        presence.popup().on_focus_in(move || {
-            inside.replace(true);
-        });
-        presence.popup().on_focus_out(move || {
-            inside.replace(false);
-        });
+    if let Some(anchor) = trigger {
+        presence.focus_back_on_close(
+            move || open.get(),
+            move || {
+                if closed_by.get() != Some(OpenChangeReason::PressOutside) {
+                    anchor.focus();
+                }
+            },
+        );
+    }
+    // Opened again from the keyboard on its way out, it is taken back with
+    // its items still there: no layout comes to focus the one asked for.
+    if !sheet {
+        let items = items.clone();
         effect(move || {
-            if !open.get() {
-                refocus.replace(inside.get());
+            if open.get() && keyed.get().is_some() && presence.mounted_untracked() {
+                untracked(|| items.focus_pending());
             }
         });
     }
@@ -1208,14 +1216,7 @@ fn surface(
             },
             move || {
                 closed(MenuEvent::Close);
-                let pressed_outside =
-                    closed_by.replace(None) == Some(OpenChangeReason::PressOutside);
-                if let Some(anchor) = trigger
-                    && refocus.replace(false)
-                    && !pressed_outside
-                {
-                    anchor.focus();
-                }
+                closed_by.replace(None);
             },
         );
     }
@@ -1572,7 +1573,9 @@ pub struct ContextMenuProps {
 /// A menu about its trigger: the secondary button (a right click, a
 /// two-finger click) opens it where the pointer is on the desktops; a
 /// finger held on the trigger opens it as a sheet at the bottom of the
-/// screen on phones and tablets. Shift+F10 or the Menu key on the focused
+/// screen on phones and tablets. While it is open, a secondary click on
+/// the trigger opens it again where the pointer is (it reports closing,
+/// then opening); one elsewhere closes it. Shift+F10 or the Menu key on the focused
 /// trigger (the web, Linux) and a screen reader's "show menu" action (VoiceOver's
 /// VO-Shift-M on macOS, UI Automation's `ShowContextMenu` on Windows) open
 /// it below the trigger with the keyboard focus on its first enabled item,
@@ -1767,7 +1770,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let focused = signal(false);
     let key = hover.as_ref().map(|m| {
         let key = m.items.add(node, m.level, disabled);
-        m.items.bind_keys(key, focused);
+        m.items.bind_keys(key, focused, m.open);
         key
     });
     // Desktops: the pointer moving over it gives it the keyboard focus.
@@ -1778,9 +1781,12 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .zip(key);
     let (moved_over, left) = (pointer.clone(), pointer);
     // In a submenu, Left on the item leaves it for its trigger.
-    if let Some(leave) = hover.as_ref().and_then(|m| m.leave.clone()) {
+    if let Some((leave, open)) = hover
+        .as_ref()
+        .and_then(|m| m.leave.clone().zip(Some(m.open)))
+    {
         crate::keys::bind_while(
-            move || focused.get(),
+            move || focused.get() && open.get(),
             &[("left", false, ())],
             move |()| leave(),
         );
@@ -1889,6 +1895,12 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
             v.on_mouse_leave(move |_: &MouseEvent| items.unpoint(key, node))
         })
         .on_press(move || {
+            // On its way out a menu takes no presses: the pointer's go
+            // through it, and the keyboard's (Return on an item the focus
+            // has not left yet) do nothing.
+            if chosen.as_ref().is_some_and(|m| !m.open.get_untracked()) {
+                return;
+            }
             cx.emit(MenuItemEvent::Select);
             if props.close_on_select.get_untracked()
                 && let Some(m) = &chosen
@@ -2173,7 +2185,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
     // be open already, from the pointer); Left leaves the submenu the
     // trigger is in.
     let focused = signal(false);
-    menu.items.bind_keys(item_key, focused);
+    menu.items.bind_keys(item_key, focused, around);
     // The keyboard on its trigger closes another submenu of its level
     // that the pointer opened; its own stays as it is.
     let focus_in = move || {
@@ -2183,7 +2195,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
     {
         let (items, up) = (menu.items.clone(), menu.leave.clone());
         crate::keys::bind_while(
-            move || focused.get(),
+            move || focused.get() && around.get(),
             &[
                 ("right", false, SubmenuKey::Enter),
                 ("enter", false, SubmenuKey::Enter),

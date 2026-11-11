@@ -142,6 +142,7 @@ pub(super) fn merged(js: &Attrs, own: &Attrs) -> Attrs {
             pressed: own.state.pressed.or(js.state.pressed),
             current: own.state.current.or(js.state.current),
             has_popup: own.state.has_popup || js.state.has_popup,
+            invalid: own.state.invalid || js.state.invalid,
         },
         value: own.value.clone().or_else(|| js.value.clone()),
         pointer_events: if own.pointer_events == PointerEvents::default() {

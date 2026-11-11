@@ -40,7 +40,7 @@ use std::{rc::Rc, sync::Arc};
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
 
-pub use self::measure::Measurement;
+pub use self::measure::{ListScrollPosition, Measurement};
 use self::{
     layout_tree::LayoutTree,
     list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget},
@@ -1946,7 +1946,12 @@ impl<M: TextEngine> Core<M> {
     /// the keyboard focus and open overlays (a row's menu or popover). A
     /// recycled cell would show another row, drop the focus and close the
     /// overlay. Each list's kept rows are all that hold one; in a list in
-    /// another list's row, both rows are kept.
+    /// another list's row, both rows are kept. The rows on either side of
+    /// the focus's are kept with it, so that the platform's Tab and
+    /// Shift+Tab, which only reach views that exist, move on to the next
+    /// row in the list rather than past it, however far the window lags
+    /// (the row the focus reaches then scrolls into view, which renders
+    /// the rows around it).
     fn sync_kept(&mut self) {
         let mut holders = std::mem::take(&mut self.kept_scratch);
         holders.clear();
@@ -1955,11 +1960,11 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .filter_map(|&id| self.key(id).ok()),
         );
-        if let Some((key, id)) = self.focus
-            && self.nodes.get(key as usize).is_some_and(|n| n.id == id)
-        {
-            holders.push(key);
-        }
+        let focus = self
+            .focus
+            .filter(|&(key, id)| self.nodes.get(key as usize).is_some_and(|n| n.id == id))
+            .map(|(key, _)| key);
+        holders.extend(focus);
         holders.extend(self.overlays.iter().copied().filter(|&key| {
             self.overlay(key)
                 .is_some_and(|o| o.host.is_some() && o.config.hint.is_none())
@@ -1982,6 +1987,14 @@ impl<M: TextEngine> Core<M> {
                         .and_then(|s| s.index)
                 {
                     kept.push((parent, index));
+                    if focus == Some(holder) {
+                        if index > 0 {
+                            kept.push((parent, index - 1));
+                        }
+                        if index + 1 < list.count {
+                            kept.push((parent, index + 1));
+                        }
+                    }
                 }
                 key = parent;
             }
@@ -2575,6 +2588,13 @@ impl<M: TextEngine> Core<M> {
                 self.answer_measure(id, call);
                 Ok(())
             }
+            Op::Command {
+                id,
+                command: Command::MeasureScrollPosition { call },
+            } if self.key(id).is_err() => {
+                self.answer_scroll_position(id, call);
+                Ok(())
+            }
             // A window's attributes go into its record, sent once per
             // commit; opening one is checked and resolved here.
             Op::Command {
@@ -3044,6 +3064,9 @@ impl<M: TextEngine> Core<M> {
         for (id, answer) in std::mem::take(&mut self.components.measures) {
             answer.borrow_mut().deliver(self.measure(id));
         }
+        for (id, answer) in std::mem::take(&mut self.components.scroll_positions) {
+            answer.borrow_mut().deliver(self.list_scroll_position(id));
+        }
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
@@ -3088,6 +3111,10 @@ impl<M: TextEngine> Core<M> {
             // are gone or not shown).
             if let Command::Measure { call } = command {
                 self.answer_measure(id, call);
+                continue;
+            }
+            if let Command::MeasureScrollPosition { call } = command {
+                self.answer_scroll_position(id, call);
                 continue;
             }
             let Ok(key) = self.key(id) else { continue };
@@ -7193,10 +7220,10 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
-        // Only colors changed, and the platform draws them from the text:
-        // its typesetting, measurements and final layout all stand; the new
-        // text is mounted with the layout drawn (a fitted text has a layout
-        // of its own text, made again).
+        // Only colors or hidden runs changed, and the platform draws them
+        // from the text: its typesetting, measurements and final layout all
+        // stand; the new text is mounted with the layout drawn (a fitted
+        // text has a layout of its own text, made again).
         if !inserted
             && cx.alignments == alignments
             && colors_at_draw
@@ -10111,6 +10138,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::ImageInfo { .. }
                 | C::AccessibilityFocus
                 | C::Measure { .. }
+                | C::MeasureScrollPosition { .. }
                 | C::SetClipboard { .. }
                 | C::ReadClipboard { .. }
                 | C::SetClipboardImage { .. }

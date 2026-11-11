@@ -11,6 +11,7 @@ import CoreErrorBoundary from "./core-error-boundary";
 import CoreFrameRate from "./core-frame-rate";
 import CoreList from "./core-list";
 import CoreListAnchor from "./core-list-anchor";
+import CoreListPosition from "./core-list-position";
 import CoreMotion from "./core-motion";
 import CoreOverlay from "./core-overlay";
 import CorePrimitives from "./core-primitives";
@@ -38,6 +39,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-frame-rate": CoreFrameRate,
   "core-list": CoreList,
   "core-list-anchor": CoreListAnchor,
+  "core-list-position": CoreListPosition,
   "core-motion": CoreMotion,
   "core-overlay": CoreOverlay,
   "core-primitives": CorePrimitives,

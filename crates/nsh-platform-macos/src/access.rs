@@ -323,6 +323,8 @@ struct AxState {
     enabled: bool,
     selected: bool,
     expanded: bool,
+    /// The content is invalid (`AXInvalid`, which [`invalid`] answers).
+    invalid: bool,
     /// A tree item's depth below the top (AppKit's disclosure level).
     disclosure: Option<u32>,
     /// The children are hidden as a group (`grouped`, or the view is
@@ -378,6 +380,10 @@ enum Ax {
     Navigation,
     /// An item of a tree.
     TreeItem,
+    /// A dialog (ARIA's `dialog`).
+    Dialog,
+    /// An alert dialog (ARIA's `alertdialog`).
+    AlertDialog,
     /// A view standing for the window's close button (`windowControl`).
     CloseButton,
     /// ... its minimize button.
@@ -452,6 +458,8 @@ struct Spec {
     disabled: bool,
     selected: bool,
     expanded: Option<bool>,
+    /// The content does not pass the app's checks (ARIA's `aria-invalid`).
+    invalid: bool,
     /// A tree item's level (1 at the top).
     level: Option<u32>,
     /// Hidden with its subtree.
@@ -711,6 +719,17 @@ fn apply(view: &NSView, spec: &Spec, was: &AxState) -> AxState {
     if was.expanded != expanded {
         view.setAccessibilityExpanded(expanded);
     }
+    let invalid = element && spec.invalid;
+    if was.invalid != invalid && was.role.is_some() {
+        // SAFETY: a view, with WebKit's and Chromium's name for the
+        // notification of a changed `AXInvalid`.
+        unsafe {
+            objc2_app_kit::NSAccessibilityPostNotification(
+                view.as_ref(),
+                &NSString::from_str("AXInvalidStatusChanged"),
+            )
+        };
+    }
     if was.disclosure != disclosure {
         view.setAccessibilityDisclosureLevel(disclosure.unwrap_or(0) as isize);
     }
@@ -724,10 +743,22 @@ fn apply(view: &NSView, spec: &Spec, was: &AxState) -> AxState {
         enabled,
         selected,
         expanded,
+        invalid,
         disclosure,
         grouped,
         range: (min, max),
     }
+}
+
+/// The name of the attribute [`invalid`] answers: WebKit's and Chromium's
+/// for ARIA's `aria-invalid`, which VoiceOver reads ("invalid data").
+/// NSAccessibility has no setter for it, so the view answers it itself.
+pub(crate) const INVALID_ATTRIBUTE: &str = "AXInvalid";
+
+/// Whether the element of the view of `s` reports its content invalid
+/// (`accessibilityState.invalid`; [`INVALID_ATTRIBUTE`]).
+pub(crate) fn invalid(s: &ViewState) -> bool {
+    s.access.ax.invalid
 }
 
 /// The value as it compares: which kind of value AppKit was given, and its
@@ -837,6 +868,17 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
                 constant(NSAccessibilityGroupRole),
                 named("AXLandmarkNavigation"),
             ),
+            // As WebKit maps ARIA's `dialog` and `alertdialog`: VoiceOver
+            // says "web dialog" / "alert dialog" and the label as it
+            // enters.
+            Ax::Dialog => (
+                constant(NSAccessibilityGroupRole),
+                named("AXApplicationDialog"),
+            ),
+            Ax::AlertDialog => (
+                constant(NSAccessibilityGroupRole),
+                named("AXApplicationAlertDialog"),
+            ),
             // As an option: AppKit's outline rows need the outline's rows
             // and columns; an item of a tree is static text that reports
             // its expanded state and its disclosure level.
@@ -919,6 +961,7 @@ fn spec_for(
         disabled: a.state.disabled,
         selected: a.state.selected,
         expanded: a.state.expanded,
+        invalid: a.state.invalid,
         level: a.level,
         hidden: a.hidden || invisible,
         grouped: (a.accessible == Some(true) || role.folds()) && kind != ViewKind::Text,
@@ -997,6 +1040,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         // A tree is a list of its items, as a listbox is (see `TreeItem`).
         Role::Tree => Ax::List,
         Role::TreeItem => Ax::TreeItem,
+        Role::Dialog => Ax::Dialog,
+        Role::AlertDialog => Ax::AlertDialog,
     }
 }
 
@@ -1108,6 +1153,17 @@ mod tests {
         assert_eq!(s.role, Ax::Button);
         assert_eq!(s.label.as_deref(), Some("Label"));
         assert_eq!(s.help.as_deref(), Some("Opens it"));
+        assert!(!s.invalid);
+        // A field whose content the app rejected (`AXInvalid`).
+        let invalid = Accessibility {
+            label: Some("Email".into()),
+            state: AccessibilityState {
+                invalid: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(spec_for(&invalid, ViewKind::View, false, None, false).invalid);
 
         let value = AccessibilityValue {
             min: Some(0.0),
@@ -1169,6 +1225,8 @@ mod tests {
             (Role::TreeItem, Ax::TreeItem),
             (Role::MenuItemCheckbox, Ax::MenuItem),
             (Role::MenuItemRadio, Ax::MenuItem),
+            (Role::Dialog, Ax::Dialog),
+            (Role::AlertDialog, Ax::AlertDialog),
         ] {
             assert_eq!(role_for(&with_role(role), ViewKind::View, false), ax);
         }

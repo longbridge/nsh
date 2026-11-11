@@ -112,7 +112,7 @@ pub(super) struct NodeParts {
 
 /// The [`state`] bits an element is in by its accessibility state `s`:
 /// selected, checked (true), indeterminate (checked mixed), expanded,
-/// pressed (true: a toggle button that is on) and busy.
+/// pressed (true: a toggle button that is on), busy and invalid.
 pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
     use crate::Checked;
     let mut states = 0;
@@ -132,6 +132,9 @@ pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
     }
     if s.busy {
         states |= state::BUSY;
+    }
+    if s.invalid {
+        states |= state::INVALID;
     }
     states
 }

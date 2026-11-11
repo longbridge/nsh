@@ -994,7 +994,9 @@ what changed.
   The executor keeps the closures in two queues: `Core::take_events` (the engine handing the events out) makes the
   waiting ones due, and the next `Core::commit` runs the due ones first, before its views render, each under the owner
   current when it was registered (dropped unrun once that owner is disposed), so what they change shows in that
-  commit with the app's props. The engine's commit loop goes on for another round while some are due
+  commit with the app's props. A closure that must run even when the answer takes away what the event came from (a
+  popup's content, which Escape inside it closes) is registered under the component's own owner (`Owner::run`), as
+  the popups' open state does. The engine's commit loop goes on for another round while some are due
   (`Core::has_due_answers`), so they go out in the batch of the events they waited for. With a Rust owner, whose
   listener ran when the event was emitted, `f` runs in the commit after the one that rendered what the listener
   changed. The web's browser engine delivers the events the same way (its JS runs in the engine's call, its ops are
@@ -1146,7 +1148,10 @@ core (`ElementRef::transition_time`, an `Action::TransitionTime` the commit answ
 `transition`, the app's `class`, `style` and theme included: the longest duration plus delay, two seconds at most),
 waits that long, then unmounts, and `onClose` follows. A generation counter keeps a stale frame or exit from acting on
 a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
-never gone, so neither `onClose` nor `onOpen` fires. Without a look for a state, or while the user asks for less
+never gone, so neither `onClose` nor `onOpen` fires. On its way out it takes no keys either: the keyboard focus inside
+goes back to the trigger as it closes, not once it is gone (`PopupPresence::focus_back_on_close`, `Popover`'s and a
+desktop menu's), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
+during the exit is the trigger's (Return opens it again, taking it back). Without a look for a state, or while the user asks for less
 motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
 for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed

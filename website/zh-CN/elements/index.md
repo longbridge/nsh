@@ -356,6 +356,8 @@ import { Menu } from "nsh/desktop";
 
 在 macOS 和 Web 上，Tab 按视图树的顺序在停靠点之间移动键盘焦点：输入框、可按压的视图，以及所有设置了 `focusable` 的视图。焦点样式（`focus:`、`.focus(..)`）为获得焦点的视图设置样式；它可按压时，按 Return 或空格会按下它。点击会按下视图但不让它获得焦点，所以焦点样式只在键盘聚焦时生效。
 
+焦点到达的视图会在外层的滚动视图和列表里滚进视野。Tab 会走遍列表的每一行，包括还没渲染的行：焦点到达时列表渲染出下一行，走过最后一行后焦点才离开列表。
+
 焦点和按压相互独立。在获得焦点时接收按键的视图（图表、滑块、用方向键移动选中项的列表）设置 `focusable`，并在获得焦点期间绑定自己的按键（`onFocus` / `onBlur` 配合 [`keymap`](../modules/nsh.md#keymap)）；点击它时，按压照样交给外层可按压的视图，比如一张点开详情页的卡片。
 
 ref 的 `focus()` 像 Tab 一样把键盘焦点移到停靠点上（显示它的焦点样式并触发 `onFocus`），比如在弹层关闭后把焦点还给它的触发器；`blur()` 让焦点离开它。
@@ -561,6 +563,7 @@ view()
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | 沿列表方向滚动到某个偏移量。 |
 | `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | 把某一项滚动到可见区域。 |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`、`ListRef` | 滚动到内容末尾。 |
+| `measureScrollPosition()` | `measure_scroll_position()` | `ListRef` | [视口起点落在哪一行](../docs/lists.md#keeping-a-reading-position)。 |
 | `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)`、`postMessage(data)` | `reload()`、`go_back()`、`go_forward()`、`stop_loading()`、`inject_java_script(..)`、`post_message(..)` | `WebViewRef` | 控制页面。 |
 | `seek(seconds)` | `seek(seconds)` | `VideoRef` | 跳转到某个时间点。 |
 | `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | 调用已注册原生组件的命令（[`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)）。 |

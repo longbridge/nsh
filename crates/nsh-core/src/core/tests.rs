@@ -1832,23 +1832,24 @@ fn color_change_skips_layout_and_identical_texts_share_measurements() {
     assert_eq!(c.text_engine.layouts.get(), 4);
 }
 
-#[test]
-fn colors_drawn_from_the_text_keep_its_typesetting() {
+/// A text block (10) of three words, each a span of its own (12, 14, 16;
+/// their raw texts 13, 15, 17), on an engine that draws colors from the
+/// text or not; `ops` run before the block's first commit.
+fn three_words(colors_at_draw: bool, ops: Vec<Op>) -> Core<FakeEngine> {
     let mut c = Core::new(
         FakeEngine {
-            colors_at_draw: true,
+            colors_at_draw,
             ..FakeEngine::default()
         },
         size_pt(320.0, 480.0),
     );
-    // A block of three words, each a span of its own.
-    let mut ops = vec![Op::Create {
+    let mut block = vec![Op::Create {
         id: 10,
         tag: Tag::Text,
     }];
     for (i, word) in ["fade ", "in ", "words"].into_iter().enumerate() {
         let (span, raw) = (12 + i as u32 * 2, 13 + i as u32 * 2);
-        ops.extend([
+        block.extend([
             Op::Create {
                 id: span,
                 tag: Tag::Text,
@@ -1869,28 +1870,41 @@ fn colors_drawn_from_the_text_keep_its_typesetting() {
             },
         ]);
     }
-    ops.push(Op::Insert {
+    block.push(Op::Insert {
         parent: ROOT_ID,
         child: 10,
         before: None,
     });
-    apply(&mut c, ops);
-    let mounted = |batch: &MountBatch| {
-        batch.items.iter().find_map(|i| match i {
-            MountItem::Text {
-                id: 10,
-                text,
-                layout,
-                content,
-            } => Some((text.clone(), layout.clone(), *content)),
-            _ => None,
-        })
-    };
+    block.extend(ops);
+    apply(&mut c, block);
+    c
+}
+
+/// The text block 10 mounted in `batch`: its text, layout and content box.
+fn mounted_words(batch: &MountBatch) -> Option<(Arc<AttributedText>, TextLayout, Bounds<Points>)> {
+    batch.items.iter().find_map(|i| match i {
+        MountItem::Text {
+            id: 10,
+            text,
+            layout,
+            content,
+        } => Some((text.clone(), layout.clone(), *content)),
+        _ => None,
+    })
+}
+
+/// How many times the engine typeset, measured and laid out a text.
+fn engine_counts(c: &Core<FakeEngine>) -> (u32, u32, u32) {
+    let e = &c.text_engine;
+    (e.prepares.get(), e.measures.get(), e.layouts.get())
+}
+
+#[test]
+fn colors_drawn_from_the_text_keep_its_typesetting() {
+    let mut c = three_words(true, Vec::new());
+    let mounted = mounted_words;
+    let counts = engine_counts;
     let (_, first, content) = mounted(&c.commit().unwrap()).expect("mounted");
-    let counts = |c: &Core<FakeEngine>| {
-        let e = &c.text_engine;
-        (e.prepares.get(), e.measures.get(), e.layouts.get())
-    };
     let before = counts(&c);
     let color = |c: &mut Core<FakeEngine>, id, color| {
         c.apply(style_op(id, &[("color", StyleValue::Str(color))]))
@@ -1918,6 +1932,78 @@ fn colors_drawn_from_the_text_keep_its_typesetting() {
     let (_, layout, _) = mounted(&c.commit().unwrap()).expect("the new text mounted");
     assert!(!Arc::ptr_eq(&layout.0, &first.0));
     assert!(c.text_engine.prepares.get() > before.0);
+}
+
+#[test]
+fn hidden_words_drawn_from_the_text_keep_its_typesetting() {
+    let visibility = |id, v| style_op(id, &[("visibility", StyleValue::Str(v))]);
+    // The last two words are queued: hidden, in their place in the lines.
+    let mut c = three_words(
+        true,
+        vec![visibility(14, "hidden"), visibility(16, "hidden")],
+    );
+    let (text, first, content) = mounted_words(&c.commit().unwrap()).expect("mounted");
+    assert_eq!(text.visible_text(), "fade ");
+    let before = engine_counts(&c);
+    let show = |c: &mut Core<FakeEngine>, ops: Vec<Op>| {
+        apply(c, ops);
+        let batch = c.commit().unwrap();
+        assert_eq!(batch.items.len(), 1, "only the text: {:?}", batch.items);
+        mounted_words(&batch).expect("the new text mounted")
+    };
+    // A word starts: shown, as a color would change, with the layout
+    // already drawn and nothing typeset, measured or laid out again.
+    let (text, layout, moved) = show(&mut c, vec![visibility(14, "visible")]);
+    assert_eq!(text.visible_text(), "fade in ");
+    assert!(Arc::ptr_eq(&layout.0, &first.0), "the layout drawn before");
+    assert_eq!(moved, content);
+    assert_eq!(engine_counts(&c), before);
+    // The next one starts in a color of its own, and is hidden again.
+    let fading = vec![
+        visibility(16, "visible"),
+        style_op(16, &[("color", StyleValue::Str("rgba(255, 0, 0, 0.5)"))]),
+    ];
+    let (text, layout, _) = show(&mut c, fading);
+    assert_eq!(text.visible_text(), "fade in words");
+    assert!(Arc::ptr_eq(&layout.0, &first.0));
+    let (text, layout, _) = show(&mut c, vec![visibility(16, "hidden")]);
+    assert_eq!(text.visible_text(), "fade in ");
+    assert!(Arc::ptr_eq(&layout.0, &first.0));
+    assert_eq!(engine_counts(&c), before);
+    // New characters, or a new size, are typeset again.
+    c.apply(Op::SetText {
+        id: 17,
+        text: "word".into(),
+    })
+    .unwrap();
+    let (_, layout, _) = mounted_words(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(!Arc::ptr_eq(&layout.0, &first.0));
+    let typeset = engine_counts(&c).0;
+    assert!(typeset > before.0);
+    apply(
+        &mut c,
+        vec![style_op(16, &[("fontSize", StyleValue::Number(20.0))])],
+    );
+    mounted_words(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(engine_counts(&c).0 > typeset);
+}
+
+#[test]
+fn hidden_words_are_typeset_again_where_colors_are_typeset() {
+    let mut c = three_words(
+        false,
+        vec![style_op(14, &[("visibility", StyleValue::Str("hidden"))])],
+    );
+    let (_, first, _) = mounted_words(&c.commit().unwrap()).expect("mounted");
+    let before = engine_counts(&c);
+    apply(
+        &mut c,
+        vec![style_op(14, &[("visibility", StyleValue::Str("visible"))])],
+    );
+    let (text, layout, _) = mounted_words(&c.commit().unwrap()).expect("the new text mounted");
+    assert!(!text.has_hidden());
+    assert!(!Arc::ptr_eq(&layout.0, &first.0));
+    assert!(engine_counts(&c).0 > before.0, "typeset again");
 }
 
 #[test]
@@ -1958,6 +2044,11 @@ fn spans_differing_only_in_colors_are_told_apart_from_other_changes() {
     };
     let green = Some(Color(0x00ff_00ff));
     assert!(text(&[("ab", lined(None))]).same_but_colors(&text(&[("ab", lined(green))])));
+    // Hidden characters keep their place: a run hidden or shown again is
+    // only drawn differently, as one recolored.
+    let hidden = text(&[("ab", style), ("cd", red.hide())]);
+    assert!(plain.same_but_colors(&hidden) && hidden.same_but_colors(&split));
+    assert!(!hidden.same_but_colors(&text(&[("ab", style), ("cd", bold.hide())])));
 }
 
 #[test]
@@ -2470,6 +2561,18 @@ fn render_list_binds(
     row_height: f32,
     paced: usize,
 ) -> usize {
+    render_sized_binds(c, next_id, cells, &|_| row_height, paced)
+}
+
+/// [`render_list_binds`] with row `index` `row_height(index)` points
+/// tall.
+fn render_sized_binds(
+    c: &mut Core<FakeEngine>,
+    next_id: &mut u32,
+    cells: &mut Vec<u32>,
+    row_height: &dyn Fn(u32) -> f32,
+    paced: usize,
+) -> usize {
     let mut binds = Vec::new();
     c.take_list_binds(&mut binds);
     c.take_paced_list_binds(paced, &mut binds);
@@ -2502,7 +2605,7 @@ fn render_list_binds(
             let cell = cells[slot as usize];
             c.apply(style_op(
                 cell,
-                &[("height", StyleValue::Number(row_height))],
+                &[("height", StyleValue::Number(row_height(index)))],
             ))
             .unwrap();
             c.apply(Op::SetProp {
@@ -2631,6 +2734,169 @@ fn tracked_tree_order_puts_a_lists_cells_in_screen_order() {
     assert!(shown.windows(2).all(|w| y(&w[0]) <= y(&w[1])), "{shown:?}");
     // The cells were recycled out of the order they were made in.
     assert_ne!(shown, cells);
+}
+
+/// Plays a list's scroll view on the platform: applies the scrolls the
+/// core sends it, clamped to its content, counting them as a platform
+/// does.
+#[derive(Default)]
+struct ScrollingPlatform {
+    y: f32,
+    applied: u32,
+    content: f32,
+}
+
+impl ScrollingPlatform {
+    /// Applies what `batch` sends list `id` of `viewport` points;
+    /// whether it scrolled.
+    fn apply(&mut self, batch: &MountBatch, id: NodeId, viewport: f32) -> bool {
+        let mut scrolled = false;
+        for item in &batch.items {
+            match item {
+                MountItem::ScrollContent { id: i, size } if *i == id => {
+                    self.content = size.height.0;
+                }
+                MountItem::ScrollBy { id: i, dy, .. } if *i == id => {
+                    self.y += dy.0;
+                    self.applied += 1;
+                    scrolled = true;
+                }
+                MountItem::Command {
+                    id: i,
+                    command: Command::ScrollTo { y, .. },
+                } if *i == id => {
+                    self.y = y.0;
+                    self.applied += 1;
+                    scrolled = true;
+                }
+                _ => {}
+            }
+            self.y = self.y.clamp(0.0, (self.content - viewport).max(0.0));
+        }
+        scrolled
+    }
+
+    /// Commits and renders the rows list 2 binds, row `index`
+    /// `row_height(index)` tall, reporting the scrolls it applies, until
+    /// nothing changes.
+    fn settle(
+        &mut self,
+        c: &mut Core<FakeEngine>,
+        next_id: &mut u32,
+        cells: &mut Vec<u32>,
+        row_height: &dyn Fn(u32) -> f32,
+    ) {
+        for _ in 0..50 {
+            let batch = c.commit();
+            let scrolled = batch.as_ref().is_some_and(|b| self.apply(b, 2, 400.0));
+            if scrolled {
+                c.set_scroll_offset(2, point(px(0.0), px(self.y)), self.applied);
+            }
+            let bound = render_sized_binds(c, next_id, cells, row_height, usize::MAX);
+            if batch.is_none() && !scrolled && bound == 0 {
+                return;
+            }
+        }
+        panic!("the list never settled");
+    }
+}
+
+/// What `ref.measureScrollPosition()` of node `id` answers.
+fn scroll_position(c: &mut Core<FakeEngine>, id: NodeId) -> crate::JsonValue {
+    c.apply(Op::Command {
+        id,
+        command: Command::MeasureScrollPosition { call: 7 },
+    })
+    .unwrap();
+    c.commit();
+    js_events(c)
+        .into_iter()
+        .find_map(|(_, _, payload)| match payload {
+            EventPayload::Native { name, data } if &*name == "$return" && data["c"] == 7 => {
+                Some(data["v"].clone())
+            }
+            _ => None,
+        })
+        .expect("an answer")
+}
+
+/// The row list 2 lays out at content offset `y`, and how far into it
+/// `y` is, from the frames of its cells.
+fn row_laid_out_at(c: &Core<FakeEngine>, y: f32) -> (u32, f32) {
+    let list = c.nodes[c.key(2).unwrap() as usize].list.as_ref().unwrap();
+    list.slots
+        .iter()
+        .filter_map(|s| s.ready().map(|index| (index, s.cell)))
+        .find_map(|(index, cell)| {
+            let frame = c.nodes[cell as usize].frame;
+            let (top, height) = (frame.origin.y.0, frame.size.height.0);
+            (top <= y && y < top + height).then_some((index, y - top))
+        })
+        .expect("a row at the offset")
+}
+
+/// After a jump far into rows laid out by their estimate and corrected
+/// as they are measured, and a scroll, the list says which row the
+/// viewport starts in and how far into it, as its cells are laid out
+/// (rows above measured and estimated alike); scrolling a list made anew
+/// to that row, that far, puts the viewport's start back there.
+#[test]
+fn a_list_measures_where_its_viewport_starts_among_its_rows() {
+    let row_height = |index: u32| 30.0 + (index * 37 % 7) as f32 * 15.0;
+    let open = |c: &mut Core<FakeEngine>| {
+        thousand_rows(c);
+        let (mut next_id, mut cells) = (100, Vec::new());
+        let mut platform = ScrollingPlatform::default();
+        platform.settle(c, &mut next_id, &mut cells, &row_height);
+        (next_id, cells, platform)
+    };
+    let mut c = core();
+    let (mut next_id, mut cells, mut platform) = open(&mut c);
+    assert_eq!(
+        scroll_position(&mut c, 2),
+        serde_json::json!({ "index": 0, "offset": 0.0 })
+    );
+    assert_eq!(scroll_position(&mut c, ROOT_ID), crate::JsonValue::Null);
+
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToIndex {
+            index: 400,
+            animated: false,
+            view_position: crate::geometry::Percentage(0.0),
+            view_offset: px(0.0),
+        },
+    })
+    .unwrap();
+    platform.settle(&mut c, &mut next_id, &mut cells, &row_height);
+    assert_eq!(row_laid_out_at(&c, platform.y), (400, 0.0));
+    // Measured rows replaced their estimates on the way.
+    assert_ne!(platform.y, 400.0 * 50.0);
+    platform.y += 70.0;
+    c.set_scroll_offset(2, point(px(0.0), px(platform.y)), platform.applied);
+    platform.settle(&mut c, &mut next_id, &mut cells, &row_height);
+
+    let (index, offset) = row_laid_out_at(&c, platform.y);
+    assert!(offset > 0.0, "{index} {offset}");
+    let at = scroll_position(&mut c, 2);
+    assert_eq!(at, serde_json::json!({ "index": index, "offset": offset }));
+
+    // A list made anew restores it with `scrollToIndex`.
+    let mut c = core();
+    let (mut next_id, mut cells, mut platform) = open(&mut c);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToIndex {
+            index,
+            animated: false,
+            view_position: crate::geometry::Percentage(0.0),
+            view_offset: px(-offset),
+        },
+    })
+    .unwrap();
+    platform.settle(&mut c, &mut next_id, &mut cells, &row_height);
+    assert_eq!(row_laid_out_at(&c, platform.y), (index, offset));
+    assert_eq!(scroll_position(&mut c, 2), at);
 }
 
 #[test]
@@ -4638,6 +4904,121 @@ fn screens_fill_their_stack_below_the_header() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 320.0, 480.0)));
+}
+
+/// Without a native header, a screen's `header` slot is as wide as the
+/// screen whatever it holds: a long one-line title shrinks instead of
+/// pushing the header, and the button after it, past the window's edge.
+#[test]
+fn a_drawn_header_is_as_wide_as_the_screen() {
+    let mut c = core();
+    c.set_header_heights(crate::NO_NATIVE_HEADER.0, crate::NO_NATIVE_HEADER.1);
+    let square = |id| {
+        style_op(
+            id,
+            &[
+                ("width", StyleValue::Number(44.0)),
+                ("height", StyleValue::Number(44.0)),
+                ("flexShrink", StyleValue::Number(0.0)),
+            ],
+        )
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Stack,
+        },
+        style_op(2, &[("flex", StyleValue::Number(1.0))]),
+        Op::Create {
+            id: 3,
+            tag: Tag::Screen,
+        },
+        Op::Create {
+            id: 4,
+            tag: Tag::HeaderItem,
+        },
+        Op::SetProp {
+            id: 4,
+            prop: Prop::HeaderSlot(crate::HeaderSlot::Header),
+        },
+        Op::Create {
+            id: 6,
+            tag: Tag::View,
+        },
+        style_op(6, &[("flexDirection", StyleValue::Str("row"))]),
+        Op::Create {
+            id: 8,
+            tag: Tag::View,
+        },
+        square(8),
+        Op::Create {
+            id: 10,
+            tag: Tag::View,
+        },
+        style_op(
+            10,
+            &[
+                ("flex", StyleValue::Number(1.0)),
+                ("minWidth", StyleValue::Number(0.0)),
+            ],
+        ),
+        Op::Create {
+            id: 12,
+            tag: Tag::Text,
+        },
+        style_op(12, &[("numberOfLines", StyleValue::Number(1.0))]),
+        Op::CreateText {
+            id: 13,
+            text: "a title far too long to fit on one line of the header".repeat(2),
+        },
+        Op::Create {
+            id: 14,
+            tag: Tag::View,
+        },
+        square(14),
+        Op::Create {
+            id: 16,
+            tag: Tag::View,
+        },
+        style_op(16, &[("flex", StyleValue::Number(1.0))]),
+    ];
+    ops.extend([
+        insert(12, 13),
+        insert(10, 12),
+        insert(6, 8),
+        insert(6, 10),
+        insert(6, 14),
+        insert(4, 6),
+        insert(3, 4),
+        insert(3, 16),
+        insert(2, 3),
+        insert(ROOT_ID, 2),
+    ]);
+    apply(&mut c, ops);
+    let mut frames = std::collections::HashMap::new();
+    for width in [320.0, 360.0, 600.0] {
+        c.set_viewport(size_pt(width, 480.0));
+        let batch = c.commit().unwrap();
+        for item in &batch.items {
+            if let MountItem::Frame { id, frame } = item {
+                frames.insert(*id, *frame);
+            }
+        }
+        let header = frames[&4];
+        assert_eq!(header.size.width, px(width), "the header at {width}");
+        let right = frames[&14];
+        assert_eq!(
+            right.origin.x + right.size.width,
+            px(width),
+            "the button after the title at {width}"
+        );
+        assert_eq!(frames[&10].size.width, px(width - 88.0));
+    }
 }
 
 #[test]
@@ -7240,6 +7621,65 @@ fn pressed_style_and_aria_variants_follow_the_accessibility_state() {
     }
 }
 
+/// `accessibilityState.invalid` from its JS shape: only `true` marks the
+/// content invalid.
+#[test]
+fn invalid_decodes_from_js() {
+    use crate::{
+        AccessibilityProp,
+        js::host::{HostCx, HostProps},
+    };
+    let invalid = |v: serde_json::Value| match AccessibilityProp::decode(
+        "accessibilityState",
+        &J(v),
+        &mut HostCx::default(),
+    )
+    .expect("accessibilityState")
+    .expect("a value")
+    {
+        AccessibilityProp::State(s) => s.invalid,
+        p => panic!("{p:?}"),
+    };
+    assert!(invalid(serde_json::json!({ "invalid": true })));
+    assert!(!invalid(serde_json::json!({ "invalid": false })));
+    assert!(!invalid(serde_json::json!({})));
+    assert!(!invalid(serde_json::json!({ "invalid": "yes" })));
+}
+
+/// An invalid field takes its `aria-invalid:` classes, as Tailwind's
+/// `&[aria-invalid="true"]`, while its accessibility state says so; the
+/// core sets the state, the platform never reports it.
+#[test]
+fn aria_invalid_classes_follow_the_accessibility_state() {
+    use crate::{AccessibilityProp, AccessibilityState};
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white aria-invalid:bg-black");
+    let state = |invalid| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+            invalid,
+            ..AccessibilityState::default()
+        })),
+    };
+    apply(&mut c, vec![state(true)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0x0000_00ff)
+    );
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates { id: 2, states }
+            if states & crate::tailwind::state::INVALID != 0
+    )));
+    apply(&mut c, vec![state(false)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
+}
+
 /// The accessibility state's new members and `accessibilityLevel`, from
 /// their JS shapes.
 #[test]
@@ -7304,6 +7744,8 @@ fn pressed_current_and_level_decode_from_js() {
         ("treeitem", R::TreeItem),
         ("menuitemcheckbox", R::MenuItemCheckbox),
         ("menuitemradio", R::MenuItemRadio),
+        ("dialog", R::Dialog),
+        ("alertdialog", R::AlertDialog),
     ] {
         assert_eq!(role(name), r);
     }
@@ -8198,8 +8640,10 @@ fn a_part_projected_focused_shows_focus_visible_while_the_focus_does() {
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 1.0);
     // The focus leaving the tree (its row still projected as it renders
-    // next) takes `focus-visible:` off at once.
+    // next) takes `focus-visible:` off as the focus goes: a lone blur
+    // lets go at the frame.
     c.set_states(2, 0);
+    c.run_frame(crate::time::now());
     let batch = c.commit().unwrap();
     assert_eq!(view_style_of(&batch, 4).unwrap().opacity, 0.75);
     // Never its own state: its events and accessibility do not see it.
@@ -13470,6 +13914,82 @@ mod components {
         let _ = c.commit();
         scroll(&mut c, 16000.0, 3);
         assert!(!bound(&c, 1) && !bound(&c, 2));
+    }
+
+    /// A long list of its own rows, each a stop of Tab.
+    #[component]
+    fn FocusableRows() -> impl IntoElement {
+        virtual_list(500, move |at| {
+            view()
+                .h(px(40.0))
+                .focusable(true)
+                .child(text(move || format!("item {}", at.index())))
+        })
+        .estimated_item_size(px(40.0))
+        .flex_1()
+    }
+
+    /// The rows on either side of the one holding the keyboard focus stay
+    /// rendered with it, wherever the list scrolls: Tab and Shift+Tab find
+    /// the next stop in the list, not the view after it.
+    #[test]
+    fn virtual_lists_keep_the_rows_beside_the_focused_one() {
+        use crate::tailwind::state::FOCUSED;
+        // The focused row, the rows kept with it, rows that go. At the
+        // list's start there is no row before.
+        for (focused, kept, gone) in [(5, &[4, 5, 6][..], &[3, 7][..]), (0, &[0, 1], &[2])] {
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<FocusableRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let list = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Create { id, kind } if *kind == ViewKind::Scroll => Some(*id),
+                    _ => None,
+                })
+                .expect("a list");
+            let content = format!("item {focused}");
+            let row = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id, text, .. } if text.text == content => Some(*id),
+                    _ => None,
+                })
+                .map(|id| {
+                    let key = c.key(id).unwrap();
+                    c.nodes[c.nodes[key as usize].parent as usize].id
+                })
+                .unwrap_or_else(|| panic!("no text {content:?}"));
+            let bound = |c: &Core<FakeEngine>, row: u32| {
+                let key = c.key(list).unwrap();
+                let list = c.nodes[key as usize].list.as_ref().unwrap();
+                list.slots.iter().any(|s| s.index == Some(row))
+            };
+            let scroll = |c: &mut Core<FakeEngine>, y: f32, applied| {
+                c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+                for _ in 0..3 {
+                    let _ = c.commit();
+                }
+            };
+            c.set_states(row, FOCUSED);
+            let _ = c.commit();
+            scroll(&mut c, 12000.0, 1);
+            for &i in kept {
+                assert!(bound(&c, i), "row {i} stays with row {focused}");
+            }
+            for &i in gone {
+                assert!(!bound(&c, i), "row {i} goes");
+            }
+            // The focus leaves: they go too.
+            c.set_states(row, 0);
+            let _ = c.commit();
+            scroll(&mut c, 16000.0, 2);
+            for &i in kept {
+                assert!(!bound(&c, i), "row {i} goes");
+            }
+        }
     }
 
     /// What a branch of `ScopedRows` provides to what it makes.
@@ -25398,12 +25918,12 @@ fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
     js_events(&mut c);
 
     let menu = |pointer_type| {
-        EventPayload::ContextMenu(crate::ContextMenuEvent::new(
+        crate::ContextMenuEvent::new(
             point(px(1.0), px(2.0)),
             point(px(5.0), px(46.0)),
             Default::default(),
             pointer_type,
-        ))
+        )
     };
     let mouse = Some(crate::PointerType::Mouse);
     for (id, pointer_type, outside) in [
@@ -25419,11 +25939,10 @@ fn a_secondary_click_is_a_press_outside_the_overlays_it_misses() {
         (10, None, false),
         (10, Some(crate::PointerType::Touch), false),
     ] {
-        c.component_event(id, EventKind::ContextMenu, &menu(pointer_type));
-        let events = js_events(&mut c);
-        let pressed = events.iter().find_map(|(at, kind, payload)| {
-            (*at == 4 && *kind == EventKind::PressOutside).then_some(payload)
-        });
+        let events = c.context_menu_presses_outside(id, &menu(pointer_type));
+        let pressed = events
+            .iter()
+            .find_map(|(at, payload)| (*at == 4).then_some(payload));
         assert_eq!(pressed.is_some(), outside, "{id} {pointer_type:?}");
         if let Some(payload) = pressed {
             assert_eq!(

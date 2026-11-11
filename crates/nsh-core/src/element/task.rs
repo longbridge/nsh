@@ -182,6 +182,10 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// Measures where the list's viewport starts among its rows with the
+    /// layout of the commit the action goes out with; the position
+    /// resolves the slot.
+    MeasureScrollPosition(NodeId, AnswerSlot<Option<crate::ListScrollPosition>>),
     /// Evaluates a web view's script within a timeout, with its answer
     /// kept by the core.
     Evaluate(
