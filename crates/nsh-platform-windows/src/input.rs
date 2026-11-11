@@ -2617,7 +2617,7 @@ mod tests {
     fn root() -> NshView {
         let root = NshView::new(ROOT_ID, ViewKind::View);
         root.state_mut().frame = crate::geom::rect(0.0, 0.0, 400.0, 400.0);
-        root.set_invalidate(Rc::new(|_| {}));
+        root.set_invalidate(Rc::new(|_, _| {}));
         root
     }
 
