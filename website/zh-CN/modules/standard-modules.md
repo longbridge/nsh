@@ -190,7 +190,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 未授权的 URL 在任何连接开始之前就被拒绝。全局 `WebSocket` 像浏览器报告连接失败那样报告它：构造函数返回 socket，随后 socket 触发 `error` 和 `close`（code 为 1006，`wasClean` 为 `false`），因此应用在构造函数之后设置的处理函数会收到这两个事件。模块的 `connect` 以 `ERR_ACCESS_DENIED` 拒绝（`permission` 为 `"network"`，`resource` 为该 URL）。第 33 个 WebSocket 以 `ERR_NSH_QUOTA_EXCEEDED` 抛出（构造函数）或拒绝（`connect`），格式错误的 URL 为 `SyntaxError`（构造函数）或 `TypeError`（`connect`）。
 
-全局 `WebSocket` 的发送队列最多 8 条消息、缓冲总量最多 8 MiB（`bufferedAmount`），超出任一项时 `send()` 抛出 `ERR_NSH_QUOTA_EXCEEDED`；socket 进入关闭过程后，`send()` 丢弃其数据，与浏览器一致。握手和每次写入超时为 30 秒，关闭时最多等待 5 秒对端的关闭帧。消息到达时即以 `message` 事件交付。
+全局 `WebSocket` 与浏览器一样，先缓冲要发送的数据，再由连接写出：缓冲总量最多 8 MiB（`bufferedAmount`）、最多 1024 条消息，因此同一轮中连续的多次 `send()` 会按顺序排队；超出任一项时 `send()` 抛出 `ERR_NSH_QUOTA_EXCEEDED`；socket 进入关闭过程后，`send()` 丢弃其数据，与浏览器一致。握手和每次写入超时为 30 秒，关闭时最多等待 5 秒对端的关闭帧。消息到达时即以 `message` 事件交付。
 
 `websocket` 模块的 `WebSocketConnection` 最多同时有 8 个待完成操作（读、写、关闭），尚未发出的写入合计最多 8 MiB；超过任一上限的 `write()` 以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝，超过 8 MiB 的消息以 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）拒绝。同一时间只能有一个 `read()` 等待，第二个以 `TypeError` 拒绝。到达后尚未读取的消息等待应用读取，消息的流量跟随应用的读取：有八条消息或 8 MiB 等待读取时，连接暂停从网络读取，对端的发送也随之等待；应用读取后连接恢复读取。解析、连接与握手合计、每次写入和关闭的超时均为 30 秒。
 

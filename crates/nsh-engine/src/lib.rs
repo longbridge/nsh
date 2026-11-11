@@ -502,6 +502,15 @@ impl Bundle {
             }
             bundle.url_schemes = schemes;
         }
+        // The files it opens come as `file:` URLs (`nsh_core::file_type`).
+        if info
+            .as_ref()
+            .is_some_and(nsh_core::file_type::declares_file_types)
+        {
+            bundle
+                .url_schemes
+                .push(nsh_core::file_type::FILE_SCHEME.to_owned());
+        }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
             .map(std::path::Path::to_path_buf);
@@ -1228,6 +1237,7 @@ enum Message {
     Kept(Vec<NodeId>),
     ContentCulling(bool),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
+    InputComposing(NodeId, Option<String>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
     AnimationsFinished(Vec<nsh_core::animation::Finished>),
@@ -1370,6 +1380,14 @@ impl EngineControl {
         let _ = self
             .tx
             .send(Message::InputScroll(id, offset, content, viewport));
+    }
+
+    /// Reports what input `id` shows while an input method composes in it
+    /// (its text with the composition at the caret), `None` once the
+    /// composition ends: the core measures the input with it, so it grows
+    /// as the composition wraps (`Core::input_composing`).
+    pub fn input_composing(&self, id: NodeId, shown: Option<String>) {
+        let _ = self.tx.send(Message::InputComposing(id, shown));
     }
 
     /// Reports the zoom scale of a zoomable scroll view (before the offset
@@ -1550,6 +1568,8 @@ pub struct Engine {
     quit_listeners: Arc<std::sync::atomic::AtomicBool>,
     /// The app's disk cache of downloaded images.
     image_cache: Option<nsh_core::image::DiskCache>,
+    /// [`Engine::media_files`].
+    media_files: Arc<nsh_core::access::MediaFiles>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1579,6 +1599,7 @@ impl Engine {
         S: MountSink,
     {
         let image_cache = config.cache.open_images(config.app.app_id());
+        let media_files = Arc::new(media_files(&config, &app_access(&config.app)));
         let (tx, rx) = crossbeam_channel::unbounded();
         let modality = Arc::default();
         setup(&EngineControl {
@@ -1612,7 +1633,16 @@ impl Engine {
             stop,
             quit_listeners,
             image_cache,
+            media_files,
         })
+    }
+
+    /// The roots the app's local media files are read under
+    /// ([`nsh_core::access::MediaFiles::open`]). The platform's image
+    /// loader reads `<Image>` files through them, as the core's does, so a
+    /// link swapped in after the check is not followed out of them.
+    pub fn media_files(&self) -> Arc<nsh_core::access::MediaFiles> {
+        self.media_files.clone()
     }
 
     /// The disk cache of the images the app downloads
@@ -1964,11 +1994,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let host_bridge = config.host.bridge(tx.clone());
         let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
-        let access = Arc::new(match &config.app {
-            App::Js(bundle) => bundle.policy.access(),
-            // Native code is trusted: it reaches what the platform allows.
-            App::Rust(_) => Policy::default().access(),
-        });
+        let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
@@ -1997,19 +2023,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         }
         // The roots local media files are read under, as `fs/promises`
         // reads files (where it has a file system: the desktops).
-        let media_files = Arc::new(match &config.app {
-            App::Js(bundle) => nsh_core::access::MediaFiles::new(
-                &access,
-                config
-                    .data_dir
-                    .as_ref()
-                    .map(|root| root.join(app_dir_name(config.app.app_id())))
-                    .as_deref(),
-                &bundle_system_paths(bundle),
-                nsh_core::access::native_files(config.environment.os),
-            ),
-            _ => nsh_core::access::MediaFiles::default(),
-        });
+        let media_files = Arc::new(media_files(&config, &access));
         core.set_media_files(media_files.clone());
         #[cfg(not(target_arch = "wasm32"))]
         core.set_image_context(nsh_core::image::loader::Context {
@@ -3250,6 +3264,7 @@ impl<M: TextEngine> State<M> {
         if !self.frame_requested
             && (script.is_some_and(Script::wants_frame)
                 || self.core.wants_frame()
+                || self.core.has_paced_mounts()
                 || (script.is_some() && self.core.has_paced_list_binds()))
         {
             self.frame_requested = true;
@@ -3318,6 +3333,8 @@ impl<M: TextEngine> State<M> {
         let mut js = std::time::Duration::ZERO;
         // The overscan bound this turn ([`PACED_BIND_OPS`]).
         let mut paced = PacedBinds::default();
+        // The views made this turn share one budget (`nsh_core`'s `pace.rs`).
+        self.core.begin_mount_turn();
         for _ in 0..MAX_LIST_ROUNDS {
             // Requests from the previous round (or frame) first.
             let js_start = Instant::now();
@@ -3544,6 +3561,12 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
             nsh_core::tailwind::Platform::Ios
         },
         reduce_motion: env.reduce_motion,
+        pointer: if env.desktop() {
+            nsh_core::tailwind::Pointer::Fine
+        } else {
+            nsh_core::tailwind::Pointer::Coarse
+        },
+        terminal: env.idiom == Idiom::Terminal,
     }
 }
 
@@ -3672,6 +3695,21 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if event == EventKind::Paste {
                 payload = payload.into_paste();
             }
+            // A secondary click goes down as a press does: the overlays it
+            // is outside of hear `onPressOutside` first, then the view its
+            // `onContextMenu`, so a context menu open on the view closes
+            // before the view asks for one again where the pointer is.
+            if let EventPayload::ContextMenu(menu) = &payload {
+                for (overlay, pressed) in state.core.context_menu_presses_outside(id, menu) {
+                    if !state
+                        .core
+                        .component_event(overlay, EventKind::PressOutside, &pressed)
+                        && let Some(script) = script
+                    {
+                        script.dispatch_event(overlay, EventKind::PressOutside, &pressed);
+                    }
+                }
+            }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {
                 return true;
@@ -3730,6 +3768,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::InputScroll(id, offset, content, viewport) => {
             state.core.set_input_scroll(id, offset, content, viewport);
         }
+        Message::InputComposing(id, shown) => state.core.input_composing(id, shown.as_deref()),
         Message::Zoom(id, scale) => state.core.set_zoom(id, scale),
         Message::ComponentSize(id, size) => state.core.set_component_size(id, size),
         Message::AnimationsFinished(mut finished) => {
@@ -3952,6 +3991,33 @@ fn release_spare_ops(ops: &mut Vec<Op>) {
     debug_assert!(ops.is_empty());
     if ops.capacity() > RETAINED_OPS {
         ops.shrink_to(RETAINED_OPS);
+    }
+}
+
+/// What `app` may reach: a JS app its policy's grant; native code is
+/// trusted, it reaches what the platform allows.
+fn app_access(app: &App) -> Access {
+    match app {
+        App::Js(bundle) => bundle.policy.access(),
+        App::Rust(_) => Policy::default().access(),
+    }
+}
+
+/// The roots local media files are read under, as `fs/promises` reads
+/// files (where it has a file system: the desktops).
+fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::MediaFiles {
+    match &config.app {
+        App::Js(bundle) => nsh_core::access::MediaFiles::new(
+            access,
+            config
+                .data_dir
+                .as_ref()
+                .map(|root| root.join(app_dir_name(config.app.app_id())))
+                .as_deref(),
+            &bundle_system_paths(bundle),
+            nsh_core::access::native_files(config.environment.os),
+        ),
+        _ => nsh_core::access::MediaFiles::default(),
     }
 }
 

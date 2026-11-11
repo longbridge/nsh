@@ -34,6 +34,8 @@ import {
 } from "nsh/desktop";
 ```
 
+在 AppKit 和 Win32 后端中，NSH 创建的菜单及未指定标签的角色菜单项会跟随 `nsh/i18n` 选择的语言，运行时切换语言也会更新。内置菜单翻译支持英语、日语、简体中文和繁体中文，其他语言回退为英语；菜单项显式指定的 `label` 始终优先。
+
 ## isAvailable
 
 ```ts
@@ -376,6 +378,7 @@ const Application: {
   quit(): void;
   restart(): void;
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
+  on(event: "openFiles", listener: (files: { paths: string[] }) => void): () => void;
   on(event: "quit", listener: () => void): () => void;
 };
 ```
@@ -385,6 +388,7 @@ const Application: {
 | `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
 | `restart()` | `restart()` | 像 `quit()` 一样退出应用，然后用相同的参数重新启动它。 |
 | `on("secondInstance", listener)` | `next_second_instance()` | 应用运行时再次被启动（[单实例](#单实例)）。 |
+| `on("openFiles", listener)` | `next_open_files()` | 系统用应用声明的类型的文件打开了它（[打开文件](#打开文件)）。 |
 | `on("quit", listener)` | `on_app_quit(f)` | 应用正在退出：运行它的清理（[退出](#退出)）。 |
 
 `Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（为 Dock 保留的隐藏窗口、托盘图标）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
@@ -457,6 +461,51 @@ function Editor() {
 并且不能让应用继续运行。listener 返回的 promise 会被等待，所有 listener 合计最多 200 毫秒，这期间平台也在等应用；
 超过这个时间应用就停止。组件渲染时添加的 listener 随组件一起移除；`on` 返回的函数也能停止它。
 
+### 打开文件
+
+打开文档的应用（播放器、编辑器）在 nsh.json 的 `fileTypes` 中列出文件类型。`nsh package` 把它们声明给系统，应用就会出现在
+「打开方式」中，并打开用户双击或拖到图标上的文件。文件以绝对路径送到 `Application.on("openFiles")`，包括启动应用的文件。
+应用 [scheme](nsh.md#urlscheme) 的链接与之分开，仍由 `UrlScheme.on("open")` 送达。`Application` 从 `nsh/desktop` 导入，
+`openFiles` 在 iOS 上同样送达。
+
+```json
+{
+  "fileTypes": [
+    { "name": "Video", "extensions": ["mp4", "mov"], "mimeTypes": ["video/mp4", "video/quicktime"], "contentTypes": ["public.movie"] }
+  ]
+}
+```
+
+```tsx
+import { Application } from "nsh/desktop";
+
+Application.on("openFiles", ({ paths }) => {
+  for (const path of paths) play(path);
+});
+```
+
+| 键 | 说明 |
+| --- | --- |
+| `name` | 系统对这种文件的称呼（`"Video"`），必填。 |
+| `extensions` | 扩展名，不带点（`["mp4", "mov"]`）。 |
+| `mimeTypes` | MIME 类型（`["video/mp4"]`）：Linux 按它们列出应用。 |
+| `contentTypes` | 统一类型标识符（`["public.movie"]`）：iOS 按它们列出应用。 |
+| `role` | `"viewer"`（默认）或 `"editor"`。 |
+
+每种类型要给出 `extensions` 或 `contentTypes`。Rust 代码 await `nsh_core::prelude` 的 `next_open_files()`，得到
+`Vec<PathBuf>`。没有监听时到达的文件会一次交给下一个监听者（最多 64 个，丢弃最早的）。只有声明了文件类型的应用，NSH
+才接收打开的文件。
+
+| 平台 | 应用如何打开文件 |
+| --- | --- |
+| macOS | `Info.plist` 中的 `CFBundleDocumentTypes`；Launch Services 打开应用，或把文件交给正在运行的应用 |
+| iOS、Mac Catalyst | `Info.plist` 中的 `CFBundleDocumentTypes`（按 `contentTypes`）；系统把文件的副本交给应用 |
+| Windows | 应用每次启动时写在 `HKEY_CURRENT_USER\\Software\\Classes` 下：每种类型一个 ProgID，列在各扩展名的 `OpenWithProgids` 中。带文件的第二次启动把文件交给正在运行的应用 |
+| Linux | 桌面条目的 `MimeType`，`Exec … %U`；应用只运行一份，第二次启动把文件交给正在运行的应用 |
+| Android、Web | 不声明；它们的包不包含 `fileTypes` |
+
+开启 [`singleInstance`](#单实例) 时，第二次启动还会以原样的参数报告 `secondInstance`。
+
 ### 单实例
 
 桌面应用通常只运行一份：再次打开时把正在运行的应用带到前台。应用在 nsh.json 中写 `"singleInstance": true` 开启。
@@ -484,7 +533,7 @@ Rust 代码 await `nsh_core::prelude` 的 `next_second_instance()`，得到带 `
 | --- | --- |
 | Windows | 以应用 id 命名的互斥量；第二次启动把参数和工作目录发给正在运行的应用的窗口（`WM_COPYDATA`） |
 | Linux | GApplication 在会话总线上按应用 id 保证唯一；第二次启动的命令行交给正在运行的应用 |
-| macOS | Launch Services 对一个应用包只运行一份，再次打开时激活它，因此不报告 `secondInstance`；文件和链接通过 `UrlScheme` 送达 |
+| macOS | Launch Services 对一个应用包只运行一份，再次打开时激活它，因此不报告 `secondInstance`；文件通过 `openFiles`、链接通过 `UrlScheme` 送达 |
 | iOS、Android、Web | 系统只运行一份应用；不报告 `secondInstance` |
 
 `nsh package` 构建的发布运行器读取这个设置；`nsh run` 仍按原样启动开发宿主。
@@ -905,6 +954,8 @@ Tray.set({
   ],
 });
 ```
+
+应用在 `onClick` 或菜单项的 `onSelect` 中显示或聚焦的窗口会来到最前面；在 Linux 的 Wayland 桌面上，面板会把这次点击的激活令牌交给应用。
 
 标题让 macOS 菜单栏里图标旁边一直显示一段文字，比如价格，涨跌幅用应用主题里的颜色。文字段的颜色在调用 `set` 时就固定下来；要让主题颜色跟随浅色和深色外观，就在读取配色方案的 `effect` 中设置托盘：
 

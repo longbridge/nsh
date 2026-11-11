@@ -49,7 +49,7 @@ view()
 ## 类如何组合
 
 - **后写的生效。** 同一变体层级的工具类中，字符串里靠后的那个生效：`"p-4 p-2"` 等于 `p-2`。组件可以接收 `class` 属性并直接拼接到自己的类后面，不需要 `tailwind-merge`。
-- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：`group-*:`（先按状态，再按组名）、`selection:`、`placeholder:`、位置（`first:` 等）、`checked:`、`indeterminate:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`focus-visible:`、`active:`、`enabled:`、`disabled:`、`aria-busy:`、`aria-checked:`、`aria-expanded:`、`aria-pressed:`、`aria-selected:`、`data-*:`（按名称）、动效偏好、从宽到窄的 `max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。与 Tailwind 的排序一样，先比较类中顺序最靠后的变体，再比较次靠后的变体，多一个变体的排在后面（`dark:hover:` 在 `dark:` 之后）。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
+- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：`group-*:`（先按状态，再按组名）、`selection:`、`placeholder:`、位置（`first:` 等）、`checked:`、`indeterminate:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`focus-visible:`、`active:`、`enabled:`、`disabled:`、`aria-busy:`、`aria-checked:`、`aria-expanded:`、`aria-pressed:`、`aria-selected:`、`data-*:`（按名称）、动效偏好、从宽到窄的 `max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`、`pointer-coarse:`、`pointer-fine:`，最后是平台（`terminal:` 最后）。与 Tailwind 的排序一样，先比较类中顺序最靠后的变体，再比较次靠后的变体，多一个变体的排在后面（`dark:hover:` 在 `dark:` 之后）。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
 - **`style` 优先于类。** 内联 `style` 叠加在解析后的类之上。样式键就是与它同名的 CSS 属性，也就是工具类设置的那个属性，因此它只替换这一个属性：`style={{ paddingLeft: 8 }}` 胜过 `pl-4`，并保留 `pr-4`。重要标记的工具类（`!p-4` 或 `p-4!`）连内联样式也能覆盖。
 - **文字样式会继承。** 写在视图上的文字类（`text-white`、`font-bold`、`text-center` 等）会像 CSS 一样传给其中的 `<Text>` 和 `<Input>`。
 - **display 遵循 CSS。** `flex` 和 `inline-flex` 是横向排列，除非有方向类另行指定，且与其在字符串中的位置无关（`flex-col flex` 是纵向）。样式中的 `display: "flex"` 同样是横向；未设置 display 的视图保持 NSH 默认的纵向排列。
@@ -447,6 +447,8 @@ view()
 | `dark:` | 外观为深色 | `.dark(\|s\| …)` |
 | `ios:` | 运行在 iOS 或 Mac Catalyst 上 | `.when(os() == Os::Ios, …)` |
 | `android:` | 运行在 Android 上 | `.when(os() == Os::Android, …)` |
+| `terminal:` | 在终端中绘制 | `.when(idiom() == Idiom::Terminal, …)` |
+| `pointer-fine:`、`pointer-coarse:` | 主要指针是鼠标或触控板（桌面、桌面浏览器、终端）/ 手指 | `.when(is_desktop(), …)` |
 | `portrait:`、`landscape:` | 窗口高大于宽 / 宽大于高 | `.style_when(move \|\| window().height > window().width, …)` |
 | `ltr:`、`rtl:` | 布局方向 | `.style_when(rtl, …)` |
 | `motion-safe:`、`motion-reduce:` | 用户未开启 / 开启了减弱动态效果 | `.style_when(reduce_motion, …)` |

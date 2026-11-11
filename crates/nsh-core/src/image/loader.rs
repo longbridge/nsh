@@ -118,6 +118,20 @@ impl AssetBase {
             }
         }
     }
+
+    /// Whether `path` is one of its bundled files (by its text, `..`
+    /// resolved): those are the app's own, read whatever `fs.read` roots
+    /// it declares.
+    fn holds(&self, path: &std::path::Path) -> bool {
+        let path = crate::access::lexical(path);
+        let dirs = match self {
+            AssetBase::Http(_) => return false,
+            AssetBase::Directory(dir) => std::slice::from_ref(dir),
+            AssetBase::Directories(dirs) => dirs.as_slice(),
+        };
+        dirs.iter()
+            .any(|dir| path.starts_with(crate::access::lexical(dir)))
+    }
 }
 
 /// Reads an `asset:/…` URI (the engine's [`Context::read_asset`]): blocking.
@@ -883,7 +897,21 @@ fn read(
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<ImageData, String> {
     match location {
-        Location::File(path) => read_file(path).map_err(|e| format!("{}: {e}", path.display())),
+        Location::File(path) => {
+            // A bundled file is the app's own: not one of its `fs.read`
+            // reads.
+            let bundled = context
+                .asset_base
+                .as_ref()
+                .is_some_and(|base| base.holds(path));
+            let none = crate::access::MediaFiles::default();
+            let files = if bundled {
+                &none
+            } else {
+                &*context.media_files
+            };
+            read_file(path, files).map_err(|e| format!("{}: {e}", path.display()))
+        }
         Location::Data(uri) => super::decode_data_uri(uri).map(|(_, bytes)| bytes.into()),
         Location::Memory(_, data) => Ok(data.clone()),
         Location::Asset(uri, read) => read(uri).map(ImageData::from),
@@ -902,9 +930,19 @@ pub fn read_now(location: &Location, context: &Context) -> Result<ImageData, Str
     read(location, context, &AtomicBool::new(false), &mut |_, _| {})
 }
 
-fn read_file(path: &std::path::Path) -> Result<ImageData, String> {
+/// Reads the file at `path`: for an app with `fs.read` roots, through the
+/// root that holds it, so a link made after the check is not followed out
+/// of it ([`crate::access::MediaFiles::open`]).
+fn read_file(
+    path: &std::path::Path,
+    files: &crate::access::MediaFiles,
+) -> Result<ImageData, String> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let file = match files.open(path) {
+        Some(file) => file,
+        None => std::fs::File::open(path),
+    }
+    .map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)

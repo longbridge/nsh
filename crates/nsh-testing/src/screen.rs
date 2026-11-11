@@ -205,6 +205,9 @@ struct View {
     /// `focusable`: `Some(true)` makes it a stop of Tab, `Some(false)` keeps
     /// a pressable out ([`nsh_core::ViewProps::focus_stop`]).
     focusable: Option<bool>,
+    /// A shown overlay's place in the Tab order
+    /// ([`nsh_core::ViewProps::tab_after`]).
+    tab_after: Option<NodeId>,
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
@@ -212,6 +215,8 @@ struct View {
     accessibility_state: AccessibilityState,
     /// Its `accessibilityLevel`.
     level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    description: Option<Arc<str>>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -381,6 +386,9 @@ pub(crate) struct Input {
     /// The edits reported so far ([`nsh_core::EventPayload::Text`]).
     pub(crate) count: u32,
     pub(crate) config: Box<InputConfig>,
+    /// What an input method composes in it (`app.compose`), at the end of
+    /// its text: marked, not in `text` until it commits.
+    pub(crate) composition: Option<String>,
     /// Where its text goes in the view (inside padding and border); the
     /// whole view until the core says.
     pub(crate) content: Option<Bounds<Points>>,
@@ -485,9 +493,11 @@ impl Screen {
                 view.role = props.accessibility.role;
                 view.disabled = props.accessibility.state.disabled;
                 view.focusable = props.focusable;
+                view.tab_after = props.tab_after;
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
+                view.description = props.accessibility.description.clone();
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -1053,43 +1063,50 @@ impl Screen {
             } else if view.clips && id != ROOT {
                 inner = inner.within(bounds);
             }
-            let mut children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
-                self.screens(id).last().copied().into_iter().collect()
-            } else {
-                self.children.get(&id).cloned().unwrap_or_default()
-            };
-            // A scroll view's content, and a list's cells in its parent's
-            // viewport, in the order they are on screen, as macOS, iOS and
-            // Android order Tab and screen readers: a list's recycled cells
-            // are in the order they were made.
-            let horizontal = view.scroll.as_ref().map(|s| s.horizontal).or(view
-                .screen_order
-                .map(|a| a == nsh_core::geometry::Axis::Horizontal));
-            if let Some(horizontal) = horizontal
-                && children.len() > 1
-            {
-                let start = |child: &NodeId| {
-                    let frame = self.nodes.get(child).map(|v| v.frame).unwrap_or_default();
-                    let (main, cross) = if horizontal {
-                        (frame.origin.x, frame.origin.y)
-                    } else {
-                        (frame.origin.y, frame.origin.x)
-                    };
-                    (main.0, cross.0)
-                };
-                children.sort_by(|a, b| {
-                    let (a, b) = (start(a), start(b));
-                    a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
-                });
-            }
             stack.extend(
-                children
+                self.reading_children(id)
                     .into_iter()
                     .rev()
                     .map(|child| (child, content, inner, hidden, shows || id == ROOT, own)),
             );
         }
         out
+    }
+
+    /// `id`'s children in reading order: a stack's top screen; a scroll
+    /// view's content, and a list's cells in its parent's viewport, in the
+    /// order they are on screen, as macOS, iOS and Android order Tab and
+    /// screen readers (a list's recycled cells are in the order they were
+    /// made).
+    fn reading_children(&self, id: NodeId) -> Vec<NodeId> {
+        let mut children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+            self.screens(id).last().copied().into_iter().collect()
+        } else {
+            self.children.get(&id).cloned().unwrap_or_default()
+        };
+        let horizontal = self.nodes.get(&id).and_then(|view| {
+            view.scroll.as_ref().map(|s| s.horizontal).or(view
+                .screen_order
+                .map(|a| a == nsh_core::geometry::Axis::Horizontal))
+        });
+        if let Some(horizontal) = horizontal
+            && children.len() > 1
+        {
+            let start = |child: &NodeId| {
+                let frame = self.nodes.get(child).map(|v| v.frame).unwrap_or_default();
+                let (main, cross) = if horizontal {
+                    (frame.origin.x, frame.origin.y)
+                } else {
+                    (frame.origin.y, frame.origin.x)
+                };
+                (main.0, cross.0)
+            };
+            children.sort_by(|a, b| {
+                let (a, b) = (start(a), start(b));
+                a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+            });
+        }
+        children
     }
 
     /// The window is `size` (what lies outside it is not on screen).
@@ -1538,6 +1555,21 @@ impl Screen {
         }
     }
 
+    /// The description of the view `selector` names (its
+    /// `accessibilityDescription`: a dialog's message), which screen
+    /// readers read after its name; an error when none or several match.
+    pub fn accessibility_description(&self, selector: &str) -> Result<Option<String>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .and_then(|v| v.description.as_deref().map(str::to_owned))),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
     /// The views on screen `selector` matches, in the order a user's eyes
     /// find them ([`Screen::by_layer`]): each part looks inside what the
     /// one before matched.
@@ -1767,7 +1799,22 @@ impl Screen {
         if receives != PointerEvents::BoxOnly
             && let Some(children) = self.children.get(&id)
         {
-            for &child in children.iter().rev() {
+            // Header items and input accessories are in the bars the
+            // platform draws over a screen's content (a large title's header
+            // included), wherever they are among its children: they are on
+            // top.
+            let placed = |c: &NodeId| {
+                matches!(
+                    self.kind(*c),
+                    Some(ViewKind::HeaderItem | ViewKind::InputAccessory)
+                )
+            };
+            let order = children
+                .iter()
+                .rev()
+                .filter(|c| placed(c))
+                .chain(children.iter().rev().filter(|c| !placed(c)));
+            for &child in order {
                 let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
@@ -2167,6 +2214,23 @@ impl Screen {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
     }
 
+    /// The views that hear a mouse button released on `id`: it and every
+    /// view around it listening to `onMouseUp`, inside out, as the
+    /// platforms walk them.
+    pub(crate) fn mouse_up_targets(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        while let Some(view) = self.nodes.get(&id) {
+            if view.events.contains(EventKind::MouseUp) {
+                targets.push(id);
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        targets
+    }
+
     /// The app's keyboard shortcuts (`nsh/keymap`).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn keymap(&self) -> Option<&nsh_core::keymap::Keymap> {
@@ -2270,34 +2334,60 @@ impl Screen {
     }
 
     /// Tab's stops, in tree order (a scroll view's content in screen
-    /// order), as macOS and the web have them: the
+    /// order), a shown overlay's content right after the view it follows
+    /// where the app put it ([`nsh_core::input::tab_order`]: a popover's
+    /// after its trigger): the
     /// inputs that edit and the views [`nsh_core::ViewProps::focus_stop`]
     /// takes (those that take presses unless `focusable={false}`, and
     /// `focusable={true}` ones whether or not they do), shown and enabled.
     pub(crate) fn tab_stops(&self) -> Vec<NodeId> {
-        self.shown()
-            .into_iter()
-            .filter(|&id| {
-                let Some(v) = self.nodes.get(&id) else {
-                    return false;
-                };
-                if let Some(input) = &v.input {
-                    return input.config.editable && !self.disabled_from(id, None);
-                }
-                // A link in a text view is a stop after it, in text order
-                // (`TextLink::focus_stop`).
-                if v.span.is_some() {
-                    return v.focusable == Some(true) && !self.disabled_from(id, None);
-                }
-                // Disabled is the ancestors' too here (`disabled_from`).
-                let props = nsh_core::ViewProps {
-                    focusable: v.focusable,
-                    ..Default::default()
-                };
-                props.focus_stop(v.events.contains(EventKind::Press))
-                    && !self.disabled_from(id, None)
-            })
-            .collect()
+        let shown: HashSet<NodeId> = self.shown().into_iter().collect();
+        nsh_core::input::tab_order(
+            ROOT,
+            |&id| self.reading_children(id),
+            |&id| id,
+            |&id| self.nodes.get(&id).and_then(|v| v.tab_after),
+        )
+        .into_iter()
+        .filter(|&id| {
+            if !shown.contains(&id) {
+                return false;
+            }
+            let Some(v) = self.nodes.get(&id) else {
+                return false;
+            };
+            if let Some(input) = &v.input {
+                return input.config.editable && !self.disabled_from(id, None);
+            }
+            // A link in a text view is a stop after it, in text order
+            // (`TextLink::focus_stop`).
+            if v.span.is_some() {
+                return v.focusable == Some(true) && !self.disabled_from(id, None);
+            }
+            // Disabled is the ancestors' too here (`disabled_from`).
+            let props = nsh_core::ViewProps {
+                focusable: v.focusable,
+                ..Default::default()
+            };
+            props.focus_stop(v.events.contains(EventKind::Press)) && !self.disabled_from(id, None)
+        })
+        .collect()
+    }
+
+    /// The newest modal shown over `window` (the root of a window of the
+    /// app's own, else the main window's): the desktops and the web keep
+    /// Tab inside it, its views the only stops while it is shown.
+    pub(crate) fn focus_scope(&self, window: NodeId) -> Option<NodeId> {
+        self.shown().into_iter().rev().find(|&id| {
+            self.kind(id) == Some(ViewKind::Modal)
+                && !self.is_window(id)
+                && self.window_of(id) == window
+        })
+    }
+
+    /// Whether view `id` is `scope` or inside it.
+    pub(crate) fn within(&self, id: NodeId, scope: NodeId) -> bool {
+        id == scope || self.is_inside(id, scope)
     }
 
     /// The stop a press on `id` gives the focus to in a terminal: `id` or
@@ -2314,9 +2404,13 @@ impl Screen {
             at = self.nodes.get(&id).and_then(|v| v.parent);
         }
         let point = self.bounds_in_root(id)?.center();
-        stops.iter().rev().copied().find(|&stop| {
-            self.bounds_in_root(stop)
-                .is_some_and(|bounds| bounds.contains(&point))
+        // Topmost by how they are stacked, not by Tab's order (an
+        // overlay's content is not last there).
+        self.shown().into_iter().rev().find(|stop| {
+            stops.contains(stop)
+                && self
+                    .bounds_in_root(*stop)
+                    .is_some_and(|bounds| bounds.contains(&point))
         })
     }
 
@@ -2326,6 +2420,22 @@ impl Screen {
 
     pub(crate) fn scroll_mut(&mut self, id: NodeId) -> Option<&mut Scroll> {
         self.nodes.get_mut(&id)?.scroll.as_mut()
+    }
+
+    /// The scroll views around `id`, innermost first.
+    pub(crate) fn scrolls_around(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut at = self.nodes.get(&id).and_then(|v| v.parent);
+        while let Some(parent) = at {
+            let Some(view) = self.nodes.get(&parent) else {
+                break;
+            };
+            if view.scroll.is_some() {
+                out.push(parent);
+            }
+            at = view.parent;
+        }
+        out
     }
 
     /// How far scroll view `id` goes along its axis: its content past its

@@ -219,6 +219,15 @@ export interface DialogProps extends DialogHostProps {
   open?: boolean;
   /** How it comes in and goes (default `"slide"`). */
   animation?: "slide" | "fade" | "none";
+  /** What screen readers call it as the focus enters it: its title. */
+  accessibilityLabel?: string;
+  /** What screen readers read after its name: its message (an alert
+   * dialog's "This can't be undone."). */
+  accessibilityDescription?: string;
+  /** What it is for screen readers (default `"dialog"`): `"alertdialog"`
+   * for one that asks the user to confirm something or tells them
+   * something urgent. */
+  role?: "dialog" | "alertdialog";
   /** It finished appearing. */
   onOpen?: () => void;
   /** It went away: the user closed it, or the app removed it. */
@@ -1128,6 +1137,7 @@ unsafe extern "C" fn modal_run(
                     "children",
                     "open",
                     "animation",
+                    "role",
                     "class",
                     "style",
                     "backdropClass",
@@ -1154,6 +1164,12 @@ unsafe extern "C" fn modal_run(
                 free(cx, read);
                 r?;
             }
+            // A dialog for screen readers unless the app says otherwise
+            // (`"alertdialog"`), named by its `accessibilityLabel`.
+            let read = native(cx, dialog_role, 0, &mut [props]);
+            let r = dom::bind_prop_with(cx, node, "role", read);
+            free(cx, read);
+            r?;
             let (insets, on_insets) = native_insets(cx, false);
             let id = dom::node_id(cx, node).expect("a node");
             let r = dom::set_handler(cx, id, EventKind::Insets, on_insets);
@@ -1321,6 +1337,28 @@ unsafe extern "C" fn has_backdrop(
         free(cx, v);
     }
     if has { qjs::JS_TRUE } else { qjs::JS_FALSE }
+}
+
+/// The dialog's role for assistive technologies: the app's `role`, else
+/// `"dialog"`.
+unsafe extern "C" fn dialog_role(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (the props).
+    let props = unsafe { *data };
+    let role = get(cx, props, c"role");
+    // SAFETY: an inline check of a live value.
+    if unsafe { qjs::JS_IsUndefined(role) || qjs::JS_IsNull(role) } {
+        free(cx, role);
+        // SAFETY: a new string the caller takes.
+        return unsafe { qjs::JS_NewStringLen(cx, c"dialog".as_ptr(), 6) };
+    }
+    role
 }
 
 /// The backdrop: a view filling the dialog behind the popup, with the

@@ -159,6 +159,36 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   }
 });
 
+test("an invalid view is aria-invalid, and so is the field of an input", () => {
+  const { player } = fakePlayer();
+  const element = () => {
+    const attrs = new Map();
+    return {
+      attrs,
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+    };
+  };
+  const el = { ...element(), _props: { invalid: true } };
+  const field = element();
+  player.updateAria(el);
+  assert.equal(el.attrs.get("aria-invalid"), "true");
+  // The field made after the props takes them too: it is what screen readers read.
+  field.classList = { toggle() {} };
+  field.tagName = "INPUT";
+  el._field = field;
+  player.view = () => el;
+  player.op_in(["in", 1, { multiline: false }, null]);
+  assert.equal(field.attrs.get("aria-invalid"), "true");
+  el._props.invalid = false;
+  player.updateAria(el);
+  assert.equal(el.attrs.has("aria-invalid"), false);
+  assert.equal(field.attrs.has("aria-invalid"), false);
+  el._props.invalid = true;
+  player.updateAria(el);
+  assert.equal(field.attrs.get("aria-invalid"), "true");
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
@@ -171,6 +201,24 @@ test("events sent before the app runs reach it in order once it starts, later on
   ]);
   player.hostEvent("c");
   assert.deepEqual(events(sent), ["a", "b", "c"]);
+});
+
+test("posts go to the page host's post, else its call, and nothing comes back", async () => {
+  const posted = [];
+  const { player, sent } = fakePlayer({ host: { call: () => 1, post: (...args) => posted.push(args) } });
+  player.begin(390, started);
+  player.hostPost("note", { a: 1 });
+  assert.deepEqual(posted, [["note", { a: 1 }]]);
+  const called = [];
+  const fallback = fakePlayer({ host: { call: async (...args) => { called.push(args); throw new Error("boom"); } } });
+  fallback.player.begin(390, started);
+  fallback.player.hostPost("note", 2);
+  const throwing = fakePlayer({ host: { call() {}, post() { throw new Error("boom"); } } });
+  throwing.player.hostPost("note", 3);
+  fakePlayer().player.hostPost("note", 4);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(called, [["note", 2]]);
+  assert.deepEqual([...sent, ...fallback.sent, ...throwing.sent], []);
 });
 
 test("events for an app that failed to start reach neither it nor the next app", () => {
@@ -508,6 +556,60 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   assert.deepEqual(pressed, [button]);
   assert.equal(key(chart), false);
   assert.deepEqual(pressed, [button]);
+});
+
+test("Return and Space press the focused control unless the focus binds them", () => {
+  const { player } = fakePlayer();
+  // The app binds Return, Space and Mod+Return everywhere but text fields
+  // (binding 7), as the native match answers: on a control (focus bit 2)
+  // plain Return and Space fire only the focus' own bindings (binding 9,
+  // while `own`).
+  let own = false;
+  player.wasm.nsh_key = (code, mods, focus) => {
+    const pressing = (code === keyCode({ key: "Enter" }) || code === keyCode({ key: " " })) && !(mods & 11);
+    if (focus & 2 && pressing) return own ? 9 : -1;
+    return 7;
+  };
+  const fired = [];
+  player.call = (f) => f({ nsh_key_command: (id) => fired.push(id) });
+  player.modifiersChanged = () => {};
+  player.takesKeys = () => true;
+  player.selectionKey = () => false;
+  player.scrollKey = () => false;
+  player.back = () => false;
+  player.ancestors = () => [];
+  const pressed = [];
+  player.pressIn = (p) => pressed.push(p.press);
+  player.pressOut = () => {};
+  player.root = { contains: () => true };
+  const key = (focus, e) => {
+    globalThis.document = { activeElement: focus };
+    player.keyDown({ preventDefault() {}, stopPropagation() {}, ...e });
+    if (e.key === " ") player.keyUp({ key: " " });
+    delete globalThis.document;
+  };
+  const button = focusView(true, {});
+  const chart = focusView(false, { focusable: true });
+  // On a button: the button takes them, the app's binding never fires.
+  key(button, { key: "Enter" });
+  key(button, { key: " " });
+  key(button, { key: "Enter", shiftKey: true });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, []);
+  // With Control or Command held the binding fires, as it does with the
+  // focus on no control or on a stop that takes no presses.
+  key(button, { key: "Enter", ctrlKey: true });
+  key(button, { key: "Enter", metaKey: true });
+  key(null, { key: "Enter" });
+  key(chart, { key: "Enter" });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, [7, 7, 7, 7]);
+  // The focus' own binding (a menu button opening its menu) takes them
+  // before the press.
+  own = true;
+  key(button, { key: "Enter" });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, [7, 7, 7, 7, 9]);
 });
 
 /**

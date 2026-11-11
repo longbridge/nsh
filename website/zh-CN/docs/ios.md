@@ -15,7 +15,7 @@ NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和
 ## 环境要求
 
 - Mac 上的 **Xcode**，以及一个 iOS 模拟器运行时（`xcodebuild -downloadPlatform iOS` 可以安装）。见[安装](./installation.md#ios-与-mac-catalyst)。
-- 应用需要 **iOS 15.0** 及以上，支持 iPhone 和 iPad。
+- 应用需要 **iOS 15.0** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)），支持 iPhone 和 iPad。
 
 ## 运行应用
 
@@ -42,6 +42,10 @@ nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" -
 在 Rust 应用的目录里，应用是用你的 crate 构建的 iOS runner；TSX 应用需写明入口（`nsh package App.tsx --target ios-simulator --run`）。
 
 `--target ios` 为真机、TestFlight 或 App Store 生成签名的 `.ipa`。签名身份、描述文件和图标见[打包](./packaging.md#ios-真机)。
+
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：连接的 iPhone 上的日志在“控制台”应用中查看，
+模拟器里的用 `xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.notes"'` 查看
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 嵌入 iOS 应用
 
@@ -138,7 +142,7 @@ nsh build App.tsx --release --out MyApp/nsh
 | `bundle.js` | 同一个应用的 JS 源码。 |
 | `bundle.js.map` | 它的 source map（堆栈跟踪会指向你的 `.tsx` 文件）。 |
 | `capabilities.json` | 应用声明的[能力](./sandbox-and-capabilities.md)，仅当 `nsh.json` 中有声明时生成。 |
-| `assets/` | 应用导入的图片和字体，路径相对于入口文件。 |
+| `assets/` | 应用导入的图片和字体，路径为它们在应用目录中的路径。 |
 
 ## 显示应用
 
@@ -423,6 +427,9 @@ try app.loadBundle(at: bundledURL)
 - **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中在内边距里使用
   `env(safe-area-inset-*)` 或 [`nsh`](../modules/nsh.md#safe-area-and-keyboard) 的 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。
+- **日志。** 应用的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以你的应用的 bundle identifier 为子系统、这一行的 target
+  为类别（`console.*` 是 `js`）：由 Xcode 运行应用时 Xcode 控制台会显示它们，“控制台”应用和 `log stream` 也会
+  （[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 另请参阅
 

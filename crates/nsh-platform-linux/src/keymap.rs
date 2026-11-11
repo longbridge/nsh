@@ -7,7 +7,8 @@
 //! GTK matches the triggers, also on the keys of the layout's Latin group
 //! under other layouts, as it does the application's accelerators. A
 //! binding's action decides on the spot whether it fires (where the focus
-//! is: `KeyBinding::in_text`), reports it to JS with the root's
+//! is: `KeyBinding::in_text`; Return and Space on a focused control only
+//! when `KeyBinding::for_focus`), reports it to JS with the root's
 //! `KeyCommand` event and stops the key; JS runs the handler afterwards.
 //! A binding that does not fire, or fires and passes the key through
 //! (`KeyBinding::pass_through`), lets GTK try the next shortcut and then
@@ -35,15 +36,26 @@ pub(crate) struct KeymapState {
     keymap: RefCell<Option<Arc<Keymap>>>,
     /// A controller on each window's root view.
     controllers: RefCell<Vec<(glib::WeakRef<NshView>, gtk::ShortcutController)>>,
-    /// Each binding's trigger, whether it fires in a text field
-    /// (`KeyBinding::in_text`) and its window (`KeyBinding::window`), for
-    /// [`claims`]; a binding passing its key through claims none.
-    triggers: RefCell<Vec<(gtk::ShortcutTrigger, bool, Option<NodeId>)>>,
+    /// Each binding's trigger, for [`claims`]; a binding passing its key
+    /// through claims none.
+    triggers: RefCell<Vec<Claim>>,
     /// The binding whose key is held down (GDK does not mark auto-repeats):
     /// it does not fire again until a key is released.
     held: Rc<Cell<Option<u32>>>,
     /// The windows' key controllers that see releases, and their windows.
     releases: RefCell<Vec<(glib::WeakRef<gtk::Window>, gtk::EventControllerKey)>>,
+}
+
+/// A binding's trigger and when a press of it is the binding's, for
+/// [`claims`].
+struct Claim {
+    trigger: gtk::ShortcutTrigger,
+    /// It fires in a text field (`KeyBinding::in_text`).
+    in_text: bool,
+    /// Its window (`KeyBinding::window`).
+    window: Option<NodeId>,
+    /// It gives way to a focused control ([`gives_way`]).
+    yields: bool,
 }
 
 /// `MountItem::Keymap`: replaces the surface's shortcuts.
@@ -62,7 +74,12 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
         if let Some(trigger) = trigger(&binding.keystroke, |key| shifted(&display, key))
             .and_then(|t| gtk::ShortcutTrigger::parse_string(&t))
         {
-            triggers.push((trigger, binding.in_text, binding.window));
+            triggers.push(Claim {
+                trigger,
+                in_text: binding.in_text,
+                window: binding.window,
+                yields: gives_way(binding),
+            });
         }
     }
     *surface.keymap.triggers.borrow_mut() = triggers;
@@ -111,10 +128,11 @@ pub(crate) fn attach(surface: &Rc<Surface>, root: &NshView) {
         };
         let weak = Rc::downgrade(surface);
         let (id, in_text, repeat) = (binding.id, binding.in_text, binding.repeat);
+        let yields = gives_way(binding);
         let pass_through = binding.pass_through;
         // The widget is the root view of the window the key is in.
         let action = gtk::CallbackAction::new(move |widget, _| match weak.upgrade() {
-            Some(surface) if fires(widget, in_text) => {
+            Some(surface) if fires(&surface, widget, in_text, yields) => {
                 if let Some(window) = widget.root().and_downcast::<gtk::Window>() {
                     watch_releases(&surface, &window);
                 }
@@ -175,7 +193,7 @@ pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
     let fired = keymap.bindings().iter().rev().find(|b| {
         b.keystroke == stroke
             && b.window.is_none_or(|w| w == root.id())
-            && fires(root.upcast_ref(), b.in_text)
+            && fires(surface, root.upcast_ref(), b.in_text, gives_way(b))
     });
     if let Some(binding) = fired {
         surface.event(
@@ -196,16 +214,11 @@ pub(crate) fn claims(surface: &Surface, event: &gtk::gdk::Event) -> bool {
         .surface()
         .and_then(|s| crate::window::root_at(surface, &s))
         .unwrap_or_else(|| surface.root.clone());
-    surface
-        .keymap
-        .triggers
-        .borrow()
-        .iter()
-        .any(|(trigger, in_text, window)| {
-            trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
-                && window.is_none_or(|w| w == root.id())
-                && fires(root.upcast_ref(), *in_text)
-        })
+    surface.keymap.triggers.borrow().iter().any(|claim| {
+        claim.trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
+            && claim.window.is_none_or(|w| w == root.id())
+            && fires(surface, root.upcast_ref(), claim.in_text, claim.yields)
+    })
 }
 
 /// Listens to the releases of `window` (once per window), so that a held
@@ -229,8 +242,10 @@ fn watch_releases(surface: &Surface, window: &gtk::Window) {
 
 /// Whether a binding fires where the focus of the window of root view
 /// `root` is: never while it is in another surface, in a text field or
-/// hosted widget only when the binding may (`in_text`).
-fn fires(root: &gtk::Widget, in_text: bool) -> bool {
+/// hosted widget only when the binding may (`in_text`), on a control
+/// Return and Space press not when the binding `gives_way` to it
+/// ([`gives_way`]).
+fn fires(surface: &Surface, root: &gtk::Widget, in_text: bool, gives_way: bool) -> bool {
     let Some(focus) = root.root().and_then(|r| r.focus()) else {
         return true;
     };
@@ -239,7 +254,21 @@ fn fires(root: &gtk::Widget, in_text: bool) -> bool {
     }
     // A field's text widget, or a hosted widget (a web view).
     let editing = !focus.is::<crate::view::NshView>();
+    if gives_way && crate::key_focus::is_control(surface, &focus) {
+        return false;
+    }
     in_text || !editing
+}
+
+/// Whether `binding` gives way to a focused control that its key presses:
+/// Return and Space, unless it is the focus' own
+/// ([`nsh_core::keymap::Keymap::find_at`]).
+fn gives_way(binding: &nsh_core::keymap::KeyBinding) -> bool {
+    !binding.for_focus
+        && nsh_core::input::presses_focused_control(
+            binding.keystroke.key,
+            binding.keystroke.modifiers,
+        )
 }
 
 /// The keyval that `key` types with Shift on the display's layout (`slash`

@@ -33,7 +33,8 @@ use nsh_bundler::BundleOptions;
 use nsh_core::element::description::SetDescription;
 use nsh_engine::Bundle;
 use nsh_testing::{
-    Built, Entry, Reply, RunnerMessage, TestRequest, TestResult, TestRun, TestStatus,
+    Built, Entry, Reply, RunnerMessage, SCREEN_TEXT_LIMIT, TestRequest, TestResult, TestRun,
+    TestStatus, screen_texts,
 };
 
 use crate::{
@@ -65,6 +66,7 @@ pub(crate) fn test(
     target: Option<crate::run::Target>,
     browser: Option<&Path>,
     web_host: Option<PathBuf>,
+    device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
 ) -> anyhow::Result<()> {
@@ -114,6 +116,9 @@ pub(crate) fn test(
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
+    if device.is_some() && target != Some(crate::run::Target::Ios) {
+        bail!("--device goes with --target ios");
+    }
     if display.is_some() && target != Some(crate::run::Target::Macos) {
         bail!("--display goes with --target macos");
     }
@@ -151,7 +156,7 @@ pub(crate) fn test(
     let host = target
         .filter(|_| !files.is_empty())
         .map(|target| {
-            crate::test_host::starter(target, browser, &work_dir, fps, display, foreground)
+            crate::test_host::starter(target, browser, &work_dir, fps, device, display, foreground)
         })
         .transpose()?;
     // What `open` checks its options against on that host.
@@ -322,9 +327,10 @@ impl Tally {
                             text.push_str(stack);
                         }
                         if let Some(screen) = &failure.screen {
-                            let texts: Vec<String> =
-                                screen.iter().map(|t| format!("{t:?}")).collect();
-                            text.push_str(&format!("\non screen: {}", texts.join(", ")));
+                            // The report is read by tools: it is cut even
+                            // with `-v`, which is for the terminal.
+                            let texts = screen_texts(screen, Some(SCREEN_TEXT_LIMIT));
+                            text.push_str(&format!("\non screen: {texts}"));
                         }
                         let message = failure.message.lines().next().unwrap_or_default();
                         let _ = write!(
@@ -433,7 +439,7 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities, url_schemes, main_window) = match kind {
+        let (bytecode, map, capabilities, url_schemes, main_window, asset_root) = match kind {
             Entry::TestFile => test_file_bytecode(entry)?,
             Entry::App => {
                 let entry = crate::entry::resolve(entry)?;
@@ -461,6 +467,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             capabilities,
             url_schemes,
             main_window,
+            asset_root: Some(asset_root),
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
@@ -481,15 +488,17 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     bytecode_of(entry, &sets, false)
 }
 
-/// A compiled entry: its bytecode, its source map, and the capabilities
+/// A compiled entry: its bytecode, its source map, the capabilities
 /// (JSON), URL schemes and main window's launch options (JSON) its
-/// `nsh.json` declares, which the app runs under, as on a device.
+/// `nsh.json` declares, which the app runs under, as on a device, and the
+/// directory its assets are named from (`nsh_bundler::Bundle::asset_root`).
 type Compiled = (
     Vec<u8>,
     Option<String>,
     Option<String>,
     Vec<String>,
     Option<String>,
+    PathBuf,
 );
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
@@ -524,6 +533,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         capabilities,
         bundle.url_schemes,
         bundle.main_window,
+        bundle.asset_root,
     ))
 }
 
@@ -570,15 +580,22 @@ fn show(file: &str, result: &TestResult) {
             ui::detail(ui::dim(format!("  {}", frame.trim_start())));
         }
     }
-    // A step's error says what is on screen already.
+    // A step's error says what is on screen already, cut to a few KB; `-v`
+    // shows all of it.
     if let Some(screen) = failure
         .screen
         .as_ref()
-        .filter(|_| !failure.message.contains("on screen: "))
+        .filter(|_| ui::verbose() || !failure.message.contains("on screen: "))
     {
-        let texts: Vec<String> = screen.iter().map(|t| format!("{t:?}")).collect();
-        ui::detail(format!("  on screen: {}", texts.join(", ")));
+        let texts = screen_texts(screen, screen_limit());
+        ui::detail(format!("  on screen: {texts}"));
     }
+}
+
+/// How much of a failure's texts on screen to show: a few KB, all of them
+/// with `-v` (a failure is read, not a document's whole text).
+fn screen_limit() -> Option<usize> {
+    (!ui::verbose()).then_some(SCREEN_TEXT_LIMIT)
 }
 
 /// Tests the app's crate `krate` with `cargo test --no-fail-fast` (only the
@@ -794,7 +811,7 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities, url_schemes, main_window) = match kind {
+        let (bytecode, map, capabilities, url_schemes, main_window, asset_root) = match kind {
             Entry::App => {
                 let entry =
                     crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
@@ -827,7 +844,11 @@ fn compiler() -> nsh_testing::Compile {
             // as a packaged app's runner reads them.
             .with_url_schemes(url_schemes)
             .with_main_window(main_window.as_deref());
-        Ok(Built::Js(Box::new(bundle), map))
+        Ok(Built::Js {
+            bundle: Box::new(bundle),
+            source_map: map,
+            asset_root,
+        })
     })
 }
 
@@ -914,6 +935,36 @@ test src/lib.rs - App (line 3) ... ok
         assert!(targets[0].1[1].failure.is_none());
     }
 
+    /// A headless run refuses `--device` before it builds or runs anything:
+    /// the simulator it names would go unused.
+    #[test]
+    fn a_headless_run_refuses_a_simulator() {
+        let dir = std::env::temp_dir().join(format!("nsh-test-device-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("App.test.tsx");
+        std::fs::write(&file, "").unwrap();
+        let err = test(
+            &file,
+            &dir.join("App.tsx"),
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            Some("iPhone 16"),
+            None,
+            false,
+        )
+        .err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            err.map(|e| e.to_string()).as_deref(),
+            Some("--device goes with --target ios")
+        );
+    }
+
     #[test]
     fn test_files_are_found_where_the_app_keeps_them_and_know_their_app() {
         let dir = std::env::temp_dir().join(format!("nsh-test-files-{}", std::process::id()));
@@ -964,7 +1015,7 @@ test src/lib.rs - App (line 3) ... ok
         let built = compiler()(&dir.join("App.tsx"), Entry::App);
         std::fs::remove_dir_all(&dir).unwrap();
         match built {
-            Ok(Built::Js(bundle, _)) => assert_eq!(bundle.url_schemes, ["myapp"]),
+            Ok(Built::Js { bundle, .. }) => assert_eq!(bundle.url_schemes, ["myapp"]),
             Ok(_) => panic!("a TSX entry builds to JS"),
             Err(e) => panic!("{e}"),
         }
@@ -1027,5 +1078,25 @@ test src/lib.rs - App (line 3) ... ok
 </testsuites>
 "#
         );
+    }
+
+    #[test]
+    fn a_junit_report_cuts_a_long_screen() {
+        let result =
+            |json: serde_json::Value| -> TestResult { serde_json::from_value(json).unwrap() };
+        let mut tally = Tally::default();
+        let big = "x".repeat(200_000);
+        tally.show(
+            "App.test.tsx",
+            &result(serde_json::json!({
+                "name": "a long document",
+                "elapsed": { "secs": 0, "nanos": 0 },
+                "status": "Failed",
+                "failure": { "message": "failed", "screen": [big] },
+            })),
+        );
+        let report = tally.junit(std::time::Duration::from_secs(1));
+        assert!(report.len() < 10_000, "{} characters", report.len());
+        assert!(report.contains("more characters"), "{report}");
     }
 }

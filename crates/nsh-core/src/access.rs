@@ -458,6 +458,55 @@ impl MediaFiles {
         }
     }
 
+    /// Opens `path` (what [`Access::media_url`] granted) to read through
+    /// the declared root that holds it, as `fs/promises` reads: every
+    /// component is opened inside the root, so a link made after the check
+    /// cannot lead out of it. `None` with no roots (an app reading what the
+    /// platform allows): the caller opens the path itself.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn open(&self, path: &Path) -> Option<std::io::Result<std::fs::File>> {
+        if self.declared.is_empty() {
+            return None;
+        }
+        let refused = || std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not granted");
+        let path = lexical(path);
+        if !self
+            .declared
+            .iter()
+            .any(|root| in_root(&path, root).is_some())
+        {
+            return Some(Err(refused()));
+        }
+        // Opened under the narrowest root that grants it: the host's grant
+        // when there is one (inside a declared root), so a link in it cannot
+        // reach the rest of a wider declared root.
+        let granted: Vec<&(PathBuf, PathBuf)> = match &self.granted {
+            Some(roots) => roots
+                .iter()
+                .filter(|(_, canonical)| {
+                    self.declared
+                        .iter()
+                        .any(|(_, declared)| inside(canonical, declared).is_some())
+                })
+                .collect(),
+            None => self.declared.iter().collect(),
+        };
+        // The innermost root holding it (a nested root may be reached
+        // through a link in its parent's).
+        let Some(((_, canonical), relative)) = granted
+            .into_iter()
+            .filter_map(|root| Some((root, in_root(&path, root)?)))
+            .max_by_key(|((_, canonical), _)| canonical.components().count())
+        else {
+            return Some(Err(refused()));
+        };
+        Some((|| {
+            let dir = crate::runtime::fs::confined::open_root(canonical)?;
+            let file = crate::runtime::fs::confined::open_file(&dir, &relative, false)?;
+            Ok(file.into_std())
+        })())
+    }
+
     /// `path`'s canonical form, if a declared root holds it and the host's
     /// grant does too. Symlinks are resolved here, not by the loader: the
     /// platform's loaders open what they are given, with nothing to keep
@@ -544,6 +593,25 @@ pub(crate) fn env_names_match(a: &str, b: &str) -> bool {
     }
 }
 
+/// What a web view's page may capture (`capabilities.webview.media`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WebMedia {
+    /// `"microphone"`: audio input.
+    Microphone,
+    /// `"camera"`: video input.
+    Camera,
+}
+
+impl WebMedia {
+    /// Its name in `capabilities.webview.media`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Microphone => "microphone",
+            Self::Camera => "camera",
+        }
+    }
+}
+
 /// What an app may do (one declaration, or one grant).
 /// Start with [`Self::default`] and set the fields to grant; new capabilities
 /// default to denied.
@@ -561,6 +629,9 @@ pub struct Capabilities {
     /// Web views may take trusted input (`sendInput`, `webview.input`):
     /// never without a declaration ([`Capabilities::all`] leaves it off).
     pub webview_input: bool,
+    /// What web views' pages may capture (`webview.media`): never without a
+    /// declaration ([`Capabilities::all`] leaves it empty).
+    pub webview_media: Vec<WebMedia>,
     /// The app may set the status bar.
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
@@ -1154,7 +1225,7 @@ impl Capabilities {
             if check(
                 webview,
                 "capabilities.webview",
-                &["hosts", "input"],
+                &["hosts", "input", "media"],
                 "capabilities.webview",
             )? {
                 caps.webview = Some(match webview.get("hosts") {
@@ -1165,6 +1236,18 @@ impl Capabilities {
                     caps.webview_input = input
                         .as_bool()
                         .ok_or("capabilities.webview.input must be a boolean")?;
+                }
+                if let Some(media) = webview.get("media") {
+                    caps.webview_media = strings(media, "capabilities.webview.media")?
+                        .iter()
+                        .map(|kind| match kind.as_str() {
+                            "microphone" => Ok(WebMedia::Microphone),
+                            "camera" => Ok(WebMedia::Camera),
+                            _ => Err(format!(
+                                "capabilities.webview.media takes `microphone` and `camera`, not `{kind}`"
+                            )),
+                        })
+                        .collect::<Result<_, _>>()?;
                 }
             }
         }
@@ -1430,6 +1513,10 @@ impl Capabilities {
             // Only when granted: older runtimes read what newer signers write.
             if self.webview_input {
                 w.insert("input".into(), true.into());
+            }
+            if !self.webview_media.is_empty() {
+                let media = self.webview_media.iter().map(|m| m.as_str().into());
+                w.insert("media".into(), Value::Array(media.collect()));
             }
             obj.insert("webview".into(), Value::Object(w));
         }
@@ -2204,6 +2291,13 @@ impl Access {
         self.each(|c| c.webview.is_some() && c.webview_input)
     }
 
+    /// Whether a web view's page may capture `media` (`getUserMedia`):
+    /// declared and granted, never by default. The system still asks the
+    /// user.
+    pub fn allows_web_media(&self, media: WebMedia) -> bool {
+        self.each(|c| c.webview.is_some() && c.webview_media.contains(&media))
+    }
+
     /// Whether the app may open a window of `kind` with `attributes` (its
     /// own, before its kind's defaults) while `open` windows besides the
     /// main one are open; the message of the refusal otherwise (the call
@@ -2964,6 +3058,29 @@ mod tests {
     }
 
     #[test]
+    fn web_media_needs_an_explicit_grant() {
+        let all = Access::all();
+        assert!(!all.allows_web_media(WebMedia::Microphone));
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let mic = r#"{ "webview": { "hosts": ["example.com"], "media": ["microphone"] } }"#;
+        assert!(access(mic).allows_web_media(WebMedia::Microphone));
+        assert!(!access(mic).allows_web_media(WebMedia::Camera));
+        assert!(
+            Capabilities::from_json(&serde_json::json!({ "webview": { "media": ["screen"] } }))
+                .is_err()
+        );
+        assert_eq!(Capabilities::from_json(&caps(mic).to_json()), Ok(caps(mic)));
+        let narrowed = Access {
+            declared: caps(mic),
+            granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
+        };
+        assert!(!narrowed.allows_web_media(WebMedia::Microphone));
+    }
+
+    #[test]
     fn host_function_names_and_grants_keep_to_their_charset() {
         for good in ["getUserInfo", "user.info", "a-b_c:d.E9", &"a".repeat(128)] {
             assert!(valid_host_name(good), "{good}");
@@ -3707,6 +3824,83 @@ mod tests {
         for empty in ["", "  "] {
             assert_eq!(a.media_url(empty, None, None), Some(Cow::Borrowed(empty)));
         }
+    }
+
+    /// A granted media file is read through its root: a link swapped in
+    /// after the check does not lead the read out of it.
+    #[cfg(unix)]
+    #[test]
+    fn media_files_open_inside_their_root() {
+        use std::io::Read;
+        let base = std::env::temp_dir().join(format!("media-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("allowed")).unwrap();
+        let base = canonicalize(&base).unwrap();
+        std::fs::write(base.join("allowed/a.png"), b"public").unwrap();
+        std::fs::write(base.join("secret.png"), b"secret").unwrap();
+        let allowed = base.join("allowed");
+        let access = Access {
+            declared: Capabilities::from_json(
+                &serde_json::json!({ "fs": { "read": [allowed.to_str().unwrap()] } }),
+            )
+            .unwrap(),
+            granted: None,
+        };
+        let files = MediaFiles::new(&access, None, &TrustedPaths::default(), true);
+        let path = allowed.join("a.png");
+        let read = |path: &Path| {
+            let mut text = String::new();
+            files.open(path)?.ok()?.read_to_string(&mut text).ok()?;
+            Some(text)
+        };
+        assert_eq!(read(&path).as_deref(), Some("public"));
+        // Swapped for a link out of the root after the check.
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(base.join("secret.png"), &path).unwrap();
+        assert!(matches!(files.open(&path), Some(Err(_))));
+        assert!(matches!(files.open(&base.join("secret.png")), Some(Err(_))));
+        // No roots: the caller opens the path.
+        assert!(MediaFiles::default().open(&path).is_none());
+        // A grant narrower than the declared root: a link in the grant
+        // to a file elsewhere in the declared root is refused (#1605).
+        std::fs::create_dir_all(base.join("allowed/sub")).unwrap();
+        std::fs::write(base.join("allowed/sub/ok.png"), b"ok").unwrap();
+        std::os::unix::fs::symlink(
+            base.join("allowed/a.png"),
+            base.join("allowed/sub/link.png"),
+        )
+        .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, b"public").unwrap();
+        let narrowed = Access {
+            declared: access.declared.clone(),
+            granted: Some(
+                Capabilities::from_json(&serde_json::json!({
+                    "fs": { "read": [allowed.join("sub").to_str().unwrap()] }
+                }))
+                .unwrap(),
+            ),
+        };
+        let files = MediaFiles::new(&narrowed, None, &TrustedPaths::default(), true);
+        let mut text = String::new();
+        files
+            .open(&allowed.join("sub/ok.png"))
+            .unwrap()
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(text, "ok");
+        assert!(matches!(
+            files.open(&allowed.join("sub/link.png")),
+            Some(Err(_))
+        ));
+        assert!(matches!(files.open(&path), Some(Err(_))));
+        // `file://localhost/` names the same local file, and is refused the same.
+        let localhost = format!("file://localhost{}", allowed.join("sub/link.png").display());
+        assert_eq!(narrowed.media_url(&localhost, None, Some(&files)), None);
+        let ok = format!("file://localhost{}", allowed.join("sub/ok.png").display());
+        assert!(narrowed.media_url(&ok, None, Some(&files)).is_some());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A symlink in a granted root whose target does not exist yet is

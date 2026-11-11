@@ -21,7 +21,9 @@
 //! past [`MAX_PENDING_CALLS`], `ERR_NSH_HOST_ERROR` for the embedding app's
 //! own error); wrong arguments reject with a `TypeError` or `RangeError`.
 //! `post` is synchronous: it throws for a wrong or refused name, and a
-//! post without an embedding app is dropped without a word.
+//! post without an embedding app is dropped without a word. Without an SDK
+//! channel, calls and posts go to the platform's host
+//! (`nsh_core::Command::HostCall` / `HostPost`), where it has one.
 
 use std::{
     cell::{Cell, RefCell},
@@ -171,13 +173,26 @@ pub(crate) fn extend(cx: Ctx, host: Raw) -> Raw {
             .filter(JsonValue::is_object)
             .unwrap_or_else(|| JsonValue::Object(Default::default()));
         js::define(cx, obj.raw(), "params", from_json(cx, &params), true)?;
-        js::define(
-            cx,
-            obj.raw(),
-            "post",
-            js::function(cx, c"post", post, 2)?,
-            true,
-        )?;
+        // Without an SDK channel, a post goes to the platform's host (the
+        // web page's), which checks it as it checks calls.
+        let platform_post = js::get(cx, obj.raw(), "post")?;
+        let post = closure(cx, vec![platform_post], |cx, captures, args| {
+            let name = name_arg(cx, args.get(0), "host.post")?;
+            let data = to_json(cx, args.get(1))?;
+            if let Some(bridge) = bridge(cx).filter(|b| b.available()) {
+                check_call(cx, &name)?;
+                bridge.post(&name, data);
+            } else if crate::env::current(cx).host && js::is_function(cx, captures[0].raw()) {
+                js::call(
+                    cx,
+                    captures[0].raw(),
+                    UNDEFINED,
+                    &[args.get(0), args.get(1)],
+                )?;
+            }
+            Ok(V::undefined())
+        })?;
+        js::define(cx, obj.raw(), "post", post, true)?;
         Ok(obj)
     })();
     made.map_or(qjs::JS_EXCEPTION, V::take)
@@ -380,20 +395,6 @@ pub(crate) fn expire(cx: Ctx, now: nsh_core::time::Instant) {
         .collect();
     for (id, error) in expired {
         finish(cx, id, Err(error));
-    }
-}
-
-native! {
-    /// `post(name, data)`: hands `data` to the embedding app, with no
-    /// answer.
-    fn post(cx, _this, args) {
-        let name = name_arg(cx, args.get(0), "host.post")?;
-        let data = to_json(cx, args.get(1))?;
-        if let Some(bridge) = bridge(cx).filter(|b| b.available()) {
-            check_call(cx, &name)?;
-            bridge.post(&name, data);
-        }
-        Ok(V::undefined())
     }
 }
 

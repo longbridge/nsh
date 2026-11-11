@@ -24,7 +24,8 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
     ));
 }
 
-/// The application as a whole (desktops; its functions do nothing elsewhere).
+/// The application as a whole (desktops; its functions do nothing elsewhere,
+/// and of its events only `openFiles` comes on iOS too).
 #[module]
 pub(crate) struct Application;
 
@@ -60,7 +61,14 @@ impl Application {
     /// treat them as untrusted input. Launches while nothing listened go to
     /// the next listener (at most 16, the oldest dropped). macOS runs one
     /// instance of an app on its own and reports nothing; files and links
-    /// still come through `UrlScheme`. `quit`: the app is quitting (its Quit
+    /// come as `openFiles`, links through `UrlScheme`. `openFiles`: the
+    /// system opened the app with files of the types it declares (nsh.json
+    /// `fileTypes`: Open With, a double click, a drop on its icon) on macOS,
+    /// iOS, Windows or Linux, at launch or while it runs; `paths` are
+    /// absolute. Files that came while nothing listened, those that launched
+    /// the app included, go to the next listener at once (at most 64, the
+    /// oldest dropped). The app reads them with `fs`, which their opening
+    /// does not grant. `quit`: the app is quitting (its Quit
     /// item, `quit()`, its last window closing, the system ending it, a host
     /// app removing its view), for its cleanup, as GPUI's `on_app_quit`: it
     /// cannot keep the app running (an app that asks first quits from a Quit
@@ -68,6 +76,7 @@ impl Application {
     /// at most for all of them, while the platform waits too. Returns a
     /// function that stops listening.
     #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance>) -> Stop)]
+    #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]
     #[overload(fn(event: ApplicationQuitEvent, listener: Callback<()>) -> Stop)]
     pub(crate) fn on(
         event: ApplicationEvent,
@@ -77,6 +86,7 @@ impl Application {
     ) -> Stop {
         match event {
             ApplicationEvent::SecondInstance => second_instance(listener, &sys, cx),
+            ApplicationEvent::OpenFiles => open_files(listener, &sys, cx),
             ApplicationEvent::Quit => quit(listener, &sys, cx),
         }
     }
@@ -97,6 +107,26 @@ fn second_instance(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) ->
     Stop::new(move || {
         if let Some(launches) = launches.upgrade() {
             launches.listeners.borrow_mut().retain(|(i, _)| *i != id);
+        }
+    })
+}
+
+fn open_files(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+    let files = sys.locals.get::<Files>();
+    let id = files.next.get();
+    files.next.set(id.wrapping_add(1));
+    let unheard = files.unheard.take();
+    if !unheard.is_empty() {
+        listener.post(Payload::OpenFiles(ApplicationOpenFiles::new(unheard)));
+    }
+    files.listeners.borrow_mut().push((id, listener));
+    if !files.started.replace(true) {
+        cx.start(deliver_files(Rc::downgrade(&files)));
+    }
+    let files = Rc::downgrade(&files);
+    Stop::new(move || {
+        if let Some(files) = files.upgrade() {
+            files.listeners.borrow_mut().retain(|(i, _)| *i != id);
         }
     })
 }
@@ -123,6 +153,8 @@ pub(crate) enum ApplicationEvent {
     /// The app was launched again (nsh.json `singleInstance`).
     #[default]
     SecondInstance,
+    /// The system opened the app with files (nsh.json `fileTypes`).
+    OpenFiles,
     /// The app is quitting.
     Quit,
 }
@@ -139,10 +171,17 @@ pub(crate) enum ApplicationQuitEvent {
     Quit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub(crate) enum ApplicationOpenFilesEvent {
+    #[default]
+    OpenFiles,
+}
+
 /// What a listener gets.
 #[derive(Debug, Clone)]
 pub(crate) enum Payload {
     SecondInstance(ApplicationSecondInstance),
+    OpenFiles(ApplicationOpenFiles),
     Quit,
 }
 
@@ -158,6 +197,7 @@ impl JsValue for Payload {
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         match self {
             Payload::SecondInstance(launch) => launch.to_js(host),
+            Payload::OpenFiles(files) => files.to_js(host),
             Payload::Quit => Ret::into_js((), host),
         }
     }
@@ -217,6 +257,64 @@ async fn deliver(launches: Weak<Launches>) {
         }
         for (_, listener) in &*listeners {
             listener.post(Payload::SecondInstance(launch.clone().into()));
+        }
+    }
+}
+
+/// Files the system opened the app with (the `openFiles` event).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct ApplicationOpenFiles {
+    /// Their absolute paths.
+    paths: Vec<String>,
+}
+
+impl ApplicationOpenFiles {
+    fn new(paths: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            paths: paths
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+        }
+    }
+}
+
+/// The VM's `openFiles` listeners.
+#[derive(Default)]
+struct Files {
+    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    next: Cell<u32>,
+    /// The task waiting for the core's files started; it lasts as the VM
+    /// does.
+    started: Cell<bool>,
+    /// Files that came with no listener, for the next one.
+    unheard: RefCell<Vec<std::path::PathBuf>>,
+}
+
+impl Local for Files {
+    fn close(&self) {
+        self.listeners.borrow_mut().clear();
+    }
+}
+
+/// Posts the core's files to the listeners, while the VM lasts.
+async fn deliver_files(files: Weak<Files>) {
+    loop {
+        let paths = crate::prelude::next_open_files().await;
+        let Some(files) = files.upgrade() else {
+            return;
+        };
+        let listeners = files.listeners.borrow();
+        if listeners.is_empty() {
+            let mut unheard = files.unheard.borrow_mut();
+            unheard.extend(paths);
+            let excess = unheard.len().saturating_sub(crate::file_type::MAX_PENDING);
+            unheard.drain(..excess);
+            continue;
+        }
+        let payload = ApplicationOpenFiles::new(paths);
+        for (_, listener) in &*listeners {
+            listener.post(Payload::OpenFiles(payload.clone()));
         }
     }
 }

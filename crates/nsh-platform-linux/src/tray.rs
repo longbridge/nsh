@@ -15,6 +15,11 @@
 //!   `ItemIsMenu` asks the panel to open the menu instead. The menu's items
 //!   are chosen through `Event(id, "clicked")` and reported as the menu bar's
 //!   are ([`crate::chrome::choose`]).
+//! - Before a click, a panel on Wayland hands over an XDG activation token
+//!   (`ProvideXdgActivationToken`): it is kept for the app's next window
+//!   activation ([`crate::window::give_activation_token`]), so a window the
+//!   app shows or focuses in answer comes to the front; without one (X11, a
+//!   panel that gives none) the window is presented as before.
 //! - The title is `XAyatanaLabel` (the AppIndicator extension), its runs'
 //!   text without their colors: panels that show it (GNOME's AppIndicator
 //!   extension, Unity, MATE, Budgie) draw it right of the icon, whatever
@@ -472,8 +477,12 @@ fn item_property(name: &str) -> glib::Variant {
     })
 }
 
-fn item_call(method: &str, _params: &glib::Variant) -> Option<glib::Variant> {
-    if method == "Activate" {
+fn item_call(method: &str, params: &glib::Variant) -> Option<glib::Variant> {
+    if method == "ProvideXdgActivationToken" {
+        if let Some((token,)) = params.get::<(String,)>() {
+            crate::window::give_activation_token(token);
+        }
+    } else if method == "Activate" {
         let (surface, click) = TRAY.with(|t| {
             t.borrow()
                 .as_ref()
@@ -490,7 +499,7 @@ fn item_call(method: &str, _params: &glib::Variant) -> Option<glib::Variant> {
         }
     }
     // `ContextMenu`: hosts open the menu themselves; `Scroll`,
-    // `SecondaryActivate`, `ProvideXdgActivationToken`: nothing to do.
+    // `SecondaryActivate`: nothing to do.
     None
 }
 
@@ -734,6 +743,28 @@ mod tests {
                 .as_str(),
             "s"
         );
+    }
+
+    #[test]
+    fn the_panel_s_activation_token_serves_one_activation() {
+        let now = std::time::Instant::now;
+        item_call("ProvideXdgActivationToken", &("token-1",).to_variant());
+        assert_eq!(
+            crate::window::take_activation_token(now()).as_deref(),
+            Some("token-1")
+        );
+        assert_eq!(crate::window::take_activation_token(now()), None);
+        // A newer token replaces one not used yet.
+        item_call("ProvideXdgActivationToken", &("token-2",).to_variant());
+        item_call("ProvideXdgActivationToken", &("token-3",).to_variant());
+        assert_eq!(
+            crate::window::take_activation_token(now()).as_deref(),
+            Some("token-3")
+        );
+        // Wrong arguments and empty tokens keep nothing.
+        item_call("ProvideXdgActivationToken", &(1i32,).to_variant());
+        item_call("ProvideXdgActivationToken", &("",).to_variant());
+        assert_eq!(crate::window::take_activation_token(now()), None);
     }
 
     #[test]

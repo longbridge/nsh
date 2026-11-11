@@ -231,6 +231,15 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
             }
         }
         let pressed = s.input_pressed.get();
+        // GPUI's macOS window turns a Control-click into a secondary press
+        // but releases it as the left button: that release is the
+        // secondary button's.
+        #[cfg(target_os = "macos")]
+        let button = if button == 0 && pressed & 1 == 0 && pressed & 1 << 1 != 0 {
+            1
+        } else {
+            button
+        };
         if pressed & 1 << button == 0 {
             return;
         }
@@ -363,7 +372,7 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
                 nsh_core::WheelDelta::Lines(nsh_core::geometry::point(-l.x, -l.y))
             }
         };
-        if crate::input::wheel_event(&s, &event, delta) {
+        if crate::input::wheel_event(&s, &event, delta, precise.then_some(phase)) {
             // The view took it; a gesture going on elsewhere still ends.
             if precise && matches!(phase, GesturePhase::Ended | GesturePhase::Cancelled) {
                 let end = WheelEvent {

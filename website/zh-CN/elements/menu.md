@@ -211,7 +211,7 @@ function ViewMenu() {
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。子菜单使用同样的外观，并随菜单一起关闭。手机上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。离开途中它不接受按压和按键：关闭时键盘焦点就回到触发元素，所以离开途中按 Return 不会选中条目，而是再次打开菜单。子菜单使用同样的外观，并随菜单一起关闭。手机上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <Menu

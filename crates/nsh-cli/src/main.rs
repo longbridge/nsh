@@ -186,6 +186,10 @@ enum Command {
         /// `nsh/host` calls of each app the tests open and sends its events.
         #[arg(long, value_name = "JS")]
         web_host: Option<PathBuf>,
+        /// With `--target ios`: the simulator the apps run in (name or
+        /// UDID); default: a booted one, else the newest iPhone.
+        #[arg(long, value_name = "DEVICE")]
+        device: Option<String>,
         /// With `--target macos`: the display the apps' windows open on,
         /// centered: 1 is the primary display (the one with the menu bar),
         /// 2 the next, and so on; the main one when there is no such
@@ -870,6 +874,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser,
             web_host,
+            device,
             display,
             foreground,
         } => test::test(
@@ -882,6 +887,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser.as_deref(),
             web_host,
+            device.as_deref(),
             display.map(|n| n as usize),
             foreground,
         ),

@@ -53,25 +53,13 @@ pub fn main() -> std::process::ExitCode {
 fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     use nsh_platform_macos::{ActivationPolicy, AppOptions, Appearance, AssetBase, Limits};
 
-    /// Run by `nsh run`: the app's own logs go to its terminal too.
-    static DEVELOPMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    struct Logger;
-    impl log::Log for Logger {
-        fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-            m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
-        }
-        fn log(&self, r: &log::Record<'_>) {
-            if self.enabled(r.metadata()) {
-                eprintln!("{} {}: {}", r.level(), r.target(), r.args());
-            }
-        }
-        fn flush(&self) {}
-    }
-    static LOGGER: Logger = Logger;
+    // Warnings, errors and the app's `js` lines go to the unified log (an
+    // app opened from Finder or the Dock writes stderr to /dev/null). Run by
+    // `nsh run`, the app's own logs go there too, and to its terminal.
     let development = std::env::var_os("NSH_APP_DIR");
-    let _ = DEVELOPMENT.set(development.is_some());
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(log::LevelFilter::Info);
+    let mut logging = nsh_platform_apple::unified_log::Options::default();
+    logging.development = development.is_some();
+    nsh_platform_apple::unified_log::install(logging);
 
     // `<App>.app/Contents/MacOS/<exe>` -> `<App>.app/Contents/Resources/nsh`.
     let dir = match development {

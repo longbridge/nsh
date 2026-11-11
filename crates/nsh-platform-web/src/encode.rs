@@ -768,8 +768,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = &a.label {
         let _ = write!(s, ",\"label\":{}", json_str(l));
     }
-    if let Some(h) = &a.hint {
-        let _ = write!(s, ",\"hint\":{}", json_str(h));
+    // `aria-description`: the description, then the hint.
+    if let Some(h) = a.help_text(None) {
+        let _ = write!(s, ",\"hint\":{}", json_str(&h));
     }
     // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
     let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
@@ -790,6 +791,9 @@ fn props_json(p: &ViewProps) -> String {
     }
     if a.state.has_popup {
         s.push_str(",\"hasPopup\":true");
+    }
+    if a.state.invalid {
+        s.push_str(",\"invalid\":true");
     }
     if let Some(p) = a.state.pressed {
         let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
@@ -1638,6 +1642,15 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(id)
                 .str("hostCall")
                 .raw(&request.to_string())
+                .str(name)
+                .raw(&args.to_string())
+                .end();
+        }
+        // `nsh.js` `hostPost`: nothing comes back.
+        Command::HostPost { name, args } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostPost")
                 .str(name)
                 .raw(&args.to_string())
                 .end();

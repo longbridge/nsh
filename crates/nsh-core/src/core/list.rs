@@ -691,6 +691,22 @@ impl ListState {
             })
     }
 
+    /// The row the viewport starts in, by its first item, and how far
+    /// past the row's start the viewport starts, in natural coordinates
+    /// (`ref.measureScrollPosition()`); `None` without items or a
+    /// viewport. Before the first row (a header, padding) it is item 0, a
+    /// negative distance away.
+    pub(super) fn scroll_position(&self) -> Option<(u32, f32)> {
+        if self.count == 0 || self.viewport <= 0.0 {
+            return None;
+        }
+        let top = self.natural_offset();
+        let body = self.blocks().body;
+        let row = (self.rows.find((top - body).max(0.0) as f64) as u32).min(self.row_count() - 1);
+        let index = (row * self.columns).min(self.count - 1);
+        Some((index, top - self.item_at(index)))
+    }
+
     /// Scrolls so item `index` starts `from_top` below the viewport's start
     /// again (a list that is not inverted).
     fn keep_in_place(&mut self, index: u32, from_top: f32) {
@@ -716,16 +732,20 @@ impl ListState {
     }
 
     /// Where the viewport starts in natural coordinates while a layout
-    /// measures its cells. An inverted list's `content_len` already holds
-    /// what this layout changed (a page spliced at its end, rows measured
-    /// above the viewport) before `anchor_end` moves the offset to match,
-    /// so it counts from the end it last anchored to, plus what the
-    /// measurements so far moved the visible rows by.
+    /// measures its cells, counting what the measurements so far moved the
+    /// visible rows by: the layout scrolls by that only once it measured
+    /// every cell, and a row above the viewport that earlier rows pushed
+    /// down is still above it. An inverted list's `content_len` already
+    /// holds what this layout changed (a page spliced at its end, rows
+    /// measured above the viewport) before `anchor_end` moves the offset to
+    /// match, so it counts from the end it last anchored to.
     fn measuring_natural_offset(&self) -> f32 {
         if self.inverted && !self.anchored_end.is_nan() {
             self.anchored_end - self.offset - self.measured_scroll
-        } else {
+        } else if self.inverted {
             self.natural_offset()
+        } else {
+            self.natural_offset() + self.measured_scroll
         }
     }
 
@@ -1971,6 +1991,24 @@ mod tests {
         assert_eq!(l.measured(30, 10.0), 0.0);
     }
 
+    /// Rows above the viewport measured in one layout, in any order: each
+    /// is judged against where the viewport will be once the rows measured
+    /// before it moved it, so all of them keep the visible rows in place.
+    #[test]
+    fn rows_measured_above_the_viewport_together_all_anchor() {
+        for order in [[47, 48, 49], [49, 48, 47], [48, 49, 47]] {
+            let mut l = list(100, 50.0, 400.0);
+            l.offset = 2500.0;
+            // Item 50 starts the viewport.
+            assert_eq!(l.item_at(50), 2500.0);
+            let scroll: f32 = order.iter().map(|&i| l.measured(i, 200.0)).sum();
+            assert_eq!(scroll, 450.0, "{order:?}");
+            l.offset += scroll;
+            l.anchor_end(scroll);
+            assert_eq!(l.item_at(50) - l.natural_offset(), 0.0, "{order:?}");
+        }
+    }
+
     #[test]
     fn load_more_fires_once_per_count() {
         let mut l = list(10, 50.0, 400.0);
@@ -2297,6 +2335,38 @@ mod tests {
         l.measured_extra(ExtraKind::Empty, 100.0);
         let b = l.blocks();
         assert_eq!(b.footer, b.body + 100.0 + 8.0);
+    }
+
+    #[test]
+    fn the_scroll_position_is_the_row_at_the_viewports_start_and_the_depth_into_it() {
+        assert_eq!(list(0, 50.0, 400.0).scroll_position(), None);
+        // A header, then rows 50 points apart with 8-point gaps.
+        let mut l = list(100, 50.0, 400.0);
+        l.set_content(ListContentStyle {
+            row_gap: px(8.0),
+            ..ListContentStyle::default()
+        });
+        l.add_slot_cell(CellSlot::Header, 7);
+        l.measured_extra(ExtraKind::Header, 30.0);
+        assert_eq!(l.scroll_position(), Some((0, -38.0)));
+        l.measured(1, 90.0);
+        // In row 2, 5 points in.
+        l.offset = 38.0 + 58.0 + 98.0 + 5.0;
+        assert_eq!(l.scroll_position(), Some((2, 5.0)));
+        // In the gap after row 2: past its size.
+        l.offset = 38.0 + 58.0 + 98.0 + 52.0;
+        assert_eq!(l.scroll_position(), Some((2, 52.0)));
+        // Rows of three: the row's first item.
+        l.set_columns(3);
+        l.offset = 38.0 + 58.0 + 10.0;
+        assert_eq!(l.scroll_position(), Some((3, 10.0)));
+        // An inverted list counts from item 0 at the bottom.
+        let mut l = list(100, 50.0, 400.0);
+        l.set_inverted(true);
+        l.anchor_end(0.0);
+        assert_eq!(l.scroll_position(), Some((0, 0.0)));
+        l.offset -= 120.0;
+        assert_eq!(l.scroll_position(), Some((2, 20.0)));
     }
 
     #[test]

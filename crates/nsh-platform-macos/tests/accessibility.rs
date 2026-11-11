@@ -44,6 +44,9 @@ mod macos {
     /// The test sets it to scroll the scroll area to its end.
     static SCROLLED: AtomicBool = AtomicBool::new(false);
 
+    /// The test sets it to open the dialog.
+    static OPENED: AtomicBool = AtomicBool::new(false);
+
     /// An option and a tree item holding only a text, an option with a
     /// label of its own, and a button holding only a text.
     #[component]
@@ -86,6 +89,30 @@ mod macos {
             .child(geometry())
             .child(order())
             .child(scroll_area())
+            .child(confirm())
+    }
+
+    /// A dialog named by its title and described by its message, opened
+    /// once the test asks.
+    #[component]
+    fn Confirm() -> impl IntoElement {
+        let open = signal(false);
+        set_interval(Duration::from_millis(20), move || {
+            if OPENED.load(Ordering::SeqCst) && !open.get_untracked() {
+                open.set(true);
+            }
+        });
+        when(open, || {
+            nsh_base::dialog()
+                .test_id("rename")
+                .label("Rename file")
+                .accessibility_description("Other apps see the new name too.")
+                .child(
+                    view()
+                        .child(text("Rename file"))
+                        .child(view().test_id("save").on_press(|| {}).child(text("Save"))),
+                )
+        })
     }
 
     /// A scroll view and a plain view, each holding two texts made bottom
@@ -432,6 +459,38 @@ mod macos {
                 (140.0, 180.0 - 60.0 * s, 30.0 * s, 10.0 * s),
             );
         }
+
+        // A dialog is an AXGroup with the dialog subrole, as WebKit makes
+        // ARIA's `dialog`, named by its label; its controls stay elements
+        // of their own inside it.
+        OPENED.store(true, Ordering::SeqCst);
+        until("the dialog", || find(&root, "rename").is_some());
+        let dialog = find(&root, "rename").expect("the dialog");
+        assert_eq!(
+            dialog.accessibilityRole().map(|r| r.to_string()).as_deref(),
+            Some("AXGroup")
+        );
+        assert_eq!(
+            dialog
+                .accessibilitySubrole()
+                .map(|r| r.to_string())
+                .as_deref(),
+            Some("AXApplicationDialog")
+        );
+        assert_eq!(
+            dialog
+                .accessibilityLabel()
+                .map(|s| s.to_string())
+                .as_deref(),
+            Some("Rename file")
+        );
+        // Its description is its help, which VoiceOver reads after the
+        // name.
+        assert_eq!(
+            dialog.accessibilityHelp().map(|s| s.to_string()).as_deref(),
+            Some("Other apps see the new name too.")
+        );
+        assert_eq!(read(&dialog, "save"), (Some("Save".into()), None, 0));
 
         app.stop();
         window.close();

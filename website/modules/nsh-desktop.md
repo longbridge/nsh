@@ -34,6 +34,8 @@ import {
 } from "nsh/desktop";
 ```
 
+In the AppKit and Win32 backends, the menus NSH builds and role items without an explicit label follow the language selected by `nsh/i18n`, including changes while the app runs. Built-in menu translations cover English, Japanese, Simplified Chinese and Traditional Chinese; other languages fall back to English. An item's own `label` always takes precedence.
+
 ## isAvailable
 
 ```ts
@@ -376,6 +378,7 @@ const Application: {
   quit(): void;
   restart(): void;
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
+  on(event: "openFiles", listener: (files: { paths: string[] }) => void): () => void;
   on(event: "quit", listener: () => void): () => void;
 };
 ```
@@ -385,6 +388,7 @@ const Application: {
 | `quit()` | `quit()` | Quits the app, as the application menu's Quit item (`{ role: "quit" }`) and the platform's quit key do. |
 | `restart()` | `restart()` | Quits the app as `quit()` does, then starts it again with the same arguments. |
 | `on("secondInstance", listener)` | `next_second_instance()` | The app was launched again while it runs ([Single instance](#single-instance)). |
+| `on("openFiles", listener)` | `next_open_files()` | The system opened the app with files of the types it declares ([Opening files](#opening-files)). |
 | `on("quit", listener)` | `on_app_quit(f)` | The app is quitting: its cleanup runs ([Quitting](#quitting)). |
 
 `Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
@@ -467,6 +471,52 @@ user logs out, a host app removing its view), and cannot keep it running. A prom
 200 ms at most for all of them, while the platform waits for the app; past that the app stops. A listener added while a
 component renders goes with the component; the function `on` returns stops it.
 
+### Opening files
+
+An app that opens documents (a media player, an editor) lists their types under `fileTypes` in nsh.json. `nsh package`
+declares them to the system, so the app shows in Open With and opens the files the user double-clicks or drops on its
+icon. The files come to `Application.on("openFiles")` as absolute paths, those that launched the app included. Links of
+the app's [schemes](nsh.md#urlscheme) stay apart, on `UrlScheme.on("open")`. `Application` is imported from
+`nsh/desktop`, and `openFiles` also comes on iOS.
+
+```json
+{
+  "fileTypes": [
+    { "name": "Video", "extensions": ["mp4", "mov"], "mimeTypes": ["video/mp4", "video/quicktime"], "contentTypes": ["public.movie"] }
+  ]
+}
+```
+
+```tsx
+import { Application } from "nsh/desktop";
+
+Application.on("openFiles", ({ paths }) => {
+  for (const path of paths) play(path);
+});
+```
+
+| Key | Description |
+| --- | --- |
+| `name` | What the system calls the kind of file (`"Video"`). Required. |
+| `extensions` | The extensions, without the dot (`["mp4", "mov"]`). |
+| `mimeTypes` | The MIME types (`["video/mp4"]`): Linux lists the app for them. |
+| `contentTypes` | Uniform Type Identifiers (`["public.movie"]`): iOS lists the app for them. |
+| `role` | `"viewer"` (the default) or `"editor"`. |
+
+Each type names `extensions` or `contentTypes`. Rust code awaits `next_open_files()` of `nsh_core::prelude`, a
+`Vec<PathBuf>`. Files that come while nothing listens go to the next listener at once (up to 64, the oldest dropped).
+NSH takes opened files only for an app that declares file types.
+
+| Platform | How the app opens files |
+| --- | --- |
+| macOS | `CFBundleDocumentTypes` in `Info.plist`; Launch Services opens the app, or hands the files to the one that runs |
+| iOS, Mac Catalyst | `CFBundleDocumentTypes` in `Info.plist` (by `contentTypes`); the system hands the app a copy of the file |
+| Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts: a ProgID per type, listed in each extension's `OpenWithProgids`. A second launch with files hands them to the running app |
+| Linux | `MimeType` of the desktop entry, with `Exec … %U`; the app runs once and a second launch hands its files to the running app |
+| Android, web | Not declared; `fileTypes` is left out of their packages |
+
+With [`singleInstance`](#single-instance) a second launch also reports `secondInstance`, with its arguments as given.
+
 ### Single instance
 
 A desktop app usually runs once: opening it again brings the running app forward. An app opts in with
@@ -497,7 +547,7 @@ also come through `UrlScheme.on("open")`.
 | --- | --- |
 | Windows | A mutex named after the app's id; the second launch sends its arguments and working directory to the running app's window (`WM_COPYDATA`) |
 | Linux | GApplication's uniqueness on the session bus, by the app's id; the second launch's command line goes to the running app |
-| macOS | Launch Services runs one instance of an app bundle and activates it when it is opened again, so `secondInstance` is not reported; files and links come through `UrlScheme` |
+| macOS | Launch Services runs one instance of an app bundle and activates it when it is opened again, so `secondInstance` is not reported; files come through `openFiles` and links through `UrlScheme` |
 | iOS, Android, web | The system runs the app once; `secondInstance` is not reported |
 
 The release runners of `nsh package` read the setting; `nsh run` starts its development host as before.
@@ -918,6 +968,8 @@ Tray.set({
   ],
 });
 ```
+
+A window the app shows or focuses in `onClick` or in a menu item's `onSelect` comes to the front, on Linux's Wayland desktops too, where the panel hands the app the activation token of the click.
 
 A title keeps something in sight beside the icon in macOS's menu bar, such as a price, its change in a color of the app's theme. A run's color is fixed when `set` is called; set the tray inside an `effect` that reads the color scheme for a theme color to follow light and dark:
 

@@ -103,6 +103,12 @@ pub(crate) enum Action {
         args: crate::JsonValue,
         answer: AnswerSlot<Result<crate::JsonValue, super::JsError>>,
     },
+    /// Hands data to function `name` of the embedding app, with no answer
+    /// (`nsh/host`'s `post`).
+    HostPost {
+        name: String,
+        args: crate::JsonValue,
+    },
     /// Drops the slots of the host calls whose answers are gone (they
     /// timed out).
     ForgetHostCalls,
@@ -120,6 +126,10 @@ pub(crate) enum Action {
     /// The next link the system hands the app ([`crate::url_scheme`])
     /// resolves the slot, those that came before first.
     NextUrlSchemeOpen(AnswerSlot<String>),
+    /// The next files the system opens the app with
+    /// ([`crate::file_type`]) resolve the slot, all that came before at
+    /// once.
+    NextOpenFiles(AnswerSlot<Vec<std::path::PathBuf>>),
     /// The next later launch of the app
     /// ([`crate::single_instance::SecondInstance`]) resolves the slot, those
     /// that came before first.
@@ -182,6 +192,10 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// Measures where the list's viewport starts among its rows with the
+    /// layout of the commit the action goes out with; the position
+    /// resolves the slot.
+    MeasureScrollPosition(NodeId, AnswerSlot<Option<crate::ListScrollPosition>>),
     /// Evaluates a web view's script within a timeout, with its answer
     /// kept by the core.
     Evaluate(

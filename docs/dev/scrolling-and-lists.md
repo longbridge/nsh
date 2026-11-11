@@ -56,7 +56,7 @@
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
   below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `alignment` (`bottom`, GPUI's `ListAlignment::Bottom`: rows in reading order, opens at the end with no scroll command to pin, follows it within `follow_end` or a point's rounding, `ListState::anchor_end`; it waits for an appended last row's measurement the window will reach, so one scroll lands on its real size; short content lies at the bottom, `ListState::leading`), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts a number from the sticky ranges, so platforms pin as they do without one; an animated node rides along in `StickyCell::offset`, `ListState::sticky_node`, and the platforms add its value as they pin), `header` /
   `footer` / `empty` / `separator` (a component, called once and untracked, or an element; a signal or memo, as `<If>` and `<Each>` are, is the slot's insert's to track: `slot` in `nsh-js` `list.rs`, `web/browser/list.js`), `contentStyle`
-  (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,
+  (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollAtEnd` (opens at the end before the first frame, keeps it while rows measure, and takes precedence over `initialScrollIndex`; short content stays at the top), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,
   `onLoadMoreAtStart` + `loadMoreAtStartThreshold` (below), `onViewableItemsChange` +
   `viewabilityConfig` (`itemVisibleThreshold` / `viewAreaCoverageThreshold` / `minimumViewTime`), `keyExtractor`,
   `refreshing` / `onRefresh`, `refreshIndicator`, `pullValue`, `scrollValue`. Every other prop (`testID`, accessibility, `class`, `onLayout`, touch
@@ -92,6 +92,10 @@
 - **Kept rows**: a row holding the keyboard focus, an open overlay (a row's menu or popover; not a hint) or an end of
   a text selection stays bound wherever the list scrolls, so the field keeps the focus and the menu stays open
   (`Core::sync_kept`, each commit before the lists update). Once none is left in it, the row is recycled as any other.
+  The rows on either side of the focused row are kept with it: the platforms' Tab and Shift+Tab reach only views that
+  exist, so the next row is always there for them, however far the render window lags behind (keys repeating faster
+  than the reveal scrolls, a runtime list binding its overscan paced, the list scrolled away from the focus); the row
+  the focus reaches scrolls into view, which renders the rows around it.
 - **Revealing a view** (`reveal`, `ElementRef::reveal`): a command on the view that the
   core turns into `ScrollTo` commands of the `Scroll`s around it at the commit, in place among the commands
   (`Core::reveal_scrolls`, `core/measure.rs`), innermost first, each from where the ones inside it end up and the
@@ -108,6 +112,12 @@
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
   flight) until the rows in the viewport are all measured, the user scrolls away or the items change. Platforms only
   apply what they get.
+- **Reading position** (`ListRef.measureScrollPosition()`, `ElementRef::measure_scroll_position`): answered by
+  the core at the commit, as `measure()` is, from the list's own row positions (`ListState::scroll_position`,
+  `Core::list_scroll_position`): the row the viewport starts in and how far into it, so an app keeps a reading
+  position without adding up row sizes of its own, which would miss the rows the list measured but whose cells it
+  recycled before placing them, and the estimates it uses for the rest. `scrollToIndex` with `viewOffset: -offset`
+  restores it. Platforms never see the command.
 - **Lists in their parent's viewport** (`viewport="parent"`, `ListLayout::viewport(ListViewport::Parent)`; `own`,
   the default, is a scroll view of its own): fixed when the list's native view is made (a change in the batch that
   makes it counts; later ones warn once). The list mounts as a plain view clipping its cells and lies in its parent's layout at its full length (padding,

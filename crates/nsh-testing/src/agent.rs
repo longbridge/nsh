@@ -1123,6 +1123,13 @@ pub trait Native: Send + Sync {
                 .into(),
         )
     }
+    /// An input method composes `text` in the focused input: marked text
+    /// at the caret, in place of what it composed; empty, the composition
+    /// ends with nothing committed.
+    fn compose(&self, text: &str) -> Result<(), String> {
+        let _ = text;
+        Err("`compose` runs headless and on macOS for now".into())
+    }
     /// Chooses the action of the open context menu (`Menu.popup`) at the
     /// end of `path`: the labels of the submenus on the way, then its own.
     fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
@@ -1496,6 +1503,7 @@ impl Agent {
             TestStep::OpenedUrls => self.scene.opened_urls().map(Value::from),
             TestStep::DragAndHold { selector, x, y } => done(self.drag_and_hold(&selector, x, y)),
             TestStep::Drop => done(self.drop_held()),
+            TestStep::Compose { selector, text } => done(self.compose(&selector, &text)),
             TestStep::DropFiles { selector, uris } => done(
                 self.find(&selector, "view", PickTarget::View)
                     .and_then(|(_, at)| self.native.drop_files(at, uris))
@@ -2055,6 +2063,16 @@ impl Agent {
         self.settled()
     }
 
+    fn compose(&self, selector: &str, text: &str) -> Result<(), String> {
+        // In the field the user is in: a press would commit what it composes.
+        let (id, _) = self.find(selector, "input", PickTarget::Input)?;
+        if self.native.focused() != Some(id) {
+            self.focus(selector)?;
+        }
+        self.native.compose(text)?;
+        self.settled()
+    }
+
     fn right_click(&self, selector: &str) -> Result<(), String> {
         if !self.native.mouse() {
             return Err(
@@ -2257,7 +2275,11 @@ impl Agent {
     }
 
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.scene.texts().unwrap_or_default())
+        let texts = self.scene.texts().unwrap_or_default();
+        format!(
+            "on screen: [{}]",
+            crate::failure::screen_texts(&texts, Some(crate::failure::SCREEN_TEXT_LIMIT))
+        )
     }
 }
 

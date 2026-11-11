@@ -238,8 +238,14 @@ impl DevSession {
     }
 
     /// Serves the assets `built` imports by name, whatever their type: the
-    /// app's directory itself serves only its media files.
+    /// app's directory itself serves only its media files. It is the one
+    /// the build named them from (an entry below its app names them from
+    /// the app's directory), so a literal `asset:/` URL finds what a
+    /// package of the app holds.
     fn serve_assets(&self, built: &build::Built) {
+        if let Some(root) = &built.asset_root {
+            self.server.set_assets_root(Some(root.clone()));
+        }
         self.server.serve_files(
             built
                 .assets

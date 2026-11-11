@@ -179,7 +179,7 @@ let composing = false;
 | `autoCorrect` | `boolean` | `true` | 系统的自动更正。 |
 | `autoComplete` | `AutoComplete` | | 输入框内容的类型，用于自动填充。 |
 | `multiline` | `boolean` | `false` | 多行；回车插入换行（`submitBehavior` 另有设置时除外）。 |
-| `maxLength` | `number` | | 用户最多能输入的字符数。 |
+| `maxLength` | `number` | | 用户最多能输入的字符数。超出的粘贴只插入放得下的部分，与浏览器一致。 |
 | `readonly` | `boolean` | `false` | 用户可以选择和复制文本，但不能修改。 |
 | `autoFocus` | `boolean` | `false` | 出现时自动获得焦点。 |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | 单行 `"blurAndSubmit"`，多行 `"newline"` | 回车键做什么：提交并保持焦点、提交后失去焦点，或插入换行（仅多行）。 |

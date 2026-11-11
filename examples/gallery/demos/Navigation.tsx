@@ -572,6 +572,7 @@ export function Navigation() {
         open={sheet() === "fullScreen" || sheet() === "pageSheet" || sheet() === "formSheet" || sheet() === "fade"}
         presentation={sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen"}
         animation={sheet() === "fade" ? "fade" : "slide"}
+        accessibilityLabel={current()?.title ?? ""}
         onOpenChange={({ open }) => !open && close()}
         style={{ flex: 1 }}
       >
@@ -589,6 +590,7 @@ export function Navigation() {
       <Dialog
         open={sheet() === "kept"}
         presentation="pageSheet"
+        accessibilityLabel="Kept open"
         closeOnEscape={false}
         closeOnBackdropPress={false}
         closeOnSwipe={false}
@@ -606,6 +608,9 @@ export function Navigation() {
       <Dialog
         open={sheet() === "dialog"}
         animation="fade"
+        role="alertdialog"
+        accessibilityLabel="Delete “Launch notes”?"
+        accessibilityDescription="The note and its 14 comments go for everyone it is shared with. This cannot be undone."
         onOpenChange={({ open }) => !open && close()}
         backdropStyle={backdrop()}
         style={{ margin: "auto", width: platform.desktop ? 360 : 340, maxWidth: "90%" }}

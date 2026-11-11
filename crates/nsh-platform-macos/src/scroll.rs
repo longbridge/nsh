@@ -2469,8 +2469,9 @@ fn key_scroll_view(view: &NshView, horizontal: bool, dx: f32, dy: f32) -> Option
 }
 
 /// Scrolls the scroll views around `target` (animated) so that it shows,
-/// as iOS and Android do for the focused field. For the text fields: call
-/// it when one gets the keyboard focus.
+/// as iOS and Android do for the focused field. Called when a field gets
+/// the keyboard focus, and when another stop gets it other than by a click
+/// (Tab, `focus()`).
 pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
     // The rectangles are AppKit's, which the bounds place.
     commit_ancestors(target);

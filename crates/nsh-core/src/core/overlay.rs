@@ -16,17 +16,26 @@
 //! their anchors and root views listen to touches while they are shown)
 //! and Escape / the back button (`onCancel`, to the top overlay listening:
 //! a binding of the root's table and the root's back listener while one
-//! is shown). Closing is the app's (`nsh-base`'s components).
+//! is shown). Closing is the app's (`nsh-base`'s components). A shown
+//! overlay's content goes in the Tab order where the app put it, after the
+//! view before it there ([`Core::order_overlays_for_tab`],
+//! [`crate::ViewProps::tab_after`]), not after its root view's children.
 //!
 //! A hint overlay ([`OverlayConfig::hint`]) is shown by the core: its
 //! anchor (its parent without one) listens to the pointer coming and going
 //! while the overlay is in the view on a desktop; the pointer resting on it
 //! for the hint's delay shows the hint (a task of the components' executor
 //! wakes the engine then), the pointer leaving or pressing it hides it, as
-//! GPUI's tooltips do. In every idiom the keyboard focus shows it too,
-//! as WAI-ARIA's tooltips: the focus on its anchor (or in it, outside an
-//! overlay, the nearest hint's) shows it until the focus leaves
-//! ([`Core::focus_hints`]), and Escape hides a hint that is shown
+//! GPUI's tooltips do. In every idiom the focus the keyboard moved shows
+//! it too, as WAI-ARIA's tooltips: the focus that Tab, an arrow, a
+//! shortcut or the app's `focus()` after a key brought to its anchor (or
+//! into it, outside an overlay, the nearest hint's) shows it at once until
+//! the focus leaves ([`Core::focus_hints`]), by `focus-visible:`'s rule
+//! ([`Core::focus_shows`]) without its exception for an input that edits.
+//! A press, a tap or a click that brings the focus leaves the hint to the
+//! pointer, as Radix's tooltips do: the press hid it, and it shows again
+//! when the pointer comes back and rests, so nothing stays up once the
+//! pointer left. Escape hides a hint that is shown
 //! ([`Core::overlay_escape`]). The overlay hears what it asks for (`Show`,
 //! `Dismiss`, with the [`HintReason`]), so a component owning it
 //! (`nsh-base`'s `Tooltip`) can decide instead ([`OverlayConfig::open`]). An element's `tooltip` is a
@@ -102,15 +111,19 @@ pub(super) struct OverlayState {
     /// Where it was placed last, as `onPosition` reported it.
     pub(super) placed: Option<(Placed, Bounds<Points>)>,
     pub(super) native_anchor: Option<crate::overlay::PlacedAnchor>,
+    /// The view it follows in the Tab order while it is shown
+    /// ([`crate::ViewProps::tab_after`], [`Core::order_overlays_for_tab`]).
+    pub(super) tab_after: Option<NodeId>,
     /// A hint: the pointer rested on its anchor, and has not left or
     /// pressed it since.
     pub(super) hinted: bool,
     /// A hint: the pointer is on its anchor, resting until it shows.
     pub(super) waiting: Option<HintTimer>,
-    /// A hint: the keyboard focus is on its anchor.
+    /// A hint: the focus is on its anchor, whatever brought it there.
     pub(super) focus_on: bool,
-    /// A hint: the keyboard focus on its anchor shows it (not since
-    /// Escape or a press hid it).
+    /// A hint: the focus on its anchor shows it, the keyboard having
+    /// brought it there (`Core::focus_by_keyboard`), and no Escape or
+    /// press hid it since.
     pub(super) focus_shown: bool,
     /// A hint on a link of a text (a span, which has no frame of its own):
     /// where the pointer came over it, in its root view's coordinates,
@@ -133,7 +146,7 @@ pub(super) struct OverlayState {
 }
 
 impl OverlayState {
-    /// A hint the pointer or the keyboard focus shows.
+    /// A hint the pointer or the focus the keyboard moved shows.
     fn hint_shown(&self) -> bool {
         self.hinted || self.focus_shown
     }
@@ -183,6 +196,7 @@ impl<M: TextEngine> Core<M> {
                 host: None,
                 placed: None,
                 native_anchor: None,
+                tab_after: None,
                 hinted: false,
                 waiting: None,
                 focus_on: false,
@@ -486,6 +500,7 @@ impl<M: TextEngine> Core<M> {
                 root.laid_out = None;
             }
             self.needs_layout = true;
+            self.tab_places_stale = true;
             opened.push(key);
         }
         // Opened last, on top: in the order they were shown.
@@ -814,10 +829,11 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The keyboard focus moved: the hints whose anchor it came to show,
-    /// those it left hide. The focus counts for the nearest hint's anchor
-    /// on its chain, up to the overlay it is in (a popup's focus is not on
-    /// its trigger's hint).
+    /// The focus moved: the hints whose anchor it came to show when the
+    /// keyboard brought it there (`Core::focus_by_keyboard`), those it left
+    /// hide; a move inside an anchor decides nothing again. The focus
+    /// counts for the nearest hint's anchor on its chain, up to the overlay
+    /// it is in (a popup's focus is not on its trigger's hint).
     pub(super) fn focus_hints(&mut self) {
         let mut target = None;
         for &(k, _) in &self.focus_chain {
@@ -838,6 +854,7 @@ impl<M: TextEngine> Core<M> {
             .copied()
             .filter(|&k| self.overlay(k).is_some_and(|s| s.config.hint.is_some()))
             .collect();
+        let keyboard = self.focus_by_keyboard;
         for key in hints {
             let on = target.is_some() && self.hint_anchor(key) == target;
             let Some(state) = self.overlay_mut(key) else {
@@ -848,7 +865,11 @@ impl<M: TextEngine> Core<M> {
             }
             state.focus_on = on;
             let was = state.hint_shown();
-            state.focus_shown = on;
+            // A press that brings the focus hid the pointer's hint: showing
+            // it for that focus would keep it up long after the pointer
+            // left (a toolbar's tooltip after every click). Only the
+            // keyboard's focus shows it, as `focus-visible:` shows a ring.
+            state.focus_shown = on && keyboard;
             let now = state.hint_shown();
             if was != now {
                 self.hint_changed(key, now, HintReason::Focus);
@@ -1139,19 +1160,37 @@ impl<M: TextEngine> Core<M> {
     /// The platforms send no touch for a secondary click; a menu asked for
     /// by the keyboard or an assistive technology is no press, nor is a
     /// long press, whose touch went down already.
-    pub(super) fn overlay_context_menu(&mut self, id: NodeId, event: &ContextMenuEvent) {
+    ///
+    /// Returns those `onPressOutside` events (each overlay and its payload)
+    /// for the caller to hand out before `onContextMenu` itself, as a
+    /// press outside comes before what the press does: a context menu open
+    /// on the view closes before the view asks for one again, which then
+    /// opens where the pointer is.
+    pub fn context_menu_presses_outside(
+        &mut self,
+        id: NodeId,
+        event: &ContextMenuEvent,
+    ) -> Vec<(NodeId, EventPayload)> {
         if event.pointer_type != Some(PointerType::Mouse) || self.overlay_state.watched.is_empty() {
-            return;
+            return Vec::new();
         }
         let Ok(mut key) = self.key(id) else {
-            return;
+            return Vec::new();
         };
         let mut path = Vec::new();
         while key != NO_KEY {
             path.push(self.nodes[key as usize].id);
             key = self.nodes[key as usize].parent;
         }
+        let from = self.events.len();
         self.press_outside(event.page_position, &path);
+        self.events
+            .drain(from..)
+            .filter_map(|event| match event {
+                crate::element::JsEvent::Event(id, _, payload) => Some((id, payload)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// A press at `page` on the views of `path` (the one pressed first):
@@ -1704,6 +1743,93 @@ impl<M: TextEngine> Core<M> {
                 crate::AccessibilityRole::Listbox | crate::AccessibilityRole::Menu
             )
         })
+    }
+
+    /// Finds where each shown overlay goes in the Tab order and mounts it
+    /// where that changed ([`crate::ViewProps::tab_after`]): its native
+    /// view is at the end of its root view, but its content follows what
+    /// comes before it where the app put it, as WAI-ARIA's non-modal
+    /// popups have it (a popover's content right after its trigger). A list
+    /// of options or a menu keeps its place (a select's list, a menu: they
+    /// move the focus with their own keys, and Tab leaves them for the
+    /// control after their trigger).
+    pub(super) fn order_overlays_for_tab(&mut self) {
+        for i in 0..self.overlays.len() {
+            let key = self.overlays[i];
+            if self.overlay(key).is_none_or(|s| s.host.is_none())
+                || !self.nodes[key as usize].created
+            {
+                continue;
+            }
+            let after = if self.holds_options(key, 3) {
+                None
+            } else {
+                self.tab_predecessor(key)
+            };
+            let state = self.overlay_mut(key).expect("overlay");
+            if state.tab_after == after {
+                continue;
+            }
+            state.tab_after = after;
+            let node = &self.nodes[key as usize];
+            self.mount.push(MountItem::ViewProps {
+                id: node.id,
+                props: node.mounted_props(),
+            });
+        }
+    }
+
+    /// Whether `key` or a view of its own `depth` levels below it (not of
+    /// an overlay inside it) is a list of options or a menu.
+    fn holds_options(&self, key: Key, depth: usize) -> bool {
+        self.is_options(key)
+            || (depth > 0
+                && self.nodes[key as usize].children.iter().any(|&c| {
+                    !self.nodes[c as usize].is_overlay() && self.holds_options(c, depth - 1)
+                }))
+    }
+
+    /// The native view right before `key` in the app's tree, depth first:
+    /// the last one in the subtrees of the siblings before it, else its
+    /// parent's, going up. Other overlays' subtrees are not where they
+    /// are, so they are passed over.
+    fn tab_predecessor(&self, key: Key) -> Option<NodeId> {
+        let mut at = key;
+        loop {
+            let parent = self.nodes[at as usize].parent;
+            if parent == NO_KEY {
+                return None;
+            }
+            let siblings = &self.nodes[parent as usize].children;
+            let pos = siblings.iter().position(|&c| c == at)?;
+            if let Some(last) = siblings[..pos]
+                .iter()
+                .rev()
+                .find_map(|&s| self.last_native_in(s))
+            {
+                return Some(last);
+            }
+            let p = &self.nodes[parent as usize];
+            if p.created {
+                return Some(p.id);
+            }
+            at = parent;
+        }
+    }
+
+    /// The last native view in `key`'s subtree, depth first, overlays
+    /// passed over. A view without one has none below it either (a culled
+    /// one, a span).
+    fn last_native_in(&self, key: Key) -> Option<NodeId> {
+        let node = &self.nodes[key as usize];
+        if node.is_overlay() || !node.created {
+            return None;
+        }
+        node.children
+            .iter()
+            .rev()
+            .find_map(|&c| self.last_native_in(c))
+            .or(Some(node.id))
     }
 
     fn set_native_overlay_anchor(
