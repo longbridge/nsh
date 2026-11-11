@@ -875,6 +875,21 @@ program that describes them, builds the hosts and runners with them, and does ev
     `nsh` warns of as it writes `.nsh/types`);
   - `test` (`nsh-testing` without `bundle`, `nsh/base` and the app's sets, and a Rust app's root): the headless
     runner of `nsh test` (`nsh_testing::runner`);
+  - `unify` (no code), which `describe` and this machine's development host (`macos-host`, `linux-host` or
+    `windows-host`) depend on: it depends on each crate of `describe`'s dependency tree with the features Cargo
+    resolves for the two together (`cargo tree -e normal,build` of both, under `--cfg nsh_unify_off`, which switches
+    its own dependencies off), build scripts' and procedural macros' crates as build dependencies. The programs build
+    with a `cargo build -p` each and Cargo unifies features within one invocation only, so without it each would
+    build `nsh-core`, `nsh-base`, the app's crates and their dependencies with features of its own, and the target
+    directory would keep both. It covers `describe`'s tree only, so `describe` builds its own crates with more
+    features and nothing more (the host's whole tree would build the JS engine and the platform's backend into it,
+    which `nsh check` waits for); an app crate that depends on a backend brings that into the tree. `test` keeps its
+    own build: the host's features would change what the headless runner does (`nsh-core`'s `loader` downloads remote
+    images on Linux and Windows, `svg` draws `svg()`). A Rust app's `nsh run` builds `rust-<platform>`, the release
+    runner too, which stays apart. Its dependencies are written after the workspace on every command (`RustApp::unify`,
+    `rust_app/unify.rs`); when `cargo tree` fails it resolves again without them, and when that fails too the
+    member stays empty and the build reports the cause. Cargo's `resolver.feature-unification = "workspace"` replaces
+    it once stable (rust-lang/cargo#14774);
   - the hosts and runners, passing the sets after `nsh/base`'s (`vec![nsh_base::registry(), set_app_charts(),
     set_app_storage()]`): `ios-host` / `ios-app` (the development host and the release runner:
     `nsh_platform_ios::set_ui_sets`, then `nsh_ios_host::main` / `nsh_ios_app::main`), `linux-host` / `linux-app`,
