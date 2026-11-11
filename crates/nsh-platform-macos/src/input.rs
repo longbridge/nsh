@@ -63,8 +63,8 @@ use nsh_core::{
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, VelocityTracker, WheelLatch, WheelStep,
-        ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
+        self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker, WheelLatch,
+        WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
     },
     platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
@@ -131,6 +131,11 @@ pub(crate) struct Input {
     wheel: RefCell<Option<Wheel>>,
     /// The scroll view the system's momentum after a gesture goes to.
     momentum: RefCell<Option<NshView>>,
+    /// When the gesture that set [`Self::momentum`] ended or its last
+    /// momentum event came (ms). A gesture whose fingers stop before they
+    /// lift gets no momentum events, so `momentum` outlives it: only this
+    /// says whether a glide can still be going on.
+    momentum_last: Cell<f64>,
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
@@ -2409,7 +2414,7 @@ fn pinch_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> bool {
         step,
         true,
         false,
-        |view| view.ns().window().is_some(),
+        |view| view.ns().window().is_some() && view.state().events.contains(EventKind::Pinch),
         || {
             let hit = pick(&event_root(surface), x, y)?;
             input::wheel_listener(
@@ -2796,8 +2801,11 @@ fn wheel_event(
         WheelStep::Continue
     };
     let moved = dx != 0.0 || dy != 0.0;
+    // A momentum view counts while its glide can still be going on: one
+    // left behind by fingers that stopped before lifting must not keep
+    // later mouse notches from reaching a listener.
     let scrolling = input.wheel.borrow().is_some()
-        || input.momentum.borrow().is_some()
+        || (input.momentum.borrow().is_some() && time - input.momentum_last.get() < TOUCHPAD_IDLE)
         || input
             .latch
             .borrow()
@@ -2812,7 +2820,7 @@ fn wheel_event(
         step,
         moved,
         scrolling,
-        |view| view.ns().window().is_some(),
+        |view| view.ns().window().is_some() && view.state().events.contains(EventKind::Wheel),
         || {
             let hit = pick(&event_root(surface), x, y)?;
             let (view, takes) = input::wheel_listener(
@@ -3104,6 +3112,7 @@ fn gesture_event(
         let (vx, vy) = w.velocity.velocity();
         crate::scroll::wheel_end(surface, &view, vx, vy);
         *input.momentum.borrow_mut() = Some(view);
+        input.momentum_last.set(time);
     }
 }
 
@@ -3113,6 +3122,7 @@ fn momentum_event(surface: &Rc<Surface>, phase: NSEventPhase, dx: f32, dy: f32, 
     let Some(view) = input.momentum.borrow().clone() else {
         return;
     };
+    input.momentum_last.set(time);
     if phase.contains(NSEventPhase::Began) && !crate::scroll::momentum_begin(surface, &view) {
         // The view springs back or snaps instead.
         input.momentum.borrow_mut().take();

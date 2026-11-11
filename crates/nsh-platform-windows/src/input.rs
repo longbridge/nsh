@@ -1109,7 +1109,13 @@ fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     }
     let input = &surface.input;
     let time = event.time * 1000.0;
-    let horizontal = event.dx.abs() > event.dy.abs();
+    // The axis the scroll views take it on: Shift turns a mouse's vertical
+    // notches horizontal (`wheel`), and the latch is kept on that axis.
+    let horizontal = if !event.precise && event.dx == 0.0 && event.modifiers.shift {
+        true
+    } else {
+        event.dx.abs() > event.dy.abs()
+    };
     // Windows reports no gesture phases: every event is a step.
     let step = WheelStep::Discrete {
         horizontal,
@@ -1122,10 +1128,12 @@ fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
             .borrow()
             .as_ref()
             .is_some_and(|(view, h, last)| latch_holds(*h, *last, horizontal, time) && shown(view));
-    let routed = input
-        .wheel_listener
-        .borrow_mut()
-        .route(step, true, scrolling, shown, || {
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        true,
+        scrolling,
+        |v| shown(v) && v.state().events.contains(EventKind::Wheel),
+        || {
             let hit = pick(&surface.input_root(), x, y, true)?;
             input::wheel_listener(
                 chain(&hit.view),
@@ -1133,7 +1141,8 @@ fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
                 // A multiline field scrolls its own lines.
                 |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
             )
-        });
+        },
+    );
     let Some((view, takes)) = routed else {
         return false;
     };

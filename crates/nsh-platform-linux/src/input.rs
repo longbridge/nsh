@@ -895,7 +895,7 @@ fn wheel_event(
         step,
         moved,
         scrolling,
-        |view| view.is_mapped(),
+        |view| view.is_mapped() && view.state().events.contains(EventKind::Wheel),
         || {
             let hit = pick(&event_root(surface), x, y)?;
             // A hosted widget scrolling itself (a web page, a text view)
@@ -1047,13 +1047,20 @@ fn scroll_event(
         }
     };
     let modifiers = event.modifier_state();
+    // The axis the scroll views take it on: Shift turns a mouse's vertical
+    // notches horizontal (below), and the latch is kept on that axis.
+    let shifted = kind == notches && dx == 0.0 && modifiers.contains(gdk::ModifierType::SHIFT_MASK);
     // A view listening to `onWheel` nearer than the scroll views under the
     // pointer takes the wheel, Ctrl + wheel included (a canvas zooming).
     let step = if kind == WheelInput::Stop {
         WheelStep::End
     } else {
         WheelStep::Discrete {
-            horizontal: dx.abs() > dy.abs(),
+            horizontal: if shifted {
+                dy != 0.0
+            } else {
+                dx.abs() > dy.abs()
+            },
             precise: kind == WheelInput::Touchpad,
             time,
         }
@@ -1069,7 +1076,7 @@ fn scroll_event(
     {
         return glib::Propagation::Stop;
     }
-    if kind == notches && dx == 0.0 && modifiers.contains(gdk::ModifierType::SHIFT_MASK) {
+    if shifted {
         (dx, dy) = (dy, dx);
     }
     if wheel_input(surface, x, y, dx, dy, time, kind) {
@@ -2227,7 +2234,7 @@ fn pinch_event(surface: &Rc<Surface>, event: &gdk::TouchpadEvent, x: f32, y: f32
         step,
         true,
         false,
-        |view| view.is_mapped(),
+        |view| view.is_mapped() && view.state().events.contains(EventKind::Pinch),
         || {
             let hit = pick(&event_root(surface), x, y)?;
             input::wheel_listener(

@@ -670,6 +670,8 @@ pub fn wheel_listener<V>(
 }
 
 /// Where a wheel or touchpad event is in a scroll, for [`WheelLatch`].
+/// Plumbing of the backends, not an API for apps.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WheelStep {
     /// A touchpad gesture began (macOS' `Began`, GPUI's `Started`): its
@@ -687,7 +689,8 @@ pub enum WheelStep {
     /// whichever way they turn, as a touchpad scroll stays on its scroll
     /// view.
     Discrete {
-        /// Mostly along the horizontal axis.
+        /// Mostly along the horizontal axis, as the scroll views take it
+        /// (Shift turning a mouse's vertical notches horizontal).
         horizontal: bool,
         /// From a touchpad or a high-resolution wheel.
         precise: bool,
@@ -702,7 +705,8 @@ pub enum WheelStep {
 /// and a scroll a scroll view has started is not taken over by a listener
 /// that comes under the pointer meanwhile (which then only observes). The
 /// backends keep one per surface and decide each event with it before
-/// their scroll views do.
+/// their scroll views do. Plumbing of the backends, not an API for apps.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct WheelLatch<V> {
     state: Option<Latched<V>>,
@@ -740,7 +744,8 @@ impl<V: Clone> WheelLatch<V> {
     /// found a taker; discrete steps stay on their taker while they keep
     /// coming; while `scrolling` (a scroll view's scroll is going on:
     /// notches latched to it, a touchpad gesture or its glide) a listener
-    /// only observes. `alive`: the view still shows.
+    /// only observes. `alive`: the view still shows and still listens (a
+    /// taker that stopped listening lets the rest of the scroll go).
     pub fn route(
         &mut self,
         step: WheelStep,

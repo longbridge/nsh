@@ -1181,7 +1181,13 @@ pub(crate) fn wheel_event(
     let (x, y) = (event.x, event.y);
     let input = &surface.input;
     let time = event.time * 1000.0;
-    let horizontal = event.dx.abs() > event.dy.abs();
+    // The axis the scroll views take it on: Shift turns a mouse's vertical
+    // notches horizontal (`wheel`), and the latch is kept on that axis.
+    let horizontal = if !event.precise && event.dx == 0.0 && event.modifiers.shift {
+        event.dy != 0.0
+    } else {
+        event.dx.abs() > event.dy.abs()
+    };
     let mut gesture = input.wheel_listener.borrow().in_gesture();
     if gesture && time - input.wheel_listener_last.get() > TOUCHPAD_IDLE {
         input.wheel_listener.borrow_mut().clear();
@@ -1214,10 +1220,12 @@ pub(crate) fn wheel_event(
     // Whether a listener had this scroll before (a new gesture has none
     // yet, whatever the last one left).
     let took = step != WheelStep::Begin && input.wheel_listener.borrow().taker().is_some();
-    let routed = input
-        .wheel_listener
-        .borrow_mut()
-        .route(step, moved, scrolling, shown, || {
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        moved,
+        scrolling,
+        |v| shown(v) && v.state().events.contains(EventKind::Wheel),
+        || {
             let hit = pick(&surface.input_root(), x, y, true)?;
             input::wheel_listener(
                 chain(&hit.view),
@@ -1225,7 +1233,8 @@ pub(crate) fn wheel_event(
                 // A multiline field scrolls its own lines.
                 |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
             )
-        });
+        },
+    );
     let Some((view, takes)) = routed else {
         return false;
     };
@@ -3037,10 +3046,12 @@ fn pinch_event(surface: &Rc<Surface>, x: f32, y: f32, delta: f32, phase: Gesture
             (WheelStep::End, nsh_core::PinchPhase::End)
         }
     };
-    let routed = input
-        .pinch_listener
-        .borrow_mut()
-        .route(step, true, false, shown, || {
+    let routed = input.pinch_listener.borrow_mut().route(
+        step,
+        true,
+        false,
+        |v| shown(v) && v.state().events.contains(EventKind::Pinch),
+        || {
             let hit = pick(&surface.input_root(), x, y, true)?;
             input::wheel_listener(
                 chain(&hit.view),
@@ -3053,7 +3064,8 @@ fn pinch_event(surface: &Rc<Surface>, x: f32, y: f32, delta: f32, phase: Gesture
                     transforms(&gesture_values(surface, v, id), events).0
                 },
             )
-        });
+        },
+    );
     let Some((view, takes)) = routed else {
         return false;
     };
