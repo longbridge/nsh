@@ -7487,13 +7487,17 @@ class Player {
    * nothing.
    */
   mouseUp(e) {
+    // A `button` this build cannot name is no release to report: the engine
+    // drops such a payload too, and a real mouse only reports 0-4.
+    const button = MOUSE_BUTTON_NAMES[e.button];
+    if (!button) return;
     const target = document.elementFromPoint(e.clientX, e.clientY);
     if (!target || !this.root.contains(target)) return;
     for (const el of this.ancestors(this.viewOf(target))) {
       if (!el._events?.has("onMouseUp")) continue;
       const payload = this.mouseEvent(el, e);
       if (!payload) continue;
-      payload.button = MOUSE_BUTTON_NAMES[e.button] ?? "left";
+      payload.button = button;
       this.event(el._id, "onMouseUp", payload);
     }
   }
