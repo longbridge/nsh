@@ -1000,13 +1000,24 @@ impl WebItem {
         };
         let emitter = self.emitter.clone();
         let alive = self.alive.clone();
+        let filter = url.map(str::to_owned);
         let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
             if !alive.load(Ordering::Acquire) {
                 return Ok(());
             }
             let value = match (result, list) {
-                (Ok(()), Some(list)) => serde_json::to_value(cookies_of(&list))
-                    .map_err(|error| format!("cannot report the cookies: {error}")),
+                (Ok(()), Some(list)) => {
+                    let mut cookies = cookies_of(&list);
+                    // Apply the shared host/path/Secure rules rather than
+                    // relying only on WebView2's URI enumeration.
+                    cookies.retain(|cookie| {
+                        filter.as_deref().is_none_or(|url| {
+                            nsh_core::webview::cookie_applies_to(cookie, url)
+                        })
+                    });
+                    serde_json::to_value(cookies)
+                        .map_err(|error| format!("cannot report the cookies: {error}"))
+                }
                 (Ok(()), None) => Ok(serde_json::Value::Array(Vec::new())),
                 (Err(error), _) => Err(format!("cannot read the cookies: {}", error.message())),
             };
