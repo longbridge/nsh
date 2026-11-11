@@ -2387,6 +2387,17 @@ pub(crate) fn select_all(surface: &crate::surface::Surface) -> bool {
     true
 }
 
+/// The text's part of the surface selection, as UTF-16 offsets.
+pub(crate) fn selected_range(view: &crate::view::NshView) -> Option<std::ops::Range<u32>> {
+    let state = view.try_state()?;
+    let text = state.text.as_ref()?;
+    let (start, end) = text
+        .area_range
+        .get()
+        .or_else(|| text.selection.as_ref()?.range.get())?;
+    Some(start..end)
+}
+
 /// The selected text, without attachments' placeholders and hidden runs.
 fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();

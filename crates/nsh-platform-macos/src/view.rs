@@ -939,7 +939,8 @@ define_class!(
             let all = || -> Option<Retained<NSArray>> {
                 // SAFETY: NSView's own children.
                 let all = unsafe { msg_send![super(self), accessibilityChildren] };
-                crate::access::in_reading_order(&NshView(self.retain()), all)
+                let view = NshView(self.retain());
+                crate::access::in_reading_order(&view, crate::access::text_spans::children(&view, all))
             };
             match reached {
                 crate::access::Reached::All => {
@@ -948,6 +949,29 @@ define_class!(
                 crate::access::Reached::Controls => Some(crate::access::controls(all())),
                 crate::access::Reached::None => Some(NSArray::new()),
             }
+        }
+
+        #[unsafe(method(setAccessibilitySelectedTextRange:))]
+        fn set_accessibility_text_range(&self, range: NSRange) {
+            let view = NshView(self.retain());
+            let length = view.try_state().and_then(|s| s.text.as_ref().map(|t| t.text.len_utf16()));
+            if let Some(length) = length { crate::access::text_spans::select(&view, 0..length, range); }
+        }
+
+        #[unsafe(method(accessibilitySelectedTextRange))]
+        fn accessibility_text_range(&self) -> NSRange {
+            let view = NshView(self.retain());
+            let length = view.try_state().and_then(|s| s.text.as_ref().map(|t| t.text.len_utf16()));
+            length.and_then(|length| crate::access::text_spans::selection(&view, 0..length))
+                .map_or(NSRange::new(objc2_foundation::NSNotFound as usize, 0), |(range, _)| range)
+        }
+
+        #[unsafe(method_id(accessibilitySelectedText))]
+        fn accessibility_selected_text(&self) -> Option<Retained<NSString>> {
+            let view = NshView(self.retain());
+            let length = view.try_state().and_then(|s| s.text.as_ref().map(|t| t.text.len_utf16()));
+            length.and_then(|length| crate::access::text_spans::selection(&view, 0..length))
+                .map(|(_, text)| NSString::from_str(&text))
         }
 
         // `AXInvalid` beside AppKit's attributes while the content is
@@ -1534,6 +1558,13 @@ fn setup(view: &NSView) {
 /// The view of one node: a cheap handle (cloning retains).
 #[derive(Clone)]
 pub(crate) struct NshView(Retained<ViewObj>);
+
+impl NshView {
+    /// The surface owning this view, including child views with no root hooks.
+    pub(crate) fn surface(&self) -> Option<std::rc::Rc<Surface>> {
+        self.0.keyboard_surface()
+    }
+}
 
 impl std::fmt::Debug for NshView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

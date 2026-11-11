@@ -28,7 +28,8 @@ use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points, ViewKind,
     geometry::{bounds, point, size},
     selection::{
-        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+        KeptRows, SelectionModel, SelectionTexts, TextPosition, autoscroll_step, reading_order,
+        reorder,
     },
 };
 use rustc_hash::FxHashSet;
@@ -230,6 +231,19 @@ struct Active {
 }
 
 impl Active {
+    fn new(area: &NshView) -> Self {
+        Self {
+            area: objc2::rc::Weak::from(&**area),
+            model: SelectionModel::new(),
+            shown: Vec::new(),
+            dragging: Cell::new(false),
+            over_press: false,
+            pointer: Cell::new(None),
+            kept: KeptRows::default(),
+            reported: Selected::default(),
+        }
+    }
+
     fn area(&self) -> Option<NshView> {
         let view = self.area.load()?;
         NshView::from_ns(&view)
@@ -395,6 +409,32 @@ impl AreaSelection {
     }
 }
 
+/// Sets a single text's range through its owning selectable area, so AX and
+/// pointer selections share copying, highlights and onSelectionChange.
+pub(crate) fn select_range(surface: &Surface, view: &NshView, range: Range<u32>) -> bool {
+    let Some(area) = target(view) else {
+        return false;
+    };
+    let texts = collect(&area);
+    let Some(index) = texts.views.iter().position(|v| v.id() == view.id()) else {
+        return false;
+    };
+    if !surface.selection.area.is(&area) {
+        crate::text::clear(surface);
+    }
+    let mut guard = surface.selection.area.active.borrow_mut();
+    let active = guard.get_or_insert_with(|| Active::new(&area));
+    active.model.select_range(
+        &texts,
+        TextPosition::new(index, range.start),
+        TextPosition::new(index, range.end),
+    );
+    active.show(surface, &texts);
+    drop(guard);
+    report(surface);
+    true
+}
+
 /// The primary button went down at `(x, y)` (root coordinates) in `area`,
 /// the `clicks`th click in a row; `over_press` if a press target is under
 /// it. Clears any other selection; one click puts the anchor (a drag past
@@ -416,16 +456,7 @@ pub(crate) fn down(
     let (lx, ly) = crate::input::local(surface, area, x, y);
     let texts = collect(area);
     let mut selection_slot = selection.area.active.borrow_mut();
-    let active = selection_slot.get_or_insert_with(|| Active {
-        area: objc2::rc::Weak::from(&**area),
-        model: SelectionModel::new(),
-        shown: Vec::new(),
-        dragging: Cell::new(false),
-        over_press: false,
-        pointer: Cell::new(None),
-        kept: KeptRows::default(),
-        reported: Selected::default(),
-    });
+    let active = selection_slot.get_or_insert_with(|| Active::new(area));
     let clicks = clicks.max(1) as u32;
     active.over_press = over_press;
     active.dragging.set(clicks > 1 || shift);

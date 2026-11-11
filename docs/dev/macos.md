@@ -235,6 +235,15 @@ belong to the app, which owns retention and its storage budget.
 | Dev | `dev.rs` | The dev server client on its own thread; a status line and the error overlay above the surface (opaque; code frames keep their lines and scroll sideways; a click that selects no text dismisses it, in an inactive window too; its Copy button copies the error); Cmd+R reloads the latest build |
 | Performance monitor | `fps.rs`, `gpu.rs` | `--fps` / `AppOptions::fps` / `NSH_FPS=1` / `AppView::set_fps_monitor` / the app's `setFpsEnabled` (`Command::PerfMonitor`, through `Surface::perf_toggle`): a panel above the surface that lets the mouse through, redrawn twice a second from the surface's `nsh_engine::perf::PerfMonitor` (see below); GPU time from the IO registry (`accumulatedGPUTime` of the process' accelerator clients) |
 
+
+Inline pressable text spans have native link elements (`access/text_spans.rs`),
+interleaved with static text in UTF-16 document order. Their names omit hidden
+runs and attachment placeholders; their bounds follow the current text layout
+and layer transforms. A retained element resolves its logical span against the
+current attributed text, so streaming and recoloring keep it usable; a removed
+link cannot be activated. `AXPress` uses the current event listeners and modal
+scope, as keyboard input does.
+
 ## Keyboard
 
 Single-line fields center the native font's line in the input's content box. Their attributed placeholders use
