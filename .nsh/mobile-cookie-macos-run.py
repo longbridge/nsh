@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 
-root = Path(__file__).resolve().parents[2]
+root = Path(__file__).resolve().parents[1]
 area = root / ".nsh/webview-review"
 proof = area / "proof"
 crate = area / "crate"

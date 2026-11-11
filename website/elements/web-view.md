@@ -127,13 +127,15 @@ Rust hosts read and write the mounted web view's own cookie store. These methods
 
 Each returns `Answer<Result<…, String>>`; await it in a task. A request fails when the ref names no mounted web view, the platform has no cookie store, or the platform errors, or no answer comes in time. `WebCookie` keeps `expires` in Unix milliseconds (`None`: a session cookie) and `same_site` (`CookieSameSite::None`, `Lax`, `Strict`, or `None` without the attribute). A native store may cap a lifetime beyond its cookie policy (commonly 400 days): the store then keeps a future expiry no later than requested, and `cookies` reports that stored value; a store that refuses the cookie makes `set_cookie` fail.
 
-An `incognito` view reads and writes its own in-memory store; other views share the app's profile. The store also holds cookies the page set, and `cookies` reports those as the store keeps them.
+On iOS, macOS, Linux and Windows, an `incognito` view reads and writes its own in-memory store; other views share the app's profile. Android preserves its app-wide CookieManager, including for `incognito` views. The native store also holds cookies the page set.
 
-| Operation | macOS | Linux with WebKitGTK | Windows with WebView2 | iOS, Android, web, TUI |
-|---|---|---|---|---|
-| `cookies` | `WKHTTPCookieStore` | The view's cookie manager | The view's cookie manager | Unsupported error |
-| `set_cookie` | `WKHTTPCookieStore` | The view's cookie manager | The view's cookie manager | Unsupported error |
-| `delete_cookie` | `WKHTTPCookieStore` | The view's cookie manager | The view's cookie manager | Unsupported error |
+| Operation | iOS / macOS | Linux with WebKitGTK | Windows with WebView2 | Android | web, TUI |
+|---|---|---|---|---|---|
+| `cookies` | `WKHTTPCookieStore` | The view's cookie manager | The view's cookie manager | Explicit error | Explicit error |
+| `set_cookie` | `WKHTTPCookieStore` | The view's cookie manager | The view's cookie manager | `CookieManager.setCookie` | Explicit error |
+| `delete_cookie` | `WKHTTPCookieStore` | The view's cookie manager | The view's cookie manager | Explicit error | Explicit error |
+
+Android sets one cookie through the public [`CookieManager.setCookie`](https://developer.android.com/reference/android/webkit/CookieManager) API, retaining the supplied `Set-Cookie` attributes and reporting its completion. Its public `getCookie(url)` returns the request header's name/value pairs rather than domain, path, expiry, HttpOnly, Secure and SameSite metadata; it also requires a URL. The public removal methods clear all cookies or all session cookies. NSH therefore returns explicit errors for `cookies` and `delete_cookie` on Android, preserving existing cookies rather than inventing metadata or deleting more than requested.
 
 ## Messaging
 

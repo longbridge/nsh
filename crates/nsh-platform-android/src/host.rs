@@ -106,6 +106,16 @@ pub(crate) struct Host {
     pub(crate) test_model: Mutex<Option<Arc<nsh_testing::agent::Model>>>,
 }
 
+/// The control of the engine `generation` names, checked and captured under
+/// the same lock `load` takes to replace it: a late completion reaches only
+/// the engine that asked for it.
+fn fenced_control(host: &Host, generation: Option<u64>) -> Option<EngineControl> {
+    let engine = host.engine.lock().expect("engine");
+    (generation == Some(host.web_generation.load(Ordering::Relaxed)))
+        .then(|| engine.as_ref().map(Engine::control))
+        .flatten()
+}
+
 impl Host {
     /// The display's density: pixels per point.
     #[cfg(feature = "dev")]
@@ -639,6 +649,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // dialogs have no answer here.
             file_requests: true,
             web_evaluate: true,
+            // `CookieManager.setCookie` is the public native store this
+            // backend can use; reads and deletes answer their explicit errors
+            // (`crate::webview`).
+            webview_requests: true,
             // wgpu on Vulkan or GLES, in builds with it, until it finds no
             // GPU.
             shaders: nsh_engine::shader::LINKED,
@@ -1716,6 +1730,64 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             .ok()?;
         Some(PayloadValue::Number(n))
     };
+    // The platform's answer to `Command::WebViewRequest` (`crate::webview`):
+    // "id" is a u64 as a decimal string (object-table numbers are doubles),
+    // "ok" the store's completion, "error" its reason, and "generation" the
+    // engine that sent the request. The core's own reply shape is built here
+    // so the wire has one definition.
+    if kind == EventKind::WebViewReply {
+        let len = if keys.is_null() {
+            0
+        } else {
+            env.get_array_length(&keys).unwrap_or(0)
+        };
+        let mut request = None;
+        let mut ok = None;
+        let mut error = None;
+        let mut generation = None;
+        for i in 0..len {
+            let Ok(key) = env.get_object_array_element(&keys, i) else {
+                continue;
+            };
+            let Ok(key) = env.get_string(&JString::from(key)).map(String::from) else {
+                continue;
+            };
+            let Some(value) = read(&mut env, i) else {
+                continue;
+            };
+            match (key.as_str(), value) {
+                ("id", PayloadValue::Str(id)) => request = id.parse::<u64>().ok(),
+                ("ok", PayloadValue::Bool(value)) => ok = Some(value),
+                ("error", PayloadValue::Str(message)) => error = Some(message),
+                ("error", PayloadValue::Null) => {}
+                ("generation", PayloadValue::Str(value)) => {
+                    generation = value.parse::<u64>().ok();
+                }
+                _ => {}
+            }
+        }
+        let (Some(request), Some(ok), Some(generation)) = (request, ok, generation) else {
+            log::debug!(
+                target: "js",
+                "web view: dropped a cookie reply without its request, answer or generation"
+            );
+            return;
+        };
+        let Some(control) = fenced_control(host, Some(generation)) else {
+            return;
+        };
+        let result = if ok {
+            Ok(nsh_core::JsonValue::Null)
+        } else {
+            Err(error.unwrap_or_else(|| "the web view did not answer".into()))
+        };
+        control.dispatch_event(
+            id as NodeId,
+            EventKind::WebViewReply,
+            nsh_core::webview::reply(request, result),
+        );
+        return;
+    }
     let payload = if kind == EventKind::FileRequest {
         // "id", "error": the answer to an `OpenPath` (`SystemUi.openPath`;
         // the paths of the request say nothing new, an open answers none).
@@ -1842,12 +1914,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
         };
         // Check and capture the control under the same lock load() uses
         // to replace it: a late callback can only reach its own engine.
-        let control = {
-            let engine = host.engine.lock().expect("engine");
-            (generation == Some(host.web_generation.load(Ordering::Relaxed)))
-                .then(|| engine.as_ref().map(Engine::control))
-                .flatten()
-        };
+        let control = fenced_control(host, generation);
         if let Some(control) = control {
             control.dispatch_event(id as NodeId, kind, payload);
         }

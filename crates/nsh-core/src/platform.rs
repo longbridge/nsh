@@ -309,10 +309,10 @@ pub struct Environment {
     /// The platform answers awaitable WebView evaluations
     /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
     pub web_evaluate: bool,
-    /// The platform carries out web views' cookie requests
-    /// ([`crate::Command::WebViewRequest`]). `false` by default; a desktop
-    /// backend with a web engine sets it, and elsewhere a request answers
-    /// its error at once instead of waiting for an answer that never comes.
+    /// The platform answers web views' cookie requests
+    /// ([`crate::Command::WebViewRequest`]), including explicit errors for
+    /// operations its native store cannot support. `false` by default;
+    /// requests then fail at once instead of waiting for a native reply.
     #[doc(hidden)]
     pub webview_requests: bool,
     /// The platform shows web views (TS: `WebView.available()`). `true` by

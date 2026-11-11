@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
 import android.webkit.JavascriptInterface;
+import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.RenderProcessGoneDetail;
@@ -33,7 +34,8 @@ import org.json.JSONTokener;
  * <p>{@code incognito}: Android's WebView keeps cookies and DOM storage in
  * one store per app, which every web view shares and which stays. An
  * incognito web view only changes what is its own: it loads without the
- * HTTP cache and saves no form data.
+ * HTTP cache and saves no form data. Cookie requests therefore read and
+ * write that shared store too.
  */
 @SuppressLint({"ViewConstructor", "SetJavaScriptEnabled"})
 final class WebBox extends WidgetBox {
@@ -45,6 +47,14 @@ final class WebBox extends WidgetBox {
     private boolean disposed, processGone;
     private final Handler evaluationHandler = new Handler(Looper.getMainLooper());
     private final HashMap<Integer, Evaluation> evaluations = new HashMap<>();
+    /**
+     * Cookie requests waiting for {@code CookieManager}'s completion, by
+     * request id: the generation to answer with. The manager's store is the
+     * app's one, shared by every web view (also an incognito one, whose only
+     * own state is the HTTP cache and form data); this map fences the
+     * callback by the web view's lifetime.
+     */
+    private final HashMap<Long, String> cookieRequests = new HashMap<>();
     // The shared page wrapper enforces the result limit; leave room for its envelope.
     private static final int MAX_ENVELOPE_BYTES = 1048576 + 1024;
 
@@ -152,6 +162,7 @@ final class WebBox extends WidgetBox {
             if (disposed || processGone) return true;
             processGone = true;
             cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web content process terminated");
+            cancelCookieRequests("The web content process terminated");
             // A WebView with a lost renderer cannot be reused. Handling the
             // callback and destroying it keeps the embedding app alive.
             removeView(web);
@@ -324,6 +335,38 @@ final class WebBox extends WidgetBox {
         web.loadUrl(url, headers);
     }
 
+    /**
+     * Sets one cookie through the public {@link CookieManager}. {@code
+     * url} and {@code header} were built natively from the contract's
+     * cookie: the URL supplies a host-only cookie's host and the scheme
+     * {@code Secure} needs, the header carries every attribute. The manager
+     * calls back with whether the store took it.
+     */
+    void setCookie(long request, String generation, String url, String header, String name) {
+        if (disposed || processGone) {
+            mounter.webViewReply(id, request, generation,
+                    disposed ? "The web view was disposed" : "The web content process terminated");
+            return;
+        }
+        cookieRequests.put(request, generation);
+        try {
+            CookieManager.getInstance().setCookie(url, header, value -> {
+                String pending = cookieRequests.remove(request);
+                if (pending == null) return;
+                if (Boolean.TRUE.equals(value)) {
+                    mounter.webViewReply(id, request, pending, null);
+                } else {
+                    mounter.webViewReply(id, request, pending,
+                            "the web view cookie store did not set cookie `" + name + "`");
+                }
+            });
+        } catch (RuntimeException error) {
+            cookieRequests.remove(request);
+            mounter.webViewReply(id, request, generation,
+                    "the web view cookie store failed: " + error.getClass().getSimpleName());
+        }
+    }
+
     /** Starts a request without exposing a page-to-native bridge. */
     void evaluate(int request, String generation, String start, String poll, String cleanup) {
         if (disposed) return;
@@ -431,9 +474,23 @@ final class WebBox extends WidgetBox {
         }
     }
 
+    /**
+     * Answers every waiting cookie request with {@code message} and forgets
+     * it: a disposed web view or a lost renderer must not leave the core
+     * waiting, and a completion that arrives later finds no request to
+     * report.
+     */
+    private void cancelCookieRequests(String message) {
+        for (Long request : new ArrayList<>(cookieRequests.keySet())) {
+            String generation = cookieRequests.remove(request);
+            if (generation != null) mounter.webViewReply(id, request, generation, message);
+        }
+    }
+
     void destroy() {
         if (disposed) return;
         cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web view was disposed");
+        cancelCookieRequests("The web view was disposed");
         disposed = true;
         evaluationHandler.removeCallbacksAndMessages(null);
         if (!processGone) {

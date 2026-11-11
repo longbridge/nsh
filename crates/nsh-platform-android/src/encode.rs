@@ -1,6 +1,7 @@
 //! Encodes a [`MountBatch`] for `Mounter.java`: a little-endian stream of
-//! 32-bit ints and floats, plus an object table for strings and text
-//! layouts. One JNI call per commit, no per-item crossings.
+//! 32-bit ints and floats (and a 64-bit id where a web view request needs
+//! one), plus an object table for strings and text layouts. One JNI call per
+//! commit, no per-item crossings.
 //!
 //! Animation items (graph ops, bindings, drag and scroll values) are not
 //! encoded: they go to the UI-thread animator ([`crate::animation`]).
@@ -96,6 +97,12 @@ pub(crate) struct Encoded {
 impl Encoded {
     #[inline]
     fn int(&mut self, v: i32) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+
+    /// A 64-bit value (a web view request's id).
+    #[inline]
+    fn long(&mut self, v: i64) {
         self.bytes.extend_from_slice(&v.to_le_bytes());
     }
 
@@ -848,9 +855,50 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             }
                         }
                     }
-                    // The core refuses cookie requests on Android
-                    // (`webview_requests` is false): no opcode.
-                    Command::WebViewRequest(_) => e.int(-1),
+                    // `WebBox.java` carries the store operation out; the
+                    // reply comes back as `EventKind::WebViewReply` with this
+                    // generation, which fences engines replaced since.
+                    Command::WebViewRequest(request) => {
+                        e.int(53);
+                        e.long(request.id as i64);
+                        e.string(web_generation.to_string());
+                        match &request.operation {
+                            nsh_core::webview::WebViewOperation::SetCookie { cookie } => {
+                                match crate::webview::set_cookie(cookie) {
+                                    Ok(target) => {
+                                        e.int(1);
+                                        e.string(target.url);
+                                        e.string(target.header);
+                                        // Only to name the cookie in an
+                                        // error; the value never crosses
+                                        // back.
+                                        e.string(cookie.name.clone());
+                                    }
+                                    Err(error) => {
+                                        e.int(2);
+                                        e.string(error);
+                                    }
+                                }
+                            }
+                            nsh_core::webview::WebViewOperation::GetCookies { .. } => {
+                                e.int(2);
+                                e.string(crate::webview::GET_COOKIES_UNSUPPORTED.to_owned());
+                            }
+                            nsh_core::webview::WebViewOperation::DeleteCookie { .. } => {
+                                e.int(2);
+                                e.string(crate::webview::DELETE_COOKIE_UNSUPPORTED.to_owned());
+                            }
+                            // A newer core's operation: answered, never left
+                            // waiting.
+                            _ => {
+                                e.int(2);
+                                e.string(
+                                    "this Android backend does not know the web view operation"
+                                        .to_owned(),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1999,5 +2047,95 @@ mod tests {
             .collect();
         assert_eq!(ints, vec![COMMAND, 3, 51, -1, 0, 1, 2, 3]);
         assert!(matches!(&encoded.objects[0], Obj::Str(generation) if generation == "19"));
+    }
+
+    /// The ints of a batch with one web view request, and its object table.
+    fn webview_request(
+        id: u64,
+        operation: nsh_core::webview::WebViewOperation,
+    ) -> (Vec<i32>, Vec<String>) {
+        let encoded = encode(
+            MountBatch {
+                items: vec![MountItem::Command {
+                    id: 3,
+                    command: Command::WebViewRequest(nsh_core::webview::WebViewRequest {
+                        id,
+                        operation,
+                    }),
+                }],
+            },
+            19,
+        );
+        let ints = encoded
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        let objects = encoded
+            .objects
+            .into_iter()
+            .map(|obj| match obj {
+                Obj::Str(s) => s,
+                _ => panic!("string expected"),
+            })
+            .collect();
+        (ints, objects)
+    }
+
+    #[test]
+    fn webview_set_cookie_carries_the_request_generation_url_header_and_name() {
+        let mut cookie = nsh_core::webview::WebCookie::default();
+        cookie.name = "sid".into();
+        cookie.value = "fixture".into();
+        cookie.domain = ".example.com".into();
+        cookie.path = "/app".into();
+        cookie.expires = Some(1_893_456_000_000);
+        cookie.http_only = true;
+        cookie.secure = true;
+        cookie.same_site = Some(nsh_core::webview::CookieSameSite::Lax);
+        let (ints, objects) = webview_request(
+            0x0000_0001_0000_0002,
+            nsh_core::webview::WebViewOperation::SetCookie { cookie },
+        );
+        // `COMMAND`, view id, op 53, the u64 id (two LE ints), the
+        // generation's object, op 1, then the URL's, header's and name's
+        // objects.
+        assert_eq!(ints, vec![COMMAND, 3, 53, 2, 1, 0, 1, 1, 2, 3]);
+        assert_eq!(
+            objects,
+            vec![
+                "19".to_owned(),
+                "https://example.com/".to_owned(),
+                "sid=fixture; Domain=.example.com; Path=/app; \
+                 Expires=Tue, 01 Jan 2030 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+                    .to_owned(),
+                "sid".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn webview_reads_and_deletes_answer_their_platform_errors() {
+        let (ints, objects) = webview_request(
+            7,
+            nsh_core::webview::WebViewOperation::GetCookies {
+                url: Some("https://example.com/".into()),
+            },
+        );
+        assert_eq!(ints, vec![COMMAND, 3, 53, 7, 0, 0, 2, 1]);
+        assert_eq!(objects[0], "19");
+        assert_eq!(objects[1], crate::webview::GET_COOKIES_UNSUPPORTED);
+
+        let (ints, objects) = webview_request(
+            8,
+            nsh_core::webview::WebViewOperation::DeleteCookie {
+                name: "sid".into(),
+                domain: "example.com".into(),
+                path: "/".into(),
+            },
+        );
+        assert_eq!(ints, vec![COMMAND, 3, 53, 8, 0, 0, 2, 1]);
+        assert_eq!(objects[0], "19");
+        assert_eq!(objects[1], crate::webview::DELETE_COOKIE_UNSUPPORTED);
     }
 }

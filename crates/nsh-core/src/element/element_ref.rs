@@ -380,10 +380,11 @@ impl ElementRef {
     /// same name, domain and path. The cookie is checked first: a refused
     /// one reaches no store, so no attribute is partly applied. A store
     /// keeps it as its platform does (`expires` in Unix milliseconds, a
-    /// session cookie without one); an `incognito` view sets it in its own
-    /// in-memory store. Await it in a task; it fails when the ref names no
-    /// mounted web view, the cookie is invalid, the platform has no cookie
-    /// store, or no answer comes in time.
+    /// session cookie without one). iOS, macOS, Linux and Windows use an
+    /// incognito view's own in-memory store; Android keeps its existing
+    /// app-wide store, including for incognito views. Await it in a task;
+    /// it fails when the ref names no mounted web view, the cookie is
+    /// invalid, the platform cannot set it, or no answer comes in time.
     pub fn set_cookie(&self, cookie: crate::webview::WebCookie) -> Answer<Result<(), String>> {
         self.web_view(
             crate::webview::WebViewOperation::SetCookie { cookie },

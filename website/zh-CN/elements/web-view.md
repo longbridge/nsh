@@ -112,13 +112,15 @@ Rust 宿主可以读写已挂载 web view 自己的 cookie 存储。这些方法
 
 三者都返回 `Answer<Result<…, String>>`，在任务中等待。ref 没有指向已挂载的 web view、平台没有 cookie 存储、平台报错或没有按时收到回复时失败。`WebCookie` 的 `expires` 是 Unix 毫秒（`None` 表示会话 cookie），`same_site` 为 `CookieSameSite::None`、`Lax`、`Strict`，或没有该属性时为 `None`。原生存储可能按其 cookie 策略缩短过长的有效期（常见上限为 400 天）：此时存储保留一个不晚于请求值的未来时间，`cookies` 返回实际保存的值；拒绝该 cookie 的存储会让 `set_cookie` 失败。
 
-`incognito` 视图读写自己的内存存储；其他视图共享应用的配置。存储中也有页面自己设置的 cookie，`cookies` 按存储中的内容返回它们。
+iOS、macOS、Linux 和 Windows 的 `incognito` 视图读写自己的内存存储，其他视图共享应用的配置。Android 保持现有的应用级 CookieManager，包括 `incognito` 视图。原生存储中也包含页面设置的 cookie。
 
-| 能力 | macOS | Linux（WebKitGTK） | Windows（WebView2） | iOS、Android、web、TUI |
-|---|---|---|---|---|
-| `cookies` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 返回不支持错误 |
-| `set_cookie` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 返回不支持错误 |
-| `delete_cookie` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 返回不支持错误 |
+| 能力 | iOS / macOS | Linux（WebKitGTK） | Windows（WebView2） | Android | web、TUI |
+|---|---|---|---|---|---|
+| `cookies` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 明确返回错误 | 明确返回错误 |
+| `set_cookie` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | `CookieManager.setCookie` | 明确返回错误 |
+| `delete_cookie` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 明确返回错误 | 明确返回错误 |
+
+Android 通过公开的 [`CookieManager.setCookie`](https://developer.android.com/reference/android/webkit/CookieManager) 设置单个 cookie，传入完整的 `Set-Cookie` 属性并报告完成结果。公开的 `getCookie(url)` 返回请求头中的名称和值，不包含域、路径、过期时间、HttpOnly、Secure 和 SameSite 元数据，也必须指定 URL。公开的删除方法只能清除全部 cookie 或全部会话 cookie。因此 Android 上的 `cookies` 和 `delete_cookie` 明确返回错误，保留已有 cookie，而不是编造元数据或扩大删除范围。
 
 ## 通信
 

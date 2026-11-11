@@ -20,16 +20,19 @@
 //!
 //! # Platform support
 //!
-//! | Operation | macOS | Linux with WebKitGTK | Windows with WebView2 | iOS, Android, web, TUI |
-//! |---|---|---|---|---|
-//! | `cookies` | `WKHTTPCookieStore` | the view's cookie manager | the view's cookie manager | Unsupported error |
-//! | `set_cookie` | `WKHTTPCookieStore` | the view's cookie manager | the view's cookie manager | Unsupported error |
-//! | `delete_cookie` | `WKHTTPCookieStore` | the view's cookie manager | the view's cookie manager | Unsupported error |
+//! | Operation | iOS / macOS | Linux with WebKitGTK | Windows with WebView2 | Android | web, TUI |
+//! |---|---|---|---|---|---|
+//! | `cookies` | `WKHTTPCookieStore` | the view's cookie manager | the view's cookie manager | Unsupported error | Unsupported error |
+//! | `set_cookie` | `WKHTTPCookieStore` | the view's cookie manager | the view's cookie manager | `CookieManager.setCookie` | Unsupported error |
+//! | `delete_cookie` | `WKHTTPCookieStore` | the view's cookie manager | the view's cookie manager | Unsupported error | Unsupported error |
 //!
-//! Every operation reads and writes the store of the view it is sent to: the
-//! app's shared profile, or the in-memory store of an `incognito` view. A
-//! store keeps cookies set by the page too; `cookies` reports them as the
-//! store holds them.
+//! iOS, macOS, Linux and Windows use the view's own store: the app's shared
+//! profile, or the in-memory store of an `incognito` view. Android uses its
+//! existing app-wide CookieManager, including for `incognito` views.
+//! Android's public `getCookie(url)` exposes only name/value pairs, not
+//! the metadata this API returns or whole-store enumeration. Its removal
+//! methods clear all cookies or all session cookies; reads and exact
+//! deletions therefore return explicit errors without changing the store.
 
 use std::{fmt, time::Duration};
 
@@ -196,7 +199,7 @@ pub struct WebViewRequest {
 }
 
 /// Why a request failed when the platform has no cookie controls.
-pub(crate) const UNSUPPORTED: &str = "this platform has no web view cookie store (macOS, Linux with WebKitGTK and Windows with WebView2 do)";
+pub(crate) const UNSUPPORTED: &str = "this platform has no native web view cookie controls";
 
 /// Why a request failed when its element is not a web view.
 pub(crate) const NOT_A_WEB_VIEW: &str = "the element is not a web view";

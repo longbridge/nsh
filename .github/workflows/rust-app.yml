@@ -33,3 +33,40 @@ jobs:
             .nsh/mobile-cookie-ios/proof/
             .nsh/webview-review/proof/
           include-hidden-files: true
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android,aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android toolchain
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+      - name: Configure native tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev
+          sudo chmod 666 /dev/kvm
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/cargo
+        with:
+          cache: rust-app
+      - name: Android Cookie emulator scenario
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: python3 .nsh/mobile-cookie-android-run.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-cookie-android
+          path: .nsh/mobile-cookie-android/proof/
+          include-hidden-files: true

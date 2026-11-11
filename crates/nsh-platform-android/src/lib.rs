@@ -34,6 +34,7 @@ mod selectable_view;
 mod shader;
 mod svg;
 mod text;
+mod webview;
 
 use std::ffi::c_void;
 

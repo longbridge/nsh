@@ -2322,6 +2322,31 @@ final class Mounter {
                 if (v instanceof WebBox) ((WebBox) v).cancelEvaluation(request);
                 break;
             }
+            case 53: {
+                // A web view cookie request: its 64-bit id, the generation
+                // of the engine that sent it, then the operation. `WebBox`
+                // answers through `webViewReply`; every request is answered,
+                // including one this build cannot carry out.
+                long request = b.getLong();
+                String generation = (String) objects[b.getInt()];
+                int operation = b.getInt();
+                if (operation == 1) {
+                    String url = (String) objects[b.getInt()];
+                    String header = (String) objects[b.getInt()];
+                    String name = (String) objects[b.getInt()];
+                    if (v instanceof WebBox) {
+                        ((WebBox) v).setCookie(request, generation, url, header, name);
+                    } else {
+                        webViewReply(id, request, generation, "the element is not a web view");
+                    }
+                } else if (operation == 2) {
+                    webViewReply(id, request, generation, (String) objects[b.getInt()]);
+                } else {
+                    webViewReply(id, request, generation,
+                            "this Android backend does not know the web view operation");
+                }
+                break;
+            }
             case 50:
                 if (v instanceof InputBox) ((InputBox) v).closeEditMenu();
                 break;
@@ -2678,6 +2703,17 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /**
+     * Answers a web view cookie request: {@code error} null is success (a
+     * `SetCookie` the store took). The generation lets the native side drop
+     * an answer from an engine that was replaced since.
+     */
+    void webViewReply(int id, long request, String generation, String error) {
+        eventMap(id, Native.WEB_VIEW_REPLY,
+                new String[] {"id", "ok", "error", "generation"},
+                new Object[] {Long.toUnsignedString(request), error == null, error, generation});
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {
