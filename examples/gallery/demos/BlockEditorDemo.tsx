@@ -151,6 +151,16 @@ const column = defineExtension({
   node: { content: "block+", defining: true, isolating: true, parseDOM: [{ tag: "div[data-column]" }], toDOM: ["div", { "data-column": "" }, 0] },
 });
 
+/** The colors text takes (the `textStyle` mark's `color`), each a class of the theme's or Tailwind's palette. */
+const TEXT_COLORS: { name: string; label: string; class: string }[] = [
+  { name: "gray", label: "Gray", class: "text-muted-foreground" },
+  { name: "red", label: "Red", class: "text-down" },
+  { name: "orange", label: "Orange", class: "text-amber-500" },
+  { name: "green", label: "Green", class: "text-up" },
+  { name: "blue", label: "Blue", class: "text-sky-500" },
+  { name: "purple", label: "Purple", class: "text-violet-500" },
+];
+
 /** `/` opens the blocks: Tiptap's Suggestion with its own keys. It ranks above the keymap, so Enter picks before it splits a paragraph. */
 const slash = defineExtension({
   name: "slashCommand",
@@ -598,6 +608,8 @@ export function BlockEditorDemo() {
 
   // The floating toolbar's selection: a range of text.
   const selected = signal(false);
+  // The toolbar shows its colors in place of its buttons while one is being picked.
+  const coloring = signal(false);
 
   const sync = () => {
     revision.set(editor.revision);
@@ -637,6 +649,7 @@ export function BlockEditorDemo() {
     }
     const sel = editor.selection;
     // A range of text, or the whole document (Select All): the toolbar shows and the handle goes.
+    if (!(sel.type === "all" || (sel.type === "text" && sel.anchor !== sel.head))) coloring.set(false);
     selected.set((sel.type === "all" || (sel.type === "text" && sel.anchor !== sel.head)) && !editor.isActive("codeBlock"));
   };
   editor.on("revision", sync);
@@ -823,24 +836,65 @@ export function BlockEditorDemo() {
     return (
       <PopIn side="top">
       <View testID="format-bar" role="toolbar" accessibilityLabel="Format" style={{ ...popupSurface(), flexDirection: "row", alignItems: "center", padding: 3, gap: 1 }}>
-        <Each of={BAR_BLOCKS}>
-          {(block) => (
-            <BarButton
-              icon={block().icon}
-              label={block().title}
-              active={!!block().node && editor.isActive(block().node![0], block().node![1])}
-              onPress={() => {
-                convert(block());
-                editor.focus();
-              }}
-            />
-          )}
-        </Each>
-        <BarRule />
-        <Each of={MARKS}>
-          {(mark) => <BarButton icon={mark().icon} label={mark().label} active={editor.isActive(mark().name)} onPress={() => editor.run(command(mark().toggle))} />}
-        </Each>
-        <BarButton icon="link" label="Link" onPress={link.edit} />
+        <If
+          when={coloring()}
+          else={
+            <>
+              {/* A phone's toolbar holds the marks alone: its width has no room for the blocks, which the `/` menu has. */}
+              <Each of={pointer ? BAR_BLOCKS : []}>
+                {(block) => (
+                  <BarButton
+                    icon={block().icon}
+                    label={block().title}
+                    active={!!block().node && editor.isActive(block().node![0], block().node![1])}
+                    onPress={() => {
+                      convert(block());
+                      editor.focus();
+                    }}
+                  />
+                )}
+              </Each>
+              <If when={pointer}>
+                <BarRule />
+              </If>
+              <Each of={MARKS}>
+                {(mark) => <BarButton icon={mark().icon} label={mark().label} active={editor.isActive(mark().name)} onPress={() => editor.run(command(mark().toggle))} />}
+              </Each>
+              <BarButton icon="link" label="Link" onPress={link.edit} />
+              <BarButton icon="type" label="Text color" onPress={() => coloring.set(true)} />
+            </>
+          }
+        >
+          {/* The colors stand in for the buttons: a phone's toolbar has no room for both. */}
+          <BarButton icon="chevron-left" label="Back" onPress={() => coloring.set(false)} />
+          <BarRule />
+          <Each of={TEXT_COLORS}>
+            {(color) => (
+              <Button
+                accessibilityLabel={color().label}
+                onPress={() => {
+                  editor.run(command("setTextStyle", { color: color().name }));
+                  coloring.set(false);
+                }}
+                {...feedback()}
+                style={{ width: 30, height: 30, borderRadius: 6, alignItems: "center", justifyContent: "center" }}
+              >
+                <Text class={`text-[15px] font-semibold ${color().class}`}>A</Text>
+              </Button>
+            )}
+          </Each>
+          <Button
+            accessibilityLabel="Default color"
+            onPress={() => {
+              editor.run(command("unsetTextStyle"));
+              coloring.set(false);
+            }}
+            {...feedback()}
+            style={{ height: 30, paddingHorizontal: 8, borderRadius: 6, justifyContent: "center" }}
+          >
+            <Text style={{ fontSize: 12, color: colors.muted }}>Default</Text>
+          </Button>
+        </If>
       </View>
       </PopIn>
     );
@@ -865,7 +919,11 @@ export function BlockEditorDemo() {
             content: pointer ? "gap-3 pl-16 pr-10 py-8" : "gap-3 px-5 py-6",
             // A block the handle took, and the line it will drop on.
             // A rule sits as close to its neighbors as they do to each other (the document's gap is around it too).
-            marks: { ...richEditorClasses.marks, highlight: "bg-primary/30 rounded" },
+            marks: {
+              ...richEditorClasses.marks,
+              highlight: "bg-primary/30 rounded",
+              ...Object.fromEntries(TEXT_COLORS.map((c) => [`textStyle[color=${c.name}]`, c.class])),
+            },
             nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3", columns: "flex-row gap-6", column: "flex-1 min-w-0 gap-3" },
             selectedNode: "bg-primary/10 rounded-md",
             dropCursor: "bg-primary rounded-full",

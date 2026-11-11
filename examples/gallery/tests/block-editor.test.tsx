@@ -399,3 +399,18 @@ test("Escape selects the caret's block, which Backspace deletes; columns hold bl
   expect(texts.includes("Numbers to watch")).toBe(true);
   expect(texts.includes("Open the beta to five percent of traffic")).toBe(true);
 });
+
+test("the toolbar colors the selection's text, and Default takes the color off", async () => {
+  const app = await openDemo();
+  await app.press(REVIEW);
+  await app.keyboard.press("home");
+  await app.keyboard.press("shift+end");
+  await app.waitFor("role:toolbar[Format]");
+  const plain = app.spanStyle(`text:${REVIEW}`).color;
+  await app.press("role:button[Text color]");
+  await app.press("role:button[Red]");
+  expect(app.spanStyle(`text:${REVIEW}`).color).not.toBe(plain);
+  await app.press("role:button[Text color]");
+  await app.press("role:button[Default color]");
+  expect(app.spanStyle(`text:${REVIEW}`).color).toBe(plain);
+});
