@@ -132,6 +132,15 @@ pub enum AccessibilityRole {
     /// (`accessibilityState.checked`).
     #[prop(rename = "menuitemradio")]
     MenuItemRadio,
+    /// A dialog over the rest of the app, named by its `label` (its
+    /// title): what `nsh_base::dialog` is unless the app gives it another
+    /// role.
+    Dialog,
+    /// A dialog that asks the user to confirm something or tells them
+    /// something urgent (a destructive action's confirmation), named by
+    /// its `label`.
+    #[prop(rename = "alertdialog")]
+    AlertDialog,
 }
 
 /// Whether a checkable element is checked (`accessibilityState.checked`).
@@ -188,6 +197,10 @@ pub struct AccessibilityState {
     /// an `expanded` element without it is a disclosure, which shows its
     /// content in place (a collapsible's or an accordion's trigger).
     pub has_popup: bool,
+    /// The content does not pass the app's checks (ARIA's
+    /// `aria-invalid`): a field whose text was rejected, a select left
+    /// empty that must not be.
+    pub invalid: bool,
 }
 
 /// The value of a range or textual element (`accessibilityValue`).
@@ -236,6 +249,10 @@ pub struct Accessibility {
     pub label: Option<Arc<str>>,
     /// `accessibilityHint`.
     pub hint: Option<Arc<str>>,
+    /// `accessibilityDescription`: more about the element than its name
+    /// (ARIA's `aria-description`): a dialog's message, what a field
+    /// expects.
+    pub description: Option<Arc<str>>,
     /// `role`.
     pub role: AccessibilityRole,
     /// `accessibilityState`.
@@ -259,6 +276,37 @@ impl Accessibility {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+
+    /// What a platform with one place for everything read after the name
+    /// (AT-SPI's and AccessKit's description, AppKit's help, UIKit's
+    /// hint) gets: `value_text` (a value it reads nowhere else), the
+    /// description and the hint, in that order, each a sentence of its
+    /// own (". " between them, or only a space after a part that already
+    /// ends with `.`, `!`, `?` or `…`, nothing after a full-width `。`,
+    /// `！` or `？`); `None` when there is none of them.
+    pub fn help_text(&self, value_text: Option<&str>) -> Option<String> {
+        let mut parts = [
+            value_text,
+            self.description.as_deref(),
+            self.hint.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.is_empty());
+        let first = parts.next()?;
+        let mut out = first.to_owned();
+        for part in parts {
+            // A part that already ends its sentence keeps its own mark: a
+            // full-width one needs no space after it, a Latin one a space.
+            match out.chars().last() {
+                Some('。' | '！' | '？') => {}
+                Some('.' | '!' | '?' | '…') => out.push(' '),
+                _ => out.push_str(". "),
+            }
+            out.push_str(part);
+        }
+        Some(out)
+    }
 }
 
 /// One accessibility property, as set from JS.
@@ -274,6 +322,10 @@ pub enum AccessibilityProp {
     /// `accessibilityHint`: what activating the element does.
     #[prop(js = "accessibilityHint")]
     Hint(Option<Arc<str>>),
+    /// `accessibilityDescription`: more about the element than its name,
+    /// read after it: a dialog's message, what a field expects.
+    #[prop(js = "accessibilityDescription")]
+    Description(Option<Arc<str>>),
     /// `role`: what the element is.
     #[prop(js = "role", with = crate::js::host_values::role, reset = AccessibilityProp::Role(AccessibilityRole::None))]
     Role(AccessibilityRole),
@@ -324,6 +376,12 @@ pub struct Ripple {
 pub struct ViewProps {
     /// Resolved overlay placement for native grid projection; ordinary views have none.
     pub overlay_anchor: Option<crate::overlay::PlacedAnchor>,
+    /// A shown overlay's place in the Tab order: right after this view
+    /// and before its children, where the app put the overlay (a popover's
+    /// content follows its trigger), not at the end of the root view its
+    /// native view is in. Set by the core; platforms that order Tab
+    /// themselves walk with [`crate::input::tab_order`].
+    pub tab_after: Option<crate::NodeId>,
     /// Tab and screen readers go through the view's children as they are
     /// on screen, along this axis and then across it, instead of in tree
     /// order. The core sets it on a list in its parent's viewport: a list

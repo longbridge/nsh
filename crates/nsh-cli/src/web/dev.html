@@ -101,7 +101,7 @@
   const player = await createPlayer(document.getElementById("app"), {
     wasm: "./nsh.wasm",
     glue: GLUE ?? undefined,
-    host: HOST ? { call: (name, args) => host.call(name, args) } : undefined,
+    host: HOST ? { call: (name, args) => host.call(name, args), post: (name, args) => (host.post ?? host.call).call(host, name, args) } : undefined,
     assetBase: "/assets/",
     history: HISTORY ?? undefined,
     readAsset,

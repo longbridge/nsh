@@ -52,6 +52,8 @@ WORKFLOWS = {
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/bench/**",
             "tests/compat/cases/layout/fonts/**",
+            # nsh-core's test of Android's event codes.
+            "crates/nsh-platform-android/java/com/longbridge/nsh/Native.java",
         ],
     },
     "compat.yml": {
@@ -80,11 +82,15 @@ WORKFLOWS = {
         "files": ["examples/counter/**", "examples/gallery/**"],
     },
     "rust-app.yml": {
-        "packages": ["gallery-native", "rust-exports-native", "tasks-rs", "nsh-cli", "nsh-platform-web"],
+        # The macOS check also tests nsh-platform-apple.
+        "packages": [
+            "gallery-native", "rust-exports-native", "post-editor-native", "tasks-rs",
+            "nsh-cli", "nsh-platform-web", "nsh-platform-apple",
+        ],
         # `nsh test` runs the examples' tests.
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/gallery-rs/**",
-            "examples/rust-exports/**", "examples/tasks-rs/**",
+            "examples/rust-exports/**", "examples/post-editor/**", "examples/tasks-rs/**",
         ],
     },
 }

@@ -108,9 +108,10 @@ nsh test --filter "adds"      # the tests whose name contains "adds"
 error 2 tests: 1 passed, 1 failed (0.9s)
 ```
 
-A failing test shows what was thrown, where in the test file, and the texts on screen of the app it opened. Any failure
-makes `nsh test` exit with a non-zero code. `nsh init` creates an `App.test.tsx` with the app, and `nsh check` type
-checks test files with the rest (`.nsh/types` declares `nsh/test`).
+A failing test shows what was thrown, where in the test file, and the texts on screen of the app it opened. The texts
+are cut to a few KB (`… (<n> more characters)` marks what is left), so a long document cannot flood the output; `-v`
+shows all of them. Any failure makes `nsh test` exit with a non-zero code. `nsh init` creates an `App.test.tsx` with
+the app, and `nsh check` type checks test files with the rest (`.nsh/types` declares `nsh/test`).
 
 Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
 another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A
@@ -172,7 +173,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `localeSettings` | the locale's, in UTC | The user's locale settings (`localeSettings()`), the ones it names over the locale's: `languages` (BCP 47 tags, most preferred first; `[locale]`), `timeZone` (an IANA name; `"UTC"`), `hourCycle` (`"h12"`, `"h23"`, `"h11"` or `"h24"`), `firstDayOfWeek` (1 for Monday to 7 for Sunday), `measurementSystem` (`"metric"`, `"us"` or `"uk"`) and `temperatureUnit` (`"celsius"` or `"fahrenheit"`), the last four the locale's region's. A time zone names the zone: local times, `Date`'s and `Intl`'s, stay the machine's, and so does the zone `Intl` names. |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
-| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
+| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts, a page's `header` at its top as wide as the window on the desktops and the web, the header bar the system's on iOS and Android). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
 | `modules` | none | Stand-ins for exports of the native modules the app imports, by specifier: see [Faking native modules](#faking-native-modules). Headless runs only. |
@@ -420,7 +421,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`), or of the system's edit menu an editor shows over its selection on a phone (`RichEditor`'s, labelled as the platform labels them: `Cut`, `Copy`, `Paste`, `Select All`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
 | `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. From an edit menu, the editor carries out the action; Paste pastes the test's clipboard. Rejects when the item is disabled or missing. |
 | `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does. |
-| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on a desktop the application menu's item with that shortcut is chosen (`Menu.setApplicationMenu`, its `when` kept while an input has the focus), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles) and Return or Space presses the view it is on, and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
+| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on a desktop the application menu's item with that shortcut is chosen (`Menu.setApplicationMenu`, its `when` kept while an input has the focus), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles), inside the newest dialog while one is open, and Return or Space presses the view it is on, and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless and on Linux for now. |
@@ -523,8 +524,8 @@ that only a real platform can do:
 An app published to the web gets its host from its page: `nsh.json` `web.host`, a module exporting
 `createHost(player)` ([Web](./web.md#the-hosts-functions)). Headless runs load that module for each app a test opens,
 before the app starts, in a JavaScript context of its own (timers and `console`, nothing of the browser's, no
-imports): its `call` answers the app's [`host.call`](../modules/nsh.md#host), its `player.hostEvent` reaches
-`host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
+imports): its `call` answers the app's [`host.call`](../modules/nsh.md#host), its `post` (or `call` without one)
+takes the app's `host.post`, its `player.hostEvent` reaches `host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
 app's call with its message, as on the page, and events sent before the app starts reach its top-level listeners
 once it does. `--web-host <module>` names another module. The app's `capabilities.host` must list what it calls, as on
 the page. A call's timeout and the host's own timers run on the app's time, so a manual clock moves them
@@ -606,8 +607,9 @@ nsh test --target tui                         # in an in-memory terminal
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
-The window opens at the viewport's size (390 × 844 unless `open` says), within the screen; on iOS and Android the app
-fills the device's screen, at the device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen (on macOS, `setViewport`
+keeps it there, its top left corner when it is larger); on iOS and Android the app fills the device's screen, at the
+device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
 it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the app's time at once (timers,
 `requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)`, `waitFor` and `waitUntil` move it too, and each frame
 the platform shows moves it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
@@ -642,12 +644,12 @@ on this machine, or the executable `--browser <PATH>` names (a browser is needed
 when it finds none). One browser serves the run, and each `open` gets a page with storage of its own. The input is
 the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
 
-On iOS, the apps run in the development host in an iOS simulator: the booted one, else the newest iPhone, which
-`nsh test` boots. The steps are a finger's touches and the software keyboard's typing, as UIKit gets them from the
-device. `setColorScheme` switches the simulator's appearance, which `nsh test` sets back after the app, and the screen
-has the simulated device's size. The variables of `nsh test`'s environment that the app declares in
-`capabilities.process.env` reach the app in the simulator, as on the desktops (`nsh run --target ios` passes them too);
-`HOME`, `TMPDIR` and `PATH` hold the simulator's paths for the app.
+On iOS, the apps run in the development host in an iOS simulator: the one `--device` names (by name or UDID), else
+the booted one, else the newest iPhone, which `nsh test` boots. The steps are a finger's touches and the software
+keyboard's typing, as UIKit gets them from the device. `setColorScheme` switches the simulator's appearance, which
+`nsh test` sets back after the app, and the screen has the simulated device's size. The variables of `nsh test`'s
+environment that the app declares in `capabilities.process.env` reach the app in the simulator, as on the desktops
+(`nsh run --target ios` passes them too); `HOME`, `TMPDIR` and `PATH` hold the simulator's paths for the app.
 
 On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
 of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;

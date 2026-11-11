@@ -341,6 +341,37 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## Views made over frames (all platforms)
+
+A list row bound in the overscan, or a long reply staged into a chat, used to make its whole subtree in one batch:
+hundreds of native views nobody sees yet, created and committed by the platform in one frame (423 views took one 87 ms
+frame on macOS, mostly the Core Animation commit). The core now spreads them (`crates/nsh-core/src/core/pace.rs`):
+
+- once a turn has made 64 views, a view about to be made in a scroll view or a list cell waits, culled as content culling
+  holds views back (laid out, given a frame, made at once by a command for it);
+- after each layout the waiting views that show (their frame meets the viewport of every scroll view and list around
+  them) are made at once, down to their leaves; the rest come in later turns, nearest the viewport first, at most 32
+  views or 4 ms a turn, and the engine asks for a display frame while some wait;
+- content culling's overscan keeps the same budget.
+
+Views not made yet are not in the platform's accessibility tree, as culled content is not: they are out of sight and
+come within a few frames. Selection and select-all read the core's nodes, not native views. Test drivers turn content
+culling off, which turns pacing off, so their steps reach every view. Nothing waits that may show away from its frame
+(sticky, followers, overlays, screens, modals, transformed or animated views), nor anything outside scroll views and
+lists.
+
+Reproduce: `cargo test -p nsh-core --release --lib -- --ignored big_rows_bench --nocapture` (a 480 pt list of rows of
+420 views each, 5 rows bound). Linux x64, release:
+
+| | first batch | later batches | batches |
+|---|---|---|---|
+| before | 2,105 views (4,640 items), core 1.04 ms | none | 1 |
+| after | 100 views (290 items), core 1.02 ms | 32 views each (96 items), core < 25 us | 64 |
+
+Every view in sight is in the first batch in both. The platform's cost is per view made, so at the macOS figure of
+about 0.2 ms a view the first frame goes from about 420 ms of platform work to about 20 ms, and each later one about
+6 ms.
+
 ## Shader pictures on Linux
 
 What the GTK backend reads back for shaders' pictures (`nsh-platform-linux` `shader.rs`, `docs/dev/shaders.md`), and
@@ -415,9 +446,14 @@ readback) is not this implementation. Linux `backdropFilter` remains unsupported
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
 
 - A call from app code into the runtime (a signal read or set, an element made) outside a Wasm entry costs ~1µs
-  however many values the app holds: the weak tracing runs at most every 100ms after the call
-  (`values.js` `schedule`), not inside it. With a full trace per call it cost ~0.11ms at 1 700 retained values and
-  ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each), and a message pushed every second froze the page.
+  however many values the app holds: the weak tracing runs after the call, not inside it, at least 100ms apart
+  and twenty times as long after a run as it took (`values.js` `schedule`, `collectDelay`). With a full trace per
+  call it cost ~0.11ms at 1 700 retained values and ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each),
+  and a message pushed every second froze the page.
+- Typing into a controlled `Input` beside 10 000 rows that each hold a handler, a key every 80ms, 2026-11-11: with
+  accessors keyed by numbers and the accounting spaced by its own cost, the accounting took ~3.65ms per key instead
+  of ~9.4ms and script ~5.4ms instead of ~10.7ms; with the CPU slowed 4×, accounting ~3.6ms instead of ~50.4ms,
+  script ~6.9ms instead of ~65ms, main-thread task time ~20.9ms instead of ~79.5ms per key.
 - The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
   (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
   ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.
@@ -647,6 +683,74 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
 
   Drawing each area in a pass of its own (up to 6) was tried first: Stocks' paint only went 2.7 → 2.2 ms, the
   passes each walking the tree and the merged areas covering ~30% of the window.
+
+  Canvas paints that cannot change pixels and slot-indexed canvas damage (`docs/dev/canvas.md` "Partial redraws"),
+  release, base `f0b4659e` (the baseline built from that commit in a detached worktree), i7-14650HX, RTX 4060
+  Laptop GPU, 2560 × 1600 at 240 Hz and 150% scale, a 1200 × 800 point gallery window. Six alternating
+  baseline/new runs per side (`examples/gallery/tools/perf.py --nsh <binary> --only Stocks,Canvas --seconds 4
+  --size 1200x800`, the logs kept by an external collector), each cell the median of the per-second phase means
+  and the nearest-rank p95 of the per-second p95s over the pooled seconds (`n`):
+
+  | Scenario (n before / after) | Phase | Before, mean / p95 | After, mean / p95 |
+  |---|---|---|---|
+  | Stocks idle (18 / 18) | canvas | 0.475 / 2.080 ms | 0.460 / 2.140 ms |
+  | Stocks idle (18 / 18) | paint | 4.350 / 9.010 ms | 4.405 / 9.180 ms |
+  | Stocks scroll (77 / 78) | canvas | 0.480 / 2.300 ms | 0.480 / 2.250 ms |
+  | Stocks scroll (77 / 78) | paint | 4.360 / 9.120 ms | 4.400 / 9.210 ms |
+  | Canvas idle (18 / 18) | canvas | 0.050 / 0.100 ms | 0.050 / 0.070 ms |
+  | Canvas idle (18 / 18) | paint | 0.510 / 0.690 ms | 0.500 / 0.740 ms |
+  | Canvas scroll (26 / 29) | canvas | 0.060 / 0.100 ms | 0.060 / 0.100 ms |
+  | Canvas scroll (26 / 29) | paint | 1.055 / 2.540 ms | 1.030 / 2.620 ms |
+
+  Both gallery demos hold their rate (240 fps in the Canvas demo; Stocks' live feed keeps it at a median 186–189
+  fps both sides) and the phases move within run-to-run noise: the gallery does not draw Flow's comet, the
+  workload this targets (48 strokes per flowing connector, about three quarters of them at alpha zero at a
+  typical step), and the Canvas demo's pulsing ring animates its radius, so its damage keeps the conservative
+  full scans. The flow document is measured after Flow's pin advances. Headless
+  `nsh test examples/gallery/App.tsx --trace` is unchanged: 3174 ops / 3169 mount items / 859 nodes in the first
+  commit and 11 ops / 0 items / 859 nodes in the second, with every item line equal between the binaries (the
+  bundle is 2 110 929 bytes from both). The scripted light and dark screenshots of the gallery's home page are
+  byte-identical between the binaries (SHA-256 `6a3568db…` light, `b24d354d…` dark).
+
+  Off-damage own painting, lazy box geometry and current-frame cache retention (`docs/dev/windows.md`
+  "Partial frames"), release, the same host and a 1200 × 800 point gallery window, base `f0b4659e`
+  (the detached worktree's binary). Three alternating baseline/new runs per side
+  (`examples/gallery/tools/perf.py --nsh <binary> --only Stocks,Canvas --seconds 4 --size
+  1200x800`, the logs kept by an external collector); `n` is the pooled seconds, each cell the median
+  of the per-second means and the nearest-rank p95 of the per-second p95s:
+
+  | Scenario (n before / after) | Phase | Before, mean / p50 / p95 | After, mean / p50 / p95 |
+  |---|---|---|---|
+  | Home idle (9 / 9) | paint | 4.40 / 3.60 / 7.79 ms | 3.16 / 2.55 / 7.01 ms |
+  | Home idle (9 / 9) | canvas | 0.47 / 0.24 / 2.20 ms | 0.37 / 0.23 / 1.51 ms |
+  | Home scroll (40 / 39) | paint | 4.60 / 4.06 / 8.38 ms | 3.66 / 2.73 / 8.77 ms |
+  | Stocks idle (9 / 9) | paint | 4.54 / 3.88 / 9.35 ms | 4.52 / 3.84 / 9.59 ms |
+  | Stocks scroll (41 / 38) | paint | 4.64 / 4.03 / 9.43 ms | 4.13 / 3.44 / 9.10 ms |
+  | Canvas idle (9 / 9) | paint | 0.52 / 0.51 / 0.77 ms | 0.45 / 0.44 / 0.60 ms |
+  | Canvas scroll (14 / 14) | paint | 1.07 / 0.57 / 2.69 ms | 1.04 / 0.51 / 2.65 ms |
+
+  The gallery's home index gains the most: its cards are non-clipping parents with children, so an
+  off-damage card no longer paints its background, border and shadow (paint's mean −28% idle, −20%
+  scrolled). Stocks' idle paint barely moves because its pulsing sparklines sit inside every visible
+  card's own box (the card is in damage); scrolling improves its mean by 11%. Frames per second are
+  unchanged or better (Home idle median 191 → 218, Stocks scroll 181 → 195, Canvas 240 both sides)
+  and commits are identical (17 / 18 / 49); CPU readings move by ±10 points between runs and are not
+  used to judge this change. The decoration cache does not reach its 96 MiB limit in the gallery, so
+  current-frame retention is covered by its unit tests rather than these runs. A nine-patch outer
+  shadow was tried and rejected: Direct2D's blur moves its faint outer tail by one alpha unit when
+  the destination shape's extent changes, so sliced pixels cannot equal the whole-box bake (the
+  measurement and the two fixes tried are in `windows.md` "Partial frames"); outer shadows keep the
+  original bake.
+
+  Headless `nsh test examples/gallery/App.tsx --trace` is unchanged: both binaries bundle
+  2 110 929 bytes; 3174 ops / 3169 mount items / 859 nodes in the first commit and 11 ops / 0 items /
+  859 nodes in the second, with every item line identical (only timings differ). The scripted light and
+  dark screenshots of the gallery's home page, the Styles demo (cards and shadows) and the Canvas demo
+  are byte-identical between the binaries: home `6a3568db…` light and `b24d354d…` dark, Styles
+  `ca47dbd1…` / `6e754557…`, Canvas `1d189674…` / `26ebaf3e…`. A resized viewport (777 × 523) is not
+  comparable byte for byte: shots a second apart in one run differ by 17 064 pixels (new binary) and
+  18 093 (baseline) of 965 448, the resized frames keep repainting, so the resize evidence is visual
+  only and the partial-frame BGRA tests cover the drawing.
 
 - Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;

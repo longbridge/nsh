@@ -193,6 +193,18 @@ pub struct AppOptions {
     /// instance, a later launch with a URL handing it to the running one.
     /// Empty: none of that.
     pub schemes: Vec<String>,
+    /// The app runs once (nsh.json `singleInstance`, from the package's
+    /// `nsh\app.json`): [`run_app`] hands a later launch's arguments and
+    /// working directory to the running instance, which brings its window
+    /// forward and tells the app (`Application.on("secondInstance", ...)`),
+    /// and exits before it opens a window.
+    pub single_instance: bool,
+    /// The file types the app opens (nsh.json `fileTypes`, from the
+    /// package's `nsh\app.json`): [`run_app`] registers them for the
+    /// current user (Open With) and hands the files it is started with to
+    /// the app (`Application.on("openFiles", ...)`), a later
+    /// launch with files handing them to the running instance.
+    pub file_types: Vec<nsh_core::file_type::FileType>,
 }
 
 impl Default for AppOptions {
@@ -214,6 +226,8 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             schemes: Vec::new(),
+            single_instance: false,
+            file_types: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
@@ -623,9 +637,13 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = OleInitialize(None);
     }
-    if let crate::linking::Start::Forwarded =
-        crate::linking::start(&options.app_id, &options.title, &options.schemes)
-    {
+    if let crate::linking::Start::Forwarded = crate::linking::start(
+        &options.app_id,
+        &options.title,
+        &options.schemes,
+        &options.file_types,
+        options.single_instance,
+    ) {
         return std::process::ExitCode::SUCCESS;
     }
     // The app to run, when it is known now (a dev server's comes later).

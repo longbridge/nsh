@@ -56,6 +56,14 @@ mount(App);
 
 `content` 部件是编辑器滚动视图中文档的盒子：它的内边距（`content: "px-6 py-5"`）就是文本周围的留白，滚动条贴着编辑器自己的边缘。拖动选择越过编辑器的上下边缘时，文档随之滚动，指针越远滚得越快。
 
+### 尺寸
+
+编辑器的尺寸如同 `height: auto` 的块：不设高度时，它的高度是文档按其宽度排版后的高度加上内边距，并随每次编辑增高或变矮。`maxHeight`（`max-h-*`）让它停在该高度，此后文档在其中滚动，并保持光标可见，与多行 `Input` 一样；`minHeight`（`min-h-*`）让它至少有该高度。设置高度或弹性尺寸（`h-*`、`flex-1`）时，它是一个固定的盒子，文档在其中滚动。聊天输入框就是设置了 `maxHeight`、不设高度的编辑器：
+
+```tsx
+<RichEditor editor={editor} class="max-h-40 px-3 py-2" />
+```
+
 ### 触摸选区
 
 在 iOS 和 Android 上，编辑器像平台自己的文本视图一样选择文本。长按选中手指下的词，之后移动手指按整词扩展选区；在空白处长按则放置光标。双击选中一个词，三击选中整段。触摸产生的选区两端各有一个手柄（`selectionHandle`，主题 `primary` 色的圆点），手指拖动手柄即可移动那一端。手指抬起时，系统编辑菜单在选区上方打开，提供剪切、拷贝、粘贴和全选；点按选区会再次打开它，点按光标则打开粘贴和全选。菜单只提供适用的操作：全部选中后不再提供全选，只读编辑器只提供拷贝和全选。每个操作都是编辑器的事务，因此工具栏的 `isActive` 跟随选区，`toggleMark` 作用于它，撤销可以撤回剪切或粘贴。点按、键盘、输入法和鼠标的选择方式不变。
@@ -98,7 +106,7 @@ const schema = defineSchema({
 const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 ```
 
-`RichSchema` 读写文档：`parse(content, format?)`（默认纯文本，也可以是 `"markdown"` 或 JSON）、`parseMarkdown(markdown)`、`serialize(doc, format?)`（默认 Markdown，也可以是 `"text"`、`"json"`）以及 `check(doc)`，它返回填好属性默认值的文档。`nodes`、`marks` 和 `topNode` 列出它的类型。Markdown 对应起步 schema 的名称（`paragraph`、`heading`、`blockquote`、`codeBlock`、`bulletList`、`orderedList`、`listItem`、`bold`、`italic`、`code`、`link`、`strike`）。
+`RichSchema` 读写文档：`parse(content, format?)`（默认纯文本，也可以是 `"markdown"`、`"html"` 或 JSON）、`parseMarkdown(markdown)`、`serialize(doc, format?)`（默认 Markdown，也可以是 `"text"`、`"html"`、`"json"`）以及 `check(doc)`，它返回填好属性默认值的文档。`nodes`、`marks` 和 `topNode` 列出它的类型。Markdown 对应起步 schema 的名称（`paragraph`、`heading`、`blockquote`、`codeBlock`、`bulletList`、`orderedList`、`listItem`、`bold`、`italic`、`code`、`link`、`strike`）。
 
 ## 命令
 
@@ -134,7 +142,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `isEmpty`、`undoDepth`、`redoDepth`、`composing` | 界面显示的编辑器信息 |
 | `setContent(content, format?)` | 替换文档，作为一次可撤销的修改 |
 | `insertContent(content, format?)` | 在选区处插入内容 |
-| `getJSON()`、`getMarkdown()`、`getText()`、`textBetween(from?, to?, separator?)` | 某种格式的文档 |
+| `getJSON()`、`getHTML()`、`getMarkdown()`、`getText()`、`textBetween(from?, to?, separator?)` | 某种格式的文档 |
 | `dispatch(tr)` | 应用以 JSON 给出的事务（其步骤基于当前文档） |
 | `on(event, listener)` | 每次发生 `event` 后，在 JS 的下一轮以它的数据调用 `listener`：`revision`（`{ revision }`，每次修改之后，无论来自何处）、`update`、`selectionUpdate`、`transaction`、`focus`、`blur`、`delete`。返回一个停止监听的函数；在组件渲染期间添加的监听器随组件一起停止 |
 | `focus()`、`blur()` | 把键盘焦点移到显示编辑器的视图，或从中移开 |

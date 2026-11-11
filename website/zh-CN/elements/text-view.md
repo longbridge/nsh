@@ -240,7 +240,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 ## 流式 AI 回复
 
-随着回复增长传入它，并设置 `options={{ streaming: true }}`（Rust 中是 `MarkdownOptions { streaming: true, .. }`）。仍在到达的文本末尾常常留着未闭合的语法（`**bold`、`` `code ``、`[a link](htt`、刚到达表头的表格）；流式模式会把它显示成闭合后的样子，读者不会看到零散的 `**` 或 `[`。文档块按位置保留：已完成的块保留它们的视图，只有正在写的块会重新生成，因此长回复的更新依然很轻。
+随着回复增长传入它，并设置 `options={{ streaming: true }}`（Rust 中是 `MarkdownOptions { streaming: true, .. }`）。仍在到达的文本末尾常常留着未闭合的语法（`**bold`、`` `code ``、`[a link](htt`、刚到达表头的表格）；流式模式会把它显示成闭合后的样子，读者不会看到零散的 `**` 或 `[`。含义要看后面字符的末行在这一行结束时显示：单独的列表标记、段落下的 `-` 或 `=` 行、代码围栏的开头行或打了一半的收尾围栏，因此列表项、标题和代码块一出现就是最终的样子。词内的 `*`（`a*b`）保持原样。回复结束后（关闭 `streaming`），文本按原样解析。文档块按位置保留：已完成的块保留它们的视图，只有正在写的块会重新生成，因此长回复的更新依然很轻。
 
 `streamingCaret` 跟随文档末尾：以行内方式显示在最后一段文本的末尾，无论最后一个块在哪里结束（段落、列表项、代码块、表格的最后一个单元格）；否则单独一行显示在最后一个块之后（分隔线、渲染函数的内容）。回复结束后去掉它。
 
@@ -758,7 +758,7 @@ fn chat() -> impl IntoElement {
 |---|---|---|
 | `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url, modifiers }`，其 URL（标题为 `#anchor`，脚注为 `#footnote-<label>`）和按住的修饰键。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
-| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text, start }`，与复制得到的内容相同的选中文字及其起始位置；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | 设置了 `selectable` 的 `TextView` 的选区变化：`{ text, start, bounds, pageBounds }`，与复制得到的内容相同的选中文字、其起始位置及其外框；不再有选中内容时为 `""`（[读取选中的文字](./text-selection.md#读取选中的文字)）。放在可选择视图里时改由外层视图报告。 |
 
 ## 方法
 

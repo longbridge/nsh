@@ -9,7 +9,8 @@
 //! The pass's opacity and color filters are in the image's colors (GPUI's
 //! image opacity is not public), so a gradient whose opacity animates is
 //! drawn again each frame; images are at most [`MAX_SIDE`] pixels a side,
-//! stretched beyond (a gradient has no detail finer than its stops).
+//! stretched beyond (a gradient has no detail finer than its stops), and
+//! repeating ones at most [`MAX_REPEATING_SIDE`].
 //!
 //! A rotated, skewed or projected view cannot paint an image in its plane:
 //! its gradient is filled as bands of solid color (strips across a linear
@@ -33,6 +34,11 @@ use crate::{
 
 /// Most pixels along a side of a gradient's image.
 const MAX_SIDE: f32 = 768.0;
+
+/// Most pixels along a side of a repeating gradient's image: its bands
+/// are as fine as their period (a 1 px hatch line), so stretching the
+/// image would blur and widen them.
+const MAX_REPEATING_SIDE: f32 = 4096.0;
 
 /// How many images are kept before those not drawn lately are let go.
 const MAX_KEPT: usize = 96;
@@ -246,13 +252,14 @@ fn draw_image(
     radii: [f32; 4],
 ) {
     let b = cx.rect(0.0, 0.0, w, h);
+    let max = if ramp.repeating {
+        MAX_REPEATING_SIDE
+    } else {
+        MAX_SIDE
+    };
     let size = (
-        (f32::from(b.size.width) * cx.scale)
-            .clamp(1.0, MAX_SIDE)
-            .ceil() as u32,
-        (f32::from(b.size.height) * cx.scale)
-            .clamp(1.0, MAX_SIDE)
-            .ceil() as u32,
+        (f32::from(b.size.width) * cx.scale).clamp(1.0, max).ceil() as u32,
+        (f32::from(b.size.height) * cx.scale).clamp(1.0, max).ceil() as u32,
     );
     let key = image_key(ramp, geometry, w, h, size);
     let image = KEPT.with_borrow_mut(|kept| {

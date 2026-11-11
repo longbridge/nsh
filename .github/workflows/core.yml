@@ -32,6 +32,7 @@ on:
       - "examples/gallery/**"
       - "examples/bench/**"
       - "tests/compat/cases/layout/fonts/**"
+      - "crates/nsh-platform-android/java/com/longbridge/nsh/Native.java"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"

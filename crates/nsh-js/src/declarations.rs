@@ -292,7 +292,13 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
         "ListRef",
         Some("ViewRef"),
         "A `List`'s ref.",
-        &["scrollTo", "scrollToOffset", "scrollToIndex", "scrollToEnd"],
+        &[
+            "scrollTo",
+            "scrollToOffset",
+            "scrollToIndex",
+            "scrollToEnd",
+            "measureScrollPosition",
+        ],
     ),
     (
         "WebViewRef",
@@ -304,6 +310,7 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
             "goForward",
             "stopLoading",
             "injectJavaScript",
+            "evaluate",
             "postMessage",
             "sendInput",
             "load",

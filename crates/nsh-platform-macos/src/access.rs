@@ -9,8 +9,9 @@
 //!   labelled images, a group for other labelled views, none otherwise (the
 //!   view is no element then, and VoiceOver goes through to its children);
 //! - its label (`accessibilityLabel`; a text view's text is its value, as
-//!   VoiceOver reads static text), its help (`accessibilityHint`), its
-//!   value (`accessibilityValue`: a range for range roles, the text
+//!   VoiceOver reads static text), its help (`accessibilityDescription`
+//!   and `accessibilityHint`, as WebKit gives `aria-description` the help),
+//!   its value (`accessibilityValue`: a range for range roles, the text
 //!   otherwise; the checked state of checkable roles) and its states
 //!   (`accessibilityState`);
 //! - buttons, links, tabs, checkboxes, radios, switches, menu items,
@@ -24,11 +25,20 @@
 //!   VoiceOver does not see);
 //! - its `testID` as its accessibility identifier (what UI tests find).
 //!
+//! A scroll view is a scroll area (`AXScrollArea`) with a scroll bar on its
+//! axis whose value is where it is scrolled to ([`scroll_bar`]).
+//!
 //! Its screen frame follows the layer tree, including ancestor transforms
 //! and scroll containers, rather than AppKit's untransformed view frames.
+//! A scroll view's children, and a list's in its parent's viewport, are
+//! read in the order they are on screen ([`in_reading_order`]).
 //!
 //! Live regions are emulated by announcing a changed label or text
-//! (`NSAccessibilityAnnouncementRequestedNotification`);
+//! (`NSAccessibilityAnnouncementRequestedNotification`). An alert
+//! (`role="alert"`) is an assertive live region read whole, as a browser
+//! reads ARIA's: as it appears and when its content changes, once the
+//! batch is in ([`batch_applied`]), unless the app announced the same text
+//! in that batch;
 //! `AXPress` presses a view that takes presses, as Return does when it
 //! has the keyboard focus (`crate::input::accessibility_press`);
 //! `accessibilityActions` are not exposed.
@@ -37,13 +47,18 @@
 //! ([`Applied`]): `ViewProps` also carries touch properties, and `Text`
 //! items come again on every relayout.
 
+pub(crate) mod scroll_bar;
 pub(crate) mod table;
 
-use std::sync::Arc;
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 
 use nsh_core::{
     Accessibility, AccessibilityRole as Role, AttributedText, Checked, EventKind, EventMask,
-    LiveRegion, MountBatch, ViewKind, ViewStyle,
+    LiveRegion, MountBatch, Point, Points, ViewKind, ViewStyle, geometry::Axis,
+    scroll::reading_order,
 };
 use objc2::{MainThreadOnly, Message, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{
@@ -91,6 +106,8 @@ pub(crate) struct Applied {
     ax: AxState,
     /// Stable, non-view columns, created only when an AX client asks.
     columns: Vec<Retained<table::Column>>,
+    /// A scroll area's scroll bar, created only when an AX client asks.
+    scroll_bar: Option<Retained<scroll_bar::ScrollBar>>,
 }
 
 /// Which of its children VoiceOver reaches through a view.
@@ -141,6 +158,61 @@ pub(crate) fn controls(children: Option<Retained<NSArray>>) -> Retained<NSArray>
     }
     gather(children, &mut out);
     NSArray::from_retained_slice(&out)
+}
+
+/// AppKit's accessibility `children` of `view` in the order they are on
+/// screen, for a scroll view (along its axis) and a list in its parent's
+/// viewport (`ViewProps::screen_order`, along the list's), as the other
+/// desktop backends read them ([`reading_order`]): a list recycles its
+/// cells, so its subviews are not in their rows' order. Each element goes
+/// by the frame of the child view it is in (AppKit's children are the
+/// elements inside the subviews that are none). Any other view's children,
+/// and those with an element that is no view of a child, stay in tree
+/// order.
+pub(crate) fn in_reading_order(
+    view: &NshView,
+    children: Option<Retained<NSArray>>,
+) -> Option<Retained<NSArray>> {
+    let axis = view.try_state().and_then(|s| match &s.scroll {
+        Some(scroll) if scroll.horizontal => Some(Axis::Horizontal),
+        Some(_) => Some(Axis::Vertical),
+        None => s.props.screen_order,
+    });
+    let (Some(axis), Some(list)) = (axis, children.as_ref()) else {
+        return children;
+    };
+    if list.count() < 2 {
+        return children;
+    }
+    let container = view.container();
+    let mut keyed = Vec::with_capacity(list.count());
+    for child in list.iter() {
+        let Some(origin) = child
+            .downcast_ref::<NSView>()
+            .and_then(|v| child_origin(&container, v))
+        else {
+            return children;
+        };
+        keyed.push((origin, child));
+    }
+    reading_order(axis, &mut keyed, |(origin, _)| *origin);
+    let ordered: Vec<Retained<AnyObject>> = keyed.into_iter().map(|(_, child)| child).collect();
+    Some(NSArray::from_retained_slice(&ordered))
+}
+
+/// The frame origin of the child view of `container` that `view` is or is
+/// in.
+fn child_origin(container: &NSView, view: &NSView) -> Option<Point<Points>> {
+    let mut at = view.retain();
+    loop {
+        let parent = superview(&at)?;
+        if std::ptr::eq(&*parent, container) {
+            break;
+        }
+        at = parent;
+    }
+    let child = NshView::from_ns(&at)?;
+    child.try_state().map(|s| s.frame.origin)
 }
 
 /// True when the view of `s` is content an element folds into its name.
@@ -259,6 +331,8 @@ struct AxState {
     enabled: bool,
     selected: bool,
     expanded: bool,
+    /// The content is invalid (`AXInvalid`, which [`invalid`] answers).
+    invalid: bool,
     /// A tree item's depth below the top (AppKit's disclosure level).
     disclosure: Option<u32>,
     /// The children are hidden as a group (`grouped`, or the view is
@@ -292,6 +366,8 @@ enum Ax {
     MenuItem,
     Progress,
     ScrollBar,
+    /// A scroll view.
+    ScrollArea,
     SpinButton,
     Tab,
     TabList,
@@ -312,6 +388,10 @@ enum Ax {
     Navigation,
     /// An item of a tree.
     TreeItem,
+    /// A dialog (ARIA's `dialog`).
+    Dialog,
+    /// An alert dialog (ARIA's `alertdialog`).
+    AlertDialog,
     /// A view standing for the window's close button (`windowControl`).
     CloseButton,
     /// ... its minimize button.
@@ -386,6 +466,8 @@ struct Spec {
     disabled: bool,
     selected: bool,
     expanded: Option<bool>,
+    /// The content does not pass the app's checks (ARIA's `aria-invalid`).
+    invalid: bool,
     /// A tree item's level (1 at the top).
     level: Option<u32>,
     /// Hidden with its subtree.
@@ -394,9 +476,125 @@ struct Spec {
     grouped: bool,
 }
 
+/// The alerts to read once the batch being applied is in, and what was
+/// announced while it was applied.
+#[derive(Default)]
+struct Pending {
+    alerts: Vec<NshView>,
+    said: Vec<String>,
+}
+
+thread_local! {
+    static PENDING: RefCell<Pending> = RefCell::default();
+    /// Whether any view has been an alert: until one is, a changed text
+    /// does not look for one around it.
+    static ANY_ALERT: Cell<bool> = const { Cell::new(false) };
+}
+
 /// A batch is about to be applied. (AppKit takes roles at any time, so
 /// views get theirs with their props.)
-pub(crate) fn prepare(_batch: &MountBatch) {}
+pub(crate) fn prepare(_batch: &MountBatch) {
+    PENDING.with_borrow_mut(|p| *p = Pending::default());
+}
+
+/// The batch is in: reads the alerts that appeared or changed in it,
+/// whole, now that their content is there too. An alert the app announced
+/// itself in the batch (its text, `announceForAccessibility`) is not read
+/// again.
+pub(crate) fn batch_applied() {
+    let Pending { alerts, said } = PENDING.with_borrow_mut(std::mem::take);
+    let mut read: Vec<&NshView> = Vec::new();
+    for alert in &alerts {
+        if read.iter().any(|r| r.ns() == alert.ns()) || !is_shown(alert) {
+            continue;
+        }
+        read.push(alert);
+        let Some((text, live)) = alert_text(alert) else {
+            continue;
+        };
+        if worth_reading(&text, &said) {
+            announce(alert.ns(), &text, priority(live));
+        }
+    }
+}
+
+/// What an alert reads: its label (a text view's text), else the texts and
+/// labels of its content; and how urgently.
+fn alert_text(alert: &NshView) -> Option<(String, LiveRegion)> {
+    let (label, live) = {
+        let s = alert.try_state()?;
+        let label = s.access.spec.as_deref().and_then(|spec| spec.label.clone());
+        (label, live(&s.props.accessibility))
+    };
+    let text = label.or_else(|| {
+        let mut name = String::new();
+        gather_name(alert.ns(), &mut name);
+        Some(name)
+    })?;
+    Some((text, live))
+}
+
+/// Whether `text` is worth reading: not empty, nor what was already said
+/// in the batch.
+fn worth_reading(text: &str, said: &[String]) -> bool {
+    let text = text.trim();
+    !text.is_empty() && !said.iter().any(|s| s.trim() == text)
+}
+
+/// Whether `view` is in a window with nothing around it hidden from
+/// VoiceOver.
+fn is_shown(view: &NshView) -> bool {
+    if view.ns().window().is_none() {
+        return false;
+    }
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        if v.try_state()
+            .is_some_and(|s| s.access.spec.as_deref().is_some_and(|spec| spec.hidden))
+        {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    true
+}
+
+/// `view` or the nearest view around it that is an alert.
+fn alert_around(view: &NshView) -> Option<NshView> {
+    if !ANY_ALERT.get() {
+        return None;
+    }
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        if v.try_state()
+            .is_some_and(|s| s.props.accessibility.role == Role::Alert)
+        {
+            return Some(v);
+        }
+        at = v.parent_view();
+    }
+    None
+}
+
+/// Reads the alert `alert` once the batch is in.
+fn read_when_applied(alert: NshView) {
+    PENDING.with_borrow_mut(|p| p.alerts.push(alert));
+}
+
+/// The live region an element is: its `accessibilityLiveRegion`, else an
+/// assertive one for an alert, as ARIA's `alert` implies.
+fn live(a: &Accessibility) -> LiveRegion {
+    match a.live_region {
+        LiveRegion::None if a.role == Role::Alert => LiveRegion::Assertive,
+        live => live,
+    }
+}
+
+/// Whether an element described by `old` and now by `new` appeared as an
+/// alert: added, shown again, or given the role.
+fn appears(old: Option<&Spec>, new: &Spec) -> bool {
+    new.role == Ax::Alert && !new.hidden && old.is_none_or(|o| o.role != Ax::Alert || o.hidden)
+}
 
 /// A view was created: it is no element until its props say so.
 pub(crate) fn created(view: &NshView) {
@@ -448,7 +646,12 @@ pub(crate) fn text_changed(view: &NshView) {
             old => old.is_none(),
         }
     };
-    if update(view) && !first {
+    let changed = update(view);
+    // Inside an alert: the alert is read whole, a new text too (content
+    // added to an alert that was there).
+    if let Some(alert) = alert_around(view) {
+        read_when_applied(alert);
+    } else if changed && !first {
         announce_live(view);
     }
 }
@@ -495,6 +698,7 @@ pub(crate) fn focus(view: &NshView) {
 /// Has VoiceOver read `text` (`announce`, live
 /// regions).
 pub(crate) fn announce(element: &NSView, text: &str, priority: NSAccessibilityPriorityLevel) {
+    PENDING.with_borrow_mut(|p| p.said.push(text.to_owned()));
     let text = NSString::from_str(text);
     let priority = NSNumber::new_isize(priority.0);
     // SAFETY: immutable AppKit constants with values of their documented
@@ -540,16 +744,26 @@ fn update(view: &NshView) -> bool {
     };
     let written = apply(view.ns(), &spec, &view.state().access.ax);
     view.state_mut().access.ax = written;
+    let appeared = appears(old.as_deref(), &spec);
+    if spec.role == Ax::Alert {
+        ANY_ALERT.set(true);
+    }
     let label_changed = old.is_some_and(|o| o.label != spec.label);
     let is_text = view.state().text.is_some();
-    if label_changed
-        && live != LiveRegion::None
-        && !is_text
-        && let Some(label) = &spec.label
-    {
-        announce(view.ns(), label, priority(live));
-    }
+    let label = spec.label.clone();
     view.state_mut().access.spec = Some(Box::new(spec));
+    if appeared {
+        read_when_applied(view.clone());
+    } else if label_changed && !is_text {
+        // A label changed in an alert: the alert is read whole.
+        if let Some(alert) = alert_around(view) {
+            read_when_applied(alert);
+        } else if live != LiveRegion::None
+            && let Some(label) = &label
+        {
+            announce(view.ns(), label, priority(live));
+        }
+    }
     label_changed
 }
 
@@ -645,6 +859,17 @@ fn apply(view: &NSView, spec: &Spec, was: &AxState) -> AxState {
     if was.expanded != expanded {
         view.setAccessibilityExpanded(expanded);
     }
+    let invalid = element && spec.invalid;
+    if was.invalid != invalid && was.role.is_some() {
+        // SAFETY: a view, with WebKit's and Chromium's name for the
+        // notification of a changed `AXInvalid`.
+        unsafe {
+            objc2_app_kit::NSAccessibilityPostNotification(
+                view.as_ref(),
+                &NSString::from_str("AXInvalidStatusChanged"),
+            )
+        };
+    }
     if was.disclosure != disclosure {
         view.setAccessibilityDisclosureLevel(disclosure.unwrap_or(0) as isize);
     }
@@ -658,10 +883,22 @@ fn apply(view: &NSView, spec: &Spec, was: &AxState) -> AxState {
         enabled,
         selected,
         expanded,
+        invalid,
         disclosure,
         grouped,
         range: (min, max),
     }
+}
+
+/// The name of the attribute [`invalid`] answers: WebKit's and Chromium's
+/// for ARIA's `aria-invalid`, which VoiceOver reads ("invalid data").
+/// NSAccessibility has no setter for it, so the view answers it itself.
+pub(crate) const INVALID_ATTRIBUTE: &str = "AXInvalid";
+
+/// Whether the element of the view of `s` reports its content invalid
+/// (`accessibilityState.invalid`; [`INVALID_ATTRIBUTE`]).
+pub(crate) fn invalid(s: &ViewState) -> bool {
+    s.access.ax.invalid
 }
 
 /// The value as it compares: which kind of value AppKit was given, and its
@@ -727,6 +964,7 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             Ax::MenuItem => (constant(NSAccessibilityMenuItemRole), None),
             Ax::Progress => (constant(NSAccessibilityProgressIndicatorRole), None),
             Ax::ScrollBar => (constant(NSAccessibilityScrollBarRole), None),
+            Ax::ScrollArea => (constant(NSAccessibilityScrollAreaRole), None),
             Ax::SpinButton => (constant(NSAccessibilityIncrementorRole), None),
             Ax::Tab => (
                 constant(NSAccessibilityRadioButtonRole),
@@ -769,6 +1007,17 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             Ax::Navigation => (
                 constant(NSAccessibilityGroupRole),
                 named("AXLandmarkNavigation"),
+            ),
+            // As WebKit maps ARIA's `dialog` and `alertdialog`: VoiceOver
+            // says "web dialog" / "alert dialog" and the label as it
+            // enters.
+            Ax::Dialog => (
+                constant(NSAccessibilityGroupRole),
+                named("AXApplicationDialog"),
+            ),
+            Ax::AlertDialog => (
+                constant(NSAccessibilityGroupRole),
+                named("AXApplicationAlertDialog"),
             ),
             // As an option: AppKit's outline rows need the outline's rows
             // and columns; an item of a tree is static text that reports
@@ -847,11 +1096,12 @@ fn spec_for(
     Spec {
         role,
         label,
-        help: a.hint.as_deref().map(str::to_owned),
+        help: a.help_text(None),
         value,
         disabled: a.state.disabled,
         selected: a.state.selected,
         expanded: a.state.expanded,
+        invalid: a.state.invalid,
         level: a.level,
         hidden: a.hidden || invisible,
         grouped: (a.accessible == Some(true) || role.folds()) && kind != ViewKind::Text,
@@ -888,6 +1138,7 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
             ViewKind::Image if a.label.is_some() => Ax::Image,
             _ if a.accessible == Some(false) => Ax::Generic,
             _ if pressable => Ax::Button,
+            ViewKind::Scroll => Ax::ScrollArea,
             _ if a.label.is_some() || a.accessible == Some(true) => Ax::Group,
             _ => Ax::Generic,
         },
@@ -929,6 +1180,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         // A tree is a list of its items, as a listbox is (see `TreeItem`).
         Role::Tree => Ax::List,
         Role::TreeItem => Ax::TreeItem,
+        Role::Dialog => Ax::Dialog,
+        Role::AlertDialog => Ax::AlertDialog,
     }
 }
 
@@ -982,12 +1235,46 @@ mod tests {
     }
 
     #[test]
+    fn an_alert_is_an_assertive_live_region_read_as_it_appears() {
+        // ARIA's `alert` is a live region of its own, an assertive one,
+        // unless the app says otherwise.
+        assert_eq!(live(&with_role(Role::Alert)), LiveRegion::Assertive);
+        assert_eq!(live(&with_role(Role::Group)), LiveRegion::None);
+        let polite = Accessibility {
+            role: Role::Alert,
+            live_region: LiveRegion::Polite,
+            ..Default::default()
+        };
+        assert_eq!(live(&polite), LiveRegion::Polite);
+        // It is read when it appears: added, shown again, or a view that
+        // becomes one; not again for any other change of its own.
+        let spec = |role, hidden| spec_for(&with_role(role), ViewKind::View, false, None, hidden);
+        let alert = spec(Role::Alert, false);
+        assert!(appears(None, &alert));
+        assert!(appears(Some(&spec(Role::Alert, true)), &alert));
+        assert!(appears(Some(&spec(Role::Group, false)), &alert));
+        assert!(!appears(Some(&alert), &alert));
+        assert!(!appears(None, &spec(Role::Alert, true)));
+        assert!(!appears(None, &spec(Role::Group, false)));
+    }
+
+    #[test]
+    fn an_alert_the_app_announced_in_the_same_batch_is_not_read_twice() {
+        let said = ["Saved".to_owned()];
+        assert!(!worth_reading("Saved", &said));
+        assert!(!worth_reading(" Saved\n", &said));
+        assert!(worth_reading("Could not save", &said));
+        assert!(!worth_reading("  ", &[]));
+    }
+
+    #[test]
     fn roles() {
         let none = Accessibility::default();
         assert_eq!(role_for(&none, ViewKind::View, false), Ax::Generic);
         assert_eq!(role_for(&none, ViewKind::Text, false), Ax::Text);
         assert_eq!(role_for(&none, ViewKind::View, true), Ax::Button);
         assert_eq!(role_for(&none, ViewKind::Image, false), Ax::Generic);
+        assert_eq!(role_for(&none, ViewKind::Scroll, false), Ax::ScrollArea);
         let not_element = Accessibility {
             accessible: Some(false),
             ..Default::default()
@@ -1039,6 +1326,32 @@ mod tests {
         assert_eq!(s.role, Ax::Button);
         assert_eq!(s.label.as_deref(), Some("Label"));
         assert_eq!(s.help.as_deref(), Some("Opens it"));
+        assert!(!s.invalid);
+        // The description goes before the hint in the help.
+        let described = Accessibility {
+            label: Some("Delete file?".into()),
+            role: Role::AlertDialog,
+            description: Some("This can't be undone.".into()),
+            ..Default::default()
+        };
+        let s = spec_for(&described, ViewKind::View, false, None, false);
+        assert_eq!(s.help.as_deref(), Some("This can't be undone."));
+        let both = Accessibility {
+            description: Some("Plays the album".into()),
+            ..labelled.clone()
+        };
+        let s = spec_for(&both, ViewKind::View, true, None, false);
+        assert_eq!(s.help.as_deref(), Some("Plays the album. Opens it"));
+        // A field whose content the app rejected (`AXInvalid`).
+        let invalid = Accessibility {
+            label: Some("Email".into()),
+            state: AccessibilityState {
+                invalid: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(spec_for(&invalid, ViewKind::View, false, None, false).invalid);
 
         let value = AccessibilityValue {
             min: Some(0.0),
@@ -1100,6 +1413,8 @@ mod tests {
             (Role::TreeItem, Ax::TreeItem),
             (Role::MenuItemCheckbox, Ax::MenuItem),
             (Role::MenuItemRadio, Ax::MenuItem),
+            (Role::Dialog, Ax::Dialog),
+            (Role::AlertDialog, Ax::AlertDialog),
         ] {
             assert_eq!(role_for(&with_role(role), ViewKind::View, false), ax);
         }

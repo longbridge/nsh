@@ -685,6 +685,17 @@ impl AppView {
                 if matches!(mouse.kind, crate::MouseKind::Down(crate::MouseButton::Left)) {
                     self.surface.wake.notify();
                 }
+                self.pointer.mouse_up(
+                    mouse,
+                    &crate::input::PointerContext {
+                        area: self.area,
+                        cells: self.options.cells,
+                        hits: &self.hits,
+                        geometry: &self.geometry,
+                        tree: &mut self.tree,
+                        control: &engine.control(),
+                    },
+                );
                 let handled = if matches!(
                     mouse.kind,
                     crate::MouseKind::Down(crate::MouseButton::Right)

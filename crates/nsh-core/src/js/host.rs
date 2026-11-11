@@ -524,7 +524,7 @@ export interface PressEvent {
   clickCount: number;
 }
 
-/** Where the mouse is over a view: the payload of `onMouseEnter`, `onMouseMove` and `onMouseLeave` (GPUI's `MouseMoveEvent`). */
+/** Where the mouse is over a view, or where a button was released over it: the payload of `onMouseEnter`, `onMouseMove`, `onMouseLeave` and `onMouseUp` (GPUI's `MouseMoveEvent`). */
 export interface MouseEvent {
   /** Position in the view (its transforms undone). */
   position: Point;
@@ -533,6 +533,34 @@ export interface MouseEvent {
   modifiers: Modifiers;
   /** The button held down (a drag), or `null`. */
   pressedButton: MouseButton | null;
+  /** The button that changed at this event: the released one on `onMouseUp`, `null` on a move. */
+  button: MouseButton | null;
+}
+
+/** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
+export interface WheelEvent {
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+  /** How far it scrolled, in `deltaMode` units: positive `y` scrolls down (toward the end), positive `x` right, as the DOM's `deltaX` / `deltaY`. */
+  delta: Point;
+  /** `"points"`: a precise device (a touchpad); `"lines"`: mouse wheel notches. */
+  deltaMode: "points" | "lines";
+  modifiers: Modifiers;
+}
+
+/** A touchpad pinch over a view: the payload of `onPinch` (GPUI's `PinchEvent`). */
+export interface PinchEvent {
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+  /** How much the scale changed since the last event, as a fraction: 0.1 is 10 % bigger, negative smaller. */
+  delta: number;
+  /** Where it is in the gesture, as a touch's phase. */
+  phase: "start" | "move" | "end";
+  modifiers: Modifiers;
 }
 
 /** A mouse button (GPUI's `MouseButton`). */
@@ -663,6 +691,24 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::ALL,
         "(e: MouseEvent) => void",
         "The mouse moved over the view (or a view inside it), with or without a button down (`e.pressedButton`), or a modifier key changed while it rests there with none down; at most once per frame.",
+    ),
+    (
+        EventKind::Wheel,
+        on::ALL,
+        "(e: WheelEvent) => void",
+        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.ctrl` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
+    ),
+    (
+        EventKind::Pinch,
+        on::ALL,
+        "(e: PinchEvent) => void",
+        "A touchpad pinch over the view (or a view inside it); macOS, Linux, the GPUI backend and Safari (Windows and the other browsers report a touchpad pinch as Control + wheel: `onWheel`). The nearest listener hears it; a listener nearer than any view that pinches natively takes it, and nothing zooms natively. A pinch stays on the view its start went to. Fingers pinching a touchscreen are `onPinchStart`'s.",
+    ),
+    (
+        EventKind::MouseUp,
+        on::ALL,
+        "(e: MouseEvent) => void",
+        "A mouse button was released over the view (or a view inside it): which button (`e.button`), where, and with the modifiers. The primary button's release also reports `onPressUp`. Desktops, the terminal and the web; a release outside the view is not reported.",
     ),
     (
         EventKind::ContextMenu,
@@ -868,8 +914,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::SelectionChange,
         on::VIEW,
-        "(e: { text: string; start?: number }) => void",
-        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it. Only the outermost selectable view of an area reports it.",
+        "(e: { text: string; start?: number; bounds?: Bounds; pageBounds?: Bounds }) => void",
+        "The selection across the texts of a `selectable` view changed: `text` is what a copy would give, empty once nothing is selected; `start` is where it starts in the view's whole text (UTF-16 units) when the platform knows it; `bounds` is the box around the selected text in the view and `pageBounds` in the root view it is in, as of the event (an `Overlay`'s `anchor`: a bar of actions on the selection), while something is selected and the platform knows them. Only the outermost selectable view of an area reports it.",
     ),
     (
         EventKind::Paste,
@@ -957,6 +1003,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Dialog,
     EventKind::BackPress,
     EventKind::ImageInfo,
+    EventKind::WebEvaluation,
     EventKind::Clipboard,
     EventKind::Host,
     EventKind::Pick,
@@ -966,6 +1013,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Speech,
     EventKind::Notification,
     EventKind::UrlScheme,
+    EventKind::SecondInstance,
     EventKind::Audio,
     EventKind::Window,
     EventKind::EditAction,

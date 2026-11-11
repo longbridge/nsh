@@ -75,6 +75,18 @@ The `content` part is the box of the document inside the editor's scroll view: i
 is the room around the text, and the scroll bar runs along the editor's own edge. A drag that selects past the top
 or bottom of the editor scrolls the document along, faster the further the pointer goes.
 
+### Sizing
+
+An editor is sized as a block with `height: auto`: without a height it is as tall as its document laid out at its
+width, plus its padding, and it grows and shrinks with each edit. `maxHeight` (`max-h-*`) stops it there, and the
+document scrolls inside it from then on, keeping the caret in view, as a multiline `Input` does; `minHeight`
+(`min-h-*`) keeps it at least that tall. A height or flex sizing (`h-*`, `flex-1`) gives it a fixed box that the
+document scrolls in. A chat composer is an editor with a `maxHeight` and no height:
+
+```tsx
+<RichEditor editor={editor} class="max-h-40 px-3 py-2" />
+```
+
 ### Touch selection
 
 On iOS and Android the editor selects as the platform's own text views do. A long press selects the word under the
@@ -132,8 +144,8 @@ const schema = defineSchema({
 const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 ```
 
-A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, or JSON),
-`parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"json"`) and `check(doc)`, which
+A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, `"html"`, or JSON),
+`parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"html"`, `"json"`) and `check(doc)`, which
 returns the document with its attribute defaults filled in. `nodes`, `marks` and `topNode` name its types. Markdown
 maps to the starter schema's names (`paragraph`, `heading`, `blockquote`, `codeBlock`, `bulletList`,
 `orderedList`, `listItem`, `bold`, `italic`, `code`, `link`, `strike`).
@@ -175,7 +187,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `isEmpty`, `undoDepth`, `redoDepth`, `composing` | What a UI shows about the editor |
 | `setContent(content, format?)` | Replaces the document, as one undoable change |
 | `insertContent(content, format?)` | Inserts content over the selection |
-| `getJSON()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
+| `getJSON()`, `getHTML()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
 | `dispatch(tr)` | Applies a transaction given as JSON (its steps against the current document) |
 | `on(event, listener)` | Calls `listener` with the payload of every `event`, in JS's next turn: `revision` (`{ revision }`, after every change, from any source), `update`, `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`. Returns a function that stops it; a listener added while a component renders stops with the component |
 | `focus()`, `blur()` | Moves the keyboard focus to or from the views showing the editor |

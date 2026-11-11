@@ -9,6 +9,7 @@
 
 use std::{
     any::{Any, TypeId},
+    cell::Cell,
     future::Future,
     path::PathBuf,
     rc::Rc,
@@ -860,6 +861,34 @@ pub fn next_notification_press() -> Answer<String> {
     answer
 }
 
+/// The next files the system opens the app with (TS:
+/// `Application.on("openFiles", ...)`, GPUI's `on_open_urls` for files):
+/// files of the types the app declares (`nsh.json` `fileTypes`) the user
+/// opened with it (Open With, a double click, a drop on its icon) at
+/// launch or while it runs, as absolute paths. Those that came before
+/// anything listened, the files that launched the app included, come at
+/// once (at most [`crate::file_type::MAX_PENDING`]). Links of the app's
+/// schemes come apart ([`next_url_scheme_open`]). One call waits at a time,
+/// as with [`next_url_scheme_open`]. To await in a task.
+pub fn next_open_files() -> Answer<Vec<std::path::PathBuf>> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextOpenFiles(slot));
+    answer
+}
+
+/// The next later launch of the app (TS: `Application.on("secondInstance",
+/// ...)`): with `nsh.json` `"singleInstance": true`, a second launch on
+/// Windows or Linux hands the running instance its arguments and working
+/// directory and exits; those that came before anything listened first
+/// ([`crate::single_instance`]). The main window is already brought
+/// forward. Never on macOS (Launch Services activates the running app
+/// instead), iOS, Android or the web. To await in a task.
+pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextSecondInstance(slot));
+    answer
+}
+
 /// The next link that opens the app (TS: `UrlScheme.on("open", ...)`): a
 /// URL of a scheme the app claims (`nsh.json` `schemes`), those
 /// that came before anything listened first, the one that launched the app
@@ -876,7 +905,10 @@ pub fn next_url_scheme_open() -> Answer<String> {
 /// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
 /// it already. Moves while nothing listened since the app started are not
 /// kept; once something listened, at most
-/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+/// [`crate::url_scheme::MAX_PENDING`] wait. One call waits at a time, as
+/// with [`next_url_scheme_open`]: a newer call takes the next move and the
+/// one before gets none, so an app awaits it in one task (TS's `change`
+/// listeners share one). To await in a task.
 pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
     let (answer, slot) = Answer::new();
     act(Action::NextAppUrlChange(slot));
@@ -939,6 +971,17 @@ pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::Histo
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view's ref runs scripts and answers with their results
+/// here (TS: `WebView.evaluateAvailable()`,
+/// [`ElementRef::evaluate`](super::ElementRef::evaluate)): the platform has
+/// it and the app's capabilities grant `webview`. Elsewhere `evaluate`
+/// fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To await in a task.
+pub fn web_evaluate_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebEvaluateAvailable(slot));
     answer
 }
 
@@ -1060,6 +1103,12 @@ pub(crate) fn host_call(
     answer
 }
 
+/// Hands `args` to function `name` of the embedding app, with no answer
+/// (TS: `host.post`).
+pub(crate) fn host_post(name: String, args: crate::JsonValue) {
+    act(Action::HostPost { name, args });
+}
+
 /// Forgets the host calls whose answers were dropped (they timed out).
 pub(crate) fn forget_host_calls() {
     act(Action::ForgetHostCalls);
@@ -1146,16 +1195,37 @@ impl<T> Future for Spawned<T> {
 pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T> {
     let executor = executor();
     let owner = Owner::current();
+    let cancel = Rc::new(Cell::new(None));
+    // Made outside the block and moved in: a task cancelled before its
+    // first poll drops it too.
+    let release = Release(cancel.clone());
     let task = task::spawn_future(
         &executor,
         Owned {
             owner,
-            future: Box::pin(future),
+            future: Box::pin(async move {
+                let _release = release;
+                future.await
+            }),
         },
     );
     let handle = task.handle();
-    cleanup(move || handle.cancel());
+    // Taken back from the owner when the task ends first (it finished or
+    // was cancelled), so a long-lived owner does not keep one per task.
+    cancel.set(super::reactive::removable_cleanup(move || handle.cancel()));
     Spawned(task)
+}
+
+/// Takes a task's cleanup back from its owner as the task's future goes
+/// (it finished, or was dropped when cancelled).
+struct Release(Rc<Cell<Option<super::reactive::RemovableCleanup>>>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        if let Some(cancel) = self.0.take() {
+            cancel.remove();
+        }
+    }
 }
 
 /// Runs `f` on the platform's main thread (the UI thread), for APIs that
@@ -1179,6 +1249,17 @@ pub fn run_on_main_thread<R: Send + 'static>(
 }
 
 /// A future polled under `owner` ([`Owner::scope`]).
+/// `future`, polled under `owner`, boxed for the executor.
+pub(super) fn owned(
+    owner: Owner,
+    future: impl Future<Output = ()> + 'static,
+) -> std::pin::Pin<Box<dyn Future<Output = ()>>> {
+    Box::pin(Owned {
+        owner,
+        future: Box::pin(future),
+    })
+}
+
 struct Owned<F> {
     owner: Owner,
     future: std::pin::Pin<Box<F>>,
@@ -1411,6 +1492,13 @@ pub struct KeyOptions {
     /// component closes its popup on Tab and the focus moves on as it
     /// would ([`crate::keymap::KeyMatch::Notify`]).
     pub pass_through: bool,
+    /// The keys of the view with the keyboard focus: a component binds
+    /// them while its part has the focus or its popup is open (a menu
+    /// button's Return opens its menu). Return and Space reach such a
+    /// binding before the focused control's press; others of those keys
+    /// give way to the control the focus is on (default)
+    /// ([`crate::keymap::KeyBinding::for_focus`]).
+    pub for_focus: bool,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1470,6 +1558,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         |id| {
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
+                .focus_keys(options.for_focus)
         },
         keystroke.into(),
         handler,

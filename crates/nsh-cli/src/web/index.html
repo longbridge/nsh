@@ -94,7 +94,7 @@
       createPlayer(document.getElementById("app"), {
         wasm: take(app.wasm),
         glue: app.glue,
-        host: app.host ? { call: (name, args) => host.call(name, args) } : undefined,
+        host: app.host ? { call: (name, args) => host.call(name, args), post: (name, args) => (host.post ?? host.call).call(host, name, args) } : undefined,
         assets: app.assets,
         data: app.data,
         sides: app.sides,
