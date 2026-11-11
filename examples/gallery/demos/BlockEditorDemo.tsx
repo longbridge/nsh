@@ -1094,6 +1094,9 @@ export function BlockEditorDemo() {
     if (page) menu.set({ ...h, x: page.x - (h.left - h.x), y: page.y });
   };
 
+  /** Whether the window is wide enough for the toolbar's blocks beside its marks. */
+  const roomy = () => windowSize().width >= 640;
+
   /** What floats by the caret or the selection: the `/` menu, else the toolbar. */
   const bubble = () => {
     if (open()) return <SlashMenu shift={shift()} items={items()} index={Math.min(index(), Math.max(items().length - 1, 0))} onPick={pick} onHover={(i, at) => {
@@ -1110,8 +1113,8 @@ export function BlockEditorDemo() {
           when={coloring()}
           else={
             <>
-              {/* A phone's toolbar holds the marks alone: its width has no room for the blocks, which the `/` menu has. */}
-              <Each of={pointer ? BAR_BLOCKS : []}>
+              {/* A narrow window's toolbar (a phone, a small browser window) holds the marks alone: the blocks are in the `/` menu. */}
+              <Each of={roomy() ? BAR_BLOCKS : []}>
                 {(block) => (
                   <BarButton
                     icon={block().icon}
@@ -1124,7 +1127,7 @@ export function BlockEditorDemo() {
                   />
                 )}
               </Each>
-              <If when={pointer}>
+              <If when={roomy()}>
                 <BarRule />
               </If>
               <Each of={MARKS}>
