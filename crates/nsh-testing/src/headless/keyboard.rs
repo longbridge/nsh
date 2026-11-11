@@ -300,7 +300,10 @@ impl Headless {
             }
             if let Some(old) = focused {
                 self.set_focused_state(old, false);
-                self.send(old, EventKind::Blur, EventPayload::None);
+                // A removed input hears no blur (`Screen::taken_out`).
+                if self.screen.in_tree(old) {
+                    self.send(old, EventKind::Blur, EventPayload::None);
+                }
             }
             if let Some(new) = now {
                 // The pressable that had the keyboard focus loses it.

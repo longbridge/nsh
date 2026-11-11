@@ -878,6 +878,9 @@ impl Headless {
     fn apply(&mut self, batch: &MountBatch) {
         let focused = self.screen.focused();
         self.screen.apply(batch);
+        for (id, states) in self.screen.take_restated() {
+            self.engine.control().set_states(id, states);
+        }
         self.focus_calls(batch, focused);
         self.exited |= batch.items.iter().any(|item| {
             matches!(
