@@ -256,9 +256,9 @@ fn desktop_items(
 ) -> Vec<DesktopMenuItem> {
     desktop_entries(items, select)
         .into_iter()
-        .filter_map(|entry| match entry {
-            Entry::Item(item) => Some(item),
-            Entry::Separator => Some(DesktopMenuItem::separator()),
+        .map(|entry| match entry {
+            Entry::Item(item) => item,
+            Entry::Separator => DesktopMenuItem::separator(),
         })
         .collect()
 }

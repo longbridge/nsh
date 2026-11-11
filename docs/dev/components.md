@@ -1172,6 +1172,14 @@ is for, never by replacing one popup with another everywhere:
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
 
+**The system's menu.** `MenuButton` (`menu_button.rs`) is no popup of the core's: its items are data and the system
+draws the menu. On iOS the app's content is covered by the native component `nsh/menu-button`
+(`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
+is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
+element, and an action emits `select` with the app's id. On a desktop OS a press shows the same items with
+`popup_menu`; elsewhere the content opens nothing. `nsh/mobile`'s `SegmentedControl` is the same kind of native
+component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is.
+
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on
 the card's overlay, and the keyboard focus by `onFocus` / `onBlur` on the trigger; the delays are one timer of the

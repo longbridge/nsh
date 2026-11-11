@@ -1,25 +1,25 @@
 ---
 title: nsh/mobile
-description: iOS 和 Android 的 API：系统标签栏 TabBar、触感反馈 Haptics、iOS 的 InputAccessoryView、Android 的 BackHandler，以及 isAvailable。
+description: iOS 和 Android 的 API：系统标签栏 TabBar、iOS 的系统分段控件 SegmentedControl、触感反馈 Haptics、iOS 的 InputAccessoryView、Android 的 BackHandler，以及 isAvailable。
 order: 12.2
 ---
 
 # nsh/mobile
 
-`nsh/mobile` 收录 iOS 和 Android 的专属能力：两者都有的系统标签栏 `TabBar` 和设备的触感反馈 [`Haptics`](#haptics)；iOS 的 [`InputAccessoryView`](#inputaccessoryview)，键盘上方的工具栏；Android 的 [`BackHandler`](#backhandler)，返回键。Rust 代码使用 `nsh_core::mobile` 和 `nsh_core::prelude`；TSX 导入 `nsh/mobile`。这个模块在所有平台上都可以导入，所以同一个 bundle 能在各处运行：在其他平台上，它的组件不占空间、调用立即返回，`isAvailable` 告诉你当前是否在 iOS 或 Android 上（`nsh` 的 `platform.os` 区分具体平台）。桌面的能力在 [nsh/desktop](./nsh-desktop.md) 中。
+`nsh/mobile` 收录 iOS 和 Android 的专属能力：两者都有的系统标签栏 `TabBar` 和设备的触感反馈 [`Haptics`](#haptics)；iOS 的系统分段控件 [`SegmentedControl`](#segmentedcontrol) 和 [`InputAccessoryView`](#inputaccessoryview)，键盘上方的工具栏；Android 的 [`BackHandler`](#backhandler)，返回键。Rust 代码使用 `nsh_core::mobile` 和 `nsh_core::prelude`；TSX 导入 `nsh/mobile`。这个模块在所有平台上都可以导入，所以同一个 bundle 能在各处运行：在其他平台上，它的组件不占空间、调用立即返回，`isAvailable` 告诉你当前是否在 iOS 或 Android 上（`nsh` 的 `platform.os` 区分具体平台）。桌面的能力在 [nsh/desktop](./nsh-desktop.md) 中。
 
 ```rust tabs
-use nsh_core::mobile::{TabBarItem, tab_bar};
+use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, tab_bar};
 ```
 
 ```tsx tabs
-import { BackHandler, Haptics, InputAccessoryView, isAvailable, TabBar } from "nsh/mobile";
-import type { TabBarItem, TabBarProps } from "nsh/mobile";
+import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, TabBar } from "nsh/mobile";
+import type { SegmentedControlItem, SegmentedControlProps, TabBarItem, TabBarProps } from "nsh/mobile";
 ```
 
 ## 模块范围
 
-这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。
+这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。`SegmentedControl` 是系统自己的控件，供确实需要 iOS 原生分段控件的应用使用；在所有平台上以应用自己的外观做选择，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)。
 
 ## isAvailable
 
@@ -119,6 +119,55 @@ mount(App);
 - **iOS 和 Mac Catalyst**：`UITabBar`，采用当前 iOS 版本的系统外观：iOS 26 上是悬浮的 Liquid Glass 标签栏及其选中效果。图标是 SF Symbols。主题的 `primary` 是标签栏的 `tintColor`，即选中标签的颜色；其他标签保持系统的颜色。
 - **Android**：Material 3 的导航栏，由平台的 View 组成：每个标签的文字上方是放在激活指示器中的图标，按压时有水波纹；Android 12 及以上使用系统的动态颜色，更早的版本使用 Material 的基准颜色；浅色或深色跟随应用的外观。位于窗口底部时，它延伸到导航栏下方，高度增加导航栏的 inset，与 Material 的一致。图标是应用的 drawable（由标签栏着色）。选中标签的图标和文字使用主题的 `primary`，激活指示器是这个颜色的 12% 不透明度；其他标签保持系统的颜色。
 - **桌面（macOS、Windows、Linux、GPUI）和 Web**：各个部分用 [Tabs](../elements/tabs.md) 显示，外观由应用决定。`TabBar` 在这些平台上不占空间，所以一个布局可以同时包含两者，用 `platform.os`（[`nsh` 的设备 API](./nsh.md#device)）来选择。
+
+## SegmentedControl
+
+分段控件在原地从少数几个选项中选一个：浅色或深色，日、周或月。`SegmentedControl` 在 iOS 和 iPadOS 上就是系统自己的 `UISegmentedControl`，因此有系统的外观（iOS 26 及以后为 Liquid Glass）、动效、VoiceOver 朗读（“浅色，按钮，已选中，第 1 项，共 2 项”）和键盘焦点。
+
+```tsx
+import { signal } from "nsh";
+import { SegmentedControl } from "nsh/mobile";
+
+const appearance = signal(0);
+
+<SegmentedControl
+  items={[{ title: "浅色", icon: "sun.max" }, { title: "深色", icon: "moon" }]}
+  selectedIndex={appearance()}
+  onChange={({ index }) => appearance.set(index)}
+  style={{ alignSelf: "stretch" }}
+/>;
+```
+
+选择由应用掌握：点按时 `onChange` 报告分段的序号（`{ index }`），控件像系统的一样立即显示这个选择，应用再把序号作为 `selectedIndex` 传回。新的 `items` 原地更新分段（分段数量不变时控件保持原样，改名或禁用的分段不会闪烁）。样式未指定的尺寸取系统的尺寸；样式给出的宽度由各分段平分。在 Rust 中，`segmented_control()` 创建一个，每个属性有对应的 setter，事件用 `.on_change(..)`；`SegmentedControlItem::new(title).icon(name).disabled(true)` 创建一个分段。
+
+### 属性
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `items` | `.items(..)` | `SegmentedControlItem[]` | `[]` | 各分段，按顺序。 |
+| `selectedIndex` | `.selected_index(..)` | `number` | `0` | 选中的分段序号；超出分段数量的序号表示不选中任何分段。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不能选择任何分段：系统将控件调暗。 |
+| `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 控件的位置和尺寸。外观由系统决定。 |
+| `testID` | `.test_id(..)` | `string` | 无 | 在测试和 `nsh test --trace` 中找到这个控件。 |
+
+#### SegmentedControlItem
+
+| 字段 | Rust | 类型 | 说明 |
+|---|---|---|---|
+| `title` | `SegmentedControlItem::new(title)` | `string` | 分段的标题：显示的内容，也是 VoiceOver 朗读的内容。 |
+| `icon` | `.icon(name)` | `string` | 代替标题显示的 [SF Symbol](https://developer.apple.com/sf-symbols/)，VoiceOver 仍朗读标题。 |
+| `disabled` | `.disabled(..)` | `boolean` | 这个分段不能选择。 |
+
+### 事件
+
+| 事件 | Rust | 说明 |
+|---|---|---|
+| `onChange` | `.on_change(\|index: &u32\| ..)` | 用户选择了另一个分段：`{ index }`。控件立即显示这个选择；应用设置 `selectedIndex`。 |
+
+### 平台说明
+
+- **iOS 和 Mac Catalyst**：`UISegmentedControl`，外观取决于 iOS 版本和应用链接的 SDK：iOS 26 及以后为 Liquid Glass。
+- **Android、桌面和 Web**：`SegmentedControl` 不占空间、不显示，因此同一布局可兼顾两者：在这些平台上用 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md) 显示选择，按 `platform.os` 选用。
 
 ## InputAccessoryView
 

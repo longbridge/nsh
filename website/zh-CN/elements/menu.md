@@ -274,6 +274,49 @@ menu()
 
 <a id="props"></a>
 
+## 系统菜单：MenuButton
+
+`Menu` 在每种设备上以应用自己的外观绘制菜单。应用若需要系统自己的菜单（iOS 的下拉菜单，有系统的位置、动效，在 iOS 26 上是 Liquid Glass），用 `MenuButton` 从应用绘制的触发器上打开它：
+
+```tsx
+import { MenuButton } from "nsh/base";
+
+<MenuButton
+  accessibilityLabel="账户"
+  title={email()}
+  items={[
+    { id: "settings", label: "设置", icon: "gearshape" },
+    { id: "read", label: "全部已读", disabled: !unread() },
+    { id: "", label: "语言", items: languages.map((l) => ({ id: l.id, label: l.label, checked: l.id === lang() })) },
+    { id: "", label: "外观", inline: true, items: [
+      { id: "light", label: "浅色", checked: !dark() },
+      { id: "dark", label: "深色", checked: dark() },
+    ] },
+  ]}
+  onSelect={({ id }) => choose(id)}
+  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+>
+  <Avatar … />
+  <Text>{account()}</Text>
+</MenuButton>;
+```
+
+条目是数据，每个都有应用自己的 `id`，由 `onSelect({ id })` 报告；勾选、`disabled` 和 `destructive`（在 iOS 上为红色）是条目的状态，由应用改变；带 `items` 的条目是子菜单，再加 `inline` 则是以 `label` 为标题、就地显示的分组。子元素、`class` 和 `style` 构成触发器，在所有平台上都由应用绘制。
+
+- **iOS 和 Mac Catalyst**：触发器上覆盖一个透明的 `UIButton`，它的 `UIMenu` 是主操作：点按、VoiceOver 激活或硬件键盘都会立即打开菜单，不等待 JS。`icon` 是 SF Symbol；`title` 显示在菜单顶部。VoiceOver 访问的是这个按钮（名称来自 `accessibilityLabel`），而不是它下面的触发器内容。新的 `items` 在下次打开时生效。
+- **桌面（macOS、Windows、Linux）**：按下时在指针处以平台的上下文菜单显示这些条目（同 `nsh/desktop` 的 `Menu.popup`），分组之间用分隔线；不显示 `icon`、`title` 和 `destructive`。
+- **Android 和 Web**：视图没有系统菜单；触发器照常显示，按下不打开任何内容。在这些平台上按 `platform.os` 改用 `Menu`。
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | 菜单的条目，按顺序。 |
+| `title` | `.title(..)` | `string` | 无 | iOS：菜单的标题，显示在条目上方。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不能按下，不打开任何内容。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件为这个按钮朗读的内容。 |
+| `class`、`style`、`children` | 样式方法、`.child(..)` | | 无 | 应用绘制的触发器。 |
+
+`MenuButtonItem` 为 `{ id, label, icon?, checked?, disabled?, destructive?, items?, inline? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
+
 ## 属性
 
 ### Menu
