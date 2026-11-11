@@ -34,7 +34,8 @@
 //! natively and reported as `onCompositionChange`: as it starts and
 //! changes (AppKit tells only of the selection then: marking text sends no
 //! `textDidChange:`), and as it ends, after the `onChangeText` of the
-//! committed text. A value from JS that comes during a composition waits for its
+//! committed text. Meanwhile the core measures the input with what it
+//! shows, the composition included (`EngineControl::input_composing`). A value from JS that comes during a composition waits for its
 //! end: setting the text then would end the input method's session and
 //! commit what it composes. Leaving the input commits the composition, as
 //! a browser's blur does ([`commit_marked`]): what was composed stays and
@@ -432,6 +433,14 @@ impl Ctx {
             if seen {
                 input.apply_value(&value, count);
             }
+        }
+        // The core measures what the input shows meanwhile (the marked text
+        // is in the editor's text), so a composition that wraps a line
+        // grows the input before it commits.
+        if let Some((surface, view, _)) = self.get() {
+            let shown = composing.then(|| input.editor.borrow().text());
+            let id = view.id();
+            surface.control(|c| c.input_composing(id, shown));
         }
         self.send(EventKind::CompositionChange, || {
             EventPayload::Map(vec![
@@ -1194,7 +1203,16 @@ pub(crate) fn test_paste(
     window: &objc2_app_kit::NSWindow,
     content: &nsh_core::PasteEvent,
 ) -> Result<(), String> {
-    use objc2_app_kit::{NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
+    with_focused(window, |text_view, cx| paste_from(text_view, &cx, content))?
+}
+
+/// Runs `f` with the text view that edits the focused input and its
+/// context: an error when no input of the app has the focus.
+#[cfg(feature = "dev")]
+fn with_focused<R>(
+    window: &objc2_app_kit::NSWindow,
+    f: impl FnOnce(&NSTextView, Ctx) -> R,
+) -> Result<R, String> {
     let responder = window.firstResponder().ok_or("no input has the focus")?;
     let object: &AnyObject = &responder;
     let (text_view, cx): (&NSTextView, Option<Ctx>) =
@@ -1205,7 +1223,51 @@ pub(crate) fn test_paste(
         } else {
             return Err("no input of the app has the focus".into());
         };
-    let cx = cx.ok_or("the focused input is gone")?;
+    Ok(f(text_view, cx.ok_or("the focused input is gone")?))
+}
+
+/// The input that has the keyboard focus, if one of the app's has it.
+#[cfg(feature = "dev")]
+pub(crate) fn test_focused(window: &objc2_app_kit::NSWindow) -> Option<nsh_core::NodeId> {
+    with_focused(window, |_, cx| cx.get().map(|(_, view, _)| view.id()))
+        .ok()
+        .flatten()
+}
+
+/// A test's input method (`nsh test --target macos`): composes `text` in
+/// the focused input as one does, marked text at the caret in place of
+/// what it composed; an empty `text` ends the composition with nothing
+/// committed.
+#[cfg(feature = "dev")]
+pub(crate) fn test_compose(window: &objc2_app_kit::NSWindow, text: &str) -> Result<(), String> {
+    with_focused(window, |text_view, _| {
+        let marked = NSString::from_str(text);
+        let caret = NSRange::new(marked.length(), 0);
+        let replace = NSRange::new(objc2_foundation::NSNotFound as usize, 0);
+        // SAFETY: NSTextInputClient's methods, which NSTextView implements,
+        // with a string and ranges inside it.
+        unsafe {
+            let _: () = msg_send![
+                text_view,
+                setMarkedText: &*marked,
+                selectedRange: caret,
+                replacementRange: replace
+            ];
+            if text.is_empty() {
+                let _: () = msg_send![text_view, unmarkText];
+            }
+        }
+    })
+}
+
+/// [`test_paste`]'s paste into `text_view`, the editor of `cx`.
+#[cfg(feature = "dev")]
+fn paste_from(
+    text_view: &NSTextView,
+    cx: &Ctx,
+    content: &nsh_core::PasteEvent,
+) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
     let board = NSPasteboard::pasteboardWithUniqueName();
     board.clearContents();
     let mut items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = Vec::new();

@@ -4344,6 +4344,38 @@ fn multiline_inputs_grow_with_their_text() {
 }
 
 #[test]
+fn multiline_inputs_grow_with_what_an_input_method_composes() {
+    let mut c = input_core();
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.commit();
+    // 30 characters at 8pt in 308pt: one line, as the placeholder.
+    c.input_changed(2, &"x".repeat(30), 1);
+    assert_eq!(c.commit().and_then(|b| frame_of(&b, 2)), None);
+    // Composing 20 more wraps the line: the input grows before it commits.
+    c.input_composing(2, Some(&"x".repeat(50)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(44.0));
+    // Its value is still what was committed.
+    let node = &c.nodes[c.key(2).unwrap() as usize];
+    assert_eq!(node.input.as_ref().unwrap().value, "x".repeat(30));
+    // Cancelled, it goes back to its value's height.
+    c.input_composing(2, None);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(28.0));
+    // Committed, it keeps the height the composition gave it.
+    c.input_composing(2, Some(&"x".repeat(50)));
+    c.commit();
+    c.input_changed(2, &"x".repeat(50), 2);
+    c.input_composing(2, None);
+    let batch = c.commit();
+    assert_eq!(batch.and_then(|b| frame_of(&b, 2)), None);
+}
+
+#[test]
 fn multiline_inputs_measure_long_runs_in_pieces() {
     let mut c = input_core();
     c.apply(Op::SetProp {
@@ -22542,7 +22574,7 @@ mod rust_windows {
         )
     }
 
-    fn desktop_commands(batch: &MountBatch) -> Vec<(NodeId, DesktopCommand)> {
+    fn window_commands(batch: &MountBatch) -> Vec<(NodeId, DesktopCommand)> {
         batch
             .items
             .iter()
@@ -22550,7 +22582,7 @@ mod rust_windows {
                 MountItem::Command {
                     id,
                     command: Command::Desktop(command),
-                } => Some((*id, (**command).clone())),
+                } if command.is_window_command() => Some((*id, (**command).clone())),
                 _ => None,
             })
             .collect()
@@ -22565,7 +22597,7 @@ mod rust_windows {
         });
         c.mount_root(&Root::of::<Windows>());
         let batch = c.commit().unwrap();
-        let commands = desktop_commands(&batch);
+        let commands = window_commands(&batch);
         let [(id, DesktopCommand::OpenWindow(open))] = &commands[..] else {
             panic!("one window opens: {commands:?}");
         };
@@ -22589,7 +22621,7 @@ mod rust_windows {
             TITLE.with(|t| t.borrow().unwrap().set("Layers".into()));
         }
         let batch = c.commit().unwrap();
-        let commands = desktop_commands(&batch);
+        let commands = window_commands(&batch);
         assert_eq!(
             commands,
             [(
@@ -22660,7 +22692,7 @@ mod rust_windows {
         };
         assert_eq!(doc.id(), "doc:1");
         let batch = c.commit().unwrap();
-        let commands = desktop_commands(&batch);
+        let commands = window_commands(&batch);
         let [(id, DesktopCommand::OpenWindow(open))] = &commands[..] else {
             panic!("one window opens: {commands:?}");
         };
@@ -22677,7 +22709,7 @@ mod rust_windows {
         assert!(again.as_ref() == Some(&doc));
         let batch = c.commit().unwrap();
         assert_eq!(
-            desktop_commands(&batch),
+            window_commands(&batch),
             [(*id, DesktopCommand::Request(WindowRequest::Focus))]
         );
         // Its ref closes it: the app hears it and the window's root goes.
@@ -22708,7 +22740,7 @@ mod rust_windows {
         }
         let batch = c.commit().unwrap();
         assert!(matches!(
-            &desktop_commands(&batch)[..],
+            &window_commands(&batch)[..],
             [(_, DesktopCommand::OpenWindow(_))]
         ));
     }
@@ -22741,10 +22773,10 @@ mod rust_windows {
             ..Default::default()
         });
         c.mount_root(&Root::of::<SetsOwnTitle>());
-        let mut commands = desktop_commands(&c.commit().unwrap());
+        let mut commands = window_commands(&c.commit().unwrap());
         // An effect may run in the next commit: collect both.
         if let Some(batch) = c.commit() {
-            commands.extend(desktop_commands(&batch));
+            commands.extend(window_commands(&batch));
         }
         // It opens with them (or gets them right after): what it ends up with.
         let mut id = None;
@@ -22767,13 +22799,13 @@ mod rust_windows {
         );
         assert_eq!(merged.resizable, Some(false), "{commands:?}");
         // Sent once: nothing more on the next commit.
-        assert!(c.commit().is_none_or(|b| desktop_commands(&b).is_empty()));
+        assert!(c.commit().is_none_or(|b| window_commands(&b).is_empty()));
     }
 
     fn opened_title(c: &mut Core<FakeEngine>) -> Option<String> {
         let mut title = None;
         while let Some(batch) = c.commit() {
-            for (_, command) in desktop_commands(&batch) {
+            for (_, command) in window_commands(&batch) {
                 match command {
                     DesktopCommand::OpenWindow(open) => title = open.options.attributes.title,
                     DesktopCommand::SetAttributes(a) if a.title.is_some() => title = a.title,
@@ -22850,7 +22882,7 @@ mod rust_windows {
         });
         c.mount_root(&Root::of::<WithNotes>());
         let batch = c.commit().unwrap();
-        let [(notes, DesktopCommand::OpenWindow(_))] = &desktop_commands(&batch)[..] else {
+        let [(notes, DesktopCommand::OpenWindow(_))] = &window_commands(&batch)[..] else {
             panic!("the declared window opens");
         };
         let notes = *notes;
@@ -22861,7 +22893,7 @@ mod rust_windows {
         }
         let batch = c.commit().unwrap();
         assert_eq!(
-            desktop_commands(&batch),
+            window_commands(&batch),
             [(notes, DesktopCommand::Request(WindowRequest::Focus))]
         );
         // Not granted by the capabilities: nothing opens, as `Window.open`
@@ -22880,7 +22912,7 @@ mod rust_windows {
             let _entered = c.components.runtime.enter();
             assert!(open_window(window().id("doc")).is_none());
         }
-        assert!(c.commit().is_none_or(|b| desktop_commands(&b).is_empty()));
+        assert!(c.commit().is_none_or(|b| window_commands(&b).is_empty()));
     }
 
     thread_local! {
@@ -22913,7 +22945,7 @@ mod rust_windows {
         });
         c.mount_root(&Root::of::<ClosePresses>());
         let batch = c.commit().unwrap();
-        let commands = desktop_commands(&batch);
+        let commands = window_commands(&batch);
         let [(notes, DesktopCommand::OpenWindow(_))] = &commands[..] else {
             panic!("one window opens: {commands:?}");
         };
@@ -22976,7 +23008,7 @@ mod rust_windows {
         c.set_viewport(size(px(800.0), px(600.0)));
         c.mount_root(&Root::of::<Fitted>());
         let batch = c.commit().unwrap();
-        let commands = desktop_commands(&batch);
+        let commands = window_commands(&batch);
         let fit = |w: Option<f32>, h: Option<f32>| {
             DesktopCommand::Request(WindowRequest::SetContentSize {
                 width: w.map(Points),
@@ -23004,7 +23036,7 @@ mod rust_windows {
         c.set_viewport(size(px(800.0), px(120.0)));
         if let Some(batch) = c.commit() {
             assert!(
-                !desktop_commands(&batch)
+                !window_commands(&batch)
                     .iter()
                     .any(|(_, c)| matches!(c, DesktopCommand::Request(_))),
                 "{:?}",
@@ -23088,7 +23120,7 @@ mod rust_windows {
         c.mount_root(&Root::of::<WindowKeys>());
         let batch = c.commit().unwrap();
         let host = root_host(&batch);
-        let windows: Vec<NodeId> = desktop_commands(&batch)
+        let windows: Vec<NodeId> = window_commands(&batch)
             .iter()
             .filter(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
             .map(|(id, _)| *id)
@@ -23191,7 +23223,7 @@ mod rust_windows {
         c.set_viewport(size(px(800.0), px(600.0)));
         c.mount_root(&Root::of::<Popups>());
         let batch = c.commit().unwrap();
-        let commands = desktop_commands(&batch);
+        let commands = window_commands(&batch);
         let Some((window, _)) = commands
             .iter()
             .find(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
@@ -23349,7 +23381,7 @@ mod rust_windows {
         c.set_viewport(size(px(1100.0), px(820.0)));
         c.mount_root(&Root::of::<Sized>());
         let batch = c.commit().unwrap();
-        let opened: Vec<(NodeId, String)> = desktop_commands(&batch)
+        let opened: Vec<(NodeId, String)> = window_commands(&batch)
             .into_iter()
             .filter_map(|(id, c)| match c {
                 DesktopCommand::OpenWindow(open) => Some((id, open.options.id.clone())),
@@ -23459,7 +23491,7 @@ mod rust_windows {
         });
         c.mount_root(&Root::of::<Windows>());
         let batch = c.commit().unwrap();
-        assert!(desktop_commands(&batch).is_empty());
+        assert!(window_commands(&batch).is_empty());
     }
 }
 
@@ -23589,6 +23621,54 @@ mod rust_menus {
             .icon("asset:/file.svg"),
         ]);
         view()
+    }
+
+    #[test]
+    fn menu_labels_follow_the_language_the_app_shows() {
+        use crate::platform::{Languages, Locale};
+        let labels_in = |batch: &MountBatch| {
+            batch.items.iter().filter_map(desktop).find_map(|command| {
+                if let DesktopCommand::SetMenuLabels(labels) = command {
+                    Some((**labels).clone())
+                } else {
+                    None
+                }
+            })
+        };
+        let mut first = core();
+        let mut env = crate::element::Environment {
+            os: Os::MacOs,
+            locale: Locale::parse("en").unwrap(),
+            ..Default::default()
+        };
+        env.locale_settings.languages = Languages::one(env.locale);
+        first.set_environment(env);
+        let labels = labels_in(&first.commit().unwrap()).unwrap();
+        assert_eq!(labels.label(MenuRole::Copy), "Copy");
+        env.locale = Locale::parse("ja-JP").unwrap();
+        env.locale_settings.languages = Languages::one(env.locale);
+        first.set_environment(env);
+        let labels = labels_in(&first.commit().unwrap()).unwrap();
+        assert_eq!(labels.label(MenuRole::Copy), "コピー");
+        assert_eq!(labels.label(MenuRole::Paste), "ペースト");
+        assert_eq!(labels.edit_menu.as_deref(), Some("編集"));
+
+        // With an English-only app dictionary, text falls back to English
+        // even when all of the user's preferred languages are Japanese.
+        first.set_translations(
+            crate::i18n::Translations::from_json(r#"{"en":{"hello":"Hello"}}"#).unwrap(),
+        );
+        let labels = labels_in(&first.commit().unwrap()).unwrap();
+        assert_eq!(labels.label(MenuRole::Copy), "Copy");
+        assert_eq!(labels.edit_menu.as_deref(), Some("Edit"));
+        // Mobile platforms use the system's own menus.
+        env.os = Os::Ios;
+        first.set_environment(env);
+        assert!(first.commit().as_ref().and_then(labels_in).is_none());
+        env.os = Os::MacOs;
+        env.idiom = crate::platform::Idiom::Terminal;
+        first.set_environment(env);
+        assert!(first.commit().as_ref().and_then(labels_in).is_none());
     }
 
     fn menu_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) -> bool {

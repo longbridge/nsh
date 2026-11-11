@@ -104,7 +104,9 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
     root.child(
         scroll()
             .element_ref(&rv.scroll)
-            .flex_1()
+            // From its content's height: an editor without a height is as
+            // tall as its document, and past its `max-height` it scrolls.
+            .flex_auto()
             // The editor's own taps keep its keyboard (Android's scroll
             // views dismiss it on a tap otherwise).
             .keyboard_taps(KeyboardTaps::Always)

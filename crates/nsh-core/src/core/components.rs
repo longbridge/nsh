@@ -954,7 +954,42 @@ impl<M: TextEngine> Core<M> {
     /// read from now on.
     pub fn set_translations(&mut self, translations: crate::i18n::Translations) {
         let _entered = self.components.runtime.enter();
-        crate::element::global::<crate::i18n::Translations>().set(translations);
+        let stored = crate::element::global::<crate::i18n::Translations>();
+        let env = self.components.environment;
+        let before =
+            crate::i18n::text_locale(&stored.get(), env.locale, env.locale_settings.languages);
+        stored.set(translations);
+        if crate::i18n::text_locale(&stored.get(), env.locale, env.locale_settings.languages)
+            != before
+        {
+            self.localize_menus();
+        }
+    }
+
+    /// The menus NSH owns use the same language selection as the app's text.
+    fn localize_menus(&mut self) {
+        let _entered = self.components.runtime.enter();
+        if !matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Windows
+        ) || self.components.environment.idiom == crate::platform::Idiom::Terminal
+        {
+            return;
+        }
+        let translations = crate::element::global::<crate::i18n::Translations>().get();
+        let env = self.components.environment;
+        let locale =
+            crate::i18n::text_locale(&translations, env.locale, env.locale_settings.languages);
+        let labels = crate::desktop::MenuLabels::for_locale(
+            locale,
+            self.components.environment.os == crate::platform::Os::MacOs,
+        );
+        let _ = self.apply_op(crate::Op::Command {
+            id: crate::ROOT_ID,
+            command: crate::Command::Desktop(Box::new(
+                crate::desktop::DesktopCommand::SetMenuLabels(Box::new(labels)),
+            )),
+        });
     }
 
     /// The language the app asked to show in since the last call
@@ -1118,6 +1153,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
         let changed = self.components.environment != environment;
+        let language_changed = self.components.environment.idiom != environment.idiom
+            || self.components.environment.os != environment.os
+            || self.components.environment.locale != environment.locale
+            || self.components.environment.locale_settings.languages
+                != environment.locale_settings.languages;
         self.keyboard_moved |=
             self.components.environment.keyboard_height != environment.keyboard_height;
         let ratio = self.components.environment.pixel_ratio;
@@ -1132,6 +1172,9 @@ impl<M: TextEngine> Core<M> {
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
+        }
+        if language_changed {
+            self.localize_menus();
         }
         // A main window that keeps its placement saves it as it changes.
         if let Some(state) = environment.window_state {

@@ -2172,6 +2172,8 @@ class Player {
     const child = this.view(childId);
     if (!parent || !child) return;
     if (child._kind === "modal") {
+      child._host = parent;
+      this.goneModals?.delete(child);
       this.present(child);
       return;
     }
@@ -2189,6 +2191,7 @@ class Player {
     // Appended children stay under a border drawn over them.
     const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
     host.insertBefore(child, before && before.parentNode === host ? before : last);
+    this.showHosted(child);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
@@ -2199,7 +2202,9 @@ class Player {
   op_r([, id]) {
     const el = this.view(id);
     if (!el) return;
+    this.hideHosted(el);
     if (el._kind === "modal") {
+      this.goneModals?.delete(el);
       this.dismiss(el);
       return;
     }
@@ -2208,6 +2213,31 @@ class Player {
     this.detach(el, parent);
     if (parent?._kind === "stack") this.stackChanged(parent);
     this.screenGone(el, focused);
+  }
+
+  /** Modals presented from inside `el`, which leaves the tree, go with it:
+   * they are the root's children, out of `el`'s subtree, and the browser's
+   * graph deletes them only once their nodes are collected. */
+  hideHosted(el) {
+    for (const modal of [...this.root.children]) {
+      const host = modal._host;
+      if (modal._kind !== "modal" || modal._leaving || !host || (host !== el && !el.contains(host))) continue;
+      (this.goneModals ??= new Set()).add(modal);
+      this.dismiss(modal, true);
+      this.hideHosted(modal);
+    }
+  }
+
+  /** `el` is back in the tree: the modals that went with it come back. */
+  showHosted(el) {
+    if (!this.goneModals?.size) return;
+    for (const modal of this.goneModals) {
+      const host = modal._host;
+      if ((host !== el && !el.contains(host)) || !this.root.contains(host)) continue;
+      this.goneModals.delete(modal);
+      this.present(modal);
+      this.showHosted(modal);
+    }
   }
 
   /** Takes `el` out of `parent`: a screen once its stack is reconciled
@@ -2242,6 +2272,7 @@ class Player {
       el._video.load();
     }
     if (el._kind === "modal") {
+      this.goneModals?.delete(el);
       this.dismiss(el);
       return;
     }
@@ -7692,13 +7723,15 @@ class Player {
    * The app's shortcut (`nsh/keymap`) key `e` fires, matched natively
    * against the mounted table: its binding, -2 for a held key whose binding
    * does not repeat, -1 for none, `-3 - id` for binding `id` that passes the
-   * key through (reported, then the key goes on).
+   * key through (reported, then the key goes on). `control`: a control
+   * that Return and Space press has the focus, so they fire only the
+   * focus' own bindings (`Keymap::find_at`).
    */
-  shortcut(e, editing) {
+  shortcut(e, editing, control = false) {
     const code = e.isComposing ? -1 : keyCode(e);
     if (code < 0) return -1;
     const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
-    return this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
+    return this.wasm.nsh_key(code, mods, (editing ? 1 : 0) | (control ? 2 : 0), e.repeat ? 1 : 0);
   }
 
   keyDown(e) {
@@ -7707,9 +7740,14 @@ class Player {
     const focus = document.activeElement;
     const inRoot = focus && this.root.contains(focus);
     const editing = inRoot && !!focus.closest(".nsh-field, iframe");
+    const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+    // The control the focus is on, which Return and Space press (a stop
+    // that takes no presses, a `focusable` chart, hears them through the
+    // shortcuts only); a system dialog over the page keeps its own keys.
+    const control = inRoot && !editing && !!focus._pressable && !this.dialogs?.length;
     // The app's shortcuts first, where the focus is (`nsh/keymap`), then
-    // reported.
-    const found = this.shortcut(e, editing);
+    // reported. On a control, Return and Space fire only the focus' own.
+    const found = this.shortcut(e, editing, control);
     if (found <= -3) {
       const id = -3 - found;
       this.call((w) => w.nsh_key_command(id));
@@ -7720,7 +7758,20 @@ class Player {
       return;
     }
     if (e.defaultPrevented || e.isComposing) return;
-    const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+    // Then they press the control (`nsh_core::input::presses_focused_control`):
+    // a binding of Return elsewhere does not act instead of the control the
+    // focus was moved to.
+    if (control && plain && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      // Return presses at once, Space when it is released, as buttons do.
+      this.keyPress = { press: focus, states: this.ancestors(focus).filter((v) => v._tracked & PRESSED) };
+      this.pressIn(this.keyPress);
+      for (const v of this.keyPress.states) this.setState(v, PRESSED, true);
+      if (e.key === "Enter") this.keyPressEnd(true);
+      return;
+    }
     const dialog = this.dialogs?.[this.dialogs.length - 1];
     if (dialog) {
       if (e.key === "Escape") {
@@ -7743,16 +7794,6 @@ class Player {
       if (this.contextMenu(e, true)) return;
     }
     if (this.selectionKey(e)) return;
-    if (inRoot && focus._pressable && plain && !e.shiftKey && (e.key === "Enter" || e.key === " ")) {
-      e.preventDefault();
-      if (e.repeat) return;
-      // Return presses at once, Space when it is released, as buttons do.
-      this.keyPress = { press: focus, states: this.ancestors(focus).filter((v) => v._tracked & PRESSED) };
-      this.pressIn(this.keyPress);
-      for (const v of this.keyPress.states) this.setState(v, PRESSED, true);
-      if (e.key === "Enter") this.keyPressEnd(true);
-      return;
-    }
     const backKey = e.key === "BrowserBack" || (e.altKey && !APPLE && e.key === "ArrowLeft") || (e.metaKey && APPLE && e.key === "[");
     if ((e.key === "Escape" && plain) || backKey) {
       // With history the browser goes back itself on its keys (`popState`).
