@@ -140,11 +140,25 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   thread, before it scrolls, from the mounted event masks (`input::wheel_listener`): walking out from the view under
   the pointer, the first view that listens hears it; it takes the wheel (no native scroll, Ctrl + wheel zoom or pinch)
   when no scroll view (nor a multiline field on Windows / GPUI, nor a hosted widget scrolling itself on Linux / macOS)
-  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. There is no
+  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. One scroll
+  stays where it went, as a scroll view's does (`input::WheelLatch`, every backend's `wheel_event`): a view that took
+  it keeps the rest of it wherever the pointer goes, a trackpad gesture from its first move through the system's
+  momentum (macOS, GPUI), steps while they keep coming (`WHEEL_LATCH`; mouse notches along their axis, a touchpad's
+  whichever way they turn; Linux until the touchpad scroll stops); and a scroll a scroll view has started is not
+  taken over by a listener that comes under the pointer meanwhile, which only observes it. There is no
   `preventDefault`: events reach JS after the fact, so the rule is what is mounted, as with `onContextMenu`. Linux
   `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
   (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
   `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
+- **`onPinch`** (any element; GPUI's `PinchEvent` / `on_pinch`): a touchpad pinched over a view.
+  `EventPayload::Pinch` / `PinchEvent { position, page_position, delta, phase, modifiers }`, `delta` the change of scale
+  since the last event (a `Percentage`, as GPUI's), `phase` a `PinchPhase` (`"start"`, `"move"`, `"end"`, as touches').
+  Decided as `onWheel` is (`input::wheel_listener`, with the views that pinch natively, `transforms`, in place of the
+  scroll views) and kept from the pinch's start to its end (`input::WheelLatch`, one per surface): macOS
+  `magnifyWithEvent:` (`input.rs` `pinch_event`), Linux GDK's touchpad pinch (its absolute scale turned into changes),
+  GPUI's `PinchEvent` (`touchpad_pinch`; its Linux deltas change the absolute scale), the web Safari's `gesturestart` /
+  `gesturechange` / `gestureend` (`nsh.js` `pinchEvent`). Windows and the other browsers report a touchpad pinch as
+  Ctrl + wheel, which `onWheel` hears, so they raise no `onPinch`.
 - **`onMouseUp`** (any element): a mouse button was released over it or a view inside it (the DOM's `mouseup`):
   `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and
   `modifiers` (`EventPayload::Mouse`, `MouseEvent`; Rust `.on_mouse_up`). The primary button's release also

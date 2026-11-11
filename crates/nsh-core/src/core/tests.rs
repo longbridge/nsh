@@ -24174,6 +24174,48 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
 }
 
 #[test]
+fn pinches_reach_rust_listeners_with_their_delta_and_phase() {
+    use crate::prelude::*;
+    #[component]
+    fn Canvas() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_pinch(move |e: &PinchEvent| {
+                at.set(format!(
+                    "{} {} {} {}",
+                    e.position.x.0,
+                    e.page_position.y.0,
+                    e.delta.0,
+                    e.phase.name()
+                ))
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Canvas>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::Pinch) => Some(*id),
+            _ => None,
+        })
+        .expect("the listening view mounts Pinch in its event mask");
+    let event = crate::PinchEvent::new(
+        point(px(4.0), px(5.0)),
+        point(px(14.0), px(25.0)),
+        crate::geometry::Percentage(0.5),
+        crate::PinchPhase::Move,
+        Default::default(),
+    );
+    assert!(c.component_event(host, EventKind::Pinch, &EventPayload::Pinch(event)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "4 25 0.5 move")));
+}
+
+#[test]
 fn wheels_reach_rust_listeners_with_their_delta() {
     use crate::prelude::*;
     #[component]
