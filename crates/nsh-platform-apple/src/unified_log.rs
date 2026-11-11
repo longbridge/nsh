@@ -368,6 +368,7 @@ mod tests {
     fn logger(everything: bool) -> Logger {
         Logger {
             everything,
+            filtered: false,
             stderr: false,
             stderr_prefix: "",
             subsystem: c_string(subsystem()),
@@ -399,6 +400,12 @@ mod tests {
         assert!(release.enabled(&line(Level::Info, "js")));
         assert!(!release.enabled(&line(Level::Info, "nsh_engine::updates")));
         assert!(logger(true).enabled(&line(Level::Info, "nsh_engine::updates")));
+        // Under another logger, which already chose its lines.
+        let filtered = Logger {
+            filtered: true,
+            ..logger(false)
+        };
+        assert!(filtered.enabled(&line(Level::Debug, "nsh_engine::updates")));
     }
 
     #[test]
