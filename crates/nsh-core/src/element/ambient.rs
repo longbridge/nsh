@@ -1600,9 +1600,7 @@ impl super::ElementRef {
     /// handle; the element enters `focus-within`). Moving between elements
     /// inside it is no new coming in. The content of an overlay is inside
     /// the element the overlay is in, wherever it shows: a popup's trigger
-    /// and the popup are both inside the view holding them. The listener
-    /// asks [`focus_by_keyboard`] whether the keyboard moved the focus in
-    /// or a press, a tap or a click did.
+    /// and the popup are both inside the view holding them.
     ///
     /// It listens while the current owner lives, to whatever element
     /// carries the ref, and runs at the end of the commit round the focus
@@ -1650,11 +1648,15 @@ impl super::ElementRef {
 /// `focus-visible:` follows (the keyboard's unless the last input was a
 /// pointer), with no exception for an input that edits: a click into a
 /// field is the pointer's. It keeps what it decided until the focus moves
-/// again, whatever is typed meanwhile, so it says how the focus came: a
-/// listener of [`super::ElementRef::on_focus_in`] reads it as the focus
-/// comes in. The focus the keyboard moved shows a tooltip, and opens and
-/// holds `nsh-base`'s `HoverCard`; a click's leaves both to the pointer.
-/// Reading it subscribes to nothing.
+/// again, whatever is typed meanwhile. The focus the keyboard moved shows
+/// a tooltip, and opens and holds `nsh-base`'s `HoverCard`; a click's
+/// leaves both to the pointer. Reading it subscribes to nothing.
+///
+/// `nsh-base`'s, not an API apps use: it answers for the focus a focus
+/// listener ([`super::ElementRef::on_focus_in`]) hears come in, as the
+/// listener runs, so it is hidden from the docs and left out of the
+/// prelude.
+#[doc(hidden)]
 pub fn focus_by_keyboard() -> bool {
     executor().focus_by_keyboard.get()
 }

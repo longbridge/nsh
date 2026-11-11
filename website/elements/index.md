@@ -440,10 +440,7 @@ A view around the focus styles itself with `focus-within:` (`focusWithinStyle`, 
 is on it or on any view inside it: a field's frame around the input that edits, a toolbar while one of its buttons has
 the focus. The content of an `Overlay` is inside the view the overlay is in, wherever it shows, so a popup counts as
 part of the view that holds its trigger. In Rust, a component hears the focus come into an element and leave it with
-its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside it is neither. `focus_by_keyboard()`
-tells the component whether the keyboard moved the focus there (Tab, the arrow keys, a shortcut, or `focus()` after a
-key) or a click or a tap did, so it can follow the keyboard as tooltips and hover cards do and leave a click's focus to
-the pointer.
+its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside it is neither.
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|

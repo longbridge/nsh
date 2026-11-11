@@ -1178,7 +1178,7 @@ the card's overlay, and the keyboard focus by the focus coming into and leaving 
 (`ElementRef::on_focus_in` / `on_focus_out`: a move from the trigger into the card is neither); the delays are one
 timer of the components' executor (`set_timeout`, a `Spawned` the next request cancels), as `gpui-base`'s
 `HoverCardState` keeps one open or close task. Only the focus the keyboard moved in counts, decided as it comes in
-(`focus_by_keyboard`, the rule a tooltip's focus follows: `elements.md` "Hints"), as Floating UI's `useFocus` with
+(`Core::focus_by_keyboard`, the rule a tooltip's focus follows: `elements.md` "Hints"), as Floating UI's `useFocus` with
 `visibleOnly`: a press, a tap or a click that focuses the trigger or the card (a press handler's `focus()`, a menu
 giving the focus back as a press closes it) neither opens nor holds the card, which stays the pointer's and closes once
 the pointer left. Entering the trigger or the keyboard focusing it waits `openDelay`; leaving the trigger with the

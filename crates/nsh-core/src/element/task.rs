@@ -435,8 +435,8 @@ pub(crate) struct Executor {
     pub(crate) watches: Rc<RefCell<super::watch::Watches>>,
     /// The keyboard moved the focus where it is: the core's decision as
     /// the focus was reported (`Core::focus_by_keyboard`), `false` while
-    /// no view has the focus; components read it with
-    /// [`super::focus_by_keyboard`].
+    /// no view has the focus; `nsh-base`'s components read it with
+    /// `element::focus_by_keyboard()`.
     pub(crate) focus_by_keyboard: std::cell::Cell<bool>,
     /// The timers tasks wait for ([`super::timer`]), soonest first: the core
     /// fires them as they come due, and the engine's loop wakes for the

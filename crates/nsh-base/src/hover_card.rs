@@ -17,7 +17,10 @@
 
 use std::time::Duration;
 
-use nsh_core::{element::Style, prelude::*};
+use nsh_core::{
+    element::{Style, focus_by_keyboard},
+    prelude::*,
+};
 
 use crate::{
     popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle},

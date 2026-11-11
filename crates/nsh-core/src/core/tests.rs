@@ -21041,7 +21041,7 @@ mod views {
         let log = signal(Vec::<String>::new());
         let area = element_ref();
         let note = move |what: &str| {
-            let entry = format!("{what}:{}", focus_by_keyboard());
+            let entry = format!("{what}:{}", crate::element::focus_by_keyboard());
             log.update(|l| l.push(entry));
         };
         area.on_focus_in(move || note("in"));
@@ -21064,7 +21064,9 @@ mod views {
     /// and with no focus it is `false`.
     #[test]
     fn a_focus_listener_hears_whether_the_keyboard_moved_the_focus() {
-        use crate::{platform::InputModality, tailwind::state::FOCUSED};
+        use crate::{
+            element::focus_by_keyboard, platform::InputModality, tailwind::state::FOCUSED,
+        };
         let keyboard = |c: &Core<FakeEngine>| {
             let _entered = c.components.runtime.enter();
             focus_by_keyboard()
