@@ -119,6 +119,12 @@ struct Term {
     cx: Scope<TerminalEvent>,
     sink: ElementRef,
     focused: Signal<bool>,
+    /// What an input method is composing in the hidden input, empty when
+    /// nothing is: drawn at the cursor.
+    composition: Signal<String>,
+    /// Where the rows are in the terminal and how big, as last laid out:
+    /// the hidden input goes on the cursor's cell.
+    rows_frame: Signal<Bounds<Points>>,
     /// What the hidden input holds: its value, and the text it held when
     /// it was emptied, until the platform reports the empty value.
     sink_value: Signal<String>,
@@ -258,6 +264,8 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
         cx,
         sink: element_ref(),
         focused: signal(false),
+        composition: signal(String::new()),
+        rows_frame: signal(Bounds::default()),
         sink_value: signal(String::new()),
         held: Rc::default(),
     };
@@ -299,6 +307,9 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
                 .flex_1()
                 .min_h(px(0.0))
                 .on_layout(move |b: &Bounds<Points>| {
+                    if layout_term.rows_frame.get_untracked() != *b {
+                        layout_term.rows_frame.set(*b);
+                    }
                     let (cw, lh) = (
                         cell_width.get_untracked(),
                         props.line_height.get_untracked(),
@@ -311,7 +322,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
                     layout_term.resize(TerminalSize::new(cols, rows));
                 }),
         )
-        .child(sink(term, props, lh))
+        .child(sink(term, props, cell_width, lh))
 }
 
 /// Line `at`: its runs, and the cursor when it is on it.
@@ -328,12 +339,36 @@ fn row(
             term.emu.borrow().line(at.index())
         })
     };
+    // The column of the cursor, shown or hidden, when it is on this line:
+    // where an input method's composition is drawn.
+    let caret = {
+        let term = term.clone();
+        computed(move || {
+            term.rev.get();
+            let emu = term.emu.borrow();
+            let first_screen = emu.line_count() - term.size.borrow().rows as usize;
+            let at_cursor = emu.cursor_position();
+            (at.index() == first_screen + at_cursor.row as usize).then_some(at_cursor.col)
+        })
+    };
+    let composition = term.composition;
+    // The composition on this line, and how many cells it takes.
+    let composing = computed(move || {
+        caret.get()?;
+        let text = composition.get();
+        (!text.is_empty()).then(|| {
+            let cells = text_width(&text);
+            (text, cells)
+        })
+    });
     let cursor = computed(move || {
         term.rev.get();
         let emu = term.emu.borrow();
         let first_screen = emu.line_count() - term.size.borrow().rows as usize;
         let cursor = emu.cursor()?;
-        (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)
+        let col = (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)?;
+        // After what is being composed, as a text field's caret is.
+        Some(col + composing.with(|c| c.as_ref().map_or(0, |c| c.1)) as u16)
     });
     let backgrounds = line;
     view()
@@ -379,6 +414,30 @@ fn row(
                     .collect::<Vec<_>>(),
             )
         }))
+        // What an input method is composing, over the cells from the cursor
+        // on, underlined as platforms mark it, on the theme's background.
+        .child(when(
+            move || composing.with(Option::is_some),
+            move || {
+                view()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(move || Length::from(cell_width.get() * caret.get().unwrap_or(0) as f32))
+                    .justify_center()
+                    .bg(move || theme().background)
+                    .pointer_events(PointerEvents::None)
+                    .child(
+                        text(move || {
+                            SharedString::from(
+                                composing
+                                    .with(|c| c.as_ref().map(|c| c.0.clone()).unwrap_or_default()),
+                            )
+                        })
+                        .underline(),
+                    )
+            },
+        ))
         .child(when(
             move || cursor.get().is_some(),
             move || {
@@ -474,15 +533,44 @@ fn indexed(n: u8) -> u32 {
 }
 
 /// The input that takes the keyboard: text and pastes (the keys with no
-/// text are bound while it has the focus, [`Term::bind_keys`]).
-fn sink(term: Term, props: TerminalProps, lh: impl Fn() -> Points + 'static) -> impl IntoElement {
+/// text are bound while it has the focus, [`Term::bind_keys`]). It sits on
+/// the cursor's cell, so an input method opens its candidates at the
+/// cursor; the composition is drawn by the cursor's row. It stays a point
+/// wide: what was typed stays in it until it fills (the value it is given
+/// stays empty), and a narrow input scrolls its end, where the composition
+/// is, to its one point.
+fn sink(
+    term: Term,
+    props: TerminalProps,
+    cell_width: Memo<Points>,
+    lh: impl Fn() -> Points + 'static,
+) -> impl IntoElement {
     let (change, paste, focus, blur) = (term.clone(), term.clone(), term.clone(), term.clone());
+    let compose = term.composition;
     let value = term.sink_value;
+    // The cursor's cell in the terminal's points: the rows end at the
+    // bottom of their frame (the list follows the end), what is left of a
+    // row's height above them.
+    let place = {
+        let term = term.clone();
+        computed(move || {
+            term.rev.get();
+            let at = term.emu.borrow().cursor_position();
+            let frame = term.rows_frame.get();
+            let lh = props.line_height.get();
+            let rows = term.size.borrow().rows as f32;
+            let above = (frame.size.height - lh * rows).max(Points(0.0));
+            point(
+                frame.origin.x + cell_width.get() * at.col as f32,
+                frame.origin.y + above + lh * at.row as f32,
+            )
+        })
+    };
     input()
         .element_ref(&term.sink)
         .absolute()
-        .left_0()
-        .bottom_0()
+        .left(move || Length::from(place.get().x))
+        .top(move || Length::from(place.get().y))
         .w(px(1.0))
         .h(move || Length::from(lh()))
         .pointer_events(PointerEvents::None)
@@ -498,6 +586,13 @@ fn sink(term: Term, props: TerminalProps, lh: impl Fn() -> Points + 'static) -> 
         .value(move || value.get())
         .label(move || props.accessibility_label.get().unwrap_or_default())
         .on_change(move |text: &str| change.sink_changed(text))
+        .on_composition_change(move |c: &Composition| {
+            compose.set(if c.composing {
+                c.text.clone()
+            } else {
+                String::new()
+            })
+        })
         .on_paste(move |p: &PasteEvent| paste.paste(&p.text))
         .on_focus(move || focus.focused.set(true))
         .on_blur(move || blur.focused.set(false))
