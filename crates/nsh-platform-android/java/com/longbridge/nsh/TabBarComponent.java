@@ -225,6 +225,20 @@ final class TabBarComponent implements NshComponent {
     }
 
     /** One tab: its icon in the active indicator, its label below. */
+    /**
+     * What TalkBack says for a badge: its text, or for a badge with no text
+     * the system's own words for it ("New notification", Material's
+     * numberless badge's, in the device's language; not in the public
+     * resources). Null for none.
+     */
+    private static String spokenBadge(String text) {
+        if (text == null) return null;
+        if (!text.isEmpty()) return text;
+        android.content.res.Resources system = android.content.res.Resources.getSystem();
+        int words = system.getIdentifier("notification_hidden_text", "string", "android");
+        return words != 0 ? system.getString(words) : null;
+    }
+
     private final class Item extends LinearLayout {
         final int index;
         final FrameLayout indicator;
@@ -243,9 +257,10 @@ final class TabBarComponent implements NshComponent {
             setPadding(0, px(12), 0, px(16));
             setClickable(true);
             setFocusable(true);
-            // TalkBack says the badge's text with the title (iOS's VoiceOver
-            // reads the badge with the tab).
-            setContentDescription(badgeText != null && !badgeText.isEmpty() ? title + ", " + badgeText : title);
+            // TalkBack says the badge with the title, as VoiceOver reads iOS's
+            // badge with the tab.
+            String spoken = spokenBadge(badgeText);
+            setContentDescription(spoken != null ? title + ", " + spoken : title);
             setOnClickListener(v -> {
                 // The bar shows the choice at once, as the system's does;
                 // the app follows it with `selectedIndex`.

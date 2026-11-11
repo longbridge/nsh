@@ -123,7 +123,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 |---|---|---|---|
 | `title` | `TabBarItem::new(title)` | `string` | The tab's title, which screen readers say. |
 | `icon` | `.icon(name)` | `string` | The tab's icon, by the platform's name for it: an [SF Symbol](https://developer.apple.com/sf-symbols/) on iOS (`"house"`), a drawable of the app on Android (`res/drawable/home.xml` is `"home"`, `"android:ic_menu_search"` the system's). `platform.select` picks one per platform. |
-| `badge` | `.badge(text)` | `string` | The tab's badge: a text such as `"3"` or `"New"`, or `""` for a badge with no text; left out (the default), none. In the system's badge look; screen readers say its text with the tab's title. |
+| `badge` | `.badge(text)` | `string` | The tab's badge: a text such as `"3"` or `"New"`, or `""` for a badge with no text; left out (the default), none. In the system's badge look; screen readers say it with the tab's title: its text, or for `""` the system's words for a badge with no text (VoiceOver's; on Android the system's "New notification", in the device's language). |
 
 ### Events
 
@@ -143,7 +143,9 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
   its inset, as Material's does. Icons are drawables of the app (tinted by the bar). The selected tab's icon and label
   take the theme's `primary`, over an active indicator of it at 12% opacity; the other tabs keep the system's. A badge
   is Material 3's: `""` the small badge (a dot) at the icon's corner, a text the large badge from the icon's middle,
-  in its error colors, ending in an ellipsis past the active indicator.
+  in its error colors, ending in an ellipsis past the active indicator. The large badge holds a short text, a count
+  or a word of up to four characters, as Material's does: a longer one is cut (`"Updated"` shows as "Up…"), where iOS
+  shows it whole. TalkBack says `""` as the system's "New notification".
 - **Desktops (macOS, Windows, Linux, GPUI) and the web**: the sections show with [Tabs](../elements/tabs.md), in the app's
   look. `TabBar` takes no room there, so one layout holds both, picked by `platform.os`
   ([`nsh`'s device API](./nsh.md#device)).
