@@ -910,17 +910,35 @@ fn take_press(surface: &Surface, hwnd: HWND) -> Option<WindowPress> {
     }
 }
 
+/// Whether a press at `from` moved to `at` (client pixels) has left the
+/// system's drag rectangle of half-size `slop` (`SM_CXDRAG`, `SM_CYDRAG`,
+/// as `DragDetect` uses).
+fn past_drag_rect(from: (i32, i32), at: (i32, i32), slop: (i32, i32)) -> bool {
+    (at.0 - from.0).abs() > slop.0 || (at.1 - from.1).abs() > slop.1
+}
+
+/// Where the window's top-left corner `origin` (screen pixels) moves before
+/// `SC_MOVE | HTCAPTION` starts: `SC_MOVE` anchors at the cursor where its
+/// modal loop begins, so moving the window by the pointer's offset from the
+/// press (`at - from`, client pixels) keeps the grabbed point under the
+/// pointer.
+fn drag_start_origin(origin: (i32, i32), from: (i32, i32), at: (i32, i32)) -> (i32, i32) {
+    (origin.0 + at.0 - from.0, origin.1 + at.1 - from.1)
+}
+
+/// Whether releasing a press that went down on `pressed` delivers a click
+/// when `now` is the `windowDrag` view at the press's point on release:
+/// only when the same view is still there and still drags the window.
+fn delivers_click(pressed: &crate::view::NshView, now: Option<crate::view::NshView>) -> bool {
+    now.is_some_and(|v| v == *pressed)
+}
+
 /// `WM_MOUSEMOVE` at `lparam` (client pixels) while window `hwnd` holds a
 /// press: past the system's drag rectangle (`SM_CXDRAG` / `SM_CYDRAG` on
 /// either side, as `DragDetect`'s), the system moves the window as a press
 /// on its title bar would, and the app never hears of the press. True
 /// when a press is held (the move is not the app's).
 pub(crate) fn press_moved(surface: &Surface, hwnd: HWND, lparam: LPARAM) -> bool {
-    let (x, y) = (
-        (lparam.0 & 0xFFFF) as i16 as i32,
-        ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
-    );
-    let dpi = crate::window::dpi(hwnd);
     let Some((px, py)) = surface
         .input
         .window_press
@@ -931,6 +949,11 @@ pub(crate) fn press_moved(surface: &Surface, hwnd: HWND, lparam: LPARAM) -> bool
     else {
         return false;
     };
+    let (x, y) = (
+        (lparam.0 & 0xFFFF) as i16 as i32,
+        ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
+    );
+    let dpi = crate::window::dpi(hwnd);
     // SAFETY: plain queries.
     let (cx, cy) = unsafe {
         (
@@ -938,24 +961,43 @@ pub(crate) fn press_moved(surface: &Surface, hwnd: HWND, lparam: LPARAM) -> bool
             GetSystemMetricsForDpi(SM_CYDRAG, dpi),
         )
     };
-    if (x - px).abs() <= cx && (y - py).abs() <= cy {
+    if !past_drag_rect((px, py), (x, y), (cx, cy)) {
         return true;
     }
     let Some(press) = take_press(surface, hwnd) else {
         return true;
     };
-    // Posted, so the move's modal loop runs from the message loop, as it
-    // does for a press on the title bar; the release still queued after it
-    // ends that loop.
+    let movable = crate::window::shell(hwnd).is_none_or(|s| s.attrs().movable);
+    // When the window is not maximized, moving it by the pointer's offset
+    // from the press before `SC_MOVE` starts keeps the grabbed point under
+    // the cursor (`SC_MOVE` anchors at the message's cursor position).
     // SAFETY: plain calls on this window.
     unsafe {
         let _ = ReleaseCapture();
-        let _ = PostMessageW(
-            Some(hwnd),
-            WM_SYSCOMMAND,
-            WPARAM((SC_MOVE | HTCAPTION) as usize),
-            press.screen,
-        );
+        if movable {
+            if !zoomed(hwnd) && !crate::window::is_full_screen(hwnd) {
+                let mut rect = RECT::default();
+                if GetWindowRect(hwnd, &mut rect).is_ok() {
+                    let (left, top) =
+                        drag_start_origin((rect.left, rect.top), press.pixels, (x, y));
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        left,
+                        top,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            }
+            let _ = SendMessageW(
+                hwnd,
+                WM_SYSCOMMAND,
+                Some(WPARAM((SC_MOVE | HTCAPTION) as usize)),
+                Some(press.screen),
+            );
+        }
     }
     true
 }
@@ -971,7 +1013,10 @@ pub(crate) fn press_released(surface: &Rc<Surface>, hwnd: HWND, at: (f32, f32)) 
     };
     // SAFETY: a plain call.
     let _ = unsafe { ReleaseCapture() };
-    if crate::input::drag_view(surface, press.at.0, press.at.1).is_some_and(|v| v == press.view) {
+    if delivers_click(
+        &press.view,
+        crate::input::drag_view(surface, press.at.0, press.at.1),
+    ) {
         crate::window::click(surface, press.at, at);
     }
     true
@@ -1894,4 +1939,96 @@ pub(crate) fn appearance_changed(surface: &Surface) {
         let _ = unsafe { DrawMenuBar(hwnd) };
     }
     surface.invalidate();
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{Bounds, NodeId, Points, ViewKind};
+
+    use super::*;
+    use crate::{geom::rect, view::NshView};
+
+    fn view(parent: &NshView, id: NodeId, kind: ViewKind, frame: Bounds<Points>) -> NshView {
+        let v = NshView::new(id, kind);
+        v.state_mut().frame = frame;
+        v.insert_before(parent, None);
+        v
+    }
+
+    fn pack(x: i32, y: i32) -> LPARAM {
+        LPARAM(((x as i16 as u16 as usize) | ((y as i16 as u16 as usize) << 16)) as isize)
+    }
+
+    #[test]
+    fn drag_rect_and_start_origin() {
+        assert!(!past_drag_rect((100, 20), (100, 20), (4, 4)));
+        assert!(!past_drag_rect((100, 20), (104, 24), (4, 4)));
+        assert!(!past_drag_rect((100, 20), (96, 16), (4, 4)));
+        assert!(past_drag_rect((100, 20), (105, 20), (4, 4)));
+        assert!(past_drag_rect((100, 20), (95, 20), (4, 4)));
+        assert!(past_drag_rect((100, 20), (100, 25), (4, 4)));
+        assert!(past_drag_rect((100, 20), (100, 15), (4, 4)));
+        assert_eq!(drag_start_origin((52, 52), (100, 20), (110, 25)), (62, 57));
+        assert_eq!(drag_start_origin((52, 52), (100, 20), (92, 17)), (44, 49));
+    }
+
+    #[test]
+    fn window_press_delivers_click_only_when_same_view_stays_draggable() {
+        let surface = Surface::new(Default::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 200.0, 100.0);
+        let bar = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 40.0),
+        );
+        bar.state_mut().props.window_drag = Some(true);
+        let label = view(&bar, 4, ViewKind::View, rect(10.0, 5.0, 80.0, 30.0));
+        let other = view(&bar, 6, ViewKind::View, rect(100.0, 5.0, 80.0, 30.0));
+
+        assert!(delivers_click(&label, Some(label.clone())));
+        assert!(!delivers_click(&label, Some(other)));
+        assert!(!delivers_click(&label, None));
+
+        let hwnd = HWND::default();
+        // Pressing on a child inside the drag region holds the innermost view.
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        // A move within the drag rectangle stays held.
+        assert!(press_moved(&surface, hwnd, pack(22, 16)));
+        assert!(surface.input.window_press.borrow().is_some());
+        assert!(press_released(&surface, hwnd, (22.0, 16.0)));
+        assert!(surface.input.window_press.borrow().is_none());
+
+        // A view appearing over the press point before release suppresses the click.
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        let overlay = view(&bar, 8, ViewKind::View, rect(0.0, 0.0, 200.0, 40.0));
+        overlay.state_mut().props.window_drag = Some(true);
+        assert!(!delivers_click(
+            &label,
+            crate::input::drag_view(&surface, 20.0, 15.0)
+        ));
+        assert!(press_released(&surface, hwnd, (20.0, 15.0)));
+        overlay.unparent();
+
+        // Turning `windowDrag` off before release suppresses the click.
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        bar.state_mut().props.window_drag = Some(false);
+        assert!(!delivers_click(
+            &label,
+            crate::input::drag_view(&surface, 20.0, 15.0)
+        ));
+        assert!(press_released(&surface, hwnd, (20.0, 15.0)));
+        bar.state_mut().props.window_drag = Some(true);
+
+        // Moving past the drag rectangle hands the press to the window move.
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        assert!(press_moved(&surface, hwnd, pack(30, 20)));
+        assert!(surface.input.window_press.borrow().is_none());
+        assert!(!press_released(&surface, hwnd, (30.0, 20.0)));
+
+        // Losing capture drops the held press.
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        press_cancelled(&surface, hwnd);
+        assert!(!press_released(&surface, hwnd, (20.0, 15.0)));
+    }
 }

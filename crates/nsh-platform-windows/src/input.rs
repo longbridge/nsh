@@ -746,22 +746,33 @@ pub(crate) enum WindowPart {
 /// text field, a hosted item (editors, web views) or a view with press or
 /// touch handlers is nearer.
 pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPart> {
+    window_part_at(surface, x, y).map(|(_, part)| part)
+}
+
+/// The innermost view at `(x, y)` (the input root's coordinates) when
+/// pressing there drags the window ([`WindowPart::Drag`]).
+pub(crate) fn drag_view(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    let (view, part) = window_part_at(surface, x, y)?;
+    (part == WindowPart::Drag).then_some(view)
+}
+
+fn window_part_at(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowPart)> {
     let hit = pick(&surface.input_root(), x, y, true)?;
     if hit.item.is_some() {
         return None;
     }
-    let mut view = Some(hit.view);
+    let mut view = Some(hit.view.clone());
     while let Some(v) = view {
         {
             let s = v.state();
             if let Some(edge) = s.props.window_resize {
-                return Some(WindowPart::Resize(edge));
+                return Some((hit.view, WindowPart::Resize(edge)));
             }
             if let Some(control) = s.props.window_control {
-                return Some(WindowPart::Control(control));
+                return Some((hit.view, WindowPart::Control(control)));
             }
             if let Some(drag) = s.props.window_drag {
-                return drag.then_some(WindowPart::Drag);
+                return drag.then_some((hit.view, WindowPart::Drag));
             }
             if s.kind == ViewKind::Input
                 || has_press(s.events)
@@ -773,15 +784,6 @@ pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPar
         view = v.parent_view();
     }
     None
-}
-
-/// The innermost view at `(x, y)` (the input root's coordinates) when
-/// pressing there drags the window ([`WindowPart::Drag`]).
-pub(crate) fn drag_view(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
-    if window_part(surface, x, y) != Some(WindowPart::Drag) {
-        return None;
-    }
-    pick(&surface.input_root(), x, y, true).map(|hit| hit.view)
 }
 
 /// A context menu asked for on `view` without a pointer (UI Automation's
@@ -2766,5 +2768,31 @@ mod tests {
     fn ctrl_wheel_zooms_by_notches() {
         assert!((zoom_factor(-ZOOM_NOTCH.0) - 1.1).abs() < 1e-5);
         assert!((zoom_factor(2.0 * ZOOM_NOTCH.0) - 1.0 / 1.21).abs() < 1e-5);
+    }
+
+    #[test]
+    fn drag_view_picks_the_innermost_view_in_a_drag_region() {
+        let surface = Surface::new(Default::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 200.0, 100.0);
+        let bar = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 40.0),
+        );
+        bar.state_mut().props.window_drag = Some(true);
+        let child = view(&bar, 4, ViewKind::View, rect(10.0, 5.0, 50.0, 30.0));
+        let excluded = view(&bar, 6, ViewKind::View, rect(70.0, 5.0, 50.0, 30.0));
+        excluded.state_mut().props.window_drag = Some(false);
+        let button = view(&bar, 8, ViewKind::View, rect(130.0, 5.0, 50.0, 30.0));
+        button.state_mut().events.set(EventKind::Press, true);
+
+        assert_eq!(window_part(&surface, 5.0, 5.0), Some(WindowPart::Drag));
+        assert_eq!(drag_view(&surface, 5.0, 5.0), Some(bar));
+        assert_eq!(drag_view(&surface, 20.0, 15.0), Some(child));
+        assert_eq!(window_part(&surface, 80.0, 15.0), None);
+        assert_eq!(drag_view(&surface, 80.0, 15.0), None);
+        assert_eq!(window_part(&surface, 140.0, 15.0), None);
+        assert_eq!(drag_view(&surface, 140.0, 15.0), None);
     }
 }
