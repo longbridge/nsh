@@ -80,7 +80,8 @@ type Block = {
   hint: string;
   icon: LucideIconName;
   keywords: string;
-  apply: RichCommand;
+  /** The command that makes it, or what to do with the editor when one command cannot say it. */
+  apply: RichCommand | ((editor: RichEditorSession) => void);
   /** A list: it changes the list around the caret, others leave it first. */
   list?: boolean;
   /** The node the caret's block is while it is this block (`[type, attrs]`), for the toolbar's pressed state. */
@@ -101,6 +102,17 @@ const BLOCKS: Block[] = [
     apply: chain([command("setHorizontalRule"), command("createParagraphNear")]),
   },
   { id: "callout", group: "Insert", node: ["callout"], title: "Callout", hint: "Make writing stand out", icon: "info", keywords: "note tip aside highlight box", apply: wrapIn("callout") },
+  {
+    id: "columns", group: "Insert", title: "2 columns", hint: "Blocks side by side", icon: "panel-left", keywords: "column layout split side",
+    // Two columns of a paragraph each. The caret is left in the last one: it goes to the first, three
+    // positions into the row (the row's, the column's and the paragraph's starts).
+    apply: (editor) => {
+      editor.run(insertContent({ type: "columns", content: [{ type: "column", content: [{ type: "paragraph" }] }, { type: "column", content: [{ type: "paragraph" }] }] }));
+      const head = editor.selection.head;
+      const row = head == null ? undefined : blocksAround(editor, head).find((b) => b.type === "columns");
+      if (row) editor.run(setTextSelection(row.start + 3));
+    },
+  },
   { id: "table", group: "Insert", title: "Table", hint: "Rows and columns", icon: "table", keywords: "grid", apply: command("insertTable", { rows: 3, cols: 3, withHeaderRow: true }) },
 ];
 
@@ -127,6 +139,16 @@ const callout = defineExtension({
     parseDOM: [{ tag: "div[data-callout]" }],
     toDOM: ["div", { "data-callout": "" }, 0],
   },
+});
+
+/** Columns: blocks side by side, as Notion's. A row (`columns`) of two or more `column`s, each holding blocks. */
+const columns = defineExtension({
+  name: "columns",
+  node: { content: "column column+", group: "block", defining: true, isolating: true, parseDOM: [{ tag: "div[data-columns]" }], toDOM: ["div", { "data-columns": "" }, 0] },
+});
+const column = defineExtension({
+  name: "column",
+  node: { content: "block+", defining: true, isolating: true, parseDOM: [{ tag: "div[data-column]" }], toDOM: ["div", { "data-column": "" }, 0] },
 });
 
 /** `/` opens the blocks: Tiptap's Suggestion with its own keys. It ranks above the keymap, so Enter picks before it splits a paragraph. */
@@ -343,6 +365,21 @@ function Sample(props: { id: string }) {
           </View>
         </View>
       );
+    case "columns":
+      return (
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <View style={{ flex: 1, gap: 8 }}>
+            <Bar width={70} />
+            <Bar width={56} />
+            <Bar width={64} />
+          </View>
+          <View style={{ flex: 1, gap: 8 }}>
+            <Bar width={64} />
+            <Bar width={72} />
+            <Bar width={40} />
+          </View>
+        </View>
+      );
     case "divider":
       return (
         <View style={{ gap: 10 }}>
@@ -494,7 +531,7 @@ export function BlockEditorDemo() {
   // above the keymap holds them, so no other binding takes them first.
   const keys = new RichEditorPlugin("blockKeys");
   const blockKeys = defineExtension({ name: "blockKeys", priority: 900, addProseMirrorPlugins: () => [keys] });
-  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, slash, blockKeys], content: DOC, format: "markdown" });
+  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, columns, column, slash, blockKeys], content: DOC, format: "markdown" });
   // What the parts read: the revision follows every change of the document and the selection.
   const revision = signal(editor.revision);
 
@@ -541,7 +578,8 @@ export function BlockEditorDemo() {
         if (!item || !editor.run(liftListItem(item))) break;
       }
     }
-    editor.run(block.apply);
+    if (typeof block.apply === "function") block.apply(editor);
+    else editor.run(block.apply);
   };
   const pick = (block: Block) => {
     const range = editor.suggestion("slash")?.range;
@@ -703,8 +741,14 @@ export function BlockEditorDemo() {
     const head = editor.selection.head;
     return head == null ? null : (handleTarget(editor, head)?.start ?? null);
   };
-  keys.captureKeys(["Mod-Shift-ArrowUp", "Mod-Shift-ArrowDown", "Mod-d", "Mod-k"], (key) => {
+  keys.captureKeys(["Mod-Shift-ArrowUp", "Mod-Shift-ArrowDown", "Mod-d", "Mod-k", "Escape"], (key) => {
     if (key === "Mod-k") return link.edit();
+    // Escape selects the caret's block whole, as in Notion: Backspace then deletes it, and typing replaces it.
+    if (key === "Escape") {
+      const block = caretBlock();
+      if (block !== null && editor.selection.type !== "node") editor.run(setNodeSelection(block));
+      return;
+    }
     const start = caretBlock();
     if (start === null) return;
     if (key === "Mod-d") {
@@ -822,7 +866,7 @@ export function BlockEditorDemo() {
             // A block the handle took, and the line it will drop on.
             // A rule sits as close to its neighbors as they do to each other (the document's gap is around it too).
             marks: { ...richEditorClasses.marks, highlight: "bg-primary/30 rounded" },
-            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3" },
+            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3", columns: "flex-row gap-6", column: "flex-1 min-w-0 gap-3" },
             selectedNode: "bg-primary/10 rounded-md",
             dropCursor: "bg-primary rounded-full",
           }}

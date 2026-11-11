@@ -27,7 +27,7 @@ test("/ opens the blocks and typing narrows them", async () => {
   await app.type("label:Document", "/");
   await app.waitFor("role:listbox[Blocks]");
   expect(app.shows("text:Heading 1")).toBe(true);
-  expect(app.count("role:option")).toBe(12);
+  expect(app.count("role:option")).toBe(13);
   await app.type("label:Document", "list");
   // Three lists match: bulleted, numbered, to-do.
   await app.waitFor("role:option[Divider]", { state: "gone" });
@@ -205,8 +205,8 @@ test("the arrows keep the highlighted block in view in a list taller than the me
   await newLine(app);
   await app.type("label:Document", "/");
   await app.waitFor("role:listbox[Blocks]");
-  // Table is the last of twelve blocks, below what the menu shows at first.
-  for (let i = 0; i < 11; i++) await app.keyboard.press("down");
+  // Table is the last of thirteen blocks, below what the menu shows at first.
+  for (let i = 0; i < 12; i++) await app.keyboard.press("down");
   expect(app.shows("role:option[Table]")).toBe(true);
   await app.keyboard.press("enter");
   await app.waitFor("role:listbox[Blocks]", { state: "gone" });
@@ -373,4 +373,29 @@ test("on a touch screen a bar acts on the caret's block: move, indent, duplicate
   // `+` opens the blocks in a new item below.
   await app.press("role:button[Add a block below]");
   await app.waitFor("role:listbox[Blocks]");
+});
+
+test("Escape selects the caret's block, which Backspace deletes; columns hold blocks side by side", async () => {
+  const app = await openDemo();
+  await app.press("Brief the regional leads");
+  await app.keyboard.press("escape");
+  await app.keyboard.press("backspace");
+  await app.waitFor("text:Brief the regional leads", { state: "gone" });
+  expect(app.shows("text:Confirm the launch date")).toBe(true);
+  // Two columns, typed into one after the other.
+  await newLine(app);
+  await app.type("label:Document", "/columns");
+  await app.keyboard.press("enter");
+  await app.waitFor("role:listbox[Blocks]", { state: "gone" });
+  // The caret starts in the first column; Right at its end goes on into the second.
+  await app.type("label:Document", "Left side");
+  await app.keyboard.press("right");
+  await app.type("label:Document", "Right side");
+  await app.waitFor("text:Right side");
+  const texts = app.texts();
+  expect(texts.indexOf("Left side")).toBeGreaterThan(-1);
+  expect(texts.indexOf("Left side")).toBeLessThan(texts.indexOf("Right side"));
+  // Nothing was typed into the blocks around.
+  expect(texts.includes("Numbers to watch")).toBe(true);
+  expect(texts.includes("Open the beta to five percent of traffic")).toBe(true);
 });
