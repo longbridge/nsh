@@ -239,6 +239,13 @@ pub struct Environment {
     pub pixel_ratio: f32,
     /// A screen reader runs (VoiceOver, TalkBack).
     pub screen_reader: bool,
+    /// The platform's screen readers follow the active descendant a
+    /// focused view names (`accessibilityActiveDescendant`): they read the
+    /// element named as it changes while the focus stays. `nsh-base`'s
+    /// lists then name their highlighted row and tell screen readers
+    /// nothing more; without it, they announce the row or move the screen
+    /// reader's focus to it.
+    pub reads_active_descendants: bool,
     /// The operating system.
     pub os: Os,
     /// The platform's name where it is not the OS's: a platform built
@@ -363,6 +370,7 @@ impl Default for Environment {
             reduce_motion: false,
             pixel_ratio: 1.0,
             screen_reader: false,
+            reads_active_descendants: false,
             os: Os::default(),
             platform: None,
             os_version: (0, 0),

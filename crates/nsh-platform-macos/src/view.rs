@@ -1050,6 +1050,27 @@ define_class!(
             crate::access::table::visible_cells(&NshView(self.retain()))
         }
 
+        // The active descendant the view names, else AppKit's
+        // ([`crate::access::active_descendant`]).
+        #[unsafe(method_id(accessibilitySelectedChildren))]
+        fn accessibility_selected_children(&self) -> Option<Retained<NSArray>> {
+            match crate::access::active_descendant(&NshView(self.retain())) {
+                Some(active) => Some(NSArray::from_retained_slice(&[active])),
+                // SAFETY: NSView's own answer.
+                None => unsafe { msg_send![super(self), accessibilitySelectedChildren] },
+            }
+        }
+
+        // The view it controls ([`crate::access::controlled`]).
+        #[unsafe(method_id(accessibilityLinkedUIElements))]
+        fn accessibility_linked_ui_elements(&self) -> Option<Retained<NSArray>> {
+            match crate::access::controlled(&NshView(self.retain())) {
+                Some(view) => Some(NSArray::from_retained_slice(&[view])),
+                // SAFETY: NSView's own answer.
+                None => unsafe { msg_send![super(self), accessibilityLinkedUIElements] },
+            }
+        }
+
         #[unsafe(method_id(accessibilitySelectedRows))]
         fn accessibility_selected_rows(&self) -> Option<Retained<NSArray>> {
             crate::access::table::rows(&NshView(self.retain())).map(|rows| {
@@ -1638,6 +1659,11 @@ impl NshView {
     /// Node id.
     pub(crate) fn id(&self) -> NodeId {
         self.state().id
+    }
+
+    /// The surface the view is in (its root's), while it is in one.
+    pub(crate) fn surface(&self) -> Option<std::rc::Rc<Surface>> {
+        self.0.keyboard_surface()
     }
 
     /// Kind.

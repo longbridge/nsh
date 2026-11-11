@@ -29,6 +29,9 @@ pub struct Environment {
     pub reduce_motion: bool,
     /// A screen reader runs.
     pub screen_reader: bool,
+    /// The platform's screen readers follow active descendants
+    /// ([`crate::platform::Environment::reads_active_descendants`]).
+    pub reads_active_descendants: bool,
     /// Right-to-left layout.
     pub rtl: bool,
     /// Device pixels per point.
@@ -113,6 +116,7 @@ impl Default for Environment {
             font_scale: 1.0,
             reduce_motion: false,
             screen_reader: false,
+            reads_active_descendants: false,
             rtl: false,
             pixel_ratio: 1.0,
             os: Os::default(),
