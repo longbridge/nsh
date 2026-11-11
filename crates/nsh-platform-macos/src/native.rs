@@ -2716,7 +2716,9 @@ fn verify_cookie(parsed: &NSHTTPCookie, cookie: &WebCookie) -> Result<(), String
         .expiresDate()
         .map(|date| date.timeIntervalSince1970().round() as i64);
     if parsed_expiry != expected_expiry {
-        return mismatch("expires");
+        return Err(format!(
+            "macOS does not keep the expires attribute of cookie `{name}`: requested {expected_expiry:?}, parsed {parsed_expiry:?} (Unix seconds)"
+        ));
     }
     if parsed.isSecure() != cookie.secure {
         return mismatch("secure");

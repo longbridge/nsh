@@ -68,6 +68,8 @@ The core validates one cookie before any native call: the name is an RFC 6265 to
 
 Each backend reads and writes the store of the view it is sent to, so an `incognito` view uses its in-memory store and other views share the app's profile. macOS reads `WKHTTPCookieStore` (`getAllCookies:`, `setCookie:completionHandler:`, `deleteCookie:completionHandler:`), Linux the `WebKitGTK` cookie manager of the view's `NetworkSession`, and Windows the `ICoreWebView2CookieManager` of the web view (an InPrivate controller has its own). Native completions carry a lifetime fence: a reply finishing after its host is gone never reaches a restarted engine's node. Expiries cross the boundary as Unix milliseconds; each native API's seconds or `NSDate` is converted at the call. Cookie values are never logged.
 
+A native store may cap or reject a lifetime beyond its cookie policy (browser implementations commonly cap persistent lifetimes at 400 days): a capped request stores a future expiry no later than the one asked for, and a rejecting store makes `set_cookie` fail rather than store a different cookie. `cookies` always reports the expiry the store actually kept. Ordinary lifetimes are verified exactly; the native smoke uses a one-hour persistent cookie for exact-millisecond validation and records a far-future cookie's capped or rejected outcome as an explicit limitation.
+
 ## The main thread never waits for JS
 
 Some callbacks are questions the system wants answered on the spot (may this

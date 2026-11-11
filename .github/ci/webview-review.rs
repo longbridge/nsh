@@ -7,7 +7,7 @@
 //! Cookie values are never printed; failures name cookies and stages only.
 use std::{
     path::PathBuf,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use nsh_core::{
@@ -118,6 +118,12 @@ fn Smoke() -> impl IntoElement {
             // The fixture host, and URLs used only as cookie filters.
             let http_base = base_for_task;
             let https_base = http_base.replacen("http://", "https://", 1);
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as i64);
+            // An ordinary persistent lifetime: isolate platform policy for
+            // far-future dates, while still checking exact Unix ms.
+            let primary_expiry = (now_ms / 1000 + 3600) * 1000;
             let deep_http = format!("{http_base}/deep/x");
             let deep_https = format!("{https_base}/deep/x");
             let other_http = format!("{http_base}/other");
@@ -133,6 +139,7 @@ fn Smoke() -> impl IntoElement {
                 ("pathed", "127.0.0.1", "/deep"),
                 ("secureone", "127.0.0.1", "/"),
                 ("attrs", "127.0.0.1", "/"),
+                ("far", "127.0.0.1", "/"),
                 ("twin", "127.0.0.1", "/a"),
                 ("twin", "127.0.0.1", "/b"),
                 ("incog", "127.0.0.1", "/"),
@@ -158,7 +165,7 @@ fn Smoke() -> impl IntoElement {
             secure.secure = true;
             shared_a.set_cookie(secure).await?;
             let mut attrs = cookie("attrs", "127.0.0.1", "/");
-            attrs.expires = Some(EXPIRY_MS);
+            attrs.expires = Some(primary_expiry);
             attrs.same_site = Some(CookieSameSite::Strict);
             attrs.http_only = true;
             shared_a.set_cookie(attrs).await?;
@@ -197,7 +204,7 @@ fn Smoke() -> impl IntoElement {
             // attributes survive a set and a read.
             let all = shared_a.cookies(None).await?;
             let seen = find("attributes", &all, "attrs")?;
-            if seen.expires != Some(EXPIRY_MS) {
+            if seen.expires != Some(primary_expiry) {
                 return Err(format!("attrs expiry: {:?}", seen.expires));
             }
             if seen.same_site != Some(CookieSameSite::Strict) {
@@ -209,6 +216,32 @@ fn Smoke() -> impl IntoElement {
             let secure_seen = find("secure attribute", &all, "secureone")?;
             if !secure_seen.secure {
                 return Err("secure attribute was not kept".into());
+            }
+
+            // A far-future date is platform policy, not the ordinary
+            // conversion above: record what the native store did instead
+            // of silently dropping the case.
+            let mut far = cookie("far", "127.0.0.1", "/");
+            far.expires = Some(EXPIRY_MS);
+            match shared_a.set_cookie(far).await {
+                Ok(()) => {
+                    let stored = shared_a.cookies(None).await?;
+                    match find("far-future", &stored, "far")?.expires {
+                        Some(ms) if ms == EXPIRY_MS => {
+                            println!("PASS far-future expiry kept exactly")
+                        }
+                        Some(ms) if ms > now_ms => println!(
+                            "LIMITATION far-future expiry capped by the platform: requested {EXPIRY_MS} ms, stored {ms} ms"
+                        ),
+                        Some(ms) => {
+                            return Err(format!("far-future expiry was in the past: {ms} ms"))
+                        }
+                        None => return Err("far-future cookie lost its expiry".into()),
+                    }
+                }
+                Err(error) => {
+                    println!("LIMITATION far-future expiry rejected by the platform: {error}")
+                }
             }
             println!("PASS expiry milliseconds, SameSite and HttpOnly");
 

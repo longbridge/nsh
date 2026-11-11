@@ -125,7 +125,7 @@ Rust hosts read and write the mounted web view's own cookie store. These methods
 | `set_cookie(cookie: WebCookie)` | Sets one cookie, replacing one with the same name, domain and path. The core checks the cookie before the platform sees it: an invalid name, domain, value, path or `SameSite=None` without `Secure` fails without any native change. |
 | `delete_cookie(name: &str, domain: &str, path: &str)` | Deletes the cookie with that name, domain and path, and no other; a host-only and a domain cookie with the same name and path stay distinct. An absent cookie is not an error. |
 
-Each returns `Answer<Result<…, String>>`; await it in a task. A request fails when the ref names no mounted web view, the platform has no cookie store, the platform errors, or no answer comes in time. `WebCookie` keeps `expires` in Unix milliseconds (`None`: a session cookie) and `same_site` (`CookieSameSite::None`, `Lax`, `Strict`, or `None` without the attribute).
+Each returns `Answer<Result<…, String>>`; await it in a task. A request fails when the ref names no mounted web view, the platform has no cookie store, or the platform errors, or no answer comes in time. `WebCookie` keeps `expires` in Unix milliseconds (`None`: a session cookie) and `same_site` (`CookieSameSite::None`, `Lax`, `Strict`, or `None` without the attribute). A native store may cap a lifetime beyond its cookie policy (commonly 400 days): the store then keeps a future expiry no later than requested, and `cookies` reports that stored value; a store that refuses the cookie makes `set_cookie` fail.
 
 An `incognito` view reads and writes its own in-memory store; other views share the app's profile. The store also holds cookies the page set, and `cookies` reports those as the store keeps them.
 

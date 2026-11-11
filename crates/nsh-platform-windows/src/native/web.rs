@@ -1111,7 +1111,7 @@ impl WebItem {
                 // SAFETY: WebView2 getters on the live list; the cookies
                 // are copied (a COM reference each).
                 unsafe {
-                    if list.Count(&mut count).is_err() {
+                    if cookies.Count(&mut count).is_err() {
                         emitter.reply(
                             request,
                             Err("cannot read the cookies: the list is unavailable".to_owned()),
@@ -1119,7 +1119,7 @@ impl WebItem {
                         return Ok(());
                     }
                     for index in 0..count {
-                        let Ok(cookie) = list.GetValueAtIndex(index) else {
+                        let Ok(cookie) = cookies.GetValueAtIndex(index) else {
                             continue;
                         };
                         if nsh_core::webview::cookie_has_identity(

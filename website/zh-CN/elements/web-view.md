@@ -110,7 +110,7 @@ Rust 宿主可以读写已挂载 web view 自己的 cookie 存储。这些方法
 | `set_cookie(cookie: WebCookie)` | 设置一个 cookie；同名、同域、同路径的 cookie 会被替换。核心在平台看到它之前检查：名称、域、值、路径无效，或 `SameSite=None` 没有 `Secure` 时直接失败，不产生任何原生修改。 |
 | `delete_cookie(name: &str, domain: &str, path: &str)` | 只删除名称、域、路径都匹配的那个 cookie；同名同路径的 host-only cookie 与 domain cookie 仍然区分。cookie 不存在不算错误。 |
 
-三者都返回 `Answer<Result<…, String>>`，在任务中等待。ref 没有指向已挂载的 web view、平台没有 cookie 存储、平台报错或没有按时收到回复时失败。`WebCookie` 的 `expires` 是 Unix 毫秒（`None` 表示会话 cookie），`same_site` 为 `CookieSameSite::None`、`Lax`、`Strict`，或没有该属性时为 `None`。
+三者都返回 `Answer<Result<…, String>>`，在任务中等待。ref 没有指向已挂载的 web view、平台没有 cookie 存储、平台报错或没有按时收到回复时失败。`WebCookie` 的 `expires` 是 Unix 毫秒（`None` 表示会话 cookie），`same_site` 为 `CookieSameSite::None`、`Lax`、`Strict`，或没有该属性时为 `None`。原生存储可能按其 cookie 策略缩短过长的有效期（常见上限为 400 天）：此时存储保留一个不晚于请求值的未来时间，`cookies` 返回实际保存的值；拒绝该 cookie 的存储会让 `set_cookie` 失败。
 
 `incognito` 视图读写自己的内存存储；其他视图共享应用的配置。存储中也有页面自己设置的 cookie，`cookies` 按存储中的内容返回它们。
 
