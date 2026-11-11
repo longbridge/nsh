@@ -281,7 +281,9 @@ impl Accessibility {
     /// (AT-SPI's and AccessKit's description, AppKit's help, UIKit's
     /// hint) gets: `value_text` (a value it reads nowhere else), the
     /// description and the hint, in that order, each a sentence of its
-    /// own; `None` when there is none of them.
+    /// own (". " between them, or only a space after a part that already
+    /// ends with `.`, `!`, `?` or `…`, nothing after a full-width `。`,
+    /// `！` or `？`); `None` when there is none of them.
     pub fn help_text(&self, value_text: Option<&str>) -> Option<String> {
         let mut parts = [
             value_text,
@@ -294,7 +296,13 @@ impl Accessibility {
         let first = parts.next()?;
         let mut out = first.to_owned();
         for part in parts {
-            out.push_str(". ");
+            // A part that already ends its sentence keeps its own mark: a
+            // full-width one needs no space after it, a Latin one a space.
+            match out.chars().last() {
+                Some('。' | '！' | '？') => {}
+                Some('.' | '!' | '?' | '…') => out.push(' '),
+                _ => out.push_str(". "),
+            }
             out.push_str(part);
         }
         Some(out)
