@@ -101,24 +101,32 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
         &rv,
         Part::Root,
     );
+    // An unpadded box around the scroll view and the sink, so padding on
+    // the root insets both together and the sink stays in the viewport's
+    // coordinates. Both use `flex_auto` so an editor without a height is as
+    // tall as its document, and past its `max-height` it scrolls.
     root.child(
-        scroll()
-            .element_ref(&rv.scroll)
-            // From its content's height: an editor without a height is as
-            // tall as its document, and past its `max-height` it scrolls.
+        view()
+            .relative()
             .flex_auto()
-            // The editor's own taps keep its keyboard (Android's scroll
-            // views dismiss it on a tap otherwise).
-            .keyboard_taps(KeyboardTaps::Always)
-            .on_scroll(move |e: &ScrollEvent| {
-                scroll_rv.scroll_y.set(e.offset.y);
-                scroll_rv.scrolled.set(e.offset.y);
-                scroll_rv.viewport.set(e.size);
-            })
-            .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
-            .child(content(rv.clone())),
+            .overflow_hidden()
+            .child(
+                scroll()
+                    .element_ref(&rv.scroll)
+                    .flex_auto()
+                    // The editor's own taps keep its keyboard (Android's scroll
+                    // views dismiss it on a tap otherwise).
+                    .keyboard_taps(KeyboardTaps::Always)
+                    .on_scroll(move |e: &ScrollEvent| {
+                        scroll_rv.scroll_y.set(e.offset.y);
+                        scroll_rv.scrolled.set(e.offset.y);
+                        scroll_rv.viewport.set(e.size);
+                    })
+                    .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
+                    .child(content(rv.clone())),
+            )
+            .child(sink(rv)),
     )
-    .child(sink(rv))
 }
 
 /// The content box: what presses and drags select in.
@@ -137,6 +145,7 @@ fn content(rv: Rv) -> impl IntoElement {
                 placed.place();
             })
             .relative()
+            .min_h(relative(1.0))
             .cursor(Cursor::Text),
         &rv,
         Part::Content,
