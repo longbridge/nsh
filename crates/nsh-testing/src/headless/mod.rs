@@ -1678,14 +1678,17 @@ impl Headless {
                 .screen
                 .press_point(&parsed, id)
                 .map_or(target.center(), |p| target.origin + p);
-            let point = match self.screen.visible_bounds_in_root(id) {
+            let visible = self.screen.visible_bounds_in_root(id);
+            let point = match visible {
                 Some(visible) if visible.contains(&point) => point,
                 Some(visible) => visible.center(),
                 None => point,
             };
             if let Some((to, inside)) = self.screen.routed_press(id, point) {
                 (id, routed) = (to, Some(inside));
-            } else if let Some(cover) = self.screen.covering(id, point) {
+            } else if (visible.is_some() || target.is_empty())
+                && let Some(cover) = self.screen.covering(id, point)
+            {
                 return Err(format!(
                     "{}; {}",
                     failure::covered(selector, &self.screen.selector_of(cover)),
@@ -2400,6 +2403,42 @@ mod tests {
                 },
             ))
             .child(text(move || format!("seen: {}", seen.get())))
+    }
+
+    #[component]
+    fn EmptyCovered() -> impl IntoElement {
+        view()
+            .w(px(390.0))
+            .h(px(844.0))
+            .child(
+                view()
+                    .w(px(0.0))
+                    .h(px(0.0))
+                    .on_press(|| {})
+                    .child(text("Zero").w(px(120.0)).h(px(20.0))),
+            )
+            .child(
+                view()
+                    .absolute()
+                    .left(px(0.0))
+                    .top(px(0.0))
+                    .w(px(200.0))
+                    .h(px(70.0)),
+            )
+    }
+
+    #[test]
+    fn an_empty_press_target_keeps_its_covering_check() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<EmptyCovered>())).unwrap();
+        app.first_render().unwrap();
+        let target = app.screen().press_target("Zero").unwrap().unwrap();
+        assert!(app.screen().bounds_in_root(target).unwrap().is_empty());
+        assert!(app.screen().visible_bounds_in_root(target).is_none());
+        assert!(
+            app.press("Zero")
+                .unwrap_err()
+                .starts_with("`Zero` is covered:")
+        );
     }
 
     #[test]
