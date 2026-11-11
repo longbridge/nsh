@@ -679,6 +679,34 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
   Drawing each area in a pass of its own (up to 6) was tried first: Stocks' paint only went 2.7 → 2.2 ms, the
   passes each walking the tree and the merged areas covering ~30% of the window.
 
+  Canvas paints that cannot change pixels and slot-indexed canvas damage (`docs/dev/canvas.md` "Partial redraws"),
+  release, base `f0b4659e` (the baseline built from that commit in a detached worktree), i7-14650HX, RTX 4060
+  Laptop GPU, 2560 × 1600 at 240 Hz and 150% scale, a 1200 × 800 point gallery window. Six alternating
+  baseline/new runs per side (`examples/gallery/tools/perf.py --nsh <binary> --only Stocks,Canvas --seconds 4
+  --size 1200x800`, the logs kept by an external collector), each cell the median of the per-second phase means
+  and the nearest-rank p95 of the per-second p95s over the pooled seconds (`n`):
+
+  | Scenario (n before / after) | Phase | Before, mean / p95 | After, mean / p95 |
+  |---|---|---|---|
+  | Stocks idle (18 / 18) | canvas | 0.475 / 2.080 ms | 0.460 / 2.140 ms |
+  | Stocks idle (18 / 18) | paint | 4.350 / 9.010 ms | 4.405 / 9.180 ms |
+  | Stocks scroll (77 / 78) | canvas | 0.480 / 2.300 ms | 0.480 / 2.250 ms |
+  | Stocks scroll (77 / 78) | paint | 4.360 / 9.120 ms | 4.400 / 9.210 ms |
+  | Canvas idle (18 / 18) | canvas | 0.050 / 0.100 ms | 0.050 / 0.070 ms |
+  | Canvas idle (18 / 18) | paint | 0.510 / 0.690 ms | 0.500 / 0.740 ms |
+  | Canvas scroll (26 / 29) | canvas | 0.060 / 0.100 ms | 0.060 / 0.100 ms |
+  | Canvas scroll (26 / 29) | paint | 1.055 / 2.540 ms | 1.030 / 2.620 ms |
+
+  Both gallery demos hold their rate (240 fps in the Canvas demo; Stocks' live feed keeps it at a median 186–189
+  fps both sides) and the phases move within run-to-run noise: the gallery does not draw Flow's comet, the
+  workload this targets (48 strokes per flowing connector, about three quarters of them at alpha zero at a
+  typical step), and the Canvas demo's pulsing ring animates its radius, so its damage keeps the conservative
+  full scans. The flow document is measured after Flow's pin advances. Headless
+  `nsh test examples/gallery/App.tsx --trace` is unchanged: 3174 ops / 3169 mount items / 859 nodes in the first
+  commit and 11 ops / 0 items / 859 nodes in the second, with every item line equal between the binaries (the
+  bundle is 2 110 929 bytes from both). The scripted light and dark screenshots of the gallery's home page are
+  byte-identical between the binaries (SHA-256 `6a3568db…` light, `b24d354d…` dark).
+
 - Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
   both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes
