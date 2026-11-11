@@ -284,6 +284,21 @@ impl Nsh {
     }
 }
 
+/// The `[features]` of a generated runner crate that lets `nsh package
+/// --devtools` build it with the in-app DevTools endpoint: the desktop
+/// runners (`macos-app`, `windows-app`, `rust-macos`, `rust-windows`) have
+/// one, which enables their runner crate's.
+fn devtools_feature(dir: &str, lib: &str) -> String {
+    if matches!(
+        dir,
+        "macos-app" | "windows-app" | "rust-macos" | "rust-windows"
+    ) {
+        format!("\n[features]\ndevtools = [\"{lib}/devtools\"]\n")
+    } else {
+        String::new()
+    }
+}
+
 /// What a generated crate names of a platform crate's features: all but `js`
 /// and the standard JS modules, which a Rust app does not run.
 pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\"]";
@@ -386,7 +401,10 @@ pub(crate) fn of(entry: &Path) -> anyhow::Result<Option<RustApp>> {
         root,
         retargeted,
     };
-    app.write_workspace()?;
+    // A `--jobs` worker reads the workspace its run wrote.
+    if !crate::test_host::prepared() {
+        app.write_workspace()?;
+    }
     Ok(Some(app))
 }
 
@@ -1059,6 +1077,13 @@ fn write(path: &Path, contents: &str) -> anyhow::Result<()> {
     if fs::read_to_string(path).is_ok_and(|old| old == contents) {
         return Ok(());
     }
+    // A `--jobs` worker writes nothing shared: its run prepared it.
+    if crate::test_host::prepared() {
+        anyhow::bail!(
+            "{} differs from what this run prepared: a worker does not write it",
+            path.display()
+        );
+    }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -1183,6 +1208,16 @@ impl RustApp {
     /// the program changes.
     pub(crate) fn describe(&self) -> anyhow::Result<Vec<SetDescription>> {
         let what = self.crates_what();
+        if crate::test_host::prepared() {
+            // A `--jobs` worker: its run built the program and kept its
+            // output; nothing is built or written here.
+            let text = fs::read_to_string(self.workspace.join("description.json"))
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .and_then(|cached| cached["description"].as_str().map(str::to_owned))
+                .context("the description this run prepared is missing")?;
+            return read_description(&text, &self.crates, &what);
+        }
         let program = self.build(
             &self.workspace,
             &self.bin("describe"),
@@ -1563,13 +1598,14 @@ panic = \"abort\"
                  [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n\
                  [dependencies]\n{lib} = {}\n\
                  nsh-core = {}\nnsh-base = {}\n{app}\n\n\
-                 [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
+                 [target.'cfg({os})'.dependencies]\n{platform} = {}\n{}",
                 self.bin(dir),
                 self.bin(dir),
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
                 self.nsh.dep(platform, RUST_APP_PLATFORM),
+                devtools_feature(dir, lib),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -1980,13 +2016,14 @@ opt-level = \"s\"
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {}\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
-                 [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
+                 [target.'cfg({os})'.dependencies]\n{platform} = {}\n{}",
                 self.bin(dir),
                 self.bin(dir),
                 src(lib),
                 src("nsh-core"),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
                 src(platform),
+                devtools_feature(dir, lib),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -2144,25 +2181,41 @@ opt-level = \"s\"
             crate::runtime::require_target(None, triple)?;
         }
         if self.root.is_some() {
-            return self.rust_runner(platform, runner, triple);
+            return self.rust_runner(platform, runner, triple, &[]);
         }
-        self.host(platform, runner, triple)
+        self.host(platform, runner, triple, &[])
+    }
+
+    /// The release runner of the app for `platform`, built with the in-app
+    /// DevTools endpoint (`nsh package --devtools`): the feature `devtools` of
+    /// the generated crate, which enables the runner crate's.
+    pub(crate) fn runner_with_devtools(&self, platform: Platform) -> anyhow::Result<PathBuf> {
+        const DEVTOOLS: &[&str] = &["--features", "devtools"];
+        if !matches!(platform, Platform::MacOs | Platform::Windows) {
+            anyhow::bail!("--devtools goes with --target macos or --target windows");
+        }
+        if self.root.is_some() {
+            return self.rust_runner(platform, true, platform.triple(), DEVTOOLS);
+        }
+        self.host(platform, true, platform.triple(), DEVTOOLS)
     }
 
     /// The development host `nsh test --target` runs the app in: a Rust
     /// app's too, built with its root (its runners have no dev server
     /// client), which it runs when the test session says so.
     pub(crate) fn test_host(&self, platform: Platform) -> anyhow::Result<PathBuf> {
-        self.host(platform, false, platform.triple())
+        self.host(platform, false, platform.triple(), &[])
     }
 
     /// The development host (`runner` false) or release runner for
-    /// `platform` with the app's crates, built for `triple`.
+    /// `platform` with the app's crates, built for `triple`; `extra`: more
+    /// cargo arguments (features).
     fn host(
         &self,
         platform: Platform,
         runner: bool,
         triple: Option<&str>,
+        extra: &[&str],
     ) -> anyhow::Result<PathBuf> {
         let name = match (platform, runner) {
             (Platform::Linux, false) => "linux-host",
@@ -2186,6 +2239,7 @@ opt-level = \"s\"
             Platform::Tui => (self.tui_workspace()?, &[][..]),
             _ => (self.workspace.clone(), &[][..]),
         };
+        let features: Vec<&str> = features.iter().chain(extra).copied().collect();
         let package = self.bin(name);
         let release = runner || RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
         let what = if release && !runner {
@@ -2194,23 +2248,25 @@ opt-level = \"s\"
             what
         };
         let what = format!("{what}{}", crate::runtime::other_triple(platform, triple));
-        self.build(&workspace, &package, triple, release, features, &what)
+        self.build(&workspace, &package, triple, release, &features, &what)
     }
 
     /// A Rust app's runner for `platform` (`rust-<platform>`): a release
     /// build for packages (`release`), a debug one for `nsh run`. Both run
-    /// the app's root with no JS runtime.
+    /// the app's root with no JS runtime. `extra`: more cargo arguments
+    /// (features).
     fn rust_runner(
         &self,
         platform: Platform,
         release: bool,
         triple: Option<&str>,
+        extra: &[&str],
     ) -> anyhow::Result<PathBuf> {
         let dir = match platform {
             Platform::Linux => "rust-linux",
             Platform::MacOs => "rust-macos",
             Platform::Windows => "rust-windows",
-            Platform::Tui => return self.host(platform, false, triple),
+            Platform::Tui => return self.host(platform, false, triple, extra),
             Platform::Gpui => unreachable!("a Rust app does not run on GPUI's host"),
             Platform::IphoneOs | Platform::IphoneSimulator | Platform::MacCatalyst => "rust-ios",
         };
@@ -2229,7 +2285,14 @@ opt-level = \"s\"
             if release { "" } else { " (debug)" },
             crate::runtime::other_triple(platform, triple)
         );
-        self.build(&self.workspace, &self.bin(dir), triple, release, &[], &what)
+        self.build(
+            &self.workspace,
+            &self.bin(dir),
+            triple,
+            release,
+            extra,
+            &what,
+        )
     }
 
     /// Waits until `stop` returns true (or the user stops the command);

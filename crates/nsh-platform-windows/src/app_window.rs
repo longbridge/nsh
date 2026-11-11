@@ -716,7 +716,7 @@ pub(crate) fn title_bar_changed(surface: &Surface, id: NodeId, area: Edges<Point
 }
 
 /// What window `id` is now, as the app reads it (the test agent).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn state(surface: &Surface, id: NodeId) -> Option<WindowState> {
     crate::window_state::state(get(surface, id)?.hwnd)
 }

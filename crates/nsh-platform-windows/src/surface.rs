@@ -228,7 +228,7 @@ pub(crate) struct Surface {
     /// ([`Surface::keep_deadline`]).
     keeper: Cell<Option<f64>>,
     /// The model of a test session's app (`nsh test --target windows`).
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The time of the current (last) frame (seconds since the surface was
     /// made).
@@ -330,7 +330,7 @@ impl Surface {
             ticker: RefCell::new(None),
             frame_clients: RefCell::default(),
             keeper: Cell::new(None),
-            #[cfg(feature = "dev")]
+            #[cfg(any(feature = "dev", feature = "devtools"))]
             test_model: RefCell::default(),
             now: Cell::new(0.0),
             epoch: std::time::Instant::now(),
@@ -481,7 +481,7 @@ impl Surface {
         config.viewport = env.window;
         config.environment = env;
         // A test session's app: the test's storage, network and trace.
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         if let Some(model) = &*self.test_model.borrow() {
             model.set_up_engine(&mut config);
         }
@@ -517,7 +517,7 @@ impl Surface {
                 crate::image::set_disk_cache(self, engine.image_cache());
                 *self.media_files.borrow_mut() = engine.media_files();
                 // The test moves its clock through the engine.
-                #[cfg(feature = "dev")]
+                #[cfg(any(feature = "dev", feature = "devtools"))]
                 if let Some(model) = &*self.test_model.borrow() {
                     model.engine_started(engine.control());
                 }
@@ -576,7 +576,7 @@ impl Surface {
     }
 
     /// Shows fatal app errors with `f` (development hosts).
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     pub(crate) fn set_error_handler(&self, f: ErrorHandler) {
         *self.on_error.borrow_mut() = Some(f);
     }
@@ -862,7 +862,7 @@ impl Surface {
             }
             Message::Error(message) => {
                 log::error!("{message}");
-                #[cfg(feature = "dev")]
+                #[cfg(any(feature = "dev", feature = "devtools"))]
                 if let Some(model) = &*self.test_model.borrow() {
                     model.error(message.to_string());
                 }
@@ -908,7 +908,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
         }
@@ -964,7 +964,7 @@ impl Surface {
     /// Whether a native animation runs: the graph's (not one looping
     /// forever, which no test step waits for), or the platform's own
     /// (transitions, scroll glides).
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     pub(crate) fn animating(&self) -> bool {
         self.anim.borrow().finishing() || !self.frame_clients.borrow().is_empty()
     }
@@ -972,7 +972,7 @@ impl Surface {
     /// Keeps the model `nsh test --target` steps see of the app
     /// ([`nsh_testing::agent::Model`]): every batch applied and every error
     /// go to it from now on.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
         *self.test_model.borrow_mut() = model;
     }
@@ -1018,9 +1018,9 @@ impl Surface {
 
     /// Whether `nsh test --target windows` drives the app.
     fn testing(&self) -> bool {
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         return self.test_model.borrow().is_some();
-        #[cfg(not(feature = "dev"))]
+        #[cfg(not(any(feature = "dev", feature = "devtools")))]
         false
     }
 

@@ -77,7 +77,17 @@ pub(crate) fn init(verbose: bool) {
 
 /// Whether everything is shown as it comes.
 pub(crate) fn verbose() -> bool {
-    term().verbose
+    term().verbose && !STDOUT_RESERVED.load(Ordering::Acquire)
+}
+
+/// Standard output belongs to a protocol (`nsh devtools mcp`): nothing a
+/// command starts may inherit it, so runs are never verbose (their output is
+/// captured as in a quiet run).
+static STDOUT_RESERVED: AtomicBool = AtomicBool::new(false);
+
+/// Keeps standard output for the process's own protocol ([`STDOUT_RESERVED`]).
+pub(crate) fn reserve_stdout() {
+    STDOUT_RESERVED.store(true, Ordering::Release);
 }
 
 /// Whether output is colored.

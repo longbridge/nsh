@@ -49,7 +49,7 @@ pub(crate) fn package(
     id: &str,
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
-    let runner = runtime::file(Platform::Windows, true)?;
+    let runner = runtime::runner(Platform::Windows, options.devtools)?;
     // A runner built for another system would package fine and then not
     // start on Windows ("not a valid application").
     let mut magic = [0; 2];

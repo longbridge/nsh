@@ -96,6 +96,7 @@ does:
 ```sh
 nsh test                      # every test file of the app in the current directory
 nsh test App.test.tsx         # one file
+nsh test scripts/e2e          # a directory of test files: the app around it (the nearest nsh.json or App.tsx up) is the one they open
 nsh test --filter "adds"      # the tests whose name contains "adds"
 ```
 
@@ -606,6 +607,10 @@ nsh test --target web                         # in a headless Chrome, Edge or Ch
 nsh test --target tui                         # in an in-memory terminal
 nsh test tests/form.test.tsx --target macos   # one file
 ```
+
+On macOS and Windows the apps run over their [DevTools](./devtools.md) endpoint, which brings `--jobs <N>` (test files at once),
+`--artifacts <DIR>` (a `timeline.jsonl` and a `failure.png` per file), `--keep-open-on-failure` (a failed test's apps stay open for a
+DevTools client) and `--app <PATH>` (a packaged app built with `nsh package --devtools`) ([CLI](./cli.md#nsh-test)).
 
 The window opens at the viewport's size (390 × 844 unless `open` says), within the screen (on macOS, `setViewport`
 keeps it there, its top left corner when it is larger); on iOS and Android the app fills the device's screen, at the

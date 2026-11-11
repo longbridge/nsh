@@ -12,6 +12,7 @@ mod check;
 mod component;
 mod dev;
 mod dev_port;
+mod devtools;
 mod entry;
 mod init;
 mod logger;
@@ -151,6 +152,10 @@ enum Command {
         /// The entry of the app `path` is part of (set from it).
         #[arg(skip)]
         entry: PathBuf,
+        /// The entry a `--jobs` run found, which its worker takes instead
+        /// of finding it again (internal).
+        #[arg(long = "entry", value_name = "PATH", hide = true)]
+        worker_entry: Option<PathBuf>,
         /// Run only the tests whose name contains this (`cargo test`'s
         /// too).
         #[arg(long)]
@@ -204,7 +209,55 @@ enum Command {
         /// the app in use, and the tests' input goes to them directly.
         #[arg(long)]
         foreground: bool,
+        /// Run up to N test files at once, each in a process of its own
+        /// whose apps open their own windows (`--target macos` or
+        /// `windows`: their hosts are driven over DevTools, one per app).
+        /// The results of a file are shown together when it ends.
+        #[arg(long, value_name = "N", default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+        jobs: u32,
+        /// Keep what each test file's run over DevTools leaves in
+        /// `<DIR>/<the file's path, `/` as `__`>/`: `timeline.jsonl` (one
+        /// JSON line per step the test took and per console line the apps
+        /// printed, with `t_ms`, milliseconds since the file started) and
+        /// `failure.png`, the window of the app at the file's first failure
+        /// (`--target macos` or `windows`).
+        #[arg(long, value_name = "DIR")]
+        artifacts: Option<PathBuf>,
+        /// When a test fails, leave its apps open and print the DevTools
+        /// endpoint and token to connect to them with; Enter (or 10
+        /// minutes) closes them and the run goes on (`--target macos` or
+        /// `windows`, one test file at a time).
+        #[arg(long)]
+        keep_open_on_failure: bool,
+        /// Where a `--jobs` run's test file leaves its results for the
+        /// process that started it (internal).
+        #[arg(long, value_name = "FILE", hide = true)]
+        results_json: Option<PathBuf>,
+        /// The directory a `--jobs` run's worker keeps its generated files
+        /// in, instead of the app's `.nsh/test` (internal).
+        #[arg(long, value_name = "DIR", hide = true)]
+        work_dir: Option<PathBuf>,
+        /// The directory the `--jobs` run found its test files in, which
+        /// `--artifacts` names each file's directory from (internal).
+        #[arg(long, value_name = "DIR", hide = true)]
+        artifacts_root: Option<PathBuf>,
+        /// The development host a `--jobs` run built for its workers: they
+        /// only read what the run prepared (internal).
+        #[arg(long, value_name = "PATH", hide = true)]
+        prepared_host: Option<PathBuf>,
+        /// Run the apps the tests open as this packaged app (an `.app` on
+        /// macOS, an executable or its directory on Windows, built by `nsh
+        /// package --devtools`) instead of on a development host, driven
+        /// over its DevTools endpoint. Every `open` starts this app, with a
+        /// fresh data directory (`--target macos` or `windows`).
+        #[arg(long, value_name = "PATH")]
+        app: Option<PathBuf>,
     },
+    /// Drive a running app over its DevTools endpoint: launch, tree, shot,
+    /// press, type, wait, logs, close, and an MCP server for AI agents
+    /// (experimental: these commands and the MCP tools may change).
+    #[command(name = "devtools")]
+    Devtools(devtools::DevtoolsArgs),
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
     /// Rust crates (`nsh.json` `"rust"`): `cargo check` them first, and a
@@ -577,6 +630,13 @@ struct PackageArgs {
     /// relatively, so the site runs from any directory.
     #[arg(long, value_name = "URL", conflicts_with = "run")]
     asset_url: Option<String>,
+    /// macOS, Windows: build the app's runner with the in-app DevTools
+    /// endpoint, which `nsh test --app` drives the packaged app over (it is
+    /// served when the app starts with `NSH_DEVTOOLS` set). The runner is
+    /// built from source, in a checkout of nsh or for an app with Rust
+    /// crates; do not release such a package.
+    #[arg(long)]
+    devtools: bool,
 }
 
 /// `nsh component`'s actions.
@@ -617,6 +677,7 @@ impl Command {
             | Command::Run { entry, .. }
             | Command::Publish { entry, .. } => Some(entry),
             Command::Package(args) => Some(&mut args.entry),
+            Command::Devtools(args) => args.entry_mut(),
             Command::Init { .. }
             | Command::Keygen { .. }
             | Command::Update { .. }
@@ -725,11 +786,38 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         }
         return sign::resign(entry, key, cert, out.clone());
     }
+    // A `--jobs` worker only reads what its run prepared (before the Rust
+    // app is read below).
+    if let Command::Test {
+        prepared_host: Some(_),
+        ..
+    } = &command
+    {
+        test_host::set_prepared();
+    }
     let mut types = true;
+    // A `--jobs` worker's run wrote them already.
+    if let Command::Test {
+        results_json: Some(_),
+        ..
+    } = &command
+    {
+        types = false;
+    }
     // The app a test's path is part of.
-    if let Command::Test { path, entry, .. } = &mut command {
+    if let Command::Test {
+        path,
+        entry,
+        worker_entry,
+        ..
+    } = &mut command
+    {
         *path = dunce::canonicalize(&*path).with_context(|| format!("{}", path.display()))?;
-        *entry = test::app_entry(path)?;
+        // A `--jobs` worker is given the entry its run found.
+        *entry = match worker_entry.take() {
+            Some(entry) => entry,
+            None => test::app_entry(path)?,
+        };
     }
     if let Some(entry) = command.entry_mut() {
         *entry = entry::resolve(entry)?;
@@ -768,6 +856,7 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             | Command::Check { .. }
             | Command::Test { .. }
             | Command::Package(_)
+            | Command::Devtools(_)
             | Command::Run { .. }
             | Command::Dev {
                 server_only: false,
@@ -864,9 +953,11 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             split,
         } => build::build(&entry, &out, release, split),
         Command::Check { entry, tsc, args } => check::check(&entry, tsc.as_deref(), &args),
+        Command::Devtools(args) => devtools::run(args),
         Command::Test {
             path,
             entry,
+            worker_entry: _,
             filter,
             trace,
             fps,
@@ -877,6 +968,14 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device,
             display,
             foreground,
+            jobs,
+            artifacts,
+            keep_open_on_failure,
+            results_json,
+            work_dir,
+            artifacts_root,
+            prepared_host,
+            app,
         } => test::test(
             &path,
             &entry,
@@ -890,6 +989,16 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device.as_deref(),
             display.map(|n| n as usize),
             foreground,
+            test::Extras {
+                jobs: jobs as usize,
+                artifacts,
+                keep_open_on_failure,
+                results_json,
+                work_dir,
+                artifacts_root,
+                prepared_host,
+                app,
+            },
         ),
         Command::Dev {
             entry,
@@ -949,6 +1058,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 arch,
                 run,
                 asset_url,
+                devtools,
             } = *args;
             let mut config = package::read_config(&entry)?;
             config.name = name.or(config.name);
@@ -975,6 +1085,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 arch,
                 run,
                 asset_url: asset_url.as_deref(),
+                devtools,
             })
         }
         Command::Run {
@@ -1101,6 +1212,57 @@ mod command_tests {
     use clap::Parser as _;
 
     use super::{Cli, Command, run::Target};
+
+    /// Every argument has a valid definition, and `nsh test` parses with and
+    /// without the hidden flags of a `--jobs` worker.
+    #[test]
+    fn test_parses_with_and_without_a_workers_hidden_flags() {
+        use clap::CommandFactory as _;
+        Cli::command().debug_assert();
+        for line in [
+            &["nsh", "test", "examples/counter"][..],
+            &[
+                "nsh",
+                "test",
+                "x",
+                "--target",
+                "macos",
+                "--jobs",
+                "2",
+                "--artifacts",
+                "out",
+            ],
+            &[
+                "nsh",
+                "test",
+                "x.test.tsx",
+                "--target",
+                "windows",
+                "--entry",
+                "app/App.tsx",
+                "--work-dir",
+                "w",
+                "--results-json",
+                "r.json",
+                "--artifacts-root",
+                "root",
+                "--prepared-host",
+                "host",
+                "--artifacts",
+                "out",
+                "--filter",
+                "f",
+            ],
+        ] {
+            let cli = Cli::try_parse_from(line);
+            assert!(cli.is_ok(), "{line:?}: {:?}", cli.err());
+        }
+        let cli = Cli::try_parse_from(["nsh", "test", "x"]).unwrap();
+        let Command::Test { worker_entry, .. } = cli.command else {
+            panic!("a test command");
+        };
+        assert!(worker_entry.is_none());
+    }
 
     #[test]
     fn publish_ios_and_package_signing_have_separate_arguments() {

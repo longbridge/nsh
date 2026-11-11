@@ -205,9 +205,14 @@ impl NshWindow {
         }
     }
 
-    /// The content's view under left press `event` when, in this window
-    /// that is not key, AppKit would give it to a view outside the content
-    /// that does not accept the first mouse (the title bar's toolbar).
+    /// The content's view under left press `event` in this window that is
+    /// not key: AppKit would give the press to a view outside the content
+    /// that does not accept the first mouse (the title bar's toolbar), and,
+    /// in an app that has a main bundle (a packaged one under `nsh test
+    /// --app`; the bundle is found from the executable's `Contents/MacOS`),
+    /// it does not give a press on the content to its views either:
+    /// `NshView`'s `mouseDown:` is never called, though `sendEvent:` ran. A
+    /// bare executable (a development host) gets the press.
     fn title_bar_press_target(&self, event: &NSEvent) -> Option<Retained<NSView>> {
         if self.isKeyWindow() {
             return None;
@@ -217,7 +222,12 @@ impl NshWindow {
         let frame = unsafe { content.superview() }?;
         // The frame view's superview is none: it takes window points.
         let hit = frame.hitTest(event.locationInWindow())?;
-        if hit.isDescendantOf(&content) || hit.acceptsFirstMouse(Some(event)) {
+        // What AppKit hands to a view that accepts the first mouse, it does
+        // not hand to one of a packaged app (`nsh test --app`): the press
+        // goes nowhere, so the content's own views get it from here too.
+        // A view of the title bar that takes the first mouse keeps its
+        // press (the content has nothing under a press outside it).
+        if !hit.isDescendantOf(&content) && hit.acceptsFirstMouse(Some(event)) {
             return None;
         }
         content.hitTest(frame.convertPoint_fromView(event.locationInWindow(), None))
@@ -442,7 +452,7 @@ pub(crate) struct AppWindow {
 
 /// The state of window `id` (the main window's for the root) as it is now;
 /// `None` when no such window is open.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn state(surface: &Surface, id: NodeId) -> Option<WindowState> {
     if id == ROOT_ID {
         return crate::window_state::read(surface);
@@ -551,7 +561,7 @@ pub(crate) fn root_view(surface: &Surface, id: NodeId) -> Option<NshView> {
 /// The surface's window that has the keyboard: its key window, else (an
 /// app in the background has none) the frontmost of its windows on the
 /// screen, else the main window.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn key_window(surface: &Surface) -> Option<Retained<NSWindow>> {
     let main = surface.root.ns().window();
     let own: Vec<Retained<NSWindow>> = surface
@@ -576,7 +586,7 @@ pub(crate) fn key_window(surface: &Surface) -> Option<Retained<NSWindow>> {
 /// The test agent's press on window `id`'s close button (`nsh test`): the
 /// button's own click, so it goes where a user's press goes (the window's
 /// close policy, the reason `closeButton`).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn press_close_button(surface: &Surface, id: NodeId) -> Result<(), String> {
     let window = window_of(surface, id).ok_or("no such window is open")?;
     let button = window
@@ -1789,7 +1799,7 @@ fn close_reason(asked: Asked) -> CloseReason {
     }
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 thread_local! {
     /// The test agent is clicking a close button ([`press_close_button`]),
     /// with no event of the user's to tell it by.
@@ -1798,7 +1808,7 @@ thread_local! {
 
 /// How the event being handled asked to close `window`.
 fn asked(mtm: MainThreadMarker, window: &NSWindow) -> Asked {
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     if CLOSE_BUTTON_PRESS.get() {
         return Asked::MouseInWindow;
     }

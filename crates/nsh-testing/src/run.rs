@@ -108,7 +108,14 @@ pub struct TestRun {
     /// which answers its `nsh/host` calls and sends its events, and
     /// `host.available()` is true. `None`: the apps have no host.
     pub page_host: Option<PathBuf>,
+    /// Called when a test failed, once its hooks ran and before the apps it
+    /// opened close: what keeps the failure's evidence (a screenshot) or
+    /// holds the app open for a look. It may block.
+    pub on_failure: Option<FailureHook>,
 }
+
+/// What [`TestRun::on_failure`] calls.
+pub type FailureHook = Arc<dyn Fn() + Send + Sync>;
 
 /// Starts the app whose entry is the path on a real platform's host, as
 /// [`HostOptions`] say, once it connected (`nsh test --target`): what takes
@@ -1150,6 +1157,11 @@ impl Run {
                     failed.get_or_insert(failure);
                 }
             }
+        }
+        if failed.is_some()
+            && let Some(hook) = self.session.run.on_failure.clone()
+        {
+            let _ = nsh_core::prelude::blocking(move || hook()).await;
         }
         // The apps go before the next test starts, whatever this one left
         // running.

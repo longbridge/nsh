@@ -244,10 +244,10 @@ pub(crate) struct Surface {
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out, keyframes repeating forever): what
     /// [`Surface::animating`] does not count.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     cosmetic_frames: Cell<usize>,
     /// The model of a test session's app (`nsh test --target`).
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The display link, while it runs.
     link: RefCell<Option<Retained<CADisplayLink>>>,
@@ -375,9 +375,9 @@ impl Surface {
             js_frame: Cell::new(false),
             queued: RefCell::default(),
             frame_callbacks: RefCell::default(),
-            #[cfg(feature = "dev")]
+            #[cfg(any(feature = "dev", feature = "devtools"))]
             cosmetic_frames: Cell::new(0),
-            #[cfg(feature = "dev")]
+            #[cfg(any(feature = "dev", feature = "devtools"))]
             test_model: RefCell::default(),
             link: RefCell::new(None),
             link_rate: Cell::new(None),
@@ -437,7 +437,7 @@ impl Surface {
         config.viewport = Size::new(env.window.width, env.window.height);
         config.environment = env;
         // A test session's app: the test's storage, network and trace.
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         if let Some(model) = &*self.test_model.borrow() {
             model.set_up_engine(&mut config);
         }
@@ -481,7 +481,7 @@ impl Surface {
                 crate::image::set_disk_cache(self, engine.image_cache());
                 *self.media_files.borrow_mut() = engine.media_files();
                 // The test moves its clock through the engine.
-                #[cfg(feature = "dev")]
+                #[cfg(any(feature = "dev", feature = "devtools"))]
                 if let Some(model) = &*self.test_model.borrow() {
                     model.engine_started(engine.control());
                 }
@@ -515,7 +515,7 @@ impl Surface {
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
     }
@@ -533,7 +533,7 @@ impl Surface {
     }
 
     /// Shows fatal app errors with `f` (development hosts).
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     pub(crate) fn set_error_handler(&self, f: ErrorHandler) {
         *self.on_error.borrow_mut() = Some(f);
     }
@@ -703,7 +703,7 @@ impl Surface {
             }
             Message::Error(message) => {
                 log::error!("{message}");
-                #[cfg(feature = "dev")]
+                #[cfg(any(feature = "dev", feature = "devtools"))]
                 if let Some(model) = &*self.test_model.borrow() {
                     model.error(message.to_string());
                 }
@@ -778,7 +778,7 @@ impl Surface {
         }
         self.mounter.borrow_mut().end_batch(self);
         crate::window::batch_applied(self);
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         if let Some(model) = &*self.test_model.borrow() {
             model.apply(batch);
         }
@@ -835,13 +835,13 @@ impl Surface {
     /// repeating forever, a spinner, which never end) or no longer is; it
     /// ends with `on` false.
     pub(crate) fn cosmetic_frame(&self, on: bool) {
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         {
             let n = self.cosmetic_frames.get();
             self.cosmetic_frames
                 .set(if on { n + 1 } else { n.saturating_sub(1) });
         }
-        #[cfg(not(feature = "dev"))]
+        #[cfg(not(any(feature = "dev", feature = "devtools")))]
         let _ = on;
     }
 
@@ -850,7 +850,7 @@ impl Surface {
     /// glides, zooms; not a scroll indicator's fade, after which nothing
     /// changes) or a view's transitions (not its keyframes repeating
     /// forever); or batches wait for the next frame.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     pub(crate) fn animating(&self) -> bool {
         self.anim.borrow().finishing()
             || self.frame_callbacks.borrow().len() > self.cosmetic_frames.get()
@@ -860,7 +860,7 @@ impl Surface {
     /// Keeps the model `nsh test --target` steps see of the app
     /// ([`nsh_testing::agent::Model`]): every batch applied and every error
     /// go to it from now on.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
         *self.test_model.borrow_mut() = model;
     }
@@ -1088,9 +1088,9 @@ impl Surface {
 
     /// Whether `nsh test --target` drives the app ([`Surface::set_test_model`]).
     pub(crate) fn testing(&self) -> bool {
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         return self.test_model.borrow().is_some();
-        #[cfg(not(feature = "dev"))]
+        #[cfg(not(any(feature = "dev", feature = "devtools")))]
         false
     }
 

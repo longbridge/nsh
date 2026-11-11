@@ -1043,7 +1043,7 @@ fn restore_menu(app: &NSApplication) {
     }
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 thread_local! {
     /// The context menu tracking now, for the test agent to choose from
     /// ([`choose_open_menu`]).
@@ -1054,7 +1054,7 @@ thread_local! {
 /// Chooses the item of the open context menu at the end of `path` (the
 /// labels of the submenus on the way, then its own), as a click on it
 /// does, and closes the menu (`nsh test --target macos`).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn choose_open_menu(path: &[String]) -> Result<(), String> {
     let root = OPEN_MENU
         .with(|open| open.borrow().clone())
@@ -1079,7 +1079,7 @@ pub(crate) fn choose_open_menu(path: &[String]) -> Result<(), String> {
 }
 
 /// Closes the open context menu with nothing chosen.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn close_open_menu() -> Result<(), String> {
     let root = OPEN_MENU
         .with(|open| open.borrow().clone())
@@ -1110,12 +1110,12 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
             root.convertPoint_fromView(in_window, None)
         }
     };
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     OPEN_MENU.with(|open| *open.borrow_mut() = Some(menu.clone()));
     // Returns once the menu closed (the chosen item's action sent).
     menu.popUpMenuPositioningItem_atLocation_inView(None, location, Some(root));
     drop(loads);
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     OPEN_MENU.with(|open| open.borrow_mut().take());
     // A menu opened during a press (`onPressDown`, a long press) took its
     // release: the press ends here, or the view would stay pressed.

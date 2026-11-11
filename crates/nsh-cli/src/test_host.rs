@@ -5,7 +5,12 @@
 //! it; the host's test agent (`nsh_testing::agent`) takes the test's steps
 //! at the views the selectors name, with the platform's own input. The
 //! host goes when the test closes the app. The web's host is a page in a
-//! headless browser, whose agent runs in this process (`test_web.rs`).
+//! headless browser, whose agent runs in this process (`test_web.rs`). The
+//! macOS host's steps go over its DevTools endpoint (`devtools/`) instead
+//! of the dev server's test session. With `--app` the executable that
+//! starts is a packaged app built with DevTools (`nsh package --devtools`)
+//! instead of a development host: no dev server, the app has its code in
+//! its package.
 
 use std::{
     path::Path,
@@ -22,6 +27,29 @@ use nsh_testing::{Host, HostOptions, StartHost};
 
 use crate::{build, run::Target, ui};
 
+/// This process is a `--jobs` run's worker: the run prepared what workers
+/// share (the generated workspace, the app's description, the host's build and
+/// copy, `.nsh/types`) before it started them, so a worker only reads them
+/// and writes nothing shared.
+static PREPARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// This process is a worker of a prepared run ([`PREPARED`]).
+pub(crate) fn set_prepared() {
+    PREPARED.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// Whether this process is a worker of a prepared run.
+pub(crate) fn prepared() -> bool {
+    PREPARED.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// The development host `target`'s tests run on, built (and for a Rust app
+/// generated and copied) once: what a `--jobs` run does before it starts its
+/// workers, which are given the path.
+pub(crate) fn prepare(target: Target) -> anyhow::Result<std::path::PathBuf> {
+    crate::runtime::test_host(target.platform())
+}
+
 /// How long a host may take to start and connect.
 const CONNECT: Duration = Duration::from_secs(60);
 
@@ -31,7 +59,14 @@ const CONNECT: Duration = Duration::from_secs(60);
 /// simulator (name or UDID); `display` (one-based)
 /// is the display the macOS host opens its windows on (by default a
 /// secondary one when there is one); `foreground` lets the macOS host's apps
-/// become the active app, which run in the background otherwise.
+/// become the active app, which run in the background otherwise; `artifacts`
+/// keeps what the apps on a DevTools host leave of a test file's run; `host`
+/// is the executable to start, which `packaged` says is a packaged app
+/// (`--app`) instead of a development host.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "what starts a host: its target and each flag"
+)]
 pub(crate) fn starter(
     target: Target,
     browser: Option<&Path>,
@@ -40,6 +75,9 @@ pub(crate) fn starter(
     device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
+    artifacts: Option<Arc<crate::devtools::Artifacts>>,
+    host: Option<std::path::PathBuf>,
+    packaged: bool,
 ) -> anyhow::Result<StartHost> {
     if browser.is_some() && target != Target::Web {
         anyhow::bail!("--browser goes with --target web");
@@ -76,10 +114,26 @@ pub(crate) fn starter(
         );
     }
     // Built (in a checkout) or found once, before the first test.
-    let host = crate::runtime::test_host(target.platform())?;
+    let host = match host {
+        Some(host) => host,
+        None => crate::runtime::test_host(target.platform())?,
+    };
+    // A worker's icon files go below its own work directory.
+    let work = work.to_path_buf();
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
-        start(target, &host, entry, options, fps, display, foreground)
-            .map(|h| Box::new(h) as Box<dyn Host>)
+        start_host(
+            target,
+            &host,
+            entry,
+            options,
+            fps,
+            display,
+            foreground,
+            artifacts.as_deref(),
+            &work,
+            packaged,
+        )
+        .map(Started::into_host)
     }))
 }
 
@@ -149,8 +203,63 @@ impl Drop for TestHost {
     }
 }
 
-/// Builds `entry`, serves it in a test session and starts `host` on it.
-fn start(
+/// What [`start_host`] started.
+enum Started {
+    /// Driven over its DevTools endpoint.
+    Devtools(crate::devtools::DevtoolsHost),
+    /// Driven through the dev server's test session.
+    Test(TestHost),
+}
+
+impl Started {
+    fn into_host(self) -> Box<dyn Host> {
+        match self {
+            Started::Devtools(host) => Box::new(host),
+            Started::Test(host) => Box::new(host),
+        }
+    }
+}
+
+/// Starts the app at `entry` on `target`'s development host (`host`; never
+/// a packaged app) over its DevTools endpoint with nothing set up, and returns the host that holds it: `nsh devtools launch` and
+/// its MCP server keep it open for clients.
+pub(crate) fn launch_devtools(
+    target: Target,
+    host: &Path,
+    entry: &Path,
+    work: &Path,
+) -> Result<crate::devtools::DevtoolsHost, String> {
+    if !matches!(target, Target::Macos | Target::Windows) {
+        return Err("nsh devtools launch takes --target macos or windows".into());
+    }
+    let started = start_host(
+        target,
+        host,
+        entry,
+        &HostOptions::default(),
+        false,
+        None,
+        false,
+        None,
+        work,
+        false,
+    )?;
+    let Started::Devtools(host) = started else {
+        return Err("the host is not driven over DevTools".into());
+    };
+    // Dropped on a failure: the host quits with it.
+    crate::devtools::wait_ready(host.client().as_ref(), || host.output())?;
+    Ok(host)
+}
+
+/// Builds `entry`, serves it and starts `host` on it: macOS tests are driven
+/// over the host's DevTools endpoint (`devtools/`), the other hosts take
+/// their steps from the dev server's test session.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "what starts a host: its target, entry and each flag"
+)]
+fn start_host(
     target: Target,
     host: &Path,
     entry: &Path,
@@ -158,27 +267,39 @@ fn start(
     fps: bool,
     display: Option<usize>,
     foreground: bool,
-) -> Result<TestHost, String> {
-    let server = serve(entry, options)?;
+    artifacts: Option<&crate::devtools::Artifacts>,
+    work: &Path,
+    packaged: bool,
+) -> Result<Started, String> {
+    let devtools = matches!(target, Target::Macos | Target::Windows);
+    // A packaged app has its code and assets in its package: nothing serves
+    // them.
+    let server = if packaged {
+        None
+    } else {
+        Some(serve_with(entry, options, !devtools)?)
+    };
     let entry = resolve(entry)?;
-    if matches!(
-        target,
-        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
-    ) {
+    if !packaged
+        && matches!(
+            target,
+            Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+        )
+    {
         crate::package::note_hidden_main_window(&entry);
     }
     let dir = entry.parent().unwrap_or(Path::new("."));
-    let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
     // in every test, as headless runs' does.
     let data = fresh_data_dir()?;
     let mut command = Command::new(host);
-    command
-        .env("NSH_DEV_APP_DIR", dir)
-        .args(["--dev-server", &url])
-        .arg("--data-dir")
-        .arg(&data)
-        .stdin(Stdio::null());
+    if let Some(server) = &server {
+        let url = format!("ws://{}{WS_PATH}", server.local_addr());
+        command
+            .env("NSH_DEV_APP_DIR", dir)
+            .args(["--dev-server", &url]);
+    }
+    command.arg("--data-dir").arg(&data).stdin(Stdio::null());
     if target == Target::Tui {
         command.arg("--headless");
         command.arg("--log-file").arg(data.join("host.log"));
@@ -191,9 +312,16 @@ fn start(
     if fps {
         command.arg("--fps");
     }
-    if target == Target::Windows {
+    if target == Target::Windows && !packaged {
         // The window and its notifications show the app's name and icon.
-        command.args(crate::windows::host_args(&entry, &dir.join(".nsh")));
+        // A worker's own directory when workers run at once: the icon file
+        // is written for each app, and the host reads it as it starts.
+        let icon_dir = if prepared() {
+            work.join("windows-icon")
+        } else {
+            dir.join(".nsh")
+        };
+        command.args(crate::windows::host_args(&entry, &icon_dir));
     }
     if target == Target::Macos {
         // A window AppKit restored from an earlier run would not be this one.
@@ -216,8 +344,10 @@ fn start(
         // run `--foreground` has no Dock icon either. As `nsh run` does, a
         // test runs as a regular app when `nsh.json` does not read (the
         // keys only packages use are checked there too).
-        let config = crate::package::read_config(&entry).unwrap_or_default();
-        command.args(config.macos.host_args());
+        if !packaged {
+            let config = crate::package::read_config(&entry).unwrap_or_default();
+            command.args(config.macos.host_args());
+        }
     }
     if target == Target::Gpui && cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some()
     {
@@ -231,6 +361,39 @@ fn start(
             &format!("{}x{}", size.width.0, size.height.0),
         ]);
     }
+    if devtools {
+        let token = crate::devtools::token();
+        let port_file = data.join("devtools.port");
+        command
+            .env(nsh_devtools::ENV_LISTEN, "127.0.0.1:0")
+            .env(nsh_devtools::ENV_WAIT, "1")
+            .env(nsh_devtools::ENV_TOKEN, &token)
+            .env(nsh_devtools::ENV_PORT_FILE, &port_file);
+        let launched = crate::devtools::launch(crate::devtools::LaunchSpec {
+            command,
+            port_file,
+            token,
+            connect_timeout: CONNECT,
+        });
+        let launched = match launched {
+            Ok(launched) => launched,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&data);
+                return Err(e);
+            }
+        };
+        return crate::devtools::DevtoolsHost::start(
+            server,
+            launched,
+            data,
+            options,
+            artifacts.and_then(|a| a.current()),
+        )
+        .map(Started::Devtools);
+    }
+    let Some(server) = server else {
+        return Err("a packaged app is driven over DevTools (--target macos or windows)".into());
+    };
     let (mut child, output) =
         ui::quiet(&mut command).map_err(|e| format!("cannot start {}: {e}", host.display()))?;
     let deadline = Instant::now() + CONNECT;
@@ -251,11 +414,63 @@ fn start(
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    Ok(TestHost {
+    Ok(Started::Test(TestHost {
         server,
         child,
         data,
+    }))
+}
+
+/// The executable `nsh test --app <path>` starts: `path` itself when it is
+/// a file; a macOS app bundle's (`<App>.app`, its `Contents/MacOS/<exe>`, the
+/// `CFBundleExecutable` of its `Info.plist`, else its only file there); a
+/// directory's only `.exe` (a Windows package).
+pub(crate) fn packaged_executable(path: &Path) -> anyhow::Result<std::path::PathBuf> {
+    use anyhow::{Context, bail};
+
+    let shown = path.display();
+    if path.is_file() {
+        return Ok(path.to_path_buf());
+    }
+    if !path.is_dir() {
+        bail!("--app {shown}: no such app (package one with `nsh package --devtools`)");
+    }
+    let contents = path.join("Contents");
+    if contents.is_dir() {
+        let macos = contents.join("MacOS");
+        let named = plist::Value::from_file(contents.join("Info.plist"))
+            .ok()
+            .and_then(|info| {
+                info.as_dictionary()?
+                    .get("CFBundleExecutable")?
+                    .as_string()
+                    .map(|name| macos.join(name))
+            })
+            .filter(|exe| exe.is_file());
+        if let Some(exe) = named {
+            return Ok(exe);
+        }
+        return only_file(&macos, |_| true)
+            .with_context(|| format!("--app {shown}: no executable in Contents/MacOS"));
+    }
+    only_file(path, |file| {
+        file.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
     })
+    .with_context(|| format!("--app {shown}: no executable (`.exe`) in it"))
+}
+
+/// The one file of `dir` that `keep` accepts.
+fn only_file(dir: &Path, keep: impl Fn(&Path) -> bool) -> anyhow::Result<std::path::PathBuf> {
+    let mut found: Vec<std::path::PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && keep(path))
+        .collect();
+    if found.len() != 1 {
+        anyhow::bail!("{} files in {}, not one", found.len(), dir.display());
+    }
+    Ok(found.remove(0))
 }
 
 /// The entry `open` names (a file, or an app's directory: its entry, or
@@ -269,6 +484,17 @@ fn resolve(entry: &Path) -> Result<std::path::PathBuf, String> {
 /// them); for an app of Rust only, the host's own root, which its
 /// development host is built with.
 pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, String> {
+    serve_with(entry, options, true)
+}
+
+/// [`serve`], in a test session only when `test_session` (else a plain
+/// session that delivers the bundle and the root: the test's steps, storage,
+/// network and environment go to the app another way, over DevTools).
+pub(crate) fn serve_with(
+    entry: &Path,
+    options: &HostOptions,
+    test_session: bool,
+) -> Result<DevServer, String> {
     let entry = &resolve(entry)?;
     let root = crate::rust_app::is_root(entry);
     let built = if root {
@@ -311,13 +537,15 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
     )
     .map_err(|e| format!("cannot start a dev server: {e}"))?;
     server.serve_files(build::crate_assets().map(|a| (a.path, a.source)));
-    server.test_session();
-    // What the app starts with and what answers its requests: the test's.
-    server.set_test_storage(options.storage.clone());
-    server.set_test_trace(options.trace.is_some());
-    server.set_test_environment(options.environment.clone());
-    if let Some(network) = &options.network {
-        server.set_test_network(network.clone());
+    if test_session {
+        server.test_session();
+        // What the app starts with and what answers its requests: the test's.
+        server.set_test_storage(options.storage.clone());
+        server.set_test_trace(options.trace.is_some());
+        server.set_test_environment(options.environment.clone());
+        if let Some(network) = &options.network {
+            server.set_test_network(network.clone());
+        }
     }
     let Some(built) = built else {
         server.publish_root();
@@ -385,7 +613,19 @@ mod tests {
             Target::Ios,
             Target::Android,
         ] {
-            let err = starter(target, None, Path::new("."), false, None, None, true).err();
+            let err = starter(
+                target,
+                None,
+                Path::new("."),
+                false,
+                None,
+                None,
+                true,
+                None,
+                None,
+                false,
+            )
+            .err();
             assert_eq!(
                 err.map(|e| e.to_string()).as_deref(),
                 Some("--foreground goes with --target macos"),
@@ -415,6 +655,9 @@ mod tests {
                 Some("iPhone 16"),
                 None,
                 false,
+                None,
+                None,
+                false,
             )
             .err();
             assert_eq!(
@@ -423,5 +666,56 @@ mod tests {
                 "{target:?}"
             );
         }
+    }
+
+    /// A scratch directory of this test.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-app-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// An `.app` bundle's executable is the one `Info.plist` names, else the
+    /// only file of `Contents/MacOS`; a file is itself; a Windows package's
+    /// is its `.exe`.
+    #[test]
+    fn packaged_executable_is_found_in_each_layout() {
+        let dir = scratch("layouts");
+        let macos = dir.join("Gallery.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::write(macos.join("Gallery"), "").unwrap();
+        std::fs::write(macos.join("helper"), "").unwrap();
+        // Two files and no plist: ambiguous.
+        assert!(packaged_executable(&dir.join("Gallery.app")).is_err());
+        let mut info = plist::Dictionary::new();
+        info.insert("CFBundleExecutable".into(), "Gallery".into());
+        plist::Value::Dictionary(info)
+            .to_file_xml(dir.join("Gallery.app/Contents/Info.plist"))
+            .unwrap();
+        assert_eq!(
+            packaged_executable(&dir.join("Gallery.app")).unwrap(),
+            macos.join("Gallery")
+        );
+        // Without the plist, the only file.
+        std::fs::remove_file(macos.join("helper")).unwrap();
+        std::fs::remove_file(dir.join("Gallery.app/Contents/Info.plist")).unwrap();
+        assert_eq!(
+            packaged_executable(&dir.join("Gallery.app")).unwrap(),
+            macos.join("Gallery")
+        );
+        // A file is itself.
+        assert_eq!(
+            packaged_executable(&macos.join("Gallery")).unwrap(),
+            macos.join("Gallery")
+        );
+        // A Windows package's directory.
+        let win = dir.join("win");
+        std::fs::create_dir_all(win.join("nsh")).unwrap();
+        std::fs::write(win.join("Gallery.exe"), "").unwrap();
+        assert_eq!(packaged_executable(&win).unwrap(), win.join("Gallery.exe"));
+        // Nothing there.
+        assert!(packaged_executable(&dir.join("missing.app")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

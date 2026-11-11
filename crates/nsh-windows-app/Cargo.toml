@@ -30,6 +30,10 @@ math = ["nsh-platform-windows/math"]
 emoji-picker = ["nsh-platform-windows/emoji-picker"]
 zlib = ["nsh-platform-windows/zlib"]
 crypto = ["nsh-platform-windows/crypto"]
+# The in-app DevTools endpoint (`NSH_DEVTOOLS`, `nsh test --app`): an app
+# packaged by `nsh package --devtools` serves it. Off in releases: the
+# runner then links no DevTools code.
+devtools = ["nsh-platform-windows/devtools"]
 
 [dependencies]
 log.workspace = true

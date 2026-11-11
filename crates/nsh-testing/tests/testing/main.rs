@@ -19,6 +19,7 @@ fn test_run(filter: Option<&str>) -> TestRun {
         host: None,
         target: None,
         page_host: None,
+        on_failure: None,
     }
 }
 

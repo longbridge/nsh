@@ -1,0 +1,29 @@
+[package]
+name = "nsh-devtools"
+description = "NSH DevTools: the protocol, method table and console collector of an app's in-process debugging endpoint."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+server = ["dep:tungstenite", "dep:getrandom"]
+client = ["dep:tungstenite"]
+
+[dependencies]
+nsh-dev.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tungstenite = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Enables both sides for the endpoint tests.
+nsh-devtools = { path = ".", features = ["server", "client"] }

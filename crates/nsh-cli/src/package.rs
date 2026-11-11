@@ -576,6 +576,9 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) run: bool,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
+    /// macOS, Windows: the runner is built with the in-app DevTools endpoint
+    /// (`--devtools`).
+    pub(crate) devtools: bool,
 }
 
 /// `nsh.json` `"icon"`: one PNG for every target, or one per platform
@@ -916,6 +919,14 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             "GPUI is the backend for embedding in GPUI and GPUI Kit apps (`AppView`), not for packages: \
              package this app with --target {instead}"
         );
+    }
+    if options.devtools
+        && !matches!(
+            options.target,
+            PackageTarget::Macos | PackageTarget::Windows
+        )
+    {
+        bail!("--devtools goes with --target macos or --target windows");
     }
     if !options.abis.is_empty() && options.target != PackageTarget::Android {
         bail!("--abi only applies to --target android");
@@ -1386,7 +1397,7 @@ fn package_macos(
         id,
         executable,
     } = *app;
-    let runners = macos_runners(options.arch)?;
+    let runners = macos_runners(options.arch, options.devtools)?;
     let app = options.out.join(format!("{name}.app"));
     let step = ui::Step::start(format!("packaging {}", ui::path(&app)));
     if app.exists() {
@@ -1497,15 +1508,18 @@ struct MacRunner {
 /// The macOS release runners of a package for `arch` (`None`: this Mac's):
 /// one per architecture, each built for its Rust target (this Mac's own
 /// with no `--target`).
-fn macos_runners(arch: Option<Arch>) -> anyhow::Result<Vec<MacRunner>> {
+fn macos_runners(arch: Option<Arch>, devtools: bool) -> anyhow::Result<Vec<MacRunner>> {
     let Some(arch) = arch else {
-        let path = runtime::file(Platform::MacOs, true)?;
+        let path = runtime::runner(Platform::MacOs, devtools)?;
         return Ok(vec![MacRunner {
             path,
             arch: None,
             fat: false,
         }]);
     };
+    if devtools {
+        bail!("--devtools builds the runner for this Mac's processor only: leave out --arch");
+    }
     let mut runners = Vec::new();
     for &triple in arch.macos_triples() {
         let path = runtime::file_for(Platform::MacOs, true, macos_build_triple(triple))?;
@@ -2078,6 +2092,7 @@ mod tests {
                 arch: Some(Arch::X86_64),
                 run: false,
                 asset_url: None,
+                devtools: false,
             })
             .unwrap_err();
             assert_eq!(

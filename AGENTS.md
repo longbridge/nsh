@@ -82,6 +82,10 @@ crates/
                        feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
+  nsh-devtools/        NSH DevTools: the protocol of an app's in-process endpoint (a loopback WebSocket, JSON requests `Domain.method` over `nsh-dev`'s `TestStep`
+                       table: `methods.rs`; `Protocol.describe`: `description.rs`), the endpoint (feature `server`) and the CLI's client (feature `client`), the console
+                       collector and the tree snapshot; the platform's side is `devtools.rs` of `nsh-platform-macos` and `-windows` (feature `devtools`, on in `dev`);
+                       the commands and MCP server are `nsh-cli/src/devtools/` (docs/dev/devtools.md)
   nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
@@ -213,6 +217,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::elemen
 | VM limits, capabilities, signed packages | `docs/dev/sandbox.md`, `signed-packages.md` |
 | packaging, the iOS / Android SDKs, native components | `docs/dev/embedding.md` |
 | `.nsh/types`, the dev server, hot reload | `docs/dev/tooling.md` |
+| DevTools: the in-app endpoint, its protocol and method table, `nsh devtools`, the MCP server | `docs/dev/devtools.md` |
 | the web runtime (`nsh-platform-web`), the website's demos | `docs/dev/web.md`, `website/README.md` |
 | the Linux backend (`nsh-platform-linux`, GTK 4) | `docs/dev/linux.md` |
 | the macOS backend (`nsh-platform-macos`, AppKit) | `docs/dev/macos.md` |

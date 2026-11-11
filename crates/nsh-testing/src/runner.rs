@@ -269,6 +269,7 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
         host: None,
         target: None,
         page_host: request.page_host,
+        on_failure: None,
     };
     for file in &request.files {
         let mut report = |result: &TestResult| {

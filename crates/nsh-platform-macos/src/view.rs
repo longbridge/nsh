@@ -1257,7 +1257,7 @@ impl ViewObj {
         // one: the user's (and the enters and exits AppKit derives from
         // where it really is) would change what a test hovers with where it
         // happens to rest, and a locked screen sends none.
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         {
             let surface = self
                 .surface()
@@ -1507,7 +1507,7 @@ fn scripted_type() -> Option<NSEventType> {
 
 /// Runs `f` (which hands `event` to a window) with `event` as the one
 /// AppKit handles, for the root's `hitTest:`.
-#[cfg(any(feature = "dev", test))]
+#[cfg(any(feature = "dev", feature = "devtools", test))]
 pub(crate) fn scripted<R>(event: &NSEvent, f: impl FnOnce() -> R) -> R {
     let old = SCRIPTED.replace(Some(event.retain()));
     let r = f();

@@ -22,7 +22,7 @@
 #![cfg(target_os = "macos")]
 
 mod access;
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 mod agent;
 mod animation;
 mod app;
@@ -32,6 +32,8 @@ mod chrome;
 mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
+#[cfg(feature = "devtools")]
+mod devtools;
 mod file_drop;
 mod file_requests;
 mod fps;
@@ -53,7 +55,7 @@ mod sight;
 // Shared with iOS.
 use nsh_platform_apple::{audio, notifications, speech};
 mod surface;
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 mod synth;
 mod system;
 mod text;
@@ -64,6 +66,14 @@ mod view;
 mod visual;
 mod window;
 mod window_state;
+
+/// Records `record` for the DevTools endpoint's console: the logger of a
+/// runner built with the feature `devtools` calls it for each line it takes
+/// (development hosts' logger does it itself).
+#[cfg(feature = "devtools")]
+pub fn devtools_record(record: &log::Record<'_>) {
+    devtools::record(record);
+}
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{

@@ -9,6 +9,12 @@
 //! `nsh_platform_macos::set_ui_sets` and then [`main`]. A Rust app
 //! (`nsh.json` `"root"`) calls [`run_rust`] with its root instead, built
 //! without the feature `js`: the runner then links no QuickJS.
+//!
+//! With the feature `devtools` (`nsh package --devtools`) the runner serves
+//! the app's DevTools endpoint when `NSH_DEVTOOLS` is set, records its
+//! console for it and takes the window arguments a test host takes
+//! (`--data-dir`, `--window-size`, `--keep-window-size`, `--background`,
+//! `--display`), which `nsh test --app` gives it.
 
 /// Runs the release runner (until its window closes).
 #[cfg(all(target_os = "macos", feature = "js"))]
@@ -58,14 +64,27 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     struct Logger;
     impl log::Log for Logger {
         fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-            m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
+            printed(m) || collected(m)
         }
         fn log(&self, r: &log::Record<'_>) {
-            if self.enabled(r.metadata()) {
+            #[cfg(feature = "devtools")]
+            if collected(r.metadata()) {
+                nsh_platform_macos::devtools_record(r);
+            }
+            if printed(r.metadata()) {
                 eprintln!("{} {}: {}", r.level(), r.target(), r.args());
             }
         }
         fn flush(&self) {}
+    }
+    /// What goes to the terminal.
+    fn printed(m: &log::Metadata<'_>) -> bool {
+        m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
+    }
+    /// What the DevTools console collects (all of nsh's lines, as a
+    /// development host's logger does).
+    fn collected(m: &log::Metadata<'_>) -> bool {
+        cfg!(feature = "devtools") && (m.target().starts_with("nsh") || printed(m))
     }
     static LOGGER: Logger = Logger;
     let development = std::env::var_os("NSH_APP_DIR");
@@ -124,7 +143,54 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     // app's own runtime-delivered modules (the bundle's resources are
     // read-only).
     options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
+    #[cfg(feature = "devtools")]
+    test_arguments(&mut options);
     (dir, options)
+}
+
+/// The arguments of a test host (`nsh_macos_host`'s), which `nsh test --app`
+/// starts the packaged app with: where it keeps its data (fresh for each
+/// test), the window's size and display, and that it runs in the background.
+#[cfg(all(target_os = "macos", feature = "devtools"))]
+fn test_arguments(options: &mut nsh_platform_macos::AppOptions) {
+    use nsh_platform_macos::WindowDisplay;
+
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--data-dir" => {
+                options.data_dir = args.next().map(std::path::PathBuf::from);
+                // Its caches too (downloaded images): a test's app starts
+                // with none.
+                if let Some(dir) = &options.data_dir {
+                    options.cache = nsh_engine::CacheOptions::at(nsh_engine::CacheLocation::Dir(
+                        dir.join("cache"),
+                    ));
+                }
+            }
+            "--window-size" => {
+                if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
+                    options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));
+                }
+            }
+            "--keep-window-size" => options.keep_size = true,
+            "--background" => options.background = true,
+            "--display" => match args.next().as_deref() {
+                Some("secondary") => options.display = Some(WindowDisplay::Secondary),
+                Some(n) => match n.parse::<usize>() {
+                    // One-based, as `nsh test --display` counts them.
+                    Ok(n) if n > 0 => options.display = Some(WindowDisplay::Index(n - 1)),
+                    _ => log::warn!("--display takes a display's number, from 1, or `secondary`"),
+                },
+                None => log::warn!("--display takes a display's number, from 1, or `secondary`"),
+            },
+            // AppKit's own (`-ApplePersistenceIgnoreState YES`).
+            other if other.starts_with('-') && !other.starts_with("--") => {
+                args.next();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Whether the bundle's Info.plist has `NSHPerformanceMonitor` true.

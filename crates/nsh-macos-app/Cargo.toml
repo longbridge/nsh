@@ -30,6 +30,10 @@ math = ["nsh-platform-macos/math"]
 emoji-picker = ["nsh-platform-macos/emoji-picker"]
 zlib = ["nsh-platform-macos/zlib"]
 crypto = ["nsh-platform-macos/crypto"]
+# The in-app DevTools endpoint (`NSH_DEVTOOLS`, `nsh test --app`): an app
+# packaged by `nsh package --devtools` serves it. Off in releases: the
+# runner then links no DevTools code.
+devtools = ["nsh-platform-macos/devtools"]
 
 [dependencies]
 log.workspace = true

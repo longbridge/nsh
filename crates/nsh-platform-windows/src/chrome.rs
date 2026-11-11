@@ -155,9 +155,9 @@ pub(crate) struct Chrome {
     popup_icons: RefCell<Vec<crate::image::Load>>,
     /// The app's context menu tracking now, and the item a test chose
     /// from it (`nsh test --target windows`), carried out once it closes.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     tracked_popup: RefCell<Option<Arc<[MenuItem]>>>,
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     test_choice: Cell<Option<(u32, Option<MenuRole>)>>,
 }
 
@@ -165,7 +165,7 @@ pub(crate) struct Chrome {
 /// (the labels of the submenus on the way, then its own), as a click on it
 /// does: the menu ends, then the item is carried out (`nsh test --target
 /// windows`).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn choose_open_menu(surface: &Surface, path: &[String]) -> Result<(), String> {
     let items = surface
         .chrome
@@ -201,7 +201,7 @@ pub(crate) fn choose_open_menu(surface: &Surface, path: &[String]) -> Result<(),
 }
 
 /// Closes the app's open context menu with nothing chosen.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn close_open_menu(surface: &Surface) -> Result<(), String> {
     if surface.chrome.tracked_popup.borrow().is_none() {
         return Err("no context menu is open".into());
@@ -857,7 +857,7 @@ pub(crate) fn nc_mouse(
 /// window's own close path tells the app `closeButton`. An error when the
 /// window has none (no frame, a hidden title bar without one, or
 /// `closable: false`).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn press_close_button(hwnd: HWND) -> Result<(), String> {
     use windows::Win32::Graphics::{
         Dwm::{DWMWA_CAPTION_BUTTON_BOUNDS, DwmGetWindowAttribute},
@@ -1493,7 +1493,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         // The window must be in front for the menu to close when clicking
         // elsewhere.
         let _ = SetForegroundWindow(hwnd);
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "devtools"))]
         if actions.is_empty() {
             *surface.chrome.tracked_popup.borrow_mut() = Some(items.clone());
         }
@@ -1510,7 +1510,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         chosen.0 as usize
     };
     drop(bitmaps);
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "devtools"))]
     {
         surface.chrome.tracked_popup.borrow_mut().take();
         if let Some((id, role)) = surface.chrome.test_choice.take() {

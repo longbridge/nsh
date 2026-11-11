@@ -597,6 +597,21 @@ pub enum TestStep {
         /// The selector.
         selector: String,
     },
+    /// The node tree, in tree order, for tools outside the app: a list of
+    /// nodes (`id`, `depth`, `kind`, `test_id`, `role`, `label`, `text`,
+    /// `value`, `placeholder`, `bounds`, `visible`, `enabled`, `focused`,
+    /// `selected`, `checked`, `scroll`, `recycled`).
+    Snapshot {
+        /// Where the tree starts (a selector; the whole screen when absent).
+        #[serde(default)]
+        root: Option<String>,
+        /// How many levels below the root (all when absent).
+        #[serde(default)]
+        depth: Option<u32>,
+        /// Lists the views no user sees too.
+        #[serde(default)]
+        hidden: bool,
+    },
     /// The dialogs the app showed, in order (`app.dialogs`): a list of
     /// `nsh_core::Dialog`s.
     Dialogs,

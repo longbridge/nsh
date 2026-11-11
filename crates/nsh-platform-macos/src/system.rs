@@ -324,7 +324,7 @@ pub(crate) fn host_environment_changed(surface: &Surface) {
 
 /// `nsh test --target macos` started driving the surface: its lifecycle
 /// no longer follows a locked screen (`lifecycle`).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn testing_started(surface: &Surface) {
     update(surface);
 }
@@ -832,7 +832,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
 
 /// Answers the oldest dialog shown on `surface` as a user would: presses
 /// its button titled `button`, or closes it without one (`None`).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn answer_dialog(surface: &Rc<Surface>, button: Option<&str>) -> Result<(), String> {
     let alert = SYSTEM
         .with(|s| {

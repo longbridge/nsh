@@ -1879,7 +1879,7 @@ pub(crate) struct Pixels {
 
 /// Draws the surface offscreen at `scale` and reads the pixels back,
 /// whatever covers the window.
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
+#[cfg_attr(not(any(feature = "dev", feature = "devtools")), allow(dead_code))]
 /// `window`: the root view of a window of the app's own to draw instead of
 /// the main window's.
 pub(crate) fn snapshot(

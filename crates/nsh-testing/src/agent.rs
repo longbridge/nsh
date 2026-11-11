@@ -33,7 +33,11 @@ mod forward;
 
 pub use self::forward::{Outgoing, Send as SendOutgoing};
 pub use crate::screen::Pick;
-use crate::{MemoryStorage, screen::Screen, selector::Selector};
+use crate::{
+    MemoryStorage,
+    screen::{Screen, TreeNode},
+    selector::Selector,
+};
 
 /// How far a dragging finger moves in a display frame, as headless drags
 /// move it.
@@ -462,6 +466,16 @@ pub trait Scene: Send + Sync {
     fn span_style(&self, selector: &str) -> Result<SpanStyle, String>;
     /// The input `selector` names.
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String>;
+    /// The node tree ([`Screen::snapshot`]), without the platform's bounds.
+    fn snapshot(
+        &self,
+        root: Option<&str>,
+        depth: Option<u32>,
+        hidden: bool,
+    ) -> Result<Vec<TreeNode>, String> {
+        let _ = (root, depth, hidden);
+        Err("this scene cannot list its nodes".into())
+    }
     /// The dialogs the app showed.
     fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String>;
     /// The oldest dialog not answered yet.
@@ -610,6 +624,14 @@ impl Scene for Model {
     }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
         self.lock().screen.input_id(selector)
+    }
+    fn snapshot(
+        &self,
+        root: Option<&str>,
+        depth: Option<u32>,
+        hidden: bool,
+    ) -> Result<Vec<TreeNode>, String> {
+        self.lock().screen.snapshot(root, depth, hidden)
     }
     fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
         Ok(self.lock().screen.dialogs().to_vec())
@@ -1236,15 +1258,48 @@ impl Worker {
     }
 }
 
+/// Where a [`Tester`]'s answers go: the dev client of a dev host, or any
+/// other channel back to whoever drives the test session (an in-app
+/// endpoint).
 #[cfg(not(target_arch = "wasm32"))]
-/// A dev host's test session: when the server says it runs one
-/// ([`nsh_dev::DevEvent::Testing`]), it makes the app's [`Model`] and the
-/// platform's [`Native`] (`start`, which attaches the model to the surface
-/// before the first bundle comes) and takes the steps that follow on a
-/// [`Worker`], answering each through the dev client.
+pub trait Link: Send + Sync {
+    /// Step `id` is taken, with `outcome`.
+    fn step_done(&self, id: u64, outcome: StepOutcome);
+    /// The app made request `id`; the test answers it
+    /// ([`Tester::fetch_reply`]).
+    fn fetch(&self, id: u64, request: nsh_dev::protocol::WireRequest);
+    /// The app cancelled request `id`.
+    fn fetch_cancel(&self, id: u64);
+    /// The batches of the app's commits, as trace lines.
+    fn trace(&self, items: Vec<String>);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Link for nsh_dev::DevClient {
+    fn step_done(&self, id: u64, outcome: StepOutcome) {
+        nsh_dev::DevClient::step_done(self, id, outcome);
+    }
+    fn fetch(&self, id: u64, request: nsh_dev::protocol::WireRequest) {
+        nsh_dev::DevClient::fetch(self, id, request);
+    }
+    fn fetch_cancel(&self, id: u64) {
+        nsh_dev::DevClient::fetch_cancel(self, id);
+    }
+    fn trace(&self, items: Vec<String>) {
+        nsh_dev::DevClient::trace(self, items);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// A host's test session: when the server (or an in-app endpoint) says it
+/// runs one ([`nsh_dev::DevEvent::Testing`], [`Tester::start_session`]), it
+/// makes the app's [`Model`] and the platform's [`Native`] (`start`, which
+/// attaches the model to the surface before the first bundle comes) and
+/// takes the steps that follow on a [`Worker`], answering each through its
+/// [`Link`].
 pub struct Tester {
     start: Box<dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync>,
-    client: std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>,
+    link: std::sync::OnceLock<std::sync::Weak<dyn Link>>,
     worker: Mutex<Option<Worker>>,
     /// The model of the session's app, once it started.
     model: Mutex<Option<std::sync::Arc<Model>>>,
@@ -1252,69 +1307,58 @@ pub struct Tester {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Tester {
-    /// A host's tester; `start` runs on the dev client's thread.
+    /// A host's tester; `start` runs on the thread that starts the session.
     pub fn new(
         start: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
     ) -> std::sync::Arc<Tester> {
         std::sync::Arc::new(Tester {
             start: Box::new(start),
-            client: std::sync::OnceLock::new(),
+            link: std::sync::OnceLock::new(),
             worker: Mutex::new(None),
             model: Mutex::new(None),
         })
     }
 
-    /// The client that answers the steps (once it exists).
+    /// The link that gets the answers (once it exists); set once.
+    pub fn set_link(&self, link: std::sync::Weak<dyn Link>) {
+        let _ = self.link.set(link);
+    }
+
+    /// The dev client as the link: what the hosts' dev clients call.
     pub fn set_client(&self, client: &std::sync::Arc<nsh_dev::DevClient>) {
-        let _ = self.client.set(std::sync::Arc::downgrade(client));
+        let client: std::sync::Arc<dyn Link> = client.clone();
+        self.set_link(std::sync::Arc::downgrade(&client));
     }
 
     /// Takes the test session's events (on the dev client's thread); gives
     /// back the others.
     pub fn event(&self, event: nsh_dev::DevEvent) -> Option<nsh_dev::DevEvent> {
         match event {
-            nsh_dev::DevEvent::Testing => self.start(),
+            nsh_dev::DevEvent::Testing => self.start_session(),
             nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
             nsh_dev::DevEvent::TestSetup {
                 storage,
                 trace,
                 environment,
-            } => {
-                if let Some(model) = self.model() {
-                    let client = self.client.clone();
-                    model.set_up(
-                        storage,
-                        trace,
-                        environment,
-                        Arc::new(move |message| {
-                            let Some(client) = client.get().and_then(std::sync::Weak::upgrade)
-                            else {
-                                return;
-                            };
-                            match message {
-                                Outgoing::Fetch(id, request) => client.fetch(id, request),
-                                Outgoing::Cancel(id) => client.fetch_cancel(id),
-                                Outgoing::Trace(items) => client.trace(items),
-                            }
-                        }),
-                    );
-                }
-            }
-            nsh_dev::DevEvent::Fetch { id, reply } => {
-                if let Some(model) = self.model() {
-                    model.fetch_reply(id, reply);
-                }
-            }
+            } => self.set_up(storage, trace, environment),
+            nsh_dev::DevEvent::Fetch { id, reply } => self.fetch_reply(id, reply),
             other => return Some(other),
         }
         None
+    }
+
+    /// The link, while it lives.
+    fn link(&self) -> Option<std::sync::Arc<dyn Link>> {
+        self.link.get().and_then(std::sync::Weak::upgrade)
     }
 
     fn model(&self) -> Option<std::sync::Arc<Model>> {
         self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn start(&self) {
+    /// Starts the session: the model and the platform's [`Native`], and the
+    /// worker that takes the steps. Does nothing when it runs already.
+    pub fn start_session(&self) {
         let mut worker = self.worker.lock().unwrap_or_else(|e| e.into_inner());
         if worker.is_some() {
             return;
@@ -1322,10 +1366,10 @@ impl Tester {
         let model = std::sync::Arc::new(Model::default());
         *self.model.lock().unwrap_or_else(|e| e.into_inner()) = Some(model.clone());
         let native = (self.start)(model.clone());
-        let client = self.client.clone();
+        let link = self.link.get().cloned();
         let started = Worker::spawn(Agent::new(model, native), move |id, outcome| {
-            if let Some(client) = client.get().and_then(std::sync::Weak::upgrade) {
-                client.step_done(id, outcome);
+            if let Some(link) = link.as_ref().and_then(std::sync::Weak::upgrade) {
+                link.step_done(id, outcome);
             }
         });
         match started {
@@ -1334,15 +1378,52 @@ impl Tester {
         }
     }
 
-    fn take(&self, id: u64, step: TestStep) {
+    /// The test's setup of the session's app: its storage, whether to trace,
+    /// its environment; the app's requests and traces go out through the
+    /// link. Does nothing before [`Tester::start_session`].
+    pub fn set_up(
+        &self,
+        storage: Vec<(String, String)>,
+        trace: bool,
+        environment: nsh_dev::protocol::TestEnvironment,
+    ) {
+        let Some(model) = self.model() else { return };
+        let link = self.link.get().cloned();
+        model.set_up(
+            storage,
+            trace,
+            environment,
+            Arc::new(move |message| {
+                let Some(link) = link.as_ref().and_then(std::sync::Weak::upgrade) else {
+                    return;
+                };
+                match message {
+                    Outgoing::Fetch(id, request) => link.fetch(id, request),
+                    Outgoing::Cancel(id) => link.fetch_cancel(id),
+                    Outgoing::Trace(items) => link.trace(items),
+                }
+            }),
+        );
+    }
+
+    /// The test's answer to the app's request `id`.
+    pub fn fetch_reply(&self, id: u64, reply: nsh_dev::protocol::FetchReply) {
+        if let Some(model) = self.model() {
+            model.fetch_reply(id, reply);
+        }
+    }
+
+    /// Hands step `id` to the session's worker; without a session the link
+    /// gets a failure.
+    pub fn take(&self, id: u64, step: TestStep) {
         let taken = self
             .worker
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .is_some_and(|w| w.take(id, step));
-        if !taken && let Some(client) = self.client.get().and_then(std::sync::Weak::upgrade) {
-            client.step_done(
+        if !taken && let Some(link) = self.link() {
+            link.step_done(
                 id,
                 StepOutcome::Failed {
                     message: "the host runs no test session".into(),
@@ -1551,6 +1632,43 @@ impl Agent {
                 Ok(id
                     .and_then(|id| self.native.input_text(id))
                     .map_or(Value::Null, Value::from))
+            }
+            TestStep::Snapshot {
+                root,
+                depth,
+                hidden,
+            } => {
+                let focused = self.native.focused();
+                let nodes = self.scene.snapshot(root.as_deref(), depth, hidden)?;
+                let nodes: Vec<Value> = nodes
+                    .into_iter()
+                    .map(|n| {
+                        let bounds = self
+                            .native
+                            .bounds(n.id)
+                            .map(|b| [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]);
+                        serde_json::json!({
+                            "id": n.id,
+                            "depth": n.depth,
+                            "kind": n.kind,
+                            "test_id": n.test_id,
+                            "role": n.role,
+                            "label": n.label,
+                            "text": n.text,
+                            "value": n.value,
+                            "placeholder": n.placeholder,
+                            "bounds": bounds,
+                            "visible": n.visible,
+                            "enabled": n.enabled,
+                            "focused": focused == Some(n.id),
+                            "selected": n.selected,
+                            "checked": n.checked,
+                            "scroll": n.scroll,
+                            "recycled": n.recycled,
+                        })
+                    })
+                    .collect();
+                Ok(Value::Array(nodes))
             }
             TestStep::Dialogs => {
                 serde_json::to_value(self.scene.dialogs()?).map_err(|e| e.to_string())
@@ -2356,6 +2474,71 @@ mod tests {
         fn quit(&self) {}
     }
 
+    /// A link that records the answers.
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<(u64, StepOutcome)>>);
+
+    impl Link for Recording {
+        fn step_done(&self, id: u64, outcome: StepOutcome) {
+            self.0.lock().unwrap().push((id, outcome));
+        }
+        fn fetch(&self, _: u64, _: nsh_dev::protocol::WireRequest) {}
+        fn fetch_cancel(&self, _: u64) {}
+        fn trace(&self, _: Vec<String>) {}
+    }
+
+    fn answers(link: &Recording) -> Vec<(u64, StepOutcome)> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let got = link.0.lock().unwrap().clone();
+            if !got.is_empty() || std::time::Instant::now() > deadline {
+                return got;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn tester_answers_through_its_link() {
+        let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let control = engine.control();
+        let tester = Tester::new(move |_| {
+            Box::new(Fake(
+                control.clone(),
+                Arc::new(Mutex::new(Vec::new())),
+                None,
+            ))
+        });
+        let link = Arc::new(Recording::default());
+        let as_link: Arc<dyn Link> = link.clone();
+        tester.set_link(Arc::downgrade(&as_link));
+        tester.start_session();
+        tester.take(7, TestStep::Wait { ms: 0 });
+        let got = answers(&link);
+        assert!(
+            matches!(got.as_slice(), [(7, StepOutcome::Done { .. })]),
+            "{got:?}"
+        );
+    }
+
+    #[test]
+    fn take_without_a_session_fails() {
+        let tester = Tester::new(|_| unreachable!("no session starts"));
+        let link = Arc::new(Recording::default());
+        let as_link: Arc<dyn Link> = link.clone();
+        tester.set_link(Arc::downgrade(&as_link));
+        tester.take(3, TestStep::Wait { ms: 0 });
+        assert_eq!(
+            answers(&link),
+            vec![(
+                3,
+                StepOutcome::Failed {
+                    message: "the host runs no test session".into()
+                }
+            )]
+        );
+    }
+
     #[test]
     fn a_scrolling_finger_lands_clear_of_the_views_that_take_drags() {
         // A scroll view from 100 to 700: nothing covers its middle.
@@ -2510,6 +2693,167 @@ mod tests {
             near[2] == bottom && near[3..].iter().all(|&y| y == top),
             "{near:?}"
         );
+    }
+
+    /// An agent over a model of: 2 (testID `root`) > 4 (label "Go", press
+    /// handler) > 6 (text "Go"), and 8 (collapsed, a `display: none` view)
+    /// in 2.
+    fn snapshot_agent() -> Agent {
+        use nsh_core::{EventMask, MountItem, ViewKind, ViewProps};
+        let frame = |id, w, h| MountItem::Frame {
+            id,
+            frame: Bounds::new(point(px(0.0), px(0.0)), size(px(w), px(h))),
+        };
+        let insert = |parent, child| MountItem::Insert {
+            parent,
+            child,
+            before: None,
+        };
+        let root_props = ViewProps {
+            test_id: Some("root".into()),
+            ..Default::default()
+        };
+        let button_props = ViewProps {
+            accessibility: nsh_core::Accessibility {
+                label: Some("Go".into()),
+                role: nsh_core::AccessibilityRole::Button,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut events = EventMask::default();
+        events.set(EventKind::Press, true);
+        let model = Arc::new(Model::default());
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                },
+                MountItem::Create {
+                    id: 4,
+                    kind: ViewKind::View,
+                },
+                MountItem::Create {
+                    id: 6,
+                    kind: ViewKind::Text,
+                },
+                MountItem::Create {
+                    id: 8,
+                    kind: ViewKind::View,
+                },
+                frame(2, 200.0, 100.0),
+                frame(4, 100.0, 40.0),
+                frame(6, 50.0, 20.0),
+                frame(8, 0.0, 0.0),
+                MountItem::ViewProps {
+                    id: 2,
+                    props: Box::new(root_props),
+                },
+                MountItem::ViewProps {
+                    id: 4,
+                    props: Box::new(button_props),
+                },
+                MountItem::Events { id: 4, events },
+                MountItem::Text {
+                    id: 6,
+                    text: Arc::new(nsh_core::AttributedText {
+                        text: "Go".into(),
+                        ..Default::default()
+                    }),
+                    layout: nsh_core::TextLayout(Arc::new(())),
+                    content: Bounds::default(),
+                },
+                insert(1, 2),
+                insert(2, 4),
+                insert(4, 6),
+                insert(2, 8),
+            ],
+        });
+        let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        Agent::new(
+            model,
+            Box::new(Fake(
+                engine.control(),
+                Arc::new(Mutex::new(Vec::new())),
+                None,
+            )),
+        )
+    }
+
+    fn snapshot_of(
+        agent: &Agent,
+        root: Option<&str>,
+        depth: Option<u32>,
+        hidden: bool,
+    ) -> Vec<serde_json::Value> {
+        let outcome = agent.take(TestStep::Snapshot {
+            root: root.map(str::to_owned),
+            depth,
+            hidden,
+        });
+        let StepOutcome::Done { value } = outcome else {
+            panic!("{outcome:?}");
+        };
+        value.as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn snapshot_lists_nodes_in_tree_order_with_depths() {
+        let agent = snapshot_agent();
+        let nodes = snapshot_of(&agent, None, None, false);
+        let rows: Vec<(u64, u64, &str)> = nodes
+            .iter()
+            .map(|n| {
+                (
+                    n["id"].as_u64().unwrap(),
+                    n["depth"].as_u64().unwrap(),
+                    n["kind"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(rows, [(2, 0, "view"), (4, 1, "view"), (6, 2, "text")]);
+        assert_eq!(nodes[0]["test_id"], "root");
+        assert_eq!(nodes[1]["label"], "Go");
+        assert_eq!(nodes[1]["role"], "button");
+        assert_eq!(nodes[2]["text"], "Go");
+        // Fake puts view `id` at x = id - 0.5, 1 point square.
+        assert_eq!(nodes[1]["bounds"], serde_json::json!([3.5, 0.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn snapshot_depth_stops_the_walk() {
+        let agent = snapshot_agent();
+        assert_eq!(snapshot_of(&agent, None, Some(1), false).len(), 2);
+        assert_eq!(snapshot_of(&agent, None, Some(0), false).len(), 1);
+    }
+
+    #[test]
+    fn snapshot_root_selector_starts_there() {
+        let agent = snapshot_agent();
+        let nodes = snapshot_of(&agent, Some("id:root"), None, false);
+        assert_eq!(nodes[0]["id"], 2);
+        assert_eq!(nodes[0]["depth"], 0);
+        let nodes = snapshot_of(&agent, Some("label:Go"), None, false);
+        let rows: Vec<(u64, u64)> = nodes
+            .iter()
+            .map(|n| (n["id"].as_u64().unwrap(), n["depth"].as_u64().unwrap()))
+            .collect();
+        assert_eq!(rows, [(4, 0), (6, 1)]);
+    }
+
+    #[test]
+    fn snapshot_leaves_hidden_nodes_out_unless_asked() {
+        let agent = snapshot_agent();
+        assert!(
+            !snapshot_of(&agent, None, None, false)
+                .iter()
+                .any(|n| n["id"] == 8)
+        );
+        let all = snapshot_of(&agent, None, None, true);
+        let hidden = all.iter().find(|n| n["id"] == 8).unwrap();
+        assert_eq!(hidden["visible"], false);
+        assert_eq!(hidden["depth"], 1);
     }
 
     #[test]

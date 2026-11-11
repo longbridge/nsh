@@ -627,6 +627,15 @@ fn wait_for_replaced_process() {
     }
 }
 
+/// Loads `app`: behind the DevTools endpoint a runner built with the feature
+/// `devtools` serves when the environment asks for one.
+fn load(view: &Rc<AppView>, app: App) {
+    #[cfg(feature = "devtools")]
+    crate::devtools::load_with_endpoint(view, app);
+    #[cfg(not(feature = "devtools"))]
+    view.load(app);
+}
+
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     STANDALONE.set(true);
@@ -693,8 +702,8 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     };
     crate::linking::launch(view.surface());
     match source {
-        AppSource::Rust(root) => view.load(App::Rust(root)),
-        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        AppSource::Rust(root) => load(&view, App::Rust(root)),
+        AppSource::Bundle(bundle) => load(&view, App::Js(bundle)),
         #[cfg(feature = "dev")]
         AppSource::DevServer(url) => crate::dev::start(&view, url),
     }

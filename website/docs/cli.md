@@ -19,6 +19,7 @@ nsh <COMMAND>
   dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
   run          Like dev, and also run the app in a development host
   package      Package an installable app from the prebuilt runtime
+  devtools     Drive a running app over its DevTools endpoint (experimental)
   keygen       Create a signing key
   certify      Certify a release key with a root key
   publish      Build an app in release mode and sign it into a package (.nshpkg)
@@ -133,7 +134,7 @@ Use `nsh dev --server-only` with an app that embeds the development SDK (`Native
 ## nsh test
 
 ```sh
-nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
+nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground] [--jobs <N>] [--artifacts <DIR>] [--keep-open-on-failure] [--app <PATH>]
 ```
 
 Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Given a directory of an app with Rust crates of its own (`nsh.json` `"rust"`: a Rust app or a TSX app with a crate), it first runs `cargo test` for each crate in the directory, in the crate's own directory, and shows and counts each Rust test with the TypeScript tests, under the file of its test target (`src/lib.rs › tests::adds`); a Rust app with only Rust tests is tested this way too. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`; a Rust app's: `nsh test nsh.json`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app). A TSX app runs in the CLI's own process; an app with Rust crates of its own runs in a headless runner built with them, which the CLI builds the entries for. Headless runs behave as iOS unless a test opens the app as Android (`open`'s `platform`): `platform.os` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
@@ -154,6 +155,10 @@ Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test file
 | `--device <DEVICE>` | With `--target ios`: the simulator the apps run in, by name (`"iPhone 16 Pro"`) or UDID. Default: a booted one, else the newest iPhone, which is booted. |
 | `--display <N>` | With `--target macos`: the display the apps' windows open on, centered: `1` is the primary display (the one with the menu bar), `2` the next, and so on; a number with no display opens them on the main one. By default they open on a secondary display (the first besides the primary one, not a mirror of it), so a test run keeps to a screen of its own, and on the primary one when it is the only one. The tests run the same on every display. |
 | `--foreground` | With `--target macos`: the apps become the active app, as they do for a user. By default they run in the background: their windows show, the keyboard stays with the app you type in, and the tests' clicks, keys and shortcuts go to the windows directly. A test that depends on the app being active (`lifecycle()` follows whether the app is active) or a measurement such as `examples/gallery/tools/perf.py` (which passes it) should run with it. |
+| `--jobs <N>` | With `--target macos` or `windows`: runs up to N test files at once, each in a process of its own whose apps open their own windows. A file's results are shown together when it ends. |
+| `--artifacts <DIR>` | With `--target macos` or `windows`: keeps `<DIR>/<the file's path from the tests' directory, `/` as `__`>/timeline.jsonl` (a JSON line per step and per console line, `t_ms` in milliseconds since the file started) and `failure.png`, the app's window at the file's first failure. |
+| `--keep-open-on-failure` | With `--target macos` or `windows`: when a test fails, leaves its apps open and prints `nsh devtools: kept <url> open; token <token>` for a DevTools client; Enter (or 10 minutes) closes them and the run goes on. It runs one test file at a time. |
+| `--app <PATH>` | With `--target macos` or `windows`: runs the apps the tests open as this packaged app (an `.app` on macOS, an executable or its directory on Windows) built by `nsh package --devtools`, instead of a development host, driven over its DevTools endpoint. Every `open` starts it with a fresh data directory. |
 | `--web-host <JS>` | The web page's host module the apps opened headless get (default: `nsh.json` `web.host`; it exports `createHost(player)`): it answers their [`host`](../modules/nsh.md#host) calls and its `player.hostEvent` reaches `host.on` ([Testing](./testing-and-trace.md#the-pages-host)). Headless runs only; `--target web` runs `nsh.json`'s `web.host`. |
 
 ## nsh check
@@ -225,6 +230,7 @@ Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is p
 | `--abi <ABI>` | Android: the ABIs of the APK (`arm64-v8a`, `armeabi-v7a`, `x86_64`), repeated or separated by commas. Default: `arm64-v8a` and `armeabi-v7a`, plus the device's with `--run`. |
 | `--arch <ARCH>` | macOS: the processors the app runs on, `arm64` (Apple silicon), `x86_64` (Intel) or `universal` (both, in one executable). Default: this Mac's. A runner for another processor needs its Rust target (`rustup target add x86_64-apple-darwin`). |
 | `--run` | Install and launch the app afterwards: in the simulator (`ios-simulator`) or on the connected Android device; `macos`, `linux` and `windows` launch it; `web` serves the site on this machine at the address it prints. |
+| `--devtools` | macOS and Windows: builds the app's runner with the [DevTools](./devtools.md) endpoint, which listens when the app starts with `NSH_DEVTOOLS` set and which `nsh test --app` drives. The runner is built from source, in a checkout of NSH or for an app with Rust crates. Packages for development and testing; release packages are built without it. |
 | `--asset-url <URL>` | Web: the http(s) URL the site's files are served from, a CDN, as the page names them; `index.html` and `manifest.webmanifest` stay at the page's address (named relatively, as without the flag), and the CDN answers with `Access-Control-Allow-Origin`. Default: next to the page, named relatively. `--run` serves the site from this machine as it is, so it goes without it. |
 
 ```sh
@@ -238,6 +244,33 @@ nsh package my-app --target web
 ```
 
 See [Packaging](./packaging.md).
+
+## nsh devtools
+
+```sh
+nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp> [--session <PID>] [--app-dir <DIR>] [--json]
+```
+
+Drives a running app over its DevTools endpoint ([DevTools](./devtools.md)). Experimental: the commands may change. `launch` starts the app and the rest act on it.
+
+| Command | Description |
+|---|---|
+| `launch <APP> --target macos\|windows` | Builds and starts the app as `nsh test --target` does and stays in the foreground, printing the endpoint's URL. It writes a session file in the app's `.nsh/devtools/` and removes it when the app closes or `nsh` is interrupted. |
+| `ls` | Lists the running sessions. |
+| `tree [--depth <N>] [--root <SEL>]` | The view tree as compact text. |
+| `press <SEL>` | Presses the view the selector names. |
+| `type <SEL> <TEXT>` | Types text into the input. |
+| `wait <SEL> [--gone] [--timeout <MS>]` | Waits for the view to appear, or with `--gone` to disappear. |
+| `shot <PATH> [--node <SEL>]` | Saves a PNG of the window, or of one view. |
+| `logs [-f] [--level <L>] [--target <T>] [--text <S>] [--limit <N>]` | The app's console lines; `-f` follows. |
+| `close` | Quits the app. |
+| `mcp` | Serves the app to an AI agent over the Model Context Protocol on standard input and output. |
+
+| Flag | Description |
+|---|---|
+| `--session <PID>` | The session to act on (default: the only running one; several is an error that names them). |
+| `--app-dir <DIR>` | The app's directory, where the session files are (default: the current directory). |
+| `--json` | Prints the protocol's answer as JSON. |
 
 ## External targets
 

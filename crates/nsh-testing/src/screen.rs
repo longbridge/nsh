@@ -295,6 +295,43 @@ impl Clip {
     }
 }
 
+/// One node of [`Screen::snapshot`]: what a tool outside the app reads of a
+/// view. Bounds are the platform's, so the agent adds them.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TreeNode {
+    /// The view.
+    pub id: NodeId,
+    /// Levels below the snapshot's root.
+    pub depth: u32,
+    /// Its kind, lower case (`view`, `text`, `input`, `scroll`, `list`, ...).
+    pub kind: String,
+    /// Its `testID`.
+    pub test_id: Option<String>,
+    /// Its accessibility role, if it has one.
+    pub role: Option<String>,
+    /// Its accessibility label.
+    pub label: Option<String>,
+    /// The text it shows, cut at 80 characters.
+    pub text: Option<String>,
+    /// An input's text.
+    pub value: Option<String>,
+    /// An input's placeholder.
+    pub placeholder: Option<String>,
+    /// A user sees it.
+    pub visible: bool,
+    /// It takes input (not `disabled`).
+    pub enabled: bool,
+    /// `Some(true)` when it is selected.
+    pub selected: Option<bool>,
+    /// Its checked state: `false`, `true` or `mixed`.
+    pub checked: Option<String>,
+    /// A scroll view's offset and content size: `[x, y, width, height]`.
+    pub scroll: Option<[f32; 4]>,
+    /// It is in a cell of a list.
+    pub recycled: bool,
+}
+
 /// A view on screen as layout placed it ([`Screen::layout_nodes`]): for
 /// checks of the layout itself (what overflows, overlaps or is cut). Its
 /// boxes are in the root's points and leave transforms aside: a scaled,
@@ -967,6 +1004,138 @@ impl Screen {
             );
         }
         out
+    }
+
+    /// The node tree as a tool outside the app reads it ([`TreeNode`]), in
+    /// tree order: the views of [`Screen::layout_nodes`] below `root` (a
+    /// selector's first match; every view when `None`), at most `depth`
+    /// levels under it. Views no user sees (hidden, collapsed, clipped away)
+    /// are left out unless `hidden`, which lists them with
+    /// [`TreeNode::visible`] false.
+    pub fn snapshot(
+        &self,
+        root: Option<&str>,
+        depth: Option<u32>,
+        hidden: bool,
+    ) -> Result<Vec<TreeNode>, String> {
+        let layout = self.layout_nodes();
+        let top = match root {
+            None => None,
+            Some(selector) => {
+                let found = self.resolve(&Selector::parse(selector)?);
+                let id = *found
+                    .first()
+                    .ok_or_else(|| format!("no view matches `{selector}`"))?;
+                if !layout.iter().any(|n| n.id == id) {
+                    return Err(format!("`{selector}` is not a node of the tree"));
+                }
+                Some(id)
+            }
+        };
+        let shown: HashSet<NodeId> = self.shown().into_iter().collect();
+        // Depth below the screen's top, then relative to `top`.
+        let mut depths: HashMap<NodeId, u32> = HashMap::new();
+        let mut inside: HashSet<NodeId> = HashSet::new();
+        let mut recycled: HashSet<NodeId> = HashSet::new();
+        let mut base = 0;
+        let mut out = Vec::new();
+        for node in &layout {
+            let level = depths.get(&node.parent).map_or(0, |d| d + 1);
+            depths.insert(node.id, level);
+            let view = self.nodes.get(&node.id);
+            let list = view.is_some_and(|v| v.screen_order.is_some());
+            if self
+                .nodes
+                .get(&node.parent)
+                .is_some_and(|p| p.screen_order.is_some())
+                || recycled.contains(&node.parent)
+            {
+                recycled.insert(node.id);
+            }
+            match top {
+                None => {}
+                Some(top) if node.id == top => {
+                    base = level;
+                    inside.insert(node.id);
+                }
+                Some(_) if inside.contains(&node.parent) => {
+                    inside.insert(node.id);
+                }
+                Some(_) => continue,
+            }
+            let level = level - base;
+            let visible = shown.contains(&node.id);
+            if (!visible && !hidden) || depth.is_some_and(|d| level > d) {
+                continue;
+            }
+            let Some(view) = view else { continue };
+            let kind = if list {
+                "list".to_owned()
+            } else {
+                match node.kind {
+                    ViewKind::View => "view",
+                    ViewKind::Text => "text",
+                    ViewKind::Image => "image",
+                    ViewKind::Scroll => "scroll",
+                    ViewKind::Input => "input",
+                    ViewKind::Stack => "stack",
+                    ViewKind::Screen => "screen",
+                    ViewKind::Modal => "modal",
+                    ViewKind::HeaderItem => "header_item",
+                    ViewKind::InputAccessory => "input_accessory",
+                    ViewKind::Canvas => "canvas",
+                    ViewKind::WebView => "web_view",
+                    ViewKind::Native => "native",
+                    ViewKind::Video => "video",
+                }
+                .to_owned()
+            };
+            let mut text = view.text.clone();
+            if let Some(t) = &text
+                && t.chars().count() > 80
+            {
+                let mut cut: String = t.chars().take(80).collect();
+                cut.push('\u{2026}');
+                text = Some(cut);
+            }
+            out.push(TreeNode {
+                id: node.id,
+                depth: level,
+                kind,
+                test_id: node.test_id.as_deref().map(str::to_owned),
+                role: (view.role != AccessibilityRole::None)
+                    .then(|| view.role.js_name().to_owned()),
+                label: view.label.as_deref().map(str::to_owned),
+                text,
+                value: view.input.as_ref().map(|i| i.text.clone()),
+                placeholder: view
+                    .input
+                    .as_ref()
+                    .map(|i| i.config.placeholder.clone())
+                    .filter(|p| !p.is_empty()),
+                visible,
+                enabled: !view.disabled,
+                selected: view.selected.then_some(true),
+                checked: view.accessibility_state.checked.map(|c| {
+                    match c {
+                        nsh_core::Checked::False => "false",
+                        nsh_core::Checked::True => "true",
+                        nsh_core::Checked::Mixed => "mixed",
+                    }
+                    .to_owned()
+                }),
+                scroll: node.scroll.as_ref().map(|s| {
+                    let size = s.content_size.unwrap_or_default();
+                    let (x, y) = view
+                        .scroll
+                        .as_ref()
+                        .map_or((0.0, 0.0), |sc| (sc.x.0, sc.y.0));
+                    [x, y, size.width.0, size.height.0]
+                }),
+                recycled: recycled.contains(&node.id),
+            });
+        }
+        Ok(out)
     }
 
     /// The views of [`Screen::attached`] a user sees, in tree order: those

@@ -9,6 +9,11 @@
 //! `nsh_platform_windows::set_ui_sets` and then [`main`]. A Rust app
 //! (`nsh.json` `"root"`) calls [`run_rust`] with its root instead, built
 //! without the feature `js`: the runner then links no QuickJS.
+//!
+//! With the feature `devtools` (`nsh package --devtools`) the runner serves
+//! the app's DevTools endpoint when `NSH_DEVTOOLS` is set, records its
+//! console for it and takes the arguments a test host takes (`--data-dir`,
+//! `--window-size`), which `nsh test --app` gives it.
 
 /// Runs the release runner (until its window closes).
 #[cfg(all(windows, feature = "js"))]
@@ -65,10 +70,14 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     struct Logger;
     impl log::Log for Logger {
         fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-            m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
+            printed(m) || collected(m)
         }
         fn log(&self, r: &log::Record<'_>) {
-            if self.enabled(r.metadata()) {
+            #[cfg(feature = "devtools")]
+            if collected(r.metadata()) {
+                nsh_platform_windows::devtools_record(r);
+            }
+            if printed(r.metadata()) {
                 let line = format!("{} {}: {}\n", r.level(), r.target(), r.args());
                 nsh_platform_windows::debug_output(&line);
                 if DEVELOPMENT.get() == Some(&true) {
@@ -77,6 +86,15 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
             }
         }
         fn flush(&self) {}
+    }
+    /// What goes to the debugger.
+    fn printed(m: &log::Metadata<'_>) -> bool {
+        m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
+    }
+    /// What the DevTools console collects (all of nsh's lines, as a
+    /// development host's logger does).
+    fn collected(m: &log::Metadata<'_>) -> bool {
+        cfg!(feature = "devtools") && (m.target().starts_with("nsh") || printed(m))
     }
     static LOGGER: Logger = Logger;
     let development = std::env::var_os("NSH_APP_DIR");
@@ -139,7 +157,37 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
         Some("dark") => options.appearance = Appearance::Dark,
         _ => {}
     }
+    #[cfg(feature = "devtools")]
+    test_arguments(&mut options);
     (dir, options)
+}
+
+/// The arguments of a test host (`nsh_windows_host`'s), which `nsh test
+/// --app` starts the packaged app with: where it keeps its data (fresh for
+/// each test) and the window's size.
+#[cfg(all(windows, feature = "devtools"))]
+fn test_arguments(options: &mut nsh_platform_windows::AppOptions) {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--data-dir" => {
+                options.data_dir = args.next().map(std::path::PathBuf::from);
+                // Its caches too (downloaded images): a test's app starts
+                // with none.
+                if let Some(dir) = &options.data_dir {
+                    options.cache = nsh_engine::CacheOptions::at(nsh_engine::CacheLocation::Dir(
+                        dir.join("cache"),
+                    ));
+                }
+            }
+            "--window-size" => {
+                if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
+                    options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Not on Windows: says so and exits.

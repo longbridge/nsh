@@ -2631,7 +2631,7 @@ fn draw_shadow(
 /// The first rectangle (view coordinates: x, y, width, height) the
 /// characters `start..end` of the text view with `state` cover (the test
 /// agent's spans).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32, f32, f32, f32)> {
     let drawn = state.text.as_ref()?;
     let layout = drawn.layout.downcast::<WinLayout>()?;

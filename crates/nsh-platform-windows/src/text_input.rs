@@ -163,7 +163,7 @@ const MK_SHIFT: usize = 0x0004;
 const MK_CONTROL: usize = 0x0008;
 
 /// The text input `view` holds now (`None`: it is no input).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
     let input = view.state().input.clone()?;
     Some(input.text())

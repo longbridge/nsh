@@ -417,7 +417,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
 /// Hides the children the frames show instead of, in `window`, for an
 /// in-process picture of it ([`crate::synth::shot`]: `cacheDisplayInRect:`
 /// draws masked layers whole); the views to show again after.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn hide_masked(
     window: &objc2_app_kit::NSWindow,
 ) -> Vec<Retained<objc2_app_kit::NSView>> {

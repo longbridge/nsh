@@ -3833,6 +3833,7 @@ dependencies = [
  "nsh-bundler",
  "nsh-core",
  "nsh-dev",
+ "nsh-devtools",
  "nsh-engine",
  "nsh-i18n",
  "nsh-js",
@@ -3912,6 +3913,19 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tungstenite 0.30.0",
+]
+
+[[package]]
+name = "nsh-devtools"
+version = "0.5.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "log",
+ "nsh-dev",
+ "nsh-devtools",
+ "serde",
+ "serde_json",
  "tungstenite 0.30.0",
 ]
 
@@ -4166,6 +4180,7 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "nsh-dev",
+ "nsh-devtools",
  "nsh-engine",
  "nsh-platform-apple",
  "nsh-testing",
@@ -4241,6 +4256,7 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "nsh-dev",
+ "nsh-devtools",
  "nsh-engine",
  "nsh-testing",
  "rustc-hash 2.1.3",

@@ -692,6 +692,15 @@ fn url_scheme(url: String) {
     }
 }
 
+/// Loads `app`: behind the DevTools endpoint a runner built with the feature
+/// `devtools` serves when the environment asks for one.
+fn load(view: &Rc<AppView>, app: App) {
+    #[cfg(feature = "devtools")]
+    crate::devtools::load_with_endpoint(view, app);
+    #[cfg(not(feature = "devtools"))]
+    view.load(app);
+}
+
 /// Starts [`run_app`]'s app, with the links that came before it.
 fn start_pending() {
     let Some(source) = PENDING.with(|p| p.borrow_mut().take()) else {
@@ -706,8 +715,8 @@ fn start_pending() {
         .borrow_mut()
         .extend(URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())));
     match source {
-        AppSource::Rust(root) => view.load(App::Rust(root)),
-        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        AppSource::Rust(root) => load(&view, App::Rust(root)),
+        AppSource::Bundle(bundle) => load(&view, App::Js(bundle)),
         #[cfg(feature = "dev")]
         AppSource::DevServer(url) => crate::dev::start(&view, url),
     }

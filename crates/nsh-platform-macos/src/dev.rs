@@ -65,6 +65,9 @@ impl log::Log for DevLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
+        if let Some(collector) = crate::devtools::COLLECTOR.get() {
+            collector.record(record);
+        }
         let message = record.args().to_string();
         let client = CLIENT.lock().ok().and_then(|c| c.upgrade());
         match client {
@@ -89,6 +92,8 @@ impl log::Log for DevLogger {
 /// dev server once connected. Call first thing in a development host.
 pub fn init_logging() {
     static LOGGER: DevLogger = DevLogger;
+    // Before the logger can run: it records into the collector.
+    crate::devtools::collector();
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }
@@ -109,6 +114,8 @@ pub(crate) struct DevSession {
     _client: Arc<DevClient>,
     /// The Cmd+R key monitor.
     monitor: Option<Retained<AnyObject>>,
+    /// The DevTools endpoint, when `NSH_DEVTOOLS` asks for one.
+    _devtools: Option<crate::devtools::DevtoolsSession>,
 }
 
 impl Drop for DevSession {
@@ -144,6 +151,9 @@ struct DevUi {
     /// The status line: a pill holding its label.
     status: Option<(Retained<NSView>, Retained<NSTextField>)>,
     error: Option<Retained<NSView>>,
+    /// Holds the app (with its limits) until a DevTools client sends
+    /// `Session.start` (`NSH_DEVTOOLS_WAIT`).
+    gate: crate::devtools::Gate<(App, Option<Limits>)>,
 }
 
 /// Connects `view` to the dev server at `url` (`ws://host:port/ws`).
@@ -159,12 +169,14 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
         latest: None,
         status: None,
         error: None,
+        gate: crate::devtools::Gate::default(),
     }));
     SESSIONS.with(|s| s.borrow_mut().insert(key, ui.clone()));
     show_status(&ui, &format!("Connecting to {url}…"));
 
     let surface = view.surface();
     surface.set_error_handler(Box::new(move |message| {
+        crate::devtools::console_error(message, None);
         if let Some(ui) = session(key) {
             show_error(&ui, "Uncaught error", message, false);
         }
@@ -189,15 +201,30 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
     // A test session (`nsh test --target macos`): the surface keeps the
     // model the agent's steps see, from the first bundle on.
     let key_of_surface = surface.key();
-    let tester = nsh_testing::agent::Tester::new(move |model| {
-        DispatchQueue::main().exec_async(move || {
-            if let Some(surface) = crate::surface::Surface::with_key(key_of_surface) {
-                surface.set_test_model(Some(model));
-                crate::system::testing_started(&surface);
+    // What starts a test session (the dev client's tester and the DevTools
+    // endpoint's each run it for their own session).
+    let start_session = crate::devtools::session_starter(key_of_surface);
+    let devtools = nsh_devtools::server::EndpointConfig::from_env().and_then(|config| {
+        ui.borrow_mut().gate = crate::devtools::Gate::new(config.wait);
+        // Posted behind `Session.setup`'s model (same queue, first in, first
+        // out): the model is on the surface before the held app loads.
+        let open = move || {
+            DispatchQueue::main().exec_async(move || {
+                if let Some(ui) = session(key) {
+                    open_gate(&ui);
+                }
+            });
+        };
+        match crate::devtools::DevtoolsSession::start(config, start_session, open) {
+            Ok(devtools) => Some(devtools),
+            Err(err) => {
+                log::error!("cannot start the DevTools endpoint: {err}");
+                ui.borrow_mut().gate.open();
+                None
             }
-        });
-        Box::new(crate::agent::MacNative::new(key_of_surface))
+        }
     });
+    let tester = nsh_testing::agent::Tester::new(start_session);
     let tests = tester.clone();
     let started = DevClient::start(url, host, move |event| {
         // Taken off the main queue: a step waits for what it does there.
@@ -225,6 +252,7 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
                 key,
                 _client: client,
                 monitor: reload_key(key),
+                _devtools: devtools,
             });
         }
         Err(err) => {
@@ -335,6 +363,9 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             let Some(view) = view else { return };
             hide_error(ui);
             let app = App::Rust(root);
+            if hold(ui, &app, None) {
+                return;
+            }
             app_came(&view, &app);
             view.load(app);
         }
@@ -407,8 +438,11 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             let Some(view) = view else { return };
             log::info!("loading build {version}");
             hide_error(ui);
-            view.set_limits(limits);
             let app = App::Js(bundle);
+            if hold(ui, &app, Some(&limits)) {
+                return;
+            }
+            view.set_limits(limits);
             app_came(&view, &app);
             view.load(app);
         }
@@ -421,7 +455,9 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         } => {
             let view = {
                 let ui = ui.borrow();
-                if ui.running != Some((session, base)) {
+                // Nothing runs while the gate holds the app: the full
+                // bundle that follows the patch replaces the held one.
+                if ui.gate.is_closed() || ui.running != Some((session, base)) {
                     // Not for the running build: its bundle follows.
                     return;
                 }
@@ -448,6 +484,33 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
     }
 }
 
+/// Holds `app` while the DevTools gate is closed (the latest one wins);
+/// whether it did.
+fn hold(ui: &RefCell<DevUi>, app: &App, limits: Option<&Limits>) -> bool {
+    ui.borrow_mut().gate.hold((app.clone(), limits.cloned()))
+}
+
+/// A DevTools client sent `Session.start`: opens the gate and loads the app
+/// that came meanwhile.
+fn open_gate(ui: &Rc<RefCell<DevUi>>) {
+    let (view, held) = {
+        let mut ui = ui.borrow_mut();
+        let held = ui.gate.open();
+        (ui.view.upgrade(), held)
+    };
+    let (Some(view), Some((app, limits))) = (view, held) else {
+        return;
+    };
+    log::info!("DevTools started the app");
+    hide_status(ui);
+    hide_error(ui);
+    if let Some(limits) = limits {
+        view.set_limits(limits);
+    }
+    app_came(&view, &app);
+    view.load(app);
+}
+
 /// `app` came: the standalone host's window, held until the app's options
 /// came, shows unless they say it starts hidden (nsh.json
 /// `window.defaultVisible: false`), as the app's package shows it.
@@ -464,6 +527,11 @@ fn app_came(view: &AppView, app: &App) {
 fn reload(ui: &Rc<RefCell<DevUi>>) {
     let (view, bundle) = {
         let mut ui = ui.borrow_mut();
+        // Held apps load at the gate only; the held one is the newest
+        // bundle already.
+        if ui.gate.is_closed() {
+            return;
+        }
         let target = ui.running.take();
         let bundle = match &ui.latest {
             Some((session, version, bundle)) if Some((*session, *version)) == target => {
@@ -484,6 +552,9 @@ fn reload(ui: &Rc<RefCell<DevUi>>) {
 fn reload_latest(ui: &Rc<RefCell<DevUi>>) {
     let (view, bundle) = {
         let mut ui = ui.borrow_mut();
+        if ui.gate.is_closed() {
+            return;
+        }
         let Some((session, version, bundle)) = ui.latest.clone() else {
             return;
         };

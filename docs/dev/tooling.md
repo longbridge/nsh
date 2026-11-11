@@ -795,6 +795,36 @@ in the desktop idiom at any width (`nsh.js`'s `testSetup`, before the `idiom` op
 every other target runs them as desktops; `platform.os` stays `web`. Without a `platform`, or with `web`, the page
 measures as a real browser does.
 
+On macOS and Windows `nsh test --target` runs each app over its DevTools endpoint (`docs/dev/devtools.md`; the
+dev server still serves the build, the steps go over the endpoint). The flags that go with it, refused on the other
+targets: `--jobs <N>` runs up to N test files at once, each in a worker process of its own (the CLI builds the host
+once and the workers read it: the hidden `--prepared-host`; a file's results print together when it ends);
+`--artifacts <DIR>` keeps `timeline.jsonl` (`devtools/timeline.rs`) and `failure.png` per file under `<DIR>`
+(`devtools/artifacts.rs`); `--keep-open-on-failure` leaves the failed test's apps open, prints their URL and token and
+waits for Enter (10 minutes at most), one file at a time (so not with `--jobs`); `--app <PATH>` opens a packaged
+app built by `nsh package --devtools` instead of a development host, with a fresh data directory for each `open`.
+
+## `nsh devtools` (experimental)
+
+The endpoint, its protocol and how to extend it are in `docs/dev/devtools.md`.
+
+The commands and the MCP tools below are experimental and may change. They are thin users of an app's DevTools
+protocol (`crates/nsh-devtools`), code in `crates/nsh-cli/src/devtools/cli.rs` and `mcp.rs`, both over one `Session`
+trait so tests use a fake.
+
+- `nsh devtools launch <app> --target macos|windows` builds and starts the app as `nsh test --target` does (empty
+  setup) and stays in the foreground. It writes `.nsh/devtools/<pid>.json` in the app's directory (`pid`, `url`,
+  `token`, `app`, `target`, `started`; mode 0600 on unix, the token is in it) and removes it when it ends (Ctrl-C and
+  SIGTERM included). A launcher killed hard leaves the file; the other commands drop files whose process is gone.
+- `ls`, `tree [--depth N] [--root SEL]`, `shot <path> [--node SEL]`, `press SEL`, `type SEL TEXT`,
+  `wait SEL [--gone] [--timeout MS]`, `logs [-f] [--level L] [--target T] [--text S] [--limit N]` and `close` take
+  `--session <pid>` (default: the only running one; several is an error naming them), `--app-dir <DIR>` (default: the
+  current directory) and `--json` (the protocol's answer on standard output).
+- `nsh devtools mcp` serves the same steps to an AI agent over stdio (MCP 2025-06-18, JSON-RPC lines, nothing else on
+  standard output): `list_apps`, `launch_app`, `select_app`, `take_snapshot`, `take_screenshot`, `click`, `type`,
+  `press_key`, `scroll`, `hover`, `drag`, `wait_for`, `list_console`, `list_errors`, `close_app`. Text answers are cut
+  at 20 000 characters with a note. Apps it launches close with `close_app` or when its input ends.
+
 ## New apps (`nsh init --template`)
 
 `nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a

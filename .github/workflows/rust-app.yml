@@ -15,6 +15,7 @@ on:
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
       - "crates/nsh-dev/**"
+      - "crates/nsh-devtools/**"
       - "crates/nsh-engine/**"
       - "crates/nsh-i18n/**"
       - "crates/nsh-js/**"

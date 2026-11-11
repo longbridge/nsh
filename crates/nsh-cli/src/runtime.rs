@@ -501,6 +501,57 @@ pub(crate) fn test_host(platform: Platform) -> anyhow::Result<PathBuf> {
     }
 }
 
+/// The release runner `nsh package` packages an app with on `platform`: with
+/// `devtools`, built with the in-app DevTools endpoint (`--devtools`). An
+/// app with Rust crates builds its own with the feature; any other app needs a
+/// checkout of nsh to build it from, as no distribution carries a runner with
+/// it.
+pub(crate) fn runner(platform: Platform, devtools: bool) -> anyhow::Result<PathBuf> {
+    if !devtools {
+        return file(platform, true);
+    }
+    if let Some(app) = crate::rust_app::current() {
+        return app.runner_with_devtools(platform);
+    }
+    let name = platform.binary(true);
+    let file_name = platform.file_name(true, platform.triple());
+    let exe = cli_exe()?;
+    let bin = exe.parent().context("cli has no parent directory")?;
+    let Some(root) = checkout(bin) else {
+        bail!(
+            "--devtools builds the app's runner with the DevTools endpoint, which no installed \
+             runtime carries: run nsh from a checkout of nsh (`cargo run -p nsh-cli -- package ...`), \
+             or give the app Rust crates (nsh.json \"rust\"), which build the runner with the app"
+        );
+    };
+    let profile = bin.file_name().context("cli profile dir")?;
+    let mut args = vec!["build", "-p", name, "--features", "devtools"];
+    if let Some(triple) = platform.triple() {
+        args.extend(["--target", triple]);
+    }
+    match profile.to_str() {
+        Some("debug") => {}
+        Some("release") => args.push("--release"),
+        Some(other) => args.extend(["--profile", other]),
+        None => bail!("cli profile dir is not UTF-8"),
+    }
+    cargo(
+        &root,
+        &args,
+        &format!("{} with DevTools", platform.host(true)),
+    )?;
+    let mut built = bin
+        .parent()
+        .context("cli is not in a target directory")?
+        .to_path_buf();
+    if let Some(triple) = platform.triple() {
+        built.push(triple);
+    }
+    built.push(profile);
+    built.push(&file_name);
+    existing(built, platform, name, platform.triple())
+}
+
 pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> {
     file_for(platform, runner, platform.triple())
 }

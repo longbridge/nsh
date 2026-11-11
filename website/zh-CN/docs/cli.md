@@ -19,6 +19,7 @@ nsh <COMMAND>
   dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
   run          Like dev, and also run the app in a development host
   package      Package an installable app from the prebuilt runtime
+  devtools     Drive a running app over its DevTools endpoint (experimental)
   keygen       Create a signing key
   certify      Certify a release key with a root key
   publish      Build an app in release mode and sign it into a package (.nshpkg)
@@ -132,7 +133,7 @@ nsh dev [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|tui|web]
 ## nsh test
 
 ```sh
-nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground]
+nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>] [--web-host <JS>] [--device <DEVICE>] [--display <N>] [--foreground] [--jobs <N>] [--artifacts <DIR>] [--keep-open-on-failure] [--app <PATH>]
 ```
 
 以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。如果传入的是带有自己 Rust crate 的应用（`nsh.json` `"rust"`：Rust 应用，或带 crate 的 TSX 应用）的目录，它会先在目录中每个 crate 自己的目录下运行 `cargo test`，并把每个 Rust 测试与 TypeScript 测试一起显示和计数，归在其测试目标的文件下（`src/lib.rs › tests::adds`）；只有 Rust 测试的 Rust 应用也这样测试。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行；带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，由 CLI 为它构建入口。除非测试以 Android 打开应用（`open` 的 `platform`），无界面运行按 iOS 处理：`platform.os` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
@@ -153,6 +154,10 @@ nsh test [PATH] [--filter <NAME>] [--trace] [--fps] [--junit <FILE>] [--target <
 | `--device <DEVICE>` | 配合 `--target ios`：应用在哪个模拟器里运行，按名称（`"iPhone 16 Pro"`）或 UDID 指定。默认：已启动的模拟器，否则启动最新的 iPhone。 |
 | `--display <N>` | 配合 `--target macos`：应用窗口在哪个显示器上居中打开：`1` 是主显示器（带菜单栏的那个），`2` 是下一个，依此类推；没有这个编号的显示器时在主显示器上打开。默认在副显示器（主显示器之外的第一个，且不是它的镜像）上打开，让测试运行占用一块单独的屏幕；只有一个显示器时在主显示器上打开。测试在每个显示器上的运行结果相同。 |
 | `--foreground` | 配合 `--target macos`：让应用成为当前活跃的应用，和用户使用时一样。默认应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，测试的点击、按键和快捷键直接发给这些窗口。依赖应用处于活跃状态的测试（`lifecycle()` 随应用是否活跃而变），或 `examples/gallery/tools/perf.py` 这类性能测量（它会传入该选项），应带上它运行。 |
+| `--jobs <N>` | 配合 `--target macos` 或 `windows`：同时运行至多 N 个测试文件，每个文件在自己的进程里，应用打开各自的窗口。一个文件的结果在它结束时一起显示。 |
+| `--artifacts <DIR>` | 配合 `--target macos` 或 `windows`：保留 `<DIR>/<文件相对测试目录的路径，`/` 换成 `__`>/timeline.jsonl`（每个步骤和每行控制台输出各一行 JSON，`t_ms` 为文件开始后的毫秒数）和 `failure.png`（文件第一次失败时应用的窗口）。 |
+| `--keep-open-on-failure` | 配合 `--target macos` 或 `windows`：测试失败时让它的应用保持打开，并打印 `nsh devtools: kept <url> open; token <token>` 供 DevTools 客户端使用；按 Enter（或 10 分钟后）关闭它们，运行继续。它一次只运行一个测试文件。 |
+| `--app <PATH>` | 配合 `--target macos` 或 `windows`：把测试打开的应用作为这个用 `nsh package --devtools` 构建的打包应用（macOS 上是 `.app`，Windows 上是可执行文件或它所在的目录）运行，而不是开发 host，并通过它的 DevTools 端点驱动。每次 `open` 都用全新的数据目录启动它。 |
 | `--web-host <JS>` | headless 运行时测试打开的应用所用的 Web 页面宿主模块（默认：`nsh.json` 的 `web.host`；它导出 `createHost(player)`）：它应答应用的 [`host`](../modules/nsh.md#host) 调用，它的 `player.hostEvent` 会送到 `host.on`（[测试](./testing-and-trace.md#页面的宿主)）。只用于 headless 运行；`--target web` 运行 `nsh.json` 的 `web.host`。 |
 
 NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 保留它通常的 `target/` 缓存和已有的 `CARGO_TARGET_DIR` 行为；NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。使用我们推荐的 [huacnlee/cargo](https://github.com/huacnlee/cargo) 时，构建产物放在 `~/.cargo/targets/` 下，可执行文件仍在 `target/`。
@@ -221,6 +226,7 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 | `--abi <ABI>` | Android：APK 包含的 ABI（`arm64-v8a`、`armeabi-v7a`、`x86_64`），可重复或用逗号分隔。默认：`arm64-v8a` 和 `armeabi-v7a`，加上 `--run` 时还有设备的 ABI。 |
 | `--arch <ARCH>` | macOS：应用运行的处理器，`arm64`（Apple 芯片）、`x86_64`（Intel）或 `universal`（两者合在一个可执行文件里）。默认：本机的。为另一种处理器编 runner 需要它的 Rust target（`rustup target add x86_64-apple-darwin`）。 |
 | `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux` 和 `windows` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
+| `--devtools` | macOS 和 Windows：构建带 [DevTools](./devtools.md) 端点的应用运行器；应用启动时设置了 `NSH_DEVTOOLS`，端点才会监听，`nsh test --app` 通过它驱动应用。运行器从源码构建，在 NSH 的检出中，或用于带 Rust crate 的应用。用于开发和测试的包；发布包不带它构建。 |
 | `--asset-url <URL>` | Web：站点文件所在的 http(s) 地址（CDN），页面按它引用这些文件；`index.html` 和 `manifest.webmanifest` 仍在页面自己的地址下（和不带它时一样按相对路径引用），CDN 要返回 `Access-Control-Allow-Origin`。默认：放在页面旁边，用相对路径引用。`--run` 从本机直接提供站点，所以不带它。 |
 
 ```sh
@@ -234,6 +240,33 @@ nsh package my-app --target web
 ```
 
 参见[打包](./packaging.md)。
+
+## nsh devtools
+
+```sh
+nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp> [--session <PID>] [--app-dir <DIR>] [--json]
+```
+
+通过 DevTools 端点驱动运行中的应用（[DevTools](./devtools.md)）。实验性：命令可能会变化。`launch` 启动应用，其余命令作用于它。
+
+| 命令 | 说明 |
+|---|---|
+| `launch <APP> --target macos\|windows` | 像 `nsh test --target` 那样构建并启动应用，并留在前台，打印端点的 URL。它在应用的 `.nsh/devtools/` 里写入会话文件，应用关闭或 `nsh` 被中断时删除。 |
+| `ls` | 列出运行中的会话。 |
+| `tree [--depth <N>] [--root <SEL>]` | 视图树，紧凑文本。 |
+| `press <SEL>` | 点击选择器指向的视图。 |
+| `type <SEL> <TEXT>` | 向输入框输入文本。 |
+| `wait <SEL> [--gone] [--timeout <MS>]` | 等待视图出现，加 `--gone` 则等它消失。 |
+| `shot <PATH> [--node <SEL>]` | 把窗口或某个视图保存为 PNG。 |
+| `logs [-f] [--level <L>] [--target <T>] [--text <S>] [--limit <N>]` | 应用的控制台输出；`-f` 持续跟随。 |
+| `close` | 退出应用。 |
+| `mcp` | 通过标准输入输出，以 Model Context Protocol 把应用提供给 AI 智能体。 |
+
+| 参数 | 说明 |
+|---|---|
+| `--session <PID>` | 操作的会话（默认：唯一运行中的那个；有多个时报错并列出它们）。 |
+| `--app-dir <DIR>` | 应用的目录，会话文件所在处（默认：当前目录）。 |
+| `--json` | 以 JSON 打印协议的应答。 |
 
 ## 外部 target
 

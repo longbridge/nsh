@@ -93,7 +93,7 @@ fn install(key: u64) -> Option<Retained<AnyObject>> {
 /// monitor never sees): whether a binding consumed it (then the window
 /// must not get it; a binding passing it through is reported and the
 /// window gets it).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn fires(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     pressed(surface, event)
 }

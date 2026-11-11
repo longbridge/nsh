@@ -542,6 +542,7 @@ fn package_for_run(
         arch: None,
         run: false,
         asset_url: None,
+        devtools: false,
     })
 }
 
@@ -760,6 +761,11 @@ impl KillOnClose {
         ok.then_some(job)
     }
 }
+
+// SAFETY: the value owns its job handle alone (it is never copied out) and
+// only `Drop` closes it; kernel object handles are valid on any thread.
+#[cfg(windows)]
+unsafe impl Send for KillOnClose {}
 
 #[cfg(windows)]
 impl Drop for KillOnClose {

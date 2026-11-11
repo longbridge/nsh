@@ -49,6 +49,55 @@ use crate::{
 /// most), so what the app keeps alive shows in a trace.
 const IDLE_MS: u32 = 1200;
 
+/// What `nsh test` takes besides the flags every target shares: those of runs
+/// over DevTools (`--target macos` or `windows`).
+pub(crate) struct Extras {
+    /// `--jobs`: test files run at once.
+    pub(crate) jobs: usize,
+    /// `--artifacts`.
+    pub(crate) artifacts: Option<PathBuf>,
+    /// `--keep-open-on-failure`.
+    pub(crate) keep_open_on_failure: bool,
+    /// The hidden `--results-json`: this process is a `--jobs` run's worker
+    /// for one test file, which it leaves its results of in this file.
+    pub(crate) results_json: Option<PathBuf>,
+    /// The hidden `--work-dir`: a worker's generated files go here instead of
+    /// the app's `.nsh/test`.
+    pub(crate) work_dir: Option<PathBuf>,
+    /// The hidden `--artifacts-root`: where the run found its test files.
+    pub(crate) artifacts_root: Option<PathBuf>,
+    /// The hidden `--prepared-host`: the host the run that started this
+    /// worker built.
+    pub(crate) prepared_host: Option<PathBuf>,
+    /// `--app`: the packaged app the tests' apps run as.
+    pub(crate) app: Option<PathBuf>,
+}
+
+/// `--app` goes with the targets whose apps are driven over DevTools.
+fn check_app_flag(app: Option<&Path>, target: Option<crate::run::Target>) -> anyhow::Result<()> {
+    if app.is_some()
+        && !matches!(
+            target,
+            Some(crate::run::Target::Macos | crate::run::Target::Windows)
+        )
+    {
+        bail!(
+            "--app goes with --target macos or --target windows: it runs a packaged app built \
+             with `nsh package --devtools`, driven over DevTools"
+        );
+    }
+    Ok(())
+}
+
+/// What a worker process leaves of one test file for the `--jobs` run that
+/// started it.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FileOutcome {
+    results: Vec<TestResult>,
+    /// Why the file could not run.
+    error: Option<String>,
+}
+
 /// Runs the tests `path` names, of the app whose entry is `entry`: a test
 /// file, the test files in a directory (an app's), or an app's entry with
 /// the steps standard input gives.
@@ -69,9 +118,20 @@ pub(crate) fn test(
     device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
+    extras: Extras,
 ) -> anyhow::Result<()> {
+    let Extras {
+        jobs,
+        artifacts: artifacts_dir,
+        keep_open_on_failure,
+        results_json,
+        work_dir: worker_work_dir,
+        artifacts_root,
+        prepared_host,
+        app,
+    } = extras;
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let work_dir = app_dir.join(".nsh/test");
+    let work_dir = worker_work_dir.unwrap_or_else(|| app_dir.join(".nsh/test"));
     // The app's crates in the directory, which `cargo test` tests.
     let crates: Vec<AppCrate> = match crate::rust_app::current() {
         Some(app) if path.is_dir() => app
@@ -112,7 +172,46 @@ pub(crate) fn test(
         }
     };
     let start = Instant::now();
-    let mut tally = Tally::default();
+    let mut tally = Tally {
+        // A worker's results are shown by the run that started it.
+        quiet: results_json.is_some(),
+        ..Tally::default()
+    };
+    let over_devtools = matches!(
+        target,
+        Some(crate::run::Target::Macos | crate::run::Target::Windows)
+    );
+    check_app_flag(app.as_deref(), target)?;
+    // The executable of the packaged app, which stands for the development
+    // host the run would build.
+    let app_executable = app
+        .as_deref()
+        .map(crate::test_host::packaged_executable)
+        .transpose()?;
+    if jobs > 1 && !over_devtools {
+        bail!(
+            "--jobs above 1 goes with --target macos or --target windows: each of their apps is \
+             driven over DevTools, so test files can run at once"
+        );
+    }
+    if artifacts_dir.is_some() && !over_devtools {
+        bail!(
+            "--artifacts goes with --target macos or --target windows: it keeps what a run over \
+             DevTools leaves"
+        );
+    }
+    if keep_open_on_failure && !over_devtools {
+        bail!(
+            "--keep-open-on-failure goes with --target macos or --target windows: it holds a host \
+             open for a DevTools client"
+        );
+    }
+    if keep_open_on_failure && jobs > 1 {
+        bail!(
+            "--keep-open-on-failure runs one test file at a time: one terminal cannot wait for \
+             several open apps (drop --jobs)"
+        );
+    }
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
@@ -153,10 +252,46 @@ pub(crate) fn test(
             }
         }
     }
+    let artifacts = (artifacts_dir.is_some() || keep_open_on_failure).then(|| {
+        // Each file's directory is named from its path from here.
+        let root = artifacts_root.clone().unwrap_or_else(|| {
+            if path.is_dir() {
+                path.to_owned()
+            } else {
+                path.parent().unwrap_or(Path::new(".")).to_owned()
+            }
+        });
+        Arc::new(crate::devtools::Artifacts::new(
+            artifacts_dir.clone(),
+            root,
+            keep_open_on_failure,
+        ))
+    });
+    // A run of workers prepares what they share once, here: the host's build
+    // (for an app with Rust crates also its workspace and description, made
+    // before this), which they are given.
+    let prepared_host = match (app_executable.clone().or(prepared_host), target) {
+        (Some(host), _) => Some(host),
+        (None, Some(target)) if jobs > 1 && files.len() > 1 => {
+            Some(crate::test_host::prepare(target)?)
+        }
+        _ => None,
+    };
     let host = target
         .filter(|_| !files.is_empty())
         .map(|target| {
-            crate::test_host::starter(target, browser, &work_dir, fps, device, display, foreground)
+            crate::test_host::starter(
+                target,
+                browser,
+                &work_dir,
+                fps,
+                device,
+                display,
+                foreground,
+                artifacts.clone(),
+                prepared_host.clone(),
+                app_executable.is_some(),
+            )
         })
         .transpose()?;
     // What `open` checks its options against on that host.
@@ -190,19 +325,64 @@ pub(crate) fn test(
                 host,
                 target: host_target,
                 page_host,
+                on_failure: artifacts.clone().map(|artifacts| {
+                    Arc::new(move || artifacts.failed()) as nsh_testing::FailureHook
+                }),
             };
-            for file in &files {
-                let shown = shown(file);
-                let ran = nsh_testing::run_file(&run, file, &mut |result| {
-                    tally.show(&shown, result);
-                });
-                if let Err(e) = ran {
-                    tally.failed(&shown, &e);
+            if jobs > 1 && files.len() > 1 {
+                let target = target.context("--jobs goes with --target")?;
+                let workers = Workers {
+                    jobs,
+                    target,
+                    filter: run.filter.clone(),
+                    trace,
+                    fps,
+                    display,
+                    foreground,
+                    artifacts: artifacts_dir.clone(),
+                    artifacts_root: if path.is_dir() {
+                        path.to_owned()
+                    } else {
+                        path.parent().unwrap_or(Path::new(".")).to_owned()
+                    },
+                    entry,
+                    host: prepared_host.clone().context("the run's host")?,
+                    app: app.as_deref(),
+                    work_dir: &work_dir,
+                };
+                run_workers(&workers, &files, &shown, &mut tally)?;
+            } else {
+                for file in &files {
+                    let shown = shown(file);
+                    if let Some(artifacts) = &artifacts {
+                        artifacts.begin(file);
+                    }
+                    let ran = nsh_testing::run_file(&run, file, &mut |result| {
+                        tally.show(&shown, result);
+                    });
+                    if let Some(artifacts) = &artifacts {
+                        artifacts.end();
+                    }
+                    if let Err(e) = ran {
+                        tally.failed(&shown, &e);
+                    }
                 }
             }
         }
     }
     crate::test_web::close();
+    if let Some(path) = &results_json {
+        // A worker: its file's results go to the run that started it, which
+        // shows and counts them.
+        let (results, error) = match tally.files.pop() {
+            Some((_, results, error)) => (results, error),
+            None => (Vec::new(), None),
+        };
+        let outcome = FileOutcome { results, error };
+        let json = serde_json::to_string(&outcome).context("encode the results")?;
+        std::fs::write(path, json).with_context(|| format!("write {}", ui::path(path)))?;
+        return Ok(());
+    }
     if let Some(report) = junit {
         std::fs::write(report, tally.junit(start.elapsed()))
             .with_context(|| format!("write {}", ui::path(report)))?;
@@ -227,9 +407,236 @@ pub(crate) fn test(
     Ok(())
 }
 
+/// How a `--jobs` run starts its workers.
+struct Workers<'a> {
+    jobs: usize,
+    target: crate::run::Target,
+    filter: Option<String>,
+    trace: bool,
+    fps: bool,
+    display: Option<usize>,
+    foreground: bool,
+    artifacts: Option<PathBuf>,
+    artifacts_root: PathBuf,
+    /// The entry of the app the run's test files are part of.
+    entry: &'a Path,
+    /// The host the run built for its workers.
+    host: PathBuf,
+    /// The packaged app (`--app`) the workers run the apps as.
+    app: Option<&'a Path>,
+    /// The run's own work directory: each worker gets a directory of its own
+    /// below it.
+    work_dir: &'a Path,
+}
+
+/// How long a worker may take for one test file before it is killed and the
+/// file counts as failed.
+const WORKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+/// The last lines of a worker's output that are kept to show with its file.
+const WORKER_OUTPUT_LINES: usize = 2000;
+
+/// Runs the test files on up to `workers.jobs` threads, each file in a
+/// process of its own (`nsh test <file> --results-json <tmp>`): a test
+/// file's session is one per process (the VM's calls find it), so files run
+/// at once as processes, as many as hosts on the screen. A file's output is
+/// kept and shown with its results when it ends, so lines of different files
+/// do not mix.
+///
+/// Per worker (thread `w`): `<work dir>/jobs/<w>`, where the entries made for
+/// its test files and its results go, so that workers never write one
+/// another's generated files. Shared: the app's `.nsh/types` (written by this
+/// process before, the workers skip it), `.nsh/hosts` and Cargo's `target`
+/// (Cargo locks it).
+fn run_workers(
+    workers: &Workers<'_>,
+    files: &[PathBuf],
+    shown: &(dyn Fn(&Path) -> String + Sync),
+    tally: &mut Tally,
+) -> anyhow::Result<()> {
+    use clap::ValueEnum as _;
+    let exe = std::env::current_exe().context("the path of this program")?;
+    let target = workers
+        .target
+        .to_possible_value()
+        .map(|v| v.get_name().to_owned())
+        .context("the name of the target")?;
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let tally = Mutex::new(tally);
+    let count = workers.jobs.min(files.len());
+    let mut dirs = Vec::new();
+    for w in 0..count {
+        let dir = workers.work_dir.join("jobs").join(w.to_string());
+        // What an earlier run left of a worker's files goes.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).with_context(|| format!("make {}", ui::path(&dir)))?;
+        dirs.push(dir);
+    }
+    std::thread::scope(|scope| {
+        for dir in &dirs {
+            scope.spawn(|| {
+                loop {
+                    let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(file) = files.get(at) else { return };
+                    let shown = shown(file);
+                    let outcome = run_worker(workers, &exe, &target, file, dir);
+                    // The file's lines together.
+                    let mut tally = tally.lock().unwrap_or_else(|e| e.into_inner());
+                    match outcome {
+                        Ok((output, outcome)) => {
+                            for line in output.lines() {
+                                ui::plain(line);
+                            }
+                            for result in &outcome.results {
+                                tally.show(&shown, result);
+                            }
+                            if let Some(error) = &outcome.error {
+                                tally.failed(&shown, error);
+                            }
+                        }
+                        Err(message) => tally.failed(&shown, &message),
+                    }
+                }
+            });
+        }
+    });
+    Ok(())
+}
+
+/// Runs `file` in a process of its own, whose generated files go in `dir`:
+/// what it printed, and its results. A process that runs longer than
+/// [`WORKER_TIMEOUT`] is killed and the file fails with what it printed.
+fn run_worker(
+    workers: &Workers<'_>,
+    exe: &Path,
+    target: &str,
+    file: &Path,
+    dir: &Path,
+) -> Result<(String, FileOutcome), String> {
+    let results = dir.join("results.json");
+    let _ = std::fs::remove_file(&results);
+    let mut command = Command::new(exe);
+    command
+        .arg("test")
+        .arg(file)
+        .args(["--target", target])
+        .arg("--entry")
+        .arg(workers.entry)
+        .arg("--work-dir")
+        .arg(dir)
+        .arg("--results-json")
+        .arg(&results)
+        .arg("--prepared-host")
+        .arg(&workers.host)
+        .stdin(Stdio::null());
+    if let Some(filter) = &workers.filter {
+        command.args(["--filter", filter]);
+    }
+    if let Some(app) = workers.app {
+        command.arg("--app").arg(app);
+    }
+    if workers.trace {
+        command.arg("--trace");
+    }
+    if workers.fps {
+        command.arg("--fps");
+    }
+    if let Some(display) = workers.display {
+        command.args(["--display", &display.to_string()]);
+    }
+    if workers.foreground {
+        command.arg("--foreground");
+    }
+    if let Some(artifacts) = &workers.artifacts {
+        command
+            .arg("--artifacts")
+            .arg(artifacts)
+            .arg("--artifacts-root")
+            .arg(&workers.artifacts_root);
+    }
+    if ui::verbose() {
+        command.arg("-v");
+    }
+    // The output is read to its end, in the file's turn (verbose runs too).
+    let (reader, writer) =
+        std::io::pipe().map_err(|e| format!("cannot start a test process: {e}"))?;
+    command
+        .stdout(writer.try_clone().map_err(|e| e.to_string())?)
+        .stderr(writer);
+    let child = command.spawn();
+    // Drops this process's copies of the pipe's write end: the reader ends
+    // with the child.
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    let mut child = child.map_err(|e| format!("cannot start a test process: {e}"))?;
+    let lines: Arc<Mutex<std::collections::VecDeque<String>>> = Arc::default();
+    let kept = lines.clone();
+    let reading = std::thread::Builder::new()
+        .name("nsh-worker-output".into())
+        .spawn(move || {
+            for line in BufReader::new(reader).lines() {
+                let Ok(line) = line else { break };
+                let mut kept = kept.lock().unwrap_or_else(|e| e.into_inner());
+                if kept.len() == WORKER_OUTPUT_LINES {
+                    kept.pop_front();
+                }
+                kept.push_back(line);
+            }
+        })
+        .map_err(|e| format!("cannot read a test process's output: {e}"))?;
+    let deadline = Instant::now() + WORKER_TIMEOUT;
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if Instant::now() >= deadline => {
+                timed_out = true;
+                let _ = child.kill();
+                break child.wait();
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(e) => break Err(e),
+        }
+    }
+    .map_err(|e| format!("the test process: {e}"))?;
+    // To the end of its output: the reader ends when the pipe closes. A
+    // killed worker's own hosts may hold it open a while: wait a bit.
+    let end = Instant::now() + std::time::Duration::from_secs(5);
+    while !reading.is_finished() && Instant::now() < end {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if reading.is_finished() {
+        let _ = reading.join();
+    }
+    let output = lines
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    if timed_out {
+        return Err(format!(
+            "the test process ran longer than {} minutes and was killed{}",
+            WORKER_TIMEOUT.as_secs() / 60,
+            crate::test_host::indented(&output)
+        ));
+    }
+    let outcome = std::fs::read_to_string(&results)
+        .ok()
+        .and_then(|json| serde_json::from_str::<FileOutcome>(&json).ok());
+    match outcome {
+        Some(outcome) => Ok((output, outcome)),
+        None => Err(format!(
+            "the test process ended with {status} without results{}",
+            crate::test_host::indented(&output)
+        )),
+    }
+}
+
 /// How the tests ended so far, by file.
 #[derive(Default)]
 struct Tally {
+    /// Nothing is shown (counted only): the results are another process's.
+    quiet: bool,
     passed: usize,
     failed: usize,
     skipped: usize,
@@ -242,7 +649,9 @@ struct Tally {
 impl Tally {
     /// Shows how a test of the file shown as `file` ended, and counts it.
     fn show(&mut self, file: &str, result: &TestResult) {
-        show(file, result);
+        if !self.quiet {
+            show(file, result);
+        }
         self.count(file, result);
     }
 
@@ -261,7 +670,9 @@ impl Tally {
     /// The test file shown as `file` could not run: it counts as a failure.
     fn failed(&mut self, file: &str, message: &str) {
         self.failed += 1;
-        ui::error(format!("{file}: {message}"));
+        if !self.quiet {
+            ui::error(format!("{file}: {message}"));
+        }
         self.file(file).2 = Some(message.to_owned());
     }
 
@@ -724,13 +1135,15 @@ fn cargo_test_results(
     targets
 }
 
-/// The entry of the app `path` is part of: a directory's, a test file's
-/// (the nearest directory up with an app), or `path` itself.
+/// The entry of the app `path` is part of: a directory's own, else the one
+/// of the nearest directory up with an app (a directory of test files, as
+/// `tests/`), a test file's likewise, or `path` itself.
 pub(crate) fn app_entry(path: &Path) -> anyhow::Result<PathBuf> {
     if path.is_dir() {
-        return crate::entry::resolve(path);
-    }
-    if !is_test_file(path) {
+        if let Ok(entry) = crate::entry::resolve(path) {
+            return Ok(entry);
+        }
+    } else if !is_test_file(path) {
         return Ok(path.to_owned());
     }
     let mut dir = path.parent();
@@ -739,6 +1152,10 @@ pub(crate) fn app_entry(path: &Path) -> anyhow::Result<PathBuf> {
             return crate::entry::resolve(d);
         }
         dir = d.parent();
+    }
+    if path.is_dir() {
+        // No app around it: the error says what the directory lacks.
+        return crate::entry::resolve(path);
     }
     bail!(
         "{}: no app around it (an App.tsx or nsh.json)",
@@ -853,6 +1270,36 @@ fn compiler() -> nsh_testing::Compile {
 }
 
 #[cfg(test)]
+mod devtools_app_flag {
+    use super::*;
+    use crate::run::Target;
+
+    /// `--app` goes with `--target macos` or `windows`: any other target, or
+    /// none, refuses it with a message naming both.
+    #[test]
+    fn app_needs_a_devtools_target() {
+        let app = Some(Path::new("Gallery.app"));
+        for target in [
+            None,
+            Some(Target::Linux),
+            Some(Target::Gpui),
+            Some(Target::Web),
+            Some(Target::Ios),
+            Some(Target::Android),
+        ] {
+            let err = check_app_flag(app, target).unwrap_err().to_string();
+            assert!(
+                err.contains("--target macos") && err.contains("--target windows"),
+                "{target:?}: {err}"
+            );
+        }
+        assert!(check_app_flag(app, Some(Target::Macos)).is_ok());
+        assert!(check_app_flag(app, Some(Target::Windows)).is_ok());
+        assert!(check_app_flag(None, None).is_ok());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -956,6 +1403,16 @@ test src/lib.rs - App (line 3) ... ok
             Some("iPhone 16"),
             None,
             false,
+            Extras {
+                jobs: 1,
+                artifacts: None,
+                keep_open_on_failure: false,
+                results_json: None,
+                work_dir: None,
+                artifacts_root: None,
+                prepared_host: None,
+                app: None,
+            },
         )
         .err();
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1003,6 +1460,33 @@ test src/lib.rs - App (line 3) ... ok
             dir.join("src/cart/Cart.tsx")
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_directory_of_test_files_takes_the_entry_of_its_app() {
+        let root = dunce::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("nsh-test-dir-entry-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("tests/deep")).unwrap();
+        std::fs::write(root.join("nsh.json"), "{}").unwrap();
+        std::fs::write(root.join("App.tsx"), "").unwrap();
+        std::fs::write(root.join("tests/a.test.tsx"), "").unwrap();
+        let entry = root.join("App.tsx");
+        assert_eq!(app_entry(&root.join("tests")).unwrap(), entry);
+        assert_eq!(app_entry(&root.join("tests/deep")).unwrap(), entry);
+        // A directory with an entry of its own keeps it.
+        std::fs::write(root.join("tests/App.tsx"), "").unwrap();
+        assert_eq!(
+            app_entry(&root.join("tests")).unwrap(),
+            root.join("tests/App.tsx")
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        // No app anywhere up: the directory's own error.
+        let lone = std::env::temp_dir().join(format!("nsh-test-lone-{}", std::process::id()));
+        std::fs::create_dir_all(&lone).unwrap();
+        let error = app_entry(&lone).unwrap_err().to_string();
+        assert!(error.contains("no App.tsx"), "{error}");
+        std::fs::remove_dir_all(&lone).unwrap();
     }
 
     #[test]

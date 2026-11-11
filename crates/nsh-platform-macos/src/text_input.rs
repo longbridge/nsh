@@ -1189,7 +1189,7 @@ fn copies_selection_around(text_view: &NSTextView, surface: Option<Rc<Surface>>)
 /// its own (the machine's clipboard stays as it was), pasted into the
 /// focused input as the user's paste is: reported, then its text read
 /// from that pasteboard as `pasteBehavior` says.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn test_paste(
     window: &objc2_app_kit::NSWindow,
     content: &nsh_core::PasteEvent,
@@ -2204,7 +2204,7 @@ fn place(view: &NshView, input: &InputState) {
 const FIELD_PADDING: f32 = 2.0;
 
 /// The text input `view` holds now (`None`: it is no input).
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "devtools"))]
 pub(crate) fn current_text(view: &NshView) -> Option<String> {
     let input = view.state().input.clone()?;
     let text = input.editor.borrow().text();

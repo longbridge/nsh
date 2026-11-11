@@ -89,6 +89,7 @@ cargo test adds_a_todo        # 名称包含 "adds_a_todo" 的测试
 ```sh
 nsh test                      # 当前目录中应用的所有测试文件
 nsh test App.test.tsx         # 一个文件
+nsh test scripts/e2e          # 一个测试文件目录：它们打开所在的应用（向上最近的 nsh.json 或 App.tsx）
 nsh test --filter "adds"      # 名称包含 "adds" 的测试
 ```
 
@@ -552,6 +553,10 @@ nsh test --target web                         # 在 headless 的 Chrome、Edge �
 nsh test --target tui                         # 在内存终端里运行
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
+
+在 macOS 和 Windows 上，应用通过它们的 [DevTools](./devtools.md) 端点运行，由此有 `--jobs <N>`（同时运行的测试文件数）、
+`--artifacts <DIR>`（每个文件一份 `timeline.jsonl` 和 `failure.png`）、`--keep-open-on-failure`（测试失败时应用保持打开，供 DevTools 客户端连接）
+和 `--app <PATH>`（用 `nsh package --devtools` 构建的打包应用）（[命令行](./cli.md#nsh-test)）。
 
 窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。应用以目标平台运行（`platform.os`）。
 手动 `clock` 和 headless 时一样：`app.clock.runFor`、
