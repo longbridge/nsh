@@ -1093,7 +1093,7 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
 - **`onOpenChange({ open, reason })`**: every request to open or close (`OpenState::request`; not a request for what it
   already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
   `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"focus"` (the keyboard
-  moved the focus to a hover card's trigger, or the focus left it; the keyboard focus moved to another item of a submenu's menu), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
+  focus moved to another item of a submenu's menu, or on from an open select or combobox), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
   motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
   closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `onOpen` comes in the commit after
@@ -1168,29 +1168,23 @@ is for, never by replacing one popup with another everywhere:
 | `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), never taller than the room on its side (`onPosition`'s `available`), its items scrolling inside it; `Submenu`s cascade beside their item, on hover or press, or Right / Return on it (Left / Escape go back to it), each held to its own room, and close once the menu scrolls their item out of view; opened by a press (or the secondary button, a `ContextMenu`) with no item focused, Down / Home focus its first enabled item and Up / End its last; the keys bring the item they reach into view and page by the viewport | a sheet at the bottom over a backdrop, below the status bar at most, its items scrolling; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) with no item focused; Shift+F10 and the Menu key on the focused trigger (the web) and a screen reader's "show menu" action (macOS VoiceOver's VO-Shift-M, Windows UI Automation) open it below the trigger (`pointerType: null`, the trigger's bottom-start corner) with the keyboard focus on its first enabled item, as WAI-ARIA has it | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
 | `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms), and at once when the keyboard moves the focus to it (Tab, an arrow, a shortcut, the app's `focus()` after a key; a click that focuses it leaves it to the pointer); leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the focus a hardware keyboard moved is on the trigger, else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
-| `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) or the keyboard focus comes to it, stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both or the focus left the trigger; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |
+| `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) (the keyboard focus opens and holds nothing), stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on
-the card's overlay, and the keyboard focus by the focus coming into and leaving the view holding both
-(`ElementRef::on_focus_in` / `on_focus_out`: a move from the trigger into the card is neither); the delays are one
-timer of the components' executor (`set_timeout`, a `Spawned` the next request cancels), as `gpui-base`'s
-`HoverCardState` keeps one open or close task. Only the focus the keyboard moved in counts, decided as it comes in
-(`Core::focus_by_keyboard`, the rule a tooltip's focus follows: `elements.md` "Hints"), as Floating UI's `useFocus` with
-`visibleOnly`: a press, a tap or a click that focuses the trigger or the card (a press handler's `focus()`, a menu
-giving the focus back as a press closes it) neither opens nor holds the card, which stays the pointer's and closes once
-the pointer left. Entering the trigger or the keyboard focusing it waits `openDelay`; leaving the trigger with the
-pointer not on the card, leaving the card with the pointer not on the trigger, or the keyboard's focus leaving both
-waits `closeDelay`, and the close is dropped when it comes due with the pointer on either part or the keyboard's focus
-in them (where they are, `Over`, is a `stored` value, read only by the timer: no signal, nothing rendered again). The
-card counts as left when it goes (a `cleanup` of its region: a view taken away hears no leave). Escape and back
-(`onCancel`) and a press outside close it at once, with no timer. So a hover that does not open the card sends the
-platform nothing, and moving between the two parts sends nothing either; the card's opening and closing are
-`Popover`'s mount items. On phones and tablets (`!is_desktop()`) the trigger gets a press listener instead, which
-toggles it (`gpui-base`'s `tap_to_open`, its default there), and the card's press outside closes it without a
-backdrop, so the press goes on to what is under it.
+the card's overlay (the keyboard focus is not followed, as in `gpui-base` and Radix); the delays are one timer of the
+components' executor (`set_timeout`, a `Spawned` the next request cancels), as `gpui-base`'s `HoverCardState` keeps
+one open or close task. Entering the trigger waits `openDelay`; leaving the trigger with the pointer not
+on the card, or leaving the card with the pointer not on the trigger waits `closeDelay`,
+and the close is dropped when it comes due with the pointer on either part (where the pointer is, `Over`, is a
+`stored` value, read only by the timer: no signal, nothing rendered again). The card counts as left when it goes (a
+`cleanup` of its region: a view taken away hears no leave). Escape and back (`onCancel`) and a press outside close it at
+once, with no timer. So a hover that does not open the card sends the platform nothing, and moving between the two
+parts sends nothing either; the card's opening and closing are `Popover`'s mount items. On phones and tablets
+(`!is_desktop()`) the trigger gets a press listener instead, which toggles it (`gpui-base`'s `tap_to_open`, its
+default there), and the card's press outside closes it without a backdrop, so the press goes on to what is under it.
 
 `Select`'s and `Combobox`'s list (`listbox.rs`) is a state machine of its own, since `gpui-base`'s
 `Select` root leaves it to `gpui-component`'s styled `SearchableList` (`api-naming.md`): the rows for the query

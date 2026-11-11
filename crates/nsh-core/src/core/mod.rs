@@ -1313,8 +1313,7 @@ pub struct Core<M: TextEngine> {
     /// The keyboard moved the focus, decided when it was reported
     /// (`classes::keyboard_moves_focus`) and kept until it moves again,
     /// whatever is typed meanwhile: only such a focus shows the hint of
-    /// the anchor it comes to (`overlay::focus_hints`). Components read it
-    /// through the executor's copy (`element::focus_by_keyboard`).
+    /// the anchor it comes to (`overlay::focus_hints`).
     focus_by_keyboard: bool,
     /// The view in the `FOCUS_VISIBLE` state, by key and id
     /// (`classes::update_focus_visible`).

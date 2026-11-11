@@ -28,8 +28,6 @@
 //! `on_focus_in` / `on_focus_out` of a focus handle): the core knows
 //! which views are in `focus-within`, so such a watch costs nothing until
 //! the focus moves, and its handler runs at the end of that commit round.
-//! How the focus came is the core's decision as it was reported, which
-//! the handler reads with `focus_by_keyboard()` (`nsh-base`'s, hidden).
 
 use std::{cell::Cell, rc::Rc};
 

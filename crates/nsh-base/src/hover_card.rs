@@ -4,23 +4,15 @@
 //! natively: the trigger's and the card's `onMouseEnter` / `onMouseLeave`
 //! are Rust listeners and the delays one timer of the components' executor,
 //! so nothing runs in JS and nothing is sent to the platform until the card
-//! opens or closes. The keyboard focus is followed the same way: the view
-//! holding the trigger and the card's overlay hears the focus come in and
-//! leave (`ElementRef::on_focus_in` / `on_focus_out`, the core's
-//! `focus-within`), so a focus moving from the trigger into the card keeps
-//! it open. Only the focus the keyboard moved in opens and holds the card
-//! (`nsh_core::element::focus_by_keyboard` as it comes in, the rule a
-//! tooltip's focus follows, and Floating UI's `useFocus` with
-//! `visibleOnly`): a press, a tap or a click that focuses the trigger (a
-//! press handler's `focus()`, a menu giving the focus back as it closes)
-//! leaves the card to the pointer, so it closes once the pointer left.
+//! opens or closes. Like `gpui-base`'s and Radix's hover card, it follows
+//! the pointer only: the keyboard focus opens and holds nothing (a click
+//! that focuses the trigger would otherwise keep the card open after the
+//! pointer left). Put what a keyboard user needs where the focus can reach
+//! it, not only in the card.
 
 use std::time::Duration;
 
-use nsh_core::{
-    element::{Style, focus_by_keyboard},
-    prelude::*,
-};
+use nsh_core::{element::Style, prelude::*};
 
 use crate::{
     popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle},
@@ -36,10 +28,9 @@ pub struct HoverCardProps {
     /// Open at first, while `open` is not set.
     #[prop(default)]
     pub default_open: Prop<bool>,
-    /// Milliseconds the pointer rests on the trigger (or the focus the
-    /// keyboard moved there stays on it) before the card opens (default
-    /// 600). `Infinity`: never by itself, only when the app opens it (or,
-    /// on touch screens, a press on the trigger).
+    /// Milliseconds the pointer rests on the trigger before the card opens (default 600). `Infinity`:
+    /// never by itself, only when the app opens it (or, on touch screens,
+    /// a press on the trigger).
     #[prop(default = 600.0)]
     pub open_delay: Prop<f64>,
     /// Milliseconds the pointer is away from both the trigger and the card
@@ -95,7 +86,7 @@ pub struct HoverCardProps {
 /// The events of a [`HoverCard`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum HoverCardEvent {
-    /// It asks to open or close, with why (`"hover"`, `"focus"`,
+    /// It asks to open or close, with why (`"hover"`,
     /// `"triggerPress"`, `"pressOutside"`, `"cancel"`): set `open` to
     /// follow it.
     #[args(open, reason)]
@@ -124,42 +115,35 @@ fn delay(ms: f64) -> Option<Duration> {
     }
 }
 
-/// Where the pointer and the keyboard's focus are, for the close delay:
-/// the pointer away from both parts and that focus in neither, the card
-/// closes.
+/// Where the pointer is, for the close delay: the pointer away from both
+/// parts, the card closes.
 #[derive(Debug, Clone, Copy, Default)]
 struct Over {
     trigger: bool,
     card: bool,
-    /// The focus is on the trigger, in it or in the card, and the keyboard
-    /// moved it in: a focus a press brought holds nothing.
-    focus: bool,
 }
 
 impl Over {
     /// Something keeps the card open.
     fn holds(self) -> bool {
-        self.trigger || self.card || self.focus
+        self.trigger || self.card
     }
 }
 
 /// A card that previews what its trigger points at, shown on top of
 /// everything next to the trigger, as `gpui-base`'s `HoverCard`. On the
 /// desktops it opens once the pointer rested on the trigger for
-/// `openDelay` (or the keyboard moved the focus to it: Tab, an arrow, a
-/// shortcut, the app's `focus()` after a key), stays open while the
-/// pointer is on the trigger or the card or that focus is on either (on
-/// the trigger, or a link or button in the card), and closes `closeDelay`
-/// after the pointer left both and the focus is in neither; Escape and a
-/// press outside close it at once. A press that focuses the trigger (a
-/// click, a press handler's `focus()`) leaves it to the pointer. On phones
-/// and tablets, which have no pointer to rest, pressing the trigger opens
-/// and closes it and a press outside closes it. The card takes the pointer
-/// and presses (links and buttons in it work) and keeps no focus of its
-/// own. It looks like nothing: style the popup with `popupClass` /
-/// `popupStyle` and the content as you like; its entrance and exit are the
-/// app's `transition` classes between the popup's look and its starting
-/// and ending looks (`popupStartingClass`, `popupEndingClass`).
+/// `openDelay`, stays open while the pointer is on the trigger or the
+/// card, and closes `closeDelay` after the pointer left both (the
+/// keyboard focus opens and holds nothing); Escape and a
+/// press outside close it at once. On phones and tablets, which have no
+/// pointer to rest, pressing the trigger opens and closes it and a press
+/// outside closes it. The card takes the pointer and presses (links and
+/// buttons in it work) and keeps no focus of its own. It looks like
+/// nothing: style the popup with `popupClass` / `popupStyle` and the
+/// content as you like; its entrance and exit are the app's `transition`
+/// classes between the popup's look and its starting and ending looks
+/// (`popupStartingClass`, `popupEndingClass`).
 #[component]
 pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
@@ -227,37 +211,7 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
     );
     let anchor = element_ref();
     let desktop = is_desktop();
-    // The view holding the trigger and the card's overlay: the focus in
-    // it is on the trigger, inside it or in the card (an overlay is inside
-    // the view it is in).
-    let parts = element_ref();
-    if desktop {
-        parts.on_focus_in(move || {
-            // A press that focused the trigger or the card (a press
-            // handler's `focus()`), or a popup giving the focus back as a
-            // press closed it, leaves the card to the pointer: held by that
-            // focus, it would stay open long after the pointer left. How
-            // the focus came is decided as it comes in, and a move between
-            // the trigger and the card keeps it.
-            if !focus_by_keyboard() {
-                return;
-            }
-            over.with(|o| o.focus = true);
-            after_delay(true, OpenChangeReason::Focus);
-        });
-        parts.on_focus_out(move || {
-            // A focus that held nothing lets nothing go: what the pointer
-            // started goes on.
-            if !over.with(|o| std::mem::take(&mut o.focus)) {
-                return;
-            }
-            if !over.with(|o| o.holds()) {
-                after_delay(false, OpenChangeReason::Focus);
-            }
-        });
-    }
     view()
-        .element_ref(&parts)
         .child(props.trigger.place(move |trigger| {
             let trigger = trigger.element_ref(&anchor);
             if !desktop {

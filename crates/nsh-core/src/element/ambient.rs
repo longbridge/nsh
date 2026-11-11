@@ -1637,30 +1637,6 @@ impl super::ElementRef {
     }
 }
 
-/// Whether the keyboard moved the focus where it is: Tab, a group's
-/// arrows, a shortcut, or the app's `focus()` after a key, rather than a
-/// press, a tap or a click (a press handler's `focus()`, a popup giving
-/// the focus back to its trigger as a press closes it). The focus before
-/// any input counts as the keyboard's, as an `autoFocus` shows its focus;
-/// `false` while no view has the focus.
-///
-/// The core decides it as the platform reports the focus, by the rule
-/// `focus-visible:` follows (the keyboard's unless the last input was a
-/// pointer), with no exception for an input that edits: a click into a
-/// field is the pointer's. It keeps what it decided until the focus moves
-/// again, whatever is typed meanwhile. The focus the keyboard moved shows
-/// a tooltip, and opens and holds `nsh-base`'s `HoverCard`; a click's
-/// leaves both to the pointer. Reading it subscribes to nothing.
-///
-/// `nsh-base`'s, not an API apps use: it answers for the focus a focus
-/// listener ([`super::ElementRef::on_focus_in`]) hears come in, as the
-/// listener runs, so it is hidden from the docs and left out of the
-/// prelude.
-#[doc(hidden)]
-pub fn focus_by_keyboard() -> bool {
-    executor().focus_by_keyboard.get()
-}
-
 /// Watches the focus coming into and leaving `target` while the current
 /// owner lives.
 fn watch_focus(target: impl Fn() -> Option<NodeId> + 'static, handler: impl Fn(bool) + 'static) {
