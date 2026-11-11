@@ -273,8 +273,12 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 
 Pass the reply as it grows, with `options={{ streaming: true }}` (`MarkdownOptions { streaming: true, .. }` in Rust). The end of a text that is still arriving often leaves
 syntax open (`**bold`, `` `code ``, `[a link](htt`, a table whose header just arrived); streaming shows it as it will
-look once closed, so the reader never sees stray `**` or `[`. Blocks are kept by position: the blocks that are complete
-keep their views, and only the block being written is made again, so a long reply stays cheap to update.
+look once closed, so the reader never sees stray `**` or `[`. A last line whose meaning the next characters decide
+appears once its line ends: a list marker alone, a `-` or `=` line under a paragraph, a code fence's opening line or a
+closer half typed, so each list item, heading and code block appears as what it will be. A `*` inside a word (`a*b`)
+stays as written. Once the reply ends (`streaming` off), the text is read as written. Blocks are kept by position: the
+blocks that are complete keep their views, and only the block being written is made again, so a long reply stays
+cheap to update.
 
 `streamingCaret` follows the end of the document: inline at the end of the last text, wherever the last block ends (a
 paragraph, a list item, a code block, a table's last cell), else on a line of its own after the last block (a rule,
