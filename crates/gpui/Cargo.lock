@@ -5654,6 +5654,7 @@ name = "nsh-gpui-host"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-gpui",

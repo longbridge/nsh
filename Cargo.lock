@@ -3959,6 +3959,7 @@ name = "nsh-ios-app"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-engine",
  "nsh-platform-apple",
  "nsh-platform-ios",
@@ -3969,6 +3970,7 @@ name = "nsh-ios-host"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-ios",
@@ -4006,6 +4008,7 @@ name = "nsh-linux-app"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-engine",
  "nsh-platform-linux",
  "serde_json",
@@ -4016,6 +4019,7 @@ name = "nsh-linux-host"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-linux",
@@ -4026,6 +4030,7 @@ name = "nsh-macos-app"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-engine",
  "nsh-platform-apple",
  "nsh-platform-macos",
@@ -4037,6 +4042,7 @@ name = "nsh-macos-host"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-macos",
@@ -4319,6 +4325,7 @@ name = "nsh-windows-app"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-engine",
  "nsh-platform-windows",
  "serde_json",
@@ -4329,6 +4336,7 @@ name = "nsh-windows-host"
 version = "0.5.0"
 dependencies = [
  "log",
+ "nsh-base",
  "nsh-dev",
  "nsh-engine",
  "nsh-platform-windows",

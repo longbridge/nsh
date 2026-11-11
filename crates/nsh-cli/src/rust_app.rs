@@ -1472,7 +1472,7 @@ panic = \"abort\"
         )?;
         self.write_rust_app(ws, root)?;
         write(&ws.join("rust-web/build.rs"), WEB_BUILD_RS)?;
-        let sets = self.rust_web_sets();
+        let sets = self.rust_sets();
         write(
             &ws.join("rust-web/lib.rs"),
             &format!(
@@ -1534,7 +1534,7 @@ panic = \"abort\"
     /// `run_rust` mounts the app's root.
     fn write_rust_runner(&self, ws: &Path, dir: &str, root: &RootConfig) -> anyhow::Result<()> {
         let app = self.dependencies();
-        let sets = self.sets();
+        let sets = self.rust_sets();
         let (os, lib, platform, exit) = match dir {
             "rust-linux" => (
                 "target_os = \"linux\"",
@@ -2420,7 +2420,7 @@ impl RustApp {
         format!("vec![{}]", sets.join(", "))
     }
 
-    /// The UI sets of a Rust app's web runtime: `nsh/base`'s core part
+    /// The UI sets of a Rust app's runners and web runtime: `nsh/base`'s core part
     /// only, then the app's ([`Self::sets`]). A Rust app runs no JS, so
     /// nothing makes a component by its registered name: its code makes
     /// each of `nsh/base`'s components by type (`nsh_base::button()`),
@@ -2429,7 +2429,7 @@ impl RustApp {
     /// `nsh/base` has, and the built-in scroll bars, the core part's.
     /// Registering every part would link every component into the module,
     /// the ones the app never makes included (`nsh_base::registry_of`).
-    fn rust_web_sets(&self) -> String {
+    fn rust_sets(&self) -> String {
         let mut sets = vec![
             "nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])".to_owned(),
         ];
@@ -3959,8 +3959,12 @@ panic = \"abort\"
                 "main.rs"
             };
             let code = read(&format!("{dir}/{file}"));
-            // A Rust app's web runtime takes `nsh/base`'s core part only.
-            let sets = if dir == "rust-web" {
+            // A Rust app's runners and web runtime run no JS: they take
+            // `nsh/base`'s core part only.
+            let sets = if matches!(
+                dir,
+                "rust-web" | "rust-linux" | "rust-macos" | "rust-windows" | "rust-ios"
+            ) {
                 "vec![nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part]), set_app_charts(), set_app_app_storage()]"
             } else {
                 sets

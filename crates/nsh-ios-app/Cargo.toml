@@ -39,6 +39,7 @@ crypto = ["nsh-platform-ios/crypto"]
 log.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
+nsh-base.workspace = true
 nsh-platform-ios.workspace = true
 # The app's logs in the unified log (`unified_log`).
 nsh-platform-apple.workspace = true
