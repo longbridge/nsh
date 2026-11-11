@@ -9,6 +9,7 @@
 
 use std::{
     any::{Any, TypeId},
+    cell::Cell,
     future::Future,
     path::PathBuf,
     rc::Rc,
@@ -1102,6 +1103,12 @@ pub(crate) fn host_call(
     answer
 }
 
+/// Hands `args` to function `name` of the embedding app, with no answer
+/// (TS: `host.post`).
+pub(crate) fn host_post(name: String, args: crate::JsonValue) {
+    act(Action::HostPost { name, args });
+}
+
 /// Forgets the host calls whose answers were dropped (they timed out).
 pub(crate) fn forget_host_calls() {
     act(Action::ForgetHostCalls);
@@ -1188,16 +1195,37 @@ impl<T> Future for Spawned<T> {
 pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T> {
     let executor = executor();
     let owner = Owner::current();
+    let cancel = Rc::new(Cell::new(None));
+    // Made outside the block and moved in: a task cancelled before its
+    // first poll drops it too.
+    let release = Release(cancel.clone());
     let task = task::spawn_future(
         &executor,
         Owned {
             owner,
-            future: Box::pin(future),
+            future: Box::pin(async move {
+                let _release = release;
+                future.await
+            }),
         },
     );
     let handle = task.handle();
-    cleanup(move || handle.cancel());
+    // Taken back from the owner when the task ends first (it finished or
+    // was cancelled), so a long-lived owner does not keep one per task.
+    cancel.set(super::reactive::removable_cleanup(move || handle.cancel()));
     Spawned(task)
+}
+
+/// Takes a task's cleanup back from its owner as the task's future goes
+/// (it finished, or was dropped when cancelled).
+struct Release(Rc<Cell<Option<super::reactive::RemovableCleanup>>>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        if let Some(cancel) = self.0.take() {
+            cancel.remove();
+        }
+    }
 }
 
 /// Runs `f` on the platform's main thread (the UI thread), for APIs that
@@ -1464,6 +1492,13 @@ pub struct KeyOptions {
     /// component closes its popup on Tab and the focus moves on as it
     /// would ([`crate::keymap::KeyMatch::Notify`]).
     pub pass_through: bool,
+    /// The keys of the view with the keyboard focus: a component binds
+    /// them while its part has the focus or its popup is open (a menu
+    /// button's Return opens its menu). Return and Space reach such a
+    /// binding before the focused control's press; others of those keys
+    /// give way to the control the focus is on (default)
+    /// ([`crate::keymap::KeyBinding::for_focus`]).
+    pub for_focus: bool,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1523,6 +1558,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         |id| {
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
+                .focus_keys(options.for_focus)
         },
         keystroke.into(),
         handler,

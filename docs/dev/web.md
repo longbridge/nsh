@@ -36,10 +36,11 @@ JS values cross through generation-checked arena handles. Weak tracing connects 
 payloads to their JS peers; externally held Rust values remain strong. DOM child edges are traced separately,
 so detached trees with callback cycles can be collected. Explicit owner disposal remains deterministic.
 The tracing runs off the calls: an outermost entry promotes weakened values back only when some were demoted, and
-the trace and the demotion run at most every 100ms once the outermost call returned (`Values.schedule`), so a call
-costs the same however many values the app holds. A string crosses in one call, encoded straight into Rust's
-buffer; a row of a table crosses in one (`JsHost::primitives` / `primitive_entries`, op 49, packed by `values.js`
-and read by `values.rs` `unpack`), and an object's keys in one (op 48).
+the trace and the demotion run once the outermost call returned, at least 100ms apart and twenty times as long
+after a run as it took (`Values.schedule`, `Values.collectDelay`), so a call costs the same however many values the
+app holds and the accounting keeps to about a twentieth of the page's time. A string crosses in one call, encoded
+straight into Rust's buffer; a row of a table crosses in one (`JsHost::primitives` / `primitive_entries`, op 49,
+packed by `values.js` and read by `values.rs` `unpack`), and an object's keys in one (op 48).
 Callbacks escaping a stopped run become inert; pending module and host calls reject on disposal.
 
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
@@ -961,14 +962,18 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   its promise rejects, or the result is not JSON, since the app's call waits until it is answered; the app's call
   rejects with that message and `code` `ERR_NSH_HOST_ERROR` (`nsh_core::host_channel::host_error`). A page without a
   host sets the environment's `host` to `false`, so the core rejects the calls first, with
-  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The page sends
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A `host.post` without the native SDK channel (`browser/host.js`) goes to the
+  platform module's `post` (`nsh-core` `runtime/host.rs`), which checks the name and grant in Rust and throws
+  synchronously, then the core sends `Command::HostPost` (command `hostPost`) where the environment has a host;
+  `nsh.js` `hostPost` hands it to the host's `post`, or its `call` without one, and drops the result and any failure.
+  The page sends
   events with `player.hostEvent(event, payload)` (`onHost` `{ type: "event", event, payload }`; one `EventKind` for
   both keeps the kinds within `EventMask`'s 64 bits): the payload is serialized at once (a payload that is
   not JSON throws to the page, not inside a deferred engine call where it would drop the calls queued after it), and
   events sent before the app runs are queued and delivered in order right after `begin` starts it, so its top-level
   `host.on` listeners get them (no replay to listeners registered later); every `begin` queues again until the new app
   has started, and a start that throws (a trap) drops the queue and the events sent after it. `web/nsh.test.mjs`
-  tests `hostCall` and this queue on a fake engine (`node --test crates/nsh-platform-web/web/nsh.test.mjs`).
+  tests `hostCall`, `hostPost` and this queue on a fake engine (`node --test crates/nsh-platform-web/web/nsh.test.mjs`).
   `Environment::host` is set when the player has a `host` (`nsh_environment`'s `host`, read at start only).
   `nsh package --target web` copies `nsh.json` `web.host` (a JS module relative to `nsh.json`, `package::WebConfig`; `package::web_host_module` requires it inside the app's
   directory once symbolic links are resolved, as `nsh test` does) as `host.<digest>.js`; the page imports it alongside the

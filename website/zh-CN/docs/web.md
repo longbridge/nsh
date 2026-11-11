@@ -299,7 +299,7 @@ Dialog、Sheet 和 AlertDialog 默认覆盖容器。设置 `dialogs: "viewport"`
 
 ## 宿主的函数
 
-在 Web 上，页面就是应用的宿主：它应答 [`host`](../modules/nsh.md#host) 的 `host.call(name, args)`，并发送 `host.on` 监听的事件。`createPlayer` 的 `host` 是一个对象，它的 `call(name, args)` 返回结果或结果的 Promise；抛出异常或 Promise 被拒绝时，应用的调用以错误消息被拒绝。`player.hostEvent(event, payload)` 发送一个带 JSON 数据的事件（数据不是 JSON 时抛出异常）。传入 `host` 后，`host.available()` 为 `true`。
+在 Web 上，页面就是应用的宿主：它应答 [`host`](../modules/nsh.md#host) 的 `host.call(name, args)`，接收它的 `host.post(name, args)`，并发送 `host.on` 监听的事件。`createPlayer` 的 `host` 是一个对象，它的 `call(name, args)` 返回结果或结果的 Promise；抛出异常或 Promise 被拒绝时，应用的调用以错误消息被拒绝。它可选的 `post(name, args)` 接收应用的投递；没有 `post` 时，投递交给 `call`。投递没有回答：它的结果、抛出的异常或被拒绝的 Promise 都留在页面里。`player.hostEvent(event, payload)` 发送一个带 JSON 数据的事件（数据不是 JSON 时抛出异常）。传入 `host` 后，`host.available()` 为 `true`。
 
 ```js
 const player = await createPlayer(container, {
@@ -308,6 +308,9 @@ const player = await createPlayer(container, {
     async call(name, args) {
       if (name === "user.info") return { name: "Ada" };
       throw new Error(`no host function ${name}`);
+    },
+    post(name, args) {
+      if (name === "analytics") navigator.sendBeacon("/analytics", JSON.stringify(args));
     },
   },
 });

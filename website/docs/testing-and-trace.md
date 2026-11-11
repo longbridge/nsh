@@ -525,8 +525,8 @@ that only a real platform can do:
 An app published to the web gets its host from its page: `nsh.json` `web.host`, a module exporting
 `createHost(player)` ([Web](./web.md#the-hosts-functions)). Headless runs load that module for each app a test opens,
 before the app starts, in a JavaScript context of its own (timers and `console`, nothing of the browser's, no
-imports): its `call` answers the app's [`host.call`](../modules/nsh.md#host), its `player.hostEvent` reaches
-`host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
+imports): its `call` answers the app's [`host.call`](../modules/nsh.md#host), its `post` (or `call` without one)
+takes the app's `host.post`, its `player.hostEvent` reaches `host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
 app's call with its message, as on the page, and events sent before the app starts reach its top-level listeners
 once it does. `--web-host <module>` names another module. The app's `capabilities.host` must list what it calls, as on
 the page. A call's timeout and the host's own timers run on the app's time, so a manual clock moves them

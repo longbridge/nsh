@@ -3979,6 +3979,7 @@ version = "0.5.0"
 dependencies = [
  "log",
  "nsh-engine",
+ "nsh-platform-apple",
  "nsh-platform-ios",
 ]
 
@@ -4045,6 +4046,7 @@ version = "0.5.0"
 dependencies = [
  "log",
  "nsh-engine",
+ "nsh-platform-apple",
  "nsh-platform-macos",
  "serde_json",
 ]
@@ -4109,6 +4111,7 @@ name = "nsh-platform-apple"
 version = "0.5.0"
 dependencies = [
  "block2",
+ "cc",
  "dispatch2",
  "libc",
  "log",

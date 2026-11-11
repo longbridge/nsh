@@ -117,6 +117,14 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                     None => Value(1),
                 },
             ),
+            (
+                "button",
+                match m.button {
+                    Some(button) => Value::string(button.name())?,
+                    // `null`, as `PayloadValue::Null`.
+                    None => Value(1),
+                },
+            ),
         ])?,
         EventPayload::Wheel(w) => {
             let (dx, dy) = w.delta.xy();

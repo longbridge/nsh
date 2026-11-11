@@ -1283,6 +1283,12 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 Some(button) => obj.set("pressedButton", button.name())?,
                 None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
             }
+            // The button that changed here (`onMouseUp`'s), or `null` on a
+            // move.
+            match e.button {
+                Some(button) => obj.set("button", button.name())?,
+                None => obj.set("button", Value::new_null(cx.clone()))?,
+            }
         }
         EventPayload::Wheel(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
@@ -2191,6 +2197,47 @@ const report = (v) => text(String(v));
             let none = nsh_core::MouseEvent::default();
             let value = payload_object(&cx, &EventPayload::Mouse(none)).unwrap();
             let pressed: Value = value.as_object().unwrap().get("pressedButton").unwrap();
+            assert!(pressed.is_null());
+            let changed: Value = value.as_object().unwrap().get("button").unwrap();
+            assert!(changed.is_null());
+        });
+    }
+
+    #[test]
+    fn released_mouse_payload_has_its_button() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::MouseEvent::released(
+            point(px(5.0), px(6.5)),
+            point(px(50.0), px(60.5)),
+            nsh_core::keymap::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            nsh_core::MouseButton::Right,
+        );
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Mouse(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            let flag = |k: &str| {
+                let m: rquickjs::Object = obj.get("modifiers").unwrap();
+                m.get::<_, bool>(k).unwrap()
+            };
+            assert_eq!(
+                (
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
+                ),
+                (5.0, 6.5, 50.0, 60.5)
+            );
+            assert!(flag("shift"));
+            assert_eq!(obj.get::<_, String>("button").unwrap(), "right");
+            let pressed: Value = obj.get("pressedButton").unwrap();
             assert!(pressed.is_null());
         });
     }

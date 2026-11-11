@@ -423,6 +423,9 @@ pub(crate) struct Input {
     /// The edits reported so far ([`nsh_core::EventPayload::Text`]).
     pub(crate) count: u32,
     pub(crate) config: Box<InputConfig>,
+    /// What an input method composes in it (`app.compose`), at the end of
+    /// its text: marked, not in `text` until it commits.
+    pub(crate) composition: Option<String>,
     /// Where its text goes in the view (inside padding and border); the
     /// whole view until the core says.
     pub(crate) content: Option<Bounds<Points>>,
@@ -2418,6 +2421,23 @@ impl Screen {
     /// nearest around it listening to `onContextMenu`.
     pub(crate) fn context_menu_target(&self, id: NodeId) -> Option<NodeId> {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
+    }
+
+    /// The views that hear a mouse button released on `id`: it and every
+    /// view around it listening to `onMouseUp`, inside out, as the
+    /// platforms walk them.
+    pub(crate) fn mouse_up_targets(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        while let Some(view) = self.nodes.get(&id) {
+            if view.events.contains(EventKind::MouseUp) {
+                targets.push(id);
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        targets
     }
 
     /// The app's keyboard shortcuts (`nsh/keymap`).

@@ -481,7 +481,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 发布到 Web 的应用从页面得到宿主：`nsh.json` 的 `web.host`，一个导出 `createHost(player)` 的模块
 （[Web](./web.md#宿主的函数)）。无界面运行时，测试每打开一个应用，都会在应用启动前，在独立的 JavaScript 上下文中加载
 这个模块（有定时器和 `console`，没有浏览器的 API，不能 import）：它的 `call` 应答应用的
-[`host.call`](../modules/nsh.md#host)，它的 `player.hostEvent` 送到 `host.on`，`host.available()` 为 `true`。
+[`host.call`](../modules/nsh.md#host)，它的 `post`（没有时用 `call`）接收应用的 `host.post`，它的 `player.hostEvent` 送到 `host.on`，`host.available()` 为 `true`。
 `call` 抛出异常、Promise 被拒绝或返回值不是 JSON 时，应用的调用以它的消息被拒绝，与页面上一致；应用启动前发送的事件
 会在应用启动后送到它顶层注册的监听器。`--web-host <module>` 指定另一个模块。应用调用的函数必须列在它的 `capabilities.host` 中，
 与页面上一致。调用的超时和宿主自己的定时器都按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它们。在浏览器中（`--target web`），开发页面像发布的页面一样为每个应用运行 `nsh.json` 的 `web.host`；在其他平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。

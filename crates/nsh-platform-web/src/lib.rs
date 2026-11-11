@@ -747,11 +747,9 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
     });
     let Some(mut engine) = LocalEngine::start_with(config, text.clone(), Sink, |control| {
         if let Some(payload) = page {
-            control.dispatch_event(
-                ROOT_ID,
-                EventKind::UrlScheme,
-                event::payload(EventKind::UrlScheme, payload),
-            );
+            if let Some(payload) = event::payload(EventKind::UrlScheme, payload) {
+                control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
+            }
         }
     }) else {
         return -1.0;
@@ -1206,7 +1204,9 @@ pub unsafe extern "C" fn nsh_event(
     // SAFETY: guaranteed by the caller.
     let json = unsafe { string(ptr, len) };
     let value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-    let payload = event::payload(kind, value);
+    let Some(payload) = event::payload(kind, value) else {
+        return pump();
+    };
     send(|app| app.control.dispatch_event(id, kind, payload))
 }
 
@@ -1430,8 +1430,10 @@ fn key_of(code: u32) -> Option<Key> {
 /// Matches a key against the app's shortcuts (`nsh/keymap`) on the spot,
 /// while the browser's key event is handled: `key` as [`key_of`] takes
 /// it, `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta (Command, the
-/// Windows key), `editing` when a text field has the focus, `repeat` for
-/// an auto-repeat. Returns the binding that fires, -1 for none (the key
+/// Windows key), `focus` bits 1 when a text field has the focus and 2 when
+/// a control that Return and Space press has it (they then fire only the
+/// focus' own bindings, [`Keymap::find_at`](nsh_core::keymap::Keymap::find_at)),
+/// `repeat` for an auto-repeat. Returns the binding that fires, -1 for none (the key
 /// goes on), -2 for a held key's repeat (consumed, nothing fires) or
 /// `-3 - id` for binding `id` passing the key through (it fires, then the
 /// key goes on). JS reports a firing binding with [`nsh_key_command`].
@@ -1440,7 +1442,7 @@ fn key_of(code: u32) -> Option<Key> {
 /// shortcuts (`1 << 31` and up) and overlay Escape (`u32::MAX`), while
 /// leaving the negative sentinels distinct.
 #[unsafe(no_mangle)]
-pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -> f64 {
+pub extern "C" fn nsh_key(key: u32, modifiers: u32, focus: u32, repeat: u32) -> f64 {
     let Some(key) = key_of(key) else { return -1.0 };
     let keystroke = Keystroke {
         modifiers: Modifiers {
@@ -1453,7 +1455,13 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -
     };
     let found = KEYMAP.with(|k| {
         k.borrow().as_ref().map_or(KeyMatch::None, |k| {
-            k.find(keystroke, editing != 0, repeat != 0)
+            k.find_at(
+                nsh_core::ROOT_ID,
+                keystroke,
+                focus & 1 != 0,
+                focus & 2 != 0,
+                repeat != 0,
+            )
         })
     });
     match found {

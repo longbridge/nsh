@@ -64,6 +64,8 @@ log = "0.4"
 ordered-float = { version = "5", default-features = false }
 env_logger = "0.11"
 libc = "0.2"
+# C functions over macros Rust cannot call (`nsh-platform-apple`'s `os_log_with_type`).
+cc = "1.8"
 imagesize = "0.15"
 # A GIF's first frame (the size resvg decodes) for the SVG layer budget.
 gif = "0.14"

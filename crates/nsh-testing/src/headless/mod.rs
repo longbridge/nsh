@@ -223,6 +223,8 @@ type DialogHandler = Box<dyn FnMut(&Dialog) -> DialogAnswer + Send>;
 /// id, the host's function and its argument.
 #[cfg(feature = "js")]
 type HostCalls = Box<dyn FnMut(u64, &str, &nsh_core::JsonValue) + Send>;
+#[cfg(feature = "js")]
+type HostPosts = Box<dyn FnMut(&str, &nsh_core::JsonValue) + Send>;
 
 /// The answer to a dialog (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,6 +357,8 @@ pub struct Headless {
     /// Where the app's `nsh/host` calls go (the web page's host).
     #[cfg(feature = "js")]
     host_calls: Option<HostCalls>,
+    #[cfg(feature = "js")]
+    host_posts: Option<HostPosts>,
     /// The app's windows, on a desktop ([`windows`]); `None` elsewhere, and
     /// when the config gives its own windows (`EngineConfig::windows`).
     windows: Option<windows::Windows>,
@@ -471,6 +475,8 @@ impl Headless {
             last_press: None,
             #[cfg(feature = "js")]
             host_calls: None,
+            #[cfg(feature = "js")]
+            host_posts: None,
             windows,
         })
     }
@@ -852,6 +858,17 @@ impl Headless {
         self.host_calls = Some(Box::new(calls));
     }
 
+    /// Sends the app's `nsh/host` posts (the root's `Command::HostPost`) to
+    /// `posts` as their batches are applied, as [`Self::on_host_call`]
+    /// does calls.
+    #[cfg(feature = "js")]
+    pub(crate) fn on_host_post(
+        &mut self,
+        posts: impl FnMut(&str, &nsh_core::JsonValue) + Send + 'static,
+    ) {
+        self.host_posts = Some(Box::new(posts));
+    }
+
     /// Puts `text` on the clipboard (`None`: nothing), as the user copying.
     pub fn set_clipboard(&mut self, text: Option<String>) {
         self.screen.set_clipboard(text);
@@ -921,6 +938,18 @@ impl Headless {
                 } = item
                 {
                     calls(*id, name, args);
+                }
+            }
+        }
+        #[cfg(feature = "js")]
+        if let Some(posts) = &mut self.host_posts {
+            for item in &batch.items {
+                if let MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::HostPost { name, args },
+                } = item
+                {
+                    posts(name, args);
                 }
             }
         }
@@ -1936,8 +1965,49 @@ impl Headless {
         self.done()
     }
 
-    /// Starts a step on the input `selector` names and focuses it.
+    /// Starts a step on the input `selector` names and focuses it; what an
+    /// input method composes in it ends, as a key or a paste commits it.
     fn input_step(&mut self, selector: &str, step: String) -> Result<NodeId, String> {
+        let id = self.focus_step(selector, step)?;
+        self.set_composition(id, None);
+        Ok(id)
+    }
+
+    /// The step `compose(<selector>, <text>)`: an input method composes
+    /// `text` in the input `selector` names, marked at the end of its
+    /// text in place of what it composed (`onCompositionChange`), as a
+    /// user typing pinyin sees it; empty, the composition ends with
+    /// nothing committed. The core measures the input with it.
+    pub fn compose(&mut self, selector: &str, text: &str) -> Result<(), String> {
+        let id = self.focus_step(selector, format!("compose({selector}, {text:?})"))?;
+        self.set_composition(id, (!text.is_empty()).then(|| text.to_owned()));
+        self.done()
+    }
+
+    /// Input `id`'s composition becomes `marked` (`None`: it ends),
+    /// reported to the core and as `onCompositionChange` if it changed.
+    fn set_composition(&mut self, id: NodeId, marked: Option<String>) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
+        if input.composition == marked {
+            return;
+        }
+        let shown = marked.as_ref().map(|m| format!("{}{m}", input.text));
+        let payload = EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(marked.is_some())),
+            (
+                "text",
+                PayloadValue::Str(marked.clone().unwrap_or_default()),
+            ),
+        ]);
+        input.composition = marked;
+        self.engine.control().input_composing(id, shown);
+        self.send(id, EventKind::CompositionChange, payload);
+    }
+
+    /// Starts a step on the input `selector` names and focuses it.
+    fn focus_step(&mut self, selector: &str, step: String) -> Result<NodeId, String> {
         let parsed = Selector::parse(selector)?;
         self.step(step);
         let pick = self.screen.input_view(&parsed);
@@ -2776,6 +2846,54 @@ mod tests {
         );
     }
 
+    /// A chat composer: a multiline input that submits on return, and a
+    /// single-line one beside it.
+    #[component]
+    fn Composer() -> impl IntoElement {
+        let draft = signal(String::new());
+        let sent = signal(String::new());
+        let title = signal(String::new());
+        view()
+            .child(
+                input()
+                    .test_id("draft")
+                    .multiline(true)
+                    .submit_behavior(SubmitBehavior::Submit)
+                    .value(move || draft.get())
+                    .on_change(move |text: &str| draft.set(text.to_owned()))
+                    .on_submit(move |text: &str| sent.set(text.to_owned())),
+            )
+            .child(
+                input()
+                    .test_id("title")
+                    .on_submit(move |text: &str| title.set(text.to_owned())),
+            )
+            .child(text(move || format!("Draft: {:?}", draft.get())))
+            .child(text(move || format!("Sent: {:?}", sent.get())))
+            .child(text(move || format!("Title: {:?}", title.get())))
+    }
+
+    #[test]
+    fn shift_or_alt_return_breaks_the_line_of_a_multiline_input_that_submits() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Composer>())).unwrap();
+        app.first_render().unwrap();
+        app.type_text("id:draft", "Hi").unwrap();
+        // Shift+Return and Alt (Option)+Return break the line, as on every
+        // platform; Return sends.
+        app.press_key("shift+enter").unwrap();
+        app.type_text("id:draft", "there").unwrap();
+        app.press_key("alt+enter").unwrap();
+        app.type_text("id:draft", "!").unwrap();
+        app.wait_for(r#"Draft: "Hi\nthere\n!""#).unwrap();
+        assert!(app.shows(r#"Sent: """#));
+        app.press_key("enter").unwrap();
+        app.wait_for(r#"Sent: "Hi\nthere\n!""#).unwrap();
+        // A single line holds no line break: Shift+Return submits it.
+        app.type_text("id:title", "Plan").unwrap();
+        app.press_key("shift+enter").unwrap();
+        app.wait_for(r#"Title: "Plan""#).unwrap();
+    }
+
     /// A list of rows taller than the screen, saying where it is.
     #[component]
     fn Rows() -> impl IntoElement {
@@ -3083,6 +3201,85 @@ mod tests {
         app.press("id:chart").unwrap();
         app.wait_for("Opens 1 presses 1 steps 1 focused false")
             .unwrap();
+    }
+
+    /// A dialog whose Return allows (a global binding, outside text
+    /// fields), Mod+Return too, with an input and two buttons.
+    #[component]
+    fn ReturnAllows() -> impl IntoElement {
+        let allows = signal(0_u32);
+        let denies = signal(0_u32);
+        let cancels = signal(0_u32);
+        let sends = signal(0_u32);
+        on_key_with(
+            "enter",
+            KeyOptions {
+                when: nsh_core::keymap::When::NotEditing,
+                ..Default::default()
+            },
+            move |_| allows.update(|a| *a += 1),
+        );
+        on_key("mod+enter", move |_| sends.update(|s| *s += 1));
+        view()
+            .flex_1()
+            .child(input().test_id("note"))
+            .child(
+                view()
+                    .test_id("deny")
+                    .on_press(move || denies.update(|d| *d += 1))
+                    .child(text("Deny")),
+            )
+            .child(
+                view()
+                    .test_id("cancel")
+                    .on_press(move || cancels.update(|c| *c += 1))
+                    .child(text("Cancel")),
+            )
+            .child(text(move || {
+                format!(
+                    "Allows {} denies {} cancels {} sends {}",
+                    allows.get(),
+                    denies.get(),
+                    cancels.get(),
+                    sends.get()
+                )
+            }))
+    }
+
+    #[test]
+    fn return_and_space_press_the_focused_control_before_the_shortcuts() {
+        for os in [Os::MacOs, Os::Web, Os::Linux] {
+            let mut config = EngineConfig::new(Root::of::<ReturnAllows>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            // The focus on no control: Return is the dialog's.
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 0 cancels 0 sends 0").unwrap();
+            // Tab to Deny, then Cancel: Return and Space press the control
+            // the focus is on, not the binding.
+            app.press_key("tab").unwrap();
+            app.press_key("tab").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 1 cancels 0 sends 0")
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            app.press_key("space").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 0 sends 0").unwrap();
+            app.press_key("tab").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 0").unwrap();
+            // With Mod held the binding of that keystroke fires.
+            app.press_key("mod+enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 1").unwrap();
+            // In the text field Return is the field's: no binding (it fires
+            // outside text fields), no control.
+            app.type_text("id:note", "Hi").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 1").unwrap();
+            app.press_key("mod+enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 2").unwrap();
+        }
     }
 
     /// A list of 200 rows of its own, each a button showing its row.
