@@ -526,6 +526,15 @@ struct UrlScheme {
     address: crate::url_scheme::AppUrlCell,
 }
 
+/// Files the system opened the app with ([`crate::file_type`]).
+#[derive(Default)]
+struct OpenFiles {
+    /// Files no listener took yet, at most [`crate::file_type::MAX_PENDING`].
+    pending: std::collections::VecDeque<std::path::PathBuf>,
+    /// The listener waiting for files.
+    next: Option<AnswerSlot<Vec<std::path::PathBuf>>>,
+}
+
 /// Later launches of the app ([`crate::single_instance`]).
 #[derive(Default)]
 struct SecondInstances {
@@ -628,6 +637,7 @@ pub(super) struct Components {
     /// The links that open the app ([`crate::url_scheme`]).
     url_schemes: UrlScheme,
     second_instances: SecondInstances,
+    open_files: OpenFiles,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -766,6 +776,7 @@ impl Default for Components {
             notifications: Notifications::default(),
             url_schemes: UrlScheme::default(),
             second_instances: SecondInstances::default(),
+            open_files: OpenFiles::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             web_evaluations: Default::default(),
@@ -5221,6 +5232,37 @@ impl<M: TextEngine> Core<M> {
         change: Option<crate::url_scheme::AppUrlChangeReason>,
     ) {
         let links = &mut self.components.url_schemes;
+        // A file the system opened the app with (nsh.json `fileTypes`): the
+        // platforms report it as a `file://` URL, the core hands it to the
+        // app as a file ([`crate::file_type`]), never as a link.
+        if !page && change.is_none() && crate::file_type::is_file_url(&url) {
+            if !links
+                .schemes
+                .iter()
+                .any(|s| s == crate::file_type::FILE_SCHEME)
+            {
+                log::warn!("file dropped: the app declares no file types (nsh.json `fileTypes`)");
+                return;
+            }
+            let Some(path) = crate::file_type::file_path(&url) else {
+                log::warn!("file dropped: {url} is not a local file");
+                return;
+            };
+            let files = &mut self.components.open_files;
+            if let Some(answer) = files.next.take() {
+                answer.borrow_mut().deliver(vec![path]);
+                return;
+            }
+            if files.pending.len() == crate::file_type::MAX_PENDING {
+                log::warn!(
+                    "file dropped: {} came while nothing listened",
+                    crate::file_type::MAX_PENDING
+                );
+                files.pending.pop_front();
+            }
+            files.pending.push_back(path);
+            return;
+        }
         let checked = if page {
             crate::url_scheme::check_page_url(&url)
         } else {
@@ -5733,6 +5775,16 @@ impl<M: TextEngine> Core<M> {
                 match links.pending.pop_front() {
                     Some(url) => answer.borrow_mut().deliver(url),
                     None => links.next = Some(answer),
+                }
+            }
+            Action::NextOpenFiles(answer) => {
+                let files = &mut self.components.open_files;
+                if files.pending.is_empty() {
+                    files.next = Some(answer);
+                } else {
+                    answer
+                        .borrow_mut()
+                        .deliver(files.pending.drain(..).collect());
                 }
             }
             Action::NextSecondInstance(answer) => {

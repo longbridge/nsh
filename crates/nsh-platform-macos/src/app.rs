@@ -729,8 +729,9 @@ define_class!(
             crate::notifications::enable();
         }
 
-        // The links of the schemes the app claims (`CFBundleURLTypes`), the
-        // one that launched it included.
+        // The links of the schemes the app claims (`CFBundleURLTypes`) and
+        // the files of the types it opens (`CFBundleDocumentTypes`, as
+        // `file://` URLs), those that launched it included.
         #[unsafe(method(application:openURLs:))]
         fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
             for url in urls.iter() {

@@ -16,6 +16,12 @@
 //!   running instance shows its window (restored, or shown when hidden),
 //!   brings it to the front and sends the URL. A launch without a URL opens
 //!   another window, as before.
+//! - Files (nsh.json `fileTypes`): `HKCU\Software\Classes\<app id>.<n>` is a
+//!   ProgID per file type whose `shell\open\command` runs the executable with
+//!   the file, listed under each extension's `OpenWithProgids`, so the app
+//!   shows in Open With; written at startup as the schemes are. An argument
+//!   that is an existing file of those types goes to the app as a `file://`
+//!   URL, as a link does, and a later launch forwards it the same way.
 //! - Single instance (nsh.json `singleInstance`): the same mutex, made with
 //!   or without schemes. A later launch, with a URL or not, hands the
 //!   running instance its arguments and working directory
@@ -29,7 +35,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use nsh_core::{EventKind, EventPayload, PayloadValue, ROOT_ID};
+use nsh_core::{EventKind, EventPayload, PayloadValue, ROOT_ID, file_type::FileType};
 use nsh_engine::EngineControl;
 use windows::{
     Win32::{
@@ -74,14 +80,16 @@ const WAIT_STEPS: u32 = 50;
 const WAIT_STEP_MS: u64 = 100;
 
 thread_local! {
-    /// The URL the process was started with, until the root surface exists.
-    static LAUNCH: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The URLs the process was started with, until the root surface exists.
+    static LAUNCH: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The property that marks this app's window ([`property`]).
     static PROPERTY: RefCell<Option<HSTRING>> = const { RefCell::new(None) };
     /// The surface forwarded URLs go to.
     static SURFACE: RefCell<Option<Weak<Surface>>> = const { RefCell::new(None) };
     /// The app's schemes, which a forwarded launch's URLs are of.
     static SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// The file types the app opens, which a forwarded launch's files are of.
+    static FILE_TYPES: RefCell<Vec<FileType>> = const { RefCell::new(Vec::new()) };
 }
 
 /// What [`start`] decided.
@@ -92,23 +100,38 @@ pub(crate) enum Start {
     Forwarded,
 }
 
-/// Registers `schemes` for the app `id` named `name`, reads the launch URL
-/// and, when an instance of the app already runs, forwards the URL to it, or
-/// with `single_instance` the whole launch. On the UI thread, before the
-/// window opens. Does nothing without schemes or `single_instance`.
-pub(crate) fn start(id: &str, name: &str, schemes: &[String], single_instance: bool) -> Start {
-    if schemes.is_empty() && !single_instance {
+/// Registers `schemes` and `file_types` for the app `id` named `name`,
+/// reads the launch's URLs and files and, when an instance of the app
+/// already runs, forwards them to it, or with `single_instance` the whole
+/// launch. On the UI thread, before the window opens. Does nothing without
+/// schemes, file types or `single_instance`.
+pub(crate) fn start(
+    id: &str,
+    name: &str,
+    schemes: &[String],
+    file_types: &[FileType],
+    single_instance: bool,
+) -> Start {
+    if schemes.is_empty() && file_types.is_empty() && !single_instance {
         return Start::Run;
     }
     SCHEMES.with(|s| *s.borrow_mut() = schemes.to_vec());
+    FILE_TYPES.with(|t| *t.borrow_mut() = file_types.to_vec());
     if !cfg!(feature = "dev") {
         for scheme in schemes {
             if let Err(err) = register(scheme, name) {
                 log::warn!("links: cannot register the scheme {scheme}: {err}");
             }
         }
+        if let Err(err) = register_file_types(id, file_types) {
+            log::warn!("links: cannot register the app's file types: {err}");
+        }
     }
-    let url = std::env::args().nth(1).filter(|arg| matches(arg, schemes));
+    let cwd = std::env::current_dir().ok();
+    let urls: Vec<String> = std::env::args()
+        .skip(1)
+        .filter_map(|arg| launch_url(&arg, cwd.as_deref(), schemes, file_types))
+        .collect();
     let property = property(id);
     PROPERTY.with(|p| *p.borrow_mut() = Some(property.clone()));
     let mutex = HSTRING::from(format!("Local\\nsh-app-{}", sanitize(id)));
@@ -126,22 +149,52 @@ pub(crate) fn start(id: &str, name: &str, schemes: &[String], single_instance: b
             return Start::Forwarded;
         }
         log::warn!("single instance: the running instance did not answer; opening another");
-    } else if !first && let Some(url) = &url {
-        let data: Vec<u8> = url.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        if forward(&property, COPY_LINK, &data) {
+    } else if !first && !urls.is_empty() {
+        let all = urls.iter().all(|url| {
+            let data: Vec<u8> = url.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            forward(&property, COPY_LINK, &data)
+        });
+        if all {
             return Start::Forwarded;
         }
         log::warn!("links: the running instance did not answer; opening another");
     }
-    LAUNCH.with(|l| *l.borrow_mut() = url);
+    LAUNCH.with(|l| *l.borrow_mut() = urls);
     Start::Run
+}
+
+/// The URL `arg` hands the app: a URL of one of `schemes`, or the
+/// `file://` URL of an existing file of one of `file_types` (relative to
+/// `cwd`).
+fn launch_url(
+    arg: &str,
+    cwd: Option<&std::path::Path>,
+    schemes: &[String],
+    file_types: &[FileType],
+) -> Option<String> {
+    if matches(arg, schemes) {
+        return Some(arg.to_owned());
+    }
+    if file_types.is_empty() || arg.starts_with('-') {
+        return None;
+    }
+    let path = std::path::Path::new(arg);
+    let path = match cwd {
+        Some(cwd) if path.is_relative() => cwd.join(path),
+        _ => path.to_path_buf(),
+    };
+    if !path.is_file() || !file_types.iter().any(|t| t.matches(&path)) {
+        return None;
+    }
+    url::Url::from_file_path(&path).ok().map(String::from)
 }
 
 /// Hands the URL the process was started with to `surface`, whose engine
 /// applies it as it starts. Before the app is loaded.
 pub(crate) fn launch(surface: &Surface) {
-    if let Some(url) = LAUNCH.with(|l| l.borrow_mut().take()) {
-        surface.set_launch_link(url);
+    let urls = LAUNCH.with(|l| std::mem::take(&mut *l.borrow_mut()));
+    if !urls.is_empty() {
+        surface.set_launch_links(urls);
     }
 }
 
@@ -225,16 +278,18 @@ unsafe extern "system" fn link_proc(
 }
 
 /// A later launch of a single-instance app: reports it, then sends the URLs
-/// of the app's schemes among its arguments.
+/// of the app's schemes and the files of its types among its arguments.
 fn relaunched(surface: &Surface, launch: nsh_core::single_instance::SecondInstance) {
+    let cwd = (!launch.cwd.is_empty()).then(|| std::path::PathBuf::from(&launch.cwd));
     let urls: Vec<String> = SCHEMES.with(|schemes| {
-        let schemes = schemes.borrow();
-        launch
-            .args
-            .iter()
-            .filter(|arg| matches(arg, &schemes))
-            .cloned()
-            .collect()
+        FILE_TYPES.with(|types| {
+            let (schemes, types) = (schemes.borrow(), types.borrow());
+            launch
+                .args
+                .iter()
+                .filter_map(|arg| launch_url(arg, cwd.as_deref(), &schemes, &types))
+                .collect()
+        })
     });
     let payload = launch.to_payload();
     surface.control(|control| {
@@ -392,6 +447,42 @@ fn register(scheme: &str, name: &str) -> Result<()> {
     set_value(&command_key, None, &command)
 }
 
+/// Registers each of `file_types` as a ProgID of the app `id`
+/// (`<id>.<n>`), opened by this executable, and lists it under its
+/// extensions' `OpenWithProgids`; the ProgID is written again when its
+/// command is not this executable's.
+fn register_file_types(id: &str, file_types: &[FileType]) -> Result<()> {
+    if file_types.is_empty() {
+        return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|_| windows::core::Error::from_thread())?;
+    let command = format!("\"{}\" \"%1\"", exe.display());
+    for (n, file_type) in file_types.iter().enumerate() {
+        let prog_id = format!("{}.{}", sanitize(id), n + 1);
+        let key = format!("Software\\Classes\\{prog_id}");
+        let command_key = format!("{key}\\shell\\open\\command");
+        // Cheap and idempotent: an extension added since is listed too.
+        for extension in &file_type.extensions {
+            set_value(
+                &format!("Software\\Classes\\.{extension}\\OpenWithProgids"),
+                Some(&prog_id),
+                "",
+            )?;
+        }
+        if read_value(&command_key).as_deref() == Some(command.as_str()) {
+            continue;
+        }
+        set_value(&key, None, &file_type.name)?;
+        set_value(
+            &format!("{key}\\DefaultIcon"),
+            None,
+            &format!("{},0", exe.display()),
+        )?;
+        set_value(&command_key, None, &command)?;
+    }
+    Ok(())
+}
+
 /// The default string value of `key` under `HKEY_CURRENT_USER`.
 fn read_value(key: &str) -> Option<String> {
     let key = HSTRING::from(key);
@@ -460,6 +551,26 @@ mod tests {
         assert!(!matches("other://x", &schemes));
         assert!(!matches("-ToastActivated", &schemes));
         assert!(!matches("C:\\path", &schemes));
+    }
+
+    #[test]
+    fn files_of_the_apps_types_are_file_urls() {
+        let dir = std::env::temp_dir().join(format!("nsh-links-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("clip.mp4"), b"").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"").unwrap();
+        let types = nsh_core::file_type::file_types_from_json(
+            &serde_json::json!([{ "name": "Video", "extensions": ["mp4"] }]),
+        );
+        let url = launch_url("clip.mp4", Some(&dir), &[], &types).unwrap();
+        assert!(
+            url.starts_with("file:///") && url.ends_with("/clip.mp4"),
+            "{url}"
+        );
+        assert_eq!(launch_url("notes.txt", Some(&dir), &[], &types), None);
+        assert_eq!(launch_url("missing.mp4", Some(&dir), &[], &types), None);
+        assert_eq!(launch_url("clip.mp4", Some(&dir), &[], &[]), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -106,6 +106,12 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
             .filter_map(|s| s.as_str().map(str::to_owned))
             .collect();
     }
+    // nsh.json `fileTypes`: the files it opens.
+    options.file_types = info
+        .as_ref()
+        .and_then(|info| info.get("fileTypes"))
+        .map(nsh_platform_linux::file_type::file_types_from_json)
+        .unwrap_or_default();
     // nsh.json `singleInstance`: a second launch goes to this one.
     options.single_instance = info
         .as_ref()

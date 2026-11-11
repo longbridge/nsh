@@ -376,7 +376,11 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
     fs::write(
         &app,
         crate::package::app_json(
-            serde_json::json!({ "id": id }),
+            {
+                let mut info = serde_json::json!({ "id": id });
+                config.add_file_types_to_app_json(&mut info);
+                info
+            },
             &schemes,
             config.window.as_ref(),
         ),

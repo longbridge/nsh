@@ -502,6 +502,15 @@ impl Bundle {
             }
             bundle.url_schemes = schemes;
         }
+        // The files it opens come as `file:` URLs (`nsh_core::file_type`).
+        if info
+            .as_ref()
+            .is_some_and(nsh_core::file_type::declares_file_types)
+        {
+            bundle
+                .url_schemes
+                .push(nsh_core::file_type::FILE_SCHEME.to_owned());
+        }
         bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
             .map(std::path::Path::to_path_buf);
