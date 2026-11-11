@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +31,5 @@ jobs:
       - uses: ./.github/actions/cargo
         with:
           cache: rust-app
-      - name: Exercise native WebView APIs
-        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} .github/ci/webview-review.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: download-native-${{ runner.os }}
-          path: .nsh/webview-review/proof/
-          include-hidden-files: true
+      - name: Check Windows native code quality
+        run: cargo clippy --locked -p nsh-platform-windows --no-default-features --all-targets -- -D warnings

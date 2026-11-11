@@ -3155,7 +3155,7 @@ mod tests {
         assert!(destination_error(Path::new(""), true, &[]).is_err());
         assert!(destination_error(&dir.join("missing/report.pdf"), true, &[]).is_err());
         assert!(destination_error(&dir, true, &[]).is_err());
-        assert!(destination_error(&target, true, &[target.clone()]).is_err());
+        assert!(destination_error(&target, true, std::slice::from_ref(&target)).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
