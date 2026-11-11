@@ -1215,6 +1215,13 @@ impl Overlay {
         })
     }
 
+    /// Places it against `anchor`, which may change from one kind to
+    /// another while it is shown: a context menu opened below its trigger
+    /// and then, by a secondary click, at the pointer.
+    pub fn anchor_to(self, anchor: impl IntoReactive<OverlayAnchor>) -> Self {
+        self.bind_prop(anchor, |a| Prop::Overlay(OverlayProp::Anchor(a)))
+    }
+
     /// The side of the anchor it goes on (default below).
     pub fn placement(self, placement: impl IntoReactive<Placement>) -> Self {
         self.bind_prop(placement, |p| Prop::Overlay(OverlayProp::Placement(p)))
