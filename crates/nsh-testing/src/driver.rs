@@ -29,6 +29,8 @@ pub(crate) trait Driver: Send {
     fn clear(&mut self, selector: &str) -> Result<(), String>;
     fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String>;
     fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String>;
+    /// An input method composes `text` in the input `selector` names.
+    fn compose(&mut self, selector: &str, text: &str) -> Result<(), String>;
     /// Drops local files (`file:` URLs) on what `selector` names.
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         let _ = (selector, uris);
@@ -197,6 +199,9 @@ impl Driver for Headless {
     }
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         Headless::drop_files(self, selector, uris)
+    }
+    fn compose(&mut self, selector: &str, text: &str) -> Result<(), String> {
+        Headless::compose(self, selector, text)
     }
     fn drop_held(&mut self) -> Result<(), String> {
         Headless::drop_held(self)
@@ -470,6 +475,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::Hover { selector } => format!("hover({selector})"),
         TestStep::RightClick { selector } => format!("rightClick({selector})"),
         TestStep::Paste { selector, .. } => format!("paste({selector})"),
+        TestStep::Compose { selector, text } => format!("compose({selector}, {text:?})"),
         TestStep::ChooseMenuItem { label } => format!("chooseMenuItem({label})"),
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::HostSend { name, .. } => format!("host.send({name})"),
@@ -563,6 +569,12 @@ impl Driver for Remote {
     }
     fn drop_held(&mut self) -> Result<(), String> {
         self.action(TestStep::Drop)
+    }
+    fn compose(&mut self, selector: &str, text: &str) -> Result<(), String> {
+        self.action(TestStep::Compose {
+            selector: selector.into(),
+            text: text.into(),
+        })
     }
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         self.action(TestStep::DropFiles {

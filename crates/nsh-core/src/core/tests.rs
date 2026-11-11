@@ -4344,6 +4344,38 @@ fn multiline_inputs_grow_with_their_text() {
 }
 
 #[test]
+fn multiline_inputs_grow_with_what_an_input_method_composes() {
+    let mut c = input_core();
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.commit();
+    // 30 characters at 8pt in 308pt: one line, as the placeholder.
+    c.input_changed(2, &"x".repeat(30), 1);
+    assert_eq!(c.commit().and_then(|b| frame_of(&b, 2)), None);
+    // Composing 20 more wraps the line: the input grows before it commits.
+    c.input_composing(2, Some(&"x".repeat(50)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(44.0));
+    // Its value is still what was committed.
+    let node = &c.nodes[c.key(2).unwrap() as usize];
+    assert_eq!(node.input.as_ref().unwrap().value, "x".repeat(30));
+    // Cancelled, it goes back to its value's height.
+    c.input_composing(2, None);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(28.0));
+    // Committed, it keeps the height the composition gave it.
+    c.input_composing(2, Some(&"x".repeat(50)));
+    c.commit();
+    c.input_changed(2, &"x".repeat(50), 2);
+    c.input_composing(2, None);
+    let batch = c.commit();
+    assert_eq!(batch.and_then(|b| frame_of(&b, 2)), None);
+}
+
+#[test]
 fn multiline_inputs_measure_long_runs_in_pieces() {
     let mut c = input_core();
     c.apply(Op::SetProp {

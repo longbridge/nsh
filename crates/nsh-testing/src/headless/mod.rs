@@ -1965,8 +1965,49 @@ impl Headless {
         self.done()
     }
 
-    /// Starts a step on the input `selector` names and focuses it.
+    /// Starts a step on the input `selector` names and focuses it; what an
+    /// input method composes in it ends, as a key or a paste commits it.
     fn input_step(&mut self, selector: &str, step: String) -> Result<NodeId, String> {
+        let id = self.focus_step(selector, step)?;
+        self.set_composition(id, None);
+        Ok(id)
+    }
+
+    /// The step `compose(<selector>, <text>)`: an input method composes
+    /// `text` in the input `selector` names, marked at the end of its
+    /// text in place of what it composed (`onCompositionChange`), as a
+    /// user typing pinyin sees it; empty, the composition ends with
+    /// nothing committed. The core measures the input with it.
+    pub fn compose(&mut self, selector: &str, text: &str) -> Result<(), String> {
+        let id = self.focus_step(selector, format!("compose({selector}, {text:?})"))?;
+        self.set_composition(id, (!text.is_empty()).then(|| text.to_owned()));
+        self.done()
+    }
+
+    /// Input `id`'s composition becomes `marked` (`None`: it ends),
+    /// reported to the core and as `onCompositionChange` if it changed.
+    fn set_composition(&mut self, id: NodeId, marked: Option<String>) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
+        if input.composition == marked {
+            return;
+        }
+        let shown = marked.as_ref().map(|m| format!("{}{m}", input.text));
+        let payload = EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(marked.is_some())),
+            (
+                "text",
+                PayloadValue::Str(marked.clone().unwrap_or_default()),
+            ),
+        ]);
+        input.composition = marked;
+        self.engine.control().input_composing(id, shown);
+        self.send(id, EventKind::CompositionChange, payload);
+    }
+
+    /// Starts a step on the input `selector` names and focuses it.
+    fn focus_step(&mut self, selector: &str, step: String) -> Result<NodeId, String> {
         let parsed = Selector::parse(selector)?;
         self.step(step);
         let pick = self.screen.input_view(&parsed);
