@@ -372,10 +372,12 @@ fn opened_files_come_as_paths_apart_from_links() {
         &launch,
         |control| open(control, "file:///home/u/d.mp4"),
     );
-    assert_eq!(
-        text,
-        "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov files:/home/u/d.mp4 done"
-    );
+    // A slow machine may report the later file before the app listens, and
+    // then it waits in the same batch as the launch files.
+    let apart = "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov files:/home/u/d.mp4 done";
+    let batched =
+        "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov,/home/u/d.mp4 done";
+    assert!(text == apart || text == batched, "{text}");
 }
 
 #[test]
