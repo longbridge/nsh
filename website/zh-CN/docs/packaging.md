@@ -338,6 +338,12 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 
 打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 
+## 日志
+
+打包后的应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入平台日志：macOS 和 iOS 上是统一日志，以应用的 id 为子系统（“控制台”
+应用，或 `log stream --predicate 'subsystem == "com.example.notes"'`），Android 上是 logcat，Windows 上是调试器输出，Linux
+上是标准错误，Web 上是浏览器控制台。参见[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)。
+
 ## 查找运行时
 
 Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI 旁边查找预构建运行时（发行包中的 `bin/../runtime`）。在 NSH 的源码仓库中，它使用

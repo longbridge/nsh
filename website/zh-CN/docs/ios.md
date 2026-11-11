@@ -43,6 +43,10 @@ nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" -
 
 `--target ios` 为真机、TestFlight 或 App Store 生成签名的 `.ipa`。签名身份、描述文件和图标见[打包](./packaging.md#ios-真机)。
 
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：连接的 iPhone 上的日志在“控制台”应用中查看，
+模拟器里的用 `xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.notes"'` 查看
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
+
 ## 嵌入 iOS 应用
 
 现有的 iOS 应用可以在自己的界面中显示 NSH 应用。带 Rust 代码的 iOS 应用链接你的 crate 和 `nsh-platform-ios` crate，在
@@ -423,6 +427,9 @@ try app.loadBundle(at: bundledURL)
 - **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中在内边距里使用
   `env(safe-area-inset-*)` 或 [`nsh`](../modules/nsh.md#safe-area-and-keyboard) 的 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。
+- **日志。** 应用的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以你的应用的 bundle identifier 为子系统、这一行的 target
+  为类别（`console.*` 是 `js`）：由 Xcode 运行应用时 Xcode 控制台会显示它们，“控制台”应用和 `log stream` 也会
+  （[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 另请参阅
 

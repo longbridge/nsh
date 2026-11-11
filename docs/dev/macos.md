@@ -444,6 +444,22 @@ host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in
 attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
 shows its window itself (`focus()` from its tray).
 
+## Packaged apps' logs
+
+An app opened from Finder or the Dock has its stderr on `/dev/null`, so `nsh-macos-app` (like `nsh-ios-app` and the
+iOS SDK's C ABI without `dev`) installs `nsh_platform_apple::unified_log`, a `log` logger that writes to the unified
+log. The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
+record's target, with each category's `os_log_t` made once. Errors are `OS_LOG_TYPE_ERROR`; warnings (their text
+after `WARN`) and info are `OS_LOG_TYPE_DEFAULT`, which the log stores and Console shows without "Include Info
+Messages"; debug and trace are `OS_LOG_TYPE_DEBUG`. The text is logged `%{public}s`, a NUL in it written `\0`, in
+entries of at most 960 bytes split between lines (the store keeps about 1 KB of an entry). What is logged is the
+runners' rule: warnings, errors and target `js`, everything from info in development (`NSH_APP_DIR`, iOS's
+`NSH_DEVELOPMENT`). Lines also go to stderr in development, and when stderr is a terminal unless Xcode's console
+shows the log already (`IDE_DISABLED_OS_ACTIVITY_DT_MODE`, `OS_ACTIVITY_DT_MODE`). `os_log_with_type` is a C
+macro: `src/os_log.c` wraps it in `platform_apple_os_log` (hidden, and outside the iOS SDK's exported `_nsh_*`),
+which the crate's `build.rs` compiles with `cc` for Apple targets. The development host logs through `dev.rs` (to
+the dev server while connected, to stderr otherwise).
+
 ## Keyboard focus for views
 
 A mounted non-input view that is a focus stop participates in AppKit's key

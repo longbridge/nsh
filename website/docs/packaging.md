@@ -394,6 +394,13 @@ assets it imports, next to the prebuilt runtime:
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
 
+## Logs
+
+A packaged app logs its warnings, its errors and its `console.log` and `console.info` lines to the platform's log: the
+unified log on macOS and iOS, under the app's id (Console, or `log stream --predicate 'subsystem == "com.example.notes"'`),
+logcat on Android, the debugger's output on Windows, standard error on Linux and the browser console on the web. See
+[A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs).
+
 ## Finding the runtime
 
 A Rust app builds its own runners. For TSX apps, `nsh package` looks for the prebuilt runtime next to the CLI (`bin/../runtime` in the distribution). In a checkout of
