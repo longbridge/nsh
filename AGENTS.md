@@ -449,7 +449,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   - Mouse events are the DOM's and GPUI's: `onMouseEnter` / `onMouseMove` / `onMouseLeave`, each with a
     `MouseEvent { position, pagePosition, modifiers, pressedButton }`; `onMouseMove` fires with or without a button
     down. `onWheel` passes `WheelEvent { position, pagePosition, delta, deltaMode, modifiers }` (GPUI's
-    `ScrollWheelEvent`, the DOM's sign); a listener nearer than the scroll views under the pointer takes the wheel.
+    `ScrollWheelEvent`, the DOM's sign); a listener nearer than the scroll views under the pointer takes the wheel,
+    and one scroll stays where it went (`input::WheelLatch`).
     State styles keep CSS's names (`hover:`, `hoverStyle`).
   - Returns: an object, never a bare value that may need a second field (`AlertDialog.show` → `{ action }`,
     animations → `{ finished }`); yes / no questions (`hasText()`, `canUndo()`) return booleans.

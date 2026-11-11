@@ -140,7 +140,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   thread, before it scrolls, from the mounted event masks (`input::wheel_listener`): walking out from the view under
   the pointer, the first view that listens hears it; it takes the wheel (no native scroll, Ctrl + wheel zoom or pinch)
   when no scroll view (nor a multiline field on Windows / GPUI, nor a hosted widget scrolling itself on Linux / macOS)
-  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. There is no
+  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. One scroll
+  stays where it went, as a scroll view's does (`input::WheelLatch`, every backend's `wheel_event`): a view that took
+  it keeps the rest of it wherever the pointer goes, a trackpad gesture from its first move through the system's
+  momentum (macOS, GPUI), steps while they keep coming (`WHEEL_LATCH`; mouse notches along their axis, a touchpad's
+  whichever way they turn; Linux until the touchpad scroll stops); and a scroll a scroll view has started is not
+  taken over by a listener that comes under the pointer meanwhile, which only observes it. There is no
   `preventDefault`: events reach JS after the fact, so the rule is what is mounted, as with `onContextMenu`. Linux
   `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
   (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`

@@ -64,8 +64,8 @@ use nsh_core::{
     geometry::{Points, point},
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
-        SCROLL_PRESS_DELAY, VelocityTracker, ZOOM_IDLE, has_press, laid_out, latch_holds,
-        transforms,
+        SCROLL_PRESS_DELAY, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE, has_press, laid_out,
+        latch_holds, transforms,
     },
     tailwind::state::{HOVERED, PRESSED},
 };
@@ -134,6 +134,8 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The `onWheel` listener a scroll went to, which keeps the rest of it.
+    wheel_listener: RefCell<WheelLatch<NshView>>,
     /// Views that track `HOVERED` or listen to `onMouseEnter` /
     /// `onMouseLeave` / `onMouseMove` (hover is only tested while there
     /// are).
@@ -309,6 +311,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.zoom.borrow_mut().take();
     input.wheel.borrow_mut().take();
     input.latch.borrow_mut().take();
+    input.wheel_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -842,33 +845,73 @@ fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> 
 }
 
 /// A wheel by `(dx, dy)` (`lines`: notches, else points) at `(x, y)` (root
-/// coordinates): the nearest view around the one under it that listens
-/// to `onWheel` hears it ([`input::wheel_listener`]). Returns whether that
-/// view takes the wheel, so nothing scrolls natively.
+/// coordinates), `step` of its scroll: the nearest view around the one
+/// under it that listens to `onWheel` hears it ([`input::wheel_listener`]),
+/// and one scroll stays where it went ([`WheelLatch`]: a view that took it
+/// keeps it while it keeps coming, a touchpad scroll until it stops; a
+/// scroll going on in a scroll view is only observed). Returns whether
+/// that view takes the wheel, so nothing scrolls natively.
+#[allow(clippy::too_many_arguments)]
 fn wheel_event(
-    surface: &Surface,
+    surface: &Rc<Surface>,
     x: f32,
     y: f32,
     lines: bool,
     dx: f32,
     dy: f32,
     state: gdk::ModifierType,
+    step: WheelStep,
 ) -> bool {
-    if dx == 0.0 && dy == 0.0 {
+    let moved = dx != 0.0 || dy != 0.0;
+    if !moved && step != WheelStep::End {
         return false;
     }
-    let Some(hit) = pick(&event_root(surface), x, y) else {
+    let input = &surface.input;
+    let scrolling = input.wheel.borrow().as_ref().is_some_and(|w| !w.held)
+        || match step {
+            WheelStep::Discrete {
+                horizontal, time, ..
+            } => input
+                .latch
+                .borrow()
+                .as_ref()
+                .is_some_and(|(view, h, last)| {
+                    latch_holds(*h, *last, horizontal, time) && view.is_mapped()
+                }),
+            _ => false,
+        };
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        moved,
+        scrolling,
+        |view| view.is_mapped(),
+        || {
+            let hit = pick(&event_root(surface), x, y)?;
+            // A hosted widget scrolling itself (a web page, a text view)
+            // keeps it.
+            let native_scrolls = hit.native.as_ref().is_some_and(scrolls_itself);
+            let (view, takes) = input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Wheel),
+                |v| v.kind() == ViewKind::Scroll,
+            )?;
+            Some((view, takes && !native_scrolls))
+        },
+    );
+    let Some((view, takes)) = routed else {
         return false;
     };
-    // A hosted widget scrolling itself (a web page, a text view) keeps it.
-    let native_scrolls = hit.native.as_ref().is_some_and(scrolls_itself);
-    let Some((view, takes)) = input::wheel_listener(
-        chain(&hit.view),
-        |v| v.state().events.contains(EventKind::Wheel),
-        |v| v.kind() == ViewKind::Scroll,
-    ) else {
-        return false;
-    };
+    // Resting fingers held a scroll view without scrolling it: it lets go.
+    let held = input.wheel.borrow().as_ref().is_some_and(|w| w.held);
+    if takes
+        && held
+        && let Some(w) = input.wheel.borrow_mut().take()
+    {
+        crate::scroll::wheel_end(surface, &w.view, 0.0, 0.0);
+    }
+    if !moved {
+        return takes;
+    }
     let (location_x, location_y) = local(surface, &view, x, y);
     let delta = if lines {
         nsh_core::WheelDelta::Lines(point(dx, dy))
@@ -883,7 +926,7 @@ fn wheel_event(
     );
     let id = view.state().id;
     surface.event(id, EventKind::Wheel, EventPayload::Wheel(event));
-    takes && !native_scrolls
+    takes
 }
 
 /// The edit menu of selectable text or a selectable view `target` (Copy,
@@ -995,7 +1038,16 @@ fn scroll_event(
     let modifiers = event.modifier_state();
     // A view listening to `onWheel` nearer than the scroll views under the
     // pointer takes the wheel, Ctrl + wheel included (a canvas zooming).
-    if kind != WheelInput::Stop && wheel_event(surface, x, y, kind == notches, dx, dy, modifiers) {
+    let step = if kind == WheelInput::Stop {
+        WheelStep::End
+    } else {
+        WheelStep::Discrete {
+            horizontal: dx.abs() > dy.abs(),
+            precise: kind == WheelInput::Touchpad,
+            time,
+        }
+    };
+    if wheel_event(surface, x, y, kind == notches, dx, dy, modifiers, step) {
         return glib::Propagation::Stop;
     }
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops.
@@ -1103,7 +1155,12 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             mouse_moved(surface, x, y, gdk::ModifierType::empty());
         }
         Simulated::Wheel(x, y, dx, dy) => {
-            if !wheel_event(surface, x, y, false, dx, dy, held) {
+            let step = WheelStep::Discrete {
+                horizontal: dx.abs() > dy.abs(),
+                precise: false,
+                time,
+            };
+            if !wheel_event(surface, x, y, false, dx, dy, held, step) {
                 let step = WheelInput::Step { notches: false };
                 wheel_input(surface, x, y, dx, dy, time, step);
             }

@@ -289,7 +289,10 @@ const at = signal<number | null>(null);
 (the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
 it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
 pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
-or a view around one, only observes: the scroll view still scrolls. JS never cancels a native scroll after the fact
+or a view around one, only observes: the scroll view still scrolls. One scroll stays where it went, as a scroll
+view's does: a view that took it keeps the rest of it (a touchpad gesture and its momentum, notches while they keep
+coming) even when the pointer leaves it, and a scroll a scroll view has started is never taken over halfway by a
+listener that comes under the pointer: the listener only observes it. JS never cancels a native scroll after the fact
 (the main thread does not wait for it), so whether a view takes the wheel is decided by what is mounted, as with
 `onContextMenu`.
 

@@ -438,3 +438,39 @@ test('a view listening to onWheel inside a scroll view takes the wheel', (t) => 
   assert.equal(sent.length, 1);
   assert.equal(el.scrollTop, 20);
 });
+
+test('one scroll stays on the view that took it, and a scroll going on is only observed', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  const sent = [];
+  p.event = (id, name, payload) => sent.push([id, name, payload]);
+  p.point = (e) => [e.clientX, e.clientY];
+  const canvas = {
+    _id: 2, _kind: 'view', _events: new Set(['onWheel']), parentNode: el, isConnected: true,
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+  };
+  p.views.set(2, canvas);
+  p.wheelTracked = new Set([2]);
+  const notch = (target, dy) => ({ deltaMode: 1, deltaX: 0, deltaY: dy, clientX: 0, clientY: 0, target, preventDefault() {} });
+  // A notch over the canvas: it takes it.
+  p.wheel(notch(canvas, 3));
+  assert.equal(sent.at(-1)[0], 2);
+  assert.equal(el.scrollTop, 0);
+  // The next one comes over the scroll view itself: still the canvas's.
+  clock += 50;
+  p.wheel(notch(el, 3));
+  assert.equal(sent.length, 2);
+  assert.equal(sent.at(-1)[0], 2);
+  assert.equal(el.scrollTop, 0, 'the scroll view did not take over');
+  // After a pause a touchpad scrolls the scroll view; when the canvas
+  // comes under the pointer while that scroll goes on, it only observes it.
+  el.isConnected = true;
+  clock += 300;
+  p.wheel(wheel(el, 20));
+  assert.equal(el.scrollTop, 20);
+  clock += 50;
+  p.wheel(wheel(canvas, 20));
+  assert.equal(sent.at(-1)[0], 2);
+  assert.equal(el.scrollTop, 40, 'the scroll view kept scrolling');
+});
