@@ -179,6 +179,7 @@ export interface NavPageProps extends NavPageHostProps {
   /** Finds the page in tests and `nsh test --trace`. */
   testID?: string;
   ios?: IOSNavPageHostProps;
+  android?: AndroidNavPageHostProps;
   /** The app's header on the desktops and the web, which have no system
    * header: placed at the top of the page, as wide as the page and as tall
    * as it lays out, with the content below it. NSH draws nothing else

@@ -16,15 +16,16 @@ use objc2::{
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSAttributedString, NSData, NSDictionary, NSPropertyListReadOptions,
+    NSAttributedString, NSData, NSDictionary, NSObjectProtocol, NSPropertyListReadOptions,
     NSPropertyListSerialization, NSRange, NSString, NSURL,
 };
 use objc2_ui_kit::{
     NSAttributedStringDocumentFormats, NSDocumentTypeDocumentAttribute,
     NSDocumentTypeDocumentOption, NSHTMLTextDocumentType, NSRTFDTextDocumentType,
     NSRTFTextDocumentType, UIAlertAction, UIAlertActionStyle, UIAlertController,
-    UIAlertControllerStyle, UIApplication, UIDevice, UIPopoverArrowDirection, UIStatusBarAnimation,
-    UIStatusBarStyle, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewController,
+    UIAlertControllerStyle, UIApplication, UIDevice, UIInterfaceOrientationMask,
+    UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle, UIUserInterfaceIdiom,
+    UIUserInterfaceStyle, UIView, UIViewController,
 };
 
 thread_local! {
@@ -33,6 +34,9 @@ thread_local! {
     /// The appearance the app asked for last (`setColorScheme`), for what
     /// is not a subview of a surface: the status bar, alerts, modals.
     static APPEARANCE: Cell<UIUserInterfaceStyle> = const { Cell::new(UIUserInterfaceStyle::Unspecified) };
+    /// The orientations the page shown asked for (`supportedOrientations`;
+    /// empty: the app's), one per process like the status bar.
+    static ORIENTATIONS: Cell<UIInterfaceOrientationMask> = const { Cell::new(UIInterfaceOrientationMask(0)) };
 }
 
 /// The tint of a surface's alerts and action sheets for its design tokens
@@ -123,6 +127,56 @@ pub(crate) fn set_status_bar(config: StatusBarConfig, view: &UIView) {
         UIView::animateWithDuration_animations(0.25, &block, view.mtm());
     } else {
         update();
+    }
+}
+
+/// The orientations of [`nsh_core::ModalConfig::PORTRAIT`] bits.
+pub(crate) fn orientation_mask(bits: u8) -> UIInterfaceOrientationMask {
+    use nsh_core::ModalConfig as M;
+    let mut mask = UIInterfaceOrientationMask::empty();
+    for (bit, m) in [
+        (M::PORTRAIT, UIInterfaceOrientationMask::Portrait),
+        (
+            M::PORTRAIT_UPSIDE_DOWN,
+            UIInterfaceOrientationMask::PortraitUpsideDown,
+        ),
+        (M::LANDSCAPE_LEFT, UIInterfaceOrientationMask::LandscapeLeft),
+        (
+            M::LANDSCAPE_RIGHT,
+            UIInterfaceOrientationMask::LandscapeRight,
+        ),
+    ] {
+        if bits & bit != 0 {
+            mask |= m;
+        }
+    }
+    mask
+}
+
+/// The orientations the page shown asked for, for view controllers'
+/// `supportedInterfaceOrientations` (`None`: the controller's own).
+pub(crate) fn page_orientations() -> Option<UIInterfaceOrientationMask> {
+    let mask = ORIENTATIONS.get();
+    (!mask.is_empty()).then_some(mask)
+}
+
+/// Applies the page's `supportedOrientations` ([`nsh_core::Command::Orientations`]):
+/// asks the controllers of `view`'s window to rotate to them.
+pub(crate) fn set_orientations(bits: u8, view: &UIView) {
+    ORIENTATIONS.set(orientation_mask(bits));
+    let Some(window) = view.window() else { return };
+    let mut controller = window.rootViewController();
+    // iOS 16 asks each controller again; before, one call for the window.
+    if !controller.as_ref().is_some_and(|c| {
+        c.respondsToSelector(objc2::sel!(setNeedsUpdateOfSupportedInterfaceOrientations))
+    }) {
+        #[allow(deprecated)]
+        UIViewController::attemptRotationToDeviceOrientation(view.mtm());
+        return;
+    }
+    while let Some(c) = controller {
+        c.setNeedsUpdateOfSupportedInterfaceOrientations();
+        controller = c.presentedViewController();
     }
 }
 

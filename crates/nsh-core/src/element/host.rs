@@ -958,6 +958,17 @@ impl Screen {
         })
     }
 
+    /// The orientations the screen may take while the page is shown (iOS
+    /// and Android; default: the app's). Of the pages displayed, the one
+    /// shown most recently with a setting decides.
+    pub fn supported_orientations(
+        self,
+        orientations: impl IntoIterator<Item = Orientation>,
+    ) -> Self {
+        let bits = orientations.into_iter().fold(0, |bits, o| bits | o.bits());
+        self.set(Prop::Screen(ScreenProp::Orientations(bits)))
+    }
+
     /// A large title (iOS); the content scrolls under the header.
     pub fn header_large_title(self, large: impl IntoReactive<bool>) -> Self {
         self.bind_prop(large, |v| Prop::Screen(ScreenProp::HeaderLargeTitle(v)))

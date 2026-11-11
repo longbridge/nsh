@@ -1817,6 +1817,9 @@ impl Mounter {
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
+            (Command::Orientations(bits), native) if id == nsh_core::ROOT_ID => {
+                crate::system::set_orientations(bits, native.view());
+            }
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
