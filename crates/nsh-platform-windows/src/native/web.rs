@@ -406,7 +406,7 @@ pub(crate) struct WebItem {
 
 impl WebItem {
     pub(crate) fn new(surface: &Rc<Surface>, view: &NshView) -> Rc<Self> {
-        Rc::new(WebItem {
+        let item = Rc::new(WebItem {
             emitter: Emitter::new(surface, view.id()),
             surface: Rc::downgrade(surface),
             me: RefCell::default(),

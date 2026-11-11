@@ -50,6 +50,10 @@ try:
     unit = ["cargo", "test", "--locked", "-p", "nsh-platform-" + platform, "--no-default-features", "--lib", "native::"]
     if platform == "linux":
         unit[unit.index("--lib"):unit.index("--lib")] = ["--features", "webview"]
+    clippy = ["cargo", "clippy", "--locked", "-p", "nsh-platform-" + platform, "--no-default-features", "--all-targets"]
+    if platform == "linux":
+        clippy += ["--features", "webview"]
+    clippy += ["--", "-D", "warnings"]
     native = ["cargo", "run", "--manifest-path", str(crate / "Cargo.toml"), "--target-dir", str(root / "target")]
     prefix = []
     if platform == "linux":
@@ -58,7 +62,7 @@ try:
                    XDG_DATA_HOME=str(area / "data"), XDG_CACHE_HOME=str(area / "cache"))
         prefix = ["dbus-run-session", "--", "xvfb-run", "-a"]
     results = {}
-    for name, command in [("unit", unit), ("native", native)]:
+    for name, command in [("clippy", clippy), ("unit", unit), ("native", native)]:
         with (proof / (name + ".log")).open("w", encoding="utf-8") as log:
             completed = subprocess.run(prefix + command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=2400)
         results[name] = completed.returncode
@@ -69,7 +73,7 @@ try:
             results["success_marker"] = "WEBVIEW_SMOKE_PASS" in text
     results["commit"] = metadata["commit"]
     (proof / "result.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-    if results["unit"] or results["native"] or not results["success_marker"]:
+    if results["clippy"] or results["unit"] or results["native"] or not results["success_marker"]:
         raise SystemExit(1)
 finally:
     fixture.terminate()

@@ -43,6 +43,7 @@ mod web;
 
 use std::{
     cell::{Cell, RefCell},
+    path::PathBuf,
     rc::{Rc, Weak},
     sync::Arc,
 };

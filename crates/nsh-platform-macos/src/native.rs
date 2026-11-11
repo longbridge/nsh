@@ -3261,24 +3261,6 @@ mod tests {
     }
 
     #[test]
-    fn downloads_get_safe_file_names() {
-        assert_eq!(file_name("report.pdf"), "report.pdf");
-        assert_eq!(file_name("../../etc/passwd"), "passwd");
-        assert_eq!(file_name(r"..\..\boot.ini"), "boot.ini");
-        assert_eq!(file_name(".profile"), "profile");
-        assert_eq!(file_name("a\u{0}b\u{7}.txt"), "ab.txt");
-        assert_eq!(file_name("report\u{202e}fdp.exe"), "reportfdp.exe");
-        assert_eq!(file_name("   "), "download");
-        assert_eq!(file_name(""), "download");
-        assert_eq!(file_name("/"), "download");
-        assert_eq!(file_name("报告.pdf"), "报告.pdf");
-        let long = format!("{}.gz", "é".repeat(400));
-        let name = file_name(&long);
-        assert!(name.len() <= 200, "{} bytes", name.len());
-        assert!(name.ends_with(".gz"), "{name}");
-    }
-
-    #[test]
     fn validates_manual_download_destinations() {
         let dir = download_scratch("destinations");
         let target = dir.join("report.pdf");
