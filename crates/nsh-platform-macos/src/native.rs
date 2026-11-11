@@ -2296,7 +2296,7 @@ fn web_request(
             set_cookie(surface, node, web, request.id, cookie, alive)
         }
         WebViewOperation::DeleteCookie { name, domain, path } => {
-            delete_cookie(surface, node, web, request.id, name, domain, path, alive)
+            delete_cookie(surface, node, web, request.id, (name, domain, path), alive)
         }
         // A newer core's operation: answered, never left waiting.
         _ => reply(
@@ -2449,9 +2449,7 @@ fn delete_cookie(
     node: NodeId,
     web: &AnyObject,
     request: u64,
-    name: &str,
-    domain: &str,
-    path: &str,
+    (name, domain, path): (&str, &str, &str),
     alive: Arc<AtomicBool>,
 ) {
     let Some(jar) = cookie_jar(web) else {
