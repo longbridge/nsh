@@ -196,6 +196,7 @@ own path. An app without `capabilities` loads local files as before.
 |---|---|---|
 | `hosts` | `string[]` | Hosts a [web view](./web-view-and-video.md) may show and navigate to (`http` and `https`). Without `webview`, the app may not show web pages at all. |
 | `input` | `boolean` | A web view's ref may give its page trusted input ([`sendInput`](./web-view-and-video.md#input-as-the-users-own)). Never granted unless declared, also for an app without `"capabilities"`. |
+| `media` | `string[]` | What web pages may capture with `getUserMedia`: `"microphone"`, `"camera"`. Never granted unless declared, also for an app without `"capabilities"`. |
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
@@ -206,6 +207,17 @@ web views, so the base URL needs the grant a page there would: its host in `host
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
 and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
+
+`media` answers the web view's own media capture requests: those for a declared kind are allowed on macOS, iOS,
+Android, Windows and Linux, and the rest are denied. The system still asks the user the first time, so packages
+declare what it needs: `nsh package` writes `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (word them your
+own way with `ios.infoPlist` / `macos.infoPlist`), the macOS `com.apple.security.device.audio-input` /
+`com.apple.security.device.camera` entitlements, and Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app asks
+for when a page first needs them. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
+
+```json
+{ "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
+```
 
 ### `statusBar`
 

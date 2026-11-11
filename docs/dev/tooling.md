@@ -159,6 +159,20 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
   `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
   browser, even on loopback or under a name rebound to this machine, gets 403.
+- Asset names: `asset:/<path>` is a file's path in the app's directory, the bundle's asset root
+  (`nsh_bundler::Bundle::asset_root`, `HotBundle::asset_root`; `bundle.rs` `app_dir`: the entry's directory when it
+  holds an `nsh.json` or an `App.tsx`, else the nearest one up with an `nsh.json`, else the nearest one up with an
+  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<file>.run.js` name
+  `assets/dot.png` as `App.tsx` does. An import from outside it fails the build (`NshPlugin::ship`), as a package holds
+  only the app's directory; so does a file that is inside by name but links out (checked on its real path), a
+  pixel-density variant found beside an image too, while a link to elsewhere in the app keeps the name it has
+  (`logo@2x.png`). The entry made for a test file may be written outside the app (`TestRun::work_dir` is any
+  directory): `nsh_testing::compiler` builds it with `BundleOptions::asset_root_from`, the test file, so what the
+  test file imports is named from the test file's app (`nsh test` writes it in the app's `.nsh/test`, which roots it
+  alike). What reads assets joins their names to that root: the CLI's `build::Built::asset_root`
+  (its `assets`' sources), the dev server's media files (`DevServer::set_assets_root`, set by every build of `nsh run`;
+  `test_host::serve` starts there), headless runs' `DirectoryAssets` (`nsh_testing::Built::Js`'s `asset_root`, the
+  runner protocol's `Reply::Js` `asset_root`), and `examples/embed-gpui`'s build script.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK
@@ -366,7 +380,7 @@ A step first applies the batches that came since the last one (they belong to it
 for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
 waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
-time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
+time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output), when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
 failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
 edits than were typed is dropped. `headless::StubNetwork` (routes by `"<METHOD> <URL>"`, `*` matching any text, others
@@ -513,10 +527,14 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   leaves; `toContain` is `===`. A `RegExp` given to `toMatch` or `toThrow` runs on the JS engine (`text.search(re)`
   through `JsHost::invoke`). `rejects.toMatchObject` compares what was thrown as `Exception::thrown` holds it (its own
   properties with its `name` and `message`), made a JS value again. Failure messages show values as `values::show`
-  writes them (compact JSON, with `undefined`, `NaN`, dates, maps, typed arrays and classes as JS would write them).
+  writes them (compact JSON, with `undefined`, `NaN`, dates, maps, typed arrays and classes as JS would write them),
+  bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters (around the first difference when two values are
+  shown) so a long value cannot flood the message.
 
 `crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
-`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen),
+`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen,
+bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output with the rest counted; `-v` shows the
+terminal's all, the JUnit report is always cut),
 writes a JUnit XML report with `--junit` (`Tally::junit`) and fails when any test failed. Given a directory of an
 app with Rust crates, it first runs `cargo test --no-fail-fast` for each crate in that directory, in the crate's own
 directory (`test::cargo_test`), and parses libtest's output (`cargo_test_results`: the test targets by their
@@ -709,12 +727,13 @@ input goes through (`synth.rs`), back the mouse's back button, dialogs pressed a
 GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s clicked, screenshots rendered
 offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
-feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (a booted one, else the newest
-iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the simulator shares the Mac's network
-and files). As `nsh run --target ios` and `nsh package --target ios-simulator --run` do, it passes the app the variables
-of its environment that the app's `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads
-them as on the desktops, whose hosts are the CLI's children; the paths the simulator sets for its apps (`HOME`,
-`TMPDIR`, `PATH`, ...) keep the simulator's values. Touches are IOHID digitizer events handed to UIKit
+feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (the one `--device` names, else a
+booted one, else the newest iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
+simulator shares the Mac's network and files). As `nsh run --target ios` and
+`nsh package --target ios-simulator --run` do, it passes the app the variables of its environment that the app's
+`capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads them as on the desktops, whose
+hosts are the CLI's children; the paths the simulator sets for its apps (`HOME`, `TMPDIR`, `PATH`, ...) keep the
+simulator's values. Touches are IOHID digitizer events handed to UIKit
 (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's and BackBoardServices' functions looked up at run time,
 `synth.rs`), so UIKit makes the `UITouch`es and runs hit
 testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept

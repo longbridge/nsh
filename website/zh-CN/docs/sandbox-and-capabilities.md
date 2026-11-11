@@ -179,6 +179,7 @@ Web 上它沿用页面的协议，按补全后的 URL 检查；原生应用没�
 |---|---|---|
 | `hosts` | `string[]` | [web view](./web-view-and-video.md) 可以显示和导航到的主机（`http` 和 `https`）。没有 `webview` 时，应用完全不能显示网页。 |
 | `input` | `boolean` | web view 的 ref 可以向页面发送可信输入（[`sendInput`](./web-view-and-video.md#像用户一样输入)）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+| `media` | `string[]` | 网页可以通过 `getUserMedia` 采集的媒体：`"microphone"`、`"camera"`。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
 web view 内的顶层导航也会在加载前由平台的导航代理检查。页面自身的子资源（脚本、图片、XHR）属于网页内容自己的事，
 不做检查。`about:blank` 和内联 HTML（`html`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
@@ -188,6 +189,16 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
 并在日志中说明要添加哪个键。
+
+`media` 负责回应 web view 自己的媒体采集请求：在 macOS、iOS、Android、Windows 和 Linux 上，已声明的种类会被允许，其余一律拒绝。
+系统第一次仍会询问用户，所以安装包要声明系统需要的内容：`nsh package` 会写入 `NSMicrophoneUsageDescription` /
+`NSCameraUsageDescription`（可以用 `ios.infoPlist` / `macos.infoPlist` 改成自己的措辞）、macOS 的
+`com.apple.security.device.audio-input` / `com.apple.security.device.camera` 权利（entitlements），以及 Android 的
+`RECORD_AUDIO` / `CAMERA` 权限，应用会在页面第一次需要时请求它们。页面需要处于安全上下文（`https:` 或 `localhost`）才能使用 `getUserMedia`。
+
+```json
+{ "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
+```
 
 ### `statusBar`
 

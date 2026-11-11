@@ -1,18 +1,24 @@
 package com.longbridge.nsh;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import java.util.ArrayList;
+import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Objects;
@@ -62,6 +68,7 @@ final class WebBox extends WidgetBox {
         web.getSettings().setDomStorageEnabled(true);
         web.addJavascriptInterface(new Bridge(), "nsh");
         web.setWebViewClient(new Client());
+        web.setWebChromeClient(new Chrome());
         web.setOnTouchListener((v, e) -> {
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 // The page scrolls itself: keep enclosing scroll views out.
@@ -150,6 +157,95 @@ final class WebBox extends WidgetBox {
             removeView(web);
             web.destroy();
             return true;
+        }
+    }
+
+    /** Media capture ({@code getUserMedia}): what the app's {@code webview.media} grants. */
+    private final class Chrome extends WebChromeClient {
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+            List<String> granted = new ArrayList<>();
+            List<String> system = new ArrayList<>();
+            for (String resource : request.getResources()) {
+                String kind, permission;
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                    kind = "microphone";
+                    permission = android.Manifest.permission.RECORD_AUDIO;
+                } else if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                    kind = "camera";
+                    permission = android.Manifest.permission.CAMERA;
+                } else {
+                    continue;
+                }
+                if (!mounter.allowsWebMedia(kind)) {
+                    android.util.Log.w("nsh", "web view " + kind + " capture is not granted: add it to capabilities.webview.media");
+                    continue;
+                }
+                granted.add(resource);
+                system.add(permission);
+            }
+            if (granted.isEmpty()) {
+                request.deny();
+                return;
+            }
+            String[] resources = granted.toArray(new String[0]);
+            Context context = getContext();
+            List<String> missing = new ArrayList<>();
+            for (String p : system) {
+                if (context.checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) missing.add(p);
+            }
+            if (missing.isEmpty()) {
+                request.grant(resources);
+            } else if (context instanceof Activity) {
+                MediaPermissions.of((Activity) context).ask(missing.toArray(new String[0]), allowed -> {
+                    if (allowed) request.grant(resources);
+                    else request.deny();
+                });
+            } else {
+                request.deny();
+            }
+        }
+    }
+
+    /** Asks the user for the system's media permissions, across configuration changes. */
+    @SuppressWarnings("deprecation")
+    public static final class MediaPermissions extends android.app.Fragment {
+        private static final String TAG = "com.longbridge.nsh.WebBox.MediaPermissions";
+        private static final int CODE = 0x4f01;
+        private final List<java.util.function.Consumer<Boolean>> waiting = new ArrayList<>();
+
+        static MediaPermissions of(Activity activity) {
+            android.app.FragmentManager fragments = activity.getFragmentManager();
+            MediaPermissions found = (MediaPermissions) fragments.findFragmentByTag(TAG);
+            if (found == null) {
+                found = new MediaPermissions();
+                fragments.beginTransaction().add(found, TAG).commitNow();
+            }
+            return found;
+        }
+
+        @Override
+        public void onCreate(android.os.Bundle state) {
+            super.onCreate(state);
+            setRetainInstance(true);
+        }
+
+        void ask(String[] permissions, java.util.function.Consumer<Boolean> answer) {
+            waiting.add(answer);
+            if (waiting.size() == 1) requestPermissions(permissions, CODE);
+        }
+
+        @Override
+        public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+            if (code != CODE) {
+                super.onRequestPermissionsResult(code, permissions, results);
+                return;
+            }
+            boolean allowed = results.length > 0;
+            for (int r : results) allowed &= r == PackageManager.PERMISSION_GRANTED;
+            List<java.util.function.Consumer<Boolean>> answered = new ArrayList<>(waiting);
+            waiting.clear();
+            for (java.util.function.Consumer<Boolean> a : answered) a.accept(allowed);
         }
     }
 

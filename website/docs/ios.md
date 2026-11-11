@@ -148,7 +148,7 @@ nsh build App.tsx --release --out MyApp/nsh
 | `bundle.js` | The same app as JS source. |
 | `bundle.js.map` | Its source map (stack traces point at your `.tsx` files). |
 | `capabilities.json` | The [capabilities](./sandbox-and-capabilities.md) the app declares, when `nsh.json` has any. |
-| `assets/` | Images and fonts the app imports, at their paths relative to the entry. |
+| `assets/` | Images and fonts the app imports, at their paths in the app's directory. |
 
 ## Show the app
 

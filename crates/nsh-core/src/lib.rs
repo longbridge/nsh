@@ -81,7 +81,7 @@ pub use serde_json::Value as JsonValue;
 
 pub use crate::{
     color::{Hsla, Rgba},
-    core::{ApplyError, Core, ListBind, Measurement},
+    core::{ApplyError, Core, ListBind, ListScrollPosition, Measurement},
     effects::{
         BackdropMaterial, BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, GlassEffect,
         Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes, MacOsBackdrop,

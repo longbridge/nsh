@@ -239,6 +239,9 @@ prop id:plain closeOnEscape true
 prop id:plain closeOnBackdropPress true
 prop id:plain closeOnSwipe true
 noprop id:plain supportedOrientations
+# A dialog for screen readers, with no name of its own.
+prop id:plain role dialog
+noprop id:plain accessibilityLabel
 # Closed while `open` is false.
 absent Synced dialog
 absent Guarded dialog
@@ -288,6 +291,9 @@ expect Guarded dialog
 prop id:guarded closeOnEscape false
 prop id:guarded closeOnBackdropPress false
 prop id:guarded closeOnSwipe false
+# An alert dialog named by its label.
+prop id:guarded role alertdialog
+prop id:guarded accessibilityLabel Guarded
 event text:"Guarded dialog" onCancel reason=cancel
 expect Log: guarded cancel
 event text:"Guarded dialog" onCancel reason=swipe
@@ -312,6 +318,8 @@ covers [props] closeOnSwipe
 covers [props] closeOnBackdropPress
 covers [props] ios.supportedOrientations
 covers [props] Dialog.open
+covers [props] role
+covers [props] accessibilityLabel
 covers [events] Dialog.onOpen
 covers [events] Dialog.onClose
 covers [events] Dialog.onCancel

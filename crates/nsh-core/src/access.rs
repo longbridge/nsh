@@ -578,6 +578,25 @@ pub(crate) fn env_names_match(a: &str, b: &str) -> bool {
     }
 }
 
+/// What a web view's page may capture (`capabilities.webview.media`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WebMedia {
+    /// `"microphone"`: audio input.
+    Microphone,
+    /// `"camera"`: video input.
+    Camera,
+}
+
+impl WebMedia {
+    /// Its name in `capabilities.webview.media`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Microphone => "microphone",
+            Self::Camera => "camera",
+        }
+    }
+}
+
 /// What an app may do (one declaration, or one grant).
 /// Start with [`Self::default`] and set the fields to grant; new capabilities
 /// default to denied.
@@ -595,6 +614,9 @@ pub struct Capabilities {
     /// Web views may take trusted input (`sendInput`, `webview.input`):
     /// never without a declaration ([`Capabilities::all`] leaves it off).
     pub webview_input: bool,
+    /// What web views' pages may capture (`webview.media`): never without a
+    /// declaration ([`Capabilities::all`] leaves it empty).
+    pub webview_media: Vec<WebMedia>,
     /// The app may set the status bar.
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
@@ -1188,7 +1210,7 @@ impl Capabilities {
             if check(
                 webview,
                 "capabilities.webview",
-                &["hosts", "input"],
+                &["hosts", "input", "media"],
                 "capabilities.webview",
             )? {
                 caps.webview = Some(match webview.get("hosts") {
@@ -1199,6 +1221,18 @@ impl Capabilities {
                     caps.webview_input = input
                         .as_bool()
                         .ok_or("capabilities.webview.input must be a boolean")?;
+                }
+                if let Some(media) = webview.get("media") {
+                    caps.webview_media = strings(media, "capabilities.webview.media")?
+                        .iter()
+                        .map(|kind| match kind.as_str() {
+                            "microphone" => Ok(WebMedia::Microphone),
+                            "camera" => Ok(WebMedia::Camera),
+                            _ => Err(format!(
+                                "capabilities.webview.media takes `microphone` and `camera`, not `{kind}`"
+                            )),
+                        })
+                        .collect::<Result<_, _>>()?;
                 }
             }
         }
@@ -1464,6 +1498,10 @@ impl Capabilities {
             // Only when granted: older runtimes read what newer signers write.
             if self.webview_input {
                 w.insert("input".into(), true.into());
+            }
+            if !self.webview_media.is_empty() {
+                let media = self.webview_media.iter().map(|m| m.as_str().into());
+                w.insert("media".into(), Value::Array(media.collect()));
             }
             obj.insert("webview".into(), Value::Object(w));
         }
@@ -2238,6 +2276,13 @@ impl Access {
         self.each(|c| c.webview.is_some() && c.webview_input)
     }
 
+    /// Whether a web view's page may capture `media` (`getUserMedia`):
+    /// declared and granted, never by default. The system still asks the
+    /// user.
+    pub fn allows_web_media(&self, media: WebMedia) -> bool {
+        self.each(|c| c.webview.is_some() && c.webview_media.contains(&media))
+    }
+
     /// Whether the app may open a window of `kind` with `attributes` (its
     /// own, before its kind's defaults) while `open` windows besides the
     /// main one are open; the message of the refusal otherwise (the call
@@ -2995,6 +3040,29 @@ mod tests {
             granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
         };
         assert!(!narrowed.allows_web_input());
+    }
+
+    #[test]
+    fn web_media_needs_an_explicit_grant() {
+        let all = Access::all();
+        assert!(!all.allows_web_media(WebMedia::Microphone));
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let mic = r#"{ "webview": { "hosts": ["example.com"], "media": ["microphone"] } }"#;
+        assert!(access(mic).allows_web_media(WebMedia::Microphone));
+        assert!(!access(mic).allows_web_media(WebMedia::Camera));
+        assert!(
+            Capabilities::from_json(&serde_json::json!({ "webview": { "media": ["screen"] } }))
+                .is_err()
+        );
+        assert_eq!(Capabilities::from_json(&caps(mic).to_json()), Ok(caps(mic)));
+        let narrowed = Access {
+            declared: caps(mic),
+            granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
+        };
+        assert!(!narrowed.allows_web_media(WebMedia::Microphone));
     }
 
     #[test]

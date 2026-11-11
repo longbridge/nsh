@@ -419,6 +419,10 @@ presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style
 presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
 only.
 
+The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
+the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the
+list after its last row.
+
 Focus and presses are separate. A view that takes keys while it has the focus (a chart, a slider, a list that moves
 its selection with the arrow keys) sets `focusable` and binds its keys while focused (`onFocus` / `onBlur` with
 [`keymap`](../modules/nsh.md#keymap)); a press on it still reaches a pressable around it, such as a card that
@@ -652,6 +656,7 @@ of its own.
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | Scrolls to an offset along the list's axis. |
 | `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | Scrolls an item into view. |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`, `ListRef` | Scrolls to the end of the content. |
+| `measureScrollPosition()` | `measure_scroll_position()` | `ListRef` | [Where the viewport starts among the rows](../docs/lists.md#keeping-a-reading-position). |
 | `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebViewRef` | Controls the page. |
 | `seek(seconds)` | `seek(seconds)` | `VideoRef` | Jumps to a time. |
 | `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |

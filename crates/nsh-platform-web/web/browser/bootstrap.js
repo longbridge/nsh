@@ -3309,8 +3309,9 @@
 			refresh() {
 				if (live()) apply(invoke(200, []));
 			},
-			measure(node) {
-				return call(315, [], node, [], true, false);
+			/** `ref.measure()`, or with `"scrollPosition"` a list's `ref.measureScrollPosition()`. */
+			measure(node, what) {
+				return call(315, [], node, what ? [what] : [], true, false);
 			},
 			reply(id, ok, value) {
 				const waiter = pending.get(id);
@@ -3408,6 +3409,9 @@
 		};
 		prototype.measure = function() {
 			return measure(this);
+		};
+		prototype.measureScrollPosition = function() {
+			return measure(this, "scrollPosition");
 		};
 		const finalizers = new FinalizationRegistry((id) => {
 			if (live()) {

@@ -410,6 +410,14 @@ pub(super) fn changed(surface: &Rc<Surface>, view: &NshView, old: &Exposed, new:
             Var::str(if new.busy { "busy" } else { "" }),
         );
     }
+    if old.invalid != new.invalid {
+        property_changed(
+            &p,
+            UIA_IsDataValidForFormPropertyId,
+            Var::bool(!old.invalid),
+            Var::bool(!new.invalid),
+        );
+    }
     if old.now != new.now
         && let Some(now) = new.now
     {
@@ -420,6 +428,25 @@ pub(super) fn changed(surface: &Rc<Surface>, view: &NshView, old: &Exposed, new:
             Var::f64(now as f64),
         );
     }
+}
+
+/// ARIA's `aria-current` and `aria-invalid` as browsers expose them
+/// (`AriaProperties`: `name=value` pairs split by `;`); `None` without
+/// either.
+fn aria_properties(s: &nsh_core::AccessibilityState) -> Option<String> {
+    let current = s.current.map(|current| match current {
+        AccessibilityCurrent::True => "current=true",
+        AccessibilityCurrent::Page => "current=page",
+        AccessibilityCurrent::Step => "current=step",
+        AccessibilityCurrent::Location => "current=location",
+        AccessibilityCurrent::Date => "current=date",
+        AccessibilityCurrent::Time => "current=time",
+    });
+    let parts: Vec<&str> = current
+        .into_iter()
+        .chain(s.invalid.then_some("invalid=true"))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(";"))
 }
 
 /// The name of `view` (an element that groups its content) changed with
@@ -826,18 +853,18 @@ impl IRawElementProviderSimple_Impl for Element_Impl {
                 _ => Var::empty(),
             },
             UIA_LocalizedLandmarkTypePropertyId if control == Control::Region => Var::str("region"),
-            // ARIA's `aria-current`, as browsers expose it.
-            UIA_AriaPropertiesPropertyId => match view.state().props.accessibility.state.current {
-                Some(current) => Var::str(match current {
-                    AccessibilityCurrent::True => "current=true",
-                    AccessibilityCurrent::Page => "current=page",
-                    AccessibilityCurrent::Step => "current=step",
-                    AccessibilityCurrent::Location => "current=location",
-                    AccessibilityCurrent::Date => "current=date",
-                    AccessibilityCurrent::Time => "current=time",
-                }),
-                None => Var::empty(),
-            },
+            // Narrator says "dialog" and the name as the focus enters one.
+            UIA_IsDialogPropertyId => {
+                Var::bool(matches!(control, Control::Dialog | Control::AlertDialog))
+            }
+            UIA_AriaPropertiesPropertyId => {
+                Var::opt_str(aria_properties(&view.state().props.accessibility.state).as_deref())
+            }
+            // ARIA's `aria-invalid`, as browsers expose it; valid is UIA's
+            // default.
+            UIA_IsDataValidForFormPropertyId if view.state().props.accessibility.state.invalid => {
+                Var::bool(false)
+            }
             UIA_FrameworkIdPropertyId | UIA_ProviderDescriptionPropertyId => Var::str("nsh"),
             UIA_IsControlElementPropertyId | UIA_IsContentElementPropertyId => Var::bool(true),
             _ => Var::empty(),
@@ -1246,7 +1273,7 @@ fn control_type(c: Control) -> UIA_CONTROLTYPE_ID {
         Control::ToolBar => UIA_ToolBarControlTypeId,
         Control::List => UIA_ListControlTypeId,
         Control::ListItem => UIA_ListItemControlTypeId,
-        Control::Pane => UIA_PaneControlTypeId,
+        Control::Pane | Control::Dialog | Control::AlertDialog => UIA_PaneControlTypeId,
     }
 }
 
@@ -1255,12 +1282,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn aria_properties_name_current_and_invalid() {
+        use nsh_core::AccessibilityState;
+        assert_eq!(aria_properties(&AccessibilityState::default()), None);
+        let page = AccessibilityState {
+            current: Some(AccessibilityCurrent::Page),
+            ..Default::default()
+        };
+        assert_eq!(aria_properties(&page).as_deref(), Some("current=page"));
+        let invalid = AccessibilityState {
+            invalid: true,
+            ..Default::default()
+        };
+        assert_eq!(aria_properties(&invalid).as_deref(), Some("invalid=true"));
+        let both = AccessibilityState {
+            invalid: true,
+            ..page
+        };
+        assert_eq!(
+            aria_properties(&both).as_deref(),
+            Some("current=page;invalid=true")
+        );
+    }
+
+    #[test]
     fn control_types() {
         assert_eq!(control_type(Control::Switch), UIA_ButtonControlTypeId);
         assert_eq!(control_type(Control::Heading), UIA_TextControlTypeId);
         assert_eq!(control_type(Control::TabList), UIA_TabControlTypeId);
         assert_eq!(control_type(Control::Pane), UIA_PaneControlTypeId);
         assert_eq!(control_type(Control::ListItem), UIA_ListItemControlTypeId);
+        assert_eq!(control_type(Control::Dialog), UIA_PaneControlTypeId);
+        assert_eq!(control_type(Control::AlertDialog), UIA_PaneControlTypeId);
     }
 
     #[test]

@@ -1039,6 +1039,10 @@ fn handle(
             surface.paint();
             // SAFETY: as above.
             let _ = unsafe { EndPaint(hwnd, &ps) };
+            // Handled: `DefWindowProcW` would validate the window again and
+            // drop an invalidation made while the frame was drawn, leaving
+            // `invalid` set and no `WM_PAINT` to come (#1594).
+            return Some(LRESULT(0));
         }
         WM_ERASEBKGND => return Some(LRESULT(1)),
         WM_SIZE => {
