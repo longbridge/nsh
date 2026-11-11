@@ -725,6 +725,12 @@ pub struct KeyBinding {
     /// the main window, a dialog root for a window of the app's own): it
     /// fires only for keys pressed there. `None`: in any window.
     pub window: Option<crate::NodeId>,
+    /// It is the keys of the view with the keyboard focus (a component's,
+    /// bound while its part has the focus or its popup is open): Return
+    /// and Space reach it while the focus is on a control they press
+    /// ([`Keymap::find_at`]). Other bindings of those keys give way to the
+    /// focused control.
+    pub for_focus: bool,
 }
 
 impl KeyBinding {
@@ -743,6 +749,7 @@ impl KeyBinding {
             repeat,
             pass_through: false,
             window: None,
+            for_focus: false,
         }
     }
 
@@ -757,6 +764,13 @@ impl KeyBinding {
     /// ([`Self::pass_through`]).
     pub fn passing_through(mut self, pass_through: bool) -> KeyBinding {
         self.pass_through = pass_through;
+        self
+    }
+
+    /// The binding being the keys of the view with the keyboard focus when
+    /// `for_focus` ([`Self::for_focus`]).
+    pub fn focus_keys(mut self, for_focus: bool) -> KeyBinding {
+        self.for_focus = for_focus;
         self
     }
 }
@@ -839,10 +853,34 @@ impl Keymap {
         editing: bool,
         repeat: bool,
     ) -> KeyMatch {
+        self.find_at(window, keystroke, editing, false, repeat)
+    }
+
+    /// [`Self::find_in`] where the keyboard focus may be on a control
+    /// (`control`: a view that takes presses, not a text input). The keys
+    /// that press it ([`crate::input::presses_focused_control`]: Return
+    /// and Space) are its own: only the bindings of the focus
+    /// ([`KeyBinding::for_focus`], a menu button's Return opening its
+    /// menu) take them first; with none, the key goes on and the platform
+    /// presses the control. A binding of Return elsewhere (a dialog's main
+    /// action) does not act instead of the control the user moved the
+    /// focus to.
+    pub fn find_at(
+        &self,
+        window: crate::NodeId,
+        keystroke: Keystroke,
+        editing: bool,
+        control: bool,
+        repeat: bool,
+    ) -> KeyMatch {
+        let pressing = control
+            && !editing
+            && crate::input::presses_focused_control(keystroke.key, keystroke.modifiers);
         let found = self.bindings.iter().rev().find(|b| {
             b.keystroke == keystroke
                 && (b.in_text || !editing)
                 && b.window.is_none_or(|w| w == window)
+                && (b.for_focus || !pressing)
         });
         match found {
             None => KeyMatch::None,
@@ -878,6 +916,39 @@ mod tests {
         assert_eq!(table.find_in(9, escape, false, false), KeyMatch::Fire(1));
         let only = Keymap::new(vec![k(3).in_window(7)]);
         assert_eq!(only.find_in(9, escape, false, false), KeyMatch::None);
+    }
+
+    #[test]
+    fn return_and_space_on_a_control_fire_only_the_focus_bindings() {
+        let key = |s| Keystroke::parse_with(s, true).unwrap();
+        let (enter, space, cmd_enter) = (key("enter"), key("space"), key("cmd+enter"));
+        // A dialog's Return, Space and Command+Return, then a menu button's
+        // Return while it has the focus.
+        let mut bindings = vec![
+            KeyBinding::new(1, enter, When::NotEditing, false),
+            KeyBinding::new(2, space, When::NotEditing, false),
+            KeyBinding::new(3, cmd_enter, When::Always, false),
+        ];
+        let table = Keymap::new(bindings.clone());
+        let at = |t: &Keymap, k, control| t.find_at(crate::ROOT_ID, k, false, control, false);
+        // The focus on no control: they fire.
+        assert_eq!(at(&table, enter, false), KeyMatch::Fire(1));
+        assert_eq!(at(&table, space, false), KeyMatch::Fire(2));
+        // On a control: they are its, but with Command held.
+        assert_eq!(at(&table, enter, true), KeyMatch::None);
+        assert_eq!(at(&table, space, true), KeyMatch::None);
+        assert_eq!(at(&table, key("shift+enter"), true), KeyMatch::None);
+        assert_eq!(at(&table, cmd_enter, true), KeyMatch::Fire(3));
+        // The focus' own binding takes Return first.
+        bindings.push(KeyBinding::new(4, enter, When::NotEditing, false).focus_keys(true));
+        let table = Keymap::new(bindings);
+        assert_eq!(at(&table, enter, true), KeyMatch::Fire(4));
+        assert_eq!(at(&table, space, true), KeyMatch::None);
+        // In a text field the control is not focused: as before.
+        assert_eq!(
+            table.find_at(crate::ROOT_ID, cmd_enter, true, true, false),
+            KeyMatch::Fire(3)
+        );
     }
 
     #[test]

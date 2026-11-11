@@ -1492,6 +1492,13 @@ pub struct KeyOptions {
     /// component closes its popup on Tab and the focus moves on as it
     /// would ([`crate::keymap::KeyMatch::Notify`]).
     pub pass_through: bool,
+    /// The keys of the view with the keyboard focus: a component binds
+    /// them while its part has the focus or its popup is open (a menu
+    /// button's Return opens its menu). Return and Space reach such a
+    /// binding before the focused control's press; others of those keys
+    /// give way to the control the focus is on (default)
+    /// ([`crate::keymap::KeyBinding::for_focus`]).
+    pub for_focus: bool,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1551,6 +1558,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         |id| {
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
+                .focus_keys(options.for_focus)
         },
         keystroke.into(),
         handler,

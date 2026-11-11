@@ -1040,8 +1040,9 @@ fn has_key_focus(view: &NshView) -> bool {
 }
 
 /// Enter or Space addressed to a focused control inside the current modal.
-/// The keymap leaves these keys to the responder so a global Enter binding
-/// cannot activate an unrelated control underneath keyboard focus.
+/// The keymap leaves these keys to the responder, but for the bindings of
+/// the focus itself (`Keymap::find_at`), so a global Enter binding cannot
+/// activate an unrelated control underneath keyboard focus.
 pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> Option<NshView> {
     if !matches!(event.keyCode(), 36 | 49 | 76)
         || event.modifierFlags().intersects(
