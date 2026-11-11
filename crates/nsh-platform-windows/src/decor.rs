@@ -143,7 +143,9 @@ pub(crate) fn layered(state: &ViewState) -> bool {
 pub(crate) fn draw_layered(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     let Some(list) = layer::record(cx, |inner| {
         inner.set_transform(world);
-        crate::render::draw_content(inner, view, world);
+        // Filters and blend modes draw the subtree as one image: the view
+        // paints all of it.
+        crate::render::draw_content(inner, view, world, true);
     }) else {
         return;
     };
@@ -201,6 +203,8 @@ pub(crate) fn draw_layered(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
 /// Draws the view's backdrop filter: what the window drew behind it,
 /// filtered, inside its rounded bounds.
 pub(crate) fn draw_backdrop(cx: &mut DrawCx<'_>, state: &ViewState) {
+    #[cfg(test)]
+    probe::count(state.id, |counts| counts.backdrops += 1);
     if !cx.backdrop {
         return;
     }
@@ -251,6 +255,8 @@ pub(crate) fn draw_backdrop(cx: &mut DrawCx<'_>, state: &ViewState) {
 /// Draws the view's shadows, background color, gradients and inset
 /// shadows, under its content.
 pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
+    #[cfg(test)]
+    probe::count(state.id, |counts| counts.backgrounds += 1);
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
@@ -262,6 +268,8 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         // CSS lists the top layer first.
         for b in e.box_shadows.iter().rev() {
             if !b.inset && b.is_visible() {
+                #[cfg(test)]
+                probe::count(state.id, |counts| counts.shadows += 1);
                 let spec = ShadowSpec {
                     dx: b.offset_x.0,
                     dy: b.offset_y.0,
@@ -1101,6 +1109,58 @@ fn stroke_style(gfx: &Gfx, style: BorderStyle) -> Option<ID2D1StrokeStyle> {
             s.dashed.clone()
         })
     })
+}
+
+/// Test-only counts: which views reached the decoration entry points, and
+/// how many rounded-box geometries were made. A probe rather than a
+/// behavior: decoration entry points keep their production signatures.
+#[cfg(test)]
+pub(crate) mod probe {
+    use std::cell::{Cell, RefCell};
+
+    use nsh_core::NodeId;
+    use rustc_hash::FxHashMap;
+
+    /// Invocations of the decoration entry points for one view.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub(crate) struct Counts {
+        /// [`super::draw_backdrop`] calls.
+        pub(crate) backdrops: usize,
+        /// [`super::draw_background`] calls.
+        pub(crate) backgrounds: usize,
+        /// Outer shadows that reached the bake path.
+        pub(crate) shadows: usize,
+    }
+
+    thread_local! {
+        static COUNTS: RefCell<FxHashMap<NodeId, Counts>> = RefCell::new(FxHashMap::default());
+        static GEOMETRIES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Forgets every count.
+    pub(crate) fn reset() {
+        COUNTS.with(|counts| counts.borrow_mut().clear());
+        GEOMETRIES.with(|count| count.set(0));
+    }
+
+    /// What `view` reached since the last [`reset`].
+    pub(crate) fn counts(view: NodeId) -> Counts {
+        COUNTS.with(|counts| counts.borrow().get(&view).copied().unwrap_or_default())
+    }
+
+    pub(crate) fn count(view: NodeId, add: impl FnOnce(&mut Counts)) {
+        COUNTS.with(|counts| add(counts.borrow_mut().entry(view).or_default()));
+    }
+
+    /// Rounded-box geometries made since the last [`reset`].
+    pub(crate) fn geometries() -> usize {
+        GEOMETRIES.with(Cell::get)
+    }
+
+    /// Records one rounded-box geometry made by [`super::BoxShape`].
+    pub(crate) fn geometry_made() {
+        GEOMETRIES.with(|count| count.set(count.get() + 1));
+    }
 }
 
 #[cfg(test)]

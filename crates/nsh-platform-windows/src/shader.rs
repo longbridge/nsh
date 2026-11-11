@@ -794,8 +794,36 @@ fn children(
     drawn.then_some(target)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test observing the backdrop pixels a shader is given.
+    static CAPTURE: std::cell::RefCell<Option<Box<dyn FnMut(&[u8])>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Observes (tests only) the backdrop pixels [`give`] hands to a shader,
+/// without changing what the shader does with them.
+#[cfg(test)]
+pub(crate) fn set_capture(capture: impl FnMut(&[u8]) + 'static) {
+    CAPTURE.with(|cell| *cell.borrow_mut() = Some(Box::new(capture)));
+}
+
+/// Stops observing backdrop pixels (tests only).
+#[cfg(test)]
+pub(crate) fn take_capture() {
+    CAPTURE.with(|cell| *cell.borrow_mut() = None);
+}
+
 /// Gives `pixels` to `view`'s shader as `input` when they changed.
 fn give(view: &NshView, input: ShaderInput, pixels: &Pixels) {
+    #[cfg(test)]
+    if input == ShaderInput::Backdrop {
+        CAPTURE.with(|cell| {
+            if let Some(capture) = cell.borrow_mut().as_mut() {
+                capture(&pixels.data);
+            }
+        });
+    }
     let mut hasher = rustc_hash::FxHasher::default();
     (pixels.width, pixels.height).hash(&mut hasher);
     pixels.data.hash(&mut hasher);
