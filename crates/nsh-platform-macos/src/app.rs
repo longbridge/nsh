@@ -14,7 +14,9 @@ use nsh_core::{
 };
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use objc2::{
-    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
+    MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyClass, AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
@@ -769,6 +771,11 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, app: &NSApplication) -> NSApplicationTerminateReply {
+            // The user asked while the app listens to quit requests: it
+            // decides, and quits with `quit()` ([`quit_app`]).
+            if !system_quit() && ask_quit() {
+                return NSApplicationTerminateReply::TerminateCancel;
+            }
             finish_running(app);
             // The caller owns process termination after run_app returns.
             NSApplicationTerminateReply::TerminateCancel
@@ -895,6 +902,46 @@ pub(crate) fn restart_app() {
             finish_running(&NSApplication::sharedApplication(mtm));
         }
     });
+}
+
+/// The standalone app's quit request goes to the app, when it listens
+/// ([`crate::chrome::ask_quit`]).
+fn ask_quit() -> bool {
+    let surface = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .map(|running| running.view.surface().clone())
+    });
+    surface.is_some_and(|surface| crate::chrome::ask_quit(&surface))
+}
+
+/// Whether the quit AppKit asks about is the system's: logging out,
+/// restarting or shutting down send the app a quit Apple event with a
+/// reason (`keyAEQuitReason`); the Quit item, Command-Q and the Dock's
+/// Quit carry none.
+fn system_quit() -> bool {
+    /// `keyAEQuitReason`, `'why?'`.
+    const QUIT_REASON: u32 = u32::from_be_bytes(*b"why?");
+    let Some(class) = AnyClass::get(c"NSAppleEventManager") else {
+        return false;
+    };
+    // SAFETY: Foundation's shared Apple event manager and the event it
+    // handles now (nil outside one), on the main thread.
+    let event: Option<Retained<AnyObject>> = unsafe {
+        let manager: Option<Retained<AnyObject>> = msg_send![class, sharedAppleEventManager];
+        match manager {
+            Some(manager) => msg_send![&manager, currentAppleEvent],
+            None => None,
+        }
+    };
+    let Some(event) = event else {
+        return false;
+    };
+    // SAFETY: an `NSAppleEventDescriptor`'s attribute, nil when absent.
+    let reason: Option<Retained<AnyObject>> =
+        unsafe { msg_send![&event, attributeDescriptorForKeyword: QUIT_REASON] };
+    reason.is_some()
 }
 
 /// Ends the standalone event loop, returning process ownership to its caller.

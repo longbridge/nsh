@@ -2897,6 +2897,7 @@ impl<M: TextEngine> Core<M> {
             self.run_answers();
         }
         self.pace_commit();
+        self.sync_quit_requests();
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -2921,6 +2922,10 @@ impl<M: TextEngine> Core<M> {
         }
         if !self.outer_asked.is_empty() {
             self.send_outer_scrolls();
+        }
+        // What mounted in the rounds listens already.
+        if self.sync_quit_requests() {
+            self.commit_round();
         }
         self.split_scoped_frames();
         self.mark_shader_inputs();
