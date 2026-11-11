@@ -233,13 +233,17 @@ impl<M: TextEngine> Core<M> {
             if !matches!(command, Command::Reveal(_)) {
                 continue;
             }
-            let Ok(key) = self.key(*id) else {
+            let Ok(mut key) = self.key(*id) else {
                 continue;
             };
-            if let Some(block) = self.attachment_block(key)
-                && !self.nodes[block as usize].created
-            {
-                self.uncull(block);
+            while key != NO_KEY {
+                if let Some(block) = self.attachment_block(key) {
+                    if !self.nodes[block as usize].created {
+                        self.uncull(block);
+                    }
+                    break;
+                }
+                key = self.nodes[key as usize].parent;
             }
         }
     }
