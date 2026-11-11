@@ -79,7 +79,7 @@ pub struct TextViewProps {
     /// Shows a code block in place of the default (the code in a
     /// horizontal scroll view): syntax highlighting of the app's.
     pub render_code_block: Prop<Option<Renderer<CodeBlock>>>,
-    /// Application actions over a code block, replacing `codeBlockActions`.
+    /// Application actions in a row before a code block, replacing `codeBlockActions`.
     /// The default code layout, selection and scrolling stay in TextView.
     pub render_code_block_actions: Prop<Option<Renderer<CodeBlock>>>,
     /// The icon of a code block's action of the app's (`codeBlockActions`):
@@ -1101,10 +1101,9 @@ impl Cx {
         if is_terminal() {
             return self.terminal_code_block(code, tail);
         }
-        // The app's actions float over the top right corner, so the code
-        // keeps its first line (no row is kept for them). Where a pointer
-        // hovers (desktops, desktop browsers) they show while it is over the
-        // block; touch screens have no hover, so there they always show.
+        // Default actions float at the top right; a custom per-block renderer
+        // gets a row before the body. Desktop hover reveals either header;
+        // touch screens always show it.
         let hover = is_desktop();
         let header = (!self.code_block_actions.is_empty()
             || self.render_code_block_actions.is_some())
@@ -1142,14 +1141,9 @@ impl Cx {
         });
         // The app's highlighter, else the built-in one (which may color the
         // code a moment after it shows), else plain.
-        let body = if !code.content.is_empty()
-            && code
-                .content
-                .iter()
-                .map(Inline::plain_text)
-                .collect::<String>()
-                == code.code
-        {
+        let mut annotated_text = String::new();
+        super::document::inline_text(&code.content, &mut annotated_text);
+        let body = if !code.content.is_empty() && annotated_text == code.code {
             self.span(&code.content, key)
         } else {
             match &self.highlighter {
