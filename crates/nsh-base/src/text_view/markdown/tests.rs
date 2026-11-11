@@ -1191,6 +1191,158 @@ fn streamed_reference_brackets_and_unknown_tags_stay_text() {
     assert_eq!(blocks("<foo> x"), vec![p(vec![t("<foo> x")])]);
 }
 
+/// Every prefix of `source` (at each character), as a streamed reply
+/// shows it.
+fn streamed_prefixes(source: &str) -> impl Iterator<Item = (&str, Document)> {
+    let parser = Parser::new().options(MarkdownOptions {
+        streaming: true,
+        ..options()
+    });
+    source
+        .char_indices()
+        .skip(1)
+        .map(|(end, _)| end)
+        .chain([source.len()])
+        .map(move |end| (&source[..end], parser.markdown(&source[..end])))
+}
+
+/// The list items and blocks of code in `blocks`, at any depth.
+fn walk<'b>(blocks: &'b [Block], items: &mut Vec<&'b ListItem>, code: &mut Vec<&'b CodeBlock>) {
+    for block in blocks {
+        match block {
+            Block::List { items: list, .. } => {
+                for item in list {
+                    items.push(item);
+                    walk(&item.children, items, code);
+                }
+            }
+            Block::Blockquote { children, .. } | Block::Details { children, .. } => {
+                walk(children, items, code);
+            }
+            Block::CodeBlock(block) => code.push(block),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn streamed_markers_never_flash_empty_items_or_headings() {
+    // A list marker alone, digits that become one and a `-` line being
+    // typed: no empty item and no heading of the line above in any
+    // prefix, and the finished reply as it parses without streaming.
+    for source in [
+        "para\n\n- one\n- two\n\n1. first\n2. second\n10. tenth",
+        "Intro\n- **bold** item\n  - nested\n> - quoted\n> - again",
+        "Title\n-- not a heading, a dash\n\nText\n== and equals",
+        "Done: 1 + 1\n= 2, and -1\n-2 stays text",
+    ] {
+        for (prefix, doc) in streamed_prefixes(source) {
+            let debug = format!("{:?}", doc.blocks);
+            assert!(!debug.contains("Heading"), "{prefix:?}: {debug}");
+            let (mut items, mut code) = (Vec::new(), Vec::new());
+            walk(&doc.blocks, &mut items, &mut code);
+            assert!(
+                items.iter().all(|item| !item.children.is_empty()),
+                "{prefix:?}: {debug}"
+            );
+        }
+        let (_, streamed) = streamed_prefixes(source).last().expect("a prefix");
+        assert_eq!(streamed.blocks, blocks(source), "{source:?}");
+    }
+    // A heading's underline is one once its line ends.
+    let source = "Title\n---\nBody";
+    for (prefix, doc) in streamed_prefixes(source) {
+        let heading = doc
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Block::Heading { .. }));
+        assert_eq!(heading, prefix.contains("---\n"), "{prefix:?}: {doc:?}");
+    }
+    assert_eq!(
+        blocks(source),
+        vec![heading(2, "Title", "title"), p(vec![t("Body")])]
+    );
+    // Finished, CommonMark as written.
+    assert_eq!(
+        blocks("para\n\n-"),
+        vec![
+            p(vec![t("para")]),
+            Block::List {
+                ordered: false,
+                start: 1,
+                loose: false,
+                items: vec![item(vec![])],
+            }
+        ]
+    );
+    assert_eq!(blocks("Title\n--")[0], heading(2, "Title", "title"));
+}
+
+#[test]
+fn streamed_fences_never_flash_empty_code_or_their_closer() {
+    // A fence's info string and its closer being typed: no block of code
+    // before its opening line ends, and no backtick of the closer in the
+    // code.
+    for source in [
+        "Intro\n\n```python\nprint(1)\n```\n\nAfter",
+        "- step\n\n  ```sh\n  ls\n  ```",
+        "````md\n```\nnested\n```\n````",
+        "~~~\nplain\n~~~",
+    ] {
+        let finished = blocks(source);
+        let mut finished_code = Vec::new();
+        walk(&finished, &mut Vec::new(), &mut finished_code);
+        for (prefix, doc) in streamed_prefixes(source) {
+            let (mut items, mut code) = (Vec::new(), Vec::new());
+            walk(&doc.blocks, &mut items, &mut code);
+            for block in code {
+                // What a block holds is the start of what it holds
+                // finished, never more (a closer's backtick).
+                assert!(
+                    finished_code
+                        .iter()
+                        .any(|f| f.code.starts_with(&block.code) && f.language == block.language),
+                    "{prefix:?}: {block:?}"
+                );
+                // A language's name never shows half typed.
+                let opener = format!("{}\n", block.language.as_deref().unwrap_or(""));
+                assert!(prefix.contains(&opener), "{prefix:?}: {block:?}");
+            }
+        }
+        let (_, streamed) = streamed_prefixes(source).last().expect("a prefix");
+        assert_eq!(streamed.blocks, finished, "{source:?}");
+    }
+    // Finished, CommonMark as written: an open fence runs to the end.
+    assert_eq!(
+        blocks("```py\nx\n``"),
+        vec![Block::CodeBlock(CodeBlock {
+            language: Some("py".into()),
+            meta: None,
+            code: "x\n``".into(),
+        })]
+    );
+}
+
+#[test]
+fn streamed_stars_inside_words_stay_text() {
+    // A `*` inside a word is closed by nothing the stream adds: no prefix
+    // shows emphasis the finished reply does not have.
+    for source in ["a*b", "f(x) = a*x + b\n\nso 2*3 is 6", "- x*y\n- a*b"] {
+        for (prefix, doc) in streamed_prefixes(source) {
+            let debug = format!("{:?}", doc.blocks);
+            assert!(!debug.contains("Emphasis"), "{prefix:?}: {debug}");
+        }
+        let (_, streamed) = streamed_prefixes(source).last().expect("a prefix");
+        assert_eq!(streamed.blocks, blocks(source), "{source:?}");
+    }
+    assert_eq!(blocks("a*b"), vec![p(vec![t("a*b")])]);
+    // Emphasis written inside a word is still emphasis once closed.
+    assert_eq!(
+        blocks("a*b*c"),
+        vec![p(vec![t("a"), em(vec![t("b")]), t("c")])]
+    );
+}
+
 #[test]
 fn empty_paragraphs_are_dropped() {
     assert_eq!(

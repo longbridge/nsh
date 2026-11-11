@@ -213,7 +213,10 @@ it are complete; a text ending inside a fenced code or `$$` block needs nothing)
 with nothing after it yet is removed (so is half a formula closer, `\[1\` reads as `\[1\]`, which escaped brackets
 around a reference number keep as text); `[text` and `[text](partial` show as their text, `![alt` and `![alt](partial`
 are removed; an HTML tag being typed (`<di`, `<a href="x`) is removed; a table's header followed by the start of its
-delimiter row is completed to a table (and a lone `-` under it is no heading). So a reply never flashes literal `**`
+delimiter row is completed to a table (and a lone `-` under it is no heading). A last line not yet ended whose meaning the next
+characters decide is held back: a list marker alone, digits that may become one, a line of `-` or `=` (an underline
+now, a rule, an item or text later), a fence's opening line and the start of its closer; a lone `*` inside a word
+(`a*b`) is never closed. So a reply never flashes literal `**`
 or `[` while the next chunk is on its way. The repair is a `Cow`: text with nothing open is parsed as it is.
 
 ## HTML
