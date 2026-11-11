@@ -247,9 +247,11 @@ from the inside out). The events come after the fact and never on touches. A vie
 
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
-`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), and `pressedButton`, the button held
-down (`"left"`, `"right"`, `"middle"`, `"back"` or `"forward"`, GPUI's `MouseButton`) or `null`; in Rust `position`,
-`page_position`, `modifiers` and `pressed_button`. On the desktops and the web a drag is also a touch (`onTouchMove`,
+`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held
+down (`"left"`, `"right"`, `"middle"`, `"back"` or `"forward"`, GPUI's `MouseButton`) or `null` (`null` at a release),
+and `button`, the button that changed at this event: the released one on `onMouseUp`, `null` on a move; in Rust
+`position`, `page_position`, `modifiers`, `pressed_button` and `button`. On the desktops and the web a drag is also a
+touch (`onTouchMove`,
 the responder), and its moves reach `onMouseMove` with `pressedButton` set: feedback that only follows the hover skips
 those; on iOS and Android the hover reports the pointer with no button down. Moves come at most once a frame, the
 latest one, and always before the `onMouseLeave` that follows them, so a handler can redraw on each move:

@@ -689,7 +689,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::MouseUp,
         on::ALL,
         "(e: MouseEvent) => void",
-        "A mouse button was released over the view (or a view inside it): which button (`e.button`), where, and with the modifiers. The primary button's release also reports `onPressUp`.",
+        "A mouse button was released over the view (or a view inside it): which button (`e.button`), where, and with the modifiers. The primary button's release also reports `onPressUp`. Desktops, the terminal and the web; a release outside the view is not reported.",
     ),
     (
         EventKind::ContextMenu,
