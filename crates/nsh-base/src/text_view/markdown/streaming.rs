@@ -16,7 +16,7 @@ use super::{
 };
 
 /// `source` with the syntax its last block leaves open closed.
-pub(crate) fn repair_streaming(source: &str) -> Cow<'_, str> {
+pub fn repair_streaming(source: &str) -> Cow<'_, str> {
     let tail_start = match last_block(source) {
         Last::Block(start) => start,
         Last::Fenced => return Cow::Borrowed(source),

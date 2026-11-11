@@ -637,7 +637,7 @@ the types of `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, 
 | `heading` | `level` (1–6), `content`, `anchor?` |
 | `blockquote` | `children`, `alert?` (`"note"`, `"tip"`, `"important"`, `"warning"`, `"caution"`) |
 | `list` | `ordered?`, `start?`, `loose?`, `items` (`{ checked?, children }`) |
-| `codeBlock` | `language?`, `meta?`, `code` |
+| `codeBlock` | `language?`, `meta?`, `code`, `id?`, `content?`, `wrap?` |
 | `math` | `tex` |
 | `table` | `align?` (`"none"`, `"left"`, `"center"`, `"right"` per column), `head` (cells), `rows?` (rows of cells); a cell is `{ content }` |
 | `rule` | |
@@ -660,6 +660,8 @@ the types of `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, 
 A document also has `footnotes?`: `{ label, index, children }`, shown after the blocks in the order of their first
 reference. An app can store replies as documents, build them from its own data, or mix in custom nodes that
 `renderCustom` shows.
+
+A code block’s `id` identifies it to the app. Set `wrap: true` to fit its code to the view. `content` supplies inline annotations when its plain text equals `code`; copying keeps the original `code`. `renderCodeBlockActions` receives the current block, so controls can toggle wrapping for that block. In Rust, an inline `renderCustom` returning `Text` joins the paragraph’s spans, wrapping and selecting with them; a `View` becomes an inline attachment. Rust apps building their own documents can reuse streaming repair with `repair_streaming(&str)`.
 
 ### Parsing and plain text
 
@@ -814,6 +816,7 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 | `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `(node: TextViewCustomNode) => JSX.Element` | | Shows custom nodes. |
 | `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | Shows code blocks. |
+| `renderCodeBlockActions` | `.render_code_block_actions(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | Shows controls for the current code block in place of `codeBlockActions`, keeping the standard body. |
 | `codeBlockActions` | `.code_block_actions(..)` | `TextViewCodeAction[]` | `[]` | The actions over each code block's top right corner: `{ id: "copy" }` built in, others the app's. |
 | `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `(action: TextViewCodeAction) => JSX.Element` | | The icon of an action of the app's. |
 | `renderTableActions` | `.render_table_actions(\|table\| ..)` | `(table: TextViewTable) => JSX.Element` | | Content above each table. |

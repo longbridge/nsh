@@ -589,9 +589,12 @@ fn code_blocks_and_rules() {
         ),
         vec![
             Block::CodeBlock(CodeBlock {
+                id: None,
                 language: Some("rust".into()),
                 meta: Some("title=\"main.rs\"".into()),
                 code: "fn main() {}".into(),
+                content: Vec::new(),
+                wrap: false,
             }),
             Block::CodeBlock(CodeBlock::new(None, "indented")),
             Block::Rule,
@@ -1319,6 +1322,7 @@ fn streamed_fences_never_flash_empty_code_or_their_closer() {
             language: Some("py".into()),
             meta: None,
             code: "x\n``".into(),
+            ..Default::default()
         })]
     );
 }

@@ -592,6 +592,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 文档还可以有 `footnotes?`：`{ label, index, children }`，按首次引用的顺序显示在文档块之后。应用可以把回复存成文档、用自己的数据构建文档，或者混入由 `renderCustom` 显示的自定义节点。
 
+代码块的 `id` 是应用自己的标识；`wrap: true` 让正文在视图宽度内换行。`content` 为代码正文提供行内标注，其纯文本与 `code` 相同时显示；复制保留原始 `code`。`renderCodeBlockActions` 根据当前块绘制操作控件，例如逐块切换换行。Rust 的行内 `renderCustom` 返回 `Text` 时直接加入段落的文本，随正文换行和选择；返回 `View` 时作为行内附件。Rust 还可以调用 `repair_streaming(&str)`，在构建自有文档前复用流式 Markdown 修复。
+
 <a id="parsing-and-plain-text"></a>
 
 ### 解析与纯文本
@@ -741,6 +743,7 @@ fn chat() -> impl IntoElement {
 | `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | 显示在文档末尾：在最后一段文本之后以行内方式显示，否则单独一行。 |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `(node: TextViewCustomNode) => JSX.Element` | | 显示自定义节点。 |
 | `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | 显示代码块。 |
+| `renderCodeBlockActions` | `.render_code_block_actions(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | 显示当前代码块的操作控件，代替 `codeBlockActions`，保留标准正文。 |
 | `codeBlockActions` | `.code_block_actions(..)` | `TextViewCodeAction[]` | `[]` | 每个代码块右上角的操作：`{ id: "copy" }` 内置，其余由应用定义。 |
 | `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `(action: TextViewCodeAction) => JSX.Element` | | 应用自己的操作的图标。 |
 | `renderTableActions` | `.render_table_actions(\|table\| ..)` | `(table: TextViewTable) => JSX.Element` | | 每个表格上方的内容。 |

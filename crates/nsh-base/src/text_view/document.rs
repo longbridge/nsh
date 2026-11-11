@@ -362,6 +362,9 @@ pub(crate) fn inline_text(inlines: &[Inline], out: &mut String) {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct CodeBlock {
+    /// Optional application identity for per-block actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// Its language (the info string's first word: `rust`), if named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
@@ -370,15 +373,27 @@ pub struct CodeBlock {
     pub meta: Option<String>,
     /// The code, without a final line break.
     pub code: String,
+    /// Optional styled inline content of the code, including annotations
+    /// and custom nodes. Used when its plain text equals `code`; otherwise
+    /// the normal syntax highlighter renders the code. Copy always uses
+    /// `code`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<Inline>,
+    /// Wraps long lines in the available width instead of scrolling them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wrap: bool,
 }
 
 impl CodeBlock {
     /// Code `code` in `language`.
     pub fn new(language: Option<String>, code: impl Into<String>) -> Self {
         Self {
+            id: None,
             language,
             meta: None,
             code: code.into(),
+            content: Vec::new(),
+            wrap: false,
         }
     }
 }
@@ -766,12 +781,18 @@ export type TextViewInline =
 
 const CODE_BLOCK: &str = "/** A block of code. */
 export interface TextViewCodeBlock {
+  /** Application identity for per-block actions. */
+  id?: string;
   /** Its language (the info string's first word: `rust`), if named. */
   language?: string;
   /** The rest of the info string. */
   meta?: string;
   /** The code, without a final line break. */
   code: string;
+  /** Styled inline content with the same plain text as code; otherwise ignored. */
+  content?: TextViewInline[];
+  /** Wrap long lines instead of scrolling horizontally. */
+  wrap?: boolean;
 }";
 
 const TABLE: &str = "/** A table. */

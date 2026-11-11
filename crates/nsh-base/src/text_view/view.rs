@@ -79,7 +79,9 @@ pub struct TextViewProps {
     /// Shows a code block in place of the default (the code in a
     /// horizontal scroll view): syntax highlighting of the app's.
     pub render_code_block: Prop<Option<Renderer<CodeBlock>>>,
-    /// Content of the app's floating over each code block's top right
+    /// Application actions over a code block, replacing `codeBlockActions`.
+    /// The default code layout, selection and scrolling stay in TextView.
+    pub render_code_block_actions: Prop<Option<Renderer<CodeBlock>>>,
     /// The icon of a code block's action of the app's (`codeBlockActions`):
     /// the button around it (its size, hover and press backgrounds) is the
     /// text view's, so every action looks alike. Without it, an action
@@ -468,6 +470,7 @@ struct Cx {
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
+    render_code_block_actions: Option<Renderer<CodeBlock>>,
     render_code_block_action: Option<Renderer<TextViewCodeAction>>,
     code_block_actions: Vec<TextViewCodeAction>,
     render_table_actions: Option<Renderer<Table>>,
@@ -509,6 +512,7 @@ impl Cx {
             caret: props.streaming_caret.get(),
             render_custom: props.render_custom.get(),
             render_code_block: props.render_code_block.get(),
+            render_code_block_actions: props.render_code_block_actions.get(),
             render_code_block_action: props.render_code_block_action.get(),
             code_block_actions: props.code_block_actions.get(),
             render_table_actions: props.render_table_actions.get(),
@@ -1102,11 +1106,16 @@ impl Cx {
         // hovers (desktops, desktop browsers) they show while it is over the
         // block; touch screens have no hover, so there they always show.
         let hover = is_desktop();
-        let header = (!self.code_block_actions.is_empty()).then(|| {
+        let header = (!self.code_block_actions.is_empty()
+            || self.render_code_block_actions.is_some())
+        .then(|| {
             let header = view()
-                .absolute()
-                .top(px(6.0))
-                .right(px(6.0))
+                .when(self.render_code_block_actions.is_none(), |header| {
+                    header.absolute().top(px(6.0)).right(px(6.0))
+                })
+                .when(self.render_code_block_actions.is_some(), |header| {
+                    header.self_end().mt(px(6.0)).mr(px(6.0))
+                })
                 .flex_row()
                 .items_center()
                 .gap(px(2.0))
@@ -1116,21 +1125,40 @@ impl Cx {
                         .transition_opacity()
                         .duration(150.0)
                 });
-            self.part(header, Part::CodeBlockHeader).children(
-                self.code_block_actions
+            let content = match &self.render_code_block_actions {
+                Some(render) => vec![
+                    render
+                        .render(format!("code-actions:{key}"), code.clone())
+                        .into_element(),
+                ],
+                None => self
+                    .code_block_actions
                     .iter()
                     .enumerate()
-                    .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}"))),
-            )
+                    .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}")))
+                    .collect(),
+            };
+            self.part(header, Part::CodeBlockHeader).children(content)
         });
         // The app's highlighter, else the built-in one (which may color the
         // code a moment after it shows), else plain.
-        let body = match &self.highlighter {
-            Some(h) => text("").children(h.spans(code)),
-            None => match super::highlight::built_in(code) {
-                Some(spans) => text("").children(spans),
-                None => text(code.code.clone()),
-            },
+        let body = if !code.content.is_empty()
+            && code
+                .content
+                .iter()
+                .map(Inline::plain_text)
+                .collect::<String>()
+                == code.code
+        {
+            self.span(&code.content, key)
+        } else {
+            match &self.highlighter {
+                Some(h) => text("").children(h.spans(code)),
+                None => match super::highlight::built_in(code) {
+                    Some(spans) => text("").children(spans),
+                    None => text(code.code.clone()),
+                },
+            }
         };
         // The padding is the code's, inside the scroll view: the code
         // scrolls to the edges, and the scroll bar sits in the bottom
@@ -1151,17 +1179,23 @@ impl Cx {
             .bg(move || theme().muted)
             .text_size(px(CODE_SIZE))
             .line_height(px(CODE_SIZE * CODE_LINE));
-        // The actions last, so they are drawn over the code.
-        self.part(block, Part::CodeBlock)
-            .child(
-                self.part(
-                    scroll().horizontal().scrollbar(self.code_scroll_indicator),
-                    Part::CodeBlockScroll,
-                )
-                .child(self.part(body, Part::CodeBlockCode)),
+        let body = self.part(body, Part::CodeBlockCode);
+        let content = if code.wrap {
+            body.w_full().min_w_0().into_element()
+        } else {
+            self.part(
+                scroll().horizontal().scrollbar(self.code_scroll_indicator),
+                Part::CodeBlockScroll,
             )
-            .child(header)
+            .child(body)
             .into_element()
+        };
+        let block = self.part(block, Part::CodeBlock);
+        if self.render_code_block_actions.is_some() {
+            block.child(header).child(content).into_element()
+        } else {
+            block.child(content).child(header).into_element()
+        }
     }
 
     /// A code block in a terminal: a band as wide as its longest line and
@@ -1760,7 +1794,7 @@ impl Cx {
                 }
                 if let Some(render) = &self.render_custom {
                     return render
-                        .render(format!("custom:{key}"), node.clone())
+                        .render_inline(format!("custom:{key}"), node.clone())
                         .into_element();
                 }
                 let el = if node.content.is_empty() {

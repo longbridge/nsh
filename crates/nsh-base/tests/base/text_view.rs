@@ -15,6 +15,77 @@ use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
 #[component]
+fn AnnotatedCode() -> impl IntoElement {
+    use nsh_base::text_view::{Block, CodeBlock, CustomNode, Document, Inline};
+    let mut code = CodeBlock::new(None, "prefix 日本語 suffix");
+    code.id = Some("annotated".into());
+    code.wrap = true;
+    code.content = vec![
+        Inline::text("prefix "),
+        Inline::Custom(CustomNode::new("mark").with_text("日本語")),
+        Inline::text(" suffix"),
+    ];
+    let mut fallback = CodeBlock::new(None, "literal <tag>");
+    fallback.id = Some("fallback".into());
+    fallback.content = vec![Inline::text("replacement")];
+    text_view()
+        .document(Document::new(vec![
+            Block::CodeBlock(code),
+            Block::CodeBlock(fallback),
+        ]))
+        .render_custom(|node: &CustomNode| {
+            text(node.text.clone())
+                .test_id("annotation")
+                .font_weight(FontWeight::SEMIBOLD)
+        })
+        .render_code_block_actions(|code: &CodeBlock| {
+            let source = code.code.clone();
+            view()
+                .role(AccessibilityRole::Button)
+                .label(format!("Copy {}", code.id.as_deref().unwrap_or_default()))
+                .on_press(move || set_clipboard(source.clone()))
+                .child(text(format!(
+                    "Actions {}",
+                    code.id.as_deref().unwrap_or_default()
+                )))
+        })
+}
+
+#[test]
+fn annotated_code_keeps_one_text_run_and_copies_its_literal_source() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    app.wait_for("prefix 日本語 suffix").unwrap();
+    assert_eq!(
+        app.screen()
+            .span_style("id:annotation")
+            .unwrap()
+            .font_weight,
+        600
+    );
+    let texts = app.screen().texts();
+    assert_eq!(
+        texts,
+        [
+            "Actions annotated",
+            "prefix 日本語 suffix",
+            "Actions fallback",
+            "literal <tag>"
+        ]
+    );
+    app.press("label:Copy annotated").unwrap();
+    assert_eq!(app.screen().clipboard(), Some("prefix 日本語 suffix"));
+}
+
+#[test]
+fn mismatched_code_annotations_cannot_replace_the_displayed_or_copied_source() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    app.wait_for("literal <tag>").unwrap();
+    assert!(!app.shows("replacement"));
+    app.press("label:Copy fallback").unwrap();
+    assert_eq!(app.screen().clipboard(), Some("literal <tag>"));
+}
+
+#[component]
 fn TypedRoot() -> impl IntoElement {
     provide_context(TextViewParts::new().part(TextViewPart::Root, |s| s.text_size(px(11.0))));
     text_view().markdown("Hello\n\nAnother paragraph")
