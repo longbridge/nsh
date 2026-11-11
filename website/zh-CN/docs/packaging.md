@@ -279,6 +279,7 @@ NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖�
 | `CFBundleName`、`CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`、`CFBundleVersion` | `version`、`build` |
 | `CFBundleURLTypes` | `schemes` |
+| `CFBundleDocumentTypes` | `fileTypes`（见[打开文件](../modules/nsh-desktop.md#opening-files)） |
 | iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
 | iOS：`UIUserInterfaceStyle` | `appearance` |
 | iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |
@@ -322,6 +323,27 @@ entitlements：
 
 没有图标时，系统显示默认图标。
 
+## 相机、蓝牙和其他硬件
+
+打包后的应用根据 `nsh.json` 声明 NSH 自身功能用到的硬件：
+
+| 功能 | iOS 和 macOS | Android |
+|---|---|---|
+| [`Speech`](../modules/nsh.md#speech)，应用授予 `speech` 或没有声明 capabilities 时 | `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription` | |
+| 采集媒体的网页（[`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)） | `NSMicrophoneUsageDescription`、`NSCameraUsageDescription`；macOS 上还有 entitlements `com.apple.security.device.audio-input` 和 `com.apple.security.device.camera` | `RECORD_AUDIO`、`CAMERA` |
+| [`Notifications`](../modules/nsh.md#notifications)，应用授予 `notifications` 或没有声明 capabilities 时 | | `POST_NOTIFICATIONS` |
+
+每个 Android 包还声明了 `INTERNET`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
+（见[上文](#infoplist-keys-and-entitlements)）。
+
+在 iOS 和 macOS 上，应用自己的 [Rust crate](./rust.md) 通过系统框架访问其他硬件，所需的权限说明文字写在 `infoPlist` 中，macOS
+上的 entitlements 写在 `entitlements` 中：应用访问受保护的硬件而没有相应的权限说明文字时，系统会终止它。
+
+使用其他硬件的 Android 应用把 NSH 嵌入自己的 Gradle 项目（[Android](./android.md#embedding-in-an-android-app)），iOS 应用也可以同样嵌入自己的
+Xcode 项目（[iOS](./ios.md#embedding-in-an-ios-app)）。`AndroidManifest.xml` 和 `Info.plist` 归这个项目所有，所以由它在其中声明自己用到的内容，
+并自己编写平台代码：相机预览是一个[原生组件](./native-components.md)，其余一切由应用通过 `host.call` 访问（[iOS](./ios.md#talking-to-the-app)、
+[Android](./android.md#talking-to-the-app)）。
+
 ## 包里有什么
 
 Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组件，再加上它的 crate 注册的资源（`assets!()`）。TSX 应用的包中包含应用的字节码、
@@ -353,6 +375,7 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 - [OTA 更新](./ota-updates.md)：无需新构建，为打包应用（包括 iOS 和 Android）下发新的 TSX
 - [签名包](./signed-packages.md)：应用下载的更新
 - [项目结构](./project-structure.md)：`nsh.json` 与应用的各个文件
+- [原生组件](./native-components.md)：NSH 应用中宿主应用的视图
 
 ## 上传到 TestFlight
 
