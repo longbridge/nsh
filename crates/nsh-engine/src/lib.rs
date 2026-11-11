@@ -3529,6 +3529,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         ctrl_for_command: env.ctrl_for_command,
         host: env.host,
         lifecycle: env.lifecycle,
+        wake_count: env.wake_count,
         screen_color: env.screen_color,
         file_requests: env.file_requests,
         speech: env.speech,

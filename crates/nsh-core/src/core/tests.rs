@@ -18904,6 +18904,43 @@ mod views {
     }
 
     thread_local! {
+        static WAKE_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Shows how many times the system woke; its effect counts its runs.
+    #[component]
+    fn Waker() -> impl IntoElement {
+        effect(move || {
+            wake_count();
+            WAKE_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || format!("woke {}", wake_count()))
+    }
+
+    #[test]
+    fn an_effect_reading_the_wake_count_runs_again_on_each_wake_only() {
+        WAKE_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<Waker>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["woke 0"]);
+        assert_eq!(WAKE_RUNS.with(Cell::get), 1);
+        // Another part of the environment changes: the effect stays.
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        c.commit();
+        assert_eq!(WAKE_RUNS.with(Cell::get), 1);
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            wake_count: 1,
+            ..Default::default()
+        });
+        assert_eq!(texts(&c.commit().unwrap()), ["woke 1"]);
+        assert_eq!(WAKE_RUNS.with(Cell::get), 2);
+    }
+
+    thread_local! {
         static INTROS: Cell<u32> = const { Cell::new(0) };
     }
 
