@@ -248,7 +248,7 @@ See [Packaging](./packaging.md).
 ## nsh devtools
 
 ```sh
-nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp> [--session <PID>] [--app-dir <DIR>] [--json]
+nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp|webdriver> [--session <PID>] [--app-dir <DIR>] [--json]
 ```
 
 Drives a running app over its DevTools endpoint ([DevTools](./devtools.md)). Experimental: the commands may change. `launch` starts the app and the rest act on it.
@@ -265,6 +265,7 @@ Drives a running app over its DevTools endpoint ([DevTools](./devtools.md)). Exp
 | `logs [-f] [--level <L>] [--target <T>] [--text <S>] [--limit <N>]` | The app's console lines; `-f` follows. |
 | `close` | Quits the app. |
 | `mcp` | Serves the app to an AI agent over the Model Context Protocol on standard input and output. |
+| `webdriver [--port <PORT>] [--host <IP>]` | Serves apps over the W3C WebDriver protocol for WebdriverIO, Selenium and Appium clients ([WebDriver and Appium clients](./devtools.md#webdriver-and-appium-clients)): one session at a time, on `127.0.0.1:4723` by default. `--host` takes loopback addresses only; `--app-dir` resolves a relative `appium:app`. |
 
 | Flag | Description |
 |---|---|

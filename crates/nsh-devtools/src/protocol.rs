@@ -18,6 +18,9 @@ pub const ERR_NOT_STARTED: &str = "ERR_DEVTOOLS_NOT_STARTED";
 /// The method needs a capability the endpoint was not given.
 pub const ERR_CAPABILITY: &str = "ERR_DEVTOOLS_CAPABILITY";
 
+/// The view is no longer in the tree.
+pub const ERR_STALE: &str = "ERR_DEVTOOLS_STALE";
+
 /// Every error code, for the description.
 pub const ERROR_CODES: &[(&str, &str)] = &[
     (ERR_UNAUTHORIZED, "The token is missing or wrong."),
@@ -26,6 +29,7 @@ pub const ERROR_CODES: &[(&str, &str)] = &[
     (ERR_INPUT_LOCKED, "Another client holds the input."),
     (ERR_STEP_FAILED, "The app's step failed."),
     (ERR_NOT_STARTED, "The app has not started yet."),
+    (ERR_STALE, "The view is no longer in the tree."),
     (
         ERR_CAPABILITY,
         "The method needs a capability the endpoint was not given.",

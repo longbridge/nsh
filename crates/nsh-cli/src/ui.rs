@@ -814,7 +814,33 @@ pub(crate) fn capture_all(
     // The command keeps its copies of the pipe's write end: without
     // dropping them the read below never ends.
     cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    let mut child = child?;
+    let child = std::sync::Arc::new(Mutex::new(child?));
+    // A stopped command (Ctrl-C, SIGTERM: [`Stoppable`]) ends what it runs:
+    // the terminal's Ctrl-C reaches the child itself, a SIGTERM to this
+    // process alone would leave it (a cargo build) running.
+    let finished = std::sync::Arc::new(AtomicBool::new(false));
+    /// Ends the watcher however the read ends.
+    struct Finish(std::sync::Arc<AtomicBool>);
+    impl Drop for Finish {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+    let _finish = Finish(finished.clone());
+    {
+        let child = child.clone();
+        let _ = std::thread::Builder::new()
+            .name("nsh-stop-watch".into())
+            .spawn(move || {
+                while !finished.load(Ordering::Acquire) {
+                    if stop_requested() {
+                        let _ = child.lock().unwrap_or_else(|e| e.into_inner()).kill();
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            });
+    }
     let mut output = String::new();
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
@@ -828,7 +854,8 @@ pub(crate) fn capture_all(
         output.push_str(&text);
         line.clear();
     }
-    Ok((child.wait()?, output))
+    let status = child.lock().unwrap_or_else(|e| e.into_inner()).wait()?;
+    Ok((status, output))
 }
 
 /// Runs the cargo build `cmd` as step `building <what>`: the spinner

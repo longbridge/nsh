@@ -8,8 +8,8 @@
 use std::{
     rc::Rc,
     sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     time::Duration,
@@ -61,6 +61,43 @@ pub(crate) struct WindowsNative {
     target: Arc<AtomicU64>,
     /// The UI thread the surface lives on.
     ui: UiThread,
+    /// Whether a left button pressed by [`Native::pointer_down`] is down:
+    /// moves carry it then.
+    button: AtomicBool,
+    /// The modifiers [`Native::hold_keys`] holds: the pointer's events and
+    /// the key presses until they are let go carry them.
+    held: Mutex<Modifiers>,
+}
+
+/// `+`-joined modifier names (`"shift"`, `"mod+alt"`; `mod` is Control on
+/// Windows, `meta` the Windows key) as `base` with them set to `down`.
+fn with_modifiers(base: Modifiers, keys: &str, down: bool) -> Result<Modifiers, String> {
+    let mut m = base;
+    for name in keys.split('+') {
+        let flag = match name.trim().to_ascii_lowercase().as_str() {
+            "mod" | "ctrl" | "control" => &mut m.ctrl,
+            "alt" | "option" => &mut m.alt,
+            "shift" => &mut m.shift,
+            "meta" | "cmd" | "command" | "super" => &mut m.meta,
+            other => {
+                return Err(format!(
+                    "`{other}` is no modifier key: mod, shift, alt, ctrl or meta"
+                ));
+            }
+        };
+        *flag = down;
+    }
+    Ok(m)
+}
+
+/// `a` and `b`'s modifiers together.
+fn merged(a: Modifiers, b: Modifiers) -> Modifiers {
+    Modifiers {
+        shift: a.shift || b.shift,
+        ctrl: a.ctrl || b.ctrl,
+        alt: a.alt || b.alt,
+        meta: a.meta || b.meta,
+    }
 }
 
 impl WindowsNative {
@@ -69,7 +106,13 @@ impl WindowsNative {
             key,
             target: Arc::new(AtomicU64::new(ROOT_ID as u64)),
             ui,
+            button: AtomicBool::new(false),
+            held: Mutex::new(Modifiers::default()),
         }
+    }
+
+    fn held(&self) -> Modifiers {
+        *self.held.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// `f` on the main thread with the surface's input in the window the
@@ -120,17 +163,18 @@ impl WindowsNative {
     }
 
     fn click(&self, at: Point<Points>, hold: Duration, button: u8) {
+        let mods = self.held();
         let (x, y) = (at.x.0, at.y.0);
         let target = self.target.load(Ordering::Relaxed) as NodeId;
         // A press in a window activates it, as a click does.
         self.on_main(move |s| activate(s, target));
         // A real pointer arrives before it presses (hover state).
         self.in_target(move |s| {
-            synth::pointer(s, PointerKind::Move, x, y, 0, 0);
-            synth::pointer(s, PointerKind::Down, x, y, button, 1 << button);
+            synth::pointer(s, PointerKind::Move, x, y, 0, 0, mods);
+            synth::pointer(s, PointerKind::Down, x, y, button, 1 << button, mods);
         });
         std::thread::sleep(hold);
-        self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, button, 0));
+        self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, button, 0, mods));
     }
 }
 
@@ -172,6 +216,7 @@ impl Native for WindowsNative {
     }
 
     fn scroll(&self, at: Point<Points>, delta: Point<Points>) {
+        let mods = self.held();
         let (x, y) = (at.x.0, at.y.0);
         let (dx, dy) = (delta.x.0, delta.y.0);
         // A precision touchpad's events, one per display refresh, adding up
@@ -187,7 +232,7 @@ impl Native for WindowsNative {
                         dx: dx / n as f32,
                         dy: dy / n as f32,
                         precise: true,
-                        modifiers: Modifiers::default(),
+                        modifiers: mods,
                         time: s.clock(),
                     },
                 );
@@ -197,10 +242,11 @@ impl Native for WindowsNative {
     }
 
     fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        let mods = self.held();
         let (x, y) = (from.x.0, from.y.0);
         self.in_target(move |s| {
-            synth::pointer(s, PointerKind::Move, x, y, 0, 0);
-            synth::pointer(s, PointerKind::Down, x, y, 0, 1);
+            synth::pointer(s, PointerKind::Move, x, y, 0, 0, mods);
+            synth::pointer(s, PointerKind::Down, x, y, 0, 1, mods);
         });
         std::thread::sleep(nsh_testing::agent::LANDING);
         let mut last = from;
@@ -208,11 +254,44 @@ impl Native for WindowsNative {
             next_frame();
             let (x, y) = (at.x.0, at.y.0);
             // The primary button is held: a drag.
-            self.in_target(move |s| synth::pointer(s, PointerKind::Move, x, y, 0, 1));
+            self.in_target(move |s| synth::pointer(s, PointerKind::Move, x, y, 0, 1, mods));
             last = at;
         }
         let (x, y) = (last.x.0, last.y.0);
-        self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, 0, 0));
+        self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, 0, 0, mods));
+    }
+
+    // The three below are `press` and `drag` taken apart: the same
+    // pointer events, one call each.
+    fn pointer_down(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
+        let (x, y) = (at.x.0, at.y.0);
+        let target = self.target.load(Ordering::Relaxed) as NodeId;
+        self.on_main(move |s| activate(s, target));
+        self.in_target(move |s| {
+            synth::pointer(s, PointerKind::Move, x, y, 0, 0, mods);
+            synth::pointer(s, PointerKind::Down, x, y, 0, 1, mods);
+        })
+        .ok_or_else(|| "the window is gone".to_owned())?;
+        self.button.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    fn pointer_move(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
+        let (x, y) = (at.x.0, at.y.0);
+        // The primary button is held: a drag.
+        let buttons = u8::from(self.button.load(Ordering::Acquire));
+        self.in_target(move |s| synth::pointer(s, PointerKind::Move, x, y, 0, buttons, mods))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn pointer_up(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
+        let (x, y) = (at.x.0, at.y.0);
+        self.button.store(false, Ordering::Release);
+        self.in_target(move |s| synth::pointer(s, PointerKind::Up, x, y, 0, 0, mods))
+            .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn type_text(&self, text: &str) {
@@ -234,6 +313,7 @@ impl Native for WindowsNative {
                 },
             ),
         };
+        let modifiers = merged(modifiers, self.held());
         self.in_focused(move |s| synth::press(s, vk, modifiers));
     }
 
@@ -259,8 +339,9 @@ impl Native for WindowsNative {
     }
 
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
         let (x, y) = (at.x.0, at.y.0);
-        self.in_target(move |s| synth::pointer(s, PointerKind::Move, x, y, 0, 0))
+        self.in_target(move |s| synth::pointer(s, PointerKind::Move, x, y, 0, 0, mods))
             .ok_or_else(|| "the window is gone".to_owned())
     }
 
@@ -278,8 +359,15 @@ impl Native for WindowsNative {
             alt: m.alt,
             meta: m.cmd,
         };
+        let modifiers = merged(modifiers, self.held());
         self.in_focused(move |s| synth::press(s, vk, modifiers))
             .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        *held = with_modifiers(*held, keys, down)?;
+        Ok(())
     }
 
     fn input_text(&self, id: NodeId) -> Option<String> {
@@ -429,4 +517,28 @@ fn mapped_bounds(
         point(Points(x0), Points(y0)),
         Size::new(Points(x1 - x0), Points(y1 - y0)),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn held_modifiers_are_set_and_cleared_by_name() {
+        let held = with_modifiers(Modifiers::default(), "shift", true).unwrap();
+        assert!(held.shift && !held.ctrl);
+        let held = with_modifiers(held, "mod+meta", true).unwrap();
+        assert!(held.shift && held.ctrl && held.meta);
+        let held = with_modifiers(held, "shift", false).unwrap();
+        assert!(!held.shift && held.ctrl);
+        assert!(with_modifiers(held, "a", true).is_err());
+        let both = merged(
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+            held,
+        );
+        assert!(both.shift && both.ctrl);
+    }
 }

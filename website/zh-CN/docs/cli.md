@@ -244,7 +244,7 @@ nsh package my-app --target web
 ## nsh devtools
 
 ```sh
-nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp> [--session <PID>] [--app-dir <DIR>] [--json]
+nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp|webdriver> [--session <PID>] [--app-dir <DIR>] [--json]
 ```
 
 通过 DevTools 端点驱动运行中的应用（[DevTools](./devtools.md)）。实验性：命令可能会变化。`launch` 启动应用，其余命令作用于它。
@@ -261,6 +261,7 @@ nsh devtools <launch|ls|tree|press|type|wait|shot|logs|close|mcp> [--session <PI
 | `logs [-f] [--level <L>] [--target <T>] [--text <S>] [--limit <N>]` | 应用的控制台输出；`-f` 持续跟随。 |
 | `close` | 退出应用。 |
 | `mcp` | 通过标准输入输出，以 Model Context Protocol 把应用提供给 AI 智能体。 |
+| `webdriver [--port <PORT>] [--host <IP>]` | 通过 W3C WebDriver 协议提供应用，供 WebdriverIO、Selenium 和 Appium 客户端使用（[WebDriver 与 Appium 客户端](./devtools.md#webdriver-and-appium-clients)）：一次一个会话，默认在 `127.0.0.1:4723`。`--host` 只接受回环地址；`--app-dir` 用来解析相对的 `appium:app`。 |
 
 | 参数 | 说明 |
 |---|---|

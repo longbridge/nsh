@@ -15,6 +15,7 @@ pub mod protocol;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod tree;
+pub mod xml;
 
 /// Version of the DevTools protocol; bumped on incompatible changes.
 pub const PROTOCOL_VERSION: u32 = 1;

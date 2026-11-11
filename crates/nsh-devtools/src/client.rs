@@ -74,19 +74,23 @@ impl Client {
     ///
     /// [`ClientError`]: a refused token, a bad URL or an unreachable endpoint.
     pub fn connect(url: &str, token: &str, timeout: Duration) -> Result<Client, ClientError> {
+        // `BadUrl` keeps the URL as given: the token is never in a message.
+        let given = url;
         let url = format!("{url}?token={token}");
         let request = url
             .as_str()
             .into_client_request()
-            .map_err(|_| ClientError::BadUrl(url.clone()))?;
+            .map_err(|_| ClientError::BadUrl(given.to_string()))?;
         let uri = request.uri();
-        let host = uri.host().ok_or_else(|| ClientError::BadUrl(url.clone()))?;
+        let host = uri
+            .host()
+            .ok_or_else(|| ClientError::BadUrl(given.to_string()))?;
         let port = uri.port_u16().unwrap_or(80);
         let addr = (host, port)
             .to_socket_addrs()
             .ok()
             .and_then(|mut a| a.next())
-            .ok_or_else(|| ClientError::BadUrl(url.clone()))?;
+            .ok_or_else(|| ClientError::BadUrl(given.to_string()))?;
         let stream = TcpStream::connect_timeout(&addr, timeout)
             .map_err(|e| ClientError::Connect(e.to_string()))?;
         let _ = stream.set_nodelay(true);

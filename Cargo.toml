@@ -91,6 +91,9 @@ wuff = "0.2.9"
 oxc_sourcemap = "9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The view tree as XML and XPath over it (`nsh-devtools`'s `xpath`, for the WebDriver server); sxd-document MIT, sxd-xpath MIT or Apache-2.0.
+sxd-document = "0.3"
+sxd-xpath = "0.4"
 # Translations (`nsh_core::i18n`, `nsh-i18n`): our rust-i18n, its files and lookups.
 rust-i18n = "4.2.4"
 rust-i18n-support = "4.2.4"
@@ -230,6 +233,8 @@ gstreamer-audio = "0.25"
 taffy = { version = "0.15", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size"] }
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
+# `ServiceExt::oneshot`: tests send requests to a router without a socket.
+tower = { version = "0.5", default-features = false, features = ["util"] }
 
 # The same QuickJS binding and standard modules run on every platform; the JIT
 # stays disabled on wasm, preserving the native compiler's bytecode format.

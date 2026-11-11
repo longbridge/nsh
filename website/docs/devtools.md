@@ -1,7 +1,7 @@
 ---
 title: DevTools
 description: "Native Shell DevTools (experimental): automate and inspect a running app from outside with nsh devtools commands, an MCP server for AI agents, or the WebSocket protocol; run tests over it."
-order: 62
+order: 61.5
 group: tools
 ---
 
@@ -83,6 +83,88 @@ The tools: `list_apps`, `launch_app`, `select_app`, `take_snapshot`, `take_scree
 `launch_app { "app": "examples/gallery" }`, reads the screen with `take_snapshot` and `take_screenshot`, acts with
 `click` and `type`, and closes with `close_app`. The server releases the input after each action, so a command
 line client can act between two of an agent's calls. Long text answers are cut at 20 000 characters with a note.
+
+## WebDriver and Appium clients
+
+`nsh devtools webdriver` serves apps over the W3C WebDriver protocol, so WebdriverIO, Selenium and the Appium
+clients (Python, Java and the rest) drive an NSH app as they drive any other. It listens on `http://127.0.0.1:4723`
+(`--port`, `--host`: loopback addresses only) and holds one session at a time.
+
+```sh
+nsh devtools webdriver --app-dir examples/counter
+```
+
+A new session starts the app. The capabilities:
+
+| Capability | Meaning |
+|---|---|
+| `platformName` | `mac` (or `macos`) or `windows`. Required. |
+| `appium:app` | The app's entry (a `.tsx` file or the app's directory, relative to `--app-dir`) or a packaged app built with `nsh package --devtools`. Required. |
+| `appium:automationName` | `NSH`. |
+| `nsh:options` | `storage`: an object of strings the app's storage starts with. `environment`: the test environment (clipboard, viewport, color scheme, clock). |
+
+WebdriverIO:
+
+```js
+import { remote } from "webdriverio";
+
+const driver = await remote({
+  hostname: "127.0.0.1",
+  port: 4723,
+  capabilities: { platformName: "mac", "appium:app": "App.tsx", "appium:automationName": "NSH" },
+});
+const plus = await driver.$("~+1"); // accessibility id
+await plus.click();
+console.log(await driver.$('//*[@text="2"]').getText());
+await driver.saveScreenshot("counter.png");
+await driver.deleteSession(); // the app quits
+```
+
+The Appium Python client:
+
+```python
+from appium import webdriver
+from appium.options.common import AppiumOptions
+
+options = AppiumOptions()
+options.load_capabilities({"platformName": "mac", "appium:app": "App.tsx", "appium:automationName": "NSH"})
+driver = webdriver.Remote("http://127.0.0.1:4723", options=options)
+driver.find_element("accessibility id", "+1").click()
+print(driver.page_source)
+driver.quit()
+```
+
+### Find strategies
+
+| Strategy | Finds |
+|---|---|
+| `id` | views by `testID` (`id:<value>`). |
+| `accessibility id` | views by label (`label:<value>`). |
+| `-nsh selector` | a selector as tests write it (`id:`, `label:`, text and the rest). |
+| `class name` | views by kind (`view`, `text`, `input`, ...). |
+| `xpath` | an XPath expression on the page source, whose attributes are `id` (the view's id), `name` and `testID` (the `testID`, which the `id` strategy matches), `label`, `text`, `value`, `placeholder`, `role`, `x`, `y`, `width`, `height`, `visible`, `enabled`, `focused`, `selected` and `checked`. |
+
+WebdriverIO's `$()` reads `-nsh selector:...` as CSS: use `findElement('-nsh selector', ...)` for that strategy.
+
+`setTimeouts({ implicit })` makes a find wait for the view. An element's text is its text, else its value, else its
+label. Element screenshots, actions (pointer and key sequences) and page source (the view tree as XML) are available.
+
+### `execute`
+
+`driver.execute("nsh: <name>", {...})` runs one of a fixed set of commands; other scripts answer
+`unsupported operation`.
+
+| Script | Argument | Returns |
+|---|---|---|
+| `nsh: console` | `{ level, text, limit }` | the app's console lines. |
+| `nsh: errors` | | the errors since the last call. |
+| `nsh: ready` | `{ timeoutMs }` (default 10000) | after the app is quiet. |
+| `nsh: colorScheme` | `{ scheme: "dark" \| "light" }` | switches the color scheme. |
+
+### Appium Inspector
+
+Appium Inspector connects to `http://127.0.0.1:4723` (remote host `127.0.0.1`, port `4723`, path `/`) with the
+capabilities above. It shows the view tree (page source) and the screenshot, and a tap there presses the view.
 
 ## Tests over DevTools
 

@@ -9,8 +9,9 @@ mod host;
 mod launch;
 mod mcp;
 mod timeline;
+mod webdriver;
 
 pub(crate) use artifacts::Artifacts;
-pub(crate) use cli::{DevtoolsArgs, run, wait_ready};
+pub(crate) use cli::{DevtoolsArgs, Session, run, wait_ready};
 pub(crate) use host::DevtoolsHost;
 pub(crate) use launch::{LaunchSpec, launch, token};

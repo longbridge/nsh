@@ -220,29 +220,45 @@ impl Started {
     }
 }
 
-/// Starts the app at `entry` on `target`'s development host (`host`; never
-/// a packaged app) over its DevTools endpoint with nothing set up, and returns the host that holds it: `nsh devtools launch` and
-/// its MCP server keep it open for clients.
+/// What [`launch_devtools`] starts.
+pub(crate) enum Launchee<'a> {
+    /// The app at `entry`, built and served to the development host `host`.
+    Entry {
+        /// The platform's development host.
+        host: &'a Path,
+        /// The app's entry.
+        entry: &'a Path,
+        /// Where the host's generated files go.
+        work: &'a Path,
+    },
+    /// A packaged app (`nsh package --devtools`, as `nsh test --app` runs
+    /// it): `exe` is its executable, which has its code and assets itself.
+    Packaged {
+        /// The packaged app's executable.
+        exe: &'a Path,
+        /// Where the host's generated files go.
+        work: &'a Path,
+    },
+}
+
+/// Starts the app `launchee` names on `target` over its DevTools endpoint,
+/// set up as `options` say, and returns the host that holds it: `nsh devtools
+/// launch`, its MCP server and its WebDriver server keep it open for clients.
 pub(crate) fn launch_devtools(
     target: Target,
-    host: &Path,
-    entry: &Path,
-    work: &Path,
+    launchee: Launchee<'_>,
+    options: &HostOptions,
 ) -> Result<crate::devtools::DevtoolsHost, String> {
     if !matches!(target, Target::Macos | Target::Windows) {
         return Err("nsh devtools launch takes --target macos or windows".into());
     }
+    let (host, entry, work, packaged) = match launchee {
+        Launchee::Entry { host, entry, work } => (host, entry, work, false),
+        // Nothing serves a packaged app's entry: the executable stands for it.
+        Launchee::Packaged { exe, work } => (exe, exe, work, true),
+    };
     let started = start_host(
-        target,
-        host,
-        entry,
-        &HostOptions::default(),
-        false,
-        None,
-        false,
-        None,
-        work,
-        false,
+        target, host, entry, options, false, None, false, None, work, packaged,
     )?;
     let Started::Devtools(host) = started else {
         return Err("the host is not driven over DevTools".into());
@@ -279,7 +295,12 @@ fn start_host(
     } else {
         Some(serve_with(entry, options, !devtools)?)
     };
-    let entry = resolve(entry)?;
+    // A packaged app has no entry to resolve.
+    let entry = if packaged {
+        entry.to_path_buf()
+    } else {
+        resolve(entry)?
+    };
     if !packaged
         && matches!(
             target,

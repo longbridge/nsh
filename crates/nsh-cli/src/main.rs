@@ -254,7 +254,8 @@ enum Command {
         app: Option<PathBuf>,
     },
     /// Drive a running app over its DevTools endpoint: launch, tree, shot,
-    /// press, type, wait, logs, close, and an MCP server for AI agents
+    /// press, type, wait, logs, close, a WebDriver server for Appium clients,
+    /// and an MCP server for AI agents
     /// (experimental: these commands and the MCP tools may change).
     #[command(name = "devtools")]
     Devtools(devtools::DevtoolsArgs),

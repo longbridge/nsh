@@ -34,6 +34,7 @@ pub struct ConsoleEntry {
 /// `level` is a name (`"warn"`, any case) and the other fields keep their names.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
+#[non_exhaustive]
 pub struct ConsoleQuery {
     /// Entries at or after this time.
     pub since_ms: Option<u64>,

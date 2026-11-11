@@ -17,7 +17,7 @@ use base64::Engine as _;
 use nsh_devtools::client::Client;
 use serde_json::Value;
 
-use super::timeline::Timeline;
+use super::{cli::Session, timeline::Timeline};
 use crate::ui;
 
 /// How long `--keep-open-on-failure` waits for Enter.
@@ -199,6 +199,10 @@ impl FileRun {
             return;
         }
         for host in hosts.iter() {
+            // The run's own client holds the input lock for as long as it
+            // is connected: let go, so `nsh devtools press` or an MCP
+            // client can act on the kept host.
+            release_input(&*host.client);
             ui::plain(format!(
                 "nsh devtools: kept {} open; token {}",
                 host.url, host.token
@@ -218,6 +222,12 @@ impl FileRun {
             });
         let _ = rx.recv_timeout(KEEP_OPEN);
     }
+}
+
+/// Lets go of the input `session` holds (the answer does not matter: a
+/// session that holds nothing says so).
+fn release_input(session: &dyn Session) {
+    let _ = session.call_within("Session.release", Value::Null, SCREENSHOT);
 }
 
 /// The name of the directory a test file's artifacts go in: its path from
@@ -253,7 +263,27 @@ fn file_dir_name(root: &Path, file: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use nsh_devtools::protocol::ErrorBody;
+
     use super::*;
+
+    struct Recorder(Mutex<Vec<String>>);
+
+    impl Session for Recorder {
+        fn call_within(&self, method: &str, _: Value, _: Duration) -> Result<Value, ErrorBody> {
+            self.0.lock().unwrap().push(method.into());
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn a_kept_host_gives_its_input_back() {
+        let session = Recorder(Mutex::new(Vec::new()));
+        release_input(&session);
+        assert_eq!(*session.0.lock().unwrap(), ["Session.release"]);
+    }
 
     #[test]
     fn files_of_one_name_keep_their_own_directories() {

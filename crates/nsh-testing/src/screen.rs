@@ -1018,7 +1018,6 @@ impl Screen {
         depth: Option<u32>,
         hidden: bool,
     ) -> Result<Vec<TreeNode>, String> {
-        let layout = self.layout_nodes();
         let top = match root {
             None => None,
             Some(selector) => {
@@ -1026,12 +1025,24 @@ impl Screen {
                 let id = *found
                     .first()
                     .ok_or_else(|| format!("no view matches `{selector}`"))?;
-                if !layout.iter().any(|n| n.id == id) {
+                if !self.layout_nodes().iter().any(|n| n.id == id) {
                     return Err(format!("`{selector}` is not a node of the tree"));
                 }
                 Some(id)
             }
         };
+        self.snapshot_below(top, depth, hidden)
+    }
+
+    /// [`Screen::snapshot`] from view `top` (the whole screen for `None`),
+    /// which must be in the layout list.
+    fn snapshot_below(
+        &self,
+        top: Option<NodeId>,
+        depth: Option<u32>,
+        hidden: bool,
+    ) -> Result<Vec<TreeNode>, String> {
+        let layout = self.layout_nodes();
         let shown: HashSet<NodeId> = self.shown().into_iter().collect();
         // Depth below the screen's top, then relative to `top`.
         let mut depths: HashMap<NodeId, u32> = HashMap::new();
@@ -1136,6 +1147,35 @@ impl Screen {
             });
         }
         Ok(out)
+    }
+
+    /// The views `selector` matches, in screen order, under view `root`
+    /// (not `root` itself) when given. A `root` that is not in the layout
+    /// list is stale: an error starting `stale: `.
+    pub fn query(&self, selector: &str, root: Option<NodeId>) -> Result<Vec<NodeId>, String> {
+        if let Some(root) = root
+            && !self.layout_nodes().iter().any(|n| n.id == root)
+        {
+            return Err(format!("stale: view {root} is no longer in the tree"));
+        }
+        let found = self.resolve(&Selector::parse(selector)?);
+        Ok(found
+            .into_iter()
+            .filter(|id| root.is_none_or(|root| self.is_inside(*id, root)))
+            .collect())
+    }
+
+    /// The facts of view `id` as [`Screen::snapshot`] lists it (hidden
+    /// views too, depth 0). A view not in the layout list is stale: an
+    /// error starting `stale: `.
+    pub fn describe(&self, id: NodeId) -> Result<TreeNode, String> {
+        if !self.layout_nodes().iter().any(|n| n.id == id) {
+            return Err(format!("stale: view {id} is no longer in the tree"));
+        }
+        self.snapshot_below(Some(id), Some(0), true)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("stale: view {id} is no longer in the tree"))
     }
 
     /// The views of [`Screen::attached`] a user sees, in tree order: those

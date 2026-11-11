@@ -11,6 +11,12 @@ fn emit(c: &Collector, level: log::Level, target: &str, message: &str) {
     );
 }
 
+fn query(set: impl FnOnce(&mut ConsoleQuery)) -> ConsoleQuery {
+    let mut q = ConsoleQuery::default();
+    set(&mut q);
+    q
+}
+
 #[test]
 fn collector_keeps_the_newest_and_filters() {
     let c = Collector::new(3);
@@ -23,35 +29,11 @@ fn collector_keeps_the_newest_and_filters() {
         ["m2", "m3", "m4"]
     );
     emit(&c, log::Level::Warn, "js", "w");
-    let warns = c.query(&ConsoleQuery {
-        level: Some(log::Level::Warn),
-        ..Default::default()
-    });
+    let warns = c.query(&query(|q| q.level = Some(log::Level::Warn)));
     assert_eq!(warns.len(), 1);
-    assert_eq!(
-        c.query(&ConsoleQuery {
-            target: Some("js".into()),
-            ..Default::default()
-        })
-        .len(),
-        1
-    );
-    assert_eq!(
-        c.query(&ConsoleQuery {
-            limit: Some(1),
-            ..Default::default()
-        })[0]
-            .message,
-        "w"
-    );
-    assert_eq!(
-        c.query(&ConsoleQuery {
-            text: Some("m3".into()),
-            ..Default::default()
-        })
-        .len(),
-        1
-    );
+    assert_eq!(c.query(&query(|q| q.target = Some("js".into()))).len(), 1);
+    assert_eq!(c.query(&query(|q| q.limit = Some(1)))[0].message, "w");
+    assert_eq!(c.query(&query(|q| q.text = Some("m3".into()))).len(), 1);
 }
 
 #[test]

@@ -303,3 +303,45 @@ fn console_query_and_subscribe() {
     assert_eq!(event.method, "Console.entry");
     assert_eq!(event.params["message"], "after");
 }
+
+/// Fails every step with the message it was built with.
+struct Failing(&'static str);
+
+impl Handler for Failing {
+    fn setup(&self, _: SessionSetup) -> Result<(), ErrorBody> {
+        Ok(())
+    }
+    fn start(&self) {}
+    fn step(&self, _: TestStep, done: Box<dyn FnOnce(Result<Value, String>) + Send>) {
+        done(Err(self.0.into()));
+    }
+    fn fetch_reply(&self, _: u64, _: FetchReply) {}
+}
+
+fn failure_code(message: &'static str) -> String {
+    let endpoint = Endpoint::start(
+        config(),
+        Arc::new(Failing(message)),
+        Arc::new(Collector::default()),
+    )
+    .unwrap();
+    let url = format!("ws://{}{PATH}", endpoint.addr());
+    let client = Client::connect(&url, "secret", T).unwrap();
+    client.call("Session.start", json!({})).unwrap();
+    client
+        .call("Tree.describe", json!({ "id": 4 }))
+        .unwrap_err()
+        .code
+}
+
+#[test]
+fn a_stale_failure_has_its_own_code_and_others_keep_theirs() {
+    assert_eq!(
+        failure_code("stale: view 4 is no longer in the tree"),
+        nsh_devtools::protocol::ERR_STALE
+    );
+    assert_eq!(
+        failure_code("no view matches `id:x`"),
+        nsh_devtools::protocol::ERR_STEP_FAILED
+    );
+}

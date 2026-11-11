@@ -1,7 +1,7 @@
 ---
 title: DevTools
 description: "Native Shell DevTools（实验性）：从应用外部自动化和检查运行中的应用，可用 nsh devtools 命令、面向 AI 智能体的 MCP 服务器或 WebSocket 协议，也可以在它之上运行测试。"
-order: 62
+order: 61.5
 group: tools
 ---
 
@@ -80,6 +80,86 @@ claude mcp add nsh-devtools -- /path/to/nsh devtools mcp --app-dir /path/to/my-a
 `launch_app { "app": "examples/gallery" }`，用 `take_snapshot` 和 `take_screenshot` 读取屏幕，用 `click` 和 `type`
 操作，最后用 `close_app` 关闭。服务器在每次操作之后释放输入，所以命令行客户端可以在智能体的两次调用之间操作。
 过长的文本答复会在 20 000 个字符处截断并附上说明。
+
+## WebDriver 与 Appium 客户端
+
+`nsh devtools webdriver` 通过 W3C WebDriver 协议提供应用，WebdriverIO、Selenium 和 Appium 客户端（Python、Java 等）
+可以像驱动其他应用那样驱动 NSH 应用。它监听 `http://127.0.0.1:4723`（`--port`、`--host`：只接受回环地址），一次持有一个会话。
+
+```sh
+nsh devtools webdriver --app-dir examples/counter
+```
+
+新建会话会启动应用。capabilities：
+
+| Capability | 含义 |
+|---|---|
+| `platformName` | `mac`（或 `macos`）或 `windows`。必填。 |
+| `appium:app` | 应用的入口（`.tsx` 文件或应用目录，相对于 `--app-dir`）或用 `nsh package --devtools` 构建的打包应用。必填。 |
+| `appium:automationName` | `NSH`。 |
+| `nsh:options` | `storage`：应用存储起始内容，值为字符串的对象。`environment`：测试环境（剪贴板、视口、配色方案、时钟）。 |
+
+WebdriverIO：
+
+```js
+import { remote } from "webdriverio";
+
+const driver = await remote({
+  hostname: "127.0.0.1",
+  port: 4723,
+  capabilities: { platformName: "mac", "appium:app": "App.tsx", "appium:automationName": "NSH" },
+});
+const plus = await driver.$("~+1"); // accessibility id
+await plus.click();
+console.log(await driver.$('//*[@text="2"]').getText());
+await driver.saveScreenshot("counter.png");
+await driver.deleteSession(); // 应用退出
+```
+
+Appium Python 客户端：
+
+```python
+from appium import webdriver
+from appium.options.common import AppiumOptions
+
+options = AppiumOptions()
+options.load_capabilities({"platformName": "mac", "appium:app": "App.tsx", "appium:automationName": "NSH"})
+driver = webdriver.Remote("http://127.0.0.1:4723", options=options)
+driver.find_element("accessibility id", "+1").click()
+print(driver.page_source)
+driver.quit()
+```
+
+### 查找策略
+
+| 策略 | 查找 |
+|---|---|
+| `id` | 按 `testID` 查找视图（`id:<value>`）。 |
+| `accessibility id` | 按 label 查找视图（`label:<value>`）。 |
+| `-nsh selector` | 测试里写的选择器（`id:`、`label:`、文本等）。 |
+| `class name` | 按种类查找视图（`view`、`text`、`input` 等）。 |
+| `xpath` | 作用于页面源码的 XPath 表达式，属性有 `id`（视图 id）、`name` 和 `testID`（即 `testID`，`id` 策略匹配的就是它）、`label`、`text`、`value`、`placeholder`、`role`、`x`、`y`、`width`、`height`、`visible`、`enabled`、`focused`、`selected` 和 `checked`。 |
+
+WebdriverIO 的 `$()` 会把 `-nsh selector:...` 当作 CSS：这个策略请用 `findElement('-nsh selector', ...)`。
+
+`setTimeouts({ implicit })` 让查找等待视图出现。元素的文本是它的 text，否则是 value，再否则是 label。元素截图、
+actions（指针和按键序列）和页面源码（XML 形式的视图树）均可使用。
+
+### `execute`
+
+`driver.execute("nsh: <name>", {...})` 运行固定的几个命令之一；其他脚本返回 `unsupported operation`。
+
+| 脚本 | 参数 | 返回 |
+|---|---|---|
+| `nsh: console` | `{ level, text, limit }` | 应用的控制台日志行。 |
+| `nsh: errors` | | 自上次调用以来的错误。 |
+| `nsh: ready` | `{ timeoutMs }`（默认 10000） | 应用安静之后返回。 |
+| `nsh: colorScheme` | `{ scheme: "dark" \| "light" }` | 切换配色方案。 |
+
+### Appium Inspector
+
+Appium Inspector 用上面的 capabilities 连接 `http://127.0.0.1:4723`（远程主机 `127.0.0.1`，端口 `4723`，路径 `/`）。
+它显示视图树（页面源码）和截图，在其中点击会点击对应的视图。
 
 ## 通过 DevTools 运行测试
 

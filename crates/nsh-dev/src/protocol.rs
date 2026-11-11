@@ -385,6 +385,60 @@ pub struct SpanStyle {
     pub line_through: bool,
 }
 
+/// One action of a [`TestStep::Pointer`] sequence: points in the window's
+/// content, in points from its top-left.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PointerAction {
+    /// The left button goes down at the point.
+    Down {
+        /// Rightwards.
+        x: f32,
+        /// Downwards.
+        y: f32,
+    },
+    /// The pointer moves to the point (a drag while the button is down).
+    Move {
+        /// Rightwards.
+        x: f32,
+        /// Downwards.
+        y: f32,
+    },
+    /// The left button goes up at the point.
+    Up {
+        /// Rightwards.
+        x: f32,
+        /// Downwards.
+        y: f32,
+    },
+    /// Waits.
+    Pause {
+        /// Milliseconds.
+        ms: u64,
+    },
+}
+
+/// One action of a [`TestStep::Key`] sequence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum KeyAction {
+    /// The key goes down.
+    Down {
+        /// An `nsh/keymap` name: `"enter"`, `"shift"`, `"a"`.
+        key: String,
+    },
+    /// The key goes up.
+    Up {
+        /// An `nsh/keymap` name.
+        key: String,
+    },
+    /// Waits.
+    Pause {
+        /// Milliseconds.
+        ms: u64,
+    },
+}
+
 /// A step of a test on a host's app, named as `nsh/test` names them: views
 /// are found by selectors (`id:save`, `text:Add`, `role:button[Save]`), and
 /// actions are native input at the view the selector names.
@@ -508,6 +562,24 @@ pub enum TestStep {
         /// Whether they go down (else up).
         down: bool,
     },
+    /// A sequence of pointer actions at points of the window's content
+    /// (WebDriver's pointer input source, left button only): each goes to
+    /// the platform in order, so a drag is a down, moves and an up.
+    Pointer {
+        /// The actions, in order.
+        actions: Vec<PointerAction>,
+    },
+    /// A sequence of key actions (WebDriver's key input source): a
+    /// modifier going down is held until its up, any other key is pressed
+    /// when it goes down.
+    Key {
+        /// The actions, in order.
+        actions: Vec<KeyAction>,
+    },
+    /// Lets go of a pointer button a `Pointer` sequence left down, and
+    /// of the modifiers a `Key` sequence left held (a client's session
+    /// ending); the endpoint sends it, no method names it.
+    ReleaseInput,
     /// Drags as `Drag` does and keeps the pointer down
     /// (`app.dragAndHold`), until `Drop`.
     DragAndHold {
@@ -612,6 +684,21 @@ pub enum TestStep {
         #[serde(default)]
         hidden: bool,
     },
+    /// The views `selector` matches in screen order, as `{"ids": [id, ...]}`;
+    /// an empty list is not an error.
+    Query {
+        /// The selector.
+        selector: String,
+        /// Only views under this view (a stale view fails with `stale: `).
+        #[serde(default)]
+        root: Option<u32>,
+    },
+    /// One view's facts, a node as [`TestStep::Snapshot`] lists them; a view
+    /// no longer in the tree fails with a message starting `stale: `.
+    Describe {
+        /// The view.
+        id: u32,
+    },
     /// The dialogs the app showed, in order (`app.dialogs`): a list of
     /// `nsh_core::Dialog`s.
     Dialogs,
@@ -625,7 +712,12 @@ pub enum TestStep {
     },
     /// A picture of the app, base64-encoded: PNG on graphical targets, UTF-8
     /// Cell JSON on the terminal target. The test's side saves these bytes.
-    Screenshot,
+    Screenshot {
+        /// Only this view, cut out of the window's picture (PNG targets
+        /// only); `None`: the whole window.
+        #[serde(default)]
+        node: Option<u32>,
+    },
     /// Makes the window `width` × `height` points (`app.setViewport`).
     SetViewport {
         /// Points.

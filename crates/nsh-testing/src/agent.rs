@@ -27,7 +27,9 @@ use nsh_core::{
     MountBatch, NodeId,
     geometry::{Bounds, Point, Points, Size, point},
 };
-use nsh_dev::protocol::{PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep};
+use nsh_dev::protocol::{
+    KeyAction, PickTarget, PointerAction, SceneQuery, SpanStyle, StepOutcome, TestStep,
+};
 
 mod forward;
 
@@ -476,6 +478,17 @@ pub trait Scene: Send + Sync {
         let _ = (root, depth, hidden);
         Err("this scene cannot list its nodes".into())
     }
+    /// The views `selector` matches, under `root` when given
+    /// ([`Screen::query`]).
+    fn query(&self, selector: &str, root: Option<NodeId>) -> Result<Vec<NodeId>, String> {
+        let _ = (selector, root);
+        Err("this scene cannot list its nodes".into())
+    }
+    /// One view's facts ([`Screen::describe`]), without the platform's bounds.
+    fn describe(&self, id: NodeId) -> Result<TreeNode, String> {
+        let _ = id;
+        Err("this scene cannot list its nodes".into())
+    }
     /// The dialogs the app showed.
     fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String>;
     /// The oldest dialog not answered yet.
@@ -632,6 +645,12 @@ impl Scene for Model {
         hidden: bool,
     ) -> Result<Vec<TreeNode>, String> {
         self.lock().screen.snapshot(root, depth, hidden)
+    }
+    fn query(&self, selector: &str, root: Option<NodeId>) -> Result<Vec<NodeId>, String> {
+        self.lock().screen.query(selector, root)
+    }
+    fn describe(&self, id: NodeId) -> Result<TreeNode, String> {
+        self.lock().screen.describe(id)
     }
     fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
         Ok(self.lock().screen.dialogs().to_vec())
@@ -1186,9 +1205,28 @@ pub trait Native: Send + Sync {
     fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
         let _ = (keys, down);
         Err(
-            "holding keys (`keyboard.down` / `keyboard.up`) runs headless and on Linux for now"
+            "holding keys (`keyboard.down` / `keyboard.up`) runs headless, on Linux, macOS and Windows"
                 .into(),
         )
+    }
+    /// The mouse's left button goes down at `at` (a point of the content of
+    /// the window the pointer acts in) and stays down until
+    /// [`Native::pointer_up`], for a client that sends the pointer's actions
+    /// one by one. One that cannot refuses it.
+    fn pointer_down(&self, at: Point<Points>) -> Result<(), String> {
+        let _ = at;
+        Err("this platform cannot take a pointer button down on its own".into())
+    }
+    /// The pointer moves to `at`: a drag while the left button is down
+    /// ([`Native::pointer_down`]), a hover else.
+    fn pointer_move(&self, at: Point<Points>) -> Result<(), String> {
+        let _ = at;
+        Err("this platform cannot move the pointer on its own".into())
+    }
+    /// The mouse's left button goes up at `at`.
+    fn pointer_up(&self, at: Point<Points>) -> Result<(), String> {
+        let _ = at;
+        Err("this platform cannot let the pointer button go on its own".into())
     }
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);
@@ -1505,9 +1543,46 @@ pub struct Agent {
     viewport: Mutex<Option<Size<Points>>>,
     /// Where a `dragAndHold` left the pointer down.
     held: Mutex<Option<Point<Points>>>,
+    /// Where a `Pointer` sequence left the left button down (its last
+    /// point).
+    button: Mutex<Option<Point<Points>>>,
+    /// The modifiers a `Key` sequence holds.
+    modifiers: Mutex<Vec<String>>,
 }
 
+/// The names of the keys a key action holds down until its up; any other
+/// key is pressed when it goes down.
+const MODIFIERS: [&str; 5] = ["mod", "shift", "alt", "ctrl", "meta"];
+
 impl Agent {
+    /// A node as the snapshot answer carries it (the field names of
+    /// `nsh_devtools::SnapshotNode`), with the platform's bounds and focus.
+    fn node_json(&self, n: TreeNode, focused: Option<NodeId>) -> serde_json::Value {
+        let bounds = self
+            .native
+            .bounds(n.id)
+            .map(|b| [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]);
+        serde_json::json!({
+            "id": n.id,
+            "depth": n.depth,
+            "kind": n.kind,
+            "test_id": n.test_id,
+            "role": n.role,
+            "label": n.label,
+            "text": n.text,
+            "value": n.value,
+            "placeholder": n.placeholder,
+            "bounds": bounds,
+            "visible": n.visible,
+            "enabled": n.enabled,
+            "focused": focused == Some(n.id),
+            "selected": n.selected,
+            "checked": n.checked,
+            "scroll": n.scroll,
+            "recycled": n.recycled,
+        })
+    }
+
     /// An agent on the app `scene` sees, acting through `native`.
     pub fn new(scene: std::sync::Arc<dyn Scene>, native: Box<dyn Native>) -> Agent {
         Agent {
@@ -1515,6 +1590,8 @@ impl Agent {
             native,
             viewport: Mutex::new(None),
             held: Mutex::new(None),
+            button: Mutex::new(None),
+            modifiers: Mutex::new(Vec::new()),
         }
     }
 
@@ -1582,6 +1659,9 @@ impl Agent {
                     .and_then(|(_, at)| self.native.drop_files(at, uris))
                     .and_then(|()| self.settled()),
             ),
+            TestStep::Pointer { actions } => done(self.pointer(&actions)),
+            TestStep::Key { actions } => done(self.key_actions(&actions)),
+            TestStep::ReleaseInput => done(self.release_input()),
             TestStep::HoldKeys { keys, down } => done(
                 self.native
                     .hold_keys(&keys, down)
@@ -1640,35 +1720,20 @@ impl Agent {
             } => {
                 let focused = self.native.focused();
                 let nodes = self.scene.snapshot(root.as_deref(), depth, hidden)?;
-                let nodes: Vec<Value> = nodes
-                    .into_iter()
-                    .map(|n| {
-                        let bounds = self
-                            .native
-                            .bounds(n.id)
-                            .map(|b| [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]);
-                        serde_json::json!({
-                            "id": n.id,
-                            "depth": n.depth,
-                            "kind": n.kind,
-                            "test_id": n.test_id,
-                            "role": n.role,
-                            "label": n.label,
-                            "text": n.text,
-                            "value": n.value,
-                            "placeholder": n.placeholder,
-                            "bounds": bounds,
-                            "visible": n.visible,
-                            "enabled": n.enabled,
-                            "focused": focused == Some(n.id),
-                            "selected": n.selected,
-                            "checked": n.checked,
-                            "scroll": n.scroll,
-                            "recycled": n.recycled,
-                        })
-                    })
-                    .collect();
-                Ok(Value::Array(nodes))
+                Ok(Value::Array(
+                    nodes
+                        .into_iter()
+                        .map(|n| self.node_json(n, focused))
+                        .collect(),
+                ))
+            }
+            TestStep::Query { selector, root } => {
+                let ids = self.scene.query(&selector, root)?;
+                Ok(serde_json::json!({ "ids": ids }))
+            }
+            TestStep::Describe { id } => {
+                let node = self.scene.describe(id)?;
+                Ok(self.node_json(node, self.native.focused()))
             }
             TestStep::Dialogs => {
                 serde_json::to_value(self.scene.dialogs()?).map_err(|e| e.to_string())
@@ -1677,9 +1742,12 @@ impl Agent {
                 serde_json::to_value(self.scene.pending_dialog()?).map_err(|e| e.to_string())
             }
             TestStep::AnswerDialog { button } => done(self.answer_dialog(button.as_deref())),
-            TestStep::Screenshot => {
+            TestStep::Screenshot { node } => {
                 use base64::Engine as _;
-                let png = self.native.screenshot()?;
+                let mut png = self.native.screenshot()?;
+                if let Some(id) = node {
+                    png = self.crop_to_view(&png, id)?;
+                }
                 Ok(Value::from(
                     base64::engine::general_purpose::STANDARD.encode(png),
                 ))
@@ -1731,6 +1799,50 @@ impl Agent {
             }
             TestStep::Scene { query } => self.scene_query(query),
         }
+    }
+
+    /// The window's picture `png` cut down to view `id`'s bounds.
+    ///
+    /// The bounds are in points and the picture in pixels: the scale is the
+    /// picture's width over the viewport's. The cut is clamped to the
+    /// picture, so a view half off the window gives the half on it.
+    fn crop_to_view(&self, png: &[u8], id: NodeId) -> Result<Vec<u8>, String> {
+        // A removed view is stale, as for `describe`.
+        self.scene.describe(id)?;
+        let bounds = self
+            .native
+            .bounds(id)
+            .ok_or_else(|| format!("view {id} is not on screen"))?;
+        let (x, y) = (bounds.origin.x.0, bounds.origin.y.0);
+        let (width, height) = (bounds.size.width.0, bounds.size.height.0);
+        if !(width > 0.0 && height > 0.0) {
+            return Err("the view has no area".into());
+        }
+        let picture = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+            .map_err(|e| format!("cannot crop the picture: {e}"))?;
+        let viewport = self.native.viewport();
+        let scale_x = picture.width() as f32 / viewport.width.0.max(1.0);
+        let scale_y = picture.height() as f32 / viewport.height.0.max(1.0);
+        let left = (x * scale_x).round().max(0.0);
+        let top = (y * scale_y).round().max(0.0);
+        let right = ((x + width) * scale_x).round().min(picture.width() as f32);
+        let bottom = ((y + height) * scale_y)
+            .round()
+            .min(picture.height() as f32);
+        if right <= left || bottom <= top {
+            return Err("the view has no area".into());
+        }
+        let mut out = std::io::Cursor::new(Vec::new());
+        picture
+            .crop_imm(
+                left as u32,
+                top as u32,
+                (right - left) as u32,
+                (bottom - top) as u32,
+            )
+            .write_to(&mut out, image::ImageFormat::Png)
+            .map_err(|e| format!("cannot encode the cropped picture: {e}"))?;
+        Ok(out.into_inner())
     }
 
     /// Tells the scene the window's size when it changed.
@@ -2225,6 +2337,100 @@ impl Agent {
         self.settled()
     }
 
+    /// Takes a pointer sequence, each action at the platform in turn.
+    fn pointer(&self, actions: &[PointerAction]) -> Result<(), String> {
+        let at = |x: f32, y: f32| Point::new(Points(x), Points(y));
+        let mut result = Ok(());
+        for action in actions {
+            let step = match *action {
+                PointerAction::Down { x, y } => {
+                    let mut button = self.button.lock().unwrap();
+                    if button.is_some() {
+                        Err("the pointer's button is already down".to_owned())
+                    } else {
+                        let point = at(x, y);
+                        let done = self.native.pointer_down(point);
+                        if done.is_ok() {
+                            *button = Some(point);
+                        }
+                        done
+                    }
+                }
+                PointerAction::Move { x, y } => {
+                    let point = at(x, y);
+                    let done = self.native.pointer_move(point);
+                    if done.is_ok()
+                        && let Some(last) = self.button.lock().unwrap().as_mut()
+                    {
+                        *last = point;
+                    }
+                    done
+                }
+                PointerAction::Up { x, y } => {
+                    // An up without a down is a client cleaning up.
+                    if self.button.lock().unwrap().take().is_some() {
+                        self.native.pointer_up(at(x, y))
+                    } else {
+                        Ok(())
+                    }
+                }
+                PointerAction::Pause { ms } => {
+                    std::thread::sleep(Duration::from_millis(ms));
+                    Ok(())
+                }
+            };
+            if step.is_err() {
+                result = step;
+                break;
+            }
+        }
+        result.and_then(|()| self.settled())
+    }
+
+    /// Takes a key sequence: modifiers are held, other keys pressed.
+    fn key_actions(&self, actions: &[KeyAction]) -> Result<(), String> {
+        for action in actions {
+            match action {
+                KeyAction::Down { key } if MODIFIERS.contains(&key.as_str()) => {
+                    self.native.hold_keys(key, true)?;
+                    let mut held = self.modifiers.lock().unwrap();
+                    if !held.contains(key) {
+                        held.push(key.clone());
+                    }
+                }
+                KeyAction::Up { key } if MODIFIERS.contains(&key.as_str()) => {
+                    let was = {
+                        let mut held = self.modifiers.lock().unwrap();
+                        let before = held.len();
+                        held.retain(|k| k != key);
+                        held.len() != before
+                    };
+                    if was {
+                        self.native.hold_keys(key, false)?;
+                    }
+                }
+                KeyAction::Down { key } => self.native.press_keys(key)?,
+                // The press of a key that is not held has nothing to end.
+                KeyAction::Up { .. } => {}
+                KeyAction::Pause { ms } => std::thread::sleep(Duration::from_millis(*ms)),
+            }
+        }
+        self.settled()
+    }
+
+    /// Lets go of what a client's sequences left down: the left button at
+    /// its last point, and the held modifiers.
+    fn release_input(&self) -> Result<(), String> {
+        let button = self.button.lock().unwrap().take();
+        let up = button.map_or(Ok(()), |at| self.native.pointer_up(at));
+        let held = std::mem::take(&mut *self.modifiers.lock().unwrap());
+        for key in held {
+            self.native.hold_keys(&key, false)?;
+        }
+        up?;
+        self.settled()
+    }
+
     fn drop_held(&self) -> Result<(), String> {
         let at = self
             .held
@@ -2444,6 +2650,38 @@ mod tests {
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
         fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn pointer_down(&self, at: Point<Points>) -> Result<(), String> {
+            self.1
+                .lock()
+                .unwrap()
+                .push(format!("down({},{})", at.x.0, at.y.0));
+            Ok(())
+        }
+        fn pointer_move(&self, at: Point<Points>) -> Result<(), String> {
+            self.1
+                .lock()
+                .unwrap()
+                .push(format!("move({},{})", at.x.0, at.y.0));
+            Ok(())
+        }
+        fn pointer_up(&self, at: Point<Points>) -> Result<(), String> {
+            self.1
+                .lock()
+                .unwrap()
+                .push(format!("up({},{})", at.x.0, at.y.0));
+            Ok(())
+        }
+        fn press_keys(&self, keys: &str) -> Result<(), String> {
+            self.1.lock().unwrap().push(format!("press_keys({keys})"));
+            Ok(())
+        }
+        fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
+            self.1
+                .lock()
+                .unwrap()
+                .push(format!("hold_keys({keys},{down})"));
+            Ok(())
+        }
         fn type_text(&self, text: &str) {
             self.1.lock().unwrap().push(format!("type {text}"));
         }
@@ -2618,7 +2856,12 @@ mod tests {
             false
         }
         fn screenshot(&self) -> Result<Vec<u8>, String> {
-            Ok(Vec::new())
+            // Twice the viewport's points: a 2x display.
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::new(640, 1280)
+                .write_to(&mut out, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+            Ok(out.into_inner())
         }
         fn resize(&self, _: Points, _: Points) -> Result<(), String> {
             Ok(())
@@ -2627,6 +2870,81 @@ mod tests {
             Ok(())
         }
         fn quit(&self) {}
+    }
+
+    /// An agent over [`Page`]'s model, its view 4 at `target` points.
+    fn page_agent(target: f32) -> (Agent, Arc<Model>) {
+        use nsh_core::{MountItem, ViewKind};
+        let model = Arc::new(Model::default());
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Scroll,
+                },
+                MountItem::Create {
+                    id: 4,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        });
+        let page = Page {
+            offset: Mutex::new(0.0),
+            target,
+            undone: Vec::new(),
+            landed: Arc::new(Mutex::new(Vec::new())),
+        };
+        (Agent::new(model.clone(), Box::new(page)), model)
+    }
+
+    #[test]
+    fn node_screenshot_is_cropped_to_its_bounds() {
+        // View 4 is 320 x 40 points at (0, 10); the picture is 2x.
+        let (agent, _model) = page_agent(10.0);
+        let StepOutcome::Done { value } = agent.take(TestStep::Screenshot { node: Some(4) }) else {
+            panic!("the crop failed");
+        };
+        use base64::Engine as _;
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(value.as_str().unwrap())
+            .unwrap();
+        let cropped = image::load_from_memory(&png).unwrap();
+        assert_eq!((cropped.width(), cropped.height()), (640, 80));
+        // Without a node the picture is the window's.
+        let StepOutcome::Done { value } = agent.take(TestStep::Screenshot { node: None }) else {
+            panic!("the screenshot failed");
+        };
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(value.as_str().unwrap())
+            .unwrap();
+        let whole = image::load_from_memory(&png).unwrap();
+        assert_eq!((whole.width(), whole.height()), (640, 1280));
+    }
+
+    #[test]
+    fn node_screenshot_of_a_stale_view_fails() {
+        let (agent, model) = page_agent(10.0);
+        model.apply(&MountBatch {
+            items: vec![nsh_core::MountItem::Delete { id: 4 }],
+        });
+        for id in [4, 77] {
+            let StepOutcome::Failed { message } =
+                agent.take(TestStep::Screenshot { node: Some(id) })
+            else {
+                panic!("view {id} is stale");
+            };
+            assert!(message.starts_with("stale: "), "{message}");
+        }
     }
 
     #[test]
@@ -2699,6 +3017,10 @@ mod tests {
     /// handler) > 6 (text "Go"), and 8 (collapsed, a `display: none` view)
     /// in 2.
     fn snapshot_agent() -> Agent {
+        snapshot_agent_and_model().0
+    }
+
+    fn snapshot_agent_and_model() -> (Agent, Arc<Model>) {
         use nsh_core::{EventMask, MountItem, ViewKind, ViewProps};
         let frame = |id, w, h| MountItem::Frame {
             id,
@@ -2771,6 +3093,65 @@ mod tests {
             ],
         });
         let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let agent = Agent::new(
+            model.clone(),
+            Box::new(Fake(
+                engine.control(),
+                Arc::new(Mutex::new(Vec::new())),
+                None,
+            )),
+        );
+        (agent, model)
+    }
+
+    /// 2 > 10 (button "Go") and 4 (button "Go"), in that order: the upper
+    /// view has the larger id.
+    fn two_buttons_agent() -> Agent {
+        use nsh_core::{EventMask, MountItem, ViewKind, ViewProps};
+        let props = ViewProps {
+            accessibility: nsh_core::Accessibility {
+                label: Some("Go".into()),
+                role: nsh_core::AccessibilityRole::Button,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut events = EventMask::default();
+        events.set(EventKind::Press, true);
+        let frame = |id, y| MountItem::Frame {
+            id,
+            frame: Bounds::new(point(px(0.0), px(y)), size(px(100.0), px(40.0))),
+        };
+        let insert = |parent, child| MountItem::Insert {
+            parent,
+            child,
+            before: None,
+        };
+        let mut items = vec![
+            MountItem::Create {
+                id: 2,
+                kind: ViewKind::View,
+            },
+            frame(2, 0.0),
+        ];
+        for (id, y) in [(10, 0.0), (4, 40.0)] {
+            items.push(MountItem::Create {
+                id,
+                kind: ViewKind::View,
+            });
+            items.push(frame(id, y));
+            items.push(MountItem::ViewProps {
+                id,
+                props: Box::new(props.clone()),
+            });
+            items.push(MountItem::Events { id, events });
+        }
+        items.push(insert(1, 2));
+        items.push(insert(2, 10));
+        items.push(insert(2, 4));
+        let model = Arc::new(Model::default());
+        model.apply(&MountBatch { items });
+        let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
         Agent::new(
             model,
             Box::new(Fake(
@@ -2796,6 +3177,87 @@ mod tests {
             panic!("{outcome:?}");
         };
         value.as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn query_returns_matching_ids_in_screen_order() {
+        let agent = snapshot_agent();
+        assert_eq!(
+            query_of(&agent, "label:Go", None),
+            serde_json::json!({ "ids": [4] })
+        );
+        assert_eq!(
+            query_of(&agent, "label:Nope", None),
+            serde_json::json!({ "ids": [] })
+        );
+        // Top to bottom, not by id: the upper button has the larger id.
+        let agent = two_buttons_agent();
+        assert_eq!(
+            query_of(&agent, "label:Go", None),
+            serde_json::json!({ "ids": [10, 4] })
+        );
+    }
+
+    #[test]
+    fn query_under_a_root_only_sees_its_descendants() {
+        let agent = snapshot_agent();
+        assert_eq!(
+            query_of(&agent, "text:Go", Some(4)),
+            serde_json::json!({ "ids": [6] })
+        );
+        // The root itself is not its own descendant.
+        assert_eq!(
+            query_of(&agent, "label:Go", Some(4)),
+            serde_json::json!({ "ids": [] })
+        );
+        let outcome = agent.take(TestStep::Query {
+            selector: "label:Go".into(),
+            root: Some(99),
+        });
+        let StepOutcome::Failed { message } = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(message.starts_with("stale: "), "{message}");
+    }
+
+    #[test]
+    fn describe_has_the_snapshot_fields() {
+        let agent = snapshot_agent();
+        let outcome = agent.take(TestStep::Describe { id: 4 });
+        let StepOutcome::Done { value } = outcome else {
+            panic!("{outcome:?}");
+        };
+        let from_snapshot = snapshot_of(&agent, Some("label:Go"), Some(0), true);
+        assert_eq!(value, from_snapshot[0]);
+    }
+
+    #[test]
+    fn describe_of_a_removed_view_is_stale() {
+        let (agent, model) = snapshot_agent_and_model();
+        assert!(matches!(
+            agent.take(TestStep::Describe { id: 4 }),
+            StepOutcome::Done { .. }
+        ));
+        model.apply(&MountBatch {
+            items: vec![nsh_core::MountItem::Delete { id: 4 }],
+        });
+        for id in [4, 77] {
+            let StepOutcome::Failed { message } = agent.take(TestStep::Describe { id }) else {
+                panic!("view {id} is stale");
+            };
+            assert!(message.starts_with("stale: "), "{message}");
+        }
+    }
+
+    fn query_of(agent: &Agent, selector: &str, root: Option<u32>) -> serde_json::Value {
+        let outcome = agent.take(TestStep::Query {
+            selector: selector.into(),
+            root,
+        });
+        let StepOutcome::Done { value } = outcome else {
+            panic!("{outcome:?}");
+        };
+        value
     }
 
     #[test]
@@ -3012,5 +3474,111 @@ mod tests {
         ));
         assert!(typed.lock().unwrap().is_empty());
         drop(engine);
+    }
+
+    /// An agent on an empty model whose platform records its calls.
+    fn recording_agent() -> (Agent, Arc<Mutex<Vec<String>>>) {
+        let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new(
+            Arc::new(Model::default()),
+            Box::new(Fake(engine.control(), log.clone(), None)),
+        );
+        (agent, log)
+    }
+
+    fn done() -> StepOutcome {
+        StepOutcome::Done {
+            value: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn pointer_sequence_reaches_native_in_order() {
+        let (agent, log) = recording_agent();
+        let outcome = agent.take(TestStep::Pointer {
+            actions: vec![
+                PointerAction::Down { x: 10.0, y: 20.0 },
+                PointerAction::Move { x: 30.0, y: 20.0 },
+                PointerAction::Up { x: 30.0, y: 20.0 },
+            ],
+        });
+        assert_eq!(outcome, done());
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["down(10,20)", "move(30,20)", "up(30,20)"]
+        );
+    }
+
+    #[test]
+    fn pause_waits() {
+        let (agent, log) = recording_agent();
+        let start = Instant::now();
+        let outcome = agent.take(TestStep::Pointer {
+            actions: vec![PointerAction::Pause { ms: 60 }],
+        });
+        assert_eq!(outcome, done());
+        assert!(start.elapsed() >= Duration::from_millis(60));
+        assert!(log.lock().unwrap().is_empty());
+        let start = Instant::now();
+        agent.take(TestStep::Key {
+            actions: vec![KeyAction::Pause { ms: 60 }],
+        });
+        assert!(start.elapsed() >= Duration::from_millis(60));
+    }
+
+    #[test]
+    fn key_modifiers_hold_and_other_keys_press() {
+        let (agent, log) = recording_agent();
+        let key = |k: &str| k.to_owned();
+        let outcome = agent.take(TestStep::Key {
+            actions: vec![
+                KeyAction::Down { key: key("shift") },
+                KeyAction::Down { key: key("a") },
+                KeyAction::Up { key: key("a") },
+                KeyAction::Up { key: key("shift") },
+            ],
+        });
+        assert_eq!(outcome, done());
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                "hold_keys(shift,true)",
+                "press_keys(a)",
+                "hold_keys(shift,false)"
+            ]
+        );
+    }
+
+    #[test]
+    fn release_lets_go_of_a_held_button() {
+        let (agent, log) = recording_agent();
+        agent.take(TestStep::Pointer {
+            actions: vec![
+                PointerAction::Down { x: 1.0, y: 2.0 },
+                PointerAction::Move { x: 5.0, y: 6.0 },
+            ],
+        });
+        agent.take(TestStep::Key {
+            actions: vec![KeyAction::Down { key: "ctrl".into() }],
+        });
+        log.lock().unwrap().clear();
+        assert_eq!(agent.take(TestStep::ReleaseInput), done());
+        // The button goes up where the pointer was last, the modifier goes.
+        assert_eq!(*log.lock().unwrap(), ["up(5,6)", "hold_keys(ctrl,false)"]);
+        log.lock().unwrap().clear();
+        assert_eq!(agent.take(TestStep::ReleaseInput), done());
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_second_down_without_an_up_is_refused() {
+        let (agent, log) = recording_agent();
+        let down = || TestStep::Pointer {
+            actions: vec![PointerAction::Down { x: 1.0, y: 1.0 }],
+        };
+        assert_eq!(agent.take(down()), done());
+        assert!(matches!(agent.take(down()), StepOutcome::Failed { .. }));
+        assert_eq!(*log.lock().unwrap(), ["down(1,1)"]);
     }
 }

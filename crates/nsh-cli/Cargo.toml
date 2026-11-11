@@ -26,7 +26,7 @@ nsh-i18n = { workspace = true, features = ["build"] }
 nsh-engine = { workspace = true, features = ["js"] }
 nsh-dev = { workspace = true, features = ["server"] }
 # The client of an app's DevTools endpoint: `nsh test --target macos` drives the app over it.
-nsh-devtools = { workspace = true, features = ["client"] }
+nsh-devtools = { workspace = true, features = ["client", "xpath"] }
 nsh-js = { workspace = true, features = ["zlib", "crypto"] }
 nsh-base = { workspace = true, features = ["editor", "emoji-picker", "highlight", "plot", "rich-editor", "term"] }
 nsh-package.workspace = true
@@ -56,6 +56,9 @@ image.workspace = true
 wasmparser.workspace = true
 # `--asset-url`: checked as an http(s) URL, its origin allowed to `connect-src`.
 url.workspace = true
+# `nsh devtools webdriver`: the W3C WebDriver server over HTTP.
+axum.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "time", "macros"] }
 
 [build-dependencies]
 serde_json.workspace = true
@@ -78,3 +81,5 @@ windows-sys = { workspace = true, features = [
 syntect.workspace = true
 # Pages loaded at the app's paths resolve their files as browsers do.
 url.workspace = true
+# `ServiceExt::oneshot` sends the WebDriver server's tests' requests to its router.
+tower.workspace = true

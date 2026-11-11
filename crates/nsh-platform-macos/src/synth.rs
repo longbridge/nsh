@@ -51,10 +51,6 @@ fn nanoseconds(event: &NSEvent) -> i64 {
     (event.timestamp() * 1e9).round() as i64
 }
 
-pub(crate) fn mouse(window: &NSWindow, kind: NSEventType, x: f64, y: f64, clicks: isize) {
-    mouse_with(window, kind, x, y, clicks, NSEventModifierFlags::empty());
-}
-
 /// A mouse event of `window` at `(x, y)` (content points).
 pub(crate) fn mouse_event(
     window: &NSWindow,

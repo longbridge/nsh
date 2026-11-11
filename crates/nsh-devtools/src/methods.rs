@@ -148,6 +148,20 @@ pub const METHODS: &[MethodSpec] = &[
         "Holds or releases keys.",
     ),
     spec(
+        "Input.pointer",
+        "pointer",
+        Action,
+        None,
+        "Takes a sequence of pointer actions (down, move, up, pause) at points of the window.",
+    ),
+    spec(
+        "Input.key",
+        "key",
+        Action,
+        None,
+        "Takes a sequence of key actions (down, up, pause) by `nsh/keymap` names.",
+    ),
+    spec(
         "Input.dragAndHold",
         "drag_and_hold",
         Action,
@@ -317,6 +331,20 @@ pub const METHODS: &[MethodSpec] = &[
         "The node tree in tree order: ids, kinds, labels, bounds and states.",
     ),
     spec(
+        "Tree.query",
+        "query",
+        Query,
+        None,
+        "The ids of the views the selector matches, in screen order.",
+    ),
+    spec(
+        "Tree.describe",
+        "describe",
+        Query,
+        None,
+        "One view's facts by id; a view gone from the tree is stale, a recycled list cell answers with `recycled: true`.",
+    ),
+    spec(
         "Tree.count",
         "count",
         Query,
@@ -356,7 +384,7 @@ pub const METHODS: &[MethodSpec] = &[
         "screenshot",
         Query,
         None,
-        "A screenshot of the app's window.",
+        "A screenshot of the app's window; with `node`, cropped to that view.",
     ),
     spec(
         "Capture.windowScreenshot",

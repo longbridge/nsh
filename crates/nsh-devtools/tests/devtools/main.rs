@@ -4,3 +4,4 @@ mod console;
 mod endpoint;
 mod methods;
 mod tree;
+mod xml;

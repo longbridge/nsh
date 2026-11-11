@@ -749,7 +749,7 @@ impl Driver for Remote {
     }
     fn screenshot(&mut self) -> Result<Vec<u8>, String> {
         use base64::Engine as _;
-        let png: String = self.query(TestStep::Screenshot)?;
+        let png: String = self.query(TestStep::Screenshot { node: None })?;
         base64::engine::general_purpose::STANDARD
             .decode(png)
             .map_err(|e| format!("the host sent a broken picture: {e}"))

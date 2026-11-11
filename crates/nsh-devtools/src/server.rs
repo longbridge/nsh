@@ -39,8 +39,8 @@ use crate::{
     description::description,
     methods::{self, Kind, METHODS, PRIVILEGED},
     protocol::{
-        ERR_BAD_PARAMS, ERR_INPUT_LOCKED, ERR_NOT_STARTED, ERR_STEP_FAILED, ErrorBody, Event,
-        Request, Response,
+        ERR_BAD_PARAMS, ERR_INPUT_LOCKED, ERR_NOT_STARTED, ERR_STALE, ERR_STEP_FAILED, ErrorBody,
+        Event, Request, Response,
     },
 };
 
@@ -250,10 +250,17 @@ impl Endpoint {
             std::fs::write(&tmp, format!("{url}\n"))?;
             std::fs::rename(&tmp, file)?;
         }
-        if generated {
-            println!("nsh-devtools listening on {url} token={token}");
-        } else {
-            println!("nsh-devtools listening on {url}");
+        // `println!` panics on a closed stdout (the launcher died): the
+        // announcement is best effort.
+        {
+            use io::Write as _;
+            let mut out = io::stdout().lock();
+            let _ = if generated {
+                writeln!(out, "nsh-devtools listening on {url} token={token}")
+            } else {
+                writeln!(out, "nsh-devtools listening on {url}")
+            };
+            let _ = out.flush();
         }
         let shared = Arc::new(Shared {
             handler,
@@ -399,6 +406,9 @@ fn refuse(status: u16) -> ErrorResponse {
 fn serve(shared: &Arc<Shared>, stream: TcpStream) {
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    // A client that stops reading fails its next write instead of letting
+    // the queued frames grow: the connection ends and `Cleanup` closes it.
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
     // The closure's signature is tungstenite's callback type.
     #[allow(clippy::result_large_err)]
     let check =
@@ -470,9 +480,20 @@ fn run(
 }
 
 fn release_input(shared: &Shared, conn: u64) {
-    let mut input = lock(&shared.input);
-    if *input == Some(conn) {
-        *input = None;
+    let held = {
+        let mut input = lock(&shared.input);
+        let held = *input == Some(conn);
+        if held {
+            *input = None;
+        }
+        held
+    };
+    // A client that dies mid-drag leaves the button down: let go of it
+    // before anyone else's input.
+    if held {
+        shared
+            .handler
+            .step(TestStep::ReleaseInput, Box::new(|_| {}));
     }
 }
 
@@ -687,7 +708,15 @@ fn step(
             // A connection that closed before the answer gets none.
             answer.respond(&match outcome {
                 Ok(value) => Response::ok(id, value),
-                Err(message) => Response::err(id, ErrorBody::new(ERR_STEP_FAILED, message)),
+                Err(message) => {
+                    // The agent marks a view gone from the tree with `stale: `.
+                    let code = if message.starts_with("stale: ") {
+                        ERR_STALE
+                    } else {
+                        ERR_STEP_FAILED
+                    };
+                    Response::err(id, ErrorBody::new(code, message))
+                }
             });
         }),
     );

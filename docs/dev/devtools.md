@@ -91,6 +91,86 @@ To add a method:
    checks that every sample maps to its method and back, and that every row has a sample.
 4. The description picks the row up by itself; check `Protocol.describe` lists it.
 
+## WebDriver
+
+`nsh devtools webdriver` (`crates/nsh-cli/src/devtools/webdriver/`) is a W3C WebDriver HTTP server over the
+protocol, so WebdriverIO, Selenium and the Appium clients drive an NSH app as they drive any other. It is a layer
+of the CLI like the MCP server: each WebDriver command is a method of the protocol on the session of one launched
+app, and the server adds nothing to the endpoint. An Appium server driver can proxy onto it later. The server
+refuses what a web page in the user's browser could send (`guard`): any request with an `Origin` header (403),
+any whose `Host` is not its own loopback address and port (403, against DNS rebinding), and a `POST` that is not
+`application/json` (400).
+
+| File | Holds |
+|---|---|
+| `mod.rs` | the command's `run`, the launcher (`HostLauncher`: `launch_devtools` for an entry on the development host or a packaged app) |
+| `server.rs` | the routes, the one session, new / delete session, timeouts, the loopback check, `guard` (below) |
+| `session.rs` | the capabilities (`Caps`) and the timeouts |
+| `element.rs` | find strategies, element commands, stale detection |
+| `actions.rs` | actions, screenshot, page source, window, the `execute` whitelist |
+| `keys.rs` | WebDriver's special keys (Private Use characters) as `nsh/keymap` names |
+| `error.rs` | WebDriver's error answers and the map from protocol errors |
+
+### Mapping
+
+| WebDriver | Protocol |
+|---|---|
+| new session | `launch_devtools` with `appium:app` and `nsh:options` (`storage`, `environment`), then `Session.setup`, `start`, `ready` |
+| delete session | `Session.release`, `Session.quit`; the host is dropped and the app's data goes |
+| find (`id`, `accessibility id`, `-nsh selector`) | `Tree.query` with `id:<value>`, `label:<value>` or the selector as written |
+| find (`class name`, `xpath`) | `Tree.snapshot` filtered by node kind, or rendered as XML (`nsh_devtools::xml`) and evaluated in the server |
+| click, clear | `Input.press`, `Input.clear` on `view:<id>` |
+| send keys | `Input.type` for text; `Input.key` for special keys, after `Input.type` with empty text focused the view |
+| text, name, attribute, property, rect, displayed, enabled, selected | `Tree.describe` (name: the node kind; text: text, else value, else label) |
+| actions | `Input.pointer`, `Input.key`: consecutive actions of one source kind go in one call |
+| screenshot, element screenshot | `Capture.screenshot` (with `node` for an element) |
+| page source | `Tree.snapshot` rendered as XML |
+| window, handles, rect | one window, `main`; its rect is the root view's size |
+| `execute/sync` | `nsh: console` (`Console.query`), `nsh: errors` (`Console.takeErrors`), `nsh: ready` (`Session.ready`), `nsh: colorScheme` (`Environment.setColorScheme`) |
+
+### One session per server
+
+The server holds one app: `POST /session` while another is open or starting answers `session not created`;
+`GET /status` reports `ready` accordingly. The server is a client of the app's input lock, so a command line client
+can read the app while a script drives it. Ending the server (Ctrl-C) ends the session and quits its app. `--host`
+accepts loopback addresses only.
+
+The server ends the builds and hosts it started with it. On Windows it puts itself in a job object that kills its
+processes when it closes (`run::KillOnClose::current_process`), so a server killed with `TerminateProcess`
+(`Stop-Process -Force`) takes its `cargo build` and hosts along. Ctrl-C and SIGTERM end them on the other systems
+(`ui::capture_all` kills the build it waits for once a stop is requested). A server killed hard on macOS or Linux
+(`kill -9`) can leave a build running: it finishes alone, or end it by hand.
+
+### Elements
+
+An element id is the view's id. Every element command asks `Tree.describe` first: a view that left the tree is
+`stale element reference`. A list cell is recycled with its id kept, so a find remembers the `testID` and text it saw
+and a cell that shows others is stale too. The implicit timeout makes a find poll (every 50 ms) until the deadline.
+
+### Errors
+
+| Protocol error | WebDriver error (HTTP status) |
+|---|---|
+| `ERR_DEVTOOLS_STALE` | `stale element reference` (404) |
+| `ERR_DEVTOOLS_BAD_PARAMS` | `invalid argument` (400) |
+| a client timeout, or a step failure that says it timed out | `timeout` (500) |
+| a step failure that names a selector | `invalid selector` (400) |
+| anything else | `unknown error` (500) |
+
+The server's own answers: `session not created`, `invalid session id`, `no such element`, `unknown command`,
+`unknown method`, `unsupported operation` (window resizing, scripts, `execute/async`, wheel input) and
+`move target out of bounds`. A body is `{"value":{"error","message","stacktrace"}}`.
+
+### Adding a command
+
+1. Add the route to the file of its kind (`server.rs` for sessions, `element.rs`, `actions.rs`); a handler takes
+   `Server::current(sid)` and runs the blocking `Session` calls inside `blocking`.
+2. Make it call protocol methods only; when the protocol lacks one, add it to the protocol first (the table above
+   is the list of what the server needed, and a workaround here belongs in the protocol).
+3. Map a failure through `WdError` (`From<ErrorBody>`), and add a test with the fake `Session` of the file's tests
+   (`cargo test -p nsh-cli devtools_webdriver`).
+4. Add the command to the mapping table here and to `website/docs/devtools.md` and its `zh-CN` page.
+
 ## Platforms
 
 macOS and Windows serve the endpoint. `nsh test --target macos|windows` runs the apps over it (also `--jobs`,

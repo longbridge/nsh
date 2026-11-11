@@ -15,6 +15,7 @@ workspace = true
 [features]
 server = ["dep:tungstenite", "dep:getrandom"]
 client = ["dep:tungstenite"]
+xpath = ["dep:sxd-document", "dep:sxd-xpath"]
 
 [dependencies]
 nsh-dev.workspace = true
@@ -23,7 +24,9 @@ serde.workspace = true
 serde_json.workspace = true
 tungstenite = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
+sxd-document = { workspace = true, optional = true }
+sxd-xpath = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Enables both sides for the endpoint tests.
-nsh-devtools = { path = ".", features = ["server", "client"] }
+nsh-devtools = { path = ".", features = ["server", "client", "xpath"] }

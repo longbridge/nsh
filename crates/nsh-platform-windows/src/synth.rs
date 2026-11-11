@@ -17,7 +17,8 @@ use crate::{
 
 /// A pointer event of the mouse's `button` (0: primary, 3: back) at `x`,
 /// `y` (points, root coordinates), with the buttons `held` after it (bit
-/// `n` for button `n`, as a mouse message's `wparam` tells them).
+/// `n` for button `n`, as a mouse message's `wparam` tells them), the
+/// keyboard's `modifiers` down.
 pub(crate) fn pointer(
     surface: &Rc<Surface>,
     kind: PointerKind,
@@ -25,6 +26,7 @@ pub(crate) fn pointer(
     y: f32,
     button: u8,
     held: u8,
+    modifiers: Modifiers,
 ) {
     crate::input::pointer(
         surface,
@@ -38,7 +40,7 @@ pub(crate) fn pointer(
             touch: false,
             pen: false,
             time: surface.clock(),
-            modifiers: Modifiers::default(),
+            modifiers,
             clicks: 1,
         },
     );

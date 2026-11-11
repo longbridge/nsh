@@ -1,4 +1,4 @@
-use nsh_dev::protocol::{ClockChange, SceneQuery, TestFile, TestStep};
+use nsh_dev::protocol::{ClockChange, KeyAction, PointerAction, SceneQuery, TestFile, TestStep};
 use nsh_devtools::{
     PROTOCOL_VERSION,
     description::description,
@@ -60,6 +60,27 @@ fn samples() -> Vec<TestStep> {
             keys: "shift".into(),
             down: true,
         },
+        TestStep::Pointer {
+            actions: vec![
+                PointerAction::Down { x: 10.0, y: 20.5 },
+                PointerAction::Move { x: 30.0, y: 20.5 },
+                PointerAction::Pause { ms: 25 },
+                PointerAction::Up { x: 30.0, y: 20.5 },
+            ],
+        },
+        TestStep::Key {
+            actions: vec![
+                KeyAction::Down {
+                    key: "shift".into(),
+                },
+                KeyAction::Down { key: "a".into() },
+                KeyAction::Pause { ms: 5 },
+                KeyAction::Up { key: "a".into() },
+                KeyAction::Up {
+                    key: "shift".into(),
+                },
+            ],
+        },
         TestStep::DragAndHold {
             selector: selector(),
             x: 4.5,
@@ -109,6 +130,11 @@ fn samples() -> Vec<TestStep> {
             depth: Some(3),
             hidden: true,
         },
+        TestStep::Query {
+            selector: selector(),
+            root: Some(4),
+        },
+        TestStep::Describe { id: 4 },
         TestStep::Count {
             selector: selector(),
         },
@@ -124,7 +150,8 @@ fn samples() -> Vec<TestStep> {
         TestStep::SpanStyle {
             selector: selector(),
         },
-        TestStep::Screenshot,
+        TestStep::Screenshot { node: None },
+        TestStep::Screenshot { node: Some(4) },
         TestStep::WindowScreenshot { id: "main".into() },
         TestStep::WindowState { id: "main".into() },
         TestStep::PressWindowClose { id: "main".into() },
@@ -163,6 +190,20 @@ fn every_step_round_trips_through_its_method() {
 }
 
 #[test]
+fn a_screenshot_without_a_node_is_the_whole_window() {
+    for params in [json!({}), json!(null)] {
+        assert_eq!(
+            step_of("Capture.screenshot", params).unwrap(),
+            TestStep::Screenshot { node: None }
+        );
+    }
+    assert_eq!(
+        serde_json::from_value::<TestStep>(json!({ "step": "screenshot" })).unwrap(),
+        TestStep::Screenshot { node: None }
+    );
+}
+
+#[test]
 fn unmapped_steps_have_no_method() {
     assert!(
         method_of(&TestStep::Scene {
@@ -170,6 +211,8 @@ fn unmapped_steps_have_no_method() {
         })
         .is_none()
     );
+    // The release the endpoint sends itself is no method.
+    assert!(method_of(&TestStep::ReleaseInput).is_none());
 }
 
 #[test]

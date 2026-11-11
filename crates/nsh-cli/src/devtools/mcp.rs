@@ -353,7 +353,15 @@ impl Server {
         let entry = crate::entry::resolve(&self.app_path(app)).map_err(|e| format!("{e:#}"))?;
         let host_exe = crate::test_host::prepare(target).map_err(|e| format!("{e:#}"))?;
         let work = entry.parent().unwrap_or(Path::new(".")).join(".nsh");
-        let host = crate::test_host::launch_devtools(target, &host_exe, &entry, &work)?;
+        let host = crate::test_host::launch_devtools(
+            target,
+            crate::test_host::Launchee::Entry {
+                host: &host_exe,
+                entry: &entry,
+                work: &work,
+            },
+            &Default::default(),
+        )?;
         let pid = host.pid();
         self.current = Some(Current {
             pid,

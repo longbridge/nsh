@@ -101,7 +101,7 @@ pub(crate) enum DevtoolsCommand {
     Shot {
         /// Where to write the PNG.
         path: PathBuf,
-        /// Only this view (a selector), cut out of the window.
+        /// Only this view (a selector), cut out of the window by the host.
         #[arg(long, value_name = "SEL")]
         node: Option<String>,
     },
@@ -152,6 +152,17 @@ pub(crate) enum DevtoolsCommand {
     /// Serve the commands to an AI agent as an MCP server on standard input
     /// and output (JSON-RPC, MCP 2025-06-18).
     Mcp,
+    /// Serve apps over the W3C WebDriver protocol (Appium and WebDriver
+    /// clients; one session at a time; experimental: it may change). Listens
+    /// on loopback only; `--app-dir` resolves a relative `appium:app`.
+    Webdriver {
+        /// The port to listen on.
+        #[arg(long, default_value_t = 4723)]
+        port: u16,
+        /// The loopback address to listen on.
+        #[arg(long, default_value = "127.0.0.1", value_name = "IP")]
+        host: String,
+    },
 }
 
 /// What a command or tool talks to: the protocol of one app.
@@ -225,48 +236,32 @@ pub(crate) fn snapshot_text(
     Ok(render_compact(&nodes))
 }
 
-/// A PNG of the app's window, or of the view `node` names cut out of it.
-///
-/// The view's bounds are in points and the picture in pixels: the scale is
-/// the picture's width over the root view's.
+/// A PNG of the app's window, or of the view the selector `node` names cut
+/// out of it by the host.
 pub(crate) fn screenshot_png(session: &dyn Session, node: Option<&str>) -> Result<Vec<u8>, String> {
+    let params = match node {
+        None => Value::Null,
+        Some(selector) => {
+            let found = session
+                .call("Tree.query", json!({ "selector": selector }))
+                .map_err(|e| e.message)?;
+            let id = found["ids"]
+                .as_array()
+                .and_then(|ids| ids.first())
+                .and_then(Value::as_u64)
+                .ok_or_else(|| format!("no view matches {selector}"))?;
+            json!({ "node": id })
+        }
+    };
     let answer = session
-        .call("Capture.screenshot", Value::Null)
+        .call("Capture.screenshot", params)
         .map_err(|e| e.message)?;
     let text = answer
         .as_str()
         .ok_or("the screenshot is not a base64 string")?;
-    let png = base64::engine::general_purpose::STANDARD
+    base64::engine::general_purpose::STANDARD
         .decode(text)
-        .map_err(|e| format!("the screenshot is not base64: {e}"))?;
-    let Some(node) = node else {
-        return Ok(png);
-    };
-    let bounds_of = |root: Option<&str>| -> Result<Option<[f32; 4]>, String> {
-        let answer = session
-            .call(
-                "Tree.snapshot",
-                json!({ "root": root, "depth": 0, "hidden": false }),
-            )
-            .map_err(|e| e.message)?;
-        let nodes: Vec<SnapshotNode> = serde_json::from_value(answer).map_err(|e| e.to_string())?;
-        Ok(nodes.first().and_then(|n| n.bounds))
-    };
-    let (Some(view), Some(screen)) = (bounds_of(Some(node))?, bounds_of(None)?) else {
-        return Err(format!("no bounds for {node}"));
-    };
-    let picture = image::load_from_memory(&png).map_err(|e| e.to_string())?;
-    let scale = picture.width() as f32 / screen[2].max(1.0);
-    let x = (((view[0] - screen[0]) * scale).max(0.0) as u32).min(picture.width() - 1);
-    let y = (((view[1] - screen[1]) * scale).max(0.0) as u32).min(picture.height() - 1);
-    let w = ((view[2] * scale).round() as u32).clamp(1, picture.width() - x);
-    let h = ((view[3] * scale).round() as u32).clamp(1, picture.height() - y);
-    let mut out = std::io::Cursor::new(Vec::new());
-    picture
-        .crop_imm(x, y, w, h)
-        .write_to(&mut out, image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
-    Ok(out.into_inner())
+        .map_err(|e| format!("the screenshot is not base64: {e}"))
 }
 
 /// One log line as text: `time level [target] message`.
@@ -439,6 +434,7 @@ pub(crate) fn run(args: DevtoolsArgs) -> anyhow::Result<()> {
     match args.command {
         DevtoolsCommand::Launch { app, target } => launch(&app, target, json),
         DevtoolsCommand::Mcp => super::mcp::serve(&app_dir),
+        DevtoolsCommand::Webdriver { host, port } => super::webdriver::run(&host, port, &app_dir),
         DevtoolsCommand::Ls => {
             let sessions = live_sessions(&app_dir);
             if json {
@@ -474,8 +470,16 @@ fn launch(app: &Path, target: Target, json: bool) -> anyhow::Result<()> {
     let _stop = ui::Stoppable::new();
     let host_exe = crate::test_host::prepare(target)?;
     let step = ui::Step::start(format!("starting {}", ui::path(app)));
-    let mut host = crate::test_host::launch_devtools(target, &host_exe, app, &app_dir.join(".nsh"))
-        .map_err(|e| anyhow!(e))?;
+    let mut host = crate::test_host::launch_devtools(
+        target,
+        crate::test_host::Launchee::Entry {
+            host: &host_exe,
+            entry: app,
+            work: &app_dir.join(".nsh"),
+        },
+        &Default::default(),
+    )
+    .map_err(|e| anyhow!(e))?;
     step.done(format!("{} is running", ui::path(app)));
     let session = SessionFile {
         pid: std::process::id(),
@@ -603,7 +607,10 @@ fn act(client: &Client, command: DevtoolsCommand, json: bool) -> anyhow::Result<
             }
             print_answer("closed".into(), &json!({}))?;
         }
-        DevtoolsCommand::Launch { .. } | DevtoolsCommand::Ls | DevtoolsCommand::Mcp => {
+        DevtoolsCommand::Launch { .. }
+        | DevtoolsCommand::Ls
+        | DevtoolsCommand::Mcp
+        | DevtoolsCommand::Webdriver { .. } => {
             unreachable!("handled by `run`")
         }
     }

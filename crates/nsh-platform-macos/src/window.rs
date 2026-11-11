@@ -132,7 +132,11 @@ define_class!(
     /// there a press on the app's own views was lost. The key window hands such a press on to
     /// the content under it, so this window does too: what the title bar
     /// would only take to make the window key goes to the content's view at
-    /// that point, as do its drags and release.
+    /// that point, as do its drags and release. In an app with a main bundle
+    /// (a packaged one under `nsh test --app`) AppKit does not hand a press
+    /// on the content to its views either while the window is not key, so
+    /// every press there is handed on the same way
+    /// (`title_bar_press_target`).
     #[unsafe(super(NSWindow, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = WindowIvars]

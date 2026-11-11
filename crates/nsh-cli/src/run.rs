@@ -728,8 +728,40 @@ impl KillOnClose {
     /// Puts `child` in a new such job; `None` (the child then outlives a
     /// killed parent, as without it) if Windows refuses.
     pub(crate) fn assign(child: &std::process::Child) -> Option<KillOnClose> {
+        Self::assign_with(child, 0)
+    }
+
+    /// [`assign`](Self::assign) with more job limit flags (`extra`, from
+    /// `JOB_OBJECT_LIMIT_*`).
+    pub(crate) fn assign_with(child: &std::process::Child, extra: u32) -> Option<KillOnClose> {
         use std::os::windows::io::AsRawHandle as _;
 
+        Self::new(extra, child.as_raw_handle())
+    }
+
+    /// Puts this process in a new such job, for good: the job's handle is
+    /// kept until the process ends, which then ends every process it
+    /// started (cargo builds, hosts), also when it is killed with
+    /// `TerminateProcess`. `false` if Windows refuses (the process then
+    /// ends alone).
+    pub(crate) fn current_process() -> bool {
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        // SAFETY: the pseudo handle of this process, valid in any call of
+        // this process.
+        let me = unsafe { GetCurrentProcess() };
+        match Self::new(0, me) {
+            Some(job) => {
+                // Closing it would end this process: it lives as long as
+                // the process does.
+                std::mem::forget(job);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn new(extra: u32, process: windows_sys::Win32::Foundation::HANDLE) -> Option<KillOnClose> {
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
@@ -746,9 +778,10 @@ impl KillOnClose {
         // SAFETY: zeroed is a valid "no limits" value of this plain C
         // structure.
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | extra;
         // SAFETY: `info` is the structure the information class names, with
-        // its size; `child`'s handle is open while it is borrowed.
+        // its size; `process` is an open process handle (the caller's
+        // borrowed child, or this process's pseudo handle).
         let ok = unsafe {
             SetInformationJobObject(
                 job.0,
@@ -756,7 +789,7 @@ impl KillOnClose {
                 (&raw const info).cast(),
                 std::mem::size_of_val(&info) as u32,
             ) != 0
-                && AssignProcessToJobObject(job.0, child.as_raw_handle()) != 0
+                && AssignProcessToJobObject(job.0, process) != 0
         };
         ok.then_some(job)
     }

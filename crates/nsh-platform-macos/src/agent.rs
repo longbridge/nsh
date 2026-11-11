@@ -10,7 +10,10 @@
 use std::{
     cell::RefCell,
     rc::Rc,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -67,6 +70,49 @@ pub(crate) struct MacNative {
     last_click: Mutex<Option<Click>>,
     /// The window pointer input goes to, by its root node.
     target: Mutex<NodeId>,
+    /// Whether a left button pressed by [`Native::pointer_down`] is down:
+    /// moves are drags then.
+    button: AtomicBool,
+    /// The modifiers [`Native::hold_keys`] holds: the clicks, drags, hovers
+    /// and key presses until they are let go carry them.
+    held: Mutex<NSEventModifierFlags>,
+}
+
+/// The flags of `+`-joined modifier names (`"shift"`, `"mod+alt"`; `mod`
+/// and `meta` are Command on macOS).
+fn modifier_flags(keys: &str) -> Result<NSEventModifierFlags, String> {
+    let mut flags = NSEventModifierFlags::empty();
+    for name in keys.split('+') {
+        flags |= match name.trim().to_ascii_lowercase().as_str() {
+            "mod" | "meta" | "cmd" | "command" | "super" => NSEventModifierFlags::Command,
+            "ctrl" | "control" => NSEventModifierFlags::Control,
+            "alt" | "option" => NSEventModifierFlags::Option,
+            "shift" => NSEventModifierFlags::Shift,
+            other => {
+                return Err(format!(
+                    "`{other}` is no modifier key: mod, shift, alt, ctrl or meta"
+                ));
+            }
+        };
+    }
+    Ok(flags)
+}
+
+/// `name` (a key as `synth::key` names it) with the held modifiers in front.
+fn with_held(held: NSEventModifierFlags, name: &str) -> String {
+    let mut full = String::new();
+    for (flag, prefix) in [
+        (NSEventModifierFlags::Command, "cmd+"),
+        (NSEventModifierFlags::Control, "ctrl+"),
+        (NSEventModifierFlags::Option, "alt+"),
+        (NSEventModifierFlags::Shift, "shift+"),
+    ] {
+        if held.contains(flag) {
+            full.push_str(prefix);
+        }
+    }
+    full.push_str(name);
+    full
 }
 
 impl MacNative {
@@ -75,7 +121,13 @@ impl MacNative {
             key,
             last_click: Mutex::new(None),
             target: Mutex::new(ROOT_ID),
+            button: AtomicBool::new(false),
+            held: Mutex::new(NSEventModifierFlags::empty()),
         }
+    }
+
+    fn held(&self) -> NSEventModifierFlags {
+        *self.held.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn target(&self) -> NodeId {
@@ -107,6 +159,15 @@ impl MacNative {
             count,
         });
         count
+    }
+
+    /// The click count of the last left press, which its drags and its
+    /// release carry.
+    fn last_clicks(&self) -> isize {
+        self.last_click
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map_or(1, |c| c.count)
     }
 
     /// `f` with the surface and its main window, on the main queue,
@@ -209,10 +270,16 @@ thread_local! {
 /// click, so the press would only ask to activate the app. As
 /// `WebViewRef.sendInput` hands a page its clicks (`native::web_input`),
 /// and the web view takes the keyboard focus, as a click gives it.
-fn mouse(window: &NSWindow, kind: NSEventType, x: f64, y: f64, clicks: isize) {
+fn mouse(
+    window: &NSWindow,
+    kind: NSEventType,
+    x: f64,
+    y: f64,
+    clicks: isize,
+    mods: NSEventModifierFlags,
+) {
     let mtm = MainThreadMarker::from(window);
-    let Some(event) = synth::mouse_event(window, kind, x, y, clicks, NSEventModifierFlags::empty())
-    else {
+    let Some(event) = synth::mouse_event(window, kind, x, y, clicks, mods) else {
         return;
     };
     let web = if kind == NSEventType::LeftMouseDown {
@@ -371,29 +438,31 @@ impl Native for MacNative {
     }
 
     fn press(&self, at: Point<Points>) {
+        let mods = self.held();
         self.activate();
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         self.on_target(|_, window| {
             let clicks = self.click_count(x, y);
             // A real pointer arrives before it presses (hover state).
-            synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
-            mouse(window, NSEventType::LeftMouseUp, x, y, clicks);
+            synth::mouse_with(window, NSEventType::MouseMoved, x, y, 0, mods);
+            mouse(window, NSEventType::LeftMouseDown, x, y, clicks, mods);
+            mouse(window, NSEventType::LeftMouseUp, x, y, clicks, mods);
         });
     }
 
     fn long_press(&self, at: Point<Points>, hold: Duration) {
+        let mods = self.held();
         self.activate();
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         let clicks = self.on_target(|_, window| {
             let clicks = self.click_count(x, y);
-            synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-            mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+            synth::mouse_with(window, NSEventType::MouseMoved, x, y, 0, mods);
+            mouse(window, NSEventType::LeftMouseDown, x, y, clicks, mods);
             clicks
         });
         std::thread::sleep(hold);
         let clicks = clicks.unwrap_or(1);
-        self.on_target(|_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
+        self.on_target(|_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks, mods));
     }
 
     fn scroll(&self, at: Point<Points>, delta: Point<Points>) {
@@ -424,13 +493,14 @@ impl Native for MacNative {
     }
 
     fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        let mods = self.held();
         self.activate();
         let (x, y) = (f64::from(from.x.0), f64::from(from.y.0));
         let clicks = self
             .on_target(move |_, window| {
                 let clicks = self.click_count(x, y);
-                synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
-                mouse(window, NSEventType::LeftMouseDown, x, y, clicks);
+                synth::mouse_with(window, NSEventType::MouseMoved, x, y, 0, mods);
+                mouse(window, NSEventType::LeftMouseDown, x, y, clicks, mods);
                 clicks
             })
             .unwrap_or(1);
@@ -440,12 +510,52 @@ impl Native for MacNative {
             std::thread::sleep(nsh_testing::agent::FRAME);
             let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
             self.on_target(move |_, window| {
-                mouse(window, NSEventType::LeftMouseDragged, x, y, clicks);
+                mouse(window, NSEventType::LeftMouseDragged, x, y, clicks, mods);
             });
             last = at;
         }
         let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
-        self.on_target(move |_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks));
+        self.on_target(move |_, window| {
+            mouse(window, NSEventType::LeftMouseUp, x, y, clicks, mods)
+        });
+    }
+
+    fn pointer_down(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
+        self.activate();
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        // As `press` posts it: the background-window path hands a down on
+        // a window that is not key straight to the hit view.
+        self.on_target(move |_, window| {
+            let clicks = self.click_count(x, y);
+            synth::mouse_with(window, NSEventType::MouseMoved, x, y, 0, mods);
+            mouse(window, NSEventType::LeftMouseDown, x, y, clicks, mods);
+        })
+        .ok_or_else(|| "the window is gone".to_owned())?;
+        self.button.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    fn pointer_move(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        if !self.button.load(Ordering::Acquire) {
+            return self.hover(at);
+        }
+        let clicks = self.last_clicks();
+        self.on_target(move |_, window| {
+            mouse(window, NSEventType::LeftMouseDragged, x, y, clicks, mods)
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn pointer_up(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        let clicks = self.last_clicks();
+        self.button.store(false, Ordering::Release);
+        self.on_target(move |_, window| mouse(window, NSEventType::LeftMouseUp, x, y, clicks, mods))
+            .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn type_text(&self, text: &str) {
@@ -465,7 +575,8 @@ impl Native for MacNative {
             Key::Backspace => "BackSpace",
             Key::SelectAll => "cmd+a",
         };
-        self.on_key(move |surface, window| synth::key(surface, window, name));
+        let name = with_held(self.held(), name);
+        self.on_key(move |surface, window| synth::key(surface, window, &name));
     }
 
     fn mouse(&self) -> bool {
@@ -473,13 +584,14 @@ impl Native for MacNative {
     }
 
     fn right_click(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
         self.activate();
         // Another button's press ends a run of left clicks.
         *self.last_click.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         self.on_target(move |_, window| {
-            synth::mouse(window, NSEventType::RightMouseDown, x, y, 1);
-            synth::mouse(window, NSEventType::RightMouseUp, x, y, 1);
+            synth::mouse_with(window, NSEventType::RightMouseDown, x, y, 1, mods);
+            synth::mouse_with(window, NSEventType::RightMouseUp, x, y, 1, mods);
         })
         .ok_or_else(|| "the window is gone".to_owned())
     }
@@ -496,18 +608,12 @@ impl Native for MacNative {
     }
 
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let mods = self.held();
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         // Straight to the surface's input: AppKit hands a posted mouse
         // move to the first responder only, not to the view under it.
         self.on_target(move |surface, window| {
-            let event = synth::mouse_event(
-                window,
-                NSEventType::MouseMoved,
-                x,
-                y,
-                0,
-                objc2_app_kit::NSEventModifierFlags::empty(),
-            );
+            let event = synth::mouse_event(window, NSEventType::MouseMoved, x, y, 0, mods);
             if let Some(event) = event {
                 let target = self.target();
                 let root = (target != ROOT_ID)
@@ -557,9 +663,21 @@ impl Native for MacNative {
             Key::PageDown => "Page_Down".into(),
             Key::F(n) => format!("F{n}"),
         });
+        let name = with_held(self.held(), &name);
         self.activate();
         self.on_key(move |surface, window| synth::key(surface, window, &name))
             .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
+        let flags = modifier_flags(keys)?;
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        if down {
+            *held |= flags;
+        } else {
+            held.remove(flags);
+        }
+        Ok(())
     }
 
     fn input_text(&self, id: NodeId) -> Option<String> {
@@ -679,5 +797,38 @@ impl Native for MacNative {
 
     fn quit(&self) {
         self.on_main(|_, window| window.close());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modifier_names_become_flags() {
+        assert_eq!(
+            modifier_flags("shift").unwrap(),
+            NSEventModifierFlags::Shift
+        );
+        assert_eq!(
+            modifier_flags("mod+alt").unwrap(),
+            NSEventModifierFlags::Command | NSEventModifierFlags::Option
+        );
+        assert_eq!(
+            modifier_flags("control").unwrap(),
+            NSEventModifierFlags::Control
+        );
+        assert_eq!(
+            modifier_flags("meta").unwrap(),
+            NSEventModifierFlags::Command
+        );
+        assert!(modifier_flags("a").is_err());
+    }
+
+    #[test]
+    fn held_modifiers_prefix_a_key() {
+        let held = NSEventModifierFlags::Shift | NSEventModifierFlags::Command;
+        assert_eq!(with_held(held, "a"), "cmd+shift+a");
+        assert_eq!(with_held(NSEventModifierFlags::empty(), "Tab"), "Tab");
     }
 }

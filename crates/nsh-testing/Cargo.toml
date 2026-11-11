@@ -21,7 +21,7 @@ live = ["dep:ureq"]
 # A real host's test agent (`agent`): `nsh test --target` steps on the app it
 # shows, through the platform's input. No QuickJS and no network: the dev
 # hosts link it.
-agent = ["dep:nsh-dev", "dep:serde", "dep:serde_json", "dep:base64"]
+agent = ["dep:nsh-dev", "dep:serde", "dep:serde_json", "dep:base64", "dep:image"]
 # `nsh test`'s side: the `nsh/test` module, test files on an engine of their
 # own (`run_file`) and apps' headless runners (`runner`): QuickJS, which also
 # runs the web page's host module (`page_host`).
@@ -40,6 +40,7 @@ nsh-dev = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 crossbeam-channel.workspace = true
 dunce = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
 log.workspace = true
 regex.workspace = true
 # The web page's host module of headless runs (`page_host`).

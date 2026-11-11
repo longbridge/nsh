@@ -40,3 +40,17 @@ fn the_agents_json_reads_back_as_nodes() {
     assert_eq!(nodes[0].value.as_deref(), Some("hi"));
     assert!(nodes[0].focused);
 }
+
+#[test]
+fn the_agents_describe_json_reads_back_as_a_node() {
+    let json = serde_json::json!({
+        "id": 4, "depth": 0, "kind": "view", "test_id": null, "role": "button",
+        "label": "Go", "text": null, "value": null, "placeholder": null,
+        "bounds": [0.0, 1.0, 2.0, 3.0], "visible": true, "enabled": true,
+        "focused": false, "selected": null, "checked": null, "scroll": null,
+        "recycled": false
+    });
+    let node: SnapshotNode = serde_json::from_value(json).unwrap();
+    assert_eq!(node.id, 4);
+    assert_eq!(node.label.as_deref(), Some("Go"));
+}
