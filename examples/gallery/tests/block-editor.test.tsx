@@ -453,3 +453,18 @@ test("a toggle hides and shows its body with its arrow", async () => {
   await app.waitFor("role:button[Collapse]");
   expect(shown("Hidden words")).toBe(true);
 });
+
+test("a list item dragged to the right goes under the item above it, and to the left comes back out", async () => {
+  const app = await openDemo(true);
+  const handle = "role:button[Drag to move, press for the menu]";
+  await app.hover("text:Brief the regional leads");
+  await app.waitFor(handle);
+  // Across, staying on its line: nested, a numbered list inside a numbered list letters it.
+  await app.drag(handle, { x: 60 });
+  await app.waitFor("text:a.");
+  expect(app.texts().includes("Brief the regional leads")).toBe(true);
+  await app.hover("text:Brief the regional leads");
+  await app.waitFor(handle);
+  await app.drag(handle, { x: -60 });
+  await app.waitFor("text:a.", { state: "gone" });
+});

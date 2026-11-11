@@ -749,10 +749,34 @@ export function BlockEditorDemo() {
 
   // The grip: a press that stays put opens the block's menu (`onPress`); a move past a few points takes the block
   // and the pointer carries it (the responder is claimed only then, so a tap keeps its press).
+  // How far across the drag went: a list item dropped well to the right of where it was taken goes under the
+  // item above it, and well to the left comes out a level, as dragging an item across does in Notion.
+  let across = 0;
+  const INDENT = 32;
+  /** The caret into the block at `start`'s first line. */
+  const caretInto = (start: number) => {
+    let inside = start + 1;
+    for (let node = editor.nodeAt(start) as DocNode | null; node?.content?.[0] && node.content[0].text == null; node = node.content[0]) inside += 1;
+    editor.run(setTextSelection(inside));
+  };
+  const nestDropped = () => {
+    const sel = editor.selection;
+    let start = sel.type === "node" ? (sel.anchor ?? null) : null;
+    let node = start == null ? null : (editor.nodeAt(start) as DocNode | null);
+    // A list's only item is carried as its list: the item is what moves across.
+    if (start != null && node && LISTS.has(node.type ?? "") && node.content?.length === 1) {
+      start += 1;
+      node = node.content[0];
+    }
+    if (start == null || !node || !ITEMS.has(node.type ?? "") || Math.abs(across) < INDENT) return;
+    caretInto(start);
+    editor.run(across > 0 ? sinkListItem(node.type!) : liftListItem(node.type!));
+  };
   const grip = (h: Handle) => ({
     onMoveShouldSetResponder: (_: unknown, g: { dx: number; dy: number }) => Math.hypot(g.dx, g.dy) > 4,
     onResponderTerminationRequest: () => false,
     onResponderGrant: (e: { pageX: number; pageY: number }) => {
+      across = -e.pageX;
       dragging.set(true);
       const node = editor.nodeAt(h.start);
       const text = node ? plainText(node) : "";
@@ -766,8 +790,10 @@ export function BlockEditorDemo() {
       editor.dragTo({ x: e.pageX, y: e.pageY });
     },
     // The drop changes the document, and with it the handle goes.
-    onResponderRelease: () => {
+    onResponderRelease: (e: { pageX: number }) => {
+      across += e.pageX;
       editor.endDrag();
+      nestDropped();
       dragging.set(false);
       ghost.set(null);
     },
@@ -863,9 +889,7 @@ export function BlockEditorDemo() {
   const turnInto = (h: Handle, block: Block) => {
     menu.set(null);
     // The caret goes into the block's first line (past the starts of the blocks around it), then the block turns.
-    let inside = h.start + 1;
-    for (let node = editor.nodeAt(h.start) as DocNode | null; node?.content?.[0] && node.content[0].text == null; node = node.content[0]) inside += 1;
-    editor.run(setTextSelection(inside));
+    caretInto(h.start);
     convert(block);
     editor.focus();
   };
