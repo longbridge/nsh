@@ -573,9 +573,11 @@ impl Ctx {
         }
         set_focused(&surface, &view, focused);
         if focused {
-            // AppKit receives input clicks directly, outside the drawn-text
-            // pointer path. Taking the editor's focus ends that selection too.
-            crate::text::clear(&surface);
+            // AppKit receives input clicks outside the drawn-text pointer path.
+            // Programmatic focus (Find, dialogs) preserves the selection.
+            if crate::view::pressing(view.ns().mtm()) {
+                crate::text::clear(&surface);
+            }
             // The scroll views around show the field, as on phones.
             crate::scroll::reveal(&surface, &view);
         }

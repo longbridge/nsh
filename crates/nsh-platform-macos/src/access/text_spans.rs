@@ -107,6 +107,8 @@ define_class!(
         fn allowed(&self, selector: Sel) -> bool {
             if selector == sel!(accessibilityPerformPress) {
                 self.press_events().is_some()
+            } else if selection_selector(selector) {
+                self.resolve().is_some_and(|(view, _, _)| selectable(&view))
             } else {
                 // SAFETY: NSAccessibilityElement's own answer.
                 unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
@@ -139,9 +141,49 @@ impl TextSpan {
 #[derive(Debug)]
 pub(crate) struct Snapshot {
     text: Arc<AttributedText>,
+    separate_text: bool,
     spans: Vec<(Range<u32>, String)>,
     identities: BTreeMap<(Option<NodeId>, usize), usize>,
     elements: Retained<NSArray>,
+}
+
+fn selection_selector(selector: Sel) -> bool {
+    selector == sel!(setAccessibilitySelectedTextRange:)
+        || selector == sel!(accessibilitySelectedTextRange)
+        || selector == sel!(accessibilitySelectedText)
+}
+
+fn selectable(view: &NshView) -> bool {
+    view.try_state().is_some_and(|state| state.text.is_some())
+        && crate::selectable_view::target(view).is_some()
+}
+
+pub(crate) fn allows_selection(view: &NshView, selector: Sel) -> Option<bool> {
+    selection_selector(selector).then(|| {
+        let drawn_value = view.try_state().is_some_and(|state| {
+            let a = &state.props.accessibility;
+            a.label.is_none() && a.value.is_none() && a.description.is_none()
+        });
+        drawn_value && selectable(view)
+    })
+}
+
+/// Unlabelled body text is read as interleaved stretches. Semantic headings
+/// and app-labelled text keep their own name and expose only their links.
+pub(crate) fn separate_text(state: &crate::view::ViewState) -> bool {
+    let a = &state.props.accessibility;
+    a.role == nsh_core::AccessibilityRole::None
+        && a.label.is_none()
+        && a.value.is_none()
+        && a.hint.is_none()
+        && a.description.is_none()
+        && !super::is_pressable(state.events)
+        && state.text.as_ref().is_some_and(|text| {
+            text.text
+                .links
+                .iter()
+                .any(|link| link.events.contains(EventKind::Press))
+        })
 }
 
 /// An AX range is in the displayed value, whose hidden runs and attachments
@@ -276,7 +318,7 @@ fn stretches(text: &AttributedText) -> Vec<(Range<u32>, Option<NodeId>)> {
 
 fn snapshot(view: &NshView) -> Option<Rc<Snapshot>> {
     let mut state = view.try_state_mut()?;
-    if state.events.contains(EventKind::Press) {
+    if super::is_pressable(state.events) {
         return None;
     }
     let text = state.text.as_ref()?.text.clone();
@@ -287,8 +329,10 @@ fn snapshot(view: &NshView) -> Option<Rc<Snapshot>> {
     {
         return None;
     }
+    let separate_text = separate_text(&state);
     if let Some(snapshot) = &state.access.text_spans
         && Arc::ptr_eq(&text, &snapshot.text)
+        && snapshot.separate_text == separate_text
     {
         return Some(snapshot.clone());
     }
@@ -298,6 +342,9 @@ fn snapshot(view: &NshView) -> Option<Rc<Snapshot>> {
     let elements: Vec<Retained<AnyObject>> = stretches(&text)
         .into_iter()
         .filter_map(|(range, node)| {
+            if node.is_none() && !separate_text {
+                return None;
+            }
             let shown = text.copied_text(range.clone());
             if shown.is_empty() {
                 return None;
@@ -327,6 +374,7 @@ fn snapshot(view: &NshView) -> Option<Rc<Snapshot>> {
         .collect();
     let snapshot = Rc::new(Snapshot {
         text,
+        separate_text,
         spans,
         identities,
         elements: NSArray::from_retained_slice(&elements),

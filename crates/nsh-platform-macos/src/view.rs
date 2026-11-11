@@ -888,6 +888,8 @@ define_class!(
                     })
             } else if let Some(allowed) = crate::access::table::allows(&NshView(self.retain()), selector) {
                 allowed
+            } else if let Some(allowed) = crate::access::text_spans::allows_selection(&NshView(self.retain()), selector) {
+                allowed
             } else {
                 // SAFETY: NSView's own answer.
                 unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
@@ -1492,7 +1494,7 @@ fn clicking(mtm: MainThreadMarker) -> bool {
 
 /// Whether the event AppKit handles (or the test agent hands the window)
 /// is a mouse press.
-fn pressing(mtm: MainThreadMarker) -> bool {
+pub(crate) fn pressing(mtm: MainThreadMarker) -> bool {
     scripted_type().map_or_else(
         || clicking(mtm),
         |t| {

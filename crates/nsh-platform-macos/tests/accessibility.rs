@@ -28,11 +28,14 @@ mod macos {
         AppOptions, AppView,
         objc2::{
             MainThreadMarker, MainThreadOnly, Message, msg_send, rc::Retained, runtime::AnyObject,
+            sel,
         },
         objc2_app_kit::{
             NSAccessibility, NSApplication, NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask,
         },
-        objc2_foundation::{NSDate, NSNumber, NSPoint, NSRect, NSRunLoop, NSSize, NSString},
+        objc2_foundation::{
+            NSDate, NSNumber, NSPoint, NSRange, NSRect, NSRunLoop, NSSize, NSString,
+        },
     };
 
     /// The test sets it to change the texts inside the elements.
@@ -86,10 +89,107 @@ mod macos {
                     .on_press(|| {})
                     .child(name("Save", "Save all")),
             )
+            .child(inline_links())
             .child(geometry())
             .child(order())
             .child(scroll_area())
             .child(confirm())
+    }
+
+    #[component]
+    fn InlineLinks() -> impl IntoElement {
+        let linked = || text("Guide").on_press(|| {});
+        view()
+            .selectable(true)
+            .child(
+                text("")
+                    .test_id("body-links")
+                    .child(text("Before "))
+                    .child(linked())
+                    .child(text(" after")),
+            )
+            .child(
+                text("")
+                    .test_id("heading-links")
+                    .role(AccessibilityRole::Header)
+                    .child(text("Heading "))
+                    .child(linked()),
+            )
+            .child(
+                text("")
+                    .test_id("labelled-links")
+                    .label("Summary")
+                    .child(text("Shown "))
+                    .child(linked()),
+            )
+            .child(text("Cannot select").test_id("unselectable").select_none())
+    }
+
+    fn check_inline_links(root: &NSView) {
+        until("inline link mount", || {
+            view_with_id(root, "body-links").is_some()
+        });
+        let body = view_with_id(root, "body-links").unwrap();
+        assert!(!body.isAccessibilityElement());
+        let children = body.accessibilityChildren().unwrap();
+        let values: Vec<Option<String>> = children
+            .iter()
+            .map(|child| {
+                let value: Option<Retained<AnyObject>> =
+                    unsafe { msg_send![&*child, accessibilityValue] };
+                string(value)
+            })
+            .collect();
+        assert_eq!(
+            values,
+            [
+                Some("Before ".into()),
+                Some("Guide".into()),
+                Some(" after".into())
+            ]
+        );
+        for (id, role) in [
+            ("heading-links", "AXHeading"),
+            ("labelled-links", "AXStaticText"),
+        ] {
+            let view = view_with_id(root, id).unwrap();
+            assert_eq!(view.accessibilityRole().unwrap().to_string(), role);
+            let children = view.accessibilityChildren().unwrap();
+            assert_eq!(children.count(), 1, "only the link is a child of {id}");
+            let child = children.firstObject().unwrap();
+            let value: Option<Retained<AnyObject>> =
+                unsafe { msg_send![&*child, accessibilityValue] };
+            assert_eq!(string(value).as_deref(), Some("Guide"));
+        }
+        let labelled = view_with_id(root, "labelled-links").unwrap();
+        assert_eq!(
+            string(labelled.accessibilityValue()).as_deref(),
+            Some("Summary")
+        );
+        let allowed = |object: &AnyObject, selector| -> bool {
+            unsafe { msg_send![object, isAccessibilitySelectorAllowed: selector] }
+        };
+        for selector in [
+            sel!(setAccessibilitySelectedTextRange:),
+            sel!(accessibilitySelectedTextRange),
+            sel!(accessibilitySelectedText),
+        ] {
+            assert!(allowed(&body, selector));
+            assert!(!allowed(
+                &view_with_id(root, "unselectable").unwrap(),
+                selector
+            ));
+            assert!(!allowed(&find(root, "button").unwrap(), selector));
+            assert!(!allowed(&labelled, selector));
+        }
+        let link = children.objectAtIndex(1);
+        let _: () =
+            unsafe { msg_send![&*link, setAccessibilitySelectedTextRange: NSRange::new(0, 5)] };
+        let range: NSRange = unsafe { msg_send![&*link, accessibilitySelectedTextRange] };
+        let selected: Option<Retained<AnyObject>> =
+            unsafe { msg_send![&*link, accessibilitySelectedText] };
+        assert_eq!(range, NSRange::new(0, 5));
+        assert_eq!(string(selected).as_deref(), Some("Guide"));
     }
 
     /// A dialog named by its title and described by its message, opened
@@ -380,6 +480,8 @@ mod macos {
         assert_eq!(read(&root, "labelled"), (None, Some("Fixed".into()), 0));
         // A button reads its name as its label.
         assert_eq!(read(&root, "button"), (Some("Save".into()), None, 0));
+
+        check_inline_links(&root);
 
         // The texts change: what clients read follows.
         RENAMED.store(true, Ordering::SeqCst);

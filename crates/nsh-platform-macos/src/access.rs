@@ -762,19 +762,7 @@ fn update(view: &NshView) -> bool {
         {
             spec.role = window_button(control);
         }
-        if a.role == Role::None
-            && a.label.is_none()
-            && a.value.is_none()
-            && a.hint.is_none()
-            && a.description.is_none()
-            && !pressable
-            && s.text.as_ref().is_some_and(|text| {
-                text.text
-                    .links
-                    .iter()
-                    .any(|link| link.events.contains(EventKind::Press))
-            })
-        {
+        if text_spans::separate_text(s) {
             // Inline links and plain stretches are separate elements in
             // document order. Reading the complete parent duplicates them.
             spec.role = Ax::Generic;
