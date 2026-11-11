@@ -72,7 +72,11 @@ pub const FAILURE_TTL: Duration = Duration::from_secs(30);
 
 /// The encoded bytes kept in memory (L3) by default; an app sets its own
 /// with [`Loader::set_encoded_limit`].
-pub const ENCODED_BYTES: usize = if cfg!(any(target_os = "ios", target_os = "android")) {
+pub const ENCODED_BYTES: usize = if cfg!(any(
+    target_os = "ios",
+    target_os = "android",
+    target_env = "ohos"
+)) {
     16 << 20
 } else {
     32 << 20

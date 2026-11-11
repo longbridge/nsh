@@ -3553,12 +3553,10 @@ fn drawn_shaders(env: &mut Environment, unavailable: bool) {
 fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment {
     nsh_core::tailwind::ClassEnvironment {
         dark: env.color_scheme == ColorScheme::Dark,
-        platform: if env.os == Os::Web {
-            nsh_core::tailwind::Platform::Web
-        } else if cfg!(target_os = "android") {
-            nsh_core::tailwind::Platform::Android
-        } else {
-            nsh_core::tailwind::Platform::Ios
+        platform: match env.os {
+            Os::Web => nsh_core::tailwind::Platform::Web,
+            Os::Android => nsh_core::tailwind::Platform::Android,
+            _ => nsh_core::tailwind::Platform::Ios,
         },
         reduce_motion: env.reduce_motion,
         pointer: if env.desktop() {
