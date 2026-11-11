@@ -785,8 +785,14 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             ui::path(entry)
         );
     }
+    // Packaging for another target builds only the describing program
+    // for this machine: nothing to share a build with.
+    let unify = match &command {
+        Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
+        _ => true,
+    };
     let app = match command.entry_mut() {
-        Some(entry) => rust_app::of(entry)?,
+        Some(entry) => rust_app::of(entry, unify)?,
         None => None,
     };
     let Some(app) = app else {
