@@ -49,6 +49,7 @@ use std::{
 };
 
 use block2::RcBlock;
+use nsh_core::access::WebMedia;
 use nsh_core::{
     Bounds, Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Points,
     ResizeMode, Size, VideoProps, ViewKind, WebInput, WebKey, WebProps, WebSource, geometry::Point,
@@ -272,6 +273,12 @@ impl NativeState {
         *self.access.borrow_mut() = Some(Arc::new(access));
     }
 
+    /// What the running app may reach (all before an app starts): what
+    /// its image loads check their redirects against.
+    pub(crate) fn access(&self) -> Arc<Access> {
+        self.access.borrow().clone().unwrap_or_default()
+    }
+
     /// Drops every control (the app stopped): media stops playing.
     pub(crate) fn clear(&self) {
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());
@@ -424,14 +431,42 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
                 web_input(&web, input);
             }
         }
+        Command::Evaluate { .. } | Command::CancelEvaluate { .. } => {
+            let found = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(web)) => Some((
+                    web.handler.ivars().evaluations.clone(),
+                    web.props.as_ref().is_none_or(|p| p.javascript_enabled),
+                )),
+                _ => None,
+            };
+            let Some((evaluations, scripts)) = found else {
+                return;
+            };
+            match command {
+                Command::Evaluate { request, script } => {
+                    evaluations.start(*request, script, scripts)
+                }
+                Command::CancelEvaluate { request } => evaluations.cancel(*request),
+                _ => {}
+            }
+        }
         _ => {
             // WebKit may call the handler back synchronously (`stopLoading`
             // fails the navigation): the hosts are not borrowed meanwhile.
-            let web = match surface.native.hosts.borrow().get(&view.id()) {
-                Some(Host::Web(web)) => web.web.clone(),
+            let found = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(web)) => web
+                    .web
+                    .clone()
+                    .map(|w| (w, web.handler.ivars().evaluations.clone())),
                 _ => None,
             };
-            if let Some(web) = web {
+            if let Some((web, evaluations)) = found {
+                if matches!(
+                    command,
+                    Command::Reload | Command::GoBack | Command::GoForward | Command::Load(_)
+                ) {
+                    evaluations.navigated();
+                }
                 web_command(&web, command);
             }
         }
@@ -1278,6 +1313,8 @@ struct WebIvars {
     /// here: the only files this web view may open (its pages can link to
     /// each other, never to a file outside it).
     file: RefCell<Option<String>>,
+    /// `evaluate()`'s requests in this web view.
+    evaluations: Rc<nsh_platform_apple::web_evaluation::Evaluations>,
 }
 
 /// A download under way: its `WKDownload` (kept alive until it ends) and
@@ -1366,6 +1403,34 @@ define_class!(
                 };
             // WKNavigationActionPolicyCancel = 0, Allow = 1, Download = 2.
             decide.call((if download { 2 } else { allowed as isize },));
+        }
+
+        /// The page's `getUserMedia` gets what the app's `webview.media`
+        /// capability grants; the system still asks the user.
+        #[unsafe(method(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:))]
+        fn media_capture(
+            &self,
+            _web: &AnyObject,
+            _origin: &AnyObject,
+            _frame: &AnyObject,
+            kind: isize,
+            decide: &block2::Block<dyn Fn(isize)>,
+        ) {
+            // WKMediaCaptureTypeCamera = 0, Microphone = 1, CameraAndMicrophone = 2.
+            let wanted: &[WebMedia] = match kind {
+                0 => &[WebMedia::Camera],
+                1 => &[WebMedia::Microphone],
+                _ => &[WebMedia::Camera, WebMedia::Microphone],
+            };
+            let access = self.ivars().access.as_ref();
+            let granted = wanted
+                .iter()
+                .all(|m| access.is_some_and(|a| a.allows_web_media(*m)));
+            if !granted {
+                log::warn!(target: "js", "web view media capture is not granted: add it to capabilities.webview.media");
+            }
+            // WKPermissionDecisionGrant = 1, Deny = 2.
+            decide.call((if granted { 1 } else { 2 },));
         }
 
         /// What the page cannot show, or the server sends as an attachment,
@@ -1464,11 +1529,17 @@ define_class!(
 
         #[unsafe(method(webView:didStartProvisionalNavigation:))]
         fn did_start(&self, web: &AnyObject, navigation: Option<&AnyObject>) {
+            self.ivars().evaluations.navigated();
             self.ivars().navigation.set(navigation.map(download_key));
             self.emit(EventKind::LoadStart, || navigation_state(web, true));
             self.emit(EventKind::NavigationStateChange, || {
                 navigation_state(web, true)
             });
+        }
+
+        #[unsafe(method(webViewWebContentProcessDidTerminate:))]
+        fn process_terminated(&self, _web: &AnyObject) {
+            self.ivars().evaluations.process_terminated();
         }
 
         #[unsafe(method(webView:didFinishNavigation:))]
@@ -1505,6 +1576,7 @@ impl WebHandler {
         emitter: Emitter,
         access: Option<Arc<Access>>,
         downloads: Option<PathBuf>,
+        evaluations: Rc<nsh_platform_apple::web_evaluation::Evaluations>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(WebIvars {
             emitter,
@@ -1514,6 +1586,7 @@ impl WebHandler {
             navigation: Cell::default(),
             downloading: RefCell::default(),
             file: RefCell::new(None),
+            evaluations,
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -1889,7 +1962,24 @@ impl WebHost {
         access: Option<Arc<Access>>,
         downloads: Option<PathBuf>,
     ) -> Self {
-        let handler = WebHandler::new(surface.mtm, Emitter::new(surface, view), access, downloads);
+        // Replies are internal events: they reach the engine whether or not
+        // the app listens.
+        let weak = Rc::downgrade(surface);
+        let evaluations = nsh_platform_apple::web_evaluation::Evaluations::new(
+            view.id(),
+            Box::new(move |id, kind, payload| {
+                if let Some(surface) = weak.upgrade() {
+                    surface.event(id, kind, payload);
+                }
+            }),
+        );
+        let handler = WebHandler::new(
+            surface.mtm,
+            Emitter::new(surface, view),
+            access,
+            downloads,
+            evaluations,
+        );
         WebHost {
             holder: objc2::rc::Weak::new(&**view),
             web: None,
@@ -1937,6 +2027,7 @@ impl WebHost {
                     configuration: &*config
                 ];
                 let _: () = msg_send![&web, setNavigationDelegate: &**handler];
+                let _: () = msg_send![&web, setUIDelegate: &**handler];
                 // Transparent by default (WebKit paints white otherwise): a
                 // page without a background shows the view behind it, the
                 // way `backgroundColor` on the node expects.
@@ -1947,6 +2038,7 @@ impl WebHost {
             }
         });
         self.web = web.flatten();
+        self.handler.ivars().evaluations.set_web(self.web.as_ref());
     }
 
     /// Whether `view` is its `WKWebView`.
@@ -1967,6 +2059,9 @@ impl WebHost {
             self.make(p);
         }
         let Some(web) = &self.web else { return };
+        if !p.javascript_enabled {
+            self.handler.ivars().evaluations.scripts_disabled();
+        }
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
@@ -2016,6 +2111,9 @@ impl WebHost {
                 // Only the file this load opens is the page's own: none for
                 // any other source.
                 *self.handler.ivars().file.borrow_mut() = None;
+                if p.source != WebSource::None {
+                    self.handler.ivars().evaluations.navigated();
+                }
                 match &p.source {
                     WebSource::Uri(uri) => {
                         let url = NSURL::URLWithString(&NSString::from_str(uri));
@@ -2060,12 +2158,14 @@ impl WebHost {
 impl Drop for WebHost {
     fn drop(&mut self) {
         self.handler.cancel_downloads();
+        self.handler.ivars().evaluations.dispose();
         let Some(web) = &self.web else { return };
         // SAFETY: breaks the cycle web view → content controller → handler
         // and stops the page.
         unsafe {
             let _: () = msg_send![web, stopLoading];
             let _: () = msg_send![web, setNavigationDelegate: std::ptr::null::<AnyObject>()];
+            let _: () = msg_send![web, setUIDelegate: std::ptr::null::<AnyObject>()];
             let config: Retained<AnyObject> = msg_send![web, configuration];
             let content: Retained<AnyObject> = msg_send![&config, userContentController];
             let _: () = msg_send![

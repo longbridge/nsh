@@ -21,7 +21,7 @@ trigger by the keyboard in the browser and on Linux, and by screen readers on ma
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused; on the desktops Down or Home then
 focuses the first enabled item and Up or End the last. Page Down moves to the last enabled item in view and Page Up to
-the first, stopping at the ends (a `MenuList` pages a view at a time, see [Long lists](#long-lists)). On the desktops the pointer moving over an item gives
+the first, a view at a time, stopping at the ends (a `MenuList` the same, see [Long lists](#long-lists)). On the desktops the pointer moving over an item gives
 it the keyboard focus, so the keys go on from the item under the pointer; style an item's `focus:` state as its
 `hover:` one.
 On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
@@ -96,6 +96,12 @@ function FileMenu() {
 All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their menu on their own, so you arrange them
 freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup on desktops and the
 sheet on phones; a style that differs between them can compare `platform.idiom` (`nsh`) with `"desktop"`.
+
+The popup is never taller than the room on the side it opens on, and a submenu's popup never taller than its own: a
+long menu in a short window opens on the side where it fits whole, or where there is more room, and its items scroll
+inside it. The keys bring the item they move to into view, and a submenu closes once its item scrolls out of view.
+The sheet on phones stays below the status bar the same way. Draw the surface (background, border, shadow) with
+`popupClass`, around the items, so it stays in place while they scroll.
 
 ## Menu bars
 
@@ -232,8 +238,9 @@ item.
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
 `popupStartingClass` is its look in its first frame, `popupEndingClass` its look once closed, which it keeps while the
-`transition-*` classes of `popupClass` run, and `onClose` follows. Submenus take the same looks and close with their
-menu. The sheet of phones slides in and out on its own.
+`transition-*` classes of `popupClass` run, and `onClose` follows. On its way out it takes no presses or keys: the
+keyboard focus is back on the trigger as it closes, so Return during the exit chooses no item and opens the menu
+again. Submenus take the same looks and close with their menu. The sheet of phones slides in and out on its own.
 
 ```tsx
 <Menu

@@ -813,12 +813,14 @@ browsers' touches into what phones report:
   load's entries (`nshIndex`), and the player mirrors each entry's depth (`historyIndex`, `historyDepths`), so a back
   of the app's own goes to the newest earlier entry at most as deep (`entryAtDepth`) and a `popstate` knows which way
   the user went. The root's `onUrlScheme` event with `change: "back" | "forward" | "address"` (`url_scheme::CHANGE`,
-  `AppUrlChangeCause`; another cause is the address alone, quietly) sets the address and queues an `AppUrlChange` for
+  `AppUrlChangeReason`; another reason is the address alone, quietly) sets the address and queues an `AppUrlChange` for
   `next_app_url_change()`, at most 16, and only once something listened (`hears_changes`: before it the address has
   them); the TS module posts each to the listeners there are and keeps none. The player sends it for a traversal
-  between entries of one depth (`tellAddress(cause)`), for a `#fragment` the user typed (a state-less entry of the
+  between entries of one depth (`tellAddress(reason)`), for a `#fragment` the user typed (a state-less entry of the
   page whose address is not the one shown: it gets this session's state at the depth shown and the next index, and the
-  app's pages stay; before, it sent the app back to its start), and for a back that popped pages when the entry's
+  app's pages stay; before, it sent the app back to its start. Where the browser has the Navigation API, a state-less
+  entry before the app's first (`historyBase`, `beforeFirstEntry`) is the page's own, from before the player, and a
+  back onto it is a back past the first entry), and for a back that popped pages when the entry's
   address is not the one the app showed and the app set none as it answered: the player waits until the pages it
   popped are dismissed (`dismissing`, `goBack`) and the app had a turn after their `onDismiss`, at most
   `POP_ANSWER_MS` (1.5 s; a page's `onDismiss` follows its slide, `settlePop`). A forward to a depth the stack lost
@@ -931,7 +933,9 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   is the first image item as a `data:` URI the player encodes itself; the core measures it against
   `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it). An image written goes on the
   clipboard as a PNG, the image format browsers write: another format is decoded and encoded again (pitfalls.md
-  "Web, browsers"). A write that fails is a console warning; `writeImage` has resolved already.
+  "Web, browsers"), and also goes on as it is, as browsers' own Copy Image does: an `<img>` of it as `text/html`
+  (what a paste's `html` carries, `onPaste`) and, in Chromium, the web custom format `web <type>`, which an image read
+  takes before the PNG, so a GIF read back keeps its frames. A write that fails is a console warning; `writeImage` has resolved already.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
   runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `placeholder` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden

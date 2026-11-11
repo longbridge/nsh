@@ -6,7 +6,7 @@ import { AlertDialog, Dialog, NavPage, NavStack, Input, createNavStack } from "n
 import { safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";
+import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, LabeledToggle } from "../ui";
 import { TitleBar } from "../TitleBar";
 
 const edges = ["top", "bottom", "left", "right"] as const;
@@ -278,7 +278,7 @@ function Unsaved() {
             onBlur={() => focused.set(false)}
             placeholder="A draft"
             style={{
-              placeholderColor: colors.faint,
+              placeholderColor: colors.muted,
               caretColor: colors.accent,
               selectionColor: colors.accent,
               height: 48,
@@ -429,7 +429,8 @@ function ModalBody(props: { title: string; note: string; body: string; fullScree
  * (`#/messages/Invoice`), opens at `UrlScheme.url()`, gives each page its
  * address as the stack changes (`onChange` → `UrlScheme.setUrl`, the
  * browser's back included, which pops the stack) and hears links
- * (`UrlScheme.on("open")`). Only the web shows the address. */
+ * (`UrlScheme.on("open")`) and the moves the stack does not account for
+ * (`UrlScheme.on("change")`). Only the web shows the address. */
 function Addressed() {
   const prefix = "#/messages/";
   const opened = (UrlScheme.url() ?? "").split("#")[1] ?? "";
@@ -442,6 +443,9 @@ function Addressed() {
     opens.set(opens() + 1);
     address.set(url);
   });
+  // A back or forward between entries of the same pages, or an address the
+  // user typed (the web): the stack stays, the address shown follows.
+  UrlScheme.on("change", ({ url }) => address.set(url));
   // The address without the app's part, then the open message's.
   const addressOf = (top: string) => `${(UrlScheme.url() ?? "").split("#")[0]}${top === "Inbox" ? "" : prefix + encodeURIComponent(top)}`;
   // The app's part of an address: the same on the web (the page's address
@@ -460,7 +464,11 @@ function Addressed() {
           }}
         >
           {(route) => (
-            <NavPage header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}>
+            // The card's surface, not the system's page color, under each page.
+            <NavPage
+              header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}
+              style={{ backgroundColor: colors.surface }}
+            >
               <View style={{ padding: 12, gap: 8 }}>
                 {route === "Inbox" ? (
                   <Each of={["Welcome", "Invoice", "Travel"]}>
@@ -524,8 +532,8 @@ export function Navigation() {
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
-              <LinkRow icon="play" title="No animation" note='animation="none"' onPress={push(Instant)} />
-              <LinkRow icon="gestures" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
+              <LinkRow icon="animation" title="No animation" note='animation="none"' onPress={push(Instant)} />
+              <LinkRow icon="back" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
               <LinkRow icon="form" title="Unsaved changes" note="popOnBack + onBackPress" onPress={push(Unsaved)} />
               <LinkRow icon="lists" title="A deep stack" note="push / popToRoot" onPress={push(() => <Deep depth={1} />)} />
             </View>
@@ -548,7 +556,7 @@ export function Navigation() {
             icon="system"
             title="Back button"
             subtitle={hint("Android: BackHandler", "BackHandler: Escape, Alt+Left")}
-            right={<Toggle value={intercept()} onChange={(v) => intercept.set(v)} label="Intercept the back button" />}
+            right={<LabeledToggle label="Intercept" value={intercept()} onChange={(v) => intercept.set(v)} />}
           >
             <Figure value={String(backs())} unit={backs() === 1 ? "press" : "presses"} note={intercept() ? "caught" : "popped"} tone={intercept() ? "warn" : "accent"} />
             <Text style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>
@@ -564,6 +572,7 @@ export function Navigation() {
         open={sheet() === "fullScreen" || sheet() === "pageSheet" || sheet() === "formSheet" || sheet() === "fade"}
         presentation={sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen"}
         animation={sheet() === "fade" ? "fade" : "slide"}
+        accessibilityLabel={current()?.title ?? ""}
         onOpenChange={({ open }) => !open && close()}
         style={{ flex: 1 }}
       >
@@ -581,6 +590,7 @@ export function Navigation() {
       <Dialog
         open={sheet() === "kept"}
         presentation="pageSheet"
+        accessibilityLabel="Kept open"
         closeOnEscape={false}
         closeOnBackdropPress={false}
         closeOnSwipe={false}
@@ -598,6 +608,8 @@ export function Navigation() {
       <Dialog
         open={sheet() === "dialog"}
         animation="fade"
+        role="alertdialog"
+        accessibilityLabel="Delete “Launch notes”?"
         onOpenChange={({ open }) => !open && close()}
         backdropStyle={backdrop()}
         style={{ margin: "auto", width: platform.desktop ? 360 : 340, maxWidth: "90%" }}

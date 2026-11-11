@@ -132,6 +132,15 @@ pub enum AccessibilityRole {
     /// (`accessibilityState.checked`).
     #[prop(rename = "menuitemradio")]
     MenuItemRadio,
+    /// A dialog over the rest of the app, named by its `label` (its
+    /// title): what `nsh_base::dialog` is unless the app gives it another
+    /// role.
+    Dialog,
+    /// A dialog that asks the user to confirm something or tells them
+    /// something urgent (a destructive action's confirmation), named by
+    /// its `label`.
+    #[prop(rename = "alertdialog")]
+    AlertDialog,
 }
 
 /// Whether a checkable element is checked (`accessibilityState.checked`).
@@ -188,6 +197,10 @@ pub struct AccessibilityState {
     /// an `expanded` element without it is a disclosure, which shows its
     /// content in place (a collapsible's or an accordion's trigger).
     pub has_popup: bool,
+    /// The content does not pass the app's checks (ARIA's
+    /// `aria-invalid`): a field whose text was rejected, a select left
+    /// empty that must not be.
+    pub invalid: bool,
 }
 
 /// The value of a range or textual element (`accessibilityValue`).
@@ -324,6 +337,12 @@ pub struct Ripple {
 pub struct ViewProps {
     /// Resolved overlay placement for native grid projection; ordinary views have none.
     pub overlay_anchor: Option<crate::overlay::PlacedAnchor>,
+    /// A shown overlay's place in the Tab order: right after this view
+    /// and before its children, where the app put the overlay (a popover's
+    /// content follows its trigger), not at the end of the root view its
+    /// native view is in. Set by the core; platforms that order Tab
+    /// themselves walk with [`crate::input::tab_order`].
+    pub tab_after: Option<crate::NodeId>,
     /// Tab and screen readers go through the view's children as they are
     /// on screen, along this axis and then across it, instead of in tree
     /// order. The core sets it on a list in its parent's viewport: a list

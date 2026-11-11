@@ -756,3 +756,203 @@ fn a_tap_on_a_context_menus_trigger_still_presses() {
     app.app.wait_for("text:p1 u1 l0").unwrap();
     assert!(!app.app.shows("Rename"), "a tap opens no menu");
 }
+
+/// Holds a pointer of `pointer_type` still on the row for longer than a
+/// long press, as a platform reports it: a touch on the root with the row
+/// listening.
+fn hold_row(app: &mut App, pointer_type: nsh_core::PointerType) {
+    let row = app.seen.lock().unwrap().test_ids["row"];
+    let touch = |phase| {
+        EventPayload::Touch(Box::new(nsh_core::TouchEvent {
+            phase,
+            timestamp: 0.0,
+            points: vec![nsh_core::TouchPoint {
+                id: 1,
+                target: row,
+                path: if phase == nsh_core::TouchPhase::Start {
+                    vec![row]
+                } else {
+                    Vec::new()
+                },
+                page: point(px(10.0), px(110.0)),
+                location: point(px(10.0), px(10.0)),
+                changed: true,
+                pointer_type,
+            }],
+            activated: None,
+        }))
+    };
+    let control = app.app.engine().control();
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Touch,
+        touch(nsh_core::TouchPhase::Start),
+    );
+    app.app.wait(std::time::Duration::from_millis(600)).unwrap();
+}
+
+#[test]
+fn a_held_mouse_button_opens_no_context_menu() {
+    // Desktops report the mouse as a touch too: holding its button still
+    // is a slow click or the start of a drag, not a request for a menu.
+    let mut app = start_on(Root::of::<PressableRow>(), Os::Windows);
+    hold_row(&mut app, nsh_core::PointerType::Mouse);
+    assert!(
+        !app.app.shows("Rename"),
+        "a held mouse button opens no menu"
+    );
+}
+
+#[test]
+fn a_held_finger_or_pen_reported_as_a_touch_opens_the_menu() {
+    for pointer_type in [nsh_core::PointerType::Touch, nsh_core::PointerType::Pen] {
+        let mut app = start_on(Root::of::<PressableRow>(), Os::Windows);
+        hold_row(&mut app, pointer_type);
+        app.app.wait_for("Rename").unwrap();
+    }
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct RowMenuProps {
+    /// The app owns `open`, following `onOpenChange`.
+    controlled: bool,
+}
+
+/// A row with a context menu (Rename) at (40, 100), 200 by 40, the menu's
+/// state its own or the app's; another row below it that takes presses
+/// and secondary clicks of its own. The texts say where the popup was
+/// placed and how often the app heard it open and close.
+#[component]
+fn RowMenu(props: RowMenuProps) -> impl IntoElement {
+    let open = signal(false);
+    let at = signal(String::from("none"));
+    let changes = signal(String::new());
+    let menu = context_menu();
+    let menu = if props.controlled {
+        menu.open(move || Some(open.get()))
+    } else {
+        menu
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu.on_open_change(move |e: &MenuEvent| {
+                if let MenuEvent::OpenChange(next, _) = e {
+                    open.set(*next);
+                    changes.update(|c| c.push(if *next { 'o' } else { 'c' }));
+                }
+            })
+            .on_position(move |e: &MenuEvent| {
+                if let MenuEvent::Position(_, bounds, _) = e {
+                    at.set(format!("{} {}", bounds.origin.x.0, bounds.origin.y.0));
+                }
+            })
+            .trigger(
+                view()
+                    .test_id("row")
+                    .w(px(200.0))
+                    .h(px(40.0))
+                    .child(text("Row")),
+            )
+            .child(
+                menu_item()
+                    .accessibility_label("Rename")
+                    .child(text("Rename")),
+            ),
+        )
+        .child(
+            view()
+                .test_id("other")
+                .w(px(200.0))
+                .h(px(40.0))
+                .on_press(|| {})
+                .on_context_menu(|_: &ContextMenuEvent| {})
+                .child(text("Other")),
+        )
+        .child(text(move || format!("at:{}", at.get())))
+        .child(text(move || format!("changes:{}", changes.get())))
+}
+
+/// The mouse's secondary button at `page` over the view with test id
+/// `test_id`, laid out at `origin`, as the platforms report it.
+fn right_click_at(app: &mut App, test_id: &str, origin: Point<Points>, page: Point<Points>) {
+    let id = app.seen.lock().unwrap().test_ids[test_id];
+    let event = ContextMenuEvent::new(
+        point(page.x - origin.x, page.y - origin.y),
+        page,
+        Default::default(),
+        Some(PointerType::Mouse),
+    );
+    app.app.engine().control().dispatch_event(
+        id,
+        EventKind::ContextMenu,
+        EventPayload::ContextMenu(event),
+    );
+    app.app.settle();
+}
+
+/// Where the row with the menu is.
+fn row() -> Point<Points> {
+    point(px(40.0), px(100.0))
+}
+
+/// Where the other row is.
+fn other() -> Point<Points> {
+    point(px(40.0), px(140.0))
+}
+
+#[test]
+fn a_secondary_click_on_the_trigger_of_an_open_context_menu_opens_it_there() {
+    for controlled in [false, true] {
+        let mut app = start_on(
+            Root::new::<RowMenu>(move || RowMenuProps { controlled }),
+            Os::MacOs,
+        );
+        right_click_at(&mut app, "row", row(), point(px(50.0), px(110.0)));
+        app.app.wait_for("Rename").unwrap();
+        app.app.wait_for("text:at:50 110").unwrap();
+        // Again on the row, somewhere else: the menu goes there, open.
+        right_click_at(&mut app, "row", row(), point(px(200.0), px(130.0)));
+        app.app.wait_for("text:at:200 130").unwrap();
+        assert!(
+            app.app.shows("Rename"),
+            "controlled {controlled}: still open"
+        );
+        // And again on the same spot.
+        right_click_at(&mut app, "row", row(), point(px(200.0), px(130.0)));
+        app.app.idle(std::time::Duration::from_millis(300)).unwrap();
+        assert!(
+            app.app.shows("Rename"),
+            "controlled {controlled}: still open"
+        );
+        assert_eq!(
+            app.app.screen().count("Rename").unwrap(),
+            1,
+            "controlled {controlled}: one menu"
+        );
+    }
+}
+
+#[test]
+fn a_secondary_click_or_a_press_outside_an_open_context_menu_closes_it() {
+    for controlled in [false, true] {
+        let mut app = start_on(
+            Root::new::<RowMenu>(move || RowMenuProps { controlled }),
+            Os::MacOs,
+        );
+        right_click_at(&mut app, "row", row(), point(px(50.0), px(110.0)));
+        app.app.wait_for("Rename").unwrap();
+        right_click_at(&mut app, "other", other(), point(px(50.0), px(150.0)));
+        app.app
+            .wait_for_gone("Rename", std::time::Duration::from_secs(5))
+            .unwrap();
+        right_click_at(&mut app, "row", row(), point(px(50.0), px(110.0)));
+        app.app.wait_for("Rename").unwrap();
+        app.app.press("id:other").unwrap();
+        app.app
+            .wait_for_gone("Rename", std::time::Duration::from_secs(5))
+            .unwrap();
+        app.app.wait_for("text:changes:ococ").unwrap();
+    }
+}

@@ -7,6 +7,7 @@ mod layout_tree;
 mod list;
 mod measure;
 mod overlay;
+mod pace;
 mod parent_viewport;
 mod renders;
 mod resize_anchor;
@@ -20,18 +21,27 @@ mod tests;
 mod touch;
 mod views;
 mod watch;
+mod web_evaluation;
 
 /// Why an image's size cannot be known in a terminal, which decodes no
 /// images (`Image.getSize` / `prefetch` reject with
 /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
 pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
 
+/// The most network image checks [`Core`] remembers for its canvases; past
+/// it, it starts over.
+const CANVAS_IMAGES: usize = 1024;
+
+/// The start of a player's error when the core refuses its source; the
+/// capability that would grant it follows (`network`, `fs`).
+pub(crate) const SOURCE_NOT_GRANTED: &str = "the source is not granted by capabilities.";
+
 use std::{rc::Rc, sync::Arc};
 
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
 
-pub use self::measure::Measurement;
+pub use self::measure::{ListScrollPosition, Measurement};
 use self::{
     layout_tree::LayoutTree,
     list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget},
@@ -671,6 +681,12 @@ struct Node {
     /// "hidden"`): hidden with the span's characters, from sight, touches
     /// and assistive technology ([`Core::hide_attachments`]).
     hidden_in_text: bool,
+    /// A list cell the render window left behind as the list scrolled: it
+    /// shows a row out of the window where that row was laid out last, so
+    /// it is left in sight (it is out of it, and soon reused) but hidden
+    /// from assistive technology, which reads the window's rows in their
+    /// order ([`Core::set_left_behind`]).
+    left_behind: bool,
     /// `android={{ elevation }}`.
     elevation: Points,
     /// `ios={{ backdropMaterial }}`.
@@ -814,13 +830,18 @@ impl Node {
             .as_ref()
             .and_then(|root| root.overlay.as_ref())
             .and_then(|overlay| overlay.native_anchor);
+        props.tab_after = self
+            .root
+            .as_ref()
+            .and_then(|root| root.overlay.as_ref())
+            .and_then(|overlay| overlay.tab_after);
         if props.pointer_events == crate::props::PointerEvents::Auto {
             props.pointer_events = self.class_pointer;
         }
         if self.states & crate::tailwind::state::DISABLED != 0 {
             props.accessibility.state.disabled = true;
         }
-        if self.spare || self.hidden_in_text {
+        if self.spare || self.hidden_in_text || self.left_behind {
             props.accessibility.hidden = true;
         }
         if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
@@ -925,6 +946,7 @@ impl Node {
             escapes: false,
             spare: false,
             hidden_in_text: false,
+            left_behind: false,
         }
     }
 }
@@ -1128,6 +1150,8 @@ pub struct Core<M: TextEngine> {
     cull_made: bool,
     /// The walk of [`Core::sync_culled`], kept for its buffer.
     cull_scratch: Vec<(Key, f32, f32)>,
+    /// Views out of sight spread over turns (`pace.rs`).
+    pace: pace::Pace,
     /// The placeholders of `<Each>` rows ([`Op::Placeholder`]), with their
     /// ids (a key may be another node's by now).
     placeholders: Vec<(Key, NodeId)>,
@@ -1217,6 +1241,9 @@ pub struct Core<M: TextEngine> {
     mount: Vec<MountItem>,
     track_tree_order: bool,
     tree_order_changed: bool,
+    /// The tree changed: the shown overlays' places in the Tab order are
+    /// found again ([`Core::order_overlays_for_tab`]).
+    tab_places_stale: bool,
     /// Mount the states nodes show as parts of a control
     /// ([`MountItem::ProjectStates`]).
     mount_projected: bool,
@@ -1268,6 +1295,12 @@ pub struct Core<M: TextEngine> {
     /// chain was last worked out: the next commit round does it once,
     /// whatever order the reports came in.
     focus_moved: bool,
+    /// A view reported losing the focus and none took it since: the chain
+    /// waits for the next display frame before it lets go, so a move
+    /// that comes as a blur then a focus in two messages, with a commit
+    /// between them, is one change of `focus-within`, not a leave and a
+    /// new enter.
+    blur_held: bool,
     /// The chain changed since the focus watches last looked
     /// (`ElementRef::on_focus_in`).
     focus_within_changed: bool,
@@ -1283,6 +1316,11 @@ pub struct Core<M: TextEngine> {
     /// `focus_visible` changed with the focus staying where it is: the
     /// next commit round moves the state.
     focus_visible_moved: bool,
+    /// The parts projected focused (`project_focused`: a tree's or a
+    /// list's cursor), by key and id: they show `focus-visible:` while the
+    /// focus does, restyled when it starts or stops showing
+    /// (`classes::styled_states`).
+    projected_focus: Vec<(Key, NodeId)>,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1319,6 +1357,17 @@ pub struct Core<M: TextEngine> {
     max_nodes: usize,
     /// What the app may reach ([`Core::set_access`]).
     access: Arc<crate::access::Access>,
+    /// What media sources starting with `//` resolve against
+    /// ([`Core::set_base_url`]).
+    base_url: Option<Arc<str>>,
+    /// The roots local media files are read under
+    /// ([`Core::set_media_files`]).
+    media_files: Arc<crate::access::MediaFiles>,
+    /// What the check answered for the network images canvases draw, by
+    /// source: a canvas checks its images on every draw. Only answers that
+    /// depend on nothing but the grant and the base, which clear it when
+    /// they change; local files are resolved on every draw.
+    canvas_images: rustc_hash::FxHashMap<Arc<str>, Option<Arc<str>>>,
     /// Denials already logged (each once).
     denied: rustc_hash::FxHashSet<String>,
     /// The windows' attribute records, by root node (the main window's is
@@ -1404,6 +1453,9 @@ impl<M: TextEngine> Core<M> {
             attachment_blocks: Vec::new(),
             max_nodes: usize::MAX,
             access: Arc::default(),
+            base_url: None,
+            media_files: Arc::default(),
+            canvas_images: Default::default(),
             denied: Default::default(),
             windows: Default::default(),
             window_ids: Default::default(),
@@ -1424,6 +1476,7 @@ impl<M: TextEngine> Core<M> {
             cull_dirty: false,
             cull_made: false,
             cull_scratch: Vec::new(),
+            pace: pace::Pace::default(),
             placeholders: Vec::new(),
             asked_rows: Vec::new(),
             placeholders_resized: false,
@@ -1462,6 +1515,7 @@ impl<M: TextEngine> Core<M> {
             mount: Vec::new(),
             track_tree_order: false,
             tree_order_changed: false,
+            tab_places_stale: false,
             mount_projected: false,
             batches: 0,
             commands: Vec::new(),
@@ -1479,11 +1533,13 @@ impl<M: TextEngine> Core<M> {
             focus_chain: Vec::new(),
             focus_scratch: Vec::new(),
             focus_moved: false,
+            blur_held: false,
             focus_within_changed: false,
             modality: None,
             focus_visible: false,
             focus_visible_on: None,
             focus_visible_moved: false,
+            projected_focus: Vec::new(),
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -1636,6 +1692,27 @@ impl<M: TextEngine> Core<M> {
                 .set(crate::element::desktop::WindowAccess(Some(access.clone())));
         }
         self.access = access;
+        self.canvas_images.clear();
+    }
+
+    /// Sets the URL media sources starting with `//` resolve against, whose
+    /// scheme they take (the page's on the web, as `fetch`'s relative
+    /// URLs). Without one such a source names no URL, and only an app
+    /// without capabilities loads it ([`crate::access::Access::media_url`]).
+    /// A base marks a page: with one, `/x` and relative paths are the
+    /// page's, not local files, so only pages set one.
+    pub fn set_base_url(&mut self, url: Option<Arc<str>>) {
+        self.base_url = url;
+        self.canvas_images.clear();
+    }
+
+    /// Sets the `capabilities.fs.read` roots the app's local media files
+    /// (absolute paths, `file:` URLs) are read under; without them such a
+    /// source of an app with capabilities loads nothing
+    /// ([`crate::access::Access::media_url`]).
+    pub fn set_media_files(&mut self, files: Arc<crate::access::MediaFiles>) {
+        self.media_files = files;
+        self.canvas_images.clear();
     }
 
     /// Sets what the core's own image loads (an [`crate::element::svg`]'s
@@ -1873,7 +1950,12 @@ impl<M: TextEngine> Core<M> {
     /// the keyboard focus and open overlays (a row's menu or popover). A
     /// recycled cell would show another row, drop the focus and close the
     /// overlay. Each list's kept rows are all that hold one; in a list in
-    /// another list's row, both rows are kept.
+    /// another list's row, both rows are kept. The rows on either side of
+    /// the focus's are kept with it, so that the platform's Tab and
+    /// Shift+Tab, which only reach views that exist, move on to the next
+    /// row in the list rather than past it, however far the window lags
+    /// (the row the focus reaches then scrolls into view, which renders
+    /// the rows around it).
     fn sync_kept(&mut self) {
         let mut holders = std::mem::take(&mut self.kept_scratch);
         holders.clear();
@@ -1882,11 +1964,11 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .filter_map(|&id| self.key(id).ok()),
         );
-        if let Some((key, id)) = self.focus
-            && self.nodes.get(key as usize).is_some_and(|n| n.id == id)
-        {
-            holders.push(key);
-        }
+        let focus = self
+            .focus
+            .filter(|&(key, id)| self.nodes.get(key as usize).is_some_and(|n| n.id == id))
+            .map(|(key, _)| key);
+        holders.extend(focus);
         holders.extend(self.overlays.iter().copied().filter(|&key| {
             self.overlay(key)
                 .is_some_and(|o| o.host.is_some() && o.config.hint.is_none())
@@ -1909,6 +1991,14 @@ impl<M: TextEngine> Core<M> {
                         .and_then(|s| s.index)
                 {
                     kept.push((parent, index));
+                    if focus == Some(holder) {
+                        if index > 0 {
+                            kept.push((parent, index - 1));
+                        }
+                        if index + 1 < list.count {
+                            kept.push((parent, index + 1));
+                        }
+                    }
                 }
                 key = parent;
             }
@@ -2232,6 +2322,15 @@ impl<M: TextEngine> Core<M> {
     /// Applies one op as is (also for the nodes components expand).
     fn apply_op(&mut self, op: Op) -> Result<(), ApplyError> {
         match op {
+            Op::Evaluate {
+                id,
+                call,
+                script,
+                timeout,
+            } => {
+                self.start_js_web_evaluation(id, call, script, timeout);
+                Ok(())
+            }
             Op::Rust(op) => {
                 self.run_rust(op);
                 Ok(())
@@ -2343,18 +2442,55 @@ impl<M: TextEngine> Core<M> {
                 }
                 if !self.access.is_unrestricted() {
                     let access = self.access.clone();
+                    let base = self.base_url.clone();
+                    let files = self.media_files.clone();
                     let mut refused = Vec::new();
-                    drawing.ops.retain(|op| match op {
-                        crate::canvas::CanvasOp::DrawImage { image, .. }
-                            if !access.allows_media(&image.uri) =>
-                        {
-                            refused.push(image.uri.clone());
-                            false
+                    let checked = &mut self.canvas_images;
+                    // An image draws what the check granted
+                    // (`Access::media_url`).
+                    drawing.ops.retain_mut(|op| match op {
+                        crate::canvas::CanvasOp::DrawImage { image, .. } => {
+                            let granted = match checked.get(&image.uri) {
+                                Some(granted) => granted.clone(),
+                                None => {
+                                    let granted = access
+                                        .media_url(&image.uri, base.as_deref(), Some(&files))
+                                        .map(|url| match url {
+                                            std::borrow::Cow::Owned(url) => Arc::from(url),
+                                            std::borrow::Cow::Borrowed(_) => image.uri.clone(),
+                                        });
+                                    // A file's answer changes with the disk:
+                                    // never remembered.
+                                    if crate::access::media_capability(&image.uri, base.as_deref())
+                                        == "network"
+                                    {
+                                        if checked.len() >= CANVAS_IMAGES {
+                                            checked.clear();
+                                        }
+                                        checked.insert(image.uri.clone(), granted.clone());
+                                    }
+                                    granted
+                                }
+                            };
+                            match granted {
+                                Some(url) => {
+                                    image.uri = url;
+                                    true
+                                }
+                                None => {
+                                    refused.push(image.uri.clone());
+                                    false
+                                }
+                            }
                         }
                         _ => true,
                     });
                     for uri in refused {
-                        self.deny(not_granted("a canvas image", &uri, "network"));
+                        self.deny(media_not_granted(
+                            "a canvas image",
+                            &uri,
+                            self.base_url.as_deref(),
+                        ));
                     }
                 }
                 let node = &mut self.nodes[key as usize];
@@ -2454,6 +2590,13 @@ impl<M: TextEngine> Core<M> {
                 command: Command::Measure { call },
             } if self.key(id).is_err() => {
                 self.answer_measure(id, call);
+                Ok(())
+            }
+            Op::Command {
+                id,
+                command: Command::MeasureScrollPosition { call },
+            } if self.key(id).is_err() => {
+                self.answer_scroll_position(id, call);
                 Ok(())
             }
             // A window's attributes go into its record, sent once per
@@ -2715,6 +2858,7 @@ impl<M: TextEngine> Core<M> {
         if self.components.executor.has_due_answers() {
             self.run_answers();
         }
+        self.pace_commit();
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -2747,6 +2891,9 @@ impl<M: TextEngine> Core<M> {
             // showed before them.
             let starts = std::mem::take(&mut self.transition_starts);
             self.mount.splice(0..0, starts);
+        }
+        if std::mem::take(&mut self.tab_places_stale) && !self.overlays.is_empty() {
+            self.order_overlays_for_tab();
         }
         if std::mem::take(&mut self.tree_order_changed) {
             let mut order = Vec::new();
@@ -2823,7 +2970,9 @@ impl<M: TextEngine> Core<M> {
         // what they did: one change of the chain, the views both chains
         // share untouched.
         let visible_moved = std::mem::take(&mut self.focus_visible_moved);
-        if self.focus_moved {
+        // A blur no focus followed yet waits for the frame (`blur_held`).
+        let held = self.blur_held && self.focus.is_none() && !self.focus_chain.is_empty();
+        if self.focus_moved && !held {
             self.update_focus_within();
             self.update_focus_visible();
             // The hints the focus came to or left.
@@ -2896,6 +3045,11 @@ impl<M: TextEngine> Core<M> {
             self.sync_culled();
         }
         self.update_lists(relayout);
+        // Views that waited for the budget, once lists placed their cells
+        // (`pace.rs`).
+        if !self.pace.waiting.is_empty() {
+            self.sync_paced();
+        }
         // After every frame of the round: what followers follow is placed.
         self.place_followers(relayout);
         if !self.decorated.is_empty() {
@@ -2919,6 +3073,9 @@ impl<M: TextEngine> Core<M> {
         // The components' measurements, with this commit's layout as JS's.
         for (id, answer) in std::mem::take(&mut self.components.measures) {
             answer.borrow_mut().deliver(self.measure(id));
+        }
+        for (id, answer) in std::mem::take(&mut self.components.scroll_positions) {
+            answer.borrow_mut().deliver(self.list_scroll_position(id));
         }
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
@@ -2966,6 +3123,10 @@ impl<M: TextEngine> Core<M> {
                 self.answer_measure(id, call);
                 continue;
             }
+            if let Command::MeasureScrollPosition { call } = command {
+                self.answer_scroll_position(id, call);
+                continue;
+            }
             let Ok(key) = self.key(id) else { continue };
             // A culled view is made for it.
             if !self.nodes[key as usize].created && !self.uncull(key) {
@@ -2993,15 +3154,35 @@ impl<M: TextEngine> Core<M> {
                 kept.push((id, command));
                 continue;
             }
+            // `Image.getSize` / `prefetch` load what the check granted
+            // (`Access::media_url`).
+            if let Command::ImageInfo { id: request, uri } = &mut command {
+                match self.media_source(uri) {
+                    Some(granted) => {
+                        if let Some(url) = granted {
+                            *uri = url.to_string();
+                        }
+                    }
+                    None => {
+                        let message = media_not_granted(
+                            "Image.getSize / prefetch of",
+                            uri,
+                            self.base_url.as_deref(),
+                        );
+                        self.answer_image_info(*request, Err(message.clone()));
+                        self.deny(message);
+                        continue;
+                    }
+                }
+            }
+            // Menu and tray icons load what the check granted
+            // (`Access::media_url`), as an `<Image>` does.
+            if let Command::Desktop(desktop) = &mut command {
+                self.check_menu_icons(desktop);
+            }
             // Lists resolved theirs in `update_lists`; a scroll view can
             // still scroll to its end.
             match &command {
-                Command::ImageInfo { id: request, uri } if !self.access.allows_media(uri) => {
-                    let message = not_granted("Image.getSize / prefetch of", uri, "network");
-                    self.answer_image_info(*request, Err(message.clone()));
-                    self.deny(message);
-                    continue;
-                }
                 Command::SetClipboard(_)
                 | Command::ReadClipboard { .. }
                 | Command::SetClipboardImage(_)
@@ -4156,6 +4337,72 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Media source `uri` as the app may load it ([`crate::access::Access::media_url`]
+    /// against [`Core::set_base_url`]'s URL): `Some(None)` as written,
+    /// `Some(Some(url))` the URL to load in its place, `None` refused.
+    fn media_source(&self, uri: &str) -> Option<Option<Arc<str>>> {
+        match self
+            .access
+            .media_url(uri, self.base_url.as_deref(), Some(&self.media_files))?
+        {
+            std::borrow::Cow::Borrowed(_) => Some(None),
+            std::borrow::Cow::Owned(url) => Some(Some(url.into())),
+        }
+    }
+
+    /// `desktop`'s menu and tray icons as the app may load them
+    /// ([`Self::media_source`]): a refused icon is dropped (the item shows
+    /// none) and reported.
+    fn check_menu_icons(&mut self, desktop: &mut crate::desktop::DesktopCommand) {
+        use crate::{
+            ImageSource,
+            desktop::{DesktopCommand, MenuItem},
+        };
+        if self.access.is_unrestricted() {
+            return;
+        }
+        let mut check = |icon: &mut Option<ImageSource>| {
+            let Some(source) = icon else { return };
+            match self.media_source(&source.uri) {
+                Some(Some(url)) => source.uri = url,
+                Some(None) => {}
+                None => {
+                    let message =
+                        media_not_granted("the menu icon", &source.uri, self.base_url.as_deref());
+                    *icon = None;
+                    self.deny(message);
+                }
+            }
+        };
+        fn each(items: &mut [MenuItem], check: &mut impl FnMut(&mut Option<ImageSource>)) {
+            for item in items {
+                match item {
+                    MenuItem::Action(action) => check(&mut action.icon),
+                    MenuItem::Submenu { items, icon, .. } => {
+                        check(icon);
+                        each(items, check);
+                    }
+                    MenuItem::Separator => {}
+                }
+            }
+        }
+        let checked = |items: &Arc<[MenuItem]>, check: &mut dyn FnMut(&mut Option<ImageSource>)| {
+            let mut items = items.to_vec();
+            each(&mut items, &mut |icon| check(icon));
+            Arc::<[MenuItem]>::from(items)
+        };
+        match desktop {
+            DesktopCommand::SetMenu(Some(items)) | DesktopCommand::PopupMenu { items, .. } => {
+                *items = checked(items, &mut check);
+            }
+            DesktopCommand::SetTray(Some(tray)) => {
+                check(&mut tray.icon);
+                tray.menu = checked(&tray.menu, &mut check);
+            }
+            _ => {}
+        }
+    }
+
     /// `prop` with what the app may not reach removed: a refused image,
     /// video or web view source shows nothing and fails (`onError` with
     /// `code` `ERR_ACCESS_DENIED`).
@@ -4184,6 +4431,10 @@ impl<M: TextEngine> Core<M> {
         let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
             report(core, not_granted(what, uri, capability));
         };
+        let refuse_media = |core: &mut Self, what: &str, uri: &str| {
+            let message = media_not_granted(what, uri, core.base_url.as_deref());
+            report(core, message);
+        };
         let no_webviews = |core: &mut Self| {
             report(
                 core,
@@ -4191,21 +4442,37 @@ impl<M: TextEngine> Core<M> {
             );
         };
         match prop {
-            Prop::Source(Some(source)) if !self.access.allows_media(&source.uri) => {
-                refuse(self, "the image", &source.uri, "network");
-                Prop::Source(None)
+            // A loader loads what the check granted (`Access::media_url`).
+            Prop::Source(Some(mut source)) => match self.media_source(&source.uri) {
+                Some(granted) => {
+                    source.uri = granted.unwrap_or(source.uri);
+                    Prop::Source(Some(source))
+                }
+                None => {
+                    refuse_media(self, "the image", &source.uri);
+                    Prop::Source(None)
+                }
+            },
+            Prop::Image(ImageProp::Placeholder(Some(mut source))) => {
+                match self.media_source(&source.uri) {
+                    Some(granted) => {
+                        source.uri = granted.unwrap_or(source.uri);
+                        Prop::Image(ImageProp::Placeholder(Some(source)))
+                    }
+                    None => {
+                        refuse_media(self, "the placeholder", &source.uri);
+                        Prop::Image(ImageProp::Placeholder(None))
+                    }
+                }
             }
-            Prop::Image(ImageProp::Placeholder(Some(source)))
-                if !self.access.allows_media(&source.uri) =>
-            {
-                refuse(self, "the placeholder", &source.uri, "network");
-                Prop::Image(ImageProp::Placeholder(None))
-            }
-            Prop::Native(NativeProp::Src(Some(url)))
-                if kind == Kind::Video && !self.access.allows_media(&url) =>
-            {
-                refuse(self, "the video", &url, "network");
-                Prop::Native(NativeProp::Src(None))
+            Prop::Native(NativeProp::Src(Some(url))) if kind == Kind::Video => {
+                match self.media_source(&url) {
+                    Some(granted) => Prop::Native(NativeProp::Src(Some(granted.unwrap_or(url)))),
+                    None => {
+                        refuse_media(self, "the video", &url);
+                        Prop::Native(NativeProp::Src(None))
+                    }
+                }
             }
             Prop::Native(NativeProp::Src(Some(url)))
                 if kind == Kind::WebView && !self.access.allows_webview(&url) =>
@@ -4219,11 +4486,16 @@ impl<M: TextEngine> Core<M> {
                 no_webviews(self);
                 Prop::Native(NativeProp::Html(None))
             }
-            Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
-                if kind == Kind::Video && !self.access.allows_media(&uri) =>
-            {
-                refuse(self, "the video", &uri, "network");
-                Prop::Native(NativeProp::Source(crate::WebSource::None))
+            Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri))) if kind == Kind::Video => {
+                match self.media_source(&uri) {
+                    Some(granted) => Prop::Native(NativeProp::Source(crate::WebSource::Uri(
+                        granted.unwrap_or(uri),
+                    ))),
+                    None => {
+                        refuse_media(self, "the video", &uri);
+                        Prop::Native(NativeProp::Source(crate::WebSource::None))
+                    }
+                }
             }
             Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
                 if kind == Kind::WebView && !self.access.allows_webview(&uri) =>
@@ -5738,6 +6010,7 @@ impl<M: TextEngine> Core<M> {
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
         if self.nodes[child as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
             // The focus moved with it: the views around it now.
             self.focus_moved = true;
@@ -5873,6 +6146,7 @@ impl<M: TextEngine> Core<M> {
             .expect("child of parent");
         siblings.remove(pos);
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
             list.remove_cell(key);
         }
@@ -5994,6 +6268,7 @@ impl<M: TextEngine> Core<M> {
 
     fn release(&mut self, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
+        self.cancel_web_evaluations(id);
         if key == self.root {
             return Ok(());
         }
@@ -6222,11 +6497,13 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
+        self.pace.made += 1;
         // The frame it was given while culled, its view's first.
         let culled_frame = std::mem::take(&mut node.culled)
             .then_some(node.frame)
             .filter(|f| !f.origin.x.0.is_nan());
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
         if node.kind == Kind::Text {
             self.measure_for_real(key);
         }
@@ -7012,10 +7289,10 @@ impl<M: TextEngine> Core<M> {
             cx.metadata_changed = true;
             return true;
         }
-        // Only colors changed, and the platform draws them from the text:
-        // its typesetting, measurements and final layout all stand; the new
-        // text is mounted with the layout drawn (a fitted text has a layout
-        // of its own text, made again).
+        // Only colors or hidden runs changed, and the platform draws them
+        // from the text: its typesetting, measurements and final layout all
+        // stand; the new text is mounted with the layout drawn (a fitted
+        // text has a layout of its own text, made again).
         if !inserted
             && cx.alignments == alignments
             && colors_at_draw
@@ -8608,6 +8885,25 @@ impl<M: TextEngine> Core<M> {
         self.mount.push(MountItem::ViewProps { id, props });
     }
 
+    /// Hides list cell `key`, which the render window left behind, from
+    /// assistive technology, or reads it again as its list places it: its
+    /// frame is where its row was laid out last, which rows measured since
+    /// may have moved past. Its props only: it stays drawn, out of sight.
+    fn set_left_behind(&mut self, key: Key, left_behind: bool) {
+        let node = &mut self.nodes[key as usize];
+        if node.left_behind == left_behind {
+            return;
+        }
+        node.left_behind = left_behind;
+        if !node.created || node.spare {
+            // Its new view gets them (`ensure_created`), or `set_spare`
+            // sends them as it shows the cell again.
+            return;
+        }
+        let (id, props) = (node.id, node.mounted_props());
+        self.mount.push(MountItem::ViewProps { id, props });
+    }
+
     /// [`Core::update_lists`] for list `key`; `outer`: where a list in its
     /// parent's viewport is in the view it is virtualized against.
     fn update_list(
@@ -8864,7 +9160,10 @@ impl<M: TextEngine> Core<M> {
         // jumped) would show through: move them out of sight. They, the ones
         // never placed and, once the items changed, all of them are hidden
         // until placed again ([`Core::set_spare`]); the few the window leaves
-        // behind while scrolling are out of sight already and soon reused.
+        // behind while scrolling are out of sight already and soon reused,
+        // so they stay drawn, but screen readers skip them: they would read
+        // rows out of the window, by frames rows measured since may have
+        // passed ([`Core::set_left_behind`]).
         let (window_start, window_end) = list.render_window();
         // In its parent's viewport, the cells start inside the list's
         // border and padding.
@@ -8897,6 +9196,8 @@ impl<M: TextEngine> Core<M> {
             if start + size <= window_start || start >= window_end {
                 if changed {
                     self.set_spare(cell, true);
+                } else {
+                    self.set_left_behind(cell, true);
                 }
                 continue;
             }
@@ -8933,6 +9234,7 @@ impl<M: TextEngine> Core<M> {
                 rect(x, main_at, width, size.height)
             };
             this.set_frame(cell, frame);
+            this.set_left_behind(cell, false);
             this.set_spare(cell, false);
             if std::mem::take(&mut this.nodes[cell as usize].relaid) {
                 let children = std::mem::take(&mut this.nodes[cell as usize].children);
@@ -9642,6 +9944,13 @@ fn not_granted(what: &str, uri: &str, capability: &str) -> String {
     format!("{what} {uri} is not granted: {advice}")
 }
 
+/// The message for a refused media source, read against `base` as
+/// `Access::media_url` reads it.
+fn media_not_granted(what: &str, uri: &str, base: Option<&str>) -> String {
+    let advice = crate::access::media_grant_advice(uri, base);
+    format!("{what} {uri} is not granted: {advice}")
+}
+
 /// Applies one property to a control.
 fn apply_native(control: &mut NativeProps, prop: NativeProp) {
     use NativeProp as P;
@@ -9898,6 +10207,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::ImageInfo { .. }
                 | C::AccessibilityFocus
                 | C::Measure { .. }
+                | C::MeasureScrollPosition { .. }
                 | C::SetClipboard { .. }
                 | C::ReadClipboard { .. }
                 | C::SetClipboardImage { .. }

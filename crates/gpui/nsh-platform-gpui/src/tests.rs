@@ -192,6 +192,7 @@ fn windows(cx: &mut TestAppContext) {
     mouse_events_carry_the_position_button_and_modifiers(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
     text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx);
+    a_popovers_field_follows_its_trigger_in_the_tab_order(cx);
     the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
     js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
@@ -204,6 +205,7 @@ fn windows(cx: &mut TestAppContext) {
     set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
     a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
     props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx);
+    a_command_without_a_search_field_takes_the_keyboard_on_focus(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -377,6 +379,58 @@ fn text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx: &mut TestA
         }
     };
     typed_ahead(cx, down(0x4E, modifiers));
+}
+
+/// A focused field, an open popover with a field in it, and a field
+/// after the popover.
+const POPOVER_FIELDS: &str = r#"
+import { mount, Text, View } from "nsh";
+import { Input, Popover } from "nsh/base";
+
+function App() {
+  return (
+    <View style={{ flex: 1, padding: 8, gap: 8 }}>
+      <Input autoFocus value="before" style={{ height: 30 }} />
+      <Popover defaultOpen trigger={<Text>Open</Text>}>
+        <Input value="inside" style={{ width: 100, height: 30 }} />
+      </Popover>
+      <Input value="after" style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_popovers_field_follows_its_trigger_in_the_tab_order(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", POPOVER_FIELDS, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "before");
+    let tab = |view: &Entity<AppView>, cx: &mut VisualTestContext, shift: bool| {
+        view.update(cx, |view, _| {
+            let modifiers = crate::input::Modifiers {
+                shift,
+                ..crate::input::Modifiers::default()
+            };
+            let surface = view.surface().clone();
+            assert!(crate::input::key(
+                &surface,
+                down(crate::keys::VK_TAB, modifiers)
+            ));
+        });
+    };
+    // Into the popover, which is shown at the end of the root view, then
+    // on to the field after it, and back.
+    tab(&view, cx, false);
+    wait_for(&view, cx, "inside");
+    tab(&view, cx, false);
+    wait_for(&view, cx, "after");
+    tab(&view, cx, true);
+    wait_for(&view, cx, "inside");
+    tab(&view, cx, true);
+    wait_for(&view, cx, "before");
 }
 
 struct KeyLog {
@@ -1754,4 +1808,68 @@ fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestApp
         click_count: 1,
     });
     wait_for(&view, cx, "menu 20 15");
+}
+
+/// A command without a search field that the app focuses once mounted;
+/// the item chosen with the keyboard goes to a field.
+const UNSEARCHABLE_COMMAND: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Command, Input } from "nsh/base";
+
+function App() {
+  const log = signal("start");
+  let command: any;
+  let field: any;
+  setTimeout(() => command?.focus(), 0);
+  return (
+    <View style={{ flex: 1, padding: 8, gap: 8 }}>
+      <Input ref={(node) => (field = node)} autoFocus value={log()} style={{ height: 30 }} />
+      <Command
+        ref={(node) => (command = node)}
+        searchable={false}
+        items={[{ id: "alpha", label: "Alpha" }, { id: "beta", label: "Beta" }]}
+        onSelect={({ id }) => { log.set(`selected ${id}`); field?.focus(); }}
+      />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", UNSEARCHABLE_COMMAND, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    // `focus()` moves the keyboard from the field to the command.
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let moved = view.read_with(cx, |view, _| {
+            crate::key_focus::focused(view.surface()).is_some()
+                && crate::text_input::focused(view.surface()).is_none()
+        });
+        if moved {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the command never took the focus"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Its keys reach it: Down moves to the next item, Return chooses it.
+    cx.simulate_keystrokes("down");
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(50));
+    cx.simulate_keystrokes("enter");
+    let text = wait_until(&view, cx, |t| t.starts_with("selected"));
+    assert!(
+        text == "selected alpha" || text == "selected beta",
+        "{text}"
+    );
+    assert!(view.read_with(cx, |view, _| {
+        crate::key_focus::focused(view.surface()).is_none()
+    }));
 }

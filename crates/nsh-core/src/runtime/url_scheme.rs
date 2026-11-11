@@ -15,7 +15,7 @@ use crate::{
         CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, PropEnum,
         PropError, Stop, System, TsTypes, module,
     },
-    url_scheme::{AppUrlChange, AppUrlChangeCause},
+    url_scheme::{AppUrlChange, AppUrlChangeReason},
 };
 
 /// The links that open the app.
@@ -33,7 +33,7 @@ impl UrlScheme {
     /// so its URL is untrusted input: check it before acting on it.
     /// `change`: the app's address moved without the app moving it (on the
     /// web, the browser's back or forward to an entry its pages do not
-    /// account for, `cause` `"back"` or `"forward"`, or an address the user
+    /// account for, `reason` `"back"` or `"forward"`, or an address the user
     /// typed, `"address"`); `url()` reads it already, and the app shows
     /// what it names. A back that pops a page is the stack's (`onChange`),
     /// and a forward to a page the stack no longer has is `open`. Moves
@@ -158,9 +158,9 @@ pub(crate) struct UrlSchemeOpen {
     url: String,
 }
 
-/// What moved the app's address (the `change` event's `cause`).
+/// What moved the app's address (the `change` event's `reason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
-pub(crate) enum UrlSchemeChangeCause {
+pub(crate) enum UrlSchemeChangeReason {
     /// The browser's back.
     #[default]
     Back,
@@ -171,12 +171,12 @@ pub(crate) enum UrlSchemeChangeCause {
     Address,
 }
 
-impl From<AppUrlChangeCause> for UrlSchemeChangeCause {
-    fn from(cause: AppUrlChangeCause) -> Self {
-        match cause {
-            AppUrlChangeCause::Back => Self::Back,
-            AppUrlChangeCause::Forward => Self::Forward,
-            AppUrlChangeCause::Address => Self::Address,
+impl From<AppUrlChangeReason> for UrlSchemeChangeReason {
+    fn from(reason: AppUrlChangeReason) -> Self {
+        match reason {
+            AppUrlChangeReason::Back => Self::Back,
+            AppUrlChangeReason::Forward => Self::Forward,
+            AppUrlChangeReason::Address => Self::Address,
         }
     }
 }
@@ -187,14 +187,14 @@ pub(crate) struct UrlSchemeChange {
     /// The address now, as `url()` reads it.
     url: String,
     /// What moved it.
-    cause: UrlSchemeChangeCause,
+    reason: UrlSchemeChangeReason,
 }
 
 impl From<AppUrlChange> for UrlSchemeChange {
     fn from(change: AppUrlChange) -> Self {
         Self {
             url: change.url,
-            cause: change.cause.into(),
+            reason: change.reason.into(),
         }
     }
 }

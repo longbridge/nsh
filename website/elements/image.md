@@ -91,6 +91,9 @@ crate ships its `assets/` directory with `registry.assets(assets!())`). See
 > [!NOTE]
 > When the app declares [capabilities](../docs/sandbox-and-capabilities.md), remote images load from the hosts it
 > lists; an image from any other host is not requested and fails with `onError`, whose `code` is `"ERR_ACCESS_DENIED"`. `asset:` URIs, `data:` URIs and `blob:` URLs always load.
+> A local file (an absolute path or a `file:` URL) loads on the desktops when `fs.read` holds it, and not on mobile or
+> the web. Files from `onFileDrop`, from the clipboard and those named from `import.meta.url` are `file:` URLs, so they
+> need a read root too.
 
 ## Props
 

@@ -27,7 +27,8 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
+    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, ListScrollPosition,
+    Measurement, NodeId,
     geometry::{Bounds, Percentage, Point, Points},
 };
 
@@ -299,6 +300,40 @@ impl ElementRef {
         self.send(Command::InjectJavaScript(script.into()));
     }
 
+    /// Runs `script` in a web view's page and answers with its result
+    /// (TS: `ref.evaluate(script, options)`): the script's completion value,
+    /// a returned Promise's once it settles, as JSON. Fails with
+    /// [`codes::WEBVIEW_SCRIPT`](super::codes::WEBVIEW_SCRIPT) when the
+    /// script throws, its Promise rejects or its value is not JSON,
+    /// [`codes::WEBVIEW_ABORTED`](super::codes::WEBVIEW_ABORTED) when the
+    /// page navigates or the web view goes away first,
+    /// [`codes::TIMED_OUT`](super::codes::TIMED_OUT) after
+    /// `options.timeout`, and
+    /// [`codes::UNAVAILABLE`](super::codes::UNAVAILABLE) where the platform
+    /// has none ([`web_evaluate_available`](super::web_evaluate_available)).
+    /// Await it in a task.
+    pub fn evaluate(
+        &self,
+        script: impl Into<String>,
+        options: EvaluateOptions,
+    ) -> Answer<Result<Evaluation, super::JsError>> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        let script = script.into();
+        if self
+            .reach(|node, executor| {
+                executor.act(Action::Evaluate(node, script, options.timeout, pending))
+            })
+            .is_none()
+        {
+            slot.borrow_mut().deliver(Err(super::JsError::Error(
+                "the ref names no web view".into(),
+            )
+            .with_code(super::codes::WEBVIEW_ABORTED)));
+        }
+        answer
+    }
+
     /// Sends `data` to a web view's page (a `message` event on `window`).
     pub fn post_message(&self, data: impl Into<String>) {
         self.send(Command::PostMessage(data.into()));
@@ -344,6 +379,25 @@ impl ElementRef {
         let pending = slot.clone();
         if self
             .reach(|node, executor| executor.act(Action::Measure(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(None);
+        }
+        answer
+    }
+
+    /// Where a list's viewport starts among its rows (TS:
+    /// `ref.measureScrollPosition()`): the row there and how far into it,
+    /// as the list lays its rows out, from the layout of the commit this
+    /// call goes out with. [`ElementRef::scroll_to_index`] with the row
+    /// and a view offset of `-offset` puts the viewport's start back
+    /// there, as for a list made anew. `None` when no rendered list
+    /// carries the ref or it has no items. Await it in a task.
+    pub fn measure_scroll_position(&self) -> Answer<Option<ListScrollPosition>> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::MeasureScrollPosition(node, pending)))
             .is_none()
         {
             slot.borrow_mut().deliver(None);
@@ -463,6 +517,36 @@ impl<C: Component> fmt::Debug for ComponentRef<C> {
             .field(&self.node().unwrap_or(0))
             .finish()
     }
+}
+
+/// How [`ElementRef::evaluate`] runs (TS: `ref.evaluate`'s options).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EvaluateOptions {
+    /// How long the script may take to answer, a returned Promise
+    /// included; past it the call fails with
+    /// [`codes::TIMED_OUT`](super::codes::TIMED_OUT). 30 seconds by
+    /// default.
+    pub timeout: std::time::Duration,
+}
+
+impl Default for EvaluateOptions {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(30),
+        }
+    }
+}
+
+/// What a web view's script answered ([`ElementRef::evaluate`]; TS:
+/// `{ value }`).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Evaluation {
+    /// The script's result as JSON: `null`, a boolean, a finite number, a
+    /// string, an array or a plain object of these. It comes from the page:
+    /// check it before trusting it.
+    pub value: JsonValue,
 }
 
 #[cfg(test)]

@@ -52,6 +52,8 @@ WORKFLOWS = {
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/bench/**",
             "tests/compat/cases/layout/fonts/**",
+            # nsh-core's test of Android's event codes.
+            "crates/nsh-platform-android/java/com/longbridge/nsh/Native.java",
         ],
     },
     "compat.yml": {

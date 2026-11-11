@@ -3309,8 +3309,9 @@
 			refresh() {
 				if (live()) apply(invoke(200, []));
 			},
-			measure(node) {
-				return call(315, [], node, [], true, false);
+			/** `ref.measure()`, or with `"scrollPosition"` a list's `ref.measureScrollPosition()`. */
+			measure(node, what) {
+				return call(315, [], node, what ? [what] : [], true, false);
 			},
 			reply(id, ok, value) {
 				const waiter = pending.get(id);
@@ -3371,6 +3372,14 @@
 				argument
 			]);
 		};
+		prototype.evaluate = async function(script, options) {
+			if (typeof script !== "string") throw new TypeError("evaluate expects a script string");
+			if (options !== void 0 && (options === null || typeof options !== "object")) throw new TypeError("evaluate's options must be an object");
+			if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
+			const error = /* @__PURE__ */ new Error("web views evaluate no scripts here");
+			error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+			throw error;
+		};
 		prototype.setSelection = function(start, end = start) {
 			return call(314, [
 				values.nodeIds.get(this),
@@ -3400,6 +3409,9 @@
 		};
 		prototype.measure = function() {
 			return measure(this);
+		};
+		prototype.measureScrollPosition = function() {
+			return measure(this, "scrollPosition");
 		};
 		const finalizers = new FinalizationRegistry((id) => {
 			if (live()) {

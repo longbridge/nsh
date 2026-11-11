@@ -4,7 +4,7 @@ import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMen
 import { openUrl, platform, windowSize } from "nsh";
 import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { backdrop, colors, handleThumb, inputLook, menuIndicator, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, MenuPanel, menuSeparator, menuSheet, popupSurface, Tip, toggleGlyph, toggleLabel, toggleLook } from "../ui";
+import { colors, handleThumb, inputLook, menuIndicator, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, menuSeparator, popupSurface, Tip, toggleGlyph, toggleLabel, toggleLook, menuPopup } from "../ui"
 import { SAMPLE } from "./lsp/sample";
 import { type CodeAction, type DocumentColor, LanguageServer, type Problem } from "./lsp/server";
 
@@ -650,8 +650,7 @@ export function EditorDemo() {
         <Menu
           offset={4}
           margin={8}
-          popupStyle={menuSheet()}
-          backdropStyle={backdrop()}
+          {...menuPopup({ minWidth: 220 })}
           onOpenChange={({ open }) => menuOpen.set(open ? "language" : null)}
           trigger={
             <View accessibilityLabel="Language" tooltip={<Tip label="Language" />} {...toggleLook({ on: () => menuOpen() === "language", text: true, style: { paddingHorizontal: 6 } })}>
@@ -660,21 +659,19 @@ export function EditorDemo() {
             </View>
           }
         >
-          <MenuPanel minWidth={220}>
-            <Each of={LANGUAGES}>
-              {(l) => (
-                <Item
-                  label={l().label}
-                  mark="dot"
-                  checked={language() === l().value}
-                  onSelect={() => {
-                    hover.set(null);
-                    language.set(l().value);
-                  }}
-                />
-              )}
-            </Each>
-          </MenuPanel>
+          <Each of={LANGUAGES}>
+            {(l) => (
+              <Item
+                label={l().label}
+                mark="dot"
+                checked={language() === l().value}
+                onSelect={() => {
+                  hover.set(null);
+                  language.set(l().value);
+                }}
+              />
+            )}
+          </Each>
         </Menu>
         <View class="flex-1" />
         <IconTool label="Find and replace" icon="search" on={finding()} onPress={() => (finding() ? closeFind() : openFind())} />
@@ -682,8 +679,7 @@ export function EditorDemo() {
           align="end"
           offset={4}
           margin={8}
-          popupStyle={menuSheet()}
-          backdropStyle={backdrop()}
+          {...menuPopup({ minWidth: 256 })}
           onOpenChange={({ open }) => menuOpen.set(open ? "options" : null)}
           trigger={
             <View accessibilityLabel="Editor options" tooltip={<Tip label="Editor options" />} {...toggleLook({ on: () => menuOpen() === "options" })}>
@@ -691,20 +687,18 @@ export function EditorDemo() {
             </View>
           }
         >
-          <MenuPanel minWidth={256}>
-            <Item label="Soft wrap" mark="check" checked={softWrap()} keepOpen onSelect={() => softWrap.set(!softWrap())} />
-            <Item label="Line numbers" mark="check" checked={lineNumbers()} keepOpen onSelect={() => lineNumbers.set(!lineNumbers())} />
-            <Item label="Problems" mark="check" checked={problemsShown()} onSelect={() => area?.toggleDock("bottom")} />
-            <Item label="Find and Replace" shortcut="mod+f" onSelect={openFind} />
-            <MenuSeparator style={menuSeparator()} />
-            {/* Under the items' labels, past the marks' lane. */}
-            <View style={{ paddingLeft: markLane() }}>
-              <MenuLabel text={typescript() ? "TypeScript language server" : "Keys"} />
-            </View>
-            <Each of={tips()}>
-              {(tip) => <Text style={{ ...menuItemNote(), color: colors.muted, paddingLeft: (terminal ? 0 : 8) + markLane(), paddingRight: terminal ? 0 : 8, paddingVertical: 2 }}>{tip()}</Text>}
-            </Each>
-          </MenuPanel>
+          <Item label="Soft wrap" mark="check" checked={softWrap()} keepOpen onSelect={() => softWrap.set(!softWrap())} />
+          <Item label="Line numbers" mark="check" checked={lineNumbers()} keepOpen onSelect={() => lineNumbers.set(!lineNumbers())} />
+          <Item label="Problems" mark="check" checked={problemsShown()} onSelect={() => area?.toggleDock("bottom")} />
+          <Item label="Find and Replace" shortcut="mod+f" onSelect={openFind} />
+          <MenuSeparator style={menuSeparator()} />
+          {/* Under the items' labels, past the marks' lane. */}
+          <View style={{ paddingLeft: markLane() }}>
+            <MenuLabel text={typescript() ? "TypeScript language server" : "Keys"} />
+          </View>
+          <Each of={tips()}>
+            {(tip) => <Text style={{ ...menuItemNote(), color: colors.muted, paddingLeft: (terminal ? 0 : 8) + markLane(), paddingRight: terminal ? 0 : 8, paddingVertical: 2 }}>{tip()}</Text>}
+          </Each>
         </Menu>
       </View>
 
@@ -718,7 +712,10 @@ export function EditorDemo() {
           class="flex-1"
           defaultLayout={{
             center: { type: "tabs", panels: ["editor"] },
-            bottom: { layout: { type: "tabs", panels: ["problems"] }, size: 120 },
+            // Whole rows: the tab bar (28 and its rule), the list's padding (8) and six problems of 24, every
+            // one of the TypeScript sample's (an error, four warnings, an info), so none hides under the fold
+            // above the status bar.
+            bottom: { layout: { type: "tabs", panels: ["problems"] }, size: 29 + 8 + 6 * 24 },
           }}
           panels={[
             { id: "editor", closable: false },
@@ -850,7 +847,7 @@ export function EditorDemo() {
       </If>
 
       {/* A terminal's status line reads as words two columns apart (12pt is one), its edges one column in, as a pager's. */}
-      <View class="h-6 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1" style={terminal ? { gap: 24, paddingHorizontal: 8 } : undefined}>
+      <View class="h-7 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1" style={terminal ? { gap: 24, paddingHorizontal: 8 } : undefined}>
         <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] tabular-nums text-foreground">
           {caret()}
         </Text>
@@ -863,7 +860,8 @@ export function EditorDemo() {
         <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-info">
           {plural(count("info"), "info")}
         </Text>
-        <If when={!terminal || last() !== "—"}>
+        {/* Nothing until there is something to say: a lone dash reads as debris. */}
+        <If when={last() !== "—"}>
           <Text style={{ numberOfLines: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
             {last()}
           </Text>

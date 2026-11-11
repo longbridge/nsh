@@ -375,6 +375,8 @@ nsh.json 中没有 `"capabilities"` 的应用可以打开除浮层（overlay）�
 const Application: {
   quit(): void;
   restart(): void;
+  on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
+  on(event: "quit", listener: () => void): () => void;
 };
 ```
 
@@ -382,6 +384,8 @@ const Application: {
 |---|---|---|
 | `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
 | `restart()` | `restart()` | 像 `quit()` 一样退出应用，然后用相同的参数重新启动它。 |
+| `on("secondInstance", listener)` | `next_second_instance()` | 应用运行时再次被启动（[单实例](#单实例)）。 |
+| `on("quit", listener)` | `on_app_quit(f)` | 应用正在退出：运行它的清理（[退出](#退出)）。 |
 
 `Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（为 Dock 保留的隐藏窗口、托盘图标）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
 
@@ -399,6 +403,91 @@ async function changeLanguage(language: string) {
   if (await confirmRestart()) Application.restart();
 }
 ```
+
+### 退出
+
+「退出」由应用自己负责，就像 GPUI 应用自己处理 `Quit` 动作。应用菜单的 `{ role: "quit" }` 项和它的快捷键会立即退出。
+需要先询问用户的应用（有未保存的修改、正在上传）在菜单里放一个自己的「退出」项，绑定退出快捷键，询问之后再调用 `quit()`：
+
+```rust tabs
+use nsh_core::{
+    desktop::MenuItem,
+    element::desktop::{on_app_quit, quit, set_application_menu},
+    prelude::*,
+};
+
+#[component]
+fn Editor() -> impl IntoElement {
+    let dirty = signal(false);
+    set_application_menu(vec![MenuItem::submenu("File", vec![
+        MenuItem::new("Quit").shortcut("mod+q").on_select(move || {
+            if dirty.get_untracked() {
+                ask_to_save(); // 它的「退出」按钮调用 `quit()`
+            } else {
+                quit();
+            }
+        }),
+    ])]);
+    // 不论应用怎样退出都会运行；它不能让应用继续运行。
+    on_app_quit(move || async move { save_session().await });
+    editor()
+}
+```
+
+```tsx tabs
+import { Application, Menu } from "nsh/desktop";
+
+function Editor() {
+  Menu.setApplicationMenu([
+    {
+      label: "File",
+      submenu: [{ label: "Quit", shortcut: "mod+q", onSelect: () => (dirty() ? askToSave() : Application.quit()) }],
+    },
+  ]);
+  // 不论应用怎样退出都会运行；它不能让应用继续运行。
+  Application.on("quit", async () => {
+    await saveSession();
+  });
+  return <EditorView />;
+}
+```
+
+`Application.on("quit", listener)`（Rust：`on_app_quit`）是应用的清理，与 GPUI 的 `on_app_quit` 相同：不论应用怎样停止
+（它的「退出」项、`quit()`、最后一个窗口关闭、Dock 的「退出」、用户注销时系统结束它、宿主应用移除它的视图）都会运行，
+并且不能让应用继续运行。listener 返回的 promise 会被等待，所有 listener 合计最多 200 毫秒，这期间平台也在等应用；
+超过这个时间应用就停止。组件渲染时添加的 listener 随组件一起移除；`on` 返回的函数也能停止它。
+
+### 单实例
+
+桌面应用通常只运行一份：再次打开时把正在运行的应用带到前台。应用在 nsh.json 中写 `"singleInstance": true` 开启。
+之后第二次启动会把它的命令行交给正在运行的应用，并在打开窗口、启动引擎之前退出；正在运行的应用把主窗口带到前台
+（隐藏时显示出来，比如托盘应用），并以 `secondInstance` 报告这次启动，带上参数（不含程序路径）和启动时的目录：
+
+```json
+{ "singleInstance": true }
+```
+
+```tsx
+import { Application } from "nsh/desktop";
+
+Application.on("secondInstance", ({ args, cwd }) => {
+  const file = args.find((arg) => !arg.startsWith("-"));
+  if (file) openDocument(resolve(cwd, file));
+});
+```
+
+Rust 代码 await `nsh_core::prelude` 的 `next_second_instance()`，得到带 `args` 和 `cwd` 的 `SecondInstance`。没有监听者时到达的启动会
+留给下一个监听者（最多 16 个，丢弃最早的）。任何人都能用任意参数启动应用，所以要像检查其他输入一样检查它们。参数中属于
+应用 [scheme](nsh.md#urlscheme) 的链接也会通过 `UrlScheme.on("open")` 送达。
+
+| 平台 | 如何只运行一份 |
+| --- | --- |
+| Windows | 以应用 id 命名的互斥量；第二次启动把参数和工作目录发给正在运行的应用的窗口（`WM_COPYDATA`） |
+| Linux | GApplication 在会话总线上按应用 id 保证唯一；第二次启动的命令行交给正在运行的应用 |
+| macOS | Launch Services 对一个应用包只运行一份，再次打开时激活它，因此不报告 `secondInstance`；文件和链接通过 `UrlScheme` 送达 |
+| iOS、Android、Web | 系统只运行一份应用；不报告 `secondInstance` |
+
+`nsh package` 构建的发布运行器读取这个设置；`nsh run` 仍按原样启动开发宿主。
 
 ## 自定义标题栏
 
@@ -794,6 +883,8 @@ interface TrayModule {
 | --- | --- |
 | `icon` | 图标，写法与 `<Image>` 的 `src` 相同。面板按 16 到 24 像素绘制，图标应简单、方形。在 macOS 和 Windows 上 SVG 是模板图标，用菜单栏或任务栏的文字颜色绘制。不设时 Windows 显示应用图标。 |
 | `tooltip` | 指针停在图标上时显示；不设时显示应用名。 |
+| `title` | 图标旁边的文字，由若干段文字 `{ text, color? }` 组成，每段可以有自己的颜色（CSS 颜色；不设时用菜单栏的文字颜色）：应用想让用户一直看得到的东西，比如价格。macOS 的菜单栏用菜单栏字体显示。Linux 上支持 AppIndicator 标签的面板（GNOME 的 AppIndicator 扩展、Unity、MATE、Budgie）在图标右边显示它的文字，颜色跟随面板；Plasma、Waybar 和 Windows 的通知区只显示图标。 |
+| `titlePlacement` | 文字显示在图标的哪一边：`"right"`（默认）或 `"left"`。仅 macOS 支持；Linux 的面板总是把文字放在图标右边。 |
 | `menu` | 图标的菜单，菜单项与 `Menu` 的相同。右键打开；没有 `onClick` 时左键也打开。 |
 | `onClick` | 左键点击图标时调用（在 Windows 上，图标获得焦点时按 Enter 或空格也会调用），参数是 `{ bounds }`：图标在哪里（见[下文](#在图标旁打开窗口)）。 |
 
@@ -812,6 +903,28 @@ Tray.set({
     { type: "separator" },
     { role: "quit" },
   ],
+});
+```
+
+应用在 `onClick` 或菜单项的 `onSelect` 中显示或聚焦的窗口会来到最前面；在 Linux 的 Wayland 桌面上，面板会把这次点击的激活令牌交给应用。
+
+标题让 macOS 菜单栏里图标旁边一直显示一段文字，比如价格，涨跌幅用应用主题里的颜色。文字段的颜色在调用 `set` 时就固定下来；要让主题颜色跟随浅色和深色外观，就在读取配色方案的 `effect` 中设置托盘：
+
+```rust tabs
+use nsh_core::desktop::TrayTitleRun;
+
+set_tray(tray().icon(icon).title([
+    TrayTitleRun::new("AAPL 228.00 "),
+    TrayTitleRun::new("+1.33%").color(color(tokens().color("up").unwrap())),
+]));
+```
+
+```tsx tabs
+import { token } from "nsh";
+
+Tray.set({
+  icon,
+  title: [{ text: "AAPL 228.00 " }, { text: "+1.33%", color: token("up") }],
 });
 ```
 
@@ -857,7 +970,7 @@ function atIcon(icon: Bounds, size: Size): Point {
 }
 ```
 
-在 Rust 中，`set_tray(tray()...)` 与之相同（传 `None` 移除）：`tray()` 是一个 builder，有 `.icon(..)`、`.tooltip(..)`、`.menu(items)`（与 `set_application_menu` 相同的 `MenuItem`）和 `.on_click(|e| ..)`，它的 `TrayClickEvent` 带有 `bounds: Option<Bounds<Points>>`。处理函数在设置它的 owner 下运行，只在该 owner 存活期间有效；放在 `effect` 中会跟随读取的 signal 更新。每个应用只有一个托盘，与 TSX 共用：后设置的生效。
+在 Rust 中，`set_tray(tray()...)` 与之相同（传 `None` 移除）：`tray()` 是一个 builder，有 `.icon(..)`、`.tooltip(..)`、`.title(runs)`（`TrayTitleRun::new(text)`，可加 `.color(..)`）、`.title_placement(..)`（`TrayTitlePlacement`）、`.menu(items)`（与 `set_application_menu` 相同的 `MenuItem`）和 `.on_click(|e| ..)`，它的 `TrayClickEvent` 带有 `bounds: Option<Bounds<Points>>`。处理函数在设置它的 owner 下运行，只在该 owner 存活期间有效；放在 `effect` 中会跟随读取的 signal 更新。每个应用只有一个托盘，与 TSX 共用：后设置的生效。
 
 ```rust
 use nsh_core::element::desktop::{MenuItem, main_window, quit, set_tray, tray};

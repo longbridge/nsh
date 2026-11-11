@@ -135,7 +135,8 @@ fn context(surface: &Surface, uri: &str) -> Context {
     Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
-        access: Arc::default(),
+        access: surface.native.access(),
+        media_files: Arc::default(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -491,7 +492,10 @@ fn images() -> &'static Images<Picture> {
         Images::new(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let picture = decode(bytes, target)?;
+                let picture = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = picture.cost();
                 Ok((picture.clone(), picture.natural, cost))
             },
@@ -749,6 +753,29 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
             natural,
         })
     }
+}
+
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size; any thread.
+fn from_rgba((width, height, rgba): (u32, u32, &[u8])) -> Result<Picture, String> {
+    let mut pixels = rgba.to_vec();
+    for px in pixels.as_chunks_mut::<4>().0 {
+        let a = u16::from(px[3]);
+        for c in &mut px[..3] {
+            *c = ((u16::from(*c) * a + 127) / 255) as u8;
+        }
+    }
+    let mut raster = nsh_core::svg::Raster::default();
+    raster.width = width;
+    raster.height = height;
+    raster.pixels = pixels;
+    let image = rgba_image(&raster).ok_or("cannot make a CGImage")?;
+    Ok(Picture {
+        frames: Arc::new([image]),
+        key_times: Arc::new([0.0, 1.0]),
+        duration: 0.0,
+        natural: Natural::Pixels(width, height),
+    })
 }
 
 /// Draws an SVG, its longest side `longest` pixels; any thread.

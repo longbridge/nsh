@@ -283,6 +283,58 @@ const at = signal<number | null>(null);
 </View>
 ```
 
+### Wheel
+
+`onWheel` hears a mouse wheel or touchpad scroll over a view, on macOS, Windows, Linux, the GPUI backend and the web
+(the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
+it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
+pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
+or a view around one, only observes: the scroll view still scrolls. JS never cancels a native scroll after the fact
+(the main thread does not wait for it), so whether a view takes the wheel is decided by what is mounted, as with
+`onContextMenu`.
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `onWheel` | `.on_wheel(..)` | `(e: WheelEvent) => void` | A mouse wheel or touchpad scrolled over the view or a view inside it. |
+
+`WheelEvent` has `position` and `pagePosition`, as `MouseEvent`, the `modifiers` held, `delta` (a `Point`: positive
+`y` scrolls down, toward the end, positive `x` right, as the DOM's `deltaX` / `deltaY`) and `deltaMode`: `"lines"` for
+mouse wheel notches, `"points"` for a precise device (a touchpad, a Magic Mouse; AppKit's `hasPreciseScrollingDeltas`,
+the DOM's `DOM_DELTA_PIXEL`). In Rust `delta` is a `WheelDelta`, `Lines(Point<f32>)` or `Points(Point<Points>)`, as
+GPUI's `ScrollDelta`; `delta.points(line_height)` gives points either way.
+
+```rust tabs
+// A canvas: Control + wheel zooms, the wheel pans.
+let zoom = signal(1.0_f32);
+let offset = signal(Point::<Points>::default());
+
+view()
+    .size_full()
+    .on_wheel(move |e: &WheelEvent| {
+        let d = e.delta.points(px(16.0));
+        if e.modifiers.ctrl {
+            zoom.update(|z| *z *= (1.0 - d.y.0 / 200.0).clamp(0.5, 2.0));
+        } else {
+            offset.update(|o| *o = point(o.x - d.x, o.y - d.y));
+        }
+    })
+```
+
+```tsx tabs
+// A canvas: Control + wheel zooms, the wheel pans.
+const zoom = signal(1);
+const offset = signal({ x: 0, y: 0 });
+
+<View
+  style={{ flex: 1 }}
+  onWheel={(e) => {
+    const unit = e.deltaMode === "lines" ? 16 : 1;
+    if (e.modifiers.control) zoom.update((z) => z * Math.min(2, Math.max(0.5, 1 - (e.delta.y * unit) / 200)));
+    else offset.update((o) => ({ x: o.x - e.delta.x * unit, y: o.y - e.delta.y * unit }));
+  }}
+/>
+```
+
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
@@ -366,6 +418,10 @@ On macOS and the web, Tab moves the keyboard focus between its stops in tree ord
 presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and Return or Space
 presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
 only.
+
+The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
+the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the
+list after its last row.
 
 Focus and presses are separate. A view that takes keys while it has the focus (a chart, a slider, a list that moves
 its selection with the arrow keys) sets `focusable` and binds its keys while focused (`onFocus` / `onBlur` with
@@ -600,6 +656,7 @@ of its own.
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | Scrolls to an offset along the list's axis. |
 | `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | Scrolls an item into view. |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`, `ListRef` | Scrolls to the end of the content. |
+| `measureScrollPosition()` | `measure_scroll_position()` | `ListRef` | [Where the viewport starts among the rows](../docs/lists.md#keeping-a-reading-position). |
 | `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebViewRef` | Controls the page. |
 | `seek(seconds)` | `seek(seconds)` | `VideoRef` | Jumps to a time. |
 | `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |

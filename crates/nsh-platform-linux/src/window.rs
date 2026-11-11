@@ -25,7 +25,7 @@
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gtk4::{self as gtk, cairo, gdk, gio, glib, prelude::*};
@@ -52,6 +52,11 @@ const FIRST_FRAME: Duration = Duration::from_millis(150);
 /// bar), and the space around the window buttons.
 const HEADER_HEIGHT: f32 = 46.0;
 const MARGIN: i32 = 6;
+/// How long an activation token waits for the window activation it came
+/// for: the app shows its window in answer to the click that brought the
+/// token, so an older one belongs to a click that showed nothing and must
+/// not bring a later, unrelated window up.
+const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(30);
 
 thread_local! {
     /// How the close press being handled was asked for: the close key's
@@ -64,6 +69,36 @@ thread_local! {
     static LAUNCHER: RefCell<Launcher> = RefCell::default();
     /// Counts the windows shown activated ([`AppWindow::shown`]).
     static SHOWN: Cell<u64> = const { Cell::new(0) };
+    /// The XDG activation token for the next window activation, and when it
+    /// came ([`give_activation_token`]).
+    static ACTIVATION_TOKEN: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
+}
+
+/// Keeps `token`, an XDG activation token a system surface handed over with
+/// a click (the tray's panel), for the app's next window activation: a
+/// Wayland compositor brings a window to the front only with a token of the
+/// user's action, else it only marks the window as wanting attention.
+pub(crate) fn give_activation_token(token: String) {
+    if token.is_empty() {
+        return;
+    }
+    ACTIVATION_TOKEN.set(Some((token, Instant::now())));
+}
+
+/// The kept activation token, once, unless it is older than
+/// [`ACTIVATION_TOKEN_LIFETIME`] at `now`.
+pub(crate) fn take_activation_token(now: Instant) -> Option<String> {
+    let (token, given) = ACTIVATION_TOKEN.take()?;
+    (now.saturating_duration_since(given) <= ACTIVATION_TOKEN_LIFETIME).then_some(token)
+}
+
+/// Shows `window` activated, with the kept activation token if there is one
+/// (without one, on X11 or when the system gave none, GTK asks as before).
+fn present(window: &gtk::Window) {
+    if let Some(token) = take_activation_token(Instant::now()) {
+        window.set_startup_id(&token);
+    }
+    window.present();
 }
 
 /// The header a window of the app's own shows.
@@ -606,7 +641,7 @@ fn show(surface: &Surface, id: NodeId) {
         return;
     };
     if activate {
-        window.present();
+        present(&window);
     } else {
         window.set_visible(true);
     }
@@ -1020,7 +1055,7 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
                 SHOWN.set(SHOWN.get() + 1);
                 w.shown = SHOWN.get();
             }
-            window.present();
+            present(&window);
         }
         // The app closes its windows by removing their roots; one asked
         // to close otherwise goes as the app closing it, policies aside.
@@ -1551,13 +1586,13 @@ pub(crate) fn main_request(surface: &Rc<Surface>, request: &WindowRequest) {
     match request {
         WindowRequest::Show => {
             if a.activate != Some(false) {
-                window.present();
+                present(&window);
             } else {
                 window.set_visible(true);
             }
         }
         WindowRequest::Hide => window.set_visible(false),
-        WindowRequest::Focus | WindowRequest::Restore => window.present(),
+        WindowRequest::Focus | WindowRequest::Restore => present(&window),
         WindowRequest::Close => {
             surface.main_window.borrow_mut().closing = true;
             crate::chrome::close(surface);
@@ -2074,6 +2109,15 @@ mod tests {
             .get()
             .window_state
             .expect("the main window's state")
+    }
+
+    #[test]
+    fn an_activation_token_expires() {
+        give_activation_token("token".into());
+        let late = Instant::now() + ACTIVATION_TOKEN_LIFETIME + Duration::from_secs(1);
+        assert_eq!(take_activation_token(late), None);
+        // An expired token is dropped, not kept for a later activation.
+        assert_eq!(take_activation_token(Instant::now()), None);
     }
 
     #[test]

@@ -124,7 +124,7 @@ impl Encoded {
     }
 }
 
-pub(crate) fn encode(batch: MountBatch) -> Encoded {
+pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
     let mut e = Encoded {
         bytes: Vec::with_capacity(batch.items.len() * 16),
         ..Encoded::default()
@@ -566,6 +566,19 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::GoBack => e.int(5),
                     Command::GoForward => e.int(6),
                     Command::StopLoading => e.int(7),
+                    Command::Evaluate { request, script } => {
+                        e.int(51);
+                        e.int(request as i32);
+                        e.string(web_generation.to_string());
+                        let key = format!("__nsh_evaluation_{id}_{request}");
+                        e.string(nsh_core::platform::web_evaluation::start_script(&script, &key));
+                        e.string(nsh_core::platform::web_evaluation::poll_script(&key));
+                        e.string(nsh_core::platform::web_evaluation::cleanup_script(&key));
+                    }
+                    Command::CancelEvaluate { request } => {
+                        e.int(52);
+                        e.int(request as i32);
+                    }
                     Command::InjectJavaScript(js) => {
                         e.int(8);
                         e.string(js);
@@ -741,6 +754,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::ScrollToIndex { .. }
                     | Command::Reveal(_)
                     | Command::Measure { .. }
+                    | Command::MeasureScrollPosition { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
@@ -1346,6 +1360,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(AccessibilityCurrent::Date) => 5,
         Some(AccessibilityCurrent::Time) => 6,
     } << 11;
+    if s.invalid {
+        flags |= 1 << 14;
+    }
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1444,6 +1461,8 @@ fn role_index(role: AccessibilityRole) -> i32 {
         TreeItem => 40,
         MenuItemCheckbox => 41,
         MenuItemRadio => 42,
+        Dialog => 43,
+        AlertDialog => 44,
     }
 }
 
@@ -1927,7 +1946,7 @@ mod tests {
                 },
             }],
         };
-        encode(batch)
+        encode(batch, 0)
             .bytes
             .chunks_exact(4)
             .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
@@ -1955,5 +1974,27 @@ mod tests {
         ] {
             assert_eq!(ints(request), vec![COMMAND, 3, 30, 7]);
         }
+    }
+    #[test]
+    fn web_evaluations_carry_the_originating_engine_generation() {
+        let encoded = encode(
+            MountBatch {
+                items: vec![MountItem::Command {
+                    id: 3,
+                    command: Command::Evaluate {
+                        request: u32::MAX,
+                        script: "42".into(),
+                    },
+                }],
+            },
+            19,
+        );
+        let ints: Vec<_> = encoded
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        assert_eq!(ints, vec![COMMAND, 3, 51, -1, 0, 1, 2, 3]);
+        assert!(matches!(&encoded.objects[0], Obj::Str(generation) if generation == "19"));
     }
 }

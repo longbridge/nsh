@@ -830,7 +830,7 @@ parts with [`TextViewParts`](#typed-part-styles).
 |---|---|---|
 | `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url, modifiers }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote, and the modifier keys held. |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | A code block's action was pressed (after `copy` copied). |
-| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | The selection of a `selectable` `TextView` changed: `{ text, start }`, the selected text as Copy takes it, `""` once nothing is selected ([Reading the selection](./text-selection.md#reading-the-selection)). Inside a selectable view the outer view reports instead. |
+| `onSelectionChange` | `.on_selection_change(\|event: &TextViewSelectionEvent\| ..)` | The selection of a `selectable` `TextView` changed: `{ text, start, bounds, pageBounds }`, the selected text as Copy takes it and its box, `""` once nothing is selected ([Reading the selection](./text-selection.md#reading-the-selection)). Inside a selectable view the outer view reports instead. |
 
 ## Methods
 

@@ -246,6 +246,11 @@ final class Mounter {
         return Native.allowsWebview(handle(), url);
     }
 
+    /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
+    boolean allowsWebMedia(String kind) {
+        return Native.allowsWebMedia(handle(), kind);
+    }
+
     long handle() {
         return host.handle;
     }
@@ -737,6 +742,7 @@ final class Mounter {
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+            if (v instanceof WebBox) ((WebBox) v).destroy();
             if (v instanceof ScrollBox) {
                 ((ScrollBox) v).unmounted = true;
                 unkeyScroll((ScrollBox) v);
@@ -2276,8 +2282,11 @@ final class Mounter {
                 boolean block = b.getInt() != 0;
                 clearJsResponder();
                 if (block && v != null) {
-                    // Scroll views around the responder stop taking its touches.
+                    // Scroll views around the responder stop taking its touches, and the presses around it
+                    // end: a handle held past the long press delay is no long press of the text around it.
                     for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
+                        if (p instanceof Box) ((Box) p).cancelPress();
+                        else if (p instanceof TextBox && ((TextBox) p).press != null) ((TextBox) p).press.cancel();
                         if (p instanceof ScrollBox) {
                             ((ScrollBox) p).jsBlocked = true;
                             blockedScrolls.add((ScrollBox) p);
@@ -2297,6 +2306,20 @@ final class Mounter {
                 float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
                 int actions = b.getInt();
                 if (v instanceof InputBox) ((InputBox) v).openEditMenu(x, y, w, h, actions);
+                break;
+            }
+            case 51: {
+                int request = b.getInt();
+                String generation = (String) objects[b.getInt()];
+                String start = (String) objects[b.getInt()];
+                String poll = (String) objects[b.getInt()];
+                String cleanup = (String) objects[b.getInt()];
+                if (v instanceof WebBox) ((WebBox) v).evaluate(request, generation, start, poll, cleanup);
+                break;
+            }
+            case 52: {
+                int request = b.getInt();
+                if (v instanceof WebBox) ((WebBox) v).cancelEvaluation(request);
                 break;
             }
             case 50:
