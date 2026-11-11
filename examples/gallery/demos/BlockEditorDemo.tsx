@@ -275,6 +275,30 @@ function nodeSize(node: DocNode): number {
 
 const LISTS = new Set(["bulletList", "orderedList", "taskList"]);
 
+/** Where each run of text with mark `mark` starts and ends in the document. */
+function markRuns(doc: DocNode, mark: string): { from: number; to: number }[] {
+  const runs: { from: number; to: number }[] = [];
+  const walk = (node: DocNode & { marks?: { type?: string }[] | null }, pos: number) => {
+    if (node.text != null) {
+      if (node.marks?.some((m) => m.type === mark)) {
+        const last = runs[runs.length - 1];
+        // Text split by another mark (bold inside code) is one run.
+        if (last && last.to === pos) last.to = pos + node.text.length;
+        else runs.push({ from: pos, to: pos + node.text.length });
+      }
+      return;
+    }
+    let at = pos + 1;
+    for (const child of node.content ?? []) {
+      walk(child, at);
+      at += nodeSize(child);
+    }
+  };
+  // The document's own start is before position 0.
+  walk(doc, -1);
+  return runs;
+}
+
 /**
  * Two lists of one kind that came to stand next to each other (a block turned into a list beside one, an item
  * dropped between lists) become one, as in Notion, where items in a row are one list: the numbers run on and
@@ -591,9 +615,14 @@ export function BlockEditorDemo() {
   // A run of whole blocks, as Notion selects them: Escape starts it at the caret's block and Shift-Up / Down grow
   // it over the siblings; Backspace deletes the run. Its keys are taken only while a run is selected, so
   // Shift-arrows select text the rest of the time.
+  // Inline code stands off its neighbors: text takes a background but no padding, so a sliver of the same fill
+  // goes before and after each run of code (widgets, which take no position in the document).
+  const codePads = new RichEditorPlugin("codePads");
   const rangeKeys = new RichEditorPlugin("blockRange");
-  const blockRange = defineExtension({ name: "blockRange", priority: 950, addProseMirrorPlugins: () => [rangeKeys] });
+  const blockRange = defineExtension({ name: "blockRange", priority: 950, addProseMirrorPlugins: () => [rangeKeys, codePads] });
   const range = signal<{ anchor: number; head: number } | null>(null);
+  // While the run itself is being moved or copied: the change keeps it selected.
+  let moving = false;
   const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, columns, column, toggle, toggleTitle, toggleBody, slash, blockRange, blockKeys], content: DOC, format: "markdown" });
   // What the parts read: the revision follows every change of the document and the selection.
   const revision = signal(editor.revision);
@@ -707,6 +736,16 @@ export function BlockEditorDemo() {
     selected.set((sel.type === "all" || (sel.type === "text" && sel.anchor !== sel.head)) && !editor.isActive("codeBlock"));
   };
   editor.on("revision", sync);
+  const padCode = () =>
+    editor.setDecorations(
+      "codePads",
+      markRuns(editor.doc as DocNode, "code").flatMap((run) => [
+        { from: run.from, kind: "widget" as const, side: -1, spec: { class: "w-1 h-[16.5px] translate-y-[3.5px] bg-muted rounded-l" } },
+        { from: run.to, kind: "widget" as const, side: 1, spec: { class: "w-1 h-[16.5px] translate-y-[3.5px] bg-muted rounded-r" } },
+      ]),
+    );
+  padCode();
+  editor.on("update", padCode);
   // A change of the document moves the blocks: the handle and its menu go until the pointer finds a block again.
   // Lists that came to stand next to each other join, however it happened (typed `1. `, a drop, a block turned
   // into a list). An undo is left alone, so the join itself can be undone.
@@ -721,7 +760,7 @@ export function BlockEditorDemo() {
       joining = false;
       depth = editor.undoDepth;
     }
-    if (range()) selectRange(null);
+    if (range() && !moving) selectRange(null);
     if (dragging()) return;
     handle.set(null);
     menu.set(null);
@@ -836,9 +875,49 @@ export function BlockEditorDemo() {
     }
     editor.setDecorations("blockRange", tints);
   };
-  rangeKeys.captureKeys(["Shift-ArrowDown", "Shift-ArrowUp", "Backspace", "Delete"], (key) => {
+  /** The blocks of the run `r`, in order. */
+  const runNodes = (r: { anchor: number; head: number }) => {
+    const { from, to } = span(r);
+    const nodes: DocNode[] = [];
+    for (let pos = from; pos < to; ) {
+      const node = editor.nodeAt(pos) as DocNode | null;
+      if (!node) break;
+      nodes.push(node);
+      pos += nodeSize(node);
+    }
+    return nodes;
+  };
+  rangeKeys.captureKeys(["Shift-ArrowDown", "Shift-ArrowUp", "Backspace", "Delete", "Mod-d", "Mod-Shift-ArrowUp", "Mod-Shift-ArrowDown"], (key) => {
     const r = range();
     if (!r) return;
+    // The run is duplicated below itself, or moved past the sibling before or after it; it stays selected.
+    if (key === "Mod-d" || key === "Mod-Shift-ArrowUp" || key === "Mod-Shift-ArrowDown") {
+      const { from, to } = span(r);
+      const nodes = runNodes(r);
+      const first = Math.min(r.anchor, r.head);
+      const last = Math.max(r.anchor, r.head);
+      let at: number | null;
+      let done: boolean;
+      moving = true;
+      if (key === "Mod-d") {
+        at = to;
+        done = editor.run(insertContentAt(to, nodes));
+      } else {
+        const up = key === "Mod-Shift-ArrowUp";
+        const edge = neighbors(editor, up ? first : last);
+        at = !edge ? null : up ? edge.before : edge.after === null ? null : from + edge.after;
+        if (at === null) return void (moving = false);
+        done = editor.run(chain([deleteRange({ from, to }), insertContentAt(at, nodes)]));
+      }
+      // The change's `update` comes after this: the run is kept until it has.
+      setTimeout(() => (moving = false), 60);
+      if (!done || at === null) return;
+      // The same blocks, where they are now.
+      const lastStart = at + nodes.slice(0, -1).reduce((sum, n) => sum + nodeSize(n), 0);
+      editor.run(setNodeSelection(at));
+      selectRange(r.anchor <= r.head ? { anchor: at, head: lastStart } : { anchor: lastStart, head: at });
+      return;
+    }
     if (key === "Backspace" || key === "Delete") {
       const { from, to } = span(r);
       selectRange(null);
@@ -1105,6 +1184,8 @@ export function BlockEditorDemo() {
             marks: {
               ...richEditorClasses.marks,
               highlight: "bg-primary/30 rounded",
+              // Square: its ends are the slivers beside it (`codePads`).
+              code: "font-mono text-sm bg-muted",
               ...Object.fromEntries(TEXT_COLORS.map((c) => [`textStyle[color=${c.name}]`, c.class])),
             },
             nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3", columns: "flex-row gap-6", column: "flex-1 min-w-0 gap-3",

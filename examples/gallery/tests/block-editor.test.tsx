@@ -468,3 +468,25 @@ test("a list item dragged to the right goes under the item above it, and to the 
   await app.drag(handle, { x: -60 });
   await app.waitFor("text:a.", { state: "gone" });
 });
+
+test("a run of blocks moves and duplicates as one", async () => {
+  const app = await openDemo();
+  const index = order(app);
+  await app.press("Confirm the launch date");
+  await app.keyboard.press("escape");
+  await app.keyboard.press("shift+down");
+  // The first two items go below the third, in their order.
+  await app.keyboard.press("mod+shift+down");
+  await app.wait(200);
+  expect(index("Open the beta to five percent of traffic")).toBeLessThan(index("Confirm the launch date"));
+  expect(index("Confirm the launch date")).toBeLessThan(index("Brief the regional leads"));
+  // Still selected: they go back up together.
+  await app.keyboard.press("mod+shift+up");
+  await app.wait(200);
+  expect(index("Brief the regional leads")).toBeLessThan(index("Open the beta to five percent of traffic"));
+  // A copy of both.
+  await app.keyboard.press("mod+d");
+  await app.wait(200);
+  expect(app.count("text:Confirm the launch date")).toBe(2);
+  expect(app.count("text:Brief the regional leads")).toBe(2);
+});
