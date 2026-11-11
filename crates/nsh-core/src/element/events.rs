@@ -387,6 +387,14 @@ pub(crate) fn unavailable(p: &EventPayload) -> Option<Cow<'_, str>> {
         .flatten()
 }
 
+/// An error's message when its `code` says the web view's web content
+/// process ended (`ERR_NSH_WEBVIEW_TERMINATED`).
+pub(crate) fn terminated(p: &EventPayload) -> Option<Cow<'_, str>> {
+    (string(p, "code") == Some(crate::element::codes::WEBVIEW_TERMINATED))
+        .then(|| message(p))
+        .flatten()
+}
+
 pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     Some(Cow::Owned(Selection {
         start: number(p, "start") as u32,

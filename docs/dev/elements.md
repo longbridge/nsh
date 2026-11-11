@@ -625,3 +625,9 @@ disposal; page-initiated same-document history updates keep them. Platforms that
 `web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
 `WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
 
+When a web view's web content process ends, the platform keeps the app running and
+sends `onError` with `ERR_NSH_WEBVIEW_TERMINATED` (Rust `on_process_terminated`); the
+next `reload()`, `load()` or new source shows a page again. Android's `WebBox` handles
+`onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
+same web view.
+

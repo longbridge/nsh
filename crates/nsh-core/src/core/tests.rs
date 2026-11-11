@@ -15631,6 +15631,55 @@ mod components {
         assert_eq!(unavailable_web_with(true), ["waiting"]);
     }
 
+    /// A web view that says when its page's process ended.
+    #[component]
+    fn TerminatedWeb() -> impl IntoElement {
+        let heard = signal(String::from("waiting"));
+        view().child(text(move || heard.get())).child(
+            web_view("https://example.com/")
+                .on_unavailable(move |_: &str| heard.set("unavailable".into()))
+                .on_process_terminated(move |message: &str| {
+                    heard.set(format!("terminated: {message}"))
+                }),
+        )
+    }
+
+    /// What [`TerminatedWeb`] shows after the platform reports `error`.
+    fn terminated_web_after(error: EventPayload) -> String {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<TerminatedWeb>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Create { id, kind, .. } if *kind == ViewKind::WebView => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        c.component_event(web, EventKind::Error, &error);
+        texts(&c.commit().unwrap()).last().unwrap().clone()
+    }
+
+    #[test]
+    fn a_web_view_hears_when_its_page_process_ended() {
+        let error = |code: Option<&str>| {
+            let mut fields = vec![("message", PayloadValue::Str("gone".into()))];
+            if let Some(code) = code {
+                fields.push(("code", PayloadValue::Str(code.into())));
+            }
+            EventPayload::Map(fields)
+        };
+        assert_eq!(
+            terminated_web_after(error(Some(crate::element::codes::WEBVIEW_TERMINATED))),
+            "terminated: gone"
+        );
+        assert_eq!(
+            terminated_web_after(error(Some(crate::element::codes::UNAVAILABLE))),
+            "unavailable"
+        );
+    }
+
     /// Shows whether the platform draws shader views, and picks a branch
     /// by it as an app picks a shader or its own drawing.
     #[component]
