@@ -12,12 +12,12 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js", "webview"]
+default = ["js", "webview", "websocket", "updater"]
 # JS apps (bundles, signed packages); without it, the library only runs a
 # Rust app and links no QuickJS.
 js = ["nsh-engine/js"]
 # Development support: dev server client, log forwarding, error overlay.
-dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
+dev = ["js", "websocket", "updater", "dep:nsh-dev", "dep:nsh-testing"]
 # Screenshots on macOS and Windows (`nsh test --target gpui`'s): GPUI
 # renders the window's frame offscreen (its `test-support`; development
 # hosts only).
@@ -30,6 +30,12 @@ webview = ["dep:wry", "dep:gtk", "dep:webkit2gtk"]
 # Videos (GStreamer 1.20+ with its base and good plug-ins; libav for most
 # codecs).
 video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
+
+# The native WebSocket client (tokio-tungstenite, rustls). Without it
+# `connect` of `websocket` rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM.
+websocket = ["nsh-core/websocket"]
+# App self-updates (`nsh/updater`). Without it a check finds no update.
+updater = ["nsh-core/updater"]
 
 [dependencies]
 log.workspace = true

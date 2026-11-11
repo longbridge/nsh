@@ -13,10 +13,16 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js"]
+default = ["js", "websocket", "updater"]
 js = ["nsh-engine/js"]
 run-app = []
-dev = ["js", "dep:nsh-dev", "dep:nsh-testing", "dep:serde_json", "dep:ureq"]
+dev = ["js", "websocket", "updater", "dep:nsh-dev", "dep:nsh-testing", "dep:serde_json", "dep:ureq"]
+
+# The native WebSocket client (tokio-tungstenite, rustls). Without it
+# `connect` of `websocket` rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM.
+websocket = ["nsh-engine/websocket"]
+# App self-updates (`nsh/updater`). Without it a check finds no update.
+updater = ["nsh-engine/updater"]
 
 [dependencies]
 nsh-dev = { workspace = true, optional = true, features = ["client"] }

@@ -32,6 +32,12 @@ net = ["dep:ureq"]
 # it `shader` has the same API and finds no GPU, so shader views draw nothing.
 shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader", "dep:objc2", "dep:objc2-metal", "dep:objc2-core-foundation", "dep:block2"]
 
+# The native WebSocket client (tokio-tungstenite, rustls). Without it
+# `connect` of `websocket` rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM.
+websocket = ["nsh-core/websocket"]
+# App self-updates (`nsh/updater`). Without it a check finds no update.
+updater = ["nsh-core/updater"]
+
 [dependencies]
 rustc-hash.workspace = true
 log.workspace = true
