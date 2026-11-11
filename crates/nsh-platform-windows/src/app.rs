@@ -538,6 +538,9 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        // WebView2 answers the cookie store; a view whose runtime is missing
+        // answers an error rather than leaving the request hanging.
+        webview_requests: true,
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()

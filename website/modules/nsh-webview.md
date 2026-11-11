@@ -97,6 +97,8 @@ interface WebViewNavigation {
 | `postMessage(data)` | Sends `data` (a string) to the page: a `message` event on `window`, with `data` as `event.data`. |
 | `load({ src, headers? })` | Loads `src` with `headers` (`Record<string, string>`) on the page's own request only, not on its subresources, later navigations or reloads; for a signed-in page (`Authorization`). The host must be one `webview.hosts` allows. An invalid header throws a `TypeError`. The browser backend does nothing. See [Signed-in pages](../docs/web-view-and-video.md#signed-in-pages-request-headers). |
 
+Reading, setting and deleting cookies in the view's own store is a [Rust host API](../elements/web-view.md#native-cookie-store-rust-hosts): macOS, Linux with WebKitGTK and Windows with WebView2 implement it, and other platforms return an error. No JS method exposes the store.
+
 ## Talking to the page
 
 The page sends strings to the app with `window.nsh.postMessage(…)`; the app sends strings to the page with `ref.postMessage(…)`. Send JSON for structured data.

@@ -89,6 +89,7 @@ final class Native {
     static final int EDIT_ACTION = 77;
     static final int WHEEL = 78;
     static final int WEB_EVALUATION = 79;
+    static final int WEB_VIEW_REPLY = 80;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

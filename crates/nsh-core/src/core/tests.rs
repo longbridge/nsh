@@ -37520,6 +37520,367 @@ fn evaluation_core() -> Core<FakeEngine> {
     c
 }
 
+/// Native WebView cookie store: the public `ElementRef` methods, driven by
+/// buttons as an app drives them.
+mod cookie_store {
+    use serde_json::json;
+
+    use super::{views::texts, *};
+    use crate::prelude::*;
+
+    /// A web view's ref driven by buttons: each call uses the public
+    /// `cookies` / `set_cookie` / `delete_cookie` methods and shows what
+    /// the answer was. The last button hides or shows the web view, so a
+    /// request may outlive it.
+    #[crate::element::component]
+    fn CookieControls() -> impl IntoElement {
+        let web = element_ref();
+        let shown = signal(String::new());
+        let hidden = signal(false);
+        view()
+            .child(dynamic(move || {
+                if hidden.get() {
+                    return view().into_element();
+                }
+                web_view("https://example.com/")
+                    .element_ref(&web)
+                    .into_element()
+            }))
+            .child(text(move || shown.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    let line = match web.cookies(Some("https://example.com/app")).await {
+                        Ok(cookies) => format!(
+                            "cookies {}",
+                            cookies
+                                .iter()
+                                .map(|c| format!("{}@{}", c.name, c.domain))
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ),
+                        Err(_) => "cookies error".to_owned(),
+                    };
+                    shown.set(line);
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                let cookie = crate::webview::WebCookie {
+                    name: "sid".into(),
+                    value: "v".into(),
+                    domain: "example.com".into(),
+                    path: "/".into(),
+                    ..Default::default()
+                };
+                spawn(async move {
+                    shown.set(match web.set_cookie(cookie).await {
+                        Ok(()) => "set ok".to_owned(),
+                        Err(_) => "set error".to_owned(),
+                    });
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                let cookie = crate::webview::WebCookie {
+                    name: "a;b".into(),
+                    value: "v".into(),
+                    domain: "example.com".into(),
+                    path: "/".into(),
+                    ..Default::default()
+                };
+                spawn(async move {
+                    shown.set(match web.set_cookie(cookie).await {
+                        Ok(()) => "set ok".to_owned(),
+                        Err(_) => "set error".to_owned(),
+                    });
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    shown.set(match web.delete_cookie("sid", "example.com", "/").await {
+                        Ok(()) => "delete ok".to_owned(),
+                        Err(_) => "delete error".to_owned(),
+                    });
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (web, shown) = (web, shown);
+                spawn(async move {
+                    shown.set(match web.cookies(Some("file:///etc/passwd")).await {
+                        Ok(_) => "cookies ok".to_owned(),
+                        Err(_) => "cookies error".to_owned(),
+                    });
+                });
+            }))
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| hidden.update(|hidden| *hidden = !*hidden)),
+            )
+    }
+
+    /// The web view `batch` created.
+    fn web_node(batch: &MountBatch) -> NodeId {
+        batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Create { id, kind } if *kind == crate::ViewKind::WebView => Some(*id),
+                _ => None,
+            })
+            .expect("a web view")
+    }
+
+    /// The nodes of `batch` listening to presses, in the order they are
+    /// created.
+    fn press_nodes(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The web view requests in `batch`: the node each went to, its id and
+    /// what it asks.
+    fn web_requests(batch: &MountBatch) -> Vec<(NodeId, u64, crate::webview::WebViewOperation)> {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id,
+                    command: Command::WebViewRequest(request),
+                } => Some((*id, request.id, request.operation.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn controls_core(requests: bool) -> Core<FakeEngine> {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            webview_requests: requests,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<CookieControls>(|| ()));
+        c
+    }
+
+    fn press(c: &mut Core<FakeEngine>, node: NodeId) {
+        assert!(c.component_event(node, EventKind::Press, &EventPayload::None));
+    }
+
+    fn reply(id: u64, value: crate::JsonValue) -> EventPayload {
+        EventPayload::Json(json!({ "id": id, "ok": true, "value": value }))
+    }
+
+    #[test]
+    fn cookie_requests_correlate_replies_and_drop_foreign_or_duplicate_ones() {
+        let mut c = controls_core(true);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        assert_eq!(buttons.len(), 6);
+
+        press(&mut c, buttons[0]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch);
+        let [(node, request, operation)] = &requests[..] else {
+            panic!("one cookie request: {requests:?}");
+        };
+        assert_eq!(*node, web);
+        assert_eq!(
+            operation,
+            &crate::webview::WebViewOperation::GetCookies {
+                url: Some("https://example.com/app".into())
+            }
+        );
+
+        // A reply from another node settles nothing.
+        let value = json!([{
+            "name": "session", "value": "v", "domain": "example.com", "path": "/"
+        }]);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::WebViewReply,
+            &reply(*request, value.clone())
+        ));
+        c.run_component_tasks();
+        assert!(c.commit().is_none());
+
+        // The right one settles it, seen through the rendered answer.
+        assert!(c.component_event(web, EventKind::WebViewReply, &reply(*request, value)));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["cookies session@example.com"]);
+
+        // A duplicate is dropped: the answer is taken once.
+        let value = json!([]);
+        assert!(c.component_event(web, EventKind::WebViewReply, &reply(*request, value)));
+        c.run_component_tasks();
+        assert!(c.commit().is_none());
+    }
+
+    #[test]
+    fn cookie_writes_request_the_named_cookie_and_validation_sends_nothing() {
+        let mut c = controls_core(true);
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+
+        // A valid cookie: the request carries it, and its answer shows.
+        press(&mut c, buttons[1]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch);
+        let [(node, set, crate::webview::WebViewOperation::SetCookie { cookie })] = &requests[..]
+        else {
+            panic!("one set request: {requests:?}");
+        };
+        assert_eq!(
+            (
+                *node,
+                cookie.name.as_str(),
+                cookie.domain.as_str(),
+                cookie.path.as_str()
+            ),
+            (web, "sid", "example.com", "/")
+        );
+        assert!(c.component_event(
+            *node,
+            EventKind::WebViewReply,
+            &reply(*set, serde_json::Value::Null)
+        ));
+        c.run_component_tasks();
+        assert_eq!(texts(&c.commit().unwrap()), ["set ok"]);
+
+        // A deletion names the same identity, and its answer shows.
+        press(&mut c, buttons[3]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let requests = web_requests(&batch);
+        let [(node, delete, crate::webview::WebViewOperation::DeleteCookie { name, domain, path })] =
+            &requests[..]
+        else {
+            panic!("one delete request: {requests:?}");
+        };
+        assert_eq!(
+            (name.as_str(), domain.as_str(), path.as_str()),
+            ("sid", "example.com", "/")
+        );
+        assert!(c.component_event(
+            *node,
+            EventKind::WebViewReply,
+            &reply(*delete, serde_json::Value::Null)
+        ));
+        c.run_component_tasks();
+        assert_eq!(texts(&c.commit().unwrap()), ["delete ok"]);
+
+        // Invalid writes and reads fail in the core: no request is sent.
+        press(&mut c, buttons[2]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch).is_empty());
+        assert_eq!(texts(&batch), ["set error"]);
+        press(&mut c, buttons[4]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch).is_empty());
+        assert_eq!(texts(&batch), ["cookies error"]);
+    }
+
+    #[test]
+    fn cookie_requests_fail_without_a_platform_store() {
+        let mut c = controls_core(false);
+        let batch = c.commit().unwrap();
+        let buttons = press_nodes(&batch);
+        press(&mut c, buttons[0]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(web_requests(&batch).is_empty());
+        assert_eq!(texts(&batch), ["cookies error"]);
+    }
+
+    #[test]
+    fn a_pending_cookie_request_fails_when_its_view_goes() {
+        let mut c = controls_core(true);
+        let batch = c.commit().unwrap();
+        let buttons = press_nodes(&batch);
+        press(&mut c, buttons[0]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(web_requests(&batch).len(), 1);
+
+        // Hiding the web view releases its node: the request fails and the
+        // answer shows, without a native reply.
+        press(&mut c, buttons[5]);
+        assert!(c.commit().is_some());
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["cookies error"]);
+    }
+
+    #[test]
+    fn a_replaced_cookie_view_does_not_receive_the_old_request_answer() {
+        let mut c = controls_core(true);
+        let batch = c.commit().unwrap();
+        let buttons = press_nodes(&batch);
+        let old_web = web_node(&batch);
+        press(&mut c, buttons[0]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let [(_, old, _)] = &web_requests(&batch)[..] else {
+            panic!("one cookie request");
+        };
+        let old = *old;
+
+        // Hide the view (its request fails), then show it: a new web view,
+        // with the same ref, takes its place.
+        press(&mut c, buttons[5]);
+        c.commit().unwrap();
+        c.run_component_tasks();
+        assert_eq!(texts(&c.commit().unwrap()), ["cookies error"]);
+        press(&mut c, buttons[5]);
+        let batch = c.commit().unwrap();
+        let new_web = web_node(&batch);
+        assert_ne!(old_web, new_web);
+
+        press(&mut c, buttons[0]);
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let [(node, new, _)] = &web_requests(&batch)[..] else {
+            panic!("one new cookie request");
+        };
+        assert_eq!(*node, new_web);
+        assert_ne!(old, *new);
+
+        // The old request's answer, sent to the replacement, settles
+        // nothing; the new request's own answer does.
+        let value = json!([{
+            "name": "old", "value": "v", "domain": "example.com", "path": "/"
+        }]);
+        assert!(c.component_event(new_web, EventKind::WebViewReply, &reply(old, value)));
+        c.run_component_tasks();
+        assert!(c.commit().is_none());
+
+        let value = json!([{
+            "name": "new", "value": "v", "domain": "example.com", "path": "/"
+        }]);
+        assert!(c.component_event(new_web, EventKind::WebViewReply, &reply(*new, value)));
+        c.run_component_tasks();
+        assert_eq!(texts(&c.commit().unwrap()), ["cookies new@example.com"]);
+    }
+}
+
 #[test]
 fn web_evaluation_correlates_replies_and_ignores_late_or_foreign_replies() {
     use crate::element::Answer;

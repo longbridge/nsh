@@ -60,6 +60,14 @@ of what is in scope: a host element's primitive is imported from its home (`impo
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).
 
+## WebView cookie store
+
+Rust hosts await `ElementRef::cookies`, `set_cookie` and `delete_cookie` through the typed `Answer<Result<_, String>>` convention. The doc-hidden `webview` request protocol correlates replies by node and request ID, drops stale or duplicate replies, fails requests sent to an unmounted, culled or non-webview node, and times out when a platform never answers. The reply envelope and operation types stay `#[doc(hidden)]`: the methods are Rust host only, and no JS API exposes the store.
+
+The core validates one cookie before any native call: the name is an RFC 6265 token, the domain is a hostname or IP literal (a leading `.` makes it a domain cookie), the path is absolute, the value and path carry no attribute delimiter, and `SameSite=None` requires `Secure`. A refused cookie therefore leaves the store untouched. `delete_cookie` checks the same name and domain rules and a non-empty path, then matches name, domain (case-insensitively, preserving the leading dot) and path exactly, so a host-only and a domain cookie stay separate and a cookie with an unusual path can still be deleted. `cookies(Some(url))` filters by host-only or domain host, RFC 6265 path and `secure`.
+
+Each backend reads and writes the store of the view it is sent to, so an `incognito` view uses its in-memory store and other views share the app's profile. macOS reads `WKHTTPCookieStore` (`getAllCookies:`, `setCookie:completionHandler:`, `deleteCookie:completionHandler:`), Linux the `WebKitGTK` cookie manager of the view's `NetworkSession`, and Windows the `ICoreWebView2CookieManager` of the web view (an InPrivate controller has its own). Native completions carry a lifetime fence: a reply finishing after its host is gone never reaches a restarted engine's node. Expiries cross the boundary as Unix milliseconds; each native API's seconds or `NSDate` is converted at the call. Cookie values are never logged.
+
 ## The main thread never waits for JS
 
 Some callbacks are questions the system wants answered on the spot (may this

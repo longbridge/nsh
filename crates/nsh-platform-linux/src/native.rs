@@ -414,6 +414,38 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
             }
         }
         #[cfg(feature = "webview")]
+        Command::WebViewRequest(request) => {
+            // The page and what its handlers share are cloned out, so no
+            // hosts borrow is held while WebKit may call back at once.
+            let target = {
+                let hosts = surface.native.hosts.borrow();
+                match hosts.get(&view.id()) {
+                    Some(Host::Web(Some(host))) => Some(host.request_target()),
+                    _ => None,
+                }
+            };
+            match target {
+                Some((web, shared)) => web::request(&web, &shared, request),
+                None => surface.event(
+                    view.id(),
+                    EventKind::WebViewReply,
+                    nsh_core::webview::reply(
+                        request.id,
+                        Err("the web view is not available".into()),
+                    ),
+                ),
+            }
+        }
+        #[cfg(not(feature = "webview"))]
+        Command::WebViewRequest(request) => surface.event(
+            view.id(),
+            EventKind::WebViewReply,
+            nsh_core::webview::reply(
+                request.id,
+                Err("this build has no WebKitGTK web views".into()),
+            ),
+        ),
+        #[cfg(feature = "webview")]
         _ => {
             // Outside the hosts' borrow: WebKit may call back at once.
             let web = match surface.native.hosts.borrow().get(&view.id()) {
@@ -608,6 +640,16 @@ impl Emitter {
         }
         if let Some(surface) = self.surface.upgrade() {
             surface.event(self.id, kind, payload());
+        }
+    }
+
+    /// Sends `payload` to the engine whatever the app listens to: a reply
+    /// the core waits for, which is settled by a timeout or unmount
+    /// instead.
+    #[cfg(feature = "webview")]
+    fn reply(&self, kind: EventKind, payload: EventPayload) {
+        if let Some(surface) = self.surface.upgrade() {
+            surface.event(self.id, kind, payload);
         }
     }
 }

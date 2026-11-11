@@ -100,6 +100,26 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 | `postMessage(data)` | `post_message(data)` | 向页面发送一个字符串，页面会在 `window` 上收到 `message` 事件。 |
 | `load({ src, headers })` | `load(WebLoad::new(src, headers)?)` | 加载 `src`，只给页面自身的请求带上 `headers`（如 `Authorization`），子资源和之后的导航不带（[指南](../docs/web-view-and-video.md#已登录的页面请求头)）。 |
 
+### 原生 cookie 存储（Rust 宿主）
+
+Rust 宿主可以读写已挂载 web view 自己的 cookie 存储。这些方法不暴露给 TSX，也不暴露给页面的脚本。
+
+| 方法 | 说明 |
+|---|---|
+| `cookies(url: Option<&str>)` | 存储中的 cookie；给出 `url` 时只返回会发送给它的那些：host-only cookie 只匹配确切主机，domain cookie（`domain` 以 `.` 开头）匹配该域及其子域；路径按 RFC 6265 匹配，并考虑 `secure`。不给出 `url` 时返回该视图存储中的全部 cookie。 |
+| `set_cookie(cookie: WebCookie)` | 设置一个 cookie；同名、同域、同路径的 cookie 会被替换。核心在平台看到它之前检查：名称、域、值、路径无效，或 `SameSite=None` 没有 `Secure` 时直接失败，不产生任何原生修改。 |
+| `delete_cookie(name: &str, domain: &str, path: &str)` | 只删除名称、域、路径都匹配的那个 cookie；同名同路径的 host-only cookie 与 domain cookie 仍然区分。cookie 不存在不算错误。 |
+
+三者都返回 `Answer<Result<…, String>>`，在任务中等待。ref 没有指向已挂载的 web view、平台没有 cookie 存储、平台报错或没有按时收到回复时失败。`WebCookie` 的 `expires` 是 Unix 毫秒（`None` 表示会话 cookie），`same_site` 为 `CookieSameSite::None`、`Lax`、`Strict`，或没有该属性时为 `None`。
+
+`incognito` 视图读写自己的内存存储；其他视图共享应用的配置。存储中也有页面自己设置的 cookie，`cookies` 按存储中的内容返回它们。
+
+| 能力 | macOS | Linux（WebKitGTK） | Windows（WebView2） | iOS、Android、web、TUI |
+|---|---|---|---|---|
+| `cookies` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 返回不支持错误 |
+| `set_cookie` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 返回不支持错误 |
+| `delete_cookie` | `WKHTTPCookieStore` | 视图的 cookie manager | 视图的 cookie manager | 返回不支持错误 |
+
 ## 通信
 
 应用和页面之间交换的是字符串。页面通过 `window.nsh.postMessage(data)` 发送；应用通过 ref 的 `postMessage(data)`（Rust 中为 `post_message(..)`）发送。结构化数据请用 JSON。

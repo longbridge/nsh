@@ -24,7 +24,7 @@ use std::{
 use super::{
     Answer, Component,
     reactive::Kept,
-    task::{Action, Executor},
+    task::{Action, Executor, WebAnswer},
 };
 use crate::{
     Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, ListScrollPosition,
@@ -353,6 +353,91 @@ impl ElementRef {
     /// one the `webview` capability allows.
     pub fn load(&self, load: crate::WebLoad) {
         self.send(Command::Load(load));
+    }
+
+    /// The cookies of the web view's store. With `url`, those sent to it: a
+    /// host-only cookie only to its exact host, a domain cookie to that
+    /// domain and its subdomains, by path (RFC 6265) and `secure`; without
+    /// it, every cookie of that view's store. The store is the view's own:
+    /// an `incognito` view reads its in-memory store, never the app's
+    /// profile. Await it in a task; it fails when the ref names no mounted
+    /// web view, the platform has no cookie store
+    /// ([`crate::webview`] documents which do), `url` is not HTTP(S), or no
+    /// answer comes in time.
+    pub fn cookies(
+        &self,
+        url: Option<&str>,
+    ) -> Answer<Result<Vec<crate::webview::WebCookie>, String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::GetCookies {
+                url: url.map(str::to_owned),
+            },
+            WebAnswer::Cookies,
+        )
+    }
+
+    /// Sets one cookie in the web view's store, replacing a cookie with the
+    /// same name, domain and path. The cookie is checked first: a refused
+    /// one reaches no store, so no attribute is partly applied. A store
+    /// keeps it as its platform does (`expires` in Unix milliseconds, a
+    /// session cookie without one); an `incognito` view sets it in its own
+    /// in-memory store. Await it in a task; it fails when the ref names no
+    /// mounted web view, the cookie is invalid, the platform has no cookie
+    /// store, or no answer comes in time.
+    pub fn set_cookie(&self, cookie: crate::webview::WebCookie) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::SetCookie { cookie },
+            WebAnswer::Done,
+        )
+    }
+
+    /// Deletes the cookie with this name, domain and path from the web
+    /// view's store, and no other: other paths, and a host-only cookie
+    /// where `domain` names a domain cookie (its leading `.`), stay. A
+    /// cookie that is absent is not an error (the native store deletes
+    /// nothing). Await it in a task; it fails when the ref names no mounted
+    /// web view, the identity is invalid, the platform has no cookie store,
+    /// or no answer comes in time.
+    pub fn delete_cookie(
+        &self,
+        name: &str,
+        domain: &str,
+        path: &str,
+    ) -> Answer<Result<(), String>> {
+        self.web_view(
+            crate::webview::WebViewOperation::DeleteCookie {
+                name: name.to_owned(),
+                domain: domain.to_owned(),
+                path: path.to_owned(),
+            },
+            WebAnswer::Done,
+        )
+    }
+
+    /// Sends `operation` to the web view carrying the ref; `answer` takes
+    /// the platform's answer. With no rendered element carrying the ref,
+    /// the answer fails at once.
+    fn web_view<U>(
+        &self,
+        operation: crate::webview::WebViewOperation,
+        answer: impl FnOnce(super::AnswerSlot<Result<U, String>>) -> WebAnswer,
+    ) -> Answer<Result<U, String>> {
+        let (result, slot) = Answer::new();
+        let pending = slot.clone();
+        let answer = answer(slot);
+        let sent = self.reach(move |node, executor| {
+            executor.act(Action::WebViewRequest {
+                node,
+                operation,
+                answer,
+            })
+        });
+        if sent.is_none() {
+            pending
+                .borrow_mut()
+                .deliver(Err(crate::webview::NOT_MOUNTED.into()));
+        }
+        result
     }
 
     /// Jumps a video to `seconds`.

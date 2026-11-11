@@ -75,13 +75,16 @@ use std::{
 };
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
-use nsh_core::{Command, EventKind, EventPayload, PayloadValue, WebProps, WebSource};
+use nsh_core::{
+    Command, EventKind, EventPayload, JsonValue, PayloadValue, WebProps, WebSource,
+    webview::{self, CookieSameSite, WebCookie, WebViewOperation, WebViewRequest},
+};
 use nsh_engine::Access;
 use webkit6::{
     CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkError, NetworkSession,
     PolicyDecisionType, PolicyError, ResponsePolicyDecision, URIRequest, UserContentInjectedFrames,
     UserContentManager, UserMediaPermissionRequest, UserScript, UserScriptInjectionTime,
-    UserStyleLevel, UserStyleSheet, WebView, prelude::*,
+    UserStyleLevel, UserStyleSheet, WebView, prelude::*, soup,
 };
 
 use super::{Emitter, UNSCROLLABLE, error, fill_sized};
@@ -97,24 +100,46 @@ const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) 
 const NO_SCROLL: &str = "html, body { overflow: hidden !important; }";
 
 /// What a web view's signal handlers share.
-struct Shared {
+pub(super) struct Shared {
     emitter: Emitter,
     /// What the app may show (its `webview` capability); `None`: nothing
     /// is known about the app, so nothing is refused.
     access: Option<Arc<Access>>,
     /// The current navigation failed (WebKit still finishes it).
     failed: Cell<bool>,
+    /// False once the web view is dropped: a cookie store's late completion
+    /// cannot answer a restarted engine's node with the same id.
+    live: Cell<bool>,
 }
 
 impl Shared {
     fn emit(&self, kind: EventKind, payload: impl FnOnce() -> EventPayload) {
-        self.emitter.emit(kind, payload);
+        if self.live.get() {
+            self.emitter.emit(kind, payload);
+        }
+    }
+
+    /// Answers a [`Command::WebViewRequest`] `id`: its `value`, or the
+    /// error. Sent even when nothing listens: the core is waiting.
+    fn reply(&self, id: u64, result: Result<JsonValue, String>) {
+        if self.live.get() {
+            self.emitter
+                .reply(EventKind::WebViewReply, webview::reply(id, result));
+        }
+    }
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        self.live.set(false);
     }
 }
 
 /// A web view: the page filling its node's view.
 pub(super) struct WebHost {
     web: WebView,
+    /// What the handlers share (cookie replies).
+    shared: Rc<Shared>,
     content: UserContentManager,
     /// Handlers on `web` (disconnected when the host goes).
     handlers: Vec<glib::SignalHandlerId>,
@@ -145,6 +170,7 @@ impl WebHost {
             },
             access: surface.native.access.borrow().clone(),
             failed: Cell::new(false),
+            live: Cell::new(true),
         });
         let content = UserContentManager::new();
         content.register_script_message_handler(HANDLER, None);
@@ -191,6 +217,7 @@ impl WebHost {
         fill_sized(view, web.upcast_ref());
         WebHost {
             web,
+            shared,
             content,
             handlers,
             message: Some(message),
@@ -284,6 +311,12 @@ impl WebHost {
             *self.pending.borrow_mut() = Some(source.clone());
         }
     }
+
+    /// The page and what its handlers share, cloned out: no hosts borrow is
+    /// held while WebKit may call back at once.
+    pub(super) fn request_target(&self) -> (WebView, Rc<Shared>) {
+        (self.web.clone(), self.shared.clone())
+    }
 }
 
 fn load(web: &WebView, source: &WebSource) {
@@ -296,6 +329,8 @@ fn load(web: &WebView, source: &WebSource) {
 
 impl Drop for WebHost {
     fn drop(&mut self) {
+        // From here no cookie completion answers a reply.
+        self.shared.live.set(false);
         // A removal animation may keep the view on screen a little longer:
         // it shows the page as it was, without loading or reporting.
         self.web.stop_loading();
@@ -344,6 +379,209 @@ pub(super) fn command(web: &WebView, command: &Command) {
         }
         _ => {}
     }
+}
+
+/// Answers a [`Command::WebViewRequest`] for `web`, whose handlers share
+/// `shared`: the id comes back in the reply
+/// ([`EventKind::WebViewReply`]) on the node the request arrived at.
+pub(super) fn request(web: &WebView, shared: &Rc<Shared>, request: &WebViewRequest) {
+    let id = request.id;
+    match &request.operation {
+        WebViewOperation::GetCookies { url } => get_cookies(web, shared, id, url.as_deref()),
+        WebViewOperation::SetCookie { cookie } => set_cookie(web, shared, id, cookie),
+        WebViewOperation::DeleteCookie { name, domain, path } => {
+            delete_cookie(web, shared, id, name, domain, path)
+        }
+        // A newer core's operation: answered, never left waiting.
+        _ => shared.reply(id, Err("unsupported web view operation".into())),
+    }
+}
+
+/// The app's cookie manager (this view's network session's: the app's
+/// shared one, or an `incognito` view's ephemeral one).
+fn cookie_manager(web: &WebView) -> Option<webkit6::CookieManager> {
+    web.network_session()?.cookie_manager()
+}
+
+/// The cookies of `url`, or every cookie in this view's session when
+/// omitted.
+fn get_cookies(web: &WebView, shared: &Rc<Shared>, id: u64, url: Option<&str>) {
+    let Some(manager) = cookie_manager(web) else {
+        shared.reply(id, Err("the web view has no cookie manager".into()));
+        return;
+    };
+    let shared = shared.clone();
+    let done = move |result: Result<Vec<soup::Cookie>, glib::Error>| match result {
+        Ok(cookies) => {
+            let cookies: Vec<WebCookie> = cookies.into_iter().map(web_cookie).collect();
+            match serde_json::to_value(&cookies) {
+                Ok(value) => shared.reply(id, Ok(value)),
+                Err(err) => shared.reply(id, Err(err.to_string())),
+            }
+        }
+        Err(err) => shared.reply(id, Err(err.message().to_owned())),
+    };
+    match url {
+        Some(url) => manager.cookies(url, None::<&gio::Cancellable>, done),
+        None => manager.all_cookies(None::<&gio::Cancellable>, done),
+    }
+}
+
+/// A cookie of the view's store, for the core (expiry in Unix
+/// milliseconds).
+fn web_cookie(mut cookie: soup::Cookie) -> WebCookie {
+    let mut out = WebCookie::default();
+    out.name = cookie.name().map(|s| s.to_string()).unwrap_or_default();
+    out.value = cookie.value().map(|s| s.to_string()).unwrap_or_default();
+    out.domain = cookie.domain().map(|s| s.to_string()).unwrap_or_default();
+    out.path = cookie.path().map(|s| s.to_string()).unwrap_or_default();
+    out.expires = cookie
+        .expires()
+        .map(|expires| expires.to_unix().saturating_mul(1000));
+    out.http_only = cookie.is_http_only();
+    out.secure = cookie.is_secure();
+    out.same_site = match cookie.same_site_policy() {
+        soup::SameSitePolicy::None => Some(CookieSameSite::None),
+        soup::SameSitePolicy::Lax => Some(CookieSameSite::Lax),
+        soup::SameSitePolicy::Strict => Some(CookieSameSite::Strict),
+        // Not a policy WebKit stores.
+        _ => None,
+    };
+    out
+}
+
+/// Stores `cookie` in the view's cookie manager, replacing one with the
+/// same name, domain and path.
+fn set_cookie(web: &WebView, shared: &Rc<Shared>, id: u64, cookie: &WebCookie) {
+    let Some(manager) = cookie_manager(web) else {
+        shared.reply(id, Err("the web view has no cookie manager".into()));
+        return;
+    };
+    let cookie = match soup_cookie(cookie) {
+        Ok(cookie) => cookie,
+        Err(err) => {
+            shared.reply(id, Err(err));
+            return;
+        }
+    };
+    let shared = shared.clone();
+    manager.add_cookie(
+        &cookie,
+        None::<&gio::Cancellable>,
+        move |result| match result {
+            Ok(()) => shared.reply(id, Ok(JsonValue::Null)),
+            Err(err) => shared.reply(id, Err(err.message().to_owned())),
+        },
+    );
+}
+
+/// Deletes the cookie with this name, domain and path, and no other: the
+/// matching cookies of the store are found first and each deleted by the
+/// manager. Nothing matching is success (the store deletes nothing).
+fn delete_cookie(
+    web: &WebView,
+    shared: &Rc<Shared>,
+    id: u64,
+    name: &str,
+    domain: &str,
+    path: &str,
+) {
+    let Some(manager) = cookie_manager(web) else {
+        shared.reply(id, Err("the web view has no cookie manager".into()));
+        return;
+    };
+    let shared = shared.clone();
+    let name = name.to_owned();
+    let domain = domain.to_owned();
+    let path = path.to_owned();
+    let deletes = manager.clone();
+    manager.all_cookies(None::<&gio::Cancellable>, move |result| {
+        let cookies = match result {
+            Ok(cookies) => cookies,
+            Err(err) => {
+                shared.reply(id, Err(err.message().to_owned()));
+                return;
+            }
+        };
+        let mut matching: Vec<soup::Cookie> = Vec::new();
+        for mut cookie in cookies {
+            if soup_has_identity(&mut cookie, &name, &domain, &path) {
+                matching.push(cookie);
+            }
+        }
+        if matching.is_empty() {
+            shared.reply(id, Ok(JsonValue::Null));
+            return;
+        }
+        // WebKit deletes one at a time: answered when the last is gone
+        // (the first error, if any, is the answer).
+        let remaining = Rc::new(Cell::new(matching.len()));
+        let error: Rc<RefCell<Option<String>>> = Rc::default();
+        for cookie in matching {
+            let remaining = remaining.clone();
+            let error = error.clone();
+            let shared = shared.clone();
+            deletes.delete_cookie(&cookie, None::<&gio::Cancellable>, move |result| {
+                if let Err(err) = result
+                    && error.borrow().is_none()
+                {
+                    *error.borrow_mut() = Some(err.message().to_owned());
+                }
+                let left = remaining.get().saturating_sub(1);
+                remaining.set(left);
+                if left == 0 {
+                    match error.borrow_mut().take() {
+                        Some(error) => shared.reply(id, Err(error)),
+                        None => shared.reply(id, Ok(JsonValue::Null)),
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// Whether a stored cookie is the one a deletion names: its name, domain
+/// (case-insensitive, keeping a leading dot) and path.
+fn soup_has_identity(cookie: &mut soup::Cookie, name: &str, domain: &str, path: &str) -> bool {
+    let field = |value: Option<glib::GString>| value.map(|s| s.to_string()).unwrap_or_default();
+    field(cookie.name()) == name
+        && field(cookie.domain()).eq_ignore_ascii_case(domain)
+        && field(cookie.path()) == path
+}
+
+/// A core cookie as the cookie manager's (WebKit's `set_expires` takes
+/// seconds).
+fn soup_cookie(cookie: &WebCookie) -> Result<soup::Cookie, String> {
+    let mut out = soup::Cookie::new(
+        &cookie.name,
+        &cookie.value,
+        &cookie.domain,
+        &cookie.path,
+        -1,
+    );
+    if let Some(expires) = cookie.expires {
+        let date = glib::DateTime::from_unix_utc(expires.div_euclid(1000))
+            .map_err(|err| format!("cookie `{}` expiry: {err}", cookie.name))?;
+        out.set_expires(&date);
+    }
+    out.set_http_only(cookie.http_only);
+    out.set_secure(cookie.secure);
+    // Without one, the attribute is left out (libsoup's default, `Lax`).
+    if let Some(same_site) = cookie.same_site.as_ref() {
+        let policy = match same_site {
+            CookieSameSite::None => soup::SameSitePolicy::None,
+            CookieSameSite::Lax => soup::SameSitePolicy::Lax,
+            CookieSameSite::Strict => soup::SameSitePolicy::Strict,
+            _ => {
+                return Err(format!(
+                    "cookie `{}` has an unknown SameSite policy",
+                    cookie.name
+                ));
+            }
+        };
+        out.set_same_site_policy(policy);
+    }
+    Ok(out)
 }
 
 /// Navigations stay within the app's `webview` capability; responses
@@ -743,5 +981,61 @@ mod tests {
             history_key(gdk::Key::Left, M::ALT_MASK | M::LOCK_MASK),
             Some(History::Back)
         );
+    }
+
+    #[test]
+    fn translates_cookie_expiries_and_same_site() {
+        let date = glib::DateTime::from_unix_utc(1_700_000_000).unwrap();
+        let mut cookie = soup::Cookie::new("sid", "v", "example.com", "/", -1);
+        cookie.set_expires(&date);
+        cookie.set_http_only(true);
+        cookie.set_secure(true);
+        cookie.set_same_site_policy(soup::SameSitePolicy::Strict);
+        let web = web_cookie(cookie);
+        // The core speaks Unix milliseconds.
+        assert_eq!(web.expires, Some(1_700_000_000_000));
+        assert!(web.http_only && web.secure);
+        assert!(matches!(
+            web.same_site.as_ref(),
+            Some(CookieSameSite::Strict)
+        ));
+        // And WebKit takes seconds back: milliseconds are floored.
+        let mut web = web;
+        web.expires = Some(1_700_000_000_999);
+        let mut out = soup_cookie(&web).unwrap();
+        assert_eq!(
+            out.expires().map(|date| date.to_unix()),
+            Some(1_700_000_000)
+        );
+        assert!(matches!(
+            out.same_site_policy(),
+            soup::SameSitePolicy::Strict
+        ));
+        assert!(out.is_http_only() && out.is_secure());
+    }
+
+    #[test]
+    fn deletes_only_the_named_cookie_identity() {
+        let cookie =
+            |name: &str, domain: &str, path: &str| soup::Cookie::new(name, "v", domain, path, -1);
+        let mut host = cookie("sid", "example.com", "/");
+        assert!(soup_has_identity(&mut host, "sid", "example.com", "/"));
+        assert!(soup_has_identity(&mut host, "sid", "EXAMPLE.com", "/"));
+        assert!(!soup_has_identity(&mut host, "sid", ".example.com", "/"));
+        assert!(!soup_has_identity(&mut host, "other", "example.com", "/"));
+        assert!(!soup_has_identity(&mut host, "sid", "example.com", "/app"));
+        let mut domain = cookie("sid", ".example.com", "/app");
+        assert!(soup_has_identity(
+            &mut domain,
+            "sid",
+            ".example.com",
+            "/app"
+        ));
+        assert!(!soup_has_identity(
+            &mut domain,
+            "sid",
+            "example.com",
+            "/app"
+        ));
     }
 }

@@ -551,6 +551,10 @@ fn initial_environment() -> Environment {
         audio: true,
         web_input: true,
         web_evaluate: true,
+        // `Command::WebViewRequest`: WebKit answers the cookie store, and a
+        // web view it cannot make answers an error rather than leaving the
+        // request hanging.
+        webview_requests: true,
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()

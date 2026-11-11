@@ -24,7 +24,7 @@ use crate::{
         ComponentSpec, ElKind, ElNode, Environment, Executor, FileAnswer, ImageSize, IntoElement,
         JsEvent, JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
         Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
-        caught,
+        WebAnswer, caught,
         responder::ResponderEl,
         services::FetchFailure,
         view,
@@ -557,6 +557,13 @@ struct SpeechSession {
 /// The core's component state.
 pub(super) struct Components {
     pub(super) web_evaluations: super::web_evaluation::Evaluations,
+    /// Cookie requests on web views ([`crate::webview`]), by request id: the
+    /// node each went to and its answer. A reply from another node, or to a
+    /// request no longer here (a timeout's, a duplicate), is dropped.
+    webview_requests: FxHashMap<u64, (NodeId, WebAnswer)>,
+    /// Their timeouts, whose tasks cancel when the request settles.
+    webview_timeouts: FxHashMap<u64, Task<()>>,
+    next_webview_request: u64,
     registry: Registry,
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
@@ -780,6 +787,9 @@ impl Default for Components {
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             web_evaluations: Default::default(),
+            webview_requests: FxHashMap::default(),
+            webview_timeouts: FxHashMap::default(),
+            next_webview_request: 1,
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
             next_fetch: 1,
@@ -5601,6 +5611,14 @@ impl<M: TextEngine> Core<M> {
                 self.start_web_evaluation(node, script, timeout, answer)
             }
             Action::WebEvaluationTimeout(request) => self.timeout_web_evaluation(request),
+            Action::WebViewRequest {
+                node,
+                operation,
+                answer,
+            } => self.web_view_request(node, operation, answer),
+            Action::WebViewTimeout(request) => {
+                self.webview_failed(request, crate::webview::NO_ANSWER)
+            }
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
@@ -6065,6 +6083,92 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Sends `operation` to the web view `node` (an element ref's cookie
+    /// methods, [`crate::webview`]) and keeps `answer` for the platform's
+    /// reply. Fails at once where the platform has no cookie store, the
+    /// app holds no `webview` grant, the operation is invalid, or the node
+    /// is no web view; otherwise the answer fails too if it comes after
+    /// [`crate::webview::REPLY_TIMEOUT`] or the node unmounts.
+    fn web_view_request(
+        &mut self,
+        node: NodeId,
+        operation: crate::webview::WebViewOperation,
+        answer: WebAnswer,
+    ) {
+        if !self.components.environment.webview_requests {
+            answer.fail(crate::webview::UNSUPPORTED.into());
+            return;
+        }
+        if !self.access.allows_webviews() {
+            answer.fail(
+                "web views are not granted: add `webview` to capabilities in nsh.json".into(),
+            );
+            return;
+        }
+        if let Err(refused) = crate::webview::check_operation(&operation) {
+            answer.fail(refused);
+            return;
+        }
+        let web = self
+            .key(node)
+            .ok()
+            .is_some_and(|key| self.nodes[key as usize].kind == Kind::WebView);
+        if !web {
+            answer.fail(crate::webview::NOT_A_WEB_VIEW.into());
+            return;
+        }
+        // Ids are unique among the requests pending: a reply settles the
+        // request it names and no other.
+        let id = loop {
+            let id = self.components.next_webview_request;
+            self.components.next_webview_request = id.wrapping_add(1);
+            if !self.components.webview_requests.contains_key(&id) {
+                break id;
+            }
+        };
+        let executor = self.components.executor.clone();
+        let timeout = crate::element::task::act_after(
+            &executor,
+            node,
+            crate::webview::REPLY_TIMEOUT,
+            Action::WebViewTimeout(id),
+        );
+        self.components.webview_timeouts.insert(id, timeout);
+        self.components.webview_requests.insert(id, (node, answer));
+        let _ = self.apply_op(Op::Command {
+            id: node,
+            command: Command::WebViewRequest(crate::webview::WebViewRequest { id, operation }),
+        });
+    }
+
+    /// Web view request `id` fails with `error` (the platform has no cookie
+    /// store, the node is no web view or goes, no answer came): its answer
+    /// resolves, its timeout goes.
+    pub(super) fn webview_failed(&mut self, id: u64, error: impl Into<String>) {
+        self.components.webview_timeouts.remove(&id);
+        if let Some((_, answer)) = self.components.webview_requests.remove(&id) {
+            answer.fail(error.into());
+        }
+    }
+
+    /// The node `id` is released (it unmounted): the web view requests
+    /// pending on it fail, their answers never coming.
+    pub(super) fn webview_released(&mut self, id: NodeId) {
+        if self.components.webview_requests.is_empty() {
+            return;
+        }
+        let pending: Vec<u64> = self
+            .components
+            .webview_requests
+            .iter()
+            .filter(|(_, (node, _))| *node == id)
+            .map(|(request, _)| *request)
+            .collect();
+        for request in pending {
+            self.webview_failed(request, crate::webview::NOT_MOUNTED);
+        }
+    }
+
     /// Events the components handle before anything else: dialog answers
     /// (theirs never reach JS), insets of screens and modals.
     fn platform_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
@@ -6212,6 +6316,58 @@ impl<M: TextEngine> Core<M> {
             }
             EventKind::WebEvaluation => {
                 self.answer_web_evaluation(id, payload);
+                true
+            }
+            // The platform's answer to a web view cookie request
+            // (`crate::webview`), on the node it was sent to.
+            EventKind::WebViewReply => {
+                let EventPayload::Json(reply) = payload else {
+                    return false;
+                };
+                // JSON's numbers may come as floats (`1.0`); `1.5` is no
+                // request.
+                let request = reply.get("id").and_then(|id| {
+                    id.as_u64().or_else(|| {
+                        id.as_f64()
+                            .filter(|n| n.is_finite() && n.fract() == 0.0 && *n >= 0.0)
+                            .map(|n| n as u64)
+                    })
+                });
+                let Some(request) = request else {
+                    log::debug!(target: "js", "web view: dropped a cookie reply without a request's id");
+                    return true;
+                };
+                let Some(target) = self
+                    .components
+                    .webview_requests
+                    .get(&request)
+                    .map(|(node, _)| *node)
+                else {
+                    log::debug!(target: "js", "web view: dropped a cookie reply to unknown request {request}");
+                    return true;
+                };
+                // Only the web view the request went to answers it.
+                if target != id {
+                    log::debug!(
+                        target: "js",
+                        "web view: dropped a cookie reply to request {request} from node {id}, not {target}"
+                    );
+                    return true;
+                }
+                self.components.webview_timeouts.remove(&request);
+                let Some((_, answer)) = self.components.webview_requests.remove(&request) else {
+                    return true;
+                };
+                if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
+                    answer.deliver(reply.get("value"), None);
+                } else {
+                    let error = reply
+                        .get("error")
+                        .and_then(crate::JsonValue::as_str)
+                        .unwrap_or(crate::webview::NO_ANSWER)
+                        .to_string();
+                    answer.fail(error);
+                }
                 true
             }
             EventKind::ImageInfo if id == crate::ROOT_ID => {

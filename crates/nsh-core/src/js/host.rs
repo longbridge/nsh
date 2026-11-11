@@ -977,6 +977,9 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::BackPress,
     EventKind::ImageInfo,
     EventKind::WebEvaluation,
+    // The platform's answer to `Command::WebViewRequest`: the core resolves
+    // the request's typed result with it.
+    EventKind::WebViewReply,
     EventKind::Clipboard,
     EventKind::Host,
     EventKind::Pick,

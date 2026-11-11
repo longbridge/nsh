@@ -84,6 +84,10 @@ pub struct Environment {
     /// The platform answers awaitable WebView evaluations
     /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
     pub web_evaluate: bool,
+    /// The platform carries out web views' cookie requests
+    /// ([`crate::platform::Environment::webview_requests`]).
+    #[doc(hidden)]
+    pub webview_requests: bool,
     /// The platform shows web views
     /// ([`crate::platform::Environment::web_views`]).
     pub web_views: bool,
@@ -133,6 +137,7 @@ impl Default for Environment {
             cell: None,
             web_input: false,
             web_evaluate: false,
+            webview_requests: false,
             web_views: true,
             shaders: true,
         }

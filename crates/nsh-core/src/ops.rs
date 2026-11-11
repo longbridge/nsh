@@ -261,6 +261,7 @@ events! {
     Wheel = "onWheel": "A mouse wheel or touchpad scrolled over the view (payload: [`EventPayload::Wheel`]): the nearest listener around the view under the pointer hears it; one nearer than any scroll view under the pointer takes the wheel, so nothing scrolls or zooms natively ([`crate::input::wheel_listener`]).",
 
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
+    WebViewReply = "onWebViewReply" as "": "A web view's cookie request was carried out (internal; payload: `{ id, ok, value }` or `{ id, ok, error }`, resolved by the core).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2350,6 +2351,15 @@ pub enum Command {
     },
     /// Close the edit menu [`Command::OpenEditMenu`] opened on an input.
     CloseEditMenu,
+    /// A request on a web view's cookie store ([`crate::webview`]): read
+    /// its cookies, set one, or delete one. Sent only to a mounted web view
+    /// on a platform whose
+    /// [`crate::platform::Environment::webview_requests`] is set; the
+    /// platform answers with [`EventKind::WebViewReply`] on the same node
+    /// with [`EventPayload::Json`], and the core resolves the request's
+    /// typed answer. Rust host API only.
+    #[doc(hidden)]
+    WebViewRequest(crate::webview::WebViewRequest),
 }
 
 /// An editing action of an edit menu ([`Command::OpenEditMenu`],

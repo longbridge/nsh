@@ -848,6 +848,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             }
                         }
                     }
+                    // The core refuses cookie requests on Android
+                    // (`webview_requests` is false): no opcode.
+                    Command::WebViewRequest(_) => e.int(-1),
                 }
             }
         }

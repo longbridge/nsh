@@ -1004,6 +1004,20 @@ impl Emitter {
             surface.event(self.id, kind, payload());
         }
     }
+
+    /// Answers a native request ([`nsh_core::webview`]) whatever the app
+    /// listens to: the core settles its typed answer for `request`. It must
+    /// be called once per request id.
+    fn reply(&self, request: u64, result: Result<JsonValue, String>) {
+        let Some(surface) = self.surface.upgrade() else {
+            return;
+        };
+        surface.event(
+            self.id,
+            EventKind::WebViewReply,
+            nsh_core::webview::reply(request, result),
+        );
+    }
 }
 
 fn error(message: String) -> EventPayload {

@@ -200,6 +200,19 @@ pub(crate) enum Action {
     ),
     /// Rejects a request that exceeded its deadline.
     WebEvaluationTimeout(u32),
+    /// A cookie request on a web view the core sends to the platform once
+    /// the target is known to be a mounted, granted web view; its reply
+    /// resolves `answer`.
+    WebViewRequest {
+        /// The node carrying the element ref.
+        node: NodeId,
+        /// What to do on it.
+        operation: crate::webview::WebViewOperation,
+        /// Where the platform's reply goes.
+        answer: WebAnswer,
+    },
+    /// Web view request `id` waited too long for the platform's answer.
+    WebViewTimeout(u64),
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),
@@ -298,6 +311,38 @@ impl FileAnswer {
                 None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
             }),
         }
+    }
+}
+
+/// A web view request waiting for the platform's answer
+/// ([`Action::WebViewRequest`]).
+pub(crate) enum WebAnswer {
+    /// The store's cookies, or why they could not be read.
+    Cookies(AnswerSlot<Result<Vec<crate::webview::WebCookie>, String>>),
+    /// A request without a value, or why it failed.
+    Done(AnswerSlot<Result<(), String>>),
+}
+
+impl WebAnswer {
+    /// Answers with the platform's `value` (any JSON, as its reply carries
+    /// it) or its `error`.
+    pub(crate) fn deliver(self, value: Option<&crate::JsonValue>, error: Option<String>) {
+        match self {
+            WebAnswer::Cookies(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => crate::webview::cookies(value),
+            }),
+            WebAnswer::Done(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }),
+        }
+    }
+
+    /// Answers with `error`: the request was not carried out (no platform
+    /// support, no web view, unmounted, no answer in time).
+    pub(crate) fn fail(self, error: String) {
+        self.deliver(None, Some(error));
     }
 }
 

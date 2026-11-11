@@ -2425,7 +2425,12 @@ impl<M: TextEngine> Core<M> {
                 self.detach(child);
                 Ok(())
             }
-            Op::Release { id } => self.release(id),
+            Op::Release { id } => {
+                // A web view's cookie requests answer their failure before
+                // its node goes.
+                self.webview_released(id);
+                self.release(id)
+            }
             Op::Placeholder { id } => {
                 let key = self.key(id)?;
                 self.placeholder(key);
@@ -3127,9 +3132,23 @@ impl<M: TextEngine> Core<M> {
                 self.answer_scroll_position(id, call);
                 continue;
             }
-            let Ok(key) = self.key(id) else { continue };
+            // A web view request whose node is gone or never showed answers
+            // its failure (its ref names nothing rendered).
+            let webview = match &command {
+                Command::WebViewRequest(request) => Some(request.id),
+                _ => None,
+            };
+            let Ok(key) = self.key(id) else {
+                if let Some(request) = webview {
+                    self.webview_failed(request, crate::webview::NOT_MOUNTED);
+                }
+                continue;
+            };
             // A culled view is made for it.
             if !self.nodes[key as usize].created && !self.uncull(key) {
+                if let Some(request) = webview {
+                    self.webview_failed(request, crate::webview::NOT_MOUNTED);
+                }
                 continue;
             }
             let node = &self.nodes[key as usize];

@@ -18,7 +18,7 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
 - **GTK 4.14** 及以上。构建 Rust 应用的 runner 或 NSH 的 Linux 运行时（从源码构建，或在 Linux 上运行 `cargo xtask dist`）
   还需要它们的开发包和 clang：Debian 与 Ubuntu（24.04 及以上）为 `libgtk-4-dev clang`，Arch 为 `gtk4 clang`，Fedora 为
   `gtk4-devel clang`。
-- Web 视图需要 **WebKitGTK 6.0**（2.40 及以上）：构建运行时需要 Debian 与 Ubuntu 上的 `libwebkitgtk-6.0-dev`、Arch 上的
+- Web 视图及 Cookie 枚举需要 **WebKitGTK 6.0**（2.42 及以上）：构建运行时需要 Debian 与 Ubuntu 上的 `libwebkitgtk-6.0-dev`、Arch 上的
   `webkitgtk-6.0`、Fedora 上的 `webkitgtk6.0-devel`。开发宿主和发布运行器默认使用它，因此打包后的应用运行的机器上需要装有
   WebKitGTK 6.0（Debian 与 Ubuntu 上为 `libwebkitgtk-6.0-4`；GNOME 桌面自带）。在没有它的开发包的机器上，`cargo xtask dist`
   构建的运行时中 Web 视图为占位视图，其应用只需要 GTK。

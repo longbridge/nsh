@@ -64,17 +64,20 @@ use std::{
     },
 };
 
-use nsh_core::access::WebMedia;
 use nsh_core::{
     Color, Command, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID, WebProps, WebSource,
+    access::WebMedia,
+    webview::{CookieSameSite, WebCookie, WebViewOperation, WebViewRequest},
 };
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler,
     CreateCoreWebView2CompositionControllerCompletedHandler,
     CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
-    FocusChangedEventHandler,
+    FocusChangedEventHandler, GetCookiesCompletedHandler,
     Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_COLOR, COREWEBVIEW2_MOUSE_EVENT_KIND,
+        COREWEBVIEW2_COLOR, COREWEBVIEW2_COOKIE_SAME_SITE_KIND,
+        COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX, COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE,
+        COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT, COREWEBVIEW2_MOUSE_EVENT_KIND,
         COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL, COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOUBLE_CLICK,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOWN,
@@ -93,7 +96,8 @@ use webview2_com::{
         COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_POINTER_EVENT_KIND,
         COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2,
         ICoreWebView2_2, ICoreWebView2CompositionController, ICoreWebView2Controller,
-        ICoreWebView2Controller2, ICoreWebView2Controller3, ICoreWebView2Environment,
+        ICoreWebView2Controller2, ICoreWebView2Controller3, ICoreWebView2Cookie,
+        ICoreWebView2CookieList, ICoreWebView2CookieManager, ICoreWebView2Environment,
         ICoreWebView2Environment2, ICoreWebView2Environment3, ICoreWebView2Environment10,
         ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2Settings2, ICoreWebView2Settings6,
     },
@@ -255,6 +259,10 @@ pub(crate) struct WebItem {
     focused: Cell<bool>,
     /// Mouse buttons held on the page (bits by button).
     buttons: Cell<u8>,
+    /// The page's lifetime: false once closed, so a cookie store
+    /// completion later cannot answer a restarted engine's node with the
+    /// same id.
+    alive: Arc<AtomicBool>,
 }
 
 impl WebItem {
@@ -289,6 +297,7 @@ impl WebItem {
             hovered: Cell::new(false),
             focused: Cell::new(false),
             buttons: Cell::new(0),
+            alive: Arc::new(AtomicBool::new(true)),
         })
     }
 
@@ -913,11 +922,22 @@ impl WebItem {
     /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &Command) {
         let Some(webview) = self.webview.borrow().clone() else {
-            if !self.failed.get() {
+            if self.failed.get() {
+                if let Command::WebViewRequest(request) = command {
+                    self.emitter.reply(
+                        request.id,
+                        Err("this WebView2 runtime cannot show web views".to_owned()),
+                    );
+                }
+            } else {
                 self.queued.borrow_mut().push(command.clone());
             }
             return;
         };
+        if let Command::WebViewRequest(request) = command {
+            self.request(request);
+            return;
+        }
         let none = None::<&ICoreWebView2ExecuteScriptCompletedHandler>;
         // SAFETY: WebView2 calls on the live web view, on its thread.
         let _ = unsafe {
@@ -934,6 +954,208 @@ impl WebItem {
                 _ => Ok(()),
             }
         };
+    }
+
+    /// A cookie request ([`Command::WebViewRequest`]), answered exactly
+    /// once as [`EventKind::WebViewReply`].
+    fn request(&self, request: &WebViewRequest) {
+        match &request.operation {
+            WebViewOperation::GetCookies { url } => self.get_cookies(request.id, url.as_deref()),
+            WebViewOperation::SetCookie { cookie } => self.set_cookie(request.id, cookie),
+            WebViewOperation::DeleteCookie { name, domain, path } => {
+                self.delete_cookie(request.id, name, domain, path)
+            }
+            // A newer core's operation: answered, never left waiting.
+            _ => self
+                .emitter
+                .reply(request.id, Err("unsupported web view operation".to_owned())),
+        }
+    }
+
+    /// The page's cookie manager (WebView2 1.0.705 and later; an InPrivate
+    /// view's store is its own, in memory).
+    fn cookie_manager(&self) -> Result<ICoreWebView2CookieManager, String> {
+        let webview = self
+            .webview
+            .borrow()
+            .clone()
+            .ok_or_else(|| "the web view is not ready".to_owned())?;
+        let webview = webview.cast::<ICoreWebView2_2>().map_err(|error| {
+            format!(
+                "this WebView2 runtime has no cookie manager: {}",
+                error.message()
+            )
+        })?;
+        // SAFETY: a WebView2 call on the live web view, on its thread.
+        unsafe { webview.CookieManager() }
+            .map_err(|error| format!("cannot reach the cookies: {}", error.message()))
+    }
+
+    /// The cookies of `url`, or every cookie of this view's store when
+    /// omitted.
+    fn get_cookies(&self, request: u64, url: Option<&str>) {
+        let manager = match self.cookie_manager() {
+            Ok(manager) => manager,
+            Err(error) => return self.emitter.reply(request, Err(error)),
+        };
+        let emitter = self.emitter.clone();
+        let alive = self.alive.clone();
+        let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
+            if !alive.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let value = match (result, list) {
+                (Ok(()), Some(list)) => serde_json::to_value(cookies_of(&list))
+                    .map_err(|error| format!("cannot report the cookies: {error}")),
+                (Ok(()), None) => Ok(serde_json::Value::Array(Vec::new())),
+                (Err(error), _) => Err(format!("cannot read the cookies: {}", error.message())),
+            };
+            emitter.reply(request, value);
+            Ok(())
+        }));
+        let uri = url.map(HSTRING::from);
+        let uri = uri
+            .as_ref()
+            .map_or(PCWSTR::null(), |uri| PCWSTR(uri.as_ptr()));
+        // SAFETY: a WebView2 call on the live cookie manager; it keeps the
+        // handler until it calls it.
+        if let Err(error) = unsafe { manager.GetCookies(uri, &handler) } {
+            self.emitter.reply(
+                request,
+                Err(format!("cannot read the cookies: {}", error.message())),
+            );
+        }
+    }
+
+    /// Writes one cookie to this view's store (`CreateCookie`,
+    /// `AddOrUpdateCookie`), replacing one with the same name, domain and
+    /// path.
+    fn set_cookie(&self, request: u64, cookie: &WebCookie) {
+        let result = self.store_cookie(cookie).map(|()| serde_json::Value::Null);
+        self.emitter.reply(request, result);
+    }
+
+    fn store_cookie(&self, cookie: &WebCookie) -> Result<(), String> {
+        let manager = self.cookie_manager()?;
+        // The SameSite policy first: a bad one fails before a cookie is
+        // written.
+        let same_site = cookie.same_site.as_ref().map(same_site_kind).transpose()?;
+        // SAFETY: WebView2 calls on the live cookie manager and the cookie
+        // it makes; nothing is kept after the call.
+        unsafe {
+            let created = manager
+                .CreateCookie(
+                    &HSTRING::from(cookie.name.as_str()),
+                    &HSTRING::from(cookie.value.as_str()),
+                    &HSTRING::from(cookie.domain.as_str()),
+                    &HSTRING::from(cookie.path.as_str()),
+                )
+                .map_err(|error| error.message().to_owned())?;
+            if let Some(expires) = cookie.expires {
+                created
+                    .SetExpires(expires_seconds(expires))
+                    .map_err(|error| error.message().to_owned())?;
+            }
+            created
+                .SetIsHttpOnly(cookie.http_only)
+                .map_err(|error| error.message().to_owned())?;
+            created
+                .SetIsSecure(cookie.secure)
+                .map_err(|error| error.message().to_owned())?;
+            if let Some(same_site) = same_site {
+                created
+                    .SetSameSite(same_site)
+                    .map_err(|error| error.message().to_owned())?;
+            }
+            manager
+                .AddOrUpdateCookie(&created)
+                .map_err(|error| error.message().to_owned())?;
+        }
+        Ok(())
+    }
+
+    /// Deletes the cookie with this name, domain and path, and no other:
+    /// the store's matching cookies are found first and each deleted.
+    /// Nothing matching is success (the store deletes nothing).
+    fn delete_cookie(&self, request: u64, name: &str, domain: &str, path: &str) {
+        let manager = match self.cookie_manager() {
+            Ok(manager) => manager,
+            Err(error) => return self.emitter.reply(request, Err(error)),
+        };
+        let emitter = self.emitter.clone();
+        let alive = self.alive.clone();
+        let name = name.to_owned();
+        let domain = domain.to_owned();
+        let path = path.to_owned();
+        let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
+            if !alive.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let cookies = match (result, list) {
+                (Ok(()), Some(list)) => list,
+                (Ok(()), None) => {
+                    emitter.reply(request, Ok(serde_json::Value::Null));
+                    return Ok(());
+                }
+                (Err(error), _) => {
+                    emitter.reply(
+                        request,
+                        Err(format!("cannot read the cookies: {}", error.message())),
+                    );
+                    return Ok(());
+                }
+            };
+            let matching: Vec<ICoreWebView2Cookie> = {
+                let mut found = Vec::new();
+                let mut count = 0u32;
+                // SAFETY: WebView2 getters on the live list; the cookies
+                // are copied (a COM reference each).
+                unsafe {
+                    if list.Count(&mut count).is_err() {
+                        emitter.reply(
+                            request,
+                            Err("cannot read the cookies: the list is unavailable".to_owned()),
+                        );
+                        return Ok(());
+                    }
+                    for index in 0..count {
+                        let Ok(cookie) = list.GetValueAtIndex(index) else {
+                            continue;
+                        };
+                        if nsh_core::webview::cookie_has_identity(
+                            &cookie_of(&cookie),
+                            &name,
+                            &domain,
+                            &path,
+                        ) {
+                            found.push(cookie);
+                        }
+                    }
+                }
+                found
+            };
+            for cookie in matching {
+                // SAFETY: a WebView2 call on the live cookie manager and a
+                // cookie from its own store.
+                if let Err(error) = unsafe { manager.DeleteCookie(&cookie) } {
+                    emitter.reply(
+                        request,
+                        Err(format!("cannot delete the cookie: {}", error.message())),
+                    );
+                    return Ok(());
+                }
+            }
+            emitter.reply(request, Ok(serde_json::Value::Null));
+            Ok(())
+        }));
+        // SAFETY: a WebView2 call on the live cookie manager; it keeps the
+        // handler until it calls it.
+        if let Err(error) = unsafe { manager.GetCookies(PCWSTR::null(), &handler) } {
+            self.emitter.reply(
+                request,
+                Err(format!("cannot read the cookies: {}", error.message())),
+            );
+        }
     }
 
     /// `load()`: a navigation whose own request carries the app's headers
@@ -1046,6 +1268,8 @@ impl WebItem {
         if self.closed.replace(true) {
             return;
         }
+        // From here no cookie completion answers a reply.
+        self.alive.store(false, Ordering::Release);
         if self.focused.get() {
             self.focus_window();
         }
@@ -1517,6 +1741,99 @@ fn navigation(webview: &ICoreWebView2, loading: bool) -> Navigation {
     }
 }
 
+/// A cookie's expiry in WebView2's seconds since the Unix epoch (the core's
+/// is milliseconds).
+fn expires_seconds(milliseconds: i64) -> f64 {
+    milliseconds as f64 / 1000.0
+}
+
+/// WebView2's `Expires` (seconds since the Unix epoch) in the core's
+/// milliseconds; `None` for a session cookie.
+fn expires_millis(seconds: f64, session: bool) -> Option<i64> {
+    (!session && seconds.is_finite() && seconds >= 0.0).then_some((seconds * 1000.0).round() as i64)
+}
+
+/// The WebView2 SameSite policy of the core's.
+fn same_site_kind(kind: &CookieSameSite) -> Result<COREWEBVIEW2_COOKIE_SAME_SITE_KIND, String> {
+    Ok(match kind {
+        CookieSameSite::None => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE,
+        CookieSameSite::Lax => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX,
+        CookieSameSite::Strict => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT,
+        // A policy this runtime does not know is an error, not Lax.
+        _ => return Err("unknown SameSite value".to_owned()),
+    })
+}
+
+/// The core's SameSite policy of a WebView2 one, `None` for one it does not
+/// name.
+fn same_site_name(kind: COREWEBVIEW2_COOKIE_SAME_SITE_KIND) -> Option<CookieSameSite> {
+    if kind == COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE {
+        Some(CookieSameSite::None)
+    } else if kind == COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX {
+        Some(CookieSameSite::Lax)
+    } else if kind == COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT {
+        Some(CookieSameSite::Strict)
+    } else {
+        None
+    }
+}
+
+/// A WebView2 cookie list as the core's cookies.
+fn cookies_of(list: &ICoreWebView2CookieList) -> Vec<WebCookie> {
+    let mut cookies = Vec::new();
+    let mut count = 0u32;
+    // SAFETY: WebView2 getters on the live list; the cookies are copied.
+    unsafe {
+        if list.Count(&mut count).is_err() {
+            return cookies;
+        }
+        for index in 0..count {
+            if let Ok(cookie) = list.GetValueAtIndex(index) {
+                cookies.push(cookie_of(&cookie));
+            }
+        }
+    }
+    cookies
+}
+
+/// A WebView2 cookie as the core's (`Expires` is Unix milliseconds there:
+/// a session cookie has none).
+fn cookie_of(cookie: &ICoreWebView2Cookie) -> WebCookie {
+    let mut name = PWSTR::null();
+    let mut value = PWSTR::null();
+    let mut domain = PWSTR::null();
+    let mut path = PWSTR::null();
+    let mut expires = 0.0;
+    let mut http_only = BOOL(0);
+    let mut secure = BOOL(0);
+    // A cookie whose session state could not be read keeps no expiry.
+    let mut session = BOOL(1);
+    let mut same_site = COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX;
+    // SAFETY: WebView2 getters on the live cookie; `take_pwstr` frees the
+    // strings.
+    unsafe {
+        let _ = cookie.Name(&mut name);
+        let _ = cookie.Value(&mut value);
+        let _ = cookie.Domain(&mut domain);
+        let _ = cookie.Path(&mut path);
+        let _ = cookie.Expires(&mut expires);
+        let _ = cookie.IsHttpOnly(&mut http_only);
+        let _ = cookie.IsSecure(&mut secure);
+        let _ = cookie.IsSession(&mut session);
+        let _ = cookie.SameSite(&mut same_site);
+    }
+    let mut cookie = WebCookie::default();
+    cookie.name = take_pwstr(name);
+    cookie.value = take_pwstr(value);
+    cookie.domain = take_pwstr(domain);
+    cookie.path = take_pwstr(path);
+    cookie.expires = expires_millis(expires, session.as_bool());
+    cookie.http_only = http_only.as_bool();
+    cookie.secure = secure.as_bool();
+    cookie.same_site = same_site_name(same_site);
+    cookie
+}
+
 /// What a failed navigation reports, `None` for one that was replaced or
 /// cancelled (not an error).
 fn web_error(status: i32) -> Option<&'static str> {
@@ -1826,5 +2143,36 @@ mod tests {
         assert!(scroll_style(false).contains("var on = false"));
         assert!(scroll_style(true).contains("var on = true"));
         assert!(scroll_style(false).contains("overflow: hidden !important"));
+    }
+
+    #[test]
+    fn maps_same_site_policies() {
+        assert_eq!(
+            same_site_kind(&CookieSameSite::None).expect("a policy"),
+            COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE
+        );
+        assert_eq!(
+            same_site_kind(&CookieSameSite::Lax).expect("a policy"),
+            COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX
+        );
+        assert_eq!(
+            same_site_kind(&CookieSameSite::Strict).expect("a policy"),
+            COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT
+        );
+        assert!(matches!(
+            same_site_name(COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT),
+            Some(CookieSameSite::Strict)
+        ));
+        assert!(same_site_name(COREWEBVIEW2_COOKIE_SAME_SITE_KIND(99)).is_none());
+    }
+
+    #[test]
+    fn translates_cookie_expiry_between_milliseconds_and_seconds() {
+        assert_eq!(expires_seconds(1_500), 1.5);
+        assert_eq!(expires_millis(1.5, false), Some(1_500));
+        assert_eq!(expires_millis(1.5, true), None);
+        assert_eq!(expires_millis(-1.0, false), None);
+        assert_eq!(expires_millis(f64::NAN, false), None);
+        assert_eq!(expires_millis(f64::INFINITY, false), None);
     }
 }

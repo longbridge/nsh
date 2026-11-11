@@ -309,6 +309,12 @@ pub struct Environment {
     /// The platform answers awaitable WebView evaluations
     /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
     pub web_evaluate: bool,
+    /// The platform carries out web views' cookie requests
+    /// ([`crate::Command::WebViewRequest`]). `false` by default; a desktop
+    /// backend with a web engine sets it, and elsewhere a request answers
+    /// its error at once instead of waiting for an answer that never comes.
+    #[doc(hidden)]
+    pub webview_requests: bool,
     /// The platform shows web views (TS: `WebView.available()`). `true` by
     /// default; a platform that knows from the start that it shows none
     /// (built without a web engine, the system's failed to load) sets
@@ -381,6 +387,7 @@ impl Default for Environment {
             cell: None,
             web_input: false,
             web_evaluate: false,
+            webview_requests: false,
             web_views: true,
             shaders: true,
         }
