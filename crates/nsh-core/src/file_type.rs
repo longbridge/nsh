@@ -13,7 +13,7 @@
 
 /// The most files kept while no listener takes them: past it the oldest
 /// goes.
-pub const MAX_PENDING: usize = 64;
+pub(crate) const MAX_PENDING: usize = 64;
 
 /// Whether `url` is a `file:` URL (a file the system opened the app with).
 pub(crate) fn is_file_url(url: &str) -> bool {
@@ -37,7 +37,8 @@ pub(crate) fn file_path(url: &str) -> Option<std::path::PathBuf> {
 }
 
 /// The scheme of the URLs of the files the app opens, which the core lets
-/// through when the app declares file types.
+/// through when the app declares file types (toolchain use).
+#[doc(hidden)]
 pub const FILE_SCHEME: &str = "file";
 
 /// One kind of file the app opens.
@@ -79,7 +80,8 @@ impl FileTypeRole {
         }
     }
 
-    /// Its `CFBundleTypeRole`.
+    /// Its `CFBundleTypeRole` (toolchain use).
+    #[doc(hidden)]
     pub fn apple(self) -> &'static str {
         match self {
             Self::Viewer => "Viewer",
@@ -96,7 +98,8 @@ impl FileType {
             .is_some_and(|e| self.extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
     }
 
-    /// As `nsh.json` writes it.
+    /// As `nsh.json` writes it (toolchain use).
+    #[doc(hidden)]
     pub fn to_json(&self) -> crate::JsonValue {
         let mut value = serde_json::json!({ "name": self.name });
         let list = |items: &[String]| serde_json::json!(items);
@@ -120,11 +123,12 @@ impl FileType {
 /// take (a value of a form it does not know, a newer NSH's) is left out:
 /// an app opens less, never more.
 pub fn file_types_from_json(value: &crate::JsonValue) -> Vec<FileType> {
-    file_types_from_json_lenient(value).0
+    parse_file_types(value).0
 }
 
 /// Whether `"fileTypes"` of `info` (`nsh.json` or a package's `app.json`)
-/// declares any file type.
+/// declares any file type (toolchain use).
+#[doc(hidden)]
 pub fn declares_file_types(info: &crate::JsonValue) -> bool {
     info.get("fileTypes")
         .is_some_and(|types| !file_types_from_json(types).is_empty())
@@ -132,7 +136,8 @@ pub fn declares_file_types(info: &crate::JsonValue) -> bool {
 
 /// [`file_types_from_json`], with what it left out, which the toolchain
 /// warns of.
-pub fn file_types_from_json_lenient(value: &crate::JsonValue) -> (Vec<FileType>, Vec<String>) {
+#[doc(hidden)]
+pub fn parse_file_types(value: &crate::JsonValue) -> (Vec<FileType>, Vec<String>) {
     let mut ignored = Vec::new();
     let Some(list) = value.as_array() else {
         ignored.push(format!(
@@ -223,7 +228,7 @@ mod tests {
 
     #[test]
     fn file_types_are_read_and_checked() {
-        let (types, ignored) = file_types_from_json_lenient(&serde_json::json!([
+        let (types, ignored) = parse_file_types(&serde_json::json!([
             { "name": "Video", "extensions": ["MP4", "mov", "mp4"], "mimeTypes": ["video/mp4"], "role": "editor" },
             { "name": "Movie", "contentTypes": ["public.movie"] },
             { "name": "Bad", "extensions": [".mp4"] },

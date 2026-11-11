@@ -642,7 +642,7 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     config.schemes = schemes;
     ignored.extend(schemes_ignored);
     if let Some(types) = &config.file_types {
-        let (_, types_ignored) = nsh_core::file_type::file_types_from_json_lenient(types);
+        let (_, types_ignored) = nsh_core::file_type::parse_file_types(types);
         ignored.extend(types_ignored);
     }
     // The bundler warns of another value.
