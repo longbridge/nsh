@@ -311,7 +311,7 @@ pub(crate) fn factory() -> ComponentFactory {
 mod tests {
     use serde_json::json;
 
-    use super::{Entry, MAX_DEPTH, parse_items};
+    use super::{Entry, MAX_DEPTH, lists_only, parse_items};
 
     #[test]
     fn only_the_buttons_own_list_is_cleared_on_removal() {
