@@ -16,6 +16,7 @@ import {
   setNode,
   setNodeSelection,
   setTextSelection,
+  sinkListItem,
   suggestion,
   wrapIn,
   type RichCommand,
@@ -113,6 +114,7 @@ const MARKS: { icon: LucideIconName; label: string; name: string; toggle: string
   { icon: "underline", label: "Underline", name: "underline", toggle: "toggleUnderline" },
   { icon: "strikethrough", label: "Strikethrough", name: "strike", toggle: "toggleStrike" },
   { icon: "code", label: "Code", name: "code", toggle: "toggleCode" },
+  { icon: "palette", label: "Highlight", name: "highlight", toggle: "toggleHighlight" },
 ];
 
 /** A callout: blocks set apart in a tinted box, as Notion's. The app's own node type, declared as Tiptap's `Node.create`. */
@@ -742,6 +744,29 @@ export function BlockEditorDemo() {
     editor.focus();
   };
 
+  /** A touch screen has no pointer to hover with: the caret's block is the one its bar acts on. */
+  const atCaret = (act: (h: Handle) => void) => () => {
+    const start = caretBlock();
+    if (start !== null) act({ start, x: 0, y: 0, left: 0, width: 0 });
+  };
+  /** Tab's and Shift-Tab's work on a list item, for a keyboard without them. */
+  const nest = (deeper: boolean) => () => {
+    const item = editor.isActive("taskItem") ? "taskItem" : "listItem";
+    editor.run(deeper ? sinkListItem(item) : liftListItem(item));
+    editor.focus();
+  };
+  const TOUCH_ACTIONS: { icon: LucideIconName; label: string; run: () => void }[] = [
+    { icon: "plus", label: "Add a block below", run: atCaret(addBelow) },
+    { icon: "list-indent-decrease", label: "Outdent", run: nest(false) },
+    { icon: "list-indent-increase", label: "Indent", run: nest(true) },
+    { icon: "arrow-up", label: "Move block up", run: atCaret((h) => void move(h.start, -1)) },
+    { icon: "arrow-down", label: "Move block down", run: atCaret((h) => void move(h.start, 1)) },
+    { icon: "copy", label: "Duplicate block", run: atCaret(duplicate) },
+    { icon: "trash", label: "Delete block", run: atCaret(remove) },
+    { icon: "undo-2", label: "Undo", run: () => void editor.run(command("undo")) },
+    { icon: "redo-2", label: "Redo", run: () => void editor.run(command("redo")) },
+  ];
+
   /** What floats by the caret or the selection: the `/` menu, else the toolbar. */
   const bubble = () => {
     if (open()) return <SlashMenu shift={shift()} items={items()} index={Math.min(index(), Math.max(items().length - 1, 0))} onPick={pick} onHover={(i, at) => {
@@ -778,11 +803,12 @@ export function BlockEditorDemo() {
   };
 
   return (
-    <View style={{ flex: 1, padding: 16 }}>
+    // On a touch screen the editor ends at the keyboard, so its bar of block actions stays in reach.
+    <View style={pointer ? { flex: 1, padding: 16 } : { flex: 1, paddingHorizontal: 16, paddingTop: 16, paddingBottom: "env(keyboard-inset-height)" }}>
       <View
         testID="block-editor"
         onMouseMove={pointer ? onMove : undefined}
-        style={{ flex: 1, minHeight: 360, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, overflow: "hidden" }}
+        style={{ flex: 1, minHeight: 360, marginBottom: pointer ? 0 : 16, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, overflow: "hidden" }}
       >
         <RichEditor
           testID="block-document"
@@ -795,6 +821,7 @@ export function BlockEditorDemo() {
             content: pointer ? "gap-3 pl-16 pr-10 py-8" : "gap-3 px-5 py-6",
             // A block the handle took, and the line it will drop on.
             // A rule sits as close to its neighbors as they do to each other (the document's gap is around it too).
+            marks: { ...richEditorClasses.marks, highlight: "bg-primary/30 rounded" },
             nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3" },
             selectedNode: "bg-primary/10 rounded-md",
             dropCursor: "bg-primary rounded-full",
@@ -803,6 +830,26 @@ export function BlockEditorDemo() {
           bubbleMenuPlacement={open() ? "bottom" : "top"}
           bubbleMenuOffset={6}
         />
+        <If when={!pointer}>
+          <View testID="block-bar" role="toolbar" accessibilityLabel="Block" style={{ borderTopWidth: 1, borderColor: colors.line }}>
+            <Scroll horizontal>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 8, paddingVertical: 6 }}>
+                <Each of={TOUCH_ACTIONS}>
+                  {(action) => (
+                    <Button
+                      accessibilityLabel={action().label}
+                      onPress={action().run}
+                      {...feedback()}
+                      style={{ width: 40, height: 40, borderRadius: 8, alignItems: "center", justifyContent: "center" }}
+                    >
+                      <LucideIcon name={action().icon} size={20} tint={colors.muted} />
+                    </Button>
+                  )}
+                </Each>
+              </View>
+            </Scroll>
+          </View>
+        </If>
         <If when={pointer && handle() && !open() && !selected()}>
           {(() => {
             const h = () => handle()!;

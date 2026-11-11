@@ -349,3 +349,28 @@ test("a callout sets blocks apart, and the toolbar links the selection", async (
   await app.press("role:button[Remove link]");
   await app.waitFor("role:button[Edit link]", { state: "gone" });
 });
+
+test("on a touch screen a bar acts on the caret's block: move, indent, duplicate, delete", async () => {
+  const app = await openDemo();
+  const index = order(app);
+  await app.press("Brief the regional leads");
+  await app.press("role:button[Move block up]");
+  await app.wait(200);
+  expect(index("Brief the regional leads")).toBeLessThan(index("Confirm the launch date"));
+  // Indented under the item above it: a nested list numbers it `a.`.
+  await app.press("Confirm the launch date");
+  await app.press("role:button[Indent]");
+  await app.waitFor("text:a.");
+  await app.press("role:button[Outdent]");
+  await app.waitFor("text:a.", { state: "gone" });
+  const before = app.count("text:Confirm the launch date");
+  await app.press("role:button[Duplicate block]");
+  await app.wait(200);
+  expect(app.count("text:Confirm the launch date")).toBe(before + 1);
+  await app.press("role:button[Delete block]");
+  await app.wait(200);
+  expect(app.count("text:Confirm the launch date")).toBe(before);
+  // `+` opens the blocks in a new item below.
+  await app.press("role:button[Add a block below]");
+  await app.waitFor("role:listbox[Blocks]");
+});
