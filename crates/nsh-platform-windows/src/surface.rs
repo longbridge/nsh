@@ -23,7 +23,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
-    Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size,
+    Bounds, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size,
 };
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink};
 use rustc_hash::FxHashMap;
@@ -202,6 +202,10 @@ pub(crate) struct Surface {
     /// Views that changed since the last frame
     /// ([`Surface::invalidate_view`]).
     dirty: RefCell<Vec<NshView>>,
+    /// Parts of views that changed since the last frame, in the view's own
+    /// coordinates ([`Surface::invalidate_view_rect`]): a canvas's animated
+    /// values, drawn again only there.
+    partial: RefCell<Vec<(NshView, Bounds<Points>)>>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -322,6 +326,7 @@ impl Surface {
             full_damage: Cell::new(true),
             whole_change: Cell::new(0),
             dirty: RefCell::default(),
+            partial: RefCell::default(),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             host_environment: Cell::default(),
@@ -359,9 +364,12 @@ impl Surface {
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
-        root.set_invalidate(Rc::new(move |view| {
+        root.set_invalidate(Rc::new(move |view, rect| {
             if let Some(surface) = weak.upgrade() {
-                surface.invalidate_view(view);
+                match rect {
+                    Some(rect) => surface.invalidate_view_rect(view, rect),
+                    None => surface.invalidate_view(view),
+                }
             }
         }));
         surface
@@ -567,6 +575,14 @@ impl Surface {
 
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
+        // A new activation cannot open a popup for an unanswered context
+        // request. Menu events include bar items, tray clicks and hotkeys.
+        if matches!(
+            kind,
+            EventKind::Menu | EventKind::Press | EventKind::AccessibilityAction
+        ) {
+            self.chrome.context_area.take();
+        }
         self.control(|c| c.dispatch_event(id, kind, payload));
     }
 
@@ -693,6 +709,16 @@ impl Surface {
         self.request_paint();
     }
 
+    /// Asks for `rect` of `view` (in its own coordinates) to be drawn again:
+    /// a canvas whose animated values changed paints only there.
+    pub(crate) fn invalidate_view_rect(&self, view: &NshView, rect: Bounds<Points>) {
+        // A whole redraw of the view already on its way covers it.
+        if !self.full_damage.get() && !view.is_queued() {
+            self.partial.borrow_mut().push((view.clone(), rect));
+        }
+        self.request_paint();
+    }
+
     fn request_paint(&self) {
         if self.painting.get() {
             self.repaint.set(true);
@@ -716,13 +742,14 @@ impl Surface {
     /// whole window (asked for, or a change whose area is not known).
     pub(crate) fn take_damage(&self) -> Option<Vec<crate::view::WindowRect>> {
         let dirty = std::mem::take(&mut *self.dirty.borrow_mut());
+        let partial = std::mem::take(&mut *self.partial.borrow_mut());
         for view in &dirty {
             view.set_queued(false);
         }
         if self.full_damage.replace(false) {
             return None;
         }
-        let mut rects = Vec::with_capacity(dirty.len() * 2);
+        let mut rects = Vec::with_capacity(dirty.len() * 2 + partial.len());
         for view in &dirty {
             if let Some(old) = view.painted_subtree() {
                 rects.push(old);
@@ -739,6 +766,23 @@ impl Surface {
                 crate::render::drawn_area(view)
                     .map(|area| crate::compose::map_bounds(&world.to_3x2(), &area))?,
             );
+        }
+        // What changed in part of a view: where that part is now (a view
+        // that moved is in `dirty` whole, which covers it).
+        for (view, rect) in &partial {
+            let Some(world) = view.to_root() else {
+                continue;
+            };
+            if !world.is_affine() {
+                return None;
+            }
+            let area = crate::render::rect_f(
+                rect.origin.x.0,
+                rect.origin.y.0,
+                rect.size.width.0,
+                rect.size.height.0,
+            );
+            rects.push(crate::compose::map_bounds(&world.to_3x2(), &area));
         }
         // Asked to draw with nothing changed (the system's `WM_PAINT`).
         (!rects.is_empty()).then_some(rects)

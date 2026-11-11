@@ -203,6 +203,24 @@ test("events sent before the app runs reach it in order once it starts, later on
   assert.deepEqual(events(sent), ["a", "b", "c"]);
 });
 
+test("posts go to the page host's post, else its call, and nothing comes back", async () => {
+  const posted = [];
+  const { player, sent } = fakePlayer({ host: { call: () => 1, post: (...args) => posted.push(args) } });
+  player.begin(390, started);
+  player.hostPost("note", { a: 1 });
+  assert.deepEqual(posted, [["note", { a: 1 }]]);
+  const called = [];
+  const fallback = fakePlayer({ host: { call: async (...args) => { called.push(args); throw new Error("boom"); } } });
+  fallback.player.begin(390, started);
+  fallback.player.hostPost("note", 2);
+  const throwing = fakePlayer({ host: { call() {}, post() { throw new Error("boom"); } } });
+  throwing.player.hostPost("note", 3);
+  fakePlayer().player.hostPost("note", 4);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(called, [["note", 2]]);
+  assert.deepEqual([...sent, ...fallback.sent, ...throwing.sent], []);
+});
+
 test("events for an app that failed to start reach neither it nor the next app", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("before");

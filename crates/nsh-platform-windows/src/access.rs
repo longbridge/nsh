@@ -1039,7 +1039,7 @@ mod tests {
     ///   └ 22 text "Footer"
     fn tree() -> (NshView, Vec<NshView>) {
         let root = view(0, ViewKind::View, Accessibility::default());
-        root.set_invalidate(Rc::new(|_| {}));
+        root.set_invalidate(Rc::new(|_, _| {}));
         let plain = view(2, ViewKind::View, Accessibility::default());
         let title = text(4, "Title");
         let button = pressable(6, Accessibility::default());
@@ -1140,7 +1140,7 @@ mod tests {
     #[test]
     fn a_scroll_views_content_is_read_in_screen_order() {
         let root = view(0, ViewKind::View, Accessibility::default());
-        root.set_invalidate(Rc::new(|_| {}));
+        root.set_invalidate(Rc::new(|_, _| {}));
         let list = view(2, ViewKind::Scroll, Accessibility::default());
         list.insert_before(&root, None);
         for (id, y) in [(4, 160.0), (6, 200.0), (8, 80.0), (10, 120.0)] {

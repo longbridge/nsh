@@ -184,6 +184,7 @@ mod tests {
             ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),
             ("HostProps", "  onPressDown?: (e: PressEvent) => void;"),
             ("HostProps", "  onPressUp?: (e: PressEvent) => void;"),
+            ("HostProps", "  onMouseUp?: (e: MouseEvent) => void;"),
             ("HostProps", "  onLayout?: (e: { bounds: Bounds }) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),

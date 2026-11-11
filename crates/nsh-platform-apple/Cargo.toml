@@ -1,6 +1,6 @@
 [package]
 name = "nsh-platform-apple"
-description = "Code shared by the macOS and iOS backends: sound playback, the Speech recognizer, the notification center, the URL schemes web views serve from the app and web views' script evaluation."
+description = "Code shared by the macOS and iOS backends: sound playback, the Speech recognizer, the notification center, the URL schemes web views serve from the app, web views' script evaluation and the unified log as the release runners' logger."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,10 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[build-dependencies]
+# `os_log_with_type`, a C macro, compiled into a function (`src/os_log.c`).
+cc.workspace = true
 
 # Empty off Apple platforms (like the platform crates off their targets).
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]

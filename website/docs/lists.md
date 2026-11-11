@@ -173,6 +173,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `empty` | `.empty(..)` | component or element | | Shown instead of the items while there are none. |
 | `separator` | `.separator(\|\| ..)` | component or element | | Between items (one column). |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | Scrolls to this item before the first frame. |
+| `initialScrollAtEnd` | `.initial_scroll_at_end()` | `boolean` | `false` | Opens at the end before the first frame and follows it while rows measure. Short content stays at the top. In TSX this takes precedence over `initialScrollIndex`; in Rust the last initial-scroll builder wins. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near (see below). |
 | `loadMoreThreshold` | `.load_more_threshold(..)` | `number` | `1` | How close to the end, in viewports, `onLoadMore` fires. |
 | `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | The start is near, after a scroll (see below). |
@@ -779,7 +780,7 @@ let list!: ListRef;
 list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 ```
 
-Scrolling to an index (and to the end) is resolved natively with the sizes known at that moment: measured rows where they have been measured, the estimated size elsewhere. The list then follows its target while the rows around it are measured, so it lands exactly, until the user scrolls or the items change. To open a list at an item, use `initialScrollIndex` (`.initial_scroll_index(..)`) rather than scrolling after the first frame.
+Scrolling to an index (and to the end) is resolved natively with the sizes known at that moment: measured rows where they have been measured, the estimated size elsewhere. The list then follows its target while the rows around it are measured, so it lands exactly, until the user scrolls or the items change. To open a list at an item, use `initialScrollIndex` (`.initial_scroll_index(..)`), and at its end `initialScrollAtEnd` (`.initial_scroll_at_end()`), rather than scrolling after the first frame.
 
 ### Keeping a reading position
 

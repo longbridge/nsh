@@ -2980,12 +2980,15 @@ fn text(theme: &Theme, v: &str, _neg: bool) -> Option<Vec<Decl>> {
         }
         return Some(out);
     }
-    if base.starts_with('[') {
-        let a = arbitrary(base)?;
+    // A color with an opacity (`[#ff0000]/50`, `[color:rgb(0_0_255)]/25`)
+    // is no size: it is read as a color below, modifier and all.
+    if let Some(a) = arbitrary(base) {
         if let Some(l) = arbitrary_hinted(&a, "length").and_then(|s| class_length(theme, s)) {
             return one(setn(K::FontSize, l));
         }
-        if let Some(c) = arbitrary_hinted(&a, "color").and_then(css::color) {
+        if line.is_none()
+            && let Some(c) = arbitrary_hinted(&a, "color").and_then(css::color)
+        {
             return one(setc(K::Color, c));
         }
         if let Some(l) = class_length(theme, &a) {

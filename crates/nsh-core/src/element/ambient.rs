@@ -1103,6 +1103,12 @@ pub(crate) fn host_call(
     answer
 }
 
+/// Hands `args` to function `name` of the embedding app, with no answer
+/// (TS: `host.post`).
+pub(crate) fn host_post(name: String, args: crate::JsonValue) {
+    act(Action::HostPost { name, args });
+}
+
 /// Forgets the host calls whose answers were dropped (they timed out).
 pub(crate) fn forget_host_calls() {
     act(Action::ForgetHostCalls);
