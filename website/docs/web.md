@@ -349,7 +349,7 @@ cooperation; without it, presentation remains within that document and the playe
 
 ## The host's functions
 
-On the web the page is the app's host: it answers [`host`](../modules/nsh.md#host)'s `host.call(name, args)` and sends the events `host.on` listens to. `createPlayer`'s `host` is an object whose `call(name, args)` returns the result, or a promise of it; a throw or a rejection rejects the app's call with the error's message. `player.hostEvent(event, payload)` sends an event with a JSON payload (a payload that is not JSON throws). With a `host`, `host.available()` is `true`.
+On the web the page is the app's host: it answers [`host`](../modules/nsh.md#host)'s `host.call(name, args)`, takes its `host.post(name, args)` and sends the events `host.on` listens to. `createPlayer`'s `host` is an object whose `call(name, args)` returns the result, or a promise of it; a throw or a rejection rejects the app's call with the error's message. Its optional `post(name, args)` takes the app's posts; without one, a post goes to `call`. A post has no answer: its result, a throw or a rejection stays with the page. `player.hostEvent(event, payload)` sends an event with a JSON payload (a payload that is not JSON throws). With a `host`, `host.available()` is `true`.
 
 ```js
 const player = await createPlayer(container, {
@@ -358,6 +358,9 @@ const player = await createPlayer(container, {
     async call(name, args) {
       if (name === "user.info") return { name: "Ada" };
       throw new Error(`no host function ${name}`);
+    },
+    post(name, args) {
+      if (name === "analytics") navigator.sendBeacon("/analytics", JSON.stringify(args));
     },
   },
 });
