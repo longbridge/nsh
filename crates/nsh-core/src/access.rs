@@ -458,6 +458,40 @@ impl MediaFiles {
         }
     }
 
+    /// Opens `path` (what [`Access::media_url`] granted) to read through
+    /// the declared root that holds it, as `fs/promises` reads: every
+    /// component is opened inside the root, so a link made after the check
+    /// cannot lead out of it. `None` with no roots (an app reading what the
+    /// platform allows): the caller opens the path itself.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn open(&self, path: &Path) -> Option<std::io::Result<std::fs::File>> {
+        if self.declared.is_empty() {
+            return None;
+        }
+        let refused = || std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not granted");
+        let path = lexical(path);
+        let granted =
+            |roots: &[(PathBuf, PathBuf)]| roots.iter().any(|root| in_root(&path, root).is_some());
+        if !self.granted.as_deref().is_none_or(granted) {
+            return Some(Err(refused()));
+        }
+        // The innermost root holding it (a nested root may be reached
+        // through a link in its parent's).
+        let Some(((_, canonical), relative)) = self
+            .declared
+            .iter()
+            .filter_map(|root| Some((root, in_root(&path, root)?)))
+            .max_by_key(|((_, canonical), _)| canonical.components().count())
+        else {
+            return Some(Err(refused()));
+        };
+        Some((|| {
+            let dir = crate::runtime::fs::confined::open_root(canonical)?;
+            let file = crate::runtime::fs::confined::open_file(&dir, &relative, false)?;
+            Ok(file.into_std())
+        })())
+    }
+
     /// `path`'s canonical form, if a declared root holds it and the host's
     /// grant does too. Symlinks are resolved here, not by the loader: the
     /// platform's loaders open what they are given, with nothing to keep
@@ -3775,6 +3809,44 @@ mod tests {
         for empty in ["", "  "] {
             assert_eq!(a.media_url(empty, None, None), Some(Cow::Borrowed(empty)));
         }
+    }
+
+    /// A granted media file is read through its root: a link swapped in
+    /// after the check does not lead the read out of it.
+    #[cfg(unix)]
+    #[test]
+    fn media_files_open_inside_their_root() {
+        use std::io::Read;
+        let base = std::env::temp_dir().join(format!("media-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("allowed")).unwrap();
+        let base = canonicalize(&base).unwrap();
+        std::fs::write(base.join("allowed/a.png"), b"public").unwrap();
+        std::fs::write(base.join("secret.png"), b"secret").unwrap();
+        let allowed = base.join("allowed");
+        let access = Access {
+            declared: Capabilities::from_json(
+                &serde_json::json!({ "fs": { "read": [allowed.to_str().unwrap()] } }),
+            )
+            .unwrap(),
+            granted: None,
+        };
+        let files = MediaFiles::new(&access, None, &TrustedPaths::default(), true);
+        let path = allowed.join("a.png");
+        let read = |path: &Path| {
+            let mut text = String::new();
+            files.open(path)?.ok()?.read_to_string(&mut text).ok()?;
+            Some(text)
+        };
+        assert_eq!(read(&path).as_deref(), Some("public"));
+        // Swapped for a link out of the root after the check.
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(base.join("secret.png"), &path).unwrap();
+        assert!(matches!(files.open(&path), Some(Err(_))));
+        assert!(matches!(files.open(&base.join("secret.png")), Some(Err(_))));
+        // No roots: the caller opens the path.
+        assert!(MediaFiles::default().open(&path).is_none());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A symlink in a granted root whose target does not exist yet is
