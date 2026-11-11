@@ -1,0 +1,292 @@
+//! `nsh/base`'s `MenuButton` on iOS: a transparent `UIButton` over the
+//! app's content whose `UIMenu` is its primary action
+//! (`showsMenuAsPrimaryAction`, iOS 14), so a tap, VoiceOver's activation
+//! or a hardware keyboard's opens the system's menu at once, without asking
+//! JS. The menu is made from the `items` prop as it changes; a chosen
+//! action emits `select` with the app's id.
+//!
+//! The button is what VoiceOver reaches inside the element (named by
+//! `accessibilityLabel`): the app's content under it is drawn, not read
+//! twice.
+
+use std::{ptr::NonNull, rc::Rc};
+
+use block2::RcBlock;
+use nsh_core::JsonValue;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
+use objc2_foundation::{NSArray, NSObject, NSString};
+use objc2_ui_kit::{
+    UIAction, UIButton, UIButtonType, UIControl, UIImage, UIMenu, UIMenuElement,
+    UIMenuElementAttributes, UIMenuElementState, UIMenuOptions, UIResponder, UIView,
+};
+
+use crate::component::{ComponentContext, ComponentFactory, NativeComponent};
+
+/// One entry of the menu as the props give it.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Entry {
+    id: String,
+    label: String,
+    icon: String,
+    checked: Option<bool>,
+    disabled: bool,
+    destructive: bool,
+    items: Vec<Entry>,
+    inline: bool,
+}
+
+/// The entries of an `items` prop; anything but objects is skipped.
+fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
+    items
+        .iter()
+        .filter_map(JsonValue::as_object)
+        .map(|item| {
+            let text = |key: &str| {
+                item.get(key)
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let flag = |key: &str| item.get(key).and_then(JsonValue::as_bool).unwrap_or(false);
+            Entry {
+                id: text("id"),
+                label: text("label"),
+                icon: text("icon"),
+                checked: item.get("checked").and_then(JsonValue::as_bool),
+                disabled: flag("disabled"),
+                destructive: flag("destructive"),
+                items: parse_items(
+                    item.get("items")
+                        .and_then(JsonValue::as_array)
+                        .map_or(&[], |v| v),
+                ),
+                inline: flag("inline"),
+            }
+        })
+        .collect()
+}
+
+/// An action's attributes: a disabled submenu disables what it holds.
+fn attributes(entry: &Entry, disabled: bool) -> UIMenuElementAttributes {
+    let mut attributes = UIMenuElementAttributes::empty();
+    if entry.disabled || disabled {
+        attributes |= UIMenuElementAttributes::Disabled;
+    }
+    if entry.destructive {
+        attributes |= UIMenuElementAttributes::Destructive;
+    }
+    attributes
+}
+
+fn symbol(name: &str) -> Option<Retained<UIImage>> {
+    if name.is_empty() {
+        return None;
+    }
+    let image = UIImage::systemImageNamed(&NSString::from_str(name));
+    if image.is_none() {
+        log::warn!(target: "js", "MenuButton: no SF Symbol is named `{name}`");
+    }
+    image
+}
+
+/// The menu's elements for `entries`; each action emits `select` with its
+/// id through `context`.
+fn elements(
+    entries: &[Entry],
+    disabled: bool,
+    context: &ComponentContext,
+    mtm: MainThreadMarker,
+) -> Retained<NSArray<UIMenuElement>> {
+    let made: Vec<Retained<UIMenuElement>> = entries
+        .iter()
+        .map(|entry| {
+            let image = symbol(&entry.icon);
+            if entry.items.is_empty() {
+                let id = entry.id.clone();
+                let context = context.clone();
+                let handler = RcBlock::new(move |_: NonNull<UIAction>| {
+                    context.emit("select", JsonValue::from(id.clone()));
+                });
+                // SAFETY: the handler is a block UIKit copies and runs on
+                // the main thread once the menu closes with this action.
+                let action = unsafe {
+                    UIAction::actionWithTitle_image_identifier_handler(
+                        &NSString::from_str(&entry.label),
+                        image.as_deref(),
+                        None,
+                        RcBlock::as_ptr(&handler),
+                        mtm,
+                    )
+                };
+                action.setAttributes(attributes(entry, disabled));
+                if let Some(checked) = entry.checked {
+                    action.setState(if checked {
+                        UIMenuElementState::On
+                    } else {
+                        UIMenuElementState::Off
+                    });
+                }
+                Retained::into_super(action)
+            } else {
+                let options = if entry.inline {
+                    UIMenuOptions::DisplayInline
+                } else {
+                    UIMenuOptions::empty()
+                };
+                let children = elements(&entry.items, disabled || entry.disabled, context, mtm);
+                let menu = UIMenu::menuWithTitle_image_identifier_options_children(
+                    &NSString::from_str(&entry.label),
+                    image.as_deref(),
+                    None,
+                    options,
+                    &children,
+                    mtm,
+                );
+                Retained::into_super(menu)
+            }
+        })
+        .collect();
+    NSArray::from_retained_slice(&made)
+}
+
+define_class!(
+    /// The transparent button over a `MenuButton`'s content: inside its
+    /// element it is all VoiceOver reaches.
+    #[unsafe(super(UIButton, UIControl, UIView, UIResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    struct NshMenuButton;
+
+    impl NshMenuButton {
+        #[unsafe(method(didMoveToWindow))]
+        fn did_move_to_window(&self) {
+            // SAFETY: calling the superclass implementation.
+            let () = unsafe { msg_send![super(self), didMoveToWindow] };
+            // Its superview is the component's container, whose superview
+            // is the element holding the app's content beside it.
+            if self.window().is_some()
+                && let Some(element) = self.superview().and_then(|c| c.superview())
+            {
+                let me: &UIView = self;
+                let only = NSArray::<UIView>::from_slice(&[me]);
+                // SAFETY: `accessibilityElements` is UIAccessibilityContainer's
+                // NSArray property, which every NSObject has.
+                let () = unsafe { msg_send![&*element, setAccessibilityElements: &*only] };
+            }
+        }
+    }
+);
+
+struct SystemMenuButton {
+    button: Retained<NshMenuButton>,
+    entries: Vec<Entry>,
+    title: String,
+    context: ComponentContext,
+    mtm: MainThreadMarker,
+}
+
+impl SystemMenuButton {
+    /// Gives the button the menu of its entries and title.
+    fn make_menu(&self) {
+        let children = elements(&self.entries, false, &self.context, self.mtm);
+        let menu =
+            UIMenu::menuWithTitle_children(&NSString::from_str(&self.title), &children, self.mtm);
+        self.button.setMenu(Some(&menu));
+    }
+}
+
+impl NativeComponent for SystemMenuButton {
+    fn view(&self) -> &UIView {
+        &self.button
+    }
+
+    fn set_prop(&mut self, name: &str, value: Option<&JsonValue>) {
+        match name {
+            "items" => {
+                let entries = parse_items(value.and_then(JsonValue::as_array).map_or(&[], |v| v));
+                if entries != self.entries {
+                    self.entries = entries;
+                    self.make_menu();
+                }
+            }
+            "title" => {
+                let title = value
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if title != self.title {
+                    self.title = title;
+                    self.make_menu();
+                }
+            }
+            "disabled" => {
+                let disabled = value.and_then(JsonValue::as_bool).unwrap_or(false);
+                self.button.setEnabled(!disabled);
+            }
+            "accessibilityLabel" => {
+                let label = value.and_then(JsonValue::as_str).map(NSString::from_str);
+                // SAFETY: `accessibilityLabel` is UIAccessibility's NSString
+                // property, which every NSObject has.
+                let () =
+                    unsafe { msg_send![&*self.button, setAccessibilityLabel: label.as_deref()] };
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Makes the button of each `MenuButton` element
+/// (`nsh_core::platform::MENU_BUTTON_COMPONENT`), which every surface has
+/// (`Components::default`).
+pub(crate) fn factory() -> ComponentFactory {
+    Rc::new(|context: ComponentContext| {
+        let mtm = MainThreadMarker::new().expect("the menu button is made on the main thread");
+        // SAFETY: a `UIButton` subclass with no state of its own, made as
+        // `buttonWithType:` makes a custom one.
+        let button: Retained<NshMenuButton> =
+            unsafe { msg_send![NshMenuButton::class(), buttonWithType: UIButtonType::Custom] };
+        button.setShowsMenuAsPrimaryAction(true);
+        let component = SystemMenuButton {
+            button,
+            entries: Vec::new(),
+            title: String::new(),
+            context,
+            mtm,
+        };
+        component.make_menu();
+        Box::new(component) as Box<dyn NativeComponent>
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{Entry, parse_items};
+
+    #[test]
+    fn entries_carry_sections_submenus_and_states() {
+        let entries = parse_items(&[
+            json!({ "id": "settings", "label": "Settings", "icon": "gearshape" }),
+            json!({ "id": "", "label": "Language", "items": [
+                { "id": "en", "label": "English", "checked": true },
+            ] }),
+            json!({ "id": "", "label": "", "inline": true, "items": [
+                { "id": "delete", "label": "Delete", "destructive": true, "disabled": true },
+            ] }),
+        ]);
+        assert_eq!(entries[0].icon, "gearshape");
+        assert_eq!(entries[1].items[0].checked, Some(true));
+        assert!(!entries[1].inline);
+        assert!(entries[2].inline);
+        assert_eq!(
+            entries[2].items[0],
+            Entry {
+                id: "delete".into(),
+                label: "Delete".into(),
+                destructive: true,
+                disabled: true,
+                ..Entry::default()
+            }
+        );
+    }
+}

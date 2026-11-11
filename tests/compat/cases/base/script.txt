@@ -344,6 +344,13 @@ covers [nsh/base] Dialog
 covers [props] Dialog.backdropStyle
 covers [props] Dialog.backdropClass
 covers [props] Dialog.backdropTestID
+# base-menu-button
+tap id:case-base-menu-button
+# The app's content shows in the frame its style gives the button.
+expect Account trigger
+expect Chosen: none
+frame id:menu-button 0 20 390 44
+covers [nsh/base] MenuButton
 # base-nav-page
 tap id:case-base-nav-page
 # pop and header are events and props here: the headless runtime has no

@@ -11318,3 +11318,227 @@ fn base_plot_treemap_lays_out_hovers_and_steps() {
     press(&all, "left");
     all.extend(until(&rx, |b| shows(b, "hover 2") || shows(b, "hover 3")));
 }
+
+fn is_component(item: &MountItem, component: &str) -> bool {
+    matches!(item, MountItem::Component { name, .. } if &**name == component)
+}
+
+/// The first id of `component` mounted in `batches`.
+fn component_id(batches: &[MountBatch], component: &str) -> Option<u32> {
+    batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .find_map(|item| match item {
+            MountItem::Component { id, name } if &**name == component => Some(*id),
+            _ => None,
+        })
+}
+
+/// The values the props of element `id` last took in `batches`.
+fn component_prop(batches: &[MountBatch], id: u32, key: &str) -> Option<serde_json::Value> {
+    batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .filter_map(|item| match item {
+            MountItem::ComponentProps { id: c, props } if *c == id => Some(props),
+            _ => None,
+        })
+        .flatten()
+        .rfind(|(name, _)| &**name == key)
+        .and_then(|(_, value)| value.clone())
+}
+
+const SEGMENTED_CONTROL: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { SegmentedControl } from "nsh/mobile";
+const selected = signal(0);
+const items = signal([{ title: "Light", icon: "sun.max" }, { title: "Dark" }]);
+mount(() => <View>
+  <SegmentedControl items={items()} selectedIndex={selected()}
+    onChange={({ index }) => {
+      selected.set(index);
+      items.set([{ title: "Light", icon: "sun.max" }, { title: "Dark", disabled: true }]);
+    }} />
+  <Text>{`Selected: ${selected()}`}</Text>
+</View>);
+"#;
+
+/// `nsh/mobile`'s `SegmentedControl` is the system's control on iOS: its
+/// segments and selection reach it, the user's choice comes back as
+/// `onChange({ index })` and the app's new props reach the same control.
+#[test]
+fn the_segmented_control_is_the_systems_on_ios_and_reports_the_choice() {
+    use nsh_core::platform::{Os, SEGMENTED_CONTROL_COMPONENT};
+
+    let (engine, rx) = start_in(
+        SEGMENTED_CONTROL,
+        Environment {
+            os: Os::Ios,
+            ..Environment::default()
+        },
+    );
+    let initial = until(&rx, |batch| shows(batch, "Selected: 0"));
+    let control = component_id(&initial, SEGMENTED_CONTROL_COMPONENT).expect("the control");
+    assert_eq!(
+        component_prop(&initial, control, "items"),
+        Some(serde_json::json!([{ "title": "Light", "icon": "sun.max" }, { "title": "Dark" }]))
+    );
+    assert_eq!(
+        component_prop(&initial, control, "selectedIndex"),
+        Some(serde_json::json!(0))
+    );
+    assert_eq!(
+        component_prop(&initial, control, "disabled"),
+        Some(serde_json::json!(false))
+    );
+    engine.control().dispatch_event(
+        control,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "change".into(),
+            data: serde_json::json!(1),
+        },
+    );
+    let updates = until(&rx, |batch| shows(batch, "Selected: 1"));
+    assert_eq!(
+        component_prop(&updates, control, "selectedIndex"),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(
+        component_prop(&updates, control, "items"),
+        Some(serde_json::json!([
+            { "title": "Light", "icon": "sun.max" },
+            { "title": "Dark", "disabled": true },
+        ]))
+    );
+}
+
+/// Elsewhere the segmented control takes no room and makes no component.
+#[test]
+fn the_segmented_control_shows_nothing_off_ios() {
+    use nsh_core::platform::{Os, SEGMENTED_CONTROL_COMPONENT};
+
+    for os in [Os::Android, Os::MacOs] {
+        let (_engine, rx) = start_in(
+            SEGMENTED_CONTROL,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "Selected: 0"));
+        assert!(
+            !batches.iter().any(|b| b
+                .items
+                .iter()
+                .any(|i| is_component(i, SEGMENTED_CONTROL_COMPONENT))),
+            "{os:?}"
+        );
+    }
+}
+
+const MENU_BUTTON: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { MenuButton } from "nsh/base";
+const chosen = signal("none");
+const dark = signal(false);
+mount(() => <View>
+  <MenuButton accessibilityLabel="Account" title="me@example.com"
+    items={[
+      { id: "settings", label: "Settings", icon: "gearshape" },
+      { id: "", label: "Appearance", inline: true, items: [
+        { id: "light", label: "Light", checked: !dark() },
+        { id: "dark", label: "Dark", checked: dark() },
+      ] },
+    ]}
+    onSelect={({ id }) => { chosen.set(id); if (id === "dark") dark.set(true); }}>
+    <Text>Account</Text>
+  </MenuButton>
+  <Text>{`Chosen: ${chosen()}`}</Text>
+</View>);
+"#;
+
+/// `nsh/base`'s `MenuButton` covers its content with the system's button on
+/// iOS: the menu's items, title and label reach it as data, a chosen item
+/// comes back as `onSelect({ id })`, and the new checks reach the same
+/// button.
+#[test]
+fn the_menu_button_gives_ios_its_menu_and_reports_the_choice() {
+    use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
+
+    let (engine, rx) = start_in(
+        MENU_BUTTON,
+        Environment {
+            os: Os::Ios,
+            ..Environment::default()
+        },
+    );
+    let initial = until(&rx, |batch| shows(batch, "Chosen: none"));
+    assert!(
+        initial.iter().any(|batch| shows(batch, "Account")),
+        "the content shows"
+    );
+    let button = component_id(&initial, MENU_BUTTON_COMPONENT).expect("the system's button");
+    let appearance = |dark: bool| {
+        serde_json::json!([
+            { "id": "settings", "label": "Settings", "icon": "gearshape" },
+            { "id": "", "label": "Appearance", "inline": true, "items": [
+                { "id": "light", "label": "Light", "checked": !dark },
+                { "id": "dark", "label": "Dark", "checked": dark },
+            ] },
+        ])
+    };
+    assert_eq!(
+        component_prop(&initial, button, "items"),
+        Some(appearance(false))
+    );
+    assert_eq!(
+        component_prop(&initial, button, "title"),
+        Some(serde_json::json!("me@example.com"))
+    );
+    assert_eq!(
+        component_prop(&initial, button, "accessibilityLabel"),
+        Some(serde_json::json!("Account"))
+    );
+    engine.control().dispatch_event(
+        button,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "select".into(),
+            data: serde_json::json!("dark"),
+        },
+    );
+    let updates = until(&rx, |batch| shows(batch, "Chosen: dark"));
+    assert_eq!(
+        component_prop(&updates, button, "items"),
+        Some(appearance(true))
+    );
+}
+
+/// On the desktops and Android the content is a button of its own (the
+/// desktops show the items as the platform's context menu when it is
+/// pressed): no iOS component.
+#[test]
+fn the_menu_button_is_a_plain_button_off_ios() {
+    use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
+
+    for os in [Os::MacOs, Os::Android] {
+        let (_engine, rx) = start_in(
+            MENU_BUTTON,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+        assert!(
+            batches.iter().any(|batch| shows(batch, "Account")),
+            "{os:?}"
+        );
+        assert!(
+            !batches.iter().any(|b| b
+                .items
+                .iter()
+                .any(|i| is_component(i, MENU_BUTTON_COMPONENT))),
+            "{os:?}"
+        );
+    }
+}
