@@ -50,6 +50,9 @@ thread_local! {
     /// A turn asked for on the app's own pages, and when: the scene shows
     /// the old orientation until it is done.
     static TURNING: Cell<Option<(UIInterfaceOrientation, Instant)>> = const { Cell::new(None) };
+    /// Whether NSH has the device report its orientation: from a page's
+    /// setting until the app's own orientations apply again.
+    static WATCHING: Cell<bool> = const { Cell::new(false) };
 }
 
 /// How long a turn asked for may take before the scene shows it.
@@ -182,10 +185,16 @@ pub(crate) fn set_orientations(bits: u8, view: &UIView) {
     let mask = orientation_mask(bits);
     let was_own = ORIENTATIONS.get().is_empty();
     ORIENTATIONS.set(mask);
-    // The device's orientation, read when the orientations widen again.
+    // How the device is held, to turn back to when the orientations widen
+    // again: reported while a page's setting applies, read before the
+    // reports stop.
     let device = UIDevice::currentDevice(view.mtm());
-    if !device.isGeneratingDeviceOrientationNotifications() {
+    if !mask.is_empty() && !WATCHING.replace(true) {
         device.beginGeneratingDeviceOrientationNotifications();
+    }
+    let held = device.orientation();
+    if mask.is_empty() && WATCHING.replace(false) {
+        device.endGeneratingDeviceOrientationNotifications();
     }
     let Some(window) = view.window() else { return };
     let mut controller = window.rootViewController();
@@ -233,7 +242,7 @@ pub(crate) fn set_orientations(bits: u8, view: &UIView) {
     // left shows the interface turned right, and back); a device lying
     // flat says nothing, so back on the app's own pages the screen turns
     // as they showed it.
-    let wanted = match device.orientation() {
+    let wanted = match held {
         UIDeviceOrientation::Portrait => UIInterfaceOrientation::Portrait,
         UIDeviceOrientation::PortraitUpsideDown => UIInterfaceOrientation::PortraitUpsideDown,
         UIDeviceOrientation::LandscapeLeft => UIInterfaceOrientation::LandscapeRight,
