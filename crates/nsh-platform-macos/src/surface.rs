@@ -793,6 +793,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::access::batch_applied();
         crate::window::batch_applied(self);
         #[cfg(any(feature = "dev", feature = "devtools"))]
         if let Some(model) = &*self.test_model.borrow() {

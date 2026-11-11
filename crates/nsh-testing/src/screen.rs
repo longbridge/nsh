@@ -2543,6 +2543,22 @@ impl Screen {
         .collect()
     }
 
+    /// The newest modal shown over `window` (the root of a window of the
+    /// app's own, else the main window's): the desktops and the web keep
+    /// Tab inside it, its views the only stops while it is shown.
+    pub(crate) fn focus_scope(&self, window: NodeId) -> Option<NodeId> {
+        self.shown().into_iter().rev().find(|&id| {
+            self.kind(id) == Some(ViewKind::Modal)
+                && !self.is_window(id)
+                && self.window_of(id) == window
+        })
+    }
+
+    /// Whether view `id` is `scope` or inside it.
+    pub(crate) fn within(&self, id: NodeId, scope: NodeId) -> bool {
+        id == scope || self.is_inside(id, scope)
+    }
+
     /// The stop a press on `id` gives the focus to in a terminal: `id` or
     /// its nearest ancestor that Tab stops at (`tab_stops`), else the
     /// topmost stop over the press's point (a table's hit layer over its

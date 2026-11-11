@@ -365,7 +365,8 @@ report it:
   (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
   hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
-  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
+  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around; only the newest
+  dialog's while one is shown over the focus' window, `Screen::focus_scope`, as the platforms keep Tab inside it), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
   presses (a press of the pointer takes it off; on such a view they reach only the focus' own bindings in the keymap
   above, `Keymap::find_at`, and the application menu not at all), and on the web Shift+F10 raises `ContextMenu` with no pointer on
