@@ -200,6 +200,7 @@ fn windows(cx: &mut TestAppContext) {
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
+    the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx);
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
     set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
@@ -1404,6 +1405,47 @@ fn asset_uris_resolve_in_the_first_directory_that_has_the_file(cx: &mut TestAppC
     let report = wait_until(&view, cx, |t| t.contains('|'));
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(report, "app 2x3|cover 4x5");
+}
+
+/// A focused field showing `LABEL` and the tokens `primary` and
+/// `secondary` of the app's own theme (`setTheme`) as the app reads them.
+const THEMED_FIELD: &str = r##"
+import { mount, setTheme, token } from "nsh";
+import { Input } from "nsh/base";
+
+setTheme({ cssVars: { light: { primary: "#111111", secondary: "#222222" } } });
+mount(() => (
+  <Input autoFocus value={`LABEL ${token("primary")} ${token("secondary")}`} style={{ height: 30 }} />
+));
+"##;
+
+fn the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx: &mut TestAppContext) {
+    let code = |label| {
+        nsh_bundler::compile_module("App.tsx", &THEMED_FIELD.replace("LABEL", label), &[]).unwrap()
+    };
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| {
+        view.set_theme_overrides(Some(
+            r##"{ "cssVars": { "light": { "primary": "#ff0000" } } }"##,
+        ))
+        .unwrap();
+        view.load(App::Js(Bundle::source(code("first"))));
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "first #ff0000ff #222222ff");
+    // A file that does not parse changes nothing.
+    view.update(cx, |view, _| {
+        assert!(view.set_theme_overrides(Some("{")).is_err());
+    });
+    // An app loaded again starts with them.
+    view.update(cx, |view, _| {
+        view.load(App::Js(Bundle::source(code("again"))))
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "again #ff0000ff #222222ff");
+    view.update(cx, |view, _| view.set_theme_overrides(None).unwrap());
+    wait_for(&view, cx, "again #111111ff #222222ff");
 }
 
 fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut TestAppContext) {
