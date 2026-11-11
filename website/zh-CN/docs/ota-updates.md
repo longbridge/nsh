@@ -329,7 +329,7 @@ const shell = shellInfo(); // { version, build, nshVersion, packages }：已安�
 
 启动器会在终端或平台日志中记录原因：macOS 和 iOS 上是统一日志，以应用的 id 为子系统（“控制台”应用，或
 `log stream --predicate 'subsystem == "com.example.notes"'`；参见[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)），
-Android 上是 `adb logcat`。下面前两行是警告，每个平台都会记录；后两行是 info 日志，在 Android 上记录：
+Android 上是 `adb logcat`。下面前三行是警告，每个平台都会记录；最后一行是 info 日志，在 Android 上记录：
 
 ```text
 updates: downloaded package refused: …
