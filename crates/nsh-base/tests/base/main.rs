@@ -45,6 +45,7 @@ mod slider;
 mod submenu;
 mod switch;
 mod tabs;
+mod term;
 mod terminal;
 mod text_view;
 mod time_field;
