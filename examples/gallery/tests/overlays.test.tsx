@@ -186,7 +186,10 @@ test("on a desktop, moving along the toolbar shows each tool's tooltip at once o
   expect(desk.texts()).not.toContain("Comment");
   await desk.wait(300);
   await desk.waitFor("Comment");
-  // The delays card's tooltips each wait for their own delay.
+  // The delays card's tooltips each wait for their own delay, once the
+  // grace period after the toolbar is over.
+  await desk.hover("Move: Drag to move what is selected");
+  await desk.wait(400);
   await desk.hover("Default");
   await desk.wait(300);
   expect(desk.texts()).not.toContain("After half a second");

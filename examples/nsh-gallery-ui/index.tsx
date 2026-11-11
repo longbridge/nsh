@@ -699,10 +699,10 @@ export { Icon, IconLabel, type IconName } from "./icons";
  * `shortcut` after the text. In the terminal the tooltip is a line of the
  * status line: the text and its keys, no bubble.
  */
-export function Tip(props: { label: string; shortcut?: string; placement?: PopupSide; delay?: number; gracePeriod?: number }) {
+export function Tip(props: { label: string; shortcut?: string; placement?: PopupSide; delay?: number }) {
   if (terminal) {
     return (
-      <Tooltip delay={props.delay} gracePeriod={props.gracePeriod}>
+      <Tooltip delay={props.delay}>
         <View style={{ flexDirection: "row", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
           <Text class="text-foreground">{props.label}</Text>
           <If when={props.shortcut}>
@@ -714,7 +714,7 @@ export function Tip(props: { label: string; shortcut?: string; placement?: Popup
   }
   const presence = createPresence(props.placement ?? "top");
   return (
-    <Tooltip placement={props.placement} delay={props.delay} gracePeriod={props.gracePeriod} onOpen={presence.show} onClose={presence.hide}>
+    <Tooltip placement={props.placement} delay={props.delay} onOpen={presence.show} onClose={presence.hide}>
       <View class={tooltipLook().class} style={presence.style}>
         <Text class={tooltipText}>{props.label}</Text>
         <If when={props.shortcut}>

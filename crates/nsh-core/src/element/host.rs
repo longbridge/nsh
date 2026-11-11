@@ -1265,17 +1265,6 @@ impl Overlay {
         self.bind_prop(delay, |d| Prop::Overlay(OverlayProp::Hint(Some(d))))
     }
 
-    /// A hint's grace period: the pointer coming to its anchor this soon
-    /// after leaving one whose hint it showed (or while another hint the
-    /// pointer showed is in the view) shows it at once, without waiting
-    /// its delay; a press on an anchor or Escape ends the period. Zero: it
-    /// always waits. Without it, [`crate::overlay::HINT_GRACE_PERIOD`].
-    pub fn hint_grace_period(self, period: impl IntoReactive<std::time::Duration>) -> Self {
-        self.bind_prop(period, |p| {
-            Prop::Overlay(OverlayProp::HintGracePeriod(Some(p)))
-        })
-    }
-
     /// A hint shown (`Some(true)`) or hidden (`Some(false)`) whatever the
     /// pointer does: its owner follows [`Self::on_hint_show`] /
     /// [`Self::on_hint_hide`] (a `Tooltip` controlled by the app). `None`:

@@ -63,8 +63,8 @@ use crate::{
     mount::MountItem,
     ops::{Op, OverlayProp},
     overlay::{
-        HINT_DELAY, HINT_GRACE_PERIOD, OverlayAnchor, OverlayConfig, Placed, Placement,
-        TooltipContent, inset, place, place_fitted,
+        HINT_DELAY, HINT_ENDLESS, HINT_GRACE_PERIOD, OverlayAnchor, OverlayConfig, Placed,
+        Placement, TooltipContent, inset, place, place_fitted,
     },
     props::PointerEvents,
 };
@@ -774,18 +774,18 @@ impl<M: TextEngine> Core<M> {
 
     /// Whether hint `key` shows at once as the pointer comes to its anchor,
     /// without waiting its delay: the pointer left an anchor whose hint it
-    /// showed less than `key`'s grace period ago
-    /// ([`OverlayConfig::hint_grace_period`]), or a hint it showed is still
+    /// showed less than the grace period ago ([`HINT_GRACE_PERIOD`]), or a hint it showed is still
     /// in the view (an anchor inside another). Hints the focus or the app
-    /// showed count for nothing: the pointer has not paid its rest.
+    /// showed count for nothing: the pointer has not paid its rest. A hint
+    /// whose delay never ends ([`HINT_ENDLESS`]) waits it still.
     fn hint_skips_delay(&self, key: Key) -> bool {
         let Some(state) = self.overlay(key) else {
             return false;
         };
-        let grace = state.config.hint_grace_period.unwrap_or(HINT_GRACE_PERIOD);
-        if grace.is_zero() {
+        if state.config.hint.is_some_and(|d| d >= HINT_ENDLESS) {
             return false;
         }
+        let grace = HINT_GRACE_PERIOD;
         let recent = self
             .overlay_state
             .grace_from

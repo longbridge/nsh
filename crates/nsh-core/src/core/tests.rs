@@ -27122,35 +27122,27 @@ fn a_tooltip_shows_for_a_focus_before_any_input() {
 }
 
 /// Gives element `id` a `tooltip` that is hint overlay `overlay` itself (as
-/// `nsh-base`'s `Tooltip` makes it), waiting half a second, with `grace`
-/// as its grace period when given.
+/// `nsh-base`'s `Tooltip` makes it), waiting `delay`.
 fn give_hint_tooltip(
     c: &mut Core<FakeEngine>,
     id: NodeId,
     overlay: NodeId,
-    grace: Option<std::time::Duration>,
+    delay: std::time::Duration,
 ) {
-    let mut ops = vec![
-        Op::Create {
-            id: overlay,
-            tag: Tag::Overlay,
-        },
-        overlay_prop(
-            overlay,
-            crate::OverlayProp::Hint(Some(std::time::Duration::from_millis(500))),
-        ),
-    ];
-    if let Some(grace) = grace {
-        ops.push(overlay_prop(
-            overlay,
-            crate::OverlayProp::HintGracePeriod(Some(grace)),
-        ));
-    }
-    ops.push(Op::SetProp {
-        id,
-        prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(overlay)),
-    });
-    apply(c, ops);
+    apply(
+        c,
+        vec![
+            Op::Create {
+                id: overlay,
+                tag: Tag::Overlay,
+            },
+            overlay_prop(overlay, crate::OverlayProp::Hint(Some(delay))),
+            Op::SetProp {
+                id,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(overlay)),
+            },
+        ],
+    );
 }
 
 /// A core on a desktop with the tools of a toolbar: views `ids` in the
@@ -27329,14 +27321,12 @@ fn a_press_or_escape_ends_the_tooltips_grace_period_and_the_focus_starts_none() 
 }
 
 #[test]
-fn a_tooltips_grace_period_is_its_own() {
+fn a_tooltip_whose_delay_never_ends_takes_no_part_in_the_grace_period() {
     let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
     let _clock = clock.enter();
-    let mut c = toolbar_core(&[2, 8, 14]);
-    // The default grace period, none and two seconds.
+    let mut c = toolbar_core(&[2, 8]);
     give_tooltip(&mut c, 2, 4, "Move");
-    give_hint_tooltip(&mut c, 8, 10, Some(std::time::Duration::ZERO));
-    give_hint_tooltip(&mut c, 14, 16, Some(std::time::Duration::from_secs(2)));
+    give_hint_tooltip(&mut c, 8, 10, crate::overlay::HINT_ENDLESS);
     c.commit();
     let mouse = EventPayload::Mouse(crate::MouseEvent::default());
     let wait = |c: &mut Core<FakeEngine>, ms: u64| {
@@ -27347,27 +27337,13 @@ fn a_tooltips_grace_period_is_its_own() {
     c.component_event(2, EventKind::MouseEnter, &mouse);
     wait(&mut c, 500);
     assert!(tooltip_shown(&c, 2));
-    // None: it waits its delay, moving on from a tooltip or not.
+    // Moving on within the grace period: an endless delay still waits.
     c.component_event(2, EventKind::MouseLeave, &mouse);
     c.component_event(8, EventKind::MouseEnter, &mouse);
     c.commit();
-    assert!(!tooltip_shown(&c, 8), "no grace period");
-    wait(&mut c, 500);
-    assert!(tooltip_shown(&c, 8));
-    // A second away, past the default, within its two seconds: at once.
-    c.component_event(8, EventKind::MouseLeave, &mouse);
+    assert!(!tooltip_shown(&c, 8), "an endless delay never ends");
     wait(&mut c, 1000);
-    c.component_event(14, EventKind::MouseEnter, &mouse);
-    c.commit();
-    assert!(tooltip_shown(&c, 14), "its own grace period");
-    // A second away from it, the default's: its delay.
-    c.component_event(14, EventKind::MouseLeave, &mouse);
-    wait(&mut c, 1000);
-    c.component_event(2, EventKind::MouseEnter, &mouse);
-    c.commit();
-    assert!(!tooltip_shown(&c, 2));
-    wait(&mut c, 500);
-    assert!(tooltip_shown(&c, 2));
+    assert!(!tooltip_shown(&c, 8));
 }
 
 /// An image node `id` showing `source` (and `placeholder`), in the root.

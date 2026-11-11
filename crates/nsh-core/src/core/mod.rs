@@ -5678,7 +5678,6 @@ impl<M: TextEngine> Core<M> {
                     OverlayProp::Offset(v) => c.offset = v,
                     OverlayProp::Margin(v) => c.margin = v,
                     OverlayProp::Hint(v) => c.hint = v,
-                    OverlayProp::HintGracePeriod(v) => c.hint_grace_period = v,
                     OverlayProp::Open(v) => c.open = v,
                     OverlayProp::Cover(v) => c.cover = v,
                 });

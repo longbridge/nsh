@@ -19,7 +19,7 @@
 //! parent without one) for the hint's delay, until the pointer leaves the
 //! anchor or presses it, as GPUI's tooltips are; at once when the pointer
 //! comes to its anchor within its grace period after leaving one whose hint
-//! it showed ([`OverlayConfig::hint_grace_period`]). An element's `tooltip`
+//! it showed (`HINT_GRACE_PERIOD`, 300 ms). An element's `tooltip`
 //! ([`TooltipContent`]) is one the core makes.
 
 use std::time::Duration;
@@ -153,13 +153,6 @@ pub struct OverlayConfig {
     /// says, never taking the pointer itself. `None`: shown whenever its
     /// views around it are.
     pub hint: Option<Duration>,
-    /// A hint's grace period: when the pointer comes to its anchor this
-    /// soon after leaving an anchor whose hint it showed (or while another
-    /// hint the pointer showed is in the view), it shows at once, without
-    /// waiting [`Self::hint`]'s delay, so moving along a toolbar shows each
-    /// tool's hint in turn. A press on an anchor or Escape ends the period.
-    /// `None`: [`HINT_GRACE_PERIOD`]; zero: it always waits its delay.
-    pub hint_grace_period: Option<Duration>,
     /// A hint shown (`Some(true)`) or hidden (`Some(false)`) whatever the
     /// pointer does: its owner decides from what the hint asks for
     /// (`EventKind::Show` / `EventKind::Dismiss`). `None`: the pointer
@@ -177,10 +170,15 @@ pub struct OverlayConfig {
 /// The delay of a hint before it shows (500 ms, as the desktops' tooltips).
 pub const HINT_DELAY: Duration = Duration::from_millis(500);
 
-/// A hint's grace period when it sets none
-/// ([`OverlayConfig::hint_grace_period`]): 300 ms, `gpui-base`'s
-/// `TooltipDefaults` grace period.
-pub const HINT_GRACE_PERIOD: Duration = Duration::from_millis(300);
+/// The hints' grace period: the pointer coming to an anchor this soon after
+/// leaving one whose hint it showed shows its hint at once, without waiting
+/// its delay (300 ms, `gpui-base`'s `TooltipDefaults` grace period).
+pub(crate) const HINT_GRACE_PERIOD: Duration = Duration::from_millis(300);
+
+/// A hint delay this long or longer never ends (the longest a timer waits,
+/// `nsh-base`'s `Tooltip` with an endless `delay`): the pointer never shows
+/// that hint, so it takes no part in the grace period.
+pub(crate) const HINT_ENDLESS: Duration = Duration::from_millis(i32::MAX as u64);
 
 /// What an element's `tooltip` shows, in a hint overlay the core makes
 /// above the element (or the element itself when it is a hint overlay) ([`OverlayConfig::hint`]).

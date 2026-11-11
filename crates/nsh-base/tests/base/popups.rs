@@ -10,7 +10,7 @@
 //! a tooltip in every idiom until it leaves or Escape is pressed, while a
 //! press or a tap that gives the trigger the focus leaves it to the
 //! pointer. Moving on from a trigger whose tooltip the pointer showed, the
-//! next one's shows at once within its `gracePeriod`, until a press or
+//! next one's shows at once within the 300 ms grace period, until a press or
 //! Escape ends it. Escape or a choice closes a menu
 //! whose `open` the app controls every time, also when the app opened it itself. On a manual clock: time moves only as the test
 //! says.
@@ -888,14 +888,12 @@ fn a_tooltip_delay_of_infinity_is_not_shown_by_the_focus_either() {
 
 #[derive(Clone, PartialEq, Props)]
 struct ToolbarProps {
-    /// The last tool's tooltip's `gracePeriod`, when set.
-    grace_period: Option<f64>,
     /// The last tool's tooltip's `delay`.
     delay: f64,
 }
 
 /// A toolbar of three tools the Tab key stops at, each with a tooltip (the
-/// last one's grace period and delay as given) whose open changes are
+/// last one's delay as given) whose open changes are
 /// written down with their reasons, and a place away from it.
 #[component]
 fn ToolbarScreen(props: ToolbarProps) -> impl IntoElement {
@@ -915,10 +913,6 @@ fn ToolbarScreen(props: ToolbarProps) -> impl IntoElement {
             }))
             .child(text(id))
     };
-    let last = match props.grace_period {
-        Some(ms) => tooltip().grace_period(ms),
-        None => tooltip(),
-    };
     view()
         .pt(px(100.0))
         .pl(px(40.0))
@@ -929,7 +923,7 @@ fn ToolbarScreen(props: ToolbarProps) -> impl IntoElement {
                 .child(tool("pen", tooltip().child(text("Pen tip"))))
                 .child(tool(
                     "type",
-                    last.delay(props.delay).child(text("Type tip")),
+                    tooltip().delay(props.delay).child(text("Type tip")),
                 )),
         )
         .child(view().test_id("away").h(px(200.0)).child(text("Away")))
@@ -938,15 +932,12 @@ fn ToolbarScreen(props: ToolbarProps) -> impl IntoElement {
         }))
 }
 
-fn toolbar_app(grace_period: Option<f64>, delay: f64) -> Headless {
-    toolbar_app_on(grace_period, delay, Os::MacOs, Idiom::Desktop)
+fn toolbar_app(delay: f64) -> Headless {
+    toolbar_app_on(delay, Os::MacOs, Idiom::Desktop)
 }
 
-fn toolbar_app_on(grace_period: Option<f64>, delay: f64, os: Os, idiom: Idiom) -> Headless {
-    let root = Root::new::<ToolbarScreen>(move || ToolbarProps {
-        grace_period,
-        delay,
-    });
+fn toolbar_app_on(delay: f64, os: Os, idiom: Idiom) -> Headless {
+    let root = Root::new::<ToolbarScreen>(move || ToolbarProps { delay });
     start_on(root, false, os, idiom).app
 }
 
@@ -969,7 +960,7 @@ fn tip_of(id: &str) -> String {
 
 #[test]
 fn a_tooltip_shows_at_once_after_the_pointer_left_one_it_showed() {
-    let mut app = toolbar_app(None, 500.0);
+    let mut app = toolbar_app(500.0);
     rest_on(&mut app, "move");
     // On to the next tool: its tooltip shows at once, for the pointer.
     app.hover("id:pen").unwrap();
@@ -994,28 +985,8 @@ fn a_tooltip_shows_at_once_after_the_pointer_left_one_it_showed() {
 }
 
 #[test]
-fn a_tooltips_own_grace_period_decides_whether_it_waits() {
-    // None: it always waits its delay.
-    let mut app = toolbar_app(Some(0.0), 500.0);
-    rest_on(&mut app, "move");
-    app.hover("id:type").unwrap();
-    app.run_for(Duration::from_millis(20)).unwrap();
-    assert!(!app.shows("Type tip"), "no grace period");
-    app.run_for(Duration::from_millis(500)).unwrap();
-    assert!(app.shows("Type tip"));
-    // Two seconds: a second away, past the default, it shows at once.
-    let mut app = toolbar_app(Some(2000.0), 500.0);
-    rest_on(&mut app, "move");
-    app.hover("id:away").unwrap();
-    app.run_for(Duration::from_millis(1000)).unwrap();
-    app.hover("id:type").unwrap();
-    app.run_for(Duration::from_millis(20)).unwrap();
-    assert!(app.shows("Type tip"), "its own grace period");
-}
-
-#[test]
 fn a_tooltip_whose_delay_never_ends_shows_within_no_grace_period() {
-    let mut app = toolbar_app(None, f64::INFINITY);
+    let mut app = toolbar_app(f64::INFINITY);
     rest_on(&mut app, "move");
     app.hover("id:type").unwrap();
     app.run_for(Duration::from_secs(5)).unwrap();
@@ -1025,7 +996,7 @@ fn a_tooltip_whose_delay_never_ends_shows_within_no_grace_period() {
 
 #[test]
 fn a_press_or_escape_ends_the_tooltips_grace_period() {
-    let mut app = toolbar_app(None, 500.0);
+    let mut app = toolbar_app(500.0);
     rest_on(&mut app, "move");
     // A press on the tool hides its tooltip and ends the grace period: the
     // next tool waits its delay.
@@ -1054,7 +1025,7 @@ fn a_press_or_escape_ends_the_tooltips_grace_period() {
 
 #[test]
 fn a_tooltip_the_keyboard_focus_shows_starts_no_grace_period() {
-    let mut app = toolbar_app(None, 500.0);
+    let mut app = toolbar_app(500.0);
     // Tab to the first tool: its tooltip shows at once, for the focus.
     app.press_key("tab").unwrap();
     app.run_for(Duration::from_millis(20)).unwrap();
@@ -1070,11 +1041,11 @@ fn a_tooltip_the_keyboard_focus_shows_starts_no_grace_period() {
 
 #[test]
 fn a_terminals_tooltips_show_at_once_on_the_status_line_as_before() {
-    let mut app = toolbar_app_on(None, f64::INFINITY, Os::Linux, Idiom::Terminal);
+    let mut app = toolbar_app_on(f64::INFINITY, Os::Linux, Idiom::Terminal);
     app.hover("id:move").unwrap();
     app.run_for(Duration::from_millis(20)).unwrap();
     assert!(app.shows("Move tip"), "at once in a terminal");
-    // An endless delay keeps it to the app, grace period or not.
+    // An endless delay keeps it to the app.
     app.hover("id:type").unwrap();
     app.run_for(Duration::from_secs(1)).unwrap();
     assert!(!app.shows("Type tip"));
