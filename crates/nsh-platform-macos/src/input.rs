@@ -2462,6 +2462,7 @@ fn pinch_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> bool {
                         (s.id, s.events)
                     };
                     transforms(&gesture_values(surface, v, id), events).0
+                        || crate::scroll::pinches(v)
                 },
             )
         },

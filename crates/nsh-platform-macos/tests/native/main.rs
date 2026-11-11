@@ -54,7 +54,9 @@ fn main() {
                 window_frames::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
-            } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some() {
+            } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some()
+                || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
+            {
                 zoom::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();

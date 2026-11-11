@@ -6,6 +6,8 @@
 //! the zoom and the zoomed content size with the offset; and the zoomed
 //! children are where they show: AppKit converts a child's (and an input's)
 //! frame to where it is drawn, and a click presses what is drawn under it.
+//! `NSH_ZOOM_PINCH_CHECK_ONLY=1` runs just the pinch routing check, which
+//! sends events directly to the root and needs no display-link frames.
 
 use std::{
     sync::{
@@ -19,10 +21,14 @@ use nsh_base::input;
 use nsh_core::prelude::*;
 use nsh_platform_macos::{
     self as platform,
-    objc2::{MainThreadMarker, MainThreadOnly, Message, rc::Retained},
+    objc2::{
+        DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
+        rc::Retained,
+    },
     objc2_app_kit::{
         NSAccessibility, NSApplication, NSBackingStoreType, NSEvent, NSEventMask,
-        NSEventModifierFlags, NSEventType, NSScreen, NSView, NSWindow, NSWindowStyleMask,
+        NSEventModifierFlags, NSEventPhase, NSEventType, NSScreen, NSView, NSWindow,
+        NSWindowStyleMask,
     },
     objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSPoint, NSRect, NSSize, NSString},
 };
@@ -36,8 +42,90 @@ static PRESSES: AtomicUsize = AtomicUsize::new(0);
 type Scrolled = ((f32, f32), (f32, f32), f32);
 /// The `onScroll` events so far.
 static SCROLLS: Mutex<Vec<Scrolled>> = Mutex::new(Vec::new());
+/// Pinch phases observed by the view around the map.
+static PINCHES: Mutex<Vec<PinchPhase>> = Mutex::new(Vec::new());
 
 const VIEWPORT: (f64, f64) = (400.0, 300.0);
+
+define_class!(
+    /// AppKit has no public constructor for a magnify event.
+    #[unsafe(super(NSEvent))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NshTestMagnifyEvent"]
+    #[ivars = (NSPoint, NSEventPhase, f64)]
+    struct MagnifyEvent;
+
+    impl MagnifyEvent {
+        #[unsafe(method(type))]
+        fn event_type(&self) -> NSEventType {
+            NSEventType::Magnify
+        }
+        #[unsafe(method(locationInWindow))]
+        fn location(&self) -> NSPoint {
+            self.ivars().0
+        }
+        #[unsafe(method(phase))]
+        fn phase(&self) -> NSEventPhase {
+            self.ivars().1
+        }
+        #[unsafe(method(magnification))]
+        fn magnification(&self) -> f64 {
+            self.ivars().2
+        }
+        #[unsafe(method(modifierFlags))]
+        fn modifiers(&self) -> NSEventModifierFlags {
+            NSEventModifierFlags::empty()
+        }
+        #[unsafe(method(timestamp))]
+        fn timestamp(&self) -> f64 {
+            0.0
+        }
+    }
+);
+
+#[component]
+fn PinchParent() -> impl IntoElement {
+    view()
+        .size_full()
+        .on_pinch(|e: &PinchEvent| PINCHES.lock().unwrap().push(e.phase))
+        .child(map())
+}
+
+fn pinch(window: &NSWindow, root: &NSView) {
+    // AppView exposes the host container; its child is the input root.
+    let responder = root.subviews().firstObject().unwrap();
+    for (phase, delta) in [
+        (NSEventPhase::Began, 0.0),
+        (NSEventPhase::Changed, 0.5),
+        (NSEventPhase::Ended, 0.0),
+    ] {
+        let event = MagnifyEvent::alloc(MainThreadMarker::from(window)).set_ivars((
+            to_window(window, 20.0, 20.0),
+            phase,
+            delta,
+        ));
+        // SAFETY: NSEvent initializes the allocated test subclass.
+        let event: Retained<MagnifyEvent> = unsafe { msg_send![super(event), init] };
+        responder.magnifyWithEvent(&event);
+    }
+    until("the ancestor observing the pinch", || {
+        PINCHES.lock().unwrap().len() == 3
+    });
+    assert_eq!(
+        *PINCHES.lock().unwrap(),
+        [PinchPhase::Start, PinchPhase::Move, PinchPhase::End],
+        "onPinch observes the gesture while the nearer scroll view zooms"
+    );
+    expect_rect(
+        shown(window, &find(root, "far").unwrap()),
+        740.0,
+        590.0,
+        60.0,
+        60.0,
+        "the scroll view pinched to 1.5 under an onPinch ancestor",
+    );
+    println!("zoom: an onPinch ancestor observes without taking the scroll view's pinch");
+}
 
 /// An 800 × 600 map zoomable from 0.25 to 2, with a button at (500, 400)
 /// and an input at (100, 100).
@@ -261,7 +349,7 @@ pub(super) fn run() {
     };
     let surface = platform::AppView::new(mtm, options);
     window.setContentView(Some(&surface.view()));
-    surface.load(platform::App::Rust(platform::Root::of::<Map>()));
+    surface.load(platform::App::Rust(platform::Root::of::<PinchParent>()));
     window.makeKeyAndOrderFront(None);
     app.activate();
     let root = surface.view();
@@ -278,6 +366,13 @@ pub(super) fn run() {
         40.0,
         "unzoomed, out of the viewport",
     );
+
+    pinch(&window, &root);
+    if std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some() {
+        surface.stop();
+        window.close();
+        return;
+    }
 
     // Zoomed out to a quarter: 200 × 150, centered in 400 × 300.
     STEP.store(1, Ordering::SeqCst);
