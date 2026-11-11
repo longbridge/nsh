@@ -1190,13 +1190,16 @@ pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T
     let executor = executor();
     let owner = Owner::current();
     let cancel = Rc::new(Cell::new(None));
+    // Made outside the block and moved in: a task cancelled before its
+    // first poll drops it too.
+    let release = Release(cancel.clone());
     let task = task::spawn_future(
         &executor,
         Owned {
             owner,
-            future: Box::pin(Releasing {
-                future,
-                cancel: cancel.clone(),
+            future: Box::pin(async move {
+                let _release = release;
+                future.await
             }),
         },
     );
@@ -1207,29 +1210,13 @@ pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T
     Spawned(task)
 }
 
-/// A task's future, which takes its owner's cleanup back when it ends
-/// (finished, or dropped when cancelled).
-struct Releasing<F> {
-    future: F,
-    cancel: Rc<Cell<Option<super::reactive::RemovableCleanup>>>,
-}
+/// Takes a task's cleanup back from its owner as the task's future goes
+/// (it finished, or was dropped when cancelled).
+struct Release(Rc<Cell<Option<super::reactive::RemovableCleanup>>>);
 
-impl<F: Future> Future for Releasing<F> {
-    type Output = F::Output;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<F::Output> {
-        // SAFETY: `future` is never moved out of the pinned `Releasing`
-        // (its `Drop` only touches `cancel`).
-        unsafe { self.map_unchecked_mut(|s| &mut s.future) }.poll(cx)
-    }
-}
-
-impl<F> Drop for Releasing<F> {
+impl Drop for Release {
     fn drop(&mut self) {
-        if let Some(cancel) = self.cancel.take() {
+        if let Some(cancel) = self.0.take() {
             cancel.remove();
         }
     }
