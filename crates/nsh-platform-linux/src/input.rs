@@ -2310,13 +2310,13 @@ fn mouse_up(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType, button:
             s.id
         };
         let (location_x, location_y) = local(surface, &view, x, y);
-        let event = nsh_core::MouseButtonEvent::new(
+        let event = nsh_core::MouseEvent::released(
             point(Points(location_x), Points(location_y)),
             point(Points(x), Points(y)),
             modifiers(state),
             button,
         );
-        surface.event(id, EventKind::MouseUp, EventPayload::MouseButton(event));
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
     }
 }
 

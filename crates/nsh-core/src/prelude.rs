@@ -119,7 +119,6 @@ pub use crate::element::{
     MotionPreset,
     MotionSpec,
     MouseButton,
-    MouseButtonEvent,
     MouseEvent,
     NativeEvent,
     NativeView,

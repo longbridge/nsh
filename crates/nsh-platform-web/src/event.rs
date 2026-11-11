@@ -83,7 +83,7 @@ pub(crate) fn payload(kind: EventKind, value: serde_json::Value) -> Option<Event
         // it.
         EventKind::MouseUp => {
             let (position, page_position, modifiers) = pointer_at(&value);
-            EventPayload::MouseButton(nsh_core::MouseButtonEvent::new(
+            EventPayload::Mouse(nsh_core::MouseEvent::released(
                 position,
                 page_position,
                 modifiers,

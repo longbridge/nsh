@@ -23732,14 +23732,14 @@ fn mouse_ups_reach_rust_listeners_with_their_positions_and_button() {
     fn Release() -> impl IntoElement {
         let at = signal(String::new());
         view()
-            .on_mouse_up(move |e: &MouseButtonEvent| {
+            .on_mouse_up(move |e: &MouseEvent| {
                 at.set(format!(
                     "{} {} {} {} {:?}",
                     e.position.x.0,
                     e.position.y.0,
                     e.page_position.x.0,
                     e.page_position.y.0,
-                    e.button
+                    e.button.unwrap()
                 ))
             })
             .child(text(move || at.get()))
@@ -23755,13 +23755,13 @@ fn mouse_ups_reach_rust_listeners_with_their_positions_and_button() {
             _ => None,
         })
         .expect("the listening view mounts MouseUp in its event mask");
-    let event = crate::MouseButtonEvent::new(
+    let event = crate::MouseEvent::released(
         point(px(6.0), px(7.0)),
         point(px(16.0), px(27.0)),
         crate::keymap::Modifiers::default(),
         crate::MouseButton::Right,
     );
-    assert!(c.component_event(host, EventKind::MouseUp, &EventPayload::MouseButton(event)));
+    assert!(c.component_event(host, EventKind::MouseUp, &EventPayload::Mouse(event)));
     let delivered = c.commit().unwrap();
     assert!(delivered.items.iter().any(|item| matches!(item,
         MountItem::Text { text, .. } if text.text == "6 7 16 27 Right")));

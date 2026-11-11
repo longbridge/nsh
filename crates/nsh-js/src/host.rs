@@ -1283,6 +1283,12 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 Some(button) => obj.set("pressedButton", button.name())?,
                 None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
             }
+            // The button that changed here (`onMouseUp`'s), or `null` on a
+            // move.
+            match e.button {
+                Some(button) => obj.set("button", button.name())?,
+                None => obj.set("button", Value::new_null(cx.clone()))?,
+            }
         }
         EventPayload::Wheel(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
@@ -1294,12 +1300,6 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             obj.set("delta", delta)?;
             obj.set("deltaMode", e.delta.mode_name())?;
             obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
-        }
-        EventPayload::MouseButton(e) => {
-            obj.set("position", point_object(cx, e.position)?)?;
-            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
-            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
-            obj.set("button", e.button.name())?;
         }
         EventPayload::ContextMenu(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
@@ -2198,13 +2198,15 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::Mouse(none)).unwrap();
             let pressed: Value = value.as_object().unwrap().get("pressedButton").unwrap();
             assert!(pressed.is_null());
+            let changed: Value = value.as_object().unwrap().get("button").unwrap();
+            assert!(changed.is_null());
         });
     }
 
     #[test]
-    fn mouse_button_payload_has_its_button() {
+    fn released_mouse_payload_has_its_button() {
         let host = Host::new().unwrap();
-        let event = nsh_core::MouseButtonEvent::new(
+        let event = nsh_core::MouseEvent::released(
             point(px(5.0), px(6.5)),
             point(px(50.0), px(60.5)),
             nsh_core::keymap::Modifiers {
@@ -2214,7 +2216,7 @@ const report = (v) => text(String(v));
             nsh_core::MouseButton::Right,
         );
         host.cx.with(|cx| {
-            let value = payload_object(&cx, &EventPayload::MouseButton(event)).unwrap();
+            let value = payload_object(&cx, &EventPayload::Mouse(event)).unwrap();
             let obj = value.as_object().unwrap();
             let num = |o: &str, k: &str| {
                 let o: rquickjs::Object = obj.get(o).unwrap();
@@ -2235,6 +2237,8 @@ const report = (v) => text(String(v));
             );
             assert!(flag("shift"));
             assert_eq!(obj.get::<_, String>("button").unwrap(), "right");
+            let pressed: Value = obj.get("pressedButton").unwrap();
+            assert!(pressed.is_null());
         });
     }
 

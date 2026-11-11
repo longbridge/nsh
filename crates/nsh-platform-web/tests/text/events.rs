@@ -114,7 +114,7 @@ fn wheels_reach_the_core_with_their_unit() {
             }),
         )
     };
-    let EventPayload::Wheel(lines) = sent("lines") else {
+    let Some(EventPayload::Wheel(lines)) = sent("lines") else {
         panic!("onWheel carries a wheel");
     };
     assert_eq!(
@@ -123,7 +123,7 @@ fn wheels_reach_the_core_with_their_unit() {
     );
     assert!(lines.modifiers.ctrl);
     assert_eq!(lines.page_position.x.0, 11.0);
-    let EventPayload::Wheel(points) = sent("points") else {
+    let Some(EventPayload::Wheel(points)) = sent("points") else {
         panic!("onWheel carries a wheel");
     };
     assert!(points.delta.precise());
@@ -135,7 +135,7 @@ fn a_release_reports_its_button_but_not_one_it_cannot_name() {
     use nsh_core::MouseButton;
 
     let button = |value: serde_json::Value| match payload(EventKind::MouseUp, value) {
-        Some(EventPayload::MouseButton(event)) => event.button,
+        Some(EventPayload::Mouse(event)) => event.button.unwrap(),
         other => panic!("{other:?}"),
     };
     // A keyboard or scripted release names no button: it is the primary one,

@@ -147,7 +147,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
 - **`onMouseUp`** (any element): a mouse button was released over it or a view inside it (the DOM's `mouseup`):
   `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and
-  `modifiers` (`EventPayload::MouseButton`, `MouseButtonEvent`; Rust `.on_mouse_up`). The primary button's release also
+  `modifiers` (`EventPayload::Mouse`, `MouseEvent`; Rust `.on_mouse_up`). The primary button's release also
   reports `onPressUp`. The desktops (Win32, AppKit, GDK and the GPUI backend), the terminal and the web walk out from
   the view under the pointer, as a move does, and every listener hears it; iOS and Android never report it (an iPad
   or Android mouse included). On macOS a Control-click's release is the secondary button's (`"right"`), as its press

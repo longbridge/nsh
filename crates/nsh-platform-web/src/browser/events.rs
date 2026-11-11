@@ -117,6 +117,14 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                     None => Value(1),
                 },
             ),
+            (
+                "button",
+                match m.button {
+                    Some(button) => Value::string(button.name())?,
+                    // `null`, as `PayloadValue::Null`.
+                    None => Value(1),
+                },
+            ),
         ])?,
         EventPayload::Wheel(w) => {
             let (dx, dy) = w.delta.xy();
@@ -128,12 +136,6 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                 ("modifiers", modifiers(&w.modifiers)?),
             ])?
         }
-        EventPayload::MouseButton(e) => object([
-            ("position", point(e.position)?),
-            ("pagePosition", point(e.page_position)?),
-            ("modifiers", modifiers(&e.modifiers)?),
-            ("button", Value::string(e.button.name())?),
-        ])?,
         EventPayload::ContextMenu(p) => object([
             ("position", point(p.position)?),
             ("pagePosition", point(p.page_position)?),

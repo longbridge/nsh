@@ -524,7 +524,7 @@ export interface PressEvent {
   clickCount: number;
 }
 
-/** Where the mouse is over a view: the payload of `onMouseEnter`, `onMouseMove` and `onMouseLeave` (GPUI's `MouseMoveEvent`). */
+/** Where the mouse is over a view, or where a button was released over it: the payload of `onMouseEnter`, `onMouseMove`, `onMouseLeave` and `onMouseUp` (GPUI's `MouseMoveEvent`). */
 export interface MouseEvent {
   /** Position in the view (its transforms undone). */
   position: Point;
@@ -533,6 +533,8 @@ export interface MouseEvent {
   modifiers: Modifiers;
   /** The button held down (a drag), or `null`. */
   pressedButton: MouseButton | null;
+  /** The button that changed at this event: the released one on `onMouseUp`, `null` on a move. */
+  button: MouseButton | null;
 }
 
 /** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
@@ -546,17 +548,6 @@ export interface WheelEvent {
   /** `"points"`: a precise device (a touchpad); `"lines"`: mouse wheel notches. */
   deltaMode: "points" | "lines";
   modifiers: Modifiers;
-}
-
-/** Where a mouse button was released over a view: the payload of `onMouseUp`. */
-export interface MouseButtonEvent {
-  /** Position in the view (its transforms undone). */
-  position: Point;
-  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
-  pagePosition: Point;
-  modifiers: Modifiers;
-  /** The button that was released. */
-  button: MouseButton;
 }
 
 /** A mouse button (GPUI's `MouseButton`). */
@@ -697,7 +688,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::MouseUp,
         on::ALL,
-        "(e: MouseButtonEvent) => void",
+        "(e: MouseEvent) => void",
         "A mouse button was released over the view (or a view inside it): which button (`e.button`), where, and with the modifiers. The primary button's release also reports `onPressUp`.",
     ),
     (

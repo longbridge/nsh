@@ -2543,13 +2543,13 @@ fn mouse_up(
             state.id
         };
         let (location_x, location_y) = local(&view, x, y);
-        let event = nsh_core::MouseButtonEvent::new(
+        let event = nsh_core::MouseEvent::released(
             nsh_core::geometry::point(Points(location_x), Points(location_y)),
             nsh_core::geometry::point(Points(x), Points(y)),
             modifiers.core(),
             button,
         );
-        surface.event(id, EventKind::MouseUp, EventPayload::MouseButton(event));
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
     }
 }
 

@@ -5,9 +5,8 @@
 //! (`Command::OpenEditMenu`), with the platform's labels.
 
 use nsh_core::{
-    ContextMenuEvent, EditAction, EventKind, EventPayload, MouseButton, MouseButtonEvent,
-    PasteEvent, PayloadValue, PointerType, ROOT_ID, element::PropEnum, geometry::point,
-    platform::Os,
+    ContextMenuEvent, EditAction, EventKind, EventPayload, MouseButton, MouseEvent, PasteEvent,
+    PayloadValue, PointerType, ROOT_ID, element::PropEnum, geometry::point, platform::Os,
 };
 
 use super::Headless;
@@ -56,13 +55,13 @@ impl Headless {
                 .screen
                 .bounds_in_root(id)
                 .map_or(Default::default(), |b| b.origin);
-            let event = MouseButtonEvent::new(
+            let event = MouseEvent::released(
                 point(at.x - origin.x, at.y - origin.y),
                 at,
                 Default::default(),
                 MouseButton::Right,
             );
-            self.send(id, EventKind::MouseUp, EventPayload::MouseButton(event));
+            self.send(id, EventKind::MouseUp, EventPayload::Mouse(event));
         }
         self.done()
     }

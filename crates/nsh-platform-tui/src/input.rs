@@ -342,7 +342,7 @@ impl Pointer {
                 cx.control.dispatch_event(
                     id,
                     EventKind::MouseUp,
-                    EventPayload::MouseButton(nsh_core::MouseButtonEvent::new(
+                    EventPayload::Mouse(nsh_core::MouseEvent::released(
                         page - origin,
                         page,
                         mouse.modifiers,

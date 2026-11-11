@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseButtonEvent, MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop,
-    Size, Tag, TouchEvent, WheelEvent,
+    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
+    WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1501,10 +1501,10 @@ pub trait Interactive: Element {
     /// button (`button`), where, and with the modifier keys. The primary
     /// button's release also reports [`Self::on_press_up`] (the DOM's
     /// `mouseup`).
-    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseButtonEvent, M>) -> Self {
+    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
             EventKind::MouseUp,
-            events::typed(listener.into_listener(), events::mouse_button),
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 

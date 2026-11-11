@@ -2323,7 +2323,7 @@ fn mouse_up(surface: &Surface, x: f32, y: f32, modifiers: Modifiers, button: Mou
             state.id
         };
         let (location_x, location_y) = local(&view, x, y);
-        let payload = EventPayload::MouseButton(nsh_core::MouseButtonEvent::new(
+        let payload = EventPayload::Mouse(nsh_core::MouseEvent::released(
             point(Points(location_x), Points(location_y)),
             point(Points(x), Points(y)),
             modifiers.core(),
