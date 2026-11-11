@@ -4,7 +4,8 @@
 //! the app's class, and lets a key handler (the app's list: arrows, Enter)
 //! take keys while it is active; Escape dismisses it. The popup is the
 //! app's: it reads the state ([`suggestion_state`]), places itself with the
-//! session's `coords_at_pos` and runs [`replace_suggestion`] or
+//! session's `coords_at_pos`, reports how many items it lists
+//! ([`set_suggestion_item_count`]) and runs [`replace_suggestion`] or
 //! [`insert_mention`] with what the user picked. Ported from
 //! `@tiptap/suggestion` (`findSuggestionMatch`, the plugin's state and
 //! props) and `@tiptap/extension-mention` ([`mention_node`],
@@ -229,7 +230,8 @@ pub struct SuggestionOptions {
     /// Keys taken while active and recorded in the state (`last_key`,
     /// `key_count`) for an app that reads them afterwards: `"ArrowUp"`,
     /// `"ArrowDown"`, `"Enter"`, `"Tab"` (the web's key names, matched
-    /// without Mod, Ctrl or Alt).
+    /// without Mod, Ctrl or Alt). Not taken while the app reports an
+    /// empty list ([`set_suggestion_item_count`] with 0).
     pub capture_keys: Vec<String>,
 }
 
@@ -280,11 +282,15 @@ pub struct SuggestionState {
     pub last_key: Option<String>,
     /// How many keys of `capture_keys` were taken.
     pub key_count: u64,
+    /// How many items the app lists for the active query
+    /// ([`set_suggestion_item_count`]); `None` until it reports, again when
+    /// the query changes or another suggestion starts.
+    pub item_count: Option<usize>,
 }
 
 impl SuggestionState {
     /// The JSON form apps read: `{ active, range: { from, to }, query,
-    /// text, decorationId, lastKey, keyCount }`.
+    /// text, decorationId, lastKey, keyCount, itemCount }`.
     pub fn to_json(&self) -> Value {
         json!({
             "active": self.active,
@@ -294,6 +300,7 @@ impl SuggestionState {
             "decorationId": self.decoration_id,
             "lastKey": self.last_key,
             "keyCount": self.key_count,
+            "itemCount": self.item_count,
         })
     }
 }
@@ -374,6 +381,7 @@ impl PluginSpec for Suggestion {
             next.range = SuggestionRange::default();
             next.query = None;
             next.text = None;
+            next.item_count = None;
             next.dismissed_range = if prev.active {
                 Some(prev.range)
             } else {
@@ -445,6 +453,18 @@ impl PluginSpec for Suggestion {
             next.query = None;
             next.text = None;
         }
+        // A count is the list's for one query: a key pressed before the app
+        // filtered again is taken, as before the app first reported.
+        if next.decoration_id != prev.decoration_id || next.query != prev.query {
+            next.item_count = None;
+        }
+        if next.active
+            && let Some(count) = meta
+                .and_then(|m| m.get("itemCount"))
+                .and_then(Value::as_u64)
+        {
+            next.item_count = Some(count as usize);
+        }
         Arc::new(next)
     }
 
@@ -481,7 +501,9 @@ impl PluginSpec for Suggestion {
         {
             return true;
         }
-        if !(event.mod_key || event.ctrl || event.alt || event.meta)
+        // With no items there is nothing to pick: Enter sends, Tab moves on.
+        if current.item_count != Some(0)
+            && !(event.mod_key || event.ctrl || event.alt || event.meta)
             && self.options.capture_keys.iter().any(|k| k == &event.key)
         {
             let mut tr = state.tr();
@@ -563,6 +585,35 @@ pub fn exit_suggestion(key: &str) -> BoxCommand {
         }
         if let Some(dispatch) = dispatch {
             dispatch(exit_transaction(state, &key));
+        }
+        true
+    })
+}
+
+/// Tells the plugin keyed `key` how many items the app lists for the active
+/// query: with 0, `capture_keys` go on to the plugins after it and the
+/// keymap (Escape still dismisses). Report it again whenever the query
+/// changes: until then, and before the first report, the keys are taken.
+/// Refused when no suggestion is active.
+pub fn set_suggestion_item_count(key: &str, count: usize) -> BoxCommand {
+    let key = PluginKey::new(key);
+    command(move |state, dispatch| {
+        let Some(current) = key.get_state::<SuggestionState>(state) else {
+            return false;
+        };
+        if !current.active {
+            return false;
+        }
+        // An app reporting on every `transaction` hears its own report: an
+        // unchanged count dispatches nothing.
+        if current.item_count != Some(count)
+            && let Some(dispatch) = dispatch
+        {
+            let mut tr = state.tr();
+            tr.set_plugin_meta(&key, json!({ "itemCount": count }));
+            tr.set_add_to_history(false);
+            tr.set_origin(TransactionOrigin::Plugin(key.name().to_owned()));
+            dispatch(tr);
         }
         true
     })
@@ -721,9 +772,10 @@ pub fn insert_mention(name: &str, range: SuggestionRange, attrs: Attrs) -> BoxCo
     })
 }
 
-/// Registers `exitSuggestion` (`{ key? }`), `replaceSuggestion` (`{ key?,
-/// content }`, content as `insertContent` takes it) and `insertMention`
-/// (`{ range: { from, to }, id, label?, char?, name? }`) in `registry`.
+/// Registers `exitSuggestion` (`{ key? }`), `setSuggestionItemCount`
+/// (`{ key?, count }`), `replaceSuggestion` (`{ key?, content }`, content
+/// as `insertContent` takes it) and `insertMention` (`{ range: { from, to },
+/// id, label?, char?, name? }`) in `registry`.
 pub fn register_commands(registry: &mut CommandRegistry) {
     fn key(args: &Value) -> &str {
         args.get("key")
@@ -731,6 +783,13 @@ pub fn register_commands(registry: &mut CommandRegistry) {
             .unwrap_or(SUGGESTION_KEY)
     }
     registry.register("exitSuggestion", |args, _| Ok(exit_suggestion(key(args))));
+    registry.register("setSuggestionItemCount", |args, _| {
+        let count = args
+            .get("count")
+            .and_then(Value::as_u64)
+            .ok_or("setSuggestionItemCount: `count` is a whole number")?;
+        Ok(set_suggestion_item_count(key(args), count as usize))
+    });
     registry.register("replaceSuggestion", |args, schema| {
         let content = args
             .get("content")
@@ -957,6 +1016,56 @@ mod tests {
         assert!(s.active);
         assert_eq!((s.last_key.as_deref(), s.key_count), (Some("ArrowDown"), 1));
         assert!(!plugin.handle_key_down(&state, &KeyEvent::new("a"), &mut |_| {}));
+    }
+
+    fn report(state: &EditorState, count: usize) -> EditorState {
+        let mut out = None;
+        assert!(set_suggestion_item_count(SUGGESTION_KEY, count)(
+            state,
+            Some(&mut |tr| out = Some(tr))
+        ));
+        out.map_or_else(|| state.clone(), |tr| state.apply(tr).unwrap())
+    }
+
+    #[test]
+    fn an_empty_list_lets_its_keys_through() {
+        let options = SuggestionOptions {
+            capture_keys: vec!["Enter".into()],
+            ..SuggestionOptions::default()
+        };
+        let state = type_text(&editor(options), "@zz");
+        let plugin = state.plugins()[0].clone();
+        let enter = KeyEvent::new("Enter");
+        // Before the app reports, Enter is the list's, as it always was.
+        assert_eq!(current(&state).item_count, None);
+        assert!(plugin.handle_key_down(&state, &enter, &mut |_| {}));
+        let empty = report(&state, 0);
+        assert_eq!(current(&empty).to_json()["itemCount"], json!(0));
+        assert!(!plugin.handle_key_down(&empty, &enter, &mut |_| {}));
+        // The same count again dispatches nothing.
+        let mut dispatched = false;
+        assert!(set_suggestion_item_count(SUGGESTION_KEY, 0)(
+            &empty,
+            Some(&mut |_| dispatched = true)
+        ));
+        assert!(!dispatched);
+        // Escape still dismisses.
+        let mut out = None;
+        assert!(plugin.handle_key_down(&empty, &KeyEvent::new("Escape"), &mut |tr| out = Some(tr)));
+        assert!(!current(&empty.apply(out.unwrap()).unwrap()).active);
+        // Items to pick from take Enter again.
+        assert!(plugin.handle_key_down(&report(&empty, 2), &enter, &mut |_| {}));
+        // A new query is unreported until the app filters again.
+        let typed = type_text(&empty, "z");
+        assert_eq!(current(&typed).item_count, None);
+        assert!(plugin.handle_key_down(&typed, &enter, &mut |_| {}));
+        // So is a new suggestion.
+        let next = type_text(&type_text(&report(&typed, 0), " "), "@a");
+        assert!(current(&next).active);
+        assert_eq!(current(&next).item_count, None);
+        // Nothing to report to without an active suggestion.
+        let ended = type_text(&next, " ");
+        assert!(!set_suggestion_item_count(SUGGESTION_KEY, 0)(&ended, None));
     }
 
     #[test]

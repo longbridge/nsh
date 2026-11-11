@@ -3,9 +3,9 @@
 // without a view: `link`, `characterCount`, `suggestion` and `withMention`,
 // their commands (`setLink`, `toggleLink`, `unsetLink`,
 // `setCharacterLimit`, `replaceSuggestion`, `exitSuggestion`,
-// `insertMention`) and the session's queries (`suggestion`, `characters`,
-// `words`, `characterLimit`). Each line shows one result; its script
-// checks each.
+// `setSuggestionItemCount`, `insertMention`) and the session's queries
+// (`suggestion`, `characters`, `words`, `characterLimit`). Each line shows
+// one result; its script checks each.
 import { Text, View, signal } from "nsh";
 import {
   characterCount,
@@ -17,6 +17,7 @@ import {
   replaceSuggestion,
   setCharacterLimit,
   setLink,
+  setSuggestionItemCount,
   setTextSelection,
   starterSchema,
   suggestion,
@@ -102,6 +103,17 @@ function App() {
       mentions.run(insertText(" @x"));
       const exited = mentions.run(exitSuggestion("mention"));
       return `${exited} ${mentions.suggestion("mention").active} ${mentions.suggestion() === null}`;
+    });
+    step("ItemCount", () => {
+      mentions.run(insertText(" @y"));
+      const before = mentions.suggestion("mention").itemCount;
+      const set = mentions.run(setSuggestionItemCount(0, "mention"));
+      const count = mentions.suggestion("mention").itemCount;
+      mentions.run(insertText("z"));
+      const typed = mentions.suggestion("mention").itemCount;
+      mentions.run(insertText(" "));
+      const refused = mentions.run(setSuggestionItemCount(2, "mention"));
+      return `${before} ${set} ${count} ${typed} ${refused}`;
     });
     lines.set(out);
   };

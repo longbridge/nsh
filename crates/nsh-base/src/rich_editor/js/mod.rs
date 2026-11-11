@@ -1662,6 +1662,17 @@ impl RichEditorApi {
         named("exitSuggestion", serde_json::json!({ "key": key }))
     }
 
+    /// Tells the plugin keyed `key` how many items the app's list shows
+    /// for the active query: with 0, its `captureKeys` go on to the editor
+    /// (Enter sends or splits the line), Escape still dismisses. Report it
+    /// again when the query changes; until then the keys are the list's.
+    pub(crate) fn set_suggestion_item_count(count: usize, key: Option<String>) -> RichCommand {
+        named(
+            "setSuggestionItemCount",
+            serde_json::json!({ "count": count, "key": key }),
+        )
+    }
+
     /// Replaces `range` (a suggestion's) with a mention of `id` labeled
     /// `label` and a space (Tiptap's Mention command).
     pub(crate) fn insert_mention(
