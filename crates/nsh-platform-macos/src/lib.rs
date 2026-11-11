@@ -10,8 +10,9 @@
 //!   commit is one hop to the main queue ([`surface`]).
 //! - Text is typeset by CoreText on the engine thread; the main thread
 //!   only draws the lines it produced ([`text`]).
-//! - Native animations run on the root view's display link
-//!   ([`animation`]).
+//! - Native animations run on the surface's display link, made from the
+//!   root view of one of its windows that shows ([`surface`],
+//!   [`animation`]).
 //! - Desktop input as the Linux backend has it: the root view takes the
 //!   mouse, wheel, trackpad and keyboard and picks views itself
 //!   ([`input`]); scroll views keep offsets of their own ([`scroll`]).

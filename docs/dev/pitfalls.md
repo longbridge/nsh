@@ -591,9 +591,15 @@ Things that were found the hard way. Read the section of the area you change bef
   hand them to the view under the pointer.
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
-- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked. What ends
-  an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
-  one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
+- `NSView`'s display link fires only while some of the view's window shows on a screen: not while the window is
+  hidden (ordered out, or never shown), minimized, wholly covered or off every screen, or the screen is locked. A
+  surface's one link drives all of its windows, so a link made from the root of a hidden main window (a tray app's,
+  `window.defaultVisible: false`) gave the app's other windows no frames at all: made from the hidden window's view
+  it fired 0 times in a second, from a shown window's 126, and in a `Window.open` window a trackpad scroll froze
+  under the fingers and jumped into place when the gesture ended (`settle`), and animations did not run. The link is
+  made from a window that shows and made again when that one hides (`window::link_root`, `macos.md` "Frames"). What
+  ends an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with
+  a one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
 - **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
   makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its
