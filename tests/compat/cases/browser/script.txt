@@ -302,12 +302,14 @@ tap id:case-base-tooltip-grace-period-desktop
 event text:FirstTrigger onMouseEnter
 wait 700
 expect FirstTip
-# The pointer moves on: within the grace period (300 ms) the next
-# trigger's tooltip shows at once, though its delay is a minute.
-event text:FirstTrigger onMouseLeave
-absent FirstTip
+# The pointer comes to the next trigger while that tooltip is still up:
+# its tooltip shows at once, though its delay is a minute. (The grace
+# period after the pointer left, 300 ms, ends before the next step: each
+# step waits 300 ms of quiet first; the Rust and gallery tests check it.)
 event text:GraceTrigger onMouseEnter
 expect GraceTip
+event text:FirstTrigger onMouseLeave
+absent FirstTip
 # A second after the pointer left that one, past the grace period, a
 # trigger waits for its delay.
 event text:GraceTrigger onMouseLeave

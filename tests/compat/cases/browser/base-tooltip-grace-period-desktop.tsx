@@ -1,8 +1,10 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `Tooltip`'s
-// fixed grace period on a desktop. Once the pointer left a trigger whose
-// tooltip showed, a trigger it comes to within 300 ms shows its tooltip at
-// once, without its `delay` (a minute here, longer than a script waits);
-// past it, a trigger waits for its delay. Its script checks each.
+// fixed grace period on a desktop. While a tooltip the pointer showed is
+// up, or within 300 ms of the pointer leaving its trigger, a trigger the
+// pointer comes to shows its tooltip at once, without its `delay` (a
+// minute here, longer than a script waits); past that, a trigger waits for
+// its delay. Its script checks the first and the last: a script's steps
+// take longer than 300 ms apart.
 import { Text, View } from "nsh";
 import { Tooltip } from "nsh/base";
 
