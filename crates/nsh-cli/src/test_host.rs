@@ -27,7 +27,8 @@ const CONNECT: Duration = Duration::from_secs(60);
 
 /// Starts the apps tests open on `target`'s host; `browser` is the one
 /// `--target web` runs them in (else the one found on this machine); `fps`
-/// has the host log its performance monitor's readings; `display` (one-based)
+/// has the host log its performance monitor's readings; `device` is the iOS
+/// simulator (name or UDID); `display` (one-based)
 /// is the display the macOS host opens its windows on (by default a
 /// secondary one when there is one); `foreground` lets the macOS host's apps
 /// become the active app, which run in the background otherwise.
@@ -36,6 +37,7 @@ pub(crate) fn starter(
     browser: Option<&Path>,
     work: &Path,
     fps: bool,
+    device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
 ) -> anyhow::Result<StartHost> {
@@ -50,6 +52,9 @@ pub(crate) fn starter(
     {
         anyhow::bail!("--fps goes with --target linux, macos, windows or ios");
     }
+    if device.is_some() && target != Target::Ios {
+        anyhow::bail!("--device goes with --target ios");
+    }
     if display.is_some() && target != Target::Macos {
         anyhow::bail!("--display goes with --target macos");
     }
@@ -58,7 +63,7 @@ pub(crate) fn starter(
     }
     match target {
         Target::Web => return crate::test_web::starter(browser),
-        Target::Ios => return crate::test_ios::starter(work, fps),
+        Target::Ios => return crate::test_ios::starter(work, fps, device),
         Target::Android => return crate::test_android::starter(work),
         _ => {}
     }
@@ -375,10 +380,41 @@ mod tests {
             Target::Ios,
             Target::Android,
         ] {
-            let err = starter(target, None, Path::new("."), false, None, true).err();
+            let err = starter(target, None, Path::new("."), false, None, None, true).err();
             assert_eq!(
                 err.map(|e| e.to_string()).as_deref(),
                 Some("--foreground goes with --target macos"),
+                "{target:?}"
+            );
+        }
+    }
+
+    /// `--device` names an iOS simulator: the other targets refuse it before
+    /// anything is built or started.
+    #[test]
+    fn device_is_for_the_ios_host_only() {
+        for target in [
+            Target::Macos,
+            Target::Linux,
+            Target::Windows,
+            Target::Gpui,
+            Target::Tui,
+            Target::Web,
+            Target::Android,
+        ] {
+            let err = starter(
+                target,
+                None,
+                Path::new("."),
+                false,
+                Some("iPhone 16"),
+                None,
+                false,
+            )
+            .err();
+            assert_eq!(
+                err.map(|e| e.to_string()).as_deref(),
+                Some("--device goes with --target ios"),
                 "{target:?}"
             );
         }

@@ -65,6 +65,7 @@ pub(crate) fn test(
     target: Option<crate::run::Target>,
     browser: Option<&Path>,
     web_host: Option<PathBuf>,
+    device: Option<&str>,
     display: Option<usize>,
     foreground: bool,
 ) -> anyhow::Result<()> {
@@ -114,6 +115,9 @@ pub(crate) fn test(
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
+    if device.is_some() && target != Some(crate::run::Target::Ios) {
+        bail!("--device goes with --target ios");
+    }
     if display.is_some() && target != Some(crate::run::Target::Macos) {
         bail!("--display goes with --target macos");
     }
@@ -151,7 +155,7 @@ pub(crate) fn test(
     let host = target
         .filter(|_| !files.is_empty())
         .map(|target| {
-            crate::test_host::starter(target, browser, &work_dir, fps, display, foreground)
+            crate::test_host::starter(target, browser, &work_dir, fps, device, display, foreground)
         })
         .transpose()?;
     // What `open` checks its options against on that host.
@@ -912,6 +916,36 @@ test src/lib.rs - App (line 3) ... ok
             "thread 'tests::fails' panicked at src/lib.rs:9:9:\nmath is broken"
         );
         assert!(targets[0].1[1].failure.is_none());
+    }
+
+    /// A headless run refuses `--device` before it builds or runs anything:
+    /// the simulator it names would go unused.
+    #[test]
+    fn a_headless_run_refuses_a_simulator() {
+        let dir = std::env::temp_dir().join(format!("nsh-test-device-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("App.test.tsx");
+        std::fs::write(&file, "").unwrap();
+        let err = test(
+            &file,
+            &dir.join("App.tsx"),
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            Some("iPhone 16"),
+            None,
+            false,
+        )
+        .err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            err.map(|e| e.to_string()).as_deref(),
+            Some("--device goes with --target ios")
+        );
     }
 
     #[test]

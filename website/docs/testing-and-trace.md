@@ -642,12 +642,12 @@ on this machine, or the executable `--browser <PATH>` names (a browser is needed
 when it finds none). One browser serves the run, and each `open` gets a page with storage of its own. The input is
 the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
 
-On iOS, the apps run in the development host in an iOS simulator: the booted one, else the newest iPhone, which
-`nsh test` boots. The steps are a finger's touches and the software keyboard's typing, as UIKit gets them from the
-device. `setColorScheme` switches the simulator's appearance, which `nsh test` sets back after the app, and the screen
-has the simulated device's size. The variables of `nsh test`'s environment that the app declares in
-`capabilities.process.env` reach the app in the simulator, as on the desktops (`nsh run --target ios` passes them too);
-`HOME`, `TMPDIR` and `PATH` hold the simulator's paths for the app.
+On iOS, the apps run in the development host in an iOS simulator: the one `--device` names (by name or UDID), else
+the booted one, else the newest iPhone, which `nsh test` boots. The steps are a finger's touches and the software
+keyboard's typing, as UIKit gets them from the device. `setColorScheme` switches the simulator's appearance, which
+`nsh test` sets back after the app, and the screen has the simulated device's size. The variables of `nsh test`'s
+environment that the app declares in `capabilities.process.env` reach the app in the simulator, as on the desktops
+(`nsh run --target ios` passes them too); `HOME`, `TMPDIR` and `PATH` hold the simulator's paths for the app.
 
 On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
 of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;
