@@ -114,6 +114,9 @@ fn show(control: &UISegmentedControl, index: usize, segment: &Segment) {
             // SAFETY: `accessibilityLabel` is UIAccessibility's NSString
             // property, which every NSObject has.
             let _: () = unsafe { msg_send![&*image, setAccessibilityLabel: &*title] };
+            // A segment shows an image or a title, never both: clear the
+            // title a title-to-icon change leaves behind.
+            control.setTitle_forSegmentAtIndex(None, index);
             control.setImage_forSegmentAtIndex(Some(&image), index);
         }
         None => {
@@ -124,6 +127,8 @@ fn show(control: &UISegmentedControl, index: usize, segment: &Segment) {
                     segment.icon
                 );
             }
+            // Likewise the image an icon-to-title change leaves behind.
+            control.setImage_forSegmentAtIndex(None, index);
             control.setTitle_forSegmentAtIndex(Some(&NSString::from_str(&segment.title)), index);
         }
     }

@@ -17,7 +17,7 @@ use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send,
 use objc2_foundation::{NSArray, NSObject, NSString};
 use objc2_ui_kit::{
     UIAction, UIButton, UIButtonType, UIControl, UIImage, UIMenu, UIMenuElement,
-    UIMenuElementAttributes, UIMenuElementState, UIMenuOptions, UIResponder, UIView,
+    UIMenuElementAttributes, UIMenuElementState, UIMenuOptions, UIResponder, UIView, UIWindow,
 };
 
 use crate::component::{ComponentContext, ComponentFactory, NativeComponent};
@@ -187,8 +187,44 @@ define_class!(
                 let () = unsafe { msg_send![&*element, setAccessibilityElements: &*only] };
             }
         }
+
+        // Leaving the window (the component removed while its element
+        // stays, or the element itself going): the element must stop
+        // listing the button, or it keeps it alive and VoiceOver keeps
+        // reaching a button no longer there. Its superviews are still
+        // attached here, unlike in `didMoveToWindow`.
+        #[unsafe(method(willMoveToWindow:))]
+        fn will_move_to_window(&self, window: Option<&UIWindow>) {
+            if window.is_none()
+                && let Some(element) = self.superview().and_then(|c| c.superview())
+            {
+                // SAFETY: `accessibilityElements` is UIAccessibilityContainer's
+                // NSArray property, which every NSObject has.
+                let listed: Option<Retained<NSArray<NSObject>>> =
+                    unsafe { msg_send![&*element, accessibilityElements] };
+                let listed: Vec<*const NSObject> = listed
+                    .map(|a| a.iter().map(|o| Retained::as_ptr(&o)).collect())
+                    .unwrap_or_default();
+                let me: &NSObject = self;
+                if lists_only(&listed, me) {
+                    // Nil gives the element back UIKit's own derivation.
+                    let none: Option<&NSArray<NSObject>> = None;
+                    // SAFETY: as above; nil is the property's default.
+                    let () = unsafe { msg_send![&*element, setAccessibilityElements: none] };
+                }
+            }
+            // SAFETY: calling the superclass implementation.
+            let () = unsafe { msg_send![super(self), willMoveToWindow: window] };
+        }
     }
 );
+
+/// Whether `listed` (an element's `accessibilityElements`) is exactly the
+/// list the button set: only then is it the button's to clear, so a list
+/// the app or another view set since is left alone.
+fn lists_only<T>(listed: &[*const T], me: *const T) -> bool {
+    matches!(listed, [only] if *only == me)
+}
 
 struct SystemMenuButton {
     button: Retained<NshMenuButton>,
@@ -276,6 +312,16 @@ mod tests {
     use serde_json::json;
 
     use super::{Entry, MAX_DEPTH, parse_items};
+
+    #[test]
+    fn only_the_buttons_own_list_is_cleared_on_removal() {
+        let (me, other) = (1u8, 2u8);
+        let (me, other) = (&me as *const u8, &other as *const u8);
+        assert!(lists_only(&[me], me));
+        assert!(!lists_only(&[], me));
+        assert!(!lists_only(&[other], me));
+        assert!(!lists_only(&[me, other], me));
+    }
 
     #[test]
     fn submenus_past_the_depth_limit_are_dropped() {
