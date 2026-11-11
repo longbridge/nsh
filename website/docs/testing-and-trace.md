@@ -453,6 +453,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.host.calls()`, `app.host.posts()` | The app's calls and posts that `open`'s `host.handlers` got, in order: `name`, `data`. |
 | `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
 | `await app.openWithUrl(url)` | The system hands the app a link that opens it, as when the user opens one while it runs (`UrlScheme.on("open")`; a link of a scheme the app does not claim is dropped, as on a device), then waits until it is quiet. Headless runs only. |
+| `await app.failImages(url)` | The images whose source is `url` fail to load from now on, those loading now included: each reports the failure with `onError`, as on a device, so a test checks what the app shows instead (an avatar's initials, a placeholder). `url` is matched whole and `*` in it matches anything (`"https://cdn.example.com/avatars/*"`), as `network` routes are; a bundled image's is `asset:/<path>`. Then waits until the app is quiet. Headless runs only. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
@@ -517,7 +518,7 @@ that only a real platform can do:
 - **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
 - **Modals show at once**: `onShow` comes when one is presented.
-- **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject, in the app and in the test file alike. A `blob:` URL's size is read from its bytes, so `Image.getSize` of one resolves.
+- **Images are not loaded**: no `onLoad` comes, nor `onError` unless the test fails the image (`app.failImages`), and `Image.getSize` and `Image.prefetch` reject, in the app and in the test file alike. A `blob:` URL's size is read from its bytes, so `Image.getSize` of one resolves.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
 
 ### The page's host
