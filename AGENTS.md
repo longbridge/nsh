@@ -120,7 +120,9 @@ crates/
                        the test agent's platform part (`agent.rs`: `nsh test --target linux`) (docs/dev/linux.md)
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
-  nsh-platform-apple/  Shared by the macOS and iOS backends: the Speech recognizer and the notification center
+  nsh-platform-apple/  Shared by the macOS and iOS backends: the Speech recognizer, the notification center, and
+                       `unified_log`, the logger of the release runners and the iOS SDK (the unified log; stderr too
+                       wherever it goes but /dev/null)
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
                        (typeset on the engine thread), desktop input and scroll views as on Linux, navigation, video, web views,
                        native components, AppView, standalone app; feature `dev` as above (docs/dev/macos.md)
@@ -394,7 +396,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change until the first release recorded, which is not chosen yet (0.3.0 and 0.4.0 are not recorded). A new API lands with its test, a case in
+  change until the first release recorded, which is not chosen yet (0.3.0, 0.4.0 and 0.5.0 are not recorded). A new API lands with its test, a case in
   `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **Native views and interaction, app-owned design.** Common controls have one cross-platform home in `nsh/base`.
   A system-styled version of a common control does not justify another public component in a platform module.

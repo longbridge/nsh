@@ -47,6 +47,7 @@ view()
 | `.accessible(..)` | `accessible` | `boolean` | 视图作为一个整体元素提供给辅助技术；子元素不单独暴露。 |
 | `.label(..)` | `accessibilityLabel` | `string` | 屏幕阅读器朗读的内容，代替内部的文字。 |
 | `.hint(..)` | `accessibilityHint` | `string` | 激活元素会发生什么，在停顿后朗读。 |
+| `.accessibility_description(..)` | `accessibilityDescription` | `string` | 名字之外对元素的说明，在名字之后朗读：对话框的说明文字、输入框要求的格式。 |
 | `.role(..)` | `role` | `AccessibilityRole` | 元素是什么。 |
 | `.accessibility_state(..)` | `accessibilityState` | `AccessibilityState` | 它的状态：禁用、选中、勾选、忙碌、展开、按下、当前项、弹出层。`selected` 同时让选中样式生效，`checked` 为 true 时让勾选样式生效，为 `"mixed"` 时让半选样式生效，`pressed` 为 true 时让按下样式生效。 |
 | `.accessibility_level(..)` | `accessibilityLevel` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |

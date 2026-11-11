@@ -217,6 +217,7 @@ pub struct Attrs {
     pub(crate) accessible: Option<bool>,
     pub(crate) label: Option<SharedString>,
     pub(crate) hint: Option<SharedString>,
+    pub(crate) description: Option<SharedString>,
     pub(crate) role: AccessibilityRole,
     pub(crate) state: AccessibilityState,
     pub(crate) value: Option<AccessibilityValue>,
@@ -279,6 +280,11 @@ impl Attrs {
         if self.hint != old.hint {
             out.push(Prop::Accessibility(A::Hint(
                 self.hint.as_ref().map(SharedString::to_arc),
+            )));
+        }
+        if self.description != old.description {
+            out.push(Prop::Accessibility(A::Description(
+                self.description.as_ref().map(SharedString::to_arc),
             )));
         }
         if self.role != old.role {
@@ -1305,6 +1311,16 @@ pub trait Accessible: Element {
         self
     }
 
+    /// More about it than its name, which screen readers read after it
+    /// (TS: `accessibilityDescription`; `gpui-base`'s `aria_description`):
+    /// a dialog's message, what a field expects.
+    fn accessibility_description(mut self, description: impl IntoReactive<SharedString>) -> Self {
+        self.node().bind_attr(description, |a, description| {
+            a.description = Some(description)
+        });
+        self
+    }
+
     /// What it is (a button, a header, ...).
     fn role(mut self, role: impl IntoReactive<AccessibilityRole>) -> Self {
         self.node().bind_attr(role, |a, role| a.role = role);
@@ -1494,6 +1510,17 @@ pub trait Interactive: Element {
         self.on(
             EventKind::Wheel,
             events::typed(listener.into_listener(), events::wheel),
+        )
+    }
+
+    /// A mouse button was released over it (or an element inside it): which
+    /// button (`button`), where, and with the modifier keys. The primary
+    /// button's release also reports [`Self::on_press_up`] (the DOM's
+    /// `mouseup`).
+    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.on(
+            EventKind::MouseUp,
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 

@@ -764,6 +764,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
+                    | Command::HostPost { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
@@ -1319,7 +1320,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(true) => 1,
     });
     e.opt_string(a.label.as_deref());
-    e.opt_string(a.hint.as_deref());
+    // The hint text: the description, then the hint (Android has no
+    // description of its own beside the label).
+    e.opt_string(a.help_text(None).as_deref());
     e.int(role_index(a.role));
     let s = a.state;
     let mut flags = 0;

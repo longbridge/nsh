@@ -21,9 +21,20 @@ function pages(): string[] {
 }
 
 test('every Chinese page has the English outline, so every heading gets the English id', () => {
-  const drifted = pages().filter((p) => {
+  const drifted = pages().flatMap((p) => {
+    const page = p.slice(ROOT.length + 1);
     const map = idMap(p);
-    return !map || map.ids.length !== map.own.length;
+    if (!map) return [`${page}: unreadable`];
+    if (map.ids.length !== map.own.length) {
+      return [`${page}: heading ${map.ids.length + 1} ("${map.own[map.ids.length]}") is at another level than the English one`];
+    }
+    // Headings pair by position: a section missing from the Chinese page
+    // shifts the ids of every heading after it, even when the levels still
+    // line up.
+    if (map.own.length !== map.english.length) {
+      return [`${page}: ${map.own.length} headings, the English page has ${map.english.length}`];
+    }
+    return [];
   });
   expect(drifted).toEqual([]);
 }, 30_000);

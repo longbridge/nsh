@@ -238,6 +238,7 @@ desktop browsers, with an iPad's pointer or a Mac's mouse on iOS, and with a mou
 | `onMouseEnter` | `.on_mouse_enter(..)` | `(e: MouseEvent) => void` | The mouse came over the view or a view inside it (the DOM's `mouseenter`). |
 | `onMouseMove` | `.on_mouse_move(..)` | `(e: MouseEvent) => void` | The mouse moved over the view (or a view inside it), with or without a button down, or a modifier key was pressed or released while it rests there with none down (the DOM's `mousemove`). |
 | `onMouseLeave` | `.on_mouse_leave(..)` | `(e: MouseEvent) => void` | The mouse left the view and the views inside it, or the window; `e` is where it was last (the DOM's `mouseleave`). |
+| `onMouseUp` | `.on_mouse_up(..)` | `(e: MouseEvent) => void` | A mouse button was released over the view or a view inside it (the DOM's `mouseup`): `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and `modifiers`. Every listener around the view under the pointer hears it, inside out. The primary button's release also reports `onPressUp`. A release outside the view is not reported: the event has no pointer capture. Desktops (Windows, macOS, Linux, GPUI), the terminal and the web; iOS and Android never report it. |
 
 Like CSS `:hover` and the DOM's `mouseenter`, a view counts as hovered while the mouse is over it or over anything
 inside it, so the views around the one under the mouse hear `onMouseEnter` too (from the outside in; `onMouseLeave`
@@ -246,9 +247,11 @@ from the inside out). The events come after the fact and never on touches. A vie
 
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
-`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), and `pressedButton`, the button held
-down (`"left"`, `"right"`, `"middle"`, `"back"` or `"forward"`, GPUI's `MouseButton`) or `null`; in Rust `position`,
-`page_position`, `modifiers` and `pressed_button`. On the desktops and the web a drag is also a touch (`onTouchMove`,
+`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held
+down (`"left"`, `"right"`, `"middle"`, `"back"` or `"forward"`, GPUI's `MouseButton`) or `null` (`null` at a release),
+and `button`, the button that changed at this event: the released one on `onMouseUp`, `null` on a move; in Rust
+`position`, `page_position`, `modifiers`, `pressed_button` and `button`. On the desktops and the web a drag is also a
+touch (`onTouchMove`,
 the responder), and its moves reach `onMouseMove` with `pressedButton` set: feedback that only follows the hover skips
 those; on iOS and Android the hover reports the pointer with no button down. Moves come at most once a frame, the
 latest one, and always before the `onMouseLeave` that follows them, so a handler can redraw on each move:
@@ -339,7 +342,9 @@ const offset = signal({ x: 0, y: 0 });
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
 desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
-every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
+that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
+exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
@@ -576,6 +581,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessible` | `.accessible(..)` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `.label(..)` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | More about the element than its name, read after it (a dialog's message). |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |

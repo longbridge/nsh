@@ -166,6 +166,11 @@ const quote = signal("");
 It reads the selection the view holds: in a `selectable` view inside another, the outer view holds it, and the inner
 `TextView`'s ref gives `""`.
 
+On Windows, a right click on a selectable view's text opens the menu of the view's `onContextMenu` when it listens (or a view
+inside it around the text does), with the selection kept: the app shows its own menu with `Menu.popup`, where the
+`copy` and `selectAll` roles act on the selection, beside its own items for what is selected. Without a listener,
+Windows shows Copy and Select All.
+
 An [`Input`](./input.md)'s `onSelectionChange` is its own: the caret and selection in its text (`{ start, end }`).
 
 ## How a selection is made

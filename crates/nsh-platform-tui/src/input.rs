@@ -305,6 +305,55 @@ impl Pointer {
         }
     }
 
+    /// A button released: every view around the one under the pointer that
+    /// listens to `onMouseUp` hears it, inside out, as on the desktops.
+    /// Nothing is consumed: the release goes on to whatever it ends.
+    pub(crate) fn mouse_up(&self, mouse: MouseInput, cx: &PointerContext<'_>) {
+        let MouseKind::Up(button) = mouse.kind else {
+            return;
+        };
+        let position = Position::new(mouse.column, mouse.row);
+        if !cx.area.contains(position) {
+            return;
+        }
+        let scope = crate::navigation::focus_scope(cx.tree);
+        let Some(hit) = cx.hits.iter().rev().find(|hit| {
+            hit.area.contains(position) && crate::keyboard::contains(cx.tree, scope, hit.node)
+        }) else {
+            return;
+        };
+        let button = match button {
+            MouseButton::Left => nsh_core::MouseButton::Left,
+            MouseButton::Right => nsh_core::MouseButton::Right,
+            MouseButton::Middle => nsh_core::MouseButton::Middle,
+        };
+        let page = page_point(mouse, cx.area, cx.cells);
+        let mut node = Some(hit.node);
+        while let Some(id) = node {
+            let Some(view) = cx.tree.get(id) else {
+                break;
+            };
+            if view.events.contains(EventKind::MouseUp) {
+                let origin = cx
+                    .geometry
+                    .iter()
+                    .find(|g| g.id == id)
+                    .map_or_else(Point::default, |g| g.frame.origin);
+                cx.control.dispatch_event(
+                    id,
+                    EventKind::MouseUp,
+                    EventPayload::Mouse(nsh_core::MouseEvent::released(
+                        page - origin,
+                        page,
+                        mouse.modifiers,
+                        button,
+                    )),
+                );
+            }
+            node = if id == scope { None } else { view.parent };
+        }
+    }
+
     pub(crate) fn leave(&mut self, cx: &mut PointerContext<'_>) {
         self.set_hovered(Vec::new(), cx);
         self.last = None;

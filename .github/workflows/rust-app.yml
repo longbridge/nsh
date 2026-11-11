@@ -115,9 +115,12 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo clippy -p nsh-macos-app --locked --no-default-features --features js -- -D warnings
       # The crate's unit tests; the app's tests are TypeScript (`nsh test`,
-      # the web job).
+      # the web job). On macOS also nsh-platform-apple's (the code the macOS
+      # and iOS backends share, empty elsewhere), which no other job runs:
+      # in one command with the gallery, its dependencies are built with the
+      # gallery's features, so nothing is built twice.
       - name: Test the crate
-        run: cargo test -p gallery-native --locked
+        run: cargo test -p gallery-native ${{ runner.os == 'macOS' && '-p nsh-platform-apple' || '' }} --locked
       - name: Check the native dependency graph
         run: |
           cargo tree -p gallery-native --locked -e normal > "$RUNNER_TEMP/rust-app-dependencies.txt"

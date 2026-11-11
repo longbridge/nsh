@@ -223,6 +223,8 @@ type DialogHandler = Box<dyn FnMut(&Dialog) -> DialogAnswer + Send>;
 /// id, the host's function and its argument.
 #[cfg(feature = "js")]
 type HostCalls = Box<dyn FnMut(u64, &str, &nsh_core::JsonValue) + Send>;
+#[cfg(feature = "js")]
+type HostPosts = Box<dyn FnMut(&str, &nsh_core::JsonValue) + Send>;
 
 /// The answer to a dialog (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,6 +357,8 @@ pub struct Headless {
     /// Where the app's `nsh/host` calls go (the web page's host).
     #[cfg(feature = "js")]
     host_calls: Option<HostCalls>,
+    #[cfg(feature = "js")]
+    host_posts: Option<HostPosts>,
     /// The app's windows, on a desktop ([`windows`]); `None` elsewhere, and
     /// when the config gives its own windows (`EngineConfig::windows`).
     windows: Option<windows::Windows>,
@@ -471,6 +475,8 @@ impl Headless {
             last_press: None,
             #[cfg(feature = "js")]
             host_calls: None,
+            #[cfg(feature = "js")]
+            host_posts: None,
             windows,
         })
     }
@@ -852,6 +858,17 @@ impl Headless {
         self.host_calls = Some(Box::new(calls));
     }
 
+    /// Sends the app's `nsh/host` posts (the root's `Command::HostPost`) to
+    /// `posts` as their batches are applied, as [`Self::on_host_call`]
+    /// does calls.
+    #[cfg(feature = "js")]
+    pub(crate) fn on_host_post(
+        &mut self,
+        posts: impl FnMut(&str, &nsh_core::JsonValue) + Send + 'static,
+    ) {
+        self.host_posts = Some(Box::new(posts));
+    }
+
     /// Puts `text` on the clipboard (`None`: nothing), as the user copying.
     pub fn set_clipboard(&mut self, text: Option<String>) {
         self.screen.set_clipboard(text);
@@ -921,6 +938,18 @@ impl Headless {
                 } = item
                 {
                     calls(*id, name, args);
+                }
+            }
+        }
+        #[cfg(feature = "js")]
+        if let Some(posts) = &mut self.host_posts {
+            for item in &batch.items {
+                if let MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::HostPost { name, args },
+                } = item
+                {
+                    posts(name, args);
                 }
             }
         }
