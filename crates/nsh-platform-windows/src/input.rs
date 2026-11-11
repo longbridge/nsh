@@ -310,6 +310,9 @@ pub(crate) struct Input {
     next_id: Cell<u32>,
     /// Next press generation (invalidates callbacks of earlier ones).
     next_gen: Cell<u64>,
+    /// A press on a view that drags the window, held until it becomes a
+    /// click or the window's move ([`crate::chrome::WindowPress`]).
+    pub(crate) window_press: RefCell<Option<crate::chrome::WindowPress>>,
 }
 
 /// What a pointer is doing.
@@ -488,6 +491,7 @@ unsafe extern "system" fn on_timer(
 pub(crate) fn reset(surface: &Surface) {
     crate::file_drop::reset(surface);
     let input = &surface.input;
+    input.window_press.borrow_mut().take();
     input.pointers.borrow_mut().clear();
     input.two.borrow_mut().take();
     input.zoom.borrow_mut().take();
@@ -769,6 +773,15 @@ pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPar
         view = v.parent_view();
     }
     None
+}
+
+/// The innermost view at `(x, y)` (the input root's coordinates) when
+/// pressing there drags the window ([`WindowPart::Drag`]).
+pub(crate) fn drag_view(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    if window_part(surface, x, y) != Some(WindowPart::Drag) {
+        return None;
+    }
+    pick(&surface.input_root(), x, y, true).map(|hit| hit.view)
 }
 
 /// A context menu asked for on `view` without a pointer (UI Automation's

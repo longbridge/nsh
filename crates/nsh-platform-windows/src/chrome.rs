@@ -13,7 +13,11 @@
 //!   style, following the app's appearance; non-client clicks on them are
 //!   handled here, never by `DefWindowProc`, which would draw Windows 95's.
 //! - **Drag regions** work with the system title bar too: a view marked
-//!   `windowDrag` answers `HTCAPTION` anywhere.
+//!   `windowDrag` answers `HTCAPTION` anywhere. A primary press there is
+//!   held with the mouse captured ([`WindowPress`]): moved past the
+//!   system's drag rectangle, it becomes the system's move of the window;
+//!   released before that, it reaches the app as a click, so overlays see
+//!   a press outside them and close.
 //! - **Menus** are Win32 menus: the menu bar (`SetMenu`, not shown while
 //!   the title bar is hidden) and `TrackPopupMenuEx` for context menus,
 //!   both themed dark with the app (uxtheme's `SetPreferredAppMode` for the
@@ -66,11 +70,11 @@ use windows::{
             },
             HiDpi::GetSystemMetricsForDpi,
             Input::KeyboardAndMouse::{
-                TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY, VK_BACK,
-                VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24, VK_HOME, VK_INSERT, VK_LEFT,
-                VK_NEXT, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7,
-                VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PRIOR, VK_RETURN,
-                VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+                ReleaseCapture, SetCapture, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
+                TrackMouseEvent, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
+                VK_F1, VK_F24, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT, VK_OEM_1, VK_OEM_2, VK_OEM_3,
+                VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
+                VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
             },
             WindowsAndMessaging::*,
         },
@@ -826,6 +830,9 @@ pub(crate) fn nc_mouse(
             surface.invalidate();
             Some(LRESULT(0))
         }
+        WM_NCLBUTTONDOWN if code == HTCAPTION && !crate::window::from_touch() => {
+            hold_press(surface, hwnd, (p.x, p.y), (x, y), lparam)
+        }
         WM_NCLBUTTONUP if is_button(code) => {
             if shell.pressed.replace(0) == code {
                 let attrs = shell.attrs();
@@ -850,6 +857,129 @@ pub(crate) fn nc_mouse(
         }
         _ => None,
     }
+}
+
+/// A primary press on a view of the app's that drags the window
+/// (`windowDrag`), held with the mouse captured until it moves past the
+/// system's drag rectangle (the window's move) or is released (a click
+/// the app gets). `DefWindowProc` would start the move on the press
+/// itself and keep the release, so a press outside an open overlay on
+/// such a view would never reach the app.
+pub(crate) struct WindowPress {
+    hwnd: HWND,
+    /// Where it went down, in client pixels: the drag rectangle's center.
+    pixels: (i32, i32),
+    /// The same in client points: where the click goes down.
+    at: (f32, f32),
+    /// `WM_NCLBUTTONDOWN`'s `lparam` (screen pixels), for the move.
+    screen: LPARAM,
+    /// The innermost view it went down on.
+    view: crate::view::NshView,
+}
+
+/// `WM_NCLBUTTONDOWN` on `HTCAPTION` at `pixels` / `at` (client pixels /
+/// points): held when a view of the app's that drags the window is there;
+/// `None` for the system's title bar, which moves the window at once.
+fn hold_press(
+    surface: &Surface,
+    hwnd: HWND,
+    pixels: (i32, i32),
+    at: (f32, f32),
+    screen: LPARAM,
+) -> Option<LRESULT> {
+    let view = crate::input::drag_view(surface, at.0, at.1)?;
+    // SAFETY: a plain call on this window.
+    unsafe { SetCapture(hwnd) };
+    *surface.input.window_press.borrow_mut() = Some(WindowPress {
+        hwnd,
+        pixels,
+        at,
+        screen,
+        view,
+    });
+    Some(LRESULT(0))
+}
+
+/// Takes window `hwnd`'s held press, if any.
+fn take_press(surface: &Surface, hwnd: HWND) -> Option<WindowPress> {
+    let mut held = surface.input.window_press.borrow_mut();
+    if held.as_ref().is_some_and(|p| p.hwnd == hwnd) {
+        held.take()
+    } else {
+        None
+    }
+}
+
+/// `WM_MOUSEMOVE` at `lparam` (client pixels) while window `hwnd` holds a
+/// press: past the system's drag rectangle (`SM_CXDRAG` / `SM_CYDRAG` on
+/// either side, as `DragDetect`'s), the system moves the window as a press
+/// on its title bar would, and the app never hears of the press. True
+/// when a press is held (the move is not the app's).
+pub(crate) fn press_moved(surface: &Surface, hwnd: HWND, lparam: LPARAM) -> bool {
+    let (x, y) = (
+        (lparam.0 & 0xFFFF) as i16 as i32,
+        ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
+    );
+    let dpi = crate::window::dpi(hwnd);
+    let Some((px, py)) = surface
+        .input
+        .window_press
+        .borrow()
+        .as_ref()
+        .filter(|p| p.hwnd == hwnd)
+        .map(|p| p.pixels)
+    else {
+        return false;
+    };
+    // SAFETY: plain queries.
+    let (cx, cy) = unsafe {
+        (
+            GetSystemMetricsForDpi(SM_CXDRAG, dpi),
+            GetSystemMetricsForDpi(SM_CYDRAG, dpi),
+        )
+    };
+    if (x - px).abs() <= cx && (y - py).abs() <= cy {
+        return true;
+    }
+    let Some(press) = take_press(surface, hwnd) else {
+        return true;
+    };
+    // Posted, so the move's modal loop runs from the message loop, as it
+    // does for a press on the title bar; the release still queued after it
+    // ends that loop.
+    // SAFETY: plain calls on this window.
+    unsafe {
+        let _ = ReleaseCapture();
+        let _ = PostMessageW(
+            Some(hwnd),
+            WM_SYSCOMMAND,
+            WPARAM((SC_MOVE | HTCAPTION) as usize),
+            press.screen,
+        );
+    }
+    true
+}
+
+/// `WM_LBUTTONUP` at `at` (client points) while window `hwnd` holds a
+/// press: a click, which the app gets pressed where it went down, if the
+/// view it went down on is still there and still drags the window (a view
+/// that appeared under the pointer meanwhile gets no press it never saw).
+/// True when a press was held.
+pub(crate) fn press_released(surface: &Rc<Surface>, hwnd: HWND, at: (f32, f32)) -> bool {
+    let Some(press) = take_press(surface, hwnd) else {
+        return false;
+    };
+    // SAFETY: a plain call.
+    let _ = unsafe { ReleaseCapture() };
+    if crate::input::drag_view(surface, press.at.0, press.at.1).is_some_and(|v| v == press.view) {
+        crate::window::click(surface, press.at, at);
+    }
+    true
+}
+
+/// Window `hwnd` lost the mouse capture: its held press is forgotten.
+pub(crate) fn press_cancelled(surface: &Surface, hwnd: HWND) {
+    take_press(surface, hwnd);
 }
 
 /// Presses window `hwnd`'s close button as the user does (`nsh test`):
