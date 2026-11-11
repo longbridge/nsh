@@ -80,7 +80,9 @@ const BLOCKS: Block[] = [
   { id: "todo", list: true, title: "To-do list", hint: "Track tasks with checkboxes", icon: "list-todo", keywords: "task checkbox", apply: command("toggleTaskList") },
   { id: "quote", title: "Quote", hint: "Set a thought apart", icon: "text-quote", keywords: "blockquote citation", apply: command("toggleBlockquote") },
   { id: "code", title: "Code", hint: "Code with its own font", icon: "square-code", keywords: "snippet pre", apply: command("toggleCodeBlock") },
-  { id: "divider", title: "Divider", hint: "A line between sections", icon: "minus", keywords: "rule hr separator", apply: command("setHorizontalRule") },
+  { id: "divider", title: "Divider", hint: "A line between sections", icon: "minus", keywords: "rule hr separator", // The caret goes on in a new line below the rule, as in Notion.
+    apply: chain([command("setHorizontalRule"), command("createParagraphNear")]),
+  },
   { id: "table", title: "Table", hint: "Rows and columns", icon: "table", keywords: "grid", apply: command("insertTable", { rows: 3, cols: 3, withHeaderRow: true }) },
 ];
 
@@ -545,6 +547,8 @@ export function BlockEditorDemo() {
             ...richEditorClasses,
             content: pointer ? "gap-3 pl-16 pr-10 py-8" : "gap-3 px-5 py-6",
             // A block the handle took, and the line it will drop on.
+            // A rule sits as close to its neighbors as they do to each other (the document's gap is around it too).
+            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1" },
             selectedNode: "bg-primary/10 rounded-md",
             dropCursor: "bg-primary rounded-full",
           }}
