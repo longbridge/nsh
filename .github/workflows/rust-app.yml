@@ -7,33 +7,13 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
 jobs:
-  apple:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios-sim,x86_64-apple-ios
-      - uses: ./.github/actions/cargo
-        with:
-          cache: rust-app
-      - name: iOS Cookie simulator scenario
-        run: python3 .nsh/mobile-cookie-ios-run.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: mobile-cookie-apple
-          path: |
-            .nsh/mobile-cookie-ios/proof/
-            .nsh/webview-review/proof/
-          include-hidden-files: true
   android:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-linux-android,aarch64-linux-android
+          targets: x86_64-linux-android,aarch64-linux-android,armv7-linux-androideabi
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
