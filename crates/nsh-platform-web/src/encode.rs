@@ -1538,6 +1538,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str("closeNotification")
                     .str(name)
                     .end(),
+                // The page's own: a browser gives a page none an earlier
+                // load showed.
+                N::CloseAll => out.item("cmd").num(id).str("closeAllNotifications").end(),
                 N::SetBadge(count) => out.item("cmd").num(id).str("setBadge").num(*count).end(),
                 // Presses are reported as they come: a browser starts no
                 // page from one.

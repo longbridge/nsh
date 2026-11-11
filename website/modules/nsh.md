@@ -2002,8 +2002,8 @@ async function notifyMe() {
 }
 ```
 
-Rust code calls `request_notification_permission`, `show_notification`, `close_notification`, `set_badge` and
-`next_notification_press` of `nsh_core::prelude`.
+Rust code calls `request_notification_permission`, `show_notification`, `close_notification`,
+`close_all_notifications`, `set_badge` and `next_notification_press` of `nsh_core::prelude`.
 
 | Platform | Notifications | Badge |
 | --- | --- | --- |
@@ -2028,6 +2028,22 @@ to the browser.
 
 ```tsx
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.closeAll
+
+`closeAll()` removes every notification of the app's, shown or waiting to show. Call it when the user signs out, so
+what the notifications said goes with the account. The system's notification center keeps the app's notifications
+across runs on Apple platforms, Windows and Android, so there `closeAll()` also removes those an earlier run of the app
+showed. On Android and Windows it removes the notifications NSH showed, and an embedding app's own stay; on Apple
+platforms it clears the app's notification center, which an embedding app shares with NSH. On Linux and the web it
+removes those the running app showed.
+
+```tsx
+async function signOut() {
+  await Notifications.closeAll();
+  Notifications.setBadge(0);
+}
 ```
 
 ### Notifications.on

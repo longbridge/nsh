@@ -138,6 +138,14 @@ pub fn command(control: &EngineControl, command: &NotificationCommand) {
             let () =
                 unsafe { msg_send![&*center, removeDeliveredNotificationsWithIdentifiers: &*ids] };
         }
+        NotificationCommand::CloseAll => {
+            let Some(center) = center() else { return };
+            // The center is the app's: what an earlier run left goes too.
+            // SAFETY: documented methods without arguments.
+            let () = unsafe { msg_send![&*center, removeAllPendingNotificationRequests] };
+            // SAFETY: as above.
+            let () = unsafe { msg_send![&*center, removeAllDeliveredNotifications] };
+        }
         NotificationCommand::Listen => {
             install();
             LISTENER.with(|l| *l.borrow_mut() = Some(control.clone()));

@@ -857,6 +857,13 @@ pub fn close_notification(id: impl Into<String>) {
     )));
 }
 
+/// Removes every notification of the app's, shown or waiting to show, those
+/// an earlier run of the app left included where the platform can reach
+/// them (TS: `Notifications.closeAll`): what signing out clears.
+pub fn close_all_notifications() {
+    act(Action::Notification(super::NotificationAction::CloseAll));
+}
+
 /// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
 pub fn set_badge(count: u32) {
     act(Action::Notification(super::NotificationAction::SetBadge(

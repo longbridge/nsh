@@ -263,6 +263,8 @@ pub(crate) enum NotificationAction {
     },
     /// Removes the notification called this.
     Close(String),
+    /// Removes every notification of the app's.
+    CloseAll,
     /// Sets the app's badge.
     SetBadge(u32),
     /// The id of the next notification pressed resolves the slot.
