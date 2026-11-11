@@ -155,6 +155,9 @@ pub(crate) struct Input {
     /// hosted view's or another app's) — `NSCursor::currentCursor` is
     /// another object than the one set when the pointer is customized.
     cursor: Cell<Option<Cursor>>,
+    /// A Control-click (the secondary click) is down: its left-button
+    /// release is the secondary button's (`onMouseUp` reports `right`).
+    control_click: Cell<bool>,
     /// Hovered views and the cursor are picked again on the main queue
     /// (what is under the mouse moved).
     repick: Cell<bool>,
@@ -753,10 +756,16 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 .contains(NSEventModifierFlags::Control) =>
         {
             input.last.set(Some((x, y)));
+            input.control_click.set(true);
             context_menu(surface, x, y, event.modifierFlags());
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
+            // Every plain press clears the latch: a text context menu tracks
+            // the mouse synchronously and consumes its release, so a
+            // Control-click's latch can outlive its press and would
+            // otherwise report this release as the secondary button.
+            input.control_click.set(false);
             if window_part_press(surface, event, x, y) {
                 return;
             }
@@ -789,6 +798,12 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         }
         NSEventType::LeftMouseUp => {
             input.last.set(Some((x, y)));
+            let button = if input.control_click.replace(false) {
+                MouseButton::Right
+            } else {
+                MouseButton::Left
+            };
+            mouse_up(surface, x, y, Mouse::of(event), button);
             up(surface, x, y, time);
             update_cursor(surface, x, y);
             let control = input.window_control.borrow_mut().take();
@@ -797,6 +812,16 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                     .is_some_and(|hit| chain(&hit.view).contains(&view))
             {
                 crate::window::control(surface, control, event);
+            }
+        }
+        NSEventType::RightMouseUp => {
+            input.last.set(Some((x, y)));
+            mouse_up(surface, x, y, Mouse::of(event), MouseButton::Right);
+        }
+        NSEventType::OtherMouseUp => {
+            input.last.set(Some((x, y)));
+            if let Some(button) = other_button(event.buttonNumber()) {
+                mouse_up(surface, x, y, Mouse::of(event), button);
             }
         }
         NSEventType::MouseMoved | NSEventType::MouseEntered => {
@@ -2526,6 +2551,32 @@ fn mouse_moved(surface: &Surface, x: f32, y: f32, mouse: Mouse) {
     watch_flags(surface);
     for v in &listeners {
         mouse_event(surface, v, EventKind::MouseMove, x, y, mouse);
+    }
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(surface: &Surface, x: f32, y: f32, mouse: Mouse, button: MouseButton) {
+    let Some(hit) = pick(&event_root(surface), x, y) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(surface, &view, x, y);
+        let event = nsh_core::MouseEvent::released(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            mouse.modifiers,
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
     }
 }
 

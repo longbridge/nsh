@@ -1513,6 +1513,17 @@ pub trait Interactive: Element {
         )
     }
 
+    /// A mouse button was released over it (or an element inside it): which
+    /// button (`button`), where, and with the modifier keys. The primary
+    /// button's release also reports [`Self::on_press_up`] (the DOM's
+    /// `mouseup`).
+    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.on(
+            EventKind::MouseUp,
+            events::typed(listener.into_listener(), events::mouse),
+        )
+    }
+
     /// The secondary button was pressed over it (a right click,
     /// Control-click on Apple platforms): where, to open a menu at
     /// (`page_x`, `page_y`). The nearest element that listens hears it;

@@ -524,7 +524,7 @@ export interface PressEvent {
   clickCount: number;
 }
 
-/** Where the mouse is over a view: the payload of `onMouseEnter`, `onMouseMove` and `onMouseLeave` (GPUI's `MouseMoveEvent`). */
+/** Where the mouse is over a view, or where a button was released over it: the payload of `onMouseEnter`, `onMouseMove`, `onMouseLeave` and `onMouseUp` (GPUI's `MouseMoveEvent`). */
 export interface MouseEvent {
   /** Position in the view (its transforms undone). */
   position: Point;
@@ -533,6 +533,8 @@ export interface MouseEvent {
   modifiers: Modifiers;
   /** The button held down (a drag), or `null`. */
   pressedButton: MouseButton | null;
+  /** The button that changed at this event: the released one on `onMouseUp`, `null` on a move. */
+  button: MouseButton | null;
 }
 
 /** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
@@ -682,6 +684,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::ALL,
         "(e: WheelEvent) => void",
         "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.ctrl` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
+    ),
+    (
+        EventKind::MouseUp,
+        on::ALL,
+        "(e: MouseEvent) => void",
+        "A mouse button was released over the view (or a view inside it): which button (`e.button`), where, and with the modifiers. The primary button's release also reports `onPressUp`. Desktops, the terminal and the web; a release outside the view is not reported.",
     ),
     (
         EventKind::ContextMenu,

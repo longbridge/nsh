@@ -145,6 +145,17 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
   (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
   `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
+- **`onMouseUp`** (any element): a mouse button was released over it or a view inside it (the DOM's `mouseup`):
+  `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and
+  `modifiers` (`EventPayload::Mouse`, `MouseEvent`; Rust `.on_mouse_up`). The primary button's release also
+  reports `onPressUp`. The desktops (Win32, AppKit, GDK and the GPUI backend), the terminal and the web walk out from
+  the view under the pointer, as a move does, and every listener hears it; iOS and Android never report it (an iPad
+  or Android mouse included). On macOS a Control-click's release is the secondary button's (`"right"`), as its press
+  is; a right click's release
+  is what completes it, so an app that waits for it can open its menu without a timer or a press guess. Only a release
+  over the view (or a view inside it) is reported: the event has no pointer capture, so a release after the pointer
+  leaves the view or the window is not heard. The headless
+  driver's `rightClick` and the desktop test agents (Linux's included) release the secondary button too.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first

@@ -60,6 +60,10 @@ const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 /** The DOM's `buttons` bits, in the order a held button is named by. */
 const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
+/** The DOM's `button` numbers, in the order a released button is named by. */
+const MOUSE_BUTTON_NAMES = ["left", "middle", "right", "back", "forward"];
+/** The DOM's `buttons` bit of each `button` number. */
+const MOUSE_BUTTON_BITS = [1, 4, 2, 8, 16];
 /** The keys whose press or release is reported as a mouse move. */
 const MOUSE_MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
@@ -7493,6 +7497,27 @@ class Player {
     }
   }
 
+  /**
+   * `onMouseUp` of the views under the mouse and the views they are in
+   * (inside out), with the button released. A `pointercancel` releases
+   * nothing.
+   */
+  mouseUp(e) {
+    // A `button` this build cannot name is no release to report: the engine
+    // drops such a payload too, and a real mouse only reports 0-4.
+    const button = MOUSE_BUTTON_NAMES[e.button];
+    if (!button) return;
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    if (!target || !this.root.contains(target)) return;
+    for (const el of this.ancestors(this.viewOf(target))) {
+      if (!el._events?.has("onMouseUp")) continue;
+      const payload = this.mouseEvent(el, e);
+      if (!payload) continue;
+      payload.button = button;
+      this.event(el._id, "onMouseUp", payload);
+    }
+  }
+
   installInput() {
     const root = this.root;
     // What the user gives input with, told before it acts (the capture
@@ -7529,6 +7554,9 @@ class Player {
     root.addEventListener("pointermove", (e) => {
       this.mouseMoved(e);
       if (e.pointerType !== "mouse") return;
+      // A button released while another is still held comes as a move
+      // that names it (`pointerup` is only the last button's release).
+      if (e.button >= 0 && !(e.buttons & MOUSE_BUTTON_BITS[e.button])) this.mouseUp(e);
       this.hover = [e.clientX, e.clientY];
       this.hoverButtons = e.buttons;
       // Reveal only a draggable thumb under the pointer.
@@ -8474,7 +8502,12 @@ class Player {
   }
 
   pointerUp(e, cancelled) {
-    if (e.pointerType === "mouse") this.hoverButtons = e.buttons;
+    if (e.pointerType === "mouse") {
+      this.hoverButtons = e.buttons;
+      // Before the press's end, as the desktops report it, and for every
+      // button: a secondary click tracks no pointer down (`pointerDown`).
+      if (!cancelled) this.mouseUp(e);
+    }
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     if (p.mode === "bar") {

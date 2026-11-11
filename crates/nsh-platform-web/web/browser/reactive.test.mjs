@@ -813,7 +813,7 @@ test("native mouse payloads preserve positions, modifiers and nullable pressed b
   try {
     assert.deepEqual(f.mouseEvents(), [null, "left", "right", "middle", "back", "forward"].map(pressedButton => ({
       position: { x: 3, y: 4 }, pagePosition: { x: 30, y: 40 },
-      modifiers: { control: false, alt: false, shift: true, platform: false }, pressedButton,
+      modifiers: { control: false, alt: false, shift: true, platform: false }, pressedButton, button: null,
     })));
   } finally { f.close(); }
 });
