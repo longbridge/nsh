@@ -16,9 +16,10 @@ struct SizedProps {
 /// points tall.
 #[component]
 fn Sized(props: SizedProps) -> impl IntoElement {
-    let [auto, capped, held, fixed] = <[EditorSession; 4]>::try_from(props.sessions.clone())
-        .ok()
-        .expect("four sessions");
+    let Ok([auto, capped, held, fixed]) = <[EditorSession; 4]>::try_from(props.sessions.clone())
+    else {
+        panic!("four sessions");
+    };
     view()
         .w(px(300.0))
         .child(view().test_id("auto").child(rich_editor().editor(auto)))
