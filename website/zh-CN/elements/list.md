@@ -100,7 +100,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `empty` | `.empty(el)` | `ListSlot` | | `each` 为空时代替条目显示。 |
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | 条目之间的分隔（单列）。 |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前先滚动到该条目。 |
-| | `.initial_scroll_at_end()` | | | 第一帧之前滚动到末尾，并在可见的行测量时停留在那里：聊天即使最新一条消息比视口还长，也会从它的末尾打开；比视口短的内容仍停在顶部。 |
+| `initialScrollAtEnd` | `.initial_scroll_at_end()` | `boolean` | `false` | 首帧前滚动到末尾并在行高测量时保持末尾位置。短内容从顶部排列；TSX 中优先于 `initialScrollIndex`；Rust 中最后调用的初始滚动方法生效。 |
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`、`item.id` 或索引 | 条目在可见性 token 中的 key。在 Rust 中是各行的标识，前面的行增删时，行保留自己的单元格和尺寸。在 TSX 中，key 相同的行就算 `each` 换成了新对象也视为同一行，因此重建行数据（例如在 `computed` 里）不会丢掉行高和阅读位置；不设置时按对象是否相同比较。 |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | 快到末端了：加载更多。 |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | 距末端多近（以视口为单位）时触发 `onLoadMore`。 |

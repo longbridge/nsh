@@ -344,7 +344,7 @@ impl VirtualList {
     }
 
     /// Scrolls to row `index` before the first frame (TS:
-    /// `initialScrollIndex`).
+    /// `initialScrollIndex`). Replaces any earlier initial scroll setting.
     pub fn initial_scroll_index(mut self, index: usize) -> Self {
         self.list().initial_scroll = Some(Command::ScrollToIndex {
             index: index as u32,
@@ -359,7 +359,8 @@ impl VirtualList {
     /// the rows in view are measured: a chat opening at its newest message,
     /// even one longer than the viewport (LegendList's
     /// `initialScrollAtEnd`). Content shorter than the viewport stays at
-    /// the top, unlike [`crate::ListAlignment::Bottom`].
+    /// the top, unlike [`crate::ListAlignment::Bottom`]. Replaces any earlier
+    /// initial scroll setting; a later `initial_scroll_index` replaces this.
     pub fn initial_scroll_at_end(mut self) -> Self {
         self.list().initial_scroll = Some(Command::ScrollToEnd { animated: false });
         self

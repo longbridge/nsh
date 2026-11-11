@@ -21090,6 +21090,7 @@ mod views {
             assert!(texts.contains(&"m49".to_string()), "{texts:?}");
             assert!(!texts.contains(&"m0".to_string()), "{texts:?}");
             assert_eq!(at, end);
+            assert_ne!(end, 50.0 * 170.0 - 480.0, "rows were measured");
         }
     }
 
