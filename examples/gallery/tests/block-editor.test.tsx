@@ -27,7 +27,7 @@ test("/ opens the blocks and typing narrows them", async () => {
   await app.type("label:Document", "/");
   await app.waitFor("role:listbox[Blocks]");
   expect(app.shows("text:Heading 1")).toBe(true);
-  expect(app.count("role:option")).toBe(11);
+  expect(app.count("role:option")).toBe(12);
   await app.type("label:Document", "list");
   // Three lists match: bulleted, numbered, to-do.
   await app.waitFor("role:option[Divider]", { state: "gone" });
@@ -205,8 +205,8 @@ test("the arrows keep the highlighted block in view in a list taller than the me
   await newLine(app);
   await app.type("label:Document", "/");
   await app.waitFor("role:listbox[Blocks]");
-  // Table is the last of eleven blocks, below what the menu shows at first.
-  for (let i = 0; i < 10; i++) await app.keyboard.press("down");
+  // Table is the last of twelve blocks, below what the menu shows at first.
+  for (let i = 0; i < 11; i++) await app.keyboard.press("down");
   expect(app.shows("role:option[Table]")).toBe(true);
   await app.keyboard.press("enter");
   await app.waitFor("role:listbox[Blocks]", { state: "gone" });
@@ -248,16 +248,18 @@ test("a pointer resting where the menu opens does not take the highlight, and ea
   expect(app.spanStyle("text:Title").fontSize).toBe(30);
 });
 
-test("the handle goes when the document scrolls under it, and with Select All", async () => {
+test("the handle follows the pointer's block as the document scrolls, and goes with Select All", async () => {
   const app = await open("../App.tsx", { platform: "macos", width: 1200, height: 520 });
   await app.press("role:button[Block editor]");
   await app.waitFor("Q4 launch plan");
   const handle = "role:button[Drag to move, press for the menu]";
   await app.hover("text:Ship the new order ticket to every region");
   await app.waitFor(handle);
+  // The pointer stays put as the document moves: the handle is the one of the block now under it.
   await app.scroll("id:block-document", 200);
-  await app.waitFor(handle, { state: "gone" });
-  // Back over a block, then everything selected: the toolbar shows, not the handle.
+  await app.wait(200);
+  expect(app.count(handle)).toBe(1);
+  // Over another block, then everything selected: the toolbar shows, not the handle.
   await app.hover("text:Review the pricing page copy");
   await app.waitFor(handle);
   await app.press("Review the pricing page copy");
@@ -324,4 +326,26 @@ test("the toolbar shows the selection's block as pressed, and the menu pictures 
   await app.type("label:Document", "table");
   await app.waitFor("text:LISTS", { state: "gone" });
   expect(app.shows("text:INSERT")).toBe(true);
+});
+
+test("a callout sets blocks apart, and the toolbar links the selection", async () => {
+  const app = await openDemo();
+  await newLine(app);
+  await app.type("label:Document", "/callout");
+  await app.keyboard.press("enter");
+  await app.waitFor("role:listbox[Blocks]", { state: "gone" });
+  await app.type("label:Document", "Ship on Friday");
+  await app.waitFor("text:Ship on Friday");
+  // The selection gets a link from the toolbar's field.
+  await app.keyboard.press("home");
+  await app.keyboard.press("shift+end");
+  await app.waitFor("role:toolbar[Format]");
+  await app.press("role:button[Link]");
+  await app.type("label:Link address", "https://nsh.dev");
+  await app.submit("label:Link address");
+  // The caret in the link shows its address and actions.
+  await app.waitFor("role:button[Edit link]");
+  expect(app.shows("text:https://nsh.dev")).toBe(true);
+  await app.press("role:button[Remove link]");
+  await app.waitFor("role:button[Edit link]", { state: "gone" });
 });

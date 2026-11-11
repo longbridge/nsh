@@ -1,4 +1,4 @@
-import { cleanup, type JSX, Overlay, platform, Scroll, type ScrollRef, signal, Text, View } from "nsh";
+import { cleanup, type JSX, Overlay, platform, windowSize, Scroll, type ScrollRef, signal, Text, View } from "nsh";
 import {
   Button,
   RichEditor,
@@ -17,10 +17,12 @@ import {
   setNodeSelection,
   setTextSelection,
   suggestion,
+  wrapIn,
   type RichCommand,
   type RichEditorSession,
 } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
+import { createLinkMenu, LinkBubble } from "./RichEditorLink";
 import { alpha, colors, focusRing, hovered, PopIn, popupSurface, richEditorClasses } from "../ui";
 
 // A block editor in the manner of Notion, built from `nsh/base`'s
@@ -97,6 +99,7 @@ const BLOCKS: Block[] = [
   { id: "divider", group: "Insert", title: "Divider", hint: "A line between sections", icon: "minus", keywords: "rule hr separator", // The caret goes on in a new line below the rule, as in Notion.
     apply: chain([command("setHorizontalRule"), command("createParagraphNear")]),
   },
+  { id: "callout", group: "Insert", node: ["callout"], title: "Callout", hint: "Make writing stand out", icon: "info", keywords: "note tip aside highlight box", apply: wrapIn("callout") },
   { id: "table", group: "Insert", title: "Table", hint: "Rows and columns", icon: "table", keywords: "grid", apply: command("insertTable", { rows: 3, cols: 3, withHeaderRow: true }) },
 ];
 
@@ -111,6 +114,18 @@ const MARKS: { icon: LucideIconName; label: string; name: string; toggle: string
   { icon: "strikethrough", label: "Strikethrough", name: "strike", toggle: "toggleStrike" },
   { icon: "code", label: "Code", name: "code", toggle: "toggleCode" },
 ];
+
+/** A callout: blocks set apart in a tinted box, as Notion's. The app's own node type, declared as Tiptap's `Node.create`. */
+const callout = defineExtension({
+  name: "callout",
+  node: {
+    content: "block+",
+    group: "block",
+    defining: true,
+    parseDOM: [{ tag: "div[data-callout]" }],
+    toDOM: ["div", { "data-callout": "" }, 0],
+  },
+});
 
 /** `/` opens the blocks: Tiptap's Suggestion with its own keys. It ranks above the keymap, so Enter picks before it splits a paragraph. */
 const slash = defineExtension({
@@ -243,6 +258,8 @@ function Tile(props: { icon: LucideIconName }) {
 
 /** The `/` menu's list: how tall it shows, and the height of a row and of a group's heading, for keeping the highlighted block in view. */
 const MENU_HEIGHT = 340;
+const MENU_WIDTH = 300;
+const PREVIEW_WIDTH = 200;
 const ROW = 48;
 const HEADING = 28;
 
@@ -314,6 +331,16 @@ function Sample(props: { id: string }) {
           <Bar width={20} strong />
         </View>
       );
+    case "callout":
+      return (
+        <View style={{ flexDirection: "row", gap: 10, padding: 10, borderRadius: 6, backgroundColor: alpha(colors.accent, 0.16) }}>
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent }} />
+          <View style={{ gap: 7, paddingTop: 2 }}>
+            <Bar width={120} />
+            <Bar width={84} />
+          </View>
+        </View>
+      );
     case "divider":
       return (
         <View style={{ gap: 10 }}>
@@ -352,11 +379,14 @@ function Sample(props: { id: string }) {
 }
 
 /** The `/` menu: the blocks matching what was typed under their groups' headings, the highlighted one picked by Enter and pictured beside the list. */
-function SlashMenu(props: { items: Block[]; index: number; onPick: (block: Block) => void; onHover: (index: number, at: { x: number; y: number }) => void; scroll: (ref: ScrollRef) => void; onScroll: (offset: number) => void }) {
+function SlashMenu(props: { shift: number; items: Block[]; index: number; onPick: (block: Block) => void; onHover: (index: number, at: { x: number; y: number }) => void; scroll: (ref: ScrollRef) => void; onScroll: (offset: number) => void }) {
   const lit = () => props.items[props.index];
   return (
-    <PopIn side="bottom" style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-      <View testID="slash-menu" role="listbox" accessibilityLabel="Blocks" style={{ ...popupSurface(), width: 300, padding: 6 }}>
+    // The editor centers its bubble on the caret; Notion's menu starts at the `/`: it is moved right by `shift`
+    // (half its width where the window has the room), which layout does not see.
+    <PopIn side="bottom">
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, pointerEvents: "box-none", transform: [{ translateX: props.shift }] }}>
+      <View testID="slash-menu" role="listbox" accessibilityLabel="Blocks" style={{ ...popupSurface(), width: MENU_WIDTH, padding: 6 }}>
         <If
           when={props.items.length > 0}
           else={<Text style={{ padding: 10, fontSize: 13, color: colors.muted }}>No blocks match</Text>}
@@ -398,7 +428,7 @@ function SlashMenu(props: { items: Block[]; index: number; onPick: (block: Block
         </If>
       </View>
       <If when={pointer && lit()}>
-        <View testID="slash-preview" style={{ ...popupSurface(), width: 200, padding: 14, gap: 12 }}>
+        <View testID="slash-preview" style={{ ...popupSurface(), width: PREVIEW_WIDTH, padding: 14, gap: 12 }}>
           <View style={{ height: 84, justifyContent: "center" }}>
             {/* Made again for each block: a sample is a picture of one. */}
             <Each of={[lit().id]}>{(id) => <Sample id={id()} />}</Each>
@@ -406,6 +436,7 @@ function SlashMenu(props: { items: Block[]; index: number; onPick: (block: Block
           <Text style={{ fontSize: 12, lineHeight: 17, color: colors.muted }}>{lit().hint}</Text>
         </View>
       </If>
+      </View>
     </PopIn>
   );
 }
@@ -461,12 +492,23 @@ export function BlockEditorDemo() {
   // above the keymap holds them, so no other binding takes them first.
   const keys = new RichEditorPlugin("blockKeys");
   const blockKeys = defineExtension({ name: "blockKeys", priority: 900, addProseMirrorPlugins: () => [keys] });
-  const editor = createRichEditor({ extensions: [StarterKit, TableKit, slash, blockKeys], content: DOC, format: "markdown" });
+  const editor = createRichEditor({ extensions: [StarterKit, TableKit, callout, slash, blockKeys], content: DOC, format: "markdown" });
   // What the parts read: the revision follows every change of the document and the selection.
   const revision = signal(editor.revision);
 
+  // A link under the caret shows its address and actions; the toolbar's button and Mod-K open its field.
+  const link = createLinkMenu(editor, revision);
+
   // The `/` menu.
   const open = signal(false);
+  // How far right the menu goes from the caret's middle, so that it starts at the `/` (see `SlashMenu`).
+  const shift = signal(0);
+  const align = (from: number) => {
+    const caret = editor.pageCoordsAtPos(from) as Rect | null;
+    const width = MENU_WIDTH + 8 + PREVIEW_WIDTH;
+    // Half its width, less where that would pass the window's right edge.
+    shift.set(pointer && caret ? Math.max(0, Math.min(width / 2, windowSize().width - 12 - caret.x - width / 2)) : 0);
+  };
   const query = signal("");
   const index = signal(0);
   let seen = 0;
@@ -525,6 +567,7 @@ export function BlockEditorDemo() {
       if (!open()) {
         // Each opening starts at the first block, whatever the last one picked.
         open.set(true);
+        align(state.range.from);
         index.set(0);
         scrolled = 0;
       }
@@ -576,18 +619,17 @@ export function BlockEditorDemo() {
     menu.set(null);
   });
 
-  // The handle is placed in page points, so it does not move with the document: once the block under it has
-  // moved (a scroll by wheel, keys or the bar), the handle and its menu go until the pointer finds a block again.
-  // Watched only while a handle shows.
+  // The handle is placed in page points, so it does not move with the document. While one shows, its block is
+  // watched: once it has moved (a scroll by wheel, keys or the bar), the handle goes to the block that is now
+  // under the pointer, as a hover does in a browser; with the pointer elsewhere it goes away.
   const watch = setInterval(() => {
     const h = handle();
-    if (!h || dragging()) return;
+    if (!h || dragging() || menu()) return;
     const rect = editor.pageNodeRect(h.start) as Rect | null;
-    if (!rect || rect.y !== h.y) {
-      handle.set(null);
-      menu.set(null);
-    }
-  }, 120);
+    if (rect && rect.y === h.y) return;
+    handle.set(null);
+    if (lastPointer.x >= 0) place(lastPointer);
+  }, 32);
   cleanup(() => clearInterval(watch));
 
   /** The pointer over the editor: the handle goes to the block under it (a list's item, else the top-level block). */
@@ -595,7 +637,11 @@ export function BlockEditorDemo() {
     // The menu's rows hear a move before this does: they compare with where the pointer was.
     lastPointer = e.pagePosition;
     if (dragging() || menu()) return;
-    const pos = editor.posAtPageCoords(e.pagePosition);
+    place(e.pagePosition);
+  };
+  /** Puts the handle at the block under the page point `at`, if one is. */
+  const place = (at: { x: number; y: number }) => {
+    const pos = editor.posAtPageCoords(at);
     if (pos === null) return;
     const target = handleTarget(editor, pos);
     if (!target) return;
@@ -655,7 +701,8 @@ export function BlockEditorDemo() {
     const head = editor.selection.head;
     return head == null ? null : (handleTarget(editor, head)?.start ?? null);
   };
-  keys.captureKeys(["Mod-Shift-ArrowUp", "Mod-Shift-ArrowDown", "Mod-d"], (key) => {
+  keys.captureKeys(["Mod-Shift-ArrowUp", "Mod-Shift-ArrowDown", "Mod-d", "Mod-k"], (key) => {
+    if (key === "Mod-k") return link.edit();
     const start = caretBlock();
     if (start === null) return;
     if (key === "Mod-d") {
@@ -697,10 +744,11 @@ export function BlockEditorDemo() {
 
   /** What floats by the caret or the selection: the `/` menu, else the toolbar. */
   const bubble = () => {
-    if (open()) return <SlashMenu items={items()} index={Math.min(index(), Math.max(items().length - 1, 0))} onPick={pick} onHover={(i, at) => {
+    if (open()) return <SlashMenu shift={shift()} items={items()} index={Math.min(index(), Math.max(items().length - 1, 0))} onPick={pick} onHover={(i, at) => {
                 // A pointer at rest under the menu as it opens is not the user's hand: only a move lights a row.
                 if (at.x !== lastPointer.x || at.y !== lastPointer.y) index.set(i);
               }} scroll={(r) => (scroller = r)} onScroll={(y) => (scrolled = y)} />;
+    if (link.mode() !== "closed") return <PopIn side="top"><LinkBubble menu={link} /></PopIn>;
     if (!selected()) return undefined;
     revision();
     return (
@@ -723,6 +771,7 @@ export function BlockEditorDemo() {
         <Each of={MARKS}>
           {(mark) => <BarButton icon={mark().icon} label={mark().label} active={editor.isActive(mark().name)} onPress={() => editor.run(command(mark().toggle))} />}
         </Each>
+        <BarButton icon="link" label="Link" onPress={link.edit} />
       </View>
       </PopIn>
     );
@@ -746,7 +795,7 @@ export function BlockEditorDemo() {
             content: pointer ? "gap-3 pl-16 pr-10 py-8" : "gap-3 px-5 py-6",
             // A block the handle took, and the line it will drop on.
             // A rule sits as close to its neighbors as they do to each other (the document's gap is around it too).
-            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1" },
+            nodes: { ...richEditorClasses.nodes, horizontalRule: "h-px bg-border my-1", callout: "gap-2 rounded-lg border border-primary/25 bg-primary/10 px-4 py-3" },
             selectedNode: "bg-primary/10 rounded-md",
             dropCursor: "bg-primary rounded-full",
           }}
