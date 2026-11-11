@@ -341,6 +341,37 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## Views made over frames (all platforms)
+
+A list row bound in the overscan, or a long reply staged into a chat, used to make its whole subtree in one batch:
+hundreds of native views nobody sees yet, created and committed by the platform in one frame (423 views took one 87 ms
+frame on macOS, mostly the Core Animation commit). The core now spreads them (`crates/nsh-core/src/core/pace.rs`):
+
+- once a turn has made 64 views, a view about to be made in a scroll view or a list cell waits, culled as content culling
+  holds views back (laid out, given a frame, made at once by a command for it);
+- after each layout the waiting views that show (their frame meets the viewport of every scroll view and list around
+  them) are made at once, down to their leaves; the rest come in later turns, nearest the viewport first, at most 32
+  views or 4 ms a turn, and the engine asks for a display frame while some wait;
+- content culling's overscan keeps the same budget.
+
+Views not made yet are not in the platform's accessibility tree, as culled content is not: they are out of sight and
+come within a few frames. Selection and select-all read the core's nodes, not native views. Test drivers turn content
+culling off, which turns pacing off, so their steps reach every view. Nothing waits that may show away from its frame
+(sticky, followers, overlays, screens, modals, transformed or animated views), nor anything outside scroll views and
+lists.
+
+Reproduce: `cargo test -p nsh-core --release --lib -- --ignored big_rows_bench --nocapture` (a 480 pt list of rows of
+420 views each, 5 rows bound). Linux x64, release:
+
+| | first batch | later batches | batches |
+|---|---|---|---|
+| before | 2,105 views (4,640 items), core 1.04 ms | none | 1 |
+| after | 100 views (290 items), core 1.02 ms | 32 views each (96 items), core < 25 us | 64 |
+
+Every view in sight is in the first batch in both. The platform's cost is per view made, so at the macOS figure of
+about 0.2 ms a view the first frame goes from about 420 ms of platform work to about 20 ms, and each later one about
+6 ms.
+
 ## Shader pictures on Linux
 
 What the GTK backend reads back for shaders' pictures (`nsh-platform-linux` `shader.rs`, `docs/dev/shaders.md`), and
