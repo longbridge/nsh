@@ -1790,7 +1790,7 @@ pub(crate) fn appearance_changed(surface: &Surface) {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{AttributedText, Environment, TextLayout, ViewKind};
+    use nsh_core::{AttributedText, TextLayout, ViewKind, platform::Environment};
 
     use super::*;
 
@@ -1801,8 +1801,10 @@ mod tests {
         area.insert_before(&surface.root, None);
         let text = NshView::new(4, ViewKind::Text);
         text.insert_before(&area, None);
-        let mut content = AttributedText::default();
-        content.text = "Selected text".into();
+        let content = AttributedText {
+            text: "Selected text".into(),
+            ..Default::default()
+        };
         crate::text::set(
             &text,
             &Arc::new(content),

@@ -2616,7 +2616,7 @@ mod tests {
 
     #[test]
     fn a_right_click_captures_only_the_selectable_areas_own_request() {
-        let surface = Surface::new(nsh_core::Environment::default());
+        let surface = Surface::new(nsh_core::platform::Environment::default());
         surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
         let outside = view(
             &surface.root,
