@@ -178,7 +178,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `onBlur` (`EventKind::Focus` / `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first
   responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
-  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included.
+  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included. On a stop
+  that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`: a component's
+  keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
+  it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`).
   A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
   (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
   headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows

@@ -797,6 +797,9 @@ impl Listbox {
                     KeyOptions {
                         when,
                         repeat,
+                        // The open list's: Return and Space choose in it
+                        // while its trigger has the focus.
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| f(),
@@ -894,6 +897,7 @@ pub(crate) fn bind_tab_out(open: impl Fn() -> bool + 'static, close: Rc<dyn Fn()
                     when: When::Always,
                     repeat: false,
                     pass_through: true,
+                    ..Default::default()
                 },
                 move |_| close(),
             );

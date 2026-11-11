@@ -505,7 +505,8 @@ Focused stops update the existing `focus:` interaction state and report
 unmodified Return, keypad Enter and Space emit PressIn/PressOut/Press once on
 key-down; auto-repeat and key-up are consumed without another activation. App
 keymap monitors let those activation keys reach the control instead of
-triggering a global Enter/Space binding. A stop that takes no presses is not
+triggering a global Enter/Space binding; only the focus' own bindings
+(`KeyOptions::for_focus`, `Keymap::find_at`) take them first. A stop that takes no presses is not
 activated: its keys, Return and Space too, go to the app's keymap (the
 component binds them while focused), then to keyboard scrolling. Modifier
 shortcuts keep their existing priority. Accessibility focus also moves

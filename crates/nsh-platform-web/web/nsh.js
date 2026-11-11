@@ -7664,13 +7664,15 @@ class Player {
    * The app's shortcut (`nsh/keymap`) key `e` fires, matched natively
    * against the mounted table: its binding, -2 for a held key whose binding
    * does not repeat, -1 for none, `-3 - id` for binding `id` that passes the
-   * key through (reported, then the key goes on).
+   * key through (reported, then the key goes on). `control`: a control
+   * that Return and Space press has the focus, so they fire only the
+   * focus' own bindings (`Keymap::find_at`).
    */
-  shortcut(e, editing) {
+  shortcut(e, editing, control = false) {
     const code = e.isComposing ? -1 : keyCode(e);
     if (code < 0) return -1;
     const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
-    return this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
+    return this.wasm.nsh_key(code, mods, (editing ? 1 : 0) | (control ? 2 : 0), e.repeat ? 1 : 0);
   }
 
   keyDown(e) {
@@ -7679,9 +7681,14 @@ class Player {
     const focus = document.activeElement;
     const inRoot = focus && this.root.contains(focus);
     const editing = inRoot && !!focus.closest(".nsh-field, iframe");
+    const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+    // The control the focus is on, which Return and Space press (a stop
+    // that takes no presses, a `focusable` chart, hears them through the
+    // shortcuts only); a system dialog over the page keeps its own keys.
+    const control = inRoot && !editing && !!focus._pressable && !this.dialogs?.length;
     // The app's shortcuts first, where the focus is (`nsh/keymap`), then
-    // reported.
-    const found = this.shortcut(e, editing);
+    // reported. On a control, Return and Space fire only the focus' own.
+    const found = this.shortcut(e, editing, control);
     if (found <= -3) {
       const id = -3 - found;
       this.call((w) => w.nsh_key_command(id));
@@ -7692,7 +7699,20 @@ class Player {
       return;
     }
     if (e.defaultPrevented || e.isComposing) return;
-    const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+    // Then they press the control (`nsh_core::input::presses_focused_control`):
+    // a binding of Return elsewhere does not act instead of the control the
+    // focus was moved to.
+    if (control && plain && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      // Return presses at once, Space when it is released, as buttons do.
+      this.keyPress = { press: focus, states: this.ancestors(focus).filter((v) => v._tracked & PRESSED) };
+      this.pressIn(this.keyPress);
+      for (const v of this.keyPress.states) this.setState(v, PRESSED, true);
+      if (e.key === "Enter") this.keyPressEnd(true);
+      return;
+    }
     const dialog = this.dialogs?.[this.dialogs.length - 1];
     if (dialog) {
       if (e.key === "Escape") {
@@ -7715,16 +7735,6 @@ class Player {
       if (this.contextMenu(e, true)) return;
     }
     if (this.selectionKey(e)) return;
-    if (inRoot && focus._pressable && plain && !e.shiftKey && (e.key === "Enter" || e.key === " ")) {
-      e.preventDefault();
-      if (e.repeat) return;
-      // Return presses at once, Space when it is released, as buttons do.
-      this.keyPress = { press: focus, states: this.ancestors(focus).filter((v) => v._tracked & PRESSED) };
-      this.pressIn(this.keyPress);
-      for (const v of this.keyPress.states) this.setState(v, PRESSED, true);
-      if (e.key === "Enter") this.keyPressEnd(true);
-      return;
-    }
     const backKey = e.key === "BrowserBack" || (e.altKey && !APPLE && e.key === "ArrowLeft") || (e.metaKey && APPLE && e.key === "[");
     if ((e.key === "Escape" && plain) || backKey) {
       // With history the browser goes back itself on its keys (`popState`).

@@ -3114,6 +3114,85 @@ mod tests {
             .unwrap();
     }
 
+    /// A dialog whose Return allows (a global binding, outside text
+    /// fields), Mod+Return too, with an input and two buttons.
+    #[component]
+    fn ReturnAllows() -> impl IntoElement {
+        let allows = signal(0_u32);
+        let denies = signal(0_u32);
+        let cancels = signal(0_u32);
+        let sends = signal(0_u32);
+        on_key_with(
+            "enter",
+            KeyOptions {
+                when: nsh_core::keymap::When::NotEditing,
+                ..Default::default()
+            },
+            move |_| allows.update(|a| *a += 1),
+        );
+        on_key("mod+enter", move |_| sends.update(|s| *s += 1));
+        view()
+            .flex_1()
+            .child(input().test_id("note"))
+            .child(
+                view()
+                    .test_id("deny")
+                    .on_press(move || denies.update(|d| *d += 1))
+                    .child(text("Deny")),
+            )
+            .child(
+                view()
+                    .test_id("cancel")
+                    .on_press(move || cancels.update(|c| *c += 1))
+                    .child(text("Cancel")),
+            )
+            .child(text(move || {
+                format!(
+                    "Allows {} denies {} cancels {} sends {}",
+                    allows.get(),
+                    denies.get(),
+                    cancels.get(),
+                    sends.get()
+                )
+            }))
+    }
+
+    #[test]
+    fn return_and_space_press_the_focused_control_before_the_shortcuts() {
+        for os in [Os::MacOs, Os::Web, Os::Linux] {
+            let mut config = EngineConfig::new(Root::of::<ReturnAllows>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            // The focus on no control: Return is the dialog's.
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 0 cancels 0 sends 0").unwrap();
+            // Tab to Deny, then Cancel: Return and Space press the control
+            // the focus is on, not the binding.
+            app.press_key("tab").unwrap();
+            app.press_key("tab").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 1 cancels 0 sends 0")
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            app.press_key("space").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 0 sends 0").unwrap();
+            app.press_key("tab").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 0").unwrap();
+            // With Mod held the binding of that keystroke fires.
+            app.press_key("mod+enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 1").unwrap();
+            // In the text field Return is the field's: no binding (it fires
+            // outside text fields), no control.
+            app.type_text("id:note", "Hi").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 1").unwrap();
+            app.press_key("mod+enter").unwrap();
+            app.wait_for("Allows 1 denies 2 cancels 1 sends 2").unwrap();
+        }
+    }
+
     /// A list of 200 rows of its own, each a button showing its row.
     #[component]
     fn LongList() -> impl IntoElement {
