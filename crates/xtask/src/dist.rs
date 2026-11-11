@@ -105,7 +105,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
                 if package == "nsh-linux-app" {
                     args.extend([
                         "--features",
-                        "js,shader,editor,highlight,math,plot,rich-editor,zlib,crypto,websocket,updater",
+                        "js,shader,editor,highlight,math,plot,rich-editor,zlib,crypto,websocket,updater,svg,net",
                     ]);
                 }
             }

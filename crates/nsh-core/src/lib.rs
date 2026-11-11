@@ -63,6 +63,10 @@ pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
 pub mod svg;
+/// SVG without the renderer: recognized, never drawn.
+#[cfg(not(feature = "svg"))]
+#[path = "svg_off.rs"]
+pub mod svg;
 pub mod tailwind;
 mod text;
 pub mod text_edit;

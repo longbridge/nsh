@@ -327,7 +327,11 @@ impl AppView {
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
             content_culling: true,
+            // Without `net`, `fetch` rejects and remote images fail.
+            #[cfg(feature = "net")]
             network: Some(nsh_engine::net::network()),
+            #[cfg(not(feature = "net"))]
+            network: None,
             websocket: None,
             refuse_connections: None,
             filesystem: None,

@@ -12,12 +12,12 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js", "webview", "websocket", "updater"]
+default = ["js", "webview", "websocket", "updater", "svg", "net"]
 # JS apps (bundles, signed packages); without it, the library only runs a
 # Rust app and links no QuickJS.
 js = ["nsh-engine/js"]
 # Development support: dev server client, log forwarding, error overlay.
-dev = ["js", "websocket", "updater", "dep:nsh-dev", "dep:nsh-testing"]
+dev = ["js", "websocket", "updater", "svg", "net", "dep:nsh-dev", "dep:nsh-testing"]
 # Screenshots on macOS and Windows (`nsh test --target gpui`'s): GPUI
 # renders the window's frame offscreen (its `test-support`; development
 # hosts only).
@@ -36,14 +36,18 @@ video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
 websocket = ["nsh-core/websocket"]
 # App self-updates (`nsh/updater`). Without it a check finds no update.
 updater = ["nsh-core/updater"]
+# SVG images (resvg). Without it an SVG is recognized and shows nothing.
+svg = ["nsh-core/svg"]
+# HTTP: `fetch` and remote images (ureq, rustls).
+net = ["nsh-core/loader", "nsh-engine/net"]
 
 [dependencies]
 log.workspace = true
 
 # Empty off the desktop (like the other platform crates off their targets).
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
-nsh-core = { workspace = true, features = ["svg", "loader"] }
-nsh-engine = { workspace = true, features = ["net", "shader"] }
+nsh-core.workspace = true
+nsh-engine = { workspace = true, features = ["shader"] }
 nsh-base = { workspace = true, features = ["editor", "emoji-picker", "highlight", "math", "plot", "rich-editor", "term"] }
 gpui.workspace = true
 gpui_platform.workspace = true
