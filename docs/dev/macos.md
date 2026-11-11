@@ -137,7 +137,8 @@ belong to the app, which owns retention and its storage budget.
   commit whether it shows or not.
   A text's content layer keeps its picture through another width of the same lines (`text::draws_the_same`,
   `kCAGravityTopLeft`); a picture drawn in a layer narrower than its box, a view still waiting to be placed
-  (`DrawnText::cut`), draws again once placed.
+  (`DrawnText::cut`), draws again once placed. A text that only changed colors or hidden runs in the same layout
+  redraws only the lines of what changed, across the view (`text::damage`, through `NshView::redraw_rect`).
   Where the app has not drawn yet, the surface's background shows: the app's top view's opaque background when it
   fills the root (`system.rs`), else white / neutral-950 by the scheme.
 - **Text is typeset on the engine thread** by CoreText (`text.rs`, the iOS engine with `NSFont`); the main thread
