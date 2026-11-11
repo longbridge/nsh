@@ -1646,6 +1646,15 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .raw(&args.to_string())
                 .end();
         }
+        // `nsh.js` `hostPost`: nothing comes back.
+        Command::HostPost { name, args } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostPost")
+                .str(name)
+                .raw(&args.to_string())
+                .end();
+        }
         Command::ImageInfo { id: request, uri } => {
             out.item("cmd")
                 .num(id)
