@@ -24,6 +24,13 @@ mod cache;
 mod gradient;
 pub(crate) mod layer;
 
+/// Marks a drawing pass for the decoration cache: bitmaps it reads or
+/// makes are not the first evicted when it overflows
+/// ([`cache::FrameGuard`]).
+pub(crate) fn begin_frame() -> cache::FrameGuard {
+    cache::FrameGuard::begin()
+}
+
 use std::{cell::RefCell, hash::Hasher};
 
 use nsh_core::{BorderStyle, Borders, Bounds, Color, Outline, Points};

@@ -1796,6 +1796,9 @@ fn draw_into(
     areas: Option<&[D2D_RECT_F]>,
     window: Option<(&NshView, (u32, u32))>,
 ) -> windows::core::Result<Drawn> {
+    // The decoration bitmaps this pass draws with are the last evicted if
+    // the cache overflows mid-frame ([`crate::decor::begin_frame`]).
+    let _frame = crate::decor::begin_frame();
     let (window, pixels) = match window {
         Some((root, pixels)) => (Some(root), pixels),
         None => (None, surface.pixel_size()),
