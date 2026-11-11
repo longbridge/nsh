@@ -19103,6 +19103,43 @@ mod views {
     }
 
     thread_local! {
+        static WAKE_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Shows how many times the system woke; its effect counts its runs.
+    #[component]
+    fn Waker() -> impl IntoElement {
+        effect(move || {
+            wake_count();
+            WAKE_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || format!("woke {}", wake_count()))
+    }
+
+    #[test]
+    fn an_effect_reading_the_wake_count_runs_again_on_each_wake_only() {
+        WAKE_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<Waker>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["woke 0"]);
+        assert_eq!(WAKE_RUNS.with(Cell::get), 1);
+        // Another part of the environment changes: the effect stays.
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        c.commit();
+        assert_eq!(WAKE_RUNS.with(Cell::get), 1);
+        c.set_environment(crate::element::Environment {
+            dark: true,
+            wake_count: 1,
+            ..Default::default()
+        });
+        assert_eq!(texts(&c.commit().unwrap()), ["woke 1"]);
+        assert_eq!(WAKE_RUNS.with(Cell::get), 2);
+    }
+
+    thread_local! {
         static INTROS: Cell<u32> = const { Cell::new(0) };
     }
 
@@ -38908,4 +38945,177 @@ fn big_rows_bench() {
         }
     }
     eprintln!("total {total} views");
+}
+
+#[test]
+fn a_lowered_sibling_keeps_a_new_default_view_above_it() {
+    let mut c = core();
+    let z = |v: f32| style(&[("zIndex", StyleValue::Number(v))]);
+    let create = |id| Op::Create { id, tag: Tag::View };
+    let append = |child| Op::Insert {
+        parent: 1,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![create(2), create(3), create(4), append(2), append(3)],
+    );
+    let batch = c.commit().unwrap();
+    // A first fill: each goes on top, in order.
+    assert_eq!(insert_items(&batch), vec![(1, 2, None), (1, 3, None)]);
+    // In order, a new view goes below the next sibling.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 1,
+            child: 4,
+            before: Some(3),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(insert_items(&batch), vec![(1, 4, Some(3))]);
+    // 3 lowered below the others: 4, inserted again before it, now goes on
+    // top, not below 3.
+    apply(
+        &mut c,
+        vec![Op::SetStyle {
+            id: 3,
+            style: z(-1.0),
+            patch: StylePatch::default(),
+        }],
+    );
+    c.commit();
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 1,
+                child: 4,
+            },
+            Op::Insert {
+                parent: 1,
+                child: 4,
+                before: Some(3),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(insert_items(&batch), vec![(1, 4, None)]);
+}
+
+/// A component's first fill and later changes of its children.
+mod first_mount {
+    use std::{cell::Cell, time::Instant};
+
+    use super::*;
+    use crate::{element::Root, prelude::*};
+
+    thread_local! {
+        static COUNT: Cell<u32> = const { Cell::new(0) };
+        static STEP: Cell<f32> = const { Cell::new(1.0) };
+        static ITEMS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+    }
+
+    /// `COUNT` plain rows under one view, row `i` `2 + STEP * i` high.
+    #[component]
+    fn Rows() -> impl IntoElement {
+        let n = COUNT.with(Cell::get);
+        let step = STEP.with(Cell::get);
+        view().children((0..n).map(|i| view().h(px(2.0 + step * i as f32))))
+    }
+
+    /// The rows of `ITEMS`, by key.
+    #[component]
+    fn EachRows() -> impl IntoElement {
+        let items = signal(vec![0u32, 1, 2]);
+        ITEMS.with(|i| i.set(Some(items)));
+        view().child(each(
+            items,
+            |n| *n,
+            |item, _| view().h(px(2.0 + item.get_untracked() as f32)),
+        ))
+    }
+
+    /// The frames of the children of the root view's first child's first
+    /// child (the rows' parent), in tree order: (y, height).
+    fn row_frames(c: &Core<FakeEngine>) -> Vec<(f32, f32)> {
+        let mut k = c.root;
+        while c.nodes[k as usize].children.len() == 1 {
+            k = c.nodes[k as usize].children[0];
+        }
+        c.nodes[k as usize]
+            .children
+            .iter()
+            .map(|&k| {
+                let f = c.nodes[k as usize].frame;
+                (f.origin.y.0, f.size.height.0)
+            })
+            .collect()
+    }
+
+    fn mount_rows(n: u32) -> (Core<FakeEngine>, MountBatch) {
+        COUNT.with(|c| c.set(n));
+        let mut c = core();
+        c.mount_root(&Root::of::<Rows>());
+        let batch = c.commit().unwrap();
+        (c, batch)
+    }
+
+    #[test]
+    fn a_first_fill_appends_the_children_in_order() {
+        let (c, batch) = mount_rows(4);
+        assert_eq!(
+            row_frames(&c),
+            vec![(0.0, 2.0), (2.0, 3.0), (5.0, 4.0), (9.0, 5.0)]
+        );
+        // Each row appended in order, none placed before another.
+        let inserts = insert_items(&batch);
+        let last: Vec<_> = inserts[inserts.len() - 4..].to_vec();
+        assert!(
+            last.iter().all(|(_, _, before)| before.is_none()),
+            "{inserts:?}"
+        );
+        assert!(last.windows(2).all(|w| w[0].1 < w[1].1), "{inserts:?}");
+    }
+
+    #[test]
+    fn rows_added_and_reordered_after_the_first_fill_keep_their_order() {
+        let mut c = core();
+        c.mount_root(&Root::of::<EachRows>());
+        c.commit();
+        assert_eq!(row_frames(&c), vec![(0.0, 2.0), (2.0, 3.0), (5.0, 4.0)]);
+        let items = ITEMS.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            items.set(vec![3, 2, 0, 4, 1]);
+        }
+        c.commit();
+        let heights: Vec<f32> = row_frames(&c).iter().map(|r| r.1).collect();
+        assert_eq!(heights, vec![5.0, 4.0, 2.0, 6.0, 3.0]);
+    }
+
+    /// The first mount of `n` views under one view (T-0930's plain rows),
+    /// the median of 5: `cargo test --release -p nsh-core --lib
+    /// first_mount_bench -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn first_mount_bench() {
+        // All 2 high, as T-0930's rows.
+        STEP.with(|s| s.set(0.0));
+        mount_rows(100);
+        for n in [100, 1_000, 8_600, 17_200] {
+            let mut runs: Vec<f64> = (0..5)
+                .map(|_| {
+                    let t = Instant::now();
+                    let made = mount_rows(n);
+                    let ms = t.elapsed().as_secs_f64() * 1e3;
+                    drop(made);
+                    ms
+                })
+                .collect();
+            runs.sort_by(f64::total_cmp);
+            println!("first mount n={n}: {:.1} ms", runs[2]);
+        }
+    }
 }

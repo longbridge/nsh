@@ -63,6 +63,9 @@ pub struct Environment {
     /// Whether the app is in use: in the foreground, visible without the
     /// focus, or in the background.
     pub lifecycle: Lifecycle,
+    /// How many times the system woke from sleep while the surface ran
+    /// ([`crate::platform::Environment::wake_count`]).
+    pub wake_count: u32,
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
@@ -129,6 +132,7 @@ impl Default for Environment {
             ctrl_for_command: false,
             host: false,
             lifecycle: Lifecycle::Active,
+            wake_count: 0,
             screen_color: false,
             file_requests: false,
             speech: false,
