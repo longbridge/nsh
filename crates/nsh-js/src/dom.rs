@@ -72,6 +72,9 @@ pub(crate) struct Dom {
     /// removes a dialog in `onOpenChange` or `onCancel`, and the platform reports
     /// `onDismiss` once it has gone (after its animation).
     dismissed: RefCell<Vec<(NodeId, JsValue)>>,
+    /// How many modal nodes are alive: a removal looks for their
+    /// `onDismiss` handlers only when some are.
+    modals: Cell<usize>,
     /// Whether the user's language is written right to left.
     env_rtl: Cell<bool>,
     /// The tags (bits by `Tag as u32`; 63: the root) text was put in
@@ -257,6 +260,7 @@ impl Dom {
             env_rtl: Cell::new(false),
             unshown_text: Cell::new(0),
             dismissed: RefCell::new(Vec::new()),
+            modals: Cell::new(0),
             lazy_rows: Cell::new(false),
             pending_rows: RefCell::new(FxHashMap::default()),
         }
@@ -621,6 +625,9 @@ pub(crate) fn init(raw: *mut JsContext) {
 /// A new node object for id `id` (owned).
 fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsValue {
     let d = dom(cx);
+    if tag == Some(Tag::Modal) {
+        d.modals.set(d.modals.get() + 1);
+    }
     let data = Box::into_raw(Box::new(NodeData {
         id,
         text,
@@ -903,7 +910,7 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
     if p.is_null() {
         return;
     }
-    let mut data = unsafe { Box::from_raw(p) };
+    let data = unsafe { Box::from_raw(p) };
     if let Some(state) = crate::state::of_runtime(rt) {
         // SAFETY: a projection of the live state's renderer.
         let d = unsafe { &(*state).dom };
@@ -917,23 +924,8 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
             // Not the op queue: a finalizer may run while it is borrowed.
             d.shared.releases.borrow_mut().push(data.id);
         }
-        // A removed modal still hears its dismissal.
-        if data.tag == Some(Tag::Modal)
-            && let Some(i) = data
-                .handlers
-                .iter()
-                .position(|&(e, _)| e == EventKind::Dismiss)
-        {
-            let (_, handler) = data.handlers.swap_remove(i);
-            let oldest = {
-                let mut dismissed = d.dismissed.borrow_mut();
-                dismissed.push((data.id, handler));
-                (dismissed.len() > MAX_DISMISSED).then(|| dismissed.remove(0).1)
-            };
-            if let Some(v) = oldest {
-                // SAFETY: a value the renderer owned, freed after the borrow.
-                unsafe { qjs::JS_FreeValueRT(rt, v) };
-            }
+        if data.tag == Some(Tag::Modal) {
+            d.modals.set(d.modals.get().saturating_sub(1));
         }
     }
     for v in data.children {
@@ -1105,6 +1097,9 @@ fn insert_before(
     let owned = held.unwrap_or_else(|| unsafe { qjs::JS_DupValue(cx, child) });
     children.insert(pos, owned);
     unsafe { (*c).parent = parent_id };
+    if old == DETACHED {
+        forget_dismissals(cx, child);
+    }
     d.push(
         cx,
         Op::Insert {
@@ -1210,6 +1205,9 @@ fn remove_child(cx: *mut JsContext, parent: JsValue, child: JsValue) -> Result<(
     };
     let owned = children.remove(i);
     unsafe { (*c).parent = DETACHED };
+    if dom(cx).modals.get() > 0 {
+        keep_dismissals(cx, child);
+    }
     let pushed = dom(cx).push(
         cx,
         Op::Remove {
@@ -1220,6 +1218,89 @@ fn remove_child(cx: *mut JsContext, parent: JsValue, child: JsValue) -> Result<(
     // Last: this may finalize the child.
     unsafe { qjs::JS_FreeValue(cx, owned) };
     pushed
+}
+
+/// Hands the `onDismiss` handlers of the modals in detached subtree
+/// `node` (borrowed) to the renderer, so a removed modal still hears its
+/// dismissal (after its animation). Done here, while no collection runs,
+/// not in the node's finalizer: a finalizer run by QuickJS's cycle
+/// collection must not keep a value of the cycle it frees (#1643).
+fn keep_dismissals(cx: *mut JsContext, node: JsValue) {
+    let p = node_ptr(cx, node);
+    if p.is_null() {
+        return;
+    }
+    // SAFETY: live node data, read briefly; the handler is dup'd.
+    let (id, kept) = unsafe {
+        let handler = ((*p).tag == Some(Tag::Modal))
+            .then(|| {
+                (*p).handlers
+                    .iter()
+                    .find(|&&(e, _)| e == EventKind::Dismiss)
+            })
+            .flatten()
+            .map(|&(_, h)| qjs::JS_DupValue(cx, h));
+        ((*p).id, handler)
+    };
+    let d = dom(cx);
+    if let Some(handler) = kept {
+        let freed = {
+            let mut dismissed = d.dismissed.borrow_mut();
+            let mut freed: Vec<JsValue> = Vec::new();
+            if let Some(i) = dismissed.iter().position(|&(n, _)| n == id) {
+                freed.push(dismissed.remove(i).1);
+            }
+            dismissed.push((id, handler));
+            if dismissed.len() > MAX_DISMISSED {
+                freed.push(dismissed.remove(0).1);
+            }
+            freed
+        };
+        // After the borrow: freeing may finalize nodes.
+        free_values(cx, freed);
+    }
+    // SAFETY: live node data; dups held while walking.
+    let children: Vec<JsValue> = unsafe { &(*p).children }
+        .iter()
+        .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
+        .collect();
+    for &child in &children {
+        keep_dismissals(cx, child);
+    }
+    free_values(cx, children);
+}
+
+/// Drops what [`keep_dismissals`] kept for the modals in subtree `node`
+/// (borrowed), inserted again.
+fn forget_dismissals(cx: *mut JsContext, node: JsValue) {
+    let d = dom(cx);
+    if d.dismissed.borrow().is_empty() {
+        return;
+    }
+    let mut ids = Vec::new();
+    collect_ids(cx, node, &mut ids);
+    let freed: Vec<JsValue> = {
+        let mut dismissed = d.dismissed.borrow_mut();
+        let (gone, kept): (Vec<_>, Vec<_>) =
+            dismissed.drain(..).partition(|(n, _)| ids.contains(n));
+        *dismissed = kept;
+        gone.into_iter().map(|(_, v)| v).collect()
+    };
+    free_values(cx, freed);
+}
+
+fn collect_ids(cx: *mut JsContext, node: JsValue, ids: &mut Vec<NodeId>) {
+    let p = node_ptr(cx, node);
+    if p.is_null() {
+        return;
+    }
+    // SAFETY: live node data, read only (no JS runs).
+    unsafe {
+        ids.push((*p).id);
+        for &child in &(*p).children {
+            collect_ids(cx, child, ids);
+        }
+    }
 }
 
 // --- Elements, text, props -----------------------------------------------------
@@ -3493,6 +3574,20 @@ pub(crate) fn handler(cx: *mut JsContext, id: NodeId, event: EventKind) -> Optio
         let mut dismissed = d.dismissed.borrow_mut();
         let i = dismissed.iter().position(|&(n, _)| n == id)?;
         return Some(dismissed.remove(i).1);
+    }
+    if event == EventKind::Dismiss {
+        // A removed modal still alive: what was kept for it goes.
+        let kept = {
+            let mut dismissed = d.dismissed.borrow_mut();
+            dismissed
+                .iter()
+                .position(|&(n, _)| n == id)
+                .map(|i| dismissed.remove(i).1)
+        };
+        if let Some(v) = kept {
+            // SAFETY: a value the renderer owned, freed after the borrow.
+            unsafe { qjs::JS_FreeValue(cx, v) };
+        }
     }
     // SAFETY: live node data; a dup of the handler.
     unsafe { &(*p).handlers }
