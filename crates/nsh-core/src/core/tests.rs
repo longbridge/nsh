@@ -9870,6 +9870,81 @@ fn canvas_local_images_are_resolved_on_every_draw() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Menu and tray icons load what the check granted, as an `<Image>`
+/// does: one the app's capabilities do not grant is dropped.
+#[test]
+fn menu_and_tray_icons_load_what_the_check_granted() {
+    use crate::desktop::{DesktopCommand, MenuAction, MenuItem, Tray};
+    let icon = |uri: &str| {
+        Some(ImageSource {
+            uri: uri.into(),
+            ..Default::default()
+        })
+    };
+    let action = |uri: &str| {
+        MenuItem::Action(MenuAction {
+            id: 1,
+            label: "A".into(),
+            shortcut: None,
+            enabled: true,
+            checked: None,
+            role: None,
+            when: Default::default(),
+            icon: icon(uri),
+        })
+    };
+    let items = || -> Arc<[MenuItem]> {
+        vec![
+            action("https://cdn.example.com/a.png"),
+            MenuItem::Submenu {
+                label: "S".into(),
+                enabled: true,
+                items: vec![action("https://evil.example/b.png")],
+                icon: icon("https://evil.example/c.png"),
+            },
+        ]
+        .into()
+    };
+    let icons = |items: &[MenuItem]| {
+        let mut out = Vec::new();
+        MenuItem::each_icon(items, &mut |i| out.push(i.uri.to_string()));
+        out
+    };
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(
+            &serde_json::json!({ "network": { "hosts": ["cdn.example.com"] } }),
+        )
+        .unwrap(),
+        granted: None,
+    }));
+    let mut menu = DesktopCommand::SetMenu(Some(items()));
+    c.check_menu_icons(&mut menu);
+    let DesktopCommand::SetMenu(Some(checked)) = &menu else {
+        unreachable!()
+    };
+    assert_eq!(icons(checked), ["https://cdn.example.com/a.png"]);
+    let mut tray = DesktopCommand::SetTray(Some(Tray {
+        icon: icon("https://evil.example/t.png"),
+        menu: items(),
+        ..Default::default()
+    }));
+    c.check_menu_icons(&mut tray);
+    let DesktopCommand::SetTray(Some(checked)) = &tray else {
+        unreachable!()
+    };
+    assert_eq!(checked.icon, None);
+    assert_eq!(icons(&checked.menu), ["https://cdn.example.com/a.png"]);
+    // Without capabilities every icon loads as written.
+    c.set_access(Arc::default());
+    let mut menu = DesktopCommand::SetMenu(Some(items()));
+    c.check_menu_icons(&mut menu);
+    let DesktopCommand::SetMenu(Some(checked)) = &menu else {
+        unreachable!()
+    };
+    assert_eq!(icons(checked).len(), 3);
+}
+
 /// A placeholder loads the URL the check granted, as the image's source
 /// does, and shows nothing when its host is not granted.
 #[test]
@@ -37687,4 +37762,236 @@ fn a_card_holds_its_flex_one_body() {
             assert_eq!(start(footer), Some(176.0), "{what}");
         }
     }
+}
+
+/// A scroll view with more in sight than a turn's budget: what shows is
+/// made at once, the overscan around it [`pace::PACE_VIEWS`] a turn.
+#[test]
+fn a_scroll_view_makes_its_overscan_over_turns() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Rows of 1: 100 in sight, 100 in the overscan, the rest far.
+    for i in 0..400u32 {
+        ops.extend(child_view(10 + i, 2, 1.0, &[]));
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let made = created_in(&batch);
+    for i in 0..100 {
+        assert!(made.contains(&(10 + i)), "row {i} shows: {made:?}");
+    }
+    let overscan = |made: &[NodeId]| made.iter().filter(|&&id| (110..210).contains(&id)).count();
+    assert_eq!(overscan(&made), super::pace::PACE_VIEWS);
+    assert!(c.has_paced_mounts());
+    // The rest of the overscan, a budget a turn, nearest first.
+    let mut turns = 0;
+    let mut seen = made.len();
+    while c.has_paced_mounts() {
+        let batch = c.commit().unwrap();
+        let made = created_in(&batch);
+        assert!(made.len() <= super::pace::PACE_VIEWS);
+        assert!(made.windows(2).all(|w| w[0] < w[1]), "{made:?}");
+        seen += made.len();
+        turns += 1;
+        assert!(turns < 10);
+    }
+    // Nothing far: the window is the same as without pacing.
+    assert_eq!(seen, 1 + 200);
+    assert_eq!(turns, 3);
+}
+
+/// Cells bound with more views than a turn's budget: the cells in sight
+/// get theirs at once, the overscan's wait and come over turns, nearest
+/// first.
+#[test]
+fn list_cells_out_of_sight_make_their_views_over_turns() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(100.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(8),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let mut binds = Vec::new();
+    c.take_list_binds(&mut binds);
+    c.take_paced_list_binds(usize::MAX, &mut binds);
+    // Each cell a column of 40 views (2.5 pt each), as JS renders a row.
+    let mut cells = Vec::new();
+    let mut ops = Vec::new();
+    for (slot, index) in binds.iter().flat_map(|b| b.binds.iter().copied()) {
+        let cell = 100 + slot * 100;
+        ops.extend([
+            Op::Create {
+                id: cell,
+                tag: Tag::Cell,
+            },
+            Op::SetProp {
+                id: cell,
+                prop: Prop::Slot(CellSlot::Item(slot)),
+            },
+            Op::Insert {
+                parent: 2,
+                child: cell,
+                before: None,
+            },
+        ]);
+        ops.push(style_op(cell, &[("height", StyleValue::Number(100.0))]));
+        for v in 1..=40 {
+            ops.extend(child_view(cell + v, cell, 2.5, &[]));
+        }
+        ops.push(Op::SetProp {
+            id: cell,
+            prop: Prop::CellIndex(index),
+        });
+        cells.push((index, cell));
+    }
+    assert_eq!(cells.len(), 8);
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let made = created_in(&batch);
+    let views_of = |made: &[NodeId], index: u32| {
+        let cell = cells.iter().find(|c| c.0 == index).unwrap().1;
+        made.iter()
+            .filter(|&&id| id > cell && id <= cell + 40)
+            .count()
+    };
+    // Rows 0..4 show (0..400): every view of theirs is in this batch.
+    for row in 0..4 {
+        assert_eq!(views_of(&made, row), 40, "row {row}");
+    }
+    let waiting: usize = (4..8).map(|row| 40 - views_of(&made, row)).sum();
+    assert!(waiting > 0 && c.has_paced_mounts());
+    let last = cells.iter().find(|c| c.0 == 7).unwrap().1 + 40;
+    let key = c.key(last).unwrap();
+    assert!(!c.nodes[key as usize].created);
+    // Later turns: a budget each, the nearer rows first.
+    let mut turns = 0;
+    let mut first_of = Vec::new();
+    while c.has_paced_mounts() {
+        let Some(batch) = c.commit() else { break };
+        let made = created_in(&batch);
+        assert!(made.len() <= super::pace::PACE_VIEWS, "{}", made.len());
+        first_of.push((4..8).find(|&row| views_of(&made, row) > 0));
+        turns += 1;
+        assert!(turns < 20);
+    }
+    assert!(!c.has_paced_mounts());
+    assert!(c.nodes[key as usize].created);
+    assert!(first_of.windows(2).all(|w| w[0] <= w[1]), "{first_of:?}");
+}
+
+/// The batch of #1500: a list whose rows are long replies, ~420 views
+/// each. Prints the views and core time of every commit until the list
+/// settles: `cargo test -p nsh-core --release --lib -- --ignored
+/// big_rows_bench --nocapture`.
+#[test]
+#[ignore = "benchmark"]
+fn big_rows_bench() {
+    const ROWS: u32 = 8;
+    const VIEWS: u32 = 420;
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(480.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(240.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(ROWS),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let mut binds = Vec::new();
+    c.take_list_binds(&mut binds);
+    c.take_paced_list_binds(usize::MAX, &mut binds);
+    let mut ops = Vec::new();
+    for (slot, index) in binds.iter().flat_map(|b| b.binds.iter().copied()) {
+        let cell = 10_000 + slot * 1000;
+        ops.extend([
+            Op::Create {
+                id: cell,
+                tag: Tag::Cell,
+            },
+            Op::SetProp {
+                id: cell,
+                prop: Prop::Slot(CellSlot::Item(slot)),
+            },
+            Op::Insert {
+                parent: 2,
+                child: cell,
+                before: None,
+            },
+        ]);
+        // Paragraphs of lines: a reply's nested views.
+        for p in 0..VIEWS / 21 {
+            let para = cell + 1 + p * 21;
+            ops.extend(child_view(para, cell, 240.0, &[]));
+            for l in 1..=20 {
+                ops.extend(child_view(para + l, para, 12.0, &[]));
+            }
+        }
+        ops.push(Op::SetProp {
+            id: cell,
+            prop: Prop::CellIndex(index),
+        });
+    }
+    apply(&mut c, ops);
+    let mut total = 0;
+    for turn in 0.. {
+        let start = std::time::Instant::now();
+        let Some(batch) = c.commit() else { break };
+        let took = start.elapsed();
+        let made = created_in(&batch).len();
+        total += made;
+        eprintln!(
+            "turn {turn}: {made} views, {} items, core {took:?}",
+            batch.items.len()
+        );
+        if turn > 200 {
+            break;
+        }
+    }
+    eprintln!("total {total} views");
 }

@@ -1286,7 +1286,7 @@ impl VirtualGrant {
 
 /// Opening granted roots and the files in them.
 #[cfg(not(target_arch = "wasm32"))]
-mod confined {
+pub(crate) mod confined {
     use std::{io, path::Path};
 
     use cap_std::fs::{Dir, File, Metadata, OpenOptions};
@@ -1308,7 +1308,7 @@ mod confined {
     /// `O_NOFOLLOW` from `/`, so a symlink swapped in after the grant check
     /// cannot redirect the root.
     #[cfg(unix)]
-    pub(super) fn open_root(path: &Path) -> io::Result<Dir> {
+    pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
         use std::{
             ffi::CString,
             os::{
@@ -1367,14 +1367,14 @@ mod confined {
     /// it; the root is the path the grant check resolved, opened through
     /// the ambient filesystem once.
     #[cfg(not(unix))]
-    pub(super) fn open_root(path: &Path) -> io::Result<Dir> {
+    pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
         Dir::open_ambient_dir(path, cap_std::ambient_authority())
     }
 
     /// Opens a regular file to read or to write (created when missing). On
     /// Unix it is opened non-blocking, so a FIFO or device cannot stall the
     /// worker; anything but a regular file is refused before a byte moves.
-    pub(super) fn open_file(dir: &Dir, path: &Path, write: bool) -> io::Result<File> {
+    pub(crate) fn open_file(dir: &Dir, path: &Path, write: bool) -> io::Result<File> {
         let mut options = OpenOptions::new();
         if write {
             options.write(true).create(true);

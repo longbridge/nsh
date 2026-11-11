@@ -439,7 +439,7 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities, url_schemes, main_window) = match kind {
+        let (bytecode, map, capabilities, url_schemes, main_window, asset_root) = match kind {
             Entry::TestFile => test_file_bytecode(entry)?,
             Entry::App => {
                 let entry = crate::entry::resolve(entry)?;
@@ -467,6 +467,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             capabilities,
             url_schemes,
             main_window,
+            asset_root: Some(asset_root),
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
@@ -487,15 +488,17 @@ fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     bytecode_of(entry, &sets, false)
 }
 
-/// A compiled entry: its bytecode, its source map, and the capabilities
+/// A compiled entry: its bytecode, its source map, the capabilities
 /// (JSON), URL schemes and main window's launch options (JSON) its
-/// `nsh.json` declares, which the app runs under, as on a device.
+/// `nsh.json` declares, which the app runs under, as on a device, and the
+/// directory its assets are named from (`nsh_bundler::Bundle::asset_root`).
 type Compiled = (
     Vec<u8>,
     Option<String>,
     Option<String>,
     Vec<String>,
     Option<String>,
+    PathBuf,
 );
 
 /// `entry` bundled against `sets` and compiled to bytecode, with its
@@ -530,6 +533,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         capabilities,
         bundle.url_schemes,
         bundle.main_window,
+        bundle.asset_root,
     ))
 }
 
@@ -807,7 +811,7 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities, url_schemes, main_window) = match kind {
+        let (bytecode, map, capabilities, url_schemes, main_window, asset_root) = match kind {
             Entry::App => {
                 let entry =
                     crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
@@ -840,7 +844,11 @@ fn compiler() -> nsh_testing::Compile {
             // as a packaged app's runner reads them.
             .with_url_schemes(url_schemes)
             .with_main_window(main_window.as_deref());
-        Ok(Built::Js(Box::new(bundle), map))
+        Ok(Built::Js {
+            bundle: Box::new(bundle),
+            source_map: map,
+            asset_root,
+        })
     })
 }
 
@@ -1007,7 +1015,7 @@ test src/lib.rs - App (line 3) ... ok
         let built = compiler()(&dir.join("App.tsx"), Entry::App);
         std::fs::remove_dir_all(&dir).unwrap();
         match built {
-            Ok(Built::Js(bundle, _)) => assert_eq!(bundle.url_schemes, ["myapp"]),
+            Ok(Built::Js { bundle, .. }) => assert_eq!(bundle.url_schemes, ["myapp"]),
             Ok(_) => panic!("a TSX entry builds to JS"),
             Err(e) => panic!("{e}"),
         }

@@ -138,7 +138,7 @@ nsh build App.tsx --release --out MyApp/nsh
 | `bundle.js` | 同一个应用的 JS 源码。 |
 | `bundle.js.map` | 它的 source map（堆栈跟踪会指向你的 `.tsx` 文件）。 |
 | `capabilities.json` | 应用声明的[能力](./sandbox-and-capabilities.md)，仅当 `nsh.json` 中有声明时生成。 |
-| `assets/` | 应用导入的图片和字体，路径相对于入口文件。 |
+| `assets/` | 应用导入的图片和字体，路径为它们在应用目录中的路径。 |
 
 ## 显示应用
 

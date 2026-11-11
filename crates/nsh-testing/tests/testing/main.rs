@@ -166,6 +166,72 @@ fn fonts_registered_while_the_app_runs_name_their_family() {
     assert_eq!(results.len(), 3);
 }
 
+/// An entry below its app (`tests/SubApp.tsx`) names the files it imports
+/// from the app's directory and reads them from there headless, as a
+/// package of the app holds them (#1483).
+#[test]
+fn an_entry_below_its_app_reads_assets_named_from_the_app() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/asset-root");
+    let results = run_file(
+        &test_run(None),
+        &dir.join("tests/SubApp.test.tsx"),
+        &mut |_| {},
+    )
+    .unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}
+
+/// A test file's own imports are named from its app's directory, with or
+/// without an `nsh.json`, whether the run writes the entry it makes for
+/// the test file in the app's `.nsh/test` (as `nsh test` does) or in a
+/// work directory outside the app (`TestRun::work_dir` is any directory).
+#[test]
+fn a_test_file_reads_its_imports_wherever_its_entry_is_written() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/asset-root");
+    for config in [true, false] {
+        let app = std::env::temp_dir().join(format!(
+            "nsh-testing-assets-{config}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&app);
+        for file in [
+            "App.tsx",
+            "notes/hello.txt",
+            "tests/beside.txt",
+            "tests/Assets.test.ts",
+        ] {
+            std::fs::create_dir_all(app.join(file).parent().unwrap()).unwrap();
+            std::fs::copy(fixture.join(file), app.join(file)).unwrap();
+        }
+        if config {
+            std::fs::write(app.join("nsh.json"), "{}").unwrap();
+        }
+        let outside = app.with_file_name(format!(
+            "{}-work",
+            app.file_name().unwrap().to_string_lossy()
+        ));
+        for work_dir in [app.join(".nsh/test"), outside.clone()] {
+            let run = TestRun {
+                work_dir: work_dir.clone(),
+                ..test_run(None)
+            };
+            let results = run_file(&run, &app.join("tests/Assets.test.ts"), &mut |_| {})
+                .unwrap_or_else(|e| panic!("nsh.json {config}, {}: {e}", work_dir.display()));
+            let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+            assert!(
+                failed.is_empty(),
+                "nsh.json {config}, {}: {failed:#?}",
+                work_dir.display()
+            );
+            assert_eq!(results.len(), 1);
+        }
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&app);
+    }
+}
+
 #[test]
 fn describe_hooks_skip_only_todo_and_timeouts_behave_as_jest_s() {
     use nsh_testing::TestStatus::{Failed, Passed, Skipped, Todo};

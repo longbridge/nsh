@@ -7,6 +7,7 @@ mod layout_tree;
 mod list;
 mod measure;
 mod overlay;
+mod pace;
 mod parent_viewport;
 mod renders;
 mod resize_anchor;
@@ -1144,6 +1145,8 @@ pub struct Core<M: TextEngine> {
     cull_made: bool,
     /// The walk of [`Core::sync_culled`], kept for its buffer.
     cull_scratch: Vec<(Key, f32, f32)>,
+    /// Views out of sight spread over turns (`pace.rs`).
+    pace: pace::Pace,
     /// The placeholders of `<Each>` rows ([`Op::Placeholder`]), with their
     /// ids (a key may be another node's by now).
     placeholders: Vec<(Key, NodeId)>,
@@ -1465,6 +1468,7 @@ impl<M: TextEngine> Core<M> {
             cull_dirty: false,
             cull_made: false,
             cull_scratch: Vec::new(),
+            pace: pace::Pace::default(),
             placeholders: Vec::new(),
             asked_rows: Vec::new(),
             placeholders_resized: false,
@@ -2845,6 +2849,7 @@ impl<M: TextEngine> Core<M> {
         if self.components.executor.has_due_answers() {
             self.run_answers();
         }
+        self.pace_commit();
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -3028,6 +3033,11 @@ impl<M: TextEngine> Core<M> {
             self.sync_culled();
         }
         self.update_lists(relayout);
+        // Views that waited for the budget, once lists placed their cells
+        // (`pace.rs`).
+        if !self.pace.waiting.is_empty() {
+            self.sync_paced();
+        }
         // After every frame of the round: what followers follow is placed.
         self.place_followers(relayout);
         if !self.decorated.is_empty() {
@@ -3152,6 +3162,11 @@ impl<M: TextEngine> Core<M> {
                         continue;
                     }
                 }
+            }
+            // Menu and tray icons load what the check granted
+            // (`Access::media_url`), as an `<Image>` does.
+            if let Command::Desktop(desktop) = &mut command {
+                self.check_menu_icons(desktop);
             }
             // Lists resolved theirs in `update_lists`; a scroll view can
             // still scroll to its end.
@@ -4320,6 +4335,59 @@ impl<M: TextEngine> Core<M> {
         {
             std::borrow::Cow::Borrowed(_) => Some(None),
             std::borrow::Cow::Owned(url) => Some(Some(url.into())),
+        }
+    }
+
+    /// `desktop`'s menu and tray icons as the app may load them
+    /// ([`Self::media_source`]): a refused icon is dropped (the item shows
+    /// none) and reported.
+    fn check_menu_icons(&mut self, desktop: &mut crate::desktop::DesktopCommand) {
+        use crate::{
+            ImageSource,
+            desktop::{DesktopCommand, MenuItem},
+        };
+        if self.access.is_unrestricted() {
+            return;
+        }
+        let mut check = |icon: &mut Option<ImageSource>| {
+            let Some(source) = icon else { return };
+            match self.media_source(&source.uri) {
+                Some(Some(url)) => source.uri = url,
+                Some(None) => {}
+                None => {
+                    let message =
+                        media_not_granted("the menu icon", &source.uri, self.base_url.as_deref());
+                    *icon = None;
+                    self.deny(message);
+                }
+            }
+        };
+        fn each(items: &mut [MenuItem], check: &mut impl FnMut(&mut Option<ImageSource>)) {
+            for item in items {
+                match item {
+                    MenuItem::Action(action) => check(&mut action.icon),
+                    MenuItem::Submenu { items, icon, .. } => {
+                        check(icon);
+                        each(items, check);
+                    }
+                    MenuItem::Separator => {}
+                }
+            }
+        }
+        let checked = |items: &Arc<[MenuItem]>, check: &mut dyn FnMut(&mut Option<ImageSource>)| {
+            let mut items = items.to_vec();
+            each(&mut items, &mut |icon| check(icon));
+            Arc::<[MenuItem]>::from(items)
+        };
+        match desktop {
+            DesktopCommand::SetMenu(Some(items)) | DesktopCommand::PopupMenu { items, .. } => {
+                *items = checked(items, &mut check);
+            }
+            DesktopCommand::SetTray(Some(tray)) => {
+                check(&mut tray.icon);
+                tray.menu = checked(&tray.menu, &mut check);
+            }
+            _ => {}
         }
     }
 
@@ -6415,6 +6483,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
+        self.pace.made += 1;
         // The frame it was given while culled, its view's first.
         let culled_frame = std::mem::take(&mut node.culled)
             .then_some(node.frame)
