@@ -54,8 +54,8 @@ mod render;
 mod richedit;
 mod scroll;
 mod selectable_view;
-mod shader;
 mod session;
+mod shader;
 mod shell;
 mod surface;
 #[cfg(feature = "dev")]

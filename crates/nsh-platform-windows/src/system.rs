@@ -50,6 +50,10 @@
 //!   `WM_ACTIVATEAPP`; before the first, the foreground window is the
 //!   process's), inactive otherwise; background too from the moment the
 //!   session may end (signing out, shutting down: [`crate::session`]);
+//! - the wake count (`wakeCount()`): one more on every
+//!   `WM_POWERBROADCAST` with `PBT_APMRESUMEAUTOMATIC` ([`woke`]), which
+//!   top-level windows get on every resume (an embedded surface's root
+//!   window passes it on);
 //! - the time zone (`localeSettings()`'s): the zone of the system's setting
 //!   (`GetDynamicTimeZoneInformation`, its Windows key name) by its IANA
 //!   name, which the ICU Windows ships knows
@@ -368,6 +372,13 @@ pub(crate) fn app_activated(surface: &Surface, active: bool) {
 pub(crate) fn lifecycle_changed(surface: &Surface) {
     let mut env: Environment = surface.environment.get();
     env.lifecycle = lifecycle(surface, env.lifecycle);
+    surface.set_environment(env);
+}
+
+/// The system woke from sleep: `surface` counts it (`wakeCount()`).
+pub(crate) fn woke(surface: &Surface) {
+    let mut env: Environment = surface.environment.get();
+    env.wake_count = env.wake_count.wrapping_add(1);
     surface.set_environment(env);
 }
 

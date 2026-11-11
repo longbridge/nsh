@@ -274,6 +274,13 @@ pub struct Environment {
     /// focus, or in the background. For an embedded surface, the embedding
     /// app's.
     pub lifecycle: Lifecycle,
+    /// How many times the system woke from sleep while the surface ran
+    /// (TS: `wakeCount()`): the platform adds one on each wake (macOS,
+    /// Windows, Linux), so what read it runs again then. A sleep may leave
+    /// the app's state as it was (a laptop's lid closed and opened with the
+    /// app in front), while its network connections and timers did not
+    /// live through it.
+    pub wake_count: u32,
     /// The platform picks a color from the screen
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
@@ -373,6 +380,7 @@ impl Default for Environment {
             locale_settings: LocaleSettings::EN_US,
             host: false,
             lifecycle: Lifecycle::Active,
+            wake_count: 0,
             screen_color: false,
             file_requests: false,
             speech: false,
