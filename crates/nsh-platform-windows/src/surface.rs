@@ -567,6 +567,14 @@ impl Surface {
 
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
+        // A new activation cannot open a popup for an unanswered context
+        // request. Menu events include bar items, tray clicks and hotkeys.
+        if matches!(
+            kind,
+            EventKind::Menu | EventKind::Press | EventKind::AccessibilityAction
+        ) {
+            self.chrome.context_area.take();
+        }
         self.control(|c| c.dispatch_event(id, kind, payload));
     }
 

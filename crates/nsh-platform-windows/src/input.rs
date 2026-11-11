@@ -771,25 +771,54 @@ pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPar
     None
 }
 
+/// The selectable area whose text gives the app its context menu: a
+/// listener on the area or between it and the text replaces the native
+/// edit menu. A listener outside the area leaves that menu alone.
+fn menu_area(view: &NshView) -> Option<NshView> {
+    let area = crate::selectable_view::area_of(view)?;
+    let mut at = Some(view.clone());
+    while let Some(view) = at {
+        if view.state().kind == ViewKind::Input {
+            return None;
+        }
+        if view.state().events.contains(EventKind::ContextMenu) {
+            return Some(area);
+        }
+        if view == area {
+            break;
+        }
+        at = view.parent_view();
+    }
+    None
+}
+
 /// A context menu asked for on `view` without a pointer (UI Automation's
 /// `ShowContextMenu`): the view, or the nearest around it that listens to
 /// `onContextMenu`, hears it with no pointer at its bottom-start corner
 /// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
-/// selectable text is nearer. True when a view heard it.
+/// selectable text is nearer (selectable text whose selectable view
+/// listens excepted: [`menu_area`]). True when a view
+/// heard it.
 pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
+    surface.chrome.context_area.take();
+    let menu_area = menu_area(view);
+    let app_menu = menu_area.is_some();
     let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
     let mut at = Some(view.clone());
     while let Some(v) = at {
-        let (id, listens, stop, size) = {
+        let (id, listens, field, selectable, size) = {
             let s = v.state();
             (
                 s.id,
                 s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input || crate::text::selectable(&s) || s.props.selectable_view,
+                s.kind == ViewKind::Input,
+                crate::text::selectable(&s) || s.props.selectable_view,
                 s.frame.size,
             )
         };
+        let stop = field || (selectable && !app_menu);
         if listens {
+            surface.chrome.context_area.replace(menu_area);
             let position = nsh_core::input::context_menu_anchor(size, rtl);
             let (page_x, page_y) = v
                 .to_root()
@@ -815,11 +844,15 @@ pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
-/// menu.
+/// menu, but where its selectable view, or a view between them, listens
+/// ([`menu_area`]).
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    let menu_area = menu_area(&hit.view);
+    let app_menu = menu_area.is_some();
+    surface.chrome.context_area.take();
     let mut view = Some(hit.view);
     while let Some(v) = view {
         let (id, listens, input, selectable, area) = {
@@ -833,6 +866,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             )
         };
         if listens {
+            surface.chrome.context_area.replace(menu_area);
             let (location_x, location_y) = local(&v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
@@ -847,7 +881,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        if selectable || area {
+        if (selectable || area) && !app_menu {
             // Text in a selectable view has the area's menu.
             match crate::selectable_view::area_of(&v) {
                 Some(area) => crate::selectable_view::context_menu(surface, &area),
@@ -866,6 +900,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
     // Before the press acts: the focus it moves does not show
     // (`focus-visible:`).
     if event.kind == PointerKind::Down {
+        surface.chrome.context_area.take();
         surface.control(|c| c.set_input_modality(InputModality::Pointer));
     }
     let key = if event.touch || event.pen {
@@ -1133,6 +1168,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         // `DefWindowProc` opens the window menu when Alt is released after
         // it saw no other key: swallow the release once Alt + key was ours.
         return event.vk == VK_MENU && input.alt_combo.replace(false);
+    }
+    if !MODIFIER_KEYS.contains(&event.vk) {
+        surface.chrome.context_area.take();
     }
     // The window's shortcuts (full screen, the dev host's reload) work
     // wherever the focus is.
@@ -2543,6 +2581,82 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// Selectable text shows its edit menu, unless its selectable view, or
+    /// a view between them, listens to `onContextMenu`, which hears the
+    /// menu asked for instead; a listener around the selectable view does
+    /// not take it.
+    #[test]
+    fn a_selectable_views_listener_takes_its_texts_menu() {
+        let root = root();
+        let row = view(&root, 2, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        let area = view(&row, 4, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        area.state_mut().props.selectable_view = true;
+        let block = view(&area, 6, ViewKind::View, rect(0.0, 0.0, 200.0, 40.0));
+        let text = view(&block, 8, ViewKind::Text, rect(0.0, 0.0, 200.0, 20.0));
+        assert!(menu_area(&text).is_none());
+        row.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&text).is_none());
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&text).is_some());
+        // The app's menu is for that area: its edit roles act on it.
+        assert!(menu_area(&text).is_some_and(|a| a == area));
+        area.state_mut().events.set(EventKind::ContextMenu, false);
+        block.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&text).is_some());
+        // Selectable text in no selectable view keeps its own menu.
+        let alone = view(&row, 10, ViewKind::Text, rect(0.0, 50.0, 200.0, 20.0));
+        assert!(menu_area(&alone).is_none());
+        // A field's own menu edits the field, even inside a listening area.
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        let input = view(&area, 12, ViewKind::Input, rect(0.0, 60.0, 200.0, 20.0));
+        input.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&input).is_none());
+    }
+
+    #[test]
+    fn a_right_click_captures_only_the_selectable_areas_own_request() {
+        let surface = Surface::new(nsh_core::platform::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let outside = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 100.0),
+        );
+        outside.state_mut().events.set(EventKind::ContextMenu, true);
+        let area = view(&outside, 4, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        area.state_mut().props.selectable_view = true;
+        view(&area, 6, ViewKind::Text, rect(0.0, 0.0, 200.0, 20.0));
+        for listens in [true, false] {
+            area.state_mut().events.set(EventKind::ContextMenu, listens);
+            pointer(
+                &surface,
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 10.0,
+                    y: 10.0,
+                    button: 1,
+                    buttons: 2,
+                    pointer: 1,
+                    touch: false,
+                    pen: false,
+                    time: 0.0,
+                    clicks: 1,
+                    modifiers: Modifiers::default(),
+                },
+            );
+            assert_eq!(
+                surface
+                    .chrome
+                    .context_area
+                    .borrow()
+                    .as_ref()
+                    .map(NshView::id),
+                listens.then_some(area.id())
+            );
+        }
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {
