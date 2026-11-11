@@ -1310,6 +1310,11 @@ pub struct Core<M: TextEngine> {
     /// The focus shows (`focus-visible:`), decided when it was reported
     /// (`classes::focus_shows`) and again when a key is typed.
     focus_visible: bool,
+    /// The keyboard moved the focus, decided when it was reported
+    /// (`classes::keyboard_moves_focus`) and kept until it moves again,
+    /// whatever is typed meanwhile: only such a focus shows the hint of
+    /// the anchor it comes to (`overlay::focus_hints`).
+    focus_by_keyboard: bool,
     /// The view in the `FOCUS_VISIBLE` state, by key and id
     /// (`classes::update_focus_visible`).
     focus_visible_on: Option<(Key, NodeId)>,
@@ -1537,6 +1542,7 @@ impl<M: TextEngine> Core<M> {
             focus_within_changed: false,
             modality: None,
             focus_visible: false,
+            focus_by_keyboard: false,
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
@@ -2980,6 +2986,8 @@ impl<M: TextEngine> Core<M> {
                 self.focus_hints();
             }
         } else if visible_moved {
+            // A key typed with the focus where it is shows its ring, and no
+            // hint: a hint shows only for a focus the keyboard moved.
             self.update_focus_visible();
         }
         self.sync_colors();
