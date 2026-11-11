@@ -2421,6 +2421,13 @@ impl App {
         step(&this, move |app| app.set_lifecycle(state.into())).await
     }
 
+    /// Wakes the system from sleep, as when the user opens a laptop's lid:
+    /// `wakeCount()` counts one more, and `lifecycle()` stays as it was.
+    /// Headless only.
+    pub async fn wake(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.wake()).await
+    }
+
     /// Gives the user the locale settings `settings` names
     /// (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`), as the system does
     /// when the user changes them or travels; `localeSettings()` follows,
