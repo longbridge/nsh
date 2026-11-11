@@ -145,6 +145,39 @@ function blockEnd(editor: RichEditorSession, start: number): number {
   return (editor.resolve(start + 1) as Resolved).end + 1;
 }
 
+type DocNode = { type?: string; text?: string | null; content?: DocNode[] | null };
+
+/** How many positions a node takes: its text's length, one for a leaf, else its content between its two ends. */
+function nodeSize(node: DocNode): number {
+  if (node.text != null) return node.text.length;
+  if (LEAVES.has(node.type ?? "") || node.type === "hardBreak") return 1;
+  return 2 + (node.content ?? []).reduce((sum, child) => sum + nodeSize(child), 0);
+}
+
+const LISTS = new Set(["bulletList", "orderedList", "taskList"]);
+
+/**
+ * Two lists of one kind that came to stand next to each other (a block turned into a list beside one, an item
+ * dropped between lists) become one, as in Notion, where items in a row are one list: the numbers run on and
+ * the items are spaced alike.
+ */
+function joinLists(editor: RichEditorSession) {
+  for (let pass = 0; pass < 8; pass++) {
+    const blocks = ((editor.doc as DocNode).content ?? []) as DocNode[];
+    let pos = 0;
+    let joined = false;
+    for (let i = 0; i < blocks.length - 1; i++) {
+      pos += nodeSize(blocks[i]);
+      if (LISTS.has(blocks[i].type ?? "") && blocks[i].type === blocks[i + 1].type) {
+        // The first list's end and the second's start go: what is left is one list.
+        joined = editor.run(deleteRange({ from: pos - 1, to: pos + 1 }));
+        break;
+      }
+    }
+    if (!joined) return;
+  }
+}
+
 /** The text of a block, for the preview that follows the pointer while it is dragged. */
 function plainText(node: { text?: string | null; content?: unknown[] | null }): string {
   if (node.text) return node.text;
@@ -365,7 +398,19 @@ export function BlockEditorDemo() {
   };
   editor.on("revision", sync);
   // A change of the document moves the blocks: the handle and its menu go until the pointer finds a block again.
+  // Lists that came to stand next to each other join, however it happened (typed `1. `, a drop, a block turned
+  // into a list). An undo is left alone, so the join itself can be undone.
+  let depth = editor.undoDepth;
+  let joining = false;
   editor.on("update", () => {
+    const undone = editor.undoDepth < depth;
+    depth = editor.undoDepth;
+    if (!undone && !joining && !dragging()) {
+      joining = true;
+      joinLists(editor);
+      joining = false;
+      depth = editor.undoDepth;
+    }
     if (dragging()) return;
     handle.set(null);
     menu.set(null);

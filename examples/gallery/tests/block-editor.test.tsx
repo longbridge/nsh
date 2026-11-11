@@ -265,3 +265,16 @@ test("the handle goes when the document scrolls under it, and with Select All", 
   await app.waitFor("role:toolbar[Format]");
   expect(app.count(handle)).toBe(0);
 });
+
+test("a list started right above one of its kind joins it: the numbers run on", async () => {
+  const app = await openDemo();
+  // A paragraph between the heading and the numbered list, made a list by typing `1. `.
+  await app.press("Rollout");
+  await app.keyboard.press("end");
+  await app.keyboard.press("enter");
+  await app.type("label:Document", "1. Pick the owner");
+  await app.waitFor("text:Pick the owner");
+  // One list of four, not two lists that each start at 1.
+  await app.waitFor("text:4.");
+  expect(app.count("text:1.")).toBe(1);
+});
