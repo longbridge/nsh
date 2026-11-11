@@ -482,13 +482,13 @@ pub(crate) fn sheet_window(surface: &Surface) -> Option<Retained<NSWindow>> {
     own.or_else(|| surface.root.ns().window())
 }
 
-/// The window an open or save panel slides down from: the
-/// [`sheet_window`] while the user sees it ([`panel_placement`]). A sheet
-/// of a window out of sight (a tray app's hidden main window, a minimized
-/// one, one kept off every screen) stays out of sight with it, so the
-/// panel shows in a window of its own instead (`None`), the app activated
-/// first as `focus()` activates it: a panel of an inactive app opens
-/// behind the front app's windows.
+/// The window an open or save panel, or an alert ([`crate::system`]),
+/// slides down from: the [`sheet_window`] while the user sees it
+/// ([`panel_placement`]). A sheet of a window out of sight (a tray app's
+/// hidden main window, a minimized one, one kept off every screen) stays
+/// out of sight with it, so the panel shows in a window of its own instead
+/// (`None`), the app activated first as `focus()` activates it: a panel of
+/// an inactive app opens behind the front app's windows.
 pub(crate) fn panel_window(surface: &Surface) -> Option<Retained<NSWindow>> {
     let window = sheet_window(surface);
     let app = NSApplication::sharedApplication(surface.mtm);
@@ -1256,7 +1256,7 @@ fn order_front(surface: &Surface, window: &NSWindow, activate: bool, key: bool, 
 }
 
 /// How [`order_front`] activates the app (and [`panel_window`], for an
-/// open or save panel shown alone).
+/// open or save panel or an alert shown alone).
 #[derive(Debug, PartialEq, Eq)]
 enum Activation {
     /// Not at all: it is active, the window does not activate it (a panel),
@@ -1266,7 +1266,8 @@ enum Activation {
     /// new window) stays out of the way of the app the user is in.
     Ask,
     /// It takes the keyboard from the app in front (`focus()`, an open or
-    /// save panel shown alone), as other toolkits' focus calls do.
+    /// save panel or an alert shown alone), as other toolkits' focus calls
+    /// do.
     Take,
 }
 

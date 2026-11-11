@@ -663,6 +663,19 @@ Things that were found the hard way. Read the section of the area you change bef
   AppKit accessory app and in an NSH one (an NSH regular app did the same under synthetic input).
   `activateIgnoringOtherApps:YES` (deprecated in macOS 14) activated it, as Tauri, winit, Qt's `raise()` and GPUI call
   it to focus a window; `focus()` uses it, `show()` and new windows ask (`window::activation`).
+- **A sheet of a window out of sight is never seen**, and its completion handler waits for the window:
+  `beginSheetModalForWindow:` on a hidden window (a tray app's main window, `defaultVisible: false`), a minimized one or
+  one off every screen shows nothing until that window shows, so an `AlertDialog` raised from a tray menu showed
+  nowhere and its answer waited for the window. Open and save panels then show in a window of their own
+  (`beginWithCompletionHandler:`); `NSAlert` shows on its own only app-modal (`runModal`), as Electron's message boxes
+  do without a visible parent (electron/electron#22671). Three rules come with a modal loop (`system::run_alone`,
+  `tests/native/window_alert.rs`): CFRunLoop drains the main queue only outside its blocks (the queue is serial), so a
+  modal loop entered from a main-queue block holds the queue and everything that comes through it (an app's batches,
+  the test agent's calls): enter it from a block of the run loop's own (`performInModes:block:`), as context menus are
+  (`chrome.rs`); `stopModalWithCode:` from outside the loop's own events (a dispatch block, a timer) ends the loop only
+  at the next event (Apple's documentation of `stopModal`), so post one (an application-defined event); and
+  `-[NSApplication stop:]` inside a modal loop ends that loop, not the app's (Apple's documentation of `stop:`), so the
+  standalone runner stops its own loop once the modal one is over (`app.rs` `finish_running`).
 - While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
   occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
   keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and
