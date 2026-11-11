@@ -292,7 +292,7 @@ const offset = signal({ x: 0, y: 0 });
 
 ### 工具提示
 
-`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏；在任何设备上，键盘焦点停在元素上时也会显示，焦点离开或按下 Escape 时隐藏。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
+`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏；在任何设备上，键盘把焦点移到元素上时也会显示，焦点离开或按下 Escape 时隐藏（点击或轻点带来的焦点把提示交给指针决定）。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -492,6 +492,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessible` | `.accessible(..)` | `boolean` | 视图对辅助技术而言是一个整体元素，子元素不再单独暴露。 |
 | `accessibilityLabel` | `.label(..)` | `string` | 屏幕阅读器朗读的内容。没有标签的视图会朗读其中的文本。 |
 | `accessibilityHint` | `.hint(..)` | `string` | 激活该元素会发生什么。 |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | 名字之外对元素的说明，在名字之后朗读（对话框的说明文字）。 |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | 辅助技术报告的状态（`checked` 和 `pressed` 可以是 `"mixed"`；`current` 为 `true` 或 `"page"`、`"step"`、`"location"`、`"date"`、`"time"`）。 |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |

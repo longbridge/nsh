@@ -339,7 +339,9 @@ const offset = signal({ x: 0, y: 0 });
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
 desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
-every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
+that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
+exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
@@ -576,6 +578,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessible` | `.accessible(..)` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `.label(..)` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | More about the element than its name, read after it (a dialog's message). |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |

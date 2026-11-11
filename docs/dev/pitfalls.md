@@ -566,7 +566,9 @@ Things that were found the hard way. Read the section of the area you change bef
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
   400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
   `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
-  the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
+  the bar's height whatever the window's, and uses `contentLayoutRect` only without one; a measure from it runs
+  again on the next main-queue turn, once AppKit has laid the window out, since the root view's size may not change
+  again to trigger one.
 
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and

@@ -15,7 +15,7 @@ NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和
 ## 环境要求
 
 - Mac 上的 **Xcode**，以及一个 iOS 模拟器运行时（`xcodebuild -downloadPlatform iOS` 可以安装）。见[安装](./installation.md#ios-与-mac-catalyst)。
-- 应用需要 **iOS 15.0** 及以上，支持 iPhone 和 iPad。
+- 应用需要 **iOS 15.0** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)），支持 iPhone 和 iPad。
 
 ## 运行应用
 

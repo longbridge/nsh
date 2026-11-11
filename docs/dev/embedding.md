@@ -4,8 +4,10 @@
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS and macOS packages add the app's
   `ios` / `macos` `infoPlist` keys and `entitlements` (`crates/nsh-cli/src/apple.rs`: JSON as property list values,
-  the keys NSH sets refused with what to set instead; device builds check entitlements against the profile, which
-  keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
+  the keys NSH sets refused with what to set instead; `MinimumOSVersion` / `LSMinimumSystemVersion` are the runtime's
+  minimum, `IOS_MINIMUM` / `MACOS_MINIMUM`, which an app may raise but not lower (checked when `nsh.json` is read;
+  `actool` compiles the iOS icon for the version declared); device builds check entitlements against the profile,
+  which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as

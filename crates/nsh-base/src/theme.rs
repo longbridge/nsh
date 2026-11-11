@@ -346,17 +346,33 @@ fn written_as_color(value: &str) -> bool {
     ) {
         return false;
     }
-    // A shadow may start with a complete color function and end in lengths.
+    if value.ends_with(')') {
+        return true;
+    }
+    // A shadow may start with a color function. Its next component need
+    // not be separated by whitespace, but an attached bare name other than inset
+    // cannot follow the color.
     let mut depth = 1;
-    value.ends_with(')')
-        || !rest.chars().any(|c| {
-            depth += match c {
-                '(' => 1,
-                ')' => -1,
-                _ => 0,
-            };
-            depth == 0
-        })
+    for (i, c) in rest.char_indices() {
+        depth += match c {
+            '(' => 1,
+            ')' => -1,
+            _ => 0,
+        };
+        if depth == 0 {
+            let suffix = &rest[i + 1..];
+            let end = suffix
+                .find(|c: char| c.is_ascii() && !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+                .unwrap_or(suffix.len());
+            let (name, tail) = suffix.split_at(end);
+            return name
+                .trim_start_matches('-')
+                .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || !c.is_ascii())
+                && !name.eq_ignore_ascii_case("inset")
+                && !tail.starts_with(['(', '\\']);
+        }
+    }
+    true
 }
 
 /// A CSS length in points: `0.625rem`, `10px`, `10`.
@@ -741,6 +757,46 @@ mod tests {
         )
         .unwrap();
         assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn an_identifier_attached_to_a_color_function_is_listed() {
+        for value in [
+            "rgb(255 0 0)garbage",
+            "RGB(255 0 0)garbage",
+            "oklch(0.7 0.1 30)junk",
+            "color-mix(in srgb, rgb(255 0 0), #fff)garbage",
+            "rgb(255 0 0)inset-x 0 1px",
+            "rgb(255 0 0)inset2 0 1px",
+            "rgb(255 0 0)_junk",
+            "rgb(255 0 0)--junk",
+        ] {
+            let json = format!(r#"{{ "cssVars": {{ "light": {{ "brand": "{value}" }} }} }}"#);
+            let (theme, ignored) = Theme::from_json_lenient(&json).unwrap();
+            assert_eq!(ignored, [format!("`brand`: {value} is no color")]);
+            assert_eq!(theme.color("brand"), None);
+        }
+    }
+
+    #[test]
+    fn shadows_after_a_color_function_keep_their_import_behavior() {
+        for value in [
+            "rgb(0 0 0 / 0.1) 0px 1px 2px",
+            "rgb(0 0 0 / 0.1)0px 1px 2px",
+            "rgb(0 0 0 / 0.1)-1px 1px 2px",
+            "rgb(0 0 0 / 0.1)0 .1em .2em",
+            "rgb(0 0 0 / 0.1)inset 0 1px",
+            "rgb(0 0 0 / 0.1)INSET 0 1px",
+            "rgb(0 0 0 / 0.1)i\\6e set 0 1px",
+            "rgb(0 0 0 / 0.1)var(--shadow-x) 1px",
+            "rgb(0 0 0 / 0.1)calc(1px + 1em) 2px",
+            "rgb(0 0 0 / 0.1)0 1px 2px, inset 0 1px 1px #000",
+        ] {
+            let json = serde_json::json!({"cssVars": {"light": {"shadow-sm": value}}}).to_string();
+            let (theme, ignored) = Theme::from_json_lenient(&json).unwrap();
+            assert!(ignored.is_empty(), "{value}: {ignored:?}");
+            assert_eq!(theme.tokens().get("shadow-sm"), None);
+        }
     }
 
     #[test]

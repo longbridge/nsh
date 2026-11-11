@@ -278,9 +278,13 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
-- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `State` / `Value` / `Actions` / `Level` +
+- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `Description` / `State` / `Value` / `Actions` / `Level` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
-  (Android: resource id). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
+  (Android: resource id). `accessibilityDescription` (ARIA's `aria-description`, `gpui-base`'s `aria_description`;
+  Rust `.accessibility_description(..)`) is read after the name: a dialog's message. Windows has a property of its own
+  for it (UIA `FullDescription`); the other platforms have one place for what is read after the name (AppKit's help,
+  UIKit's hint, AT-SPI's and AccessKit's description, Android's hint text, the web's `aria-description`), which gets
+  the description and then the hint (`Accessibility::help_text`). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
   `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
   `Dialog` is a `dialog` unless the app gives it another role, named by its label; the platforms map it to their own
   dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content); `accessibilityState.pressed` (`aria-pressed`:
@@ -510,18 +514,25 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
   for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
-  it. In every idiom the keyboard focus shows it too (WAI-ARIA's tooltip pattern; the focus is keyboard focus, a click
-  moves none): `Core::focus_hints`, after `update_focus_within`, shows the hint of the nearest anchor on the focus
-  chain (up to the overlay the focus is in, so a popup's focus is not on its trigger's hint) at once and hides it when
-  the focus leaves. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same `ESCAPE_BINDING`):
-  Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint (`overlay_escape`); a hint
-  Escape or a press hid shows for the focus again only once the focus comes back. The overlay hears what the pointer
-  and the focus ask for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`,
-  `Escape`, `View`), and
-  `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
-  is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
-  so. The overlay should
-  not take the pointer (`pointerEvents: "none"`).
+  it. In every idiom the focus the keyboard moved shows it too (WAI-ARIA's tooltip pattern): `Core::focus_hints`,
+  after `update_focus_within`, shows the hint of the nearest anchor on the focus chain (up to the overlay the focus is
+  in, so a popup's focus is not on its trigger's hint) at once when the keyboard brought the focus there, and hides it
+  when the focus leaves. Which input moved the focus is decided as it is reported (`classes::focus_reported`:
+  `Core::focus_by_keyboard`, by `keyboard_moves_focus`: `focus-visible:`'s rule, `styles.md`, without its exception
+  for an input that edits), so Tab, a group's arrows, a shortcut and the app's `focus()` after a key show the hint, and
+  a press, a tap or a click that focuses the anchor (a click on a stop where the platform focuses it, a tap into a
+  field, a component's or the app's `focus()` after a press) leaves the hint to the pointer, as Radix's tooltips do:
+  the press hid it, and it stays hidden after the pointer left. A key typed later, the focus staying, shows
+  `focus-visible:` and no hint; the hint shows once the keyboard moves the focus to the anchor (a move inside the
+  anchor decides nothing again). Before any input the focus counts as the keyboard's (an `autoFocus`), as it
+  does for `focus-visible:`. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same
+  `ESCAPE_BINDING`): Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint
+  (`overlay_escape`); a hint Escape or a press hid shows for the focus again only once the keyboard brings the focus
+  back. The overlay hears what the pointer and the focus ask for (`Show`, `Dismiss`: `on_hint_show` /
+  `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`, `Escape`, `View`), and `OverlayConfig::open`
+  (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state is controlled or not).
+  Touch screens never watch the pointer: a hint shows there for the keyboard's focus (a hardware keyboard) or when
+  `open` says so. The overlay should not take the pointer (`pointerEvents: "none"`).
 - **A link's hint** (a hint overlay whose parent is a link of a text: a nested span, `AttributedText::links`): the
   span is its anchor (`Core::hint_anchor` takes any span, `is_text_span`, since the watch is what makes it a link;
   `is_link_span`: a span taking presses or watched for a hint). A span taking no presses (`RichEditor`'s link mark,

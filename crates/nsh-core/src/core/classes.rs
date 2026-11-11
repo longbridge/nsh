@@ -261,6 +261,7 @@ impl<M: TextEngine> Core<M> {
         if focused {
             self.focus = (key != self.root).then_some((key, id));
             self.focus_visible = self.focus_shows(key);
+            self.focus_by_keyboard = self.keyboard_moves_focus();
             self.blur_held = false;
         } else if self.focus == Some((key, id)) {
             self.focus = None;
@@ -275,7 +276,10 @@ impl<M: TextEngine> Core<M> {
     /// last ([`InputModality`]), before the focus moves it causes: a key
     /// typed while the focus does not show makes it show, as browsers
     /// do. A pointer leaves a focus that shows as it is: only a move of
-    /// the focus decides again ([`Self::focus_shows`]).
+    /// the focus decides again ([`Self::focus_shows`]). A hint the focus
+    /// shows is decided only as the focus moves
+    /// ([`Self::keyboard_moves_focus`]): a key typed after a press shows
+    /// the focus, never the hint of the view it is on.
     pub fn set_input_modality(&mut self, modality: InputModality) {
         self.modality = Some(modality);
         if modality == InputModality::Keyboard && self.focus.is_some() && !self.focus_visible {
@@ -287,11 +291,7 @@ impl<M: TextEngine> Core<M> {
     /// Whether the focus coming to `key` shows (`focus-visible:`), the
     /// one rule every platform follows, after CSS's `:focus-visible`: an
     /// input that edits always shows it (it takes typing), any other view
-    /// unless the surface's last input was a pointer, so the keyboard's
-    /// moves show (Tab, a group's arrows, a shortcut) and so does a move
-    /// the app makes (`focus()`, a calendar or a dialog moving it as it
-    /// opens) after a key, while a press, a tap or a move after one does
-    /// not. Before any input it shows, as a browser's `autofocus` does.
+    /// when the keyboard moved the focus ([`Self::keyboard_moves_focus`]).
     pub(super) fn focus_shows(&self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
         let edits = node.kind == Kind::Input
@@ -299,7 +299,21 @@ impl<M: TextEngine> Core<M> {
                 .input
                 .as_ref()
                 .is_some_and(|input| input.config.editable);
-        edits || self.modality != Some(InputModality::Pointer)
+        edits || self.keyboard_moves_focus()
+    }
+
+    /// Whether the focus moving now is the keyboard's, by the surface's
+    /// last input: unless that was a pointer, so the keyboard's moves
+    /// count (Tab, a group's arrows, a shortcut) and so does a move the
+    /// app makes (`focus()`, a calendar or a dialog moving it as it opens)
+    /// after a key, while a press, a tap or a move after one do not.
+    /// Before any input it counts, as a browser's `autofocus` shows its
+    /// focus. `focus-visible:` ([`Self::focus_shows`]) and the hints the
+    /// focus shows (`Core::focus_hints`) follow it; a hint has no
+    /// exception for an input that edits, so a click into a field leaves
+    /// its tooltip to the pointer.
+    fn keyboard_moves_focus(&self) -> bool {
+        self.modality != Some(InputModality::Pointer)
     }
 
     /// Puts `FOCUS_VISIBLE` on the focus while it shows and takes it off

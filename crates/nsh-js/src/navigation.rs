@@ -221,6 +221,9 @@ export interface DialogProps extends DialogHostProps {
   animation?: "slide" | "fade" | "none";
   /** What screen readers call it as the focus enters it: its title. */
   accessibilityLabel?: string;
+  /** What screen readers read after its name: its message (an alert
+   * dialog's "This can't be undone."). */
+  accessibilityDescription?: string;
   /** What it is for screen readers (default `"dialog"`): `"alertdialog"`
    * for one that asks the user to confirm something or tells them
    * something urgent. */
