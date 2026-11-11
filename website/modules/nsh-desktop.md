@@ -34,7 +34,7 @@ import {
 } from "nsh/desktop";
 ```
 
-The menus NSH builds and role items without an explicit label follow the language selected by `nsh/i18n`, including changes while the app runs. Built-in menu translations cover English, Japanese, Simplified Chinese and Traditional Chinese; other languages fall back to English. An item's own `label` always takes precedence.
+In the AppKit and Win32 backends, the menus NSH builds and role items without an explicit label follow the language selected by `nsh/i18n`, including changes while the app runs. Built-in menu translations cover English, Japanese, Simplified Chinese and Traditional Chinese; other languages fall back to English. An item's own `label` always takes precedence.
 
 ## isAvailable
 

@@ -177,7 +177,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::OpenWindow(_) => {}
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
-        // GTK labels the menus it makes itself.
+        // This backend retains its existing GTK and role-label behavior.
         DesktopCommand::SetMenuLabels(_) => {}
         DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
         DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {

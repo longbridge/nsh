@@ -12,9 +12,9 @@
 //! ```sh
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
+mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod ime;
-mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
@@ -39,6 +39,9 @@ fn main() {
         {
             if mount::bench_only() {
                 mount::bench_alone();
+            } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {
+                window_press::run();
+                menu_labels::run();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
             } else if std::env::var_os("NSH_WINDOW_DIALOG_CHECK_ONLY").is_some() {

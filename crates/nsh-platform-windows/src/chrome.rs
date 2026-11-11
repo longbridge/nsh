@@ -1795,10 +1795,10 @@ pub(crate) fn appearance_changed(surface: &Surface) {
 mod tests {
     use super::*;
 
-    /// An item with a role and no label of its own reads the app's label
-    /// of the role, else the English one, its shortcut after a tab.
+    /// A role-only item reads the translated label, else the English
+    /// default, with its shortcut after a tab.
     #[test]
-    fn a_role_item_reads_the_apps_label() {
+    fn a_role_item_reads_the_translated_label() {
         let action = MenuAction {
             id: 1,
             label: String::new(),

@@ -770,8 +770,8 @@ fn title(action: &MenuAction, labels: &MenuLabels) -> String {
         .unwrap_or_default()
 }
 
-/// The title of an item with `role` and no label of its own: the app's
-/// label of it in `labels`, else the English one, with the app's name
+/// The title of a role-only item: NSH's
+/// translation in `labels`, else the English one, with the app's name
 /// where macOS writes it.
 fn role_title(role: MenuRole, labels: &MenuLabels) -> String {
     if let Some(label) = labels.role(role) {
@@ -815,7 +815,7 @@ pub(crate) fn role_item(
 /// The standard menu bar: the app menu (About, Hide, Quit), Edit (the
 /// text commands fields answer: undo, cut, copy, paste, select all) and
 /// Window (minimize, zoom, full screen, close), items of their roles
-/// ([`role_item`]) labelled with the app's labels.
+/// ([`role_item`]) labelled in the app's selected language.
 fn standard_menu(mtm: MainThreadMarker, labels: &MenuLabels) -> Retained<NSMenu> {
     let title = app_name();
     let (edit, window) = (&labels.edit_menu, &labels.window_menu);
@@ -887,7 +887,7 @@ pub(crate) fn show_standard_menu(surface: &Surface) {
     surface.chrome.standard_menu.replace(Some(menu));
 }
 
-/// The app's labels changed ([`DesktopCommand::SetMenuLabels`]): this
+/// The core translated new labels ([`DesktopCommand::SetMenuLabels`]): this
 /// surface's menus take them. The standard menu bar, which only
 /// [`crate::run_app`] shows (its app is the only one), is made again with
 /// them, shown or kept to come back (`setApplicationMenu(null)`); so are
@@ -1288,11 +1288,11 @@ pub(crate) fn window_changed(surface: &Surface) {
 mod tests {
     use super::*;
 
-    /// Items with a role and no label of their own read the app's labels,
+    /// Items with a role and no label of their own read the translated labels,
     /// as they are, and English for the roles it does not label, the app
     /// menu's with the app's name.
     #[test]
-    fn roles_read_the_apps_labels() {
+    fn roles_read_the_translated_labels() {
         set_app_name("Notes");
         let english = MenuLabels::default();
         assert_eq!(role_title(MenuRole::Quit, &english), "Quit Notes");

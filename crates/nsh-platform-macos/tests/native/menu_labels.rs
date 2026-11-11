@@ -3,7 +3,7 @@
 //! at once.
 
 use std::{
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
     time::{Duration, Instant},
 };
 
@@ -15,12 +15,15 @@ use nsh_core::{
 use nsh_platform_macos as platform;
 use platform::{
     objc2::{MainThreadMarker, MainThreadOnly, sel},
-    objc2_app_kit::{NSApplication, NSBackingStoreType, NSMenu, NSWindow, NSWindowStyleMask},
-    objc2_foundation::{NSDate, NSPoint, NSRect, NSRunLoop, NSSize},
+    objc2_app_kit::{
+        NSAccessibility, NSApplication, NSBackingStoreType, NSMenu, NSView, NSWindow,
+        NSWindowStyleMask,
+    },
+    objc2_foundation::{NSDate, NSPoint, NSRect, NSRunLoop, NSSize, NSString},
 };
 
 /// The test sets it for the app to label its menus in Japanese.
-static JAPANESE: AtomicBool = AtomicBool::new(false);
+static LANGUAGE: AtomicU8 = AtomicU8::new(0);
 
 /// An Edit menu of roles only, labelled in Japanese once asked.
 #[component]
@@ -37,11 +40,43 @@ fn Menus() -> impl IntoElement {
         ),
     ]);
     set_interval(Duration::from_millis(10), || {
-        if JAPANESE.swap(false, Ordering::SeqCst) {
-            nsh_core::i18n::set_locale(Some(nsh_core::platform::Locale::parse("ja").unwrap()));
-        }
+        let language = match LANGUAGE.swap(0, Ordering::SeqCst) {
+            1 => "ja",
+            2 => "en",
+            _ => return,
+        };
+        nsh_core::i18n::set_locale(Some(nsh_core::platform::Locale::parse(language).unwrap()));
     });
+    view().flex_1().child(text(|| {
+        format!("Menu language {}", nsh_core::element::locale().as_str())
+    }))
+}
+
+#[component]
+fn OtherMenus() -> impl IntoElement {
+    nsh_core::i18n::set_locale(Some(nsh_core::platform::Locale::EN_US));
+    set_application_menu(vec![
+        MenuItem::submenu("App", [MenuItem::role(MenuRole::Quit)]),
+        MenuItem::submenu(
+            "Other",
+            [
+                MenuItem::role(MenuRole::Copy),
+                MenuItem::role(MenuRole::Paste),
+            ],
+        ),
+    ]);
     view().flex_1()
+}
+
+fn shows(view: &NSView, text: &str) -> bool {
+    view.accessibilityValue()
+        .and_then(
+            |value: platform::objc2::rc::Retained<platform::objc2::runtime::AnyObject>| {
+                value.downcast::<NSString>().ok()
+            },
+        )
+        .is_some_and(|value| value.to_string() == text)
+        || view.subviews().iter().any(|child| shows(&child, text))
 }
 
 /// The title of the item of `menu`'s submenus whose action is `action`.
@@ -75,6 +110,8 @@ fn until(what: &str, mut done: impl FnMut() -> bool) {
 #[allow(clippy::field_reassign_with_default)]
 pub(super) fn run() {
     let mtm = MainThreadMarker::new().unwrap();
+    let app = NSApplication::sharedApplication(mtm);
+    let saved_menu = app.mainMenu();
     // SAFETY: The window is created on the process main thread.
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -91,7 +128,7 @@ pub(super) fn run() {
     }
     let mut options = platform::AppOptions::default();
     options.size = (300, 200);
-    let surface = platform::AppView::new(mtm, options);
+    let surface = platform::AppView::new(mtm, options.clone());
     window.setContentView(Some(&surface.view()));
     surface.load(platform::App::Rust(platform::Root::of::<Menus>()));
     window.makeKeyAndOrderFront(None);
@@ -99,12 +136,37 @@ pub(super) fn run() {
     until("the app's menu", || {
         titles(mtm) == (Some("Copy".into()), Some("Paste".into()))
     });
-    JAPANESE.store(true, Ordering::SeqCst);
+    LANGUAGE.store(1, Ordering::SeqCst);
     until("the Japanese label", || {
         titles(mtm) == (Some("コピー".into()), Some("ペースト".into()))
     });
 
-    println!("menu labels: the app's menu takes new labels while it runs");
+    until("the Japanese content", || {
+        shows(&surface.view(), "Menu language ja")
+    });
+    let other = platform::AppView::new(mtm, options);
+    surface.view().addSubview(&other.view());
+    other.load(platform::App::Rust(platform::Root::of::<OtherMenus>()));
+    until("the other surface's menu", || {
+        app.mainMenu().is_some_and(|menu| {
+            menu.itemArray()
+                .iter()
+                .any(|item| item.title().to_string() == "Other")
+        })
+    });
+    let other_menu = app.mainMenu().unwrap();
+    LANGUAGE.store(2, Ordering::SeqCst);
+    until("the first surface's English content", || {
+        shows(&surface.view(), "Menu language en")
+    });
+    assert!(app.mainMenu().is_some_and(|menu| menu == other_menu));
+    assert_eq!(titles(mtm), (Some("Copy".into()), Some("Paste".into())));
+
+    println!(
+        "menu labels: locale changes relabel the owning surface without replacing another's menu"
+    );
+    other.stop();
     surface.stop();
+    app.setMainMenu(saved_menu.as_deref());
     window.close();
 }

@@ -680,28 +680,50 @@ pub struct MenuLabels {
 }
 
 impl MenuLabels {
-    pub(crate) fn for_locale(locale: crate::platform::Locale) -> Self {
+    pub(crate) fn for_locale(locale: crate::platform::Locale, mac: bool) -> Self {
         static TEXTS: std::sync::OnceLock<crate::i18n::Translations> = std::sync::OnceLock::new();
         let texts = TEXTS.get_or_init(|| {
             crate::i18n::Translations::from_json(include_str!("desktop/menu.json"))
                 .expect("the built-in menu translations are valid")
         });
-        let text = |key| texts.lookup(locale.as_str(), key).map(|text| text.into_owned());
+        // Region-only Chinese tags select the traditional script there.
+        let language = match locale.as_str() {
+            "zh-TW" | "zh-HK" | "zh-MO" => "zh-Hant",
+            language => language,
+        };
+        let text = |key: &str| texts.lookup(language, key).map(|text| text.into_owned());
         Self {
-            roles: MenuRole::ALL.iter().filter_map(|role| text(role.label()).map(|label| (*role, label))).collect(),
+            roles: MenuRole::ALL
+                .iter()
+                .filter_map(|role| {
+                    let key = match (role, mac) {
+                        (MenuRole::About, true) => "About App",
+                        (MenuRole::Hide, true) => "Hide App",
+                        (MenuRole::Quit, true) => "Quit App",
+                        (MenuRole::ToggleFullScreen, true) => "Enter Full Screen",
+                        _ => role.label(),
+                    };
+                    let label = if mac {
+                        text(key)
+                    } else {
+                        text(&format!("Windows {key}")).or_else(|| text(key))
+                    };
+                    label.map(|label| (*role, label))
+                })
+                .collect(),
             edit_menu: text("Edit"),
             window_menu: text("Window"),
             delete: text("Delete"),
         }
     }
 
-    /// The app's label of `role`, if it labels it.
+    /// NSH's translated label of `role`, when available.
     pub fn role(&self, role: MenuRole) -> Option<&str> {
         self.roles.get(&role).map(String::as_str)
     }
 
     /// The label of an item with `role` and no label of its own: the
-    /// app's, else [`MenuRole::label`].
+    /// translated label, else [`MenuRole::label`].
     pub fn label(&self, role: MenuRole) -> &str {
         self.role(role).unwrap_or(role.label())
     }
@@ -978,6 +1000,35 @@ pub(crate) fn title_bar_height(height: Option<Points>) -> Option<Points> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn built_in_menu_labels_follow_locale_fallbacks_and_platform_titles() {
+        for (locale, copy, quit) in [
+            ("en", "Copy", "Quit"),
+            ("ja-JP", "コピー", "終了"),
+            ("zh-CN", "复制", "退出"),
+            ("zh-Hant-TW", "複製", "結束"),
+            ("zh-TW", "複製", "結束"),
+            ("zh-MO", "複製", "結束"),
+            ("fr-FR", "Copy", "Quit"),
+        ] {
+            let locale = crate::platform::Locale::parse(locale).unwrap();
+            let labels = MenuLabels::for_locale(locale, false);
+            assert_eq!(labels.label(MenuRole::Copy), copy);
+            assert_eq!(labels.label(MenuRole::Quit), quit);
+            for role in MenuRole::ALL {
+                assert!(!labels.label(*role).contains("%{app}"));
+            }
+        }
+        let japanese = crate::platform::Locale::parse("ja").unwrap();
+        let labels = MenuLabels::for_locale(japanese, true);
+        assert_eq!(labels.label(MenuRole::Quit), "%{app}を終了");
+        assert_eq!(labels.delete.as_deref(), Some("削除"));
+        assert_eq!(
+            MenuLabels::for_locale(japanese, false).label(MenuRole::Paste),
+            "貼り付け"
+        );
+    }
+
     use super::*;
     use crate::geometry::px;
 
