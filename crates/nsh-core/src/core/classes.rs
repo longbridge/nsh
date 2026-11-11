@@ -269,6 +269,12 @@ impl<M: TextEngine> Core<M> {
         } else {
             return;
         }
+        // What the components' focus listeners ask
+        // (`element::focus_by_keyboard`): how the focus came where it is.
+        self.components
+            .executor
+            .focus_by_keyboard
+            .set(self.focus.is_some() && self.focus_by_keyboard);
         self.focus_moved = true;
     }
 
@@ -308,8 +314,10 @@ impl<M: TextEngine> Core<M> {
     /// app makes (`focus()`, a calendar or a dialog moving it as it opens)
     /// after a key, while a press, a tap or a move after one do not.
     /// Before any input it counts, as a browser's `autofocus` shows its
-    /// focus. `focus-visible:` ([`Self::focus_shows`]) and the hints the
-    /// focus shows (`Core::focus_hints`) follow it; a hint has no
+    /// focus. `focus-visible:` ([`Self::focus_shows`]), the hints the
+    /// focus shows (`Core::focus_hints`) and what components' focus
+    /// listeners ask (`element::focus_by_keyboard`: `nsh-base`'s
+    /// `HoverCard`) follow it; the hints and the listeners have no
     /// exception for an input that edits, so a click into a field leaves
     /// its tooltip to the pointer.
     fn keyboard_moves_focus(&self) -> bool {
@@ -394,6 +402,7 @@ impl<M: TextEngine> Core<M> {
             .filter(|&(k, id)| self.nodes.get(k as usize).is_some_and(|n| n.id == id));
         if focus.is_none() {
             self.focus = None;
+            self.components.executor.focus_by_keyboard.set(false);
         }
         let mut chain = std::mem::take(&mut self.focus_scratch);
         chain.clear();

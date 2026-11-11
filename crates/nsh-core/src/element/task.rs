@@ -433,6 +433,11 @@ pub(crate) struct Executor {
     pub(crate) menus: Rc<RefCell<super::menus::ViewMenus>>,
     /// The views' watches of nodes they did not make.
     pub(crate) watches: Rc<RefCell<super::watch::Watches>>,
+    /// The keyboard moved the focus where it is: the core's decision as
+    /// the focus was reported (`Core::focus_by_keyboard`), `false` while
+    /// no view has the focus; components read it with
+    /// [`super::focus_by_keyboard`].
+    pub(crate) focus_by_keyboard: std::cell::Cell<bool>,
     /// The timers tasks wait for ([`super::timer`]), soonest first: the core
     /// fires them as they come due, and the engine's loop wakes for the
     /// soonest, as it does for JS's timers.

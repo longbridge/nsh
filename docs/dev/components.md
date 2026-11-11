@@ -1092,8 +1092,8 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   when there is one; a controlled popup waits for the app to change `open`.
 - **`onOpenChange({ open, reason })`**: every request to open or close (`OpenState::request`; not a request for what it
   already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
-  `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"focus"` (a hover card's
-  trigger gained or lost the keyboard focus; the keyboard focus moved to another item of a submenu's menu), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
+  `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"focus"` (the keyboard
+  moved the focus to a hover card's trigger, or the focus left it; the keyboard focus moved to another item of a submenu's menu), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
   motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
   closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `onOpen` comes in the commit after
@@ -1174,17 +1174,23 @@ is for, never by replacing one popup with another everywhere:
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on
-the card's overlay, and the keyboard focus by `onFocus` / `onBlur` on the trigger; the delays are one timer of the
-components' executor (`set_timeout`, a `Spawned` the next request cancels), as `gpui-base`'s `HoverCardState` keeps
-one open or close task. Entering the trigger or focusing it waits `openDelay`; leaving the trigger with the pointer not
-on the card, leaving the card with the pointer not on the trigger, or the trigger losing the focus waits `closeDelay`,
-and the close is dropped when it comes due with the pointer on either part (where the pointer is, `Over`, is a
-`stored` value, read only by the timer: no signal, nothing rendered again). The card counts as left when it goes (a
-`cleanup` of its region: a view taken away hears no leave). Escape and back (`onCancel`) and a press outside close it at
-once, with no timer. So a hover that does not open the card sends the platform nothing, and moving between the two
-parts sends nothing either; the card's opening and closing are `Popover`'s mount items. On phones and tablets
-(`!is_desktop()`) the trigger gets a press listener instead, which toggles it (`gpui-base`'s `tap_to_open`, its
-default there), and the card's press outside closes it without a backdrop, so the press goes on to what is under it.
+the card's overlay, and the keyboard focus by the focus coming into and leaving the view holding both
+(`ElementRef::on_focus_in` / `on_focus_out`: a move from the trigger into the card is neither); the delays are one
+timer of the components' executor (`set_timeout`, a `Spawned` the next request cancels), as `gpui-base`'s
+`HoverCardState` keeps one open or close task. Only the focus the keyboard moved in counts, decided as it comes in
+(`focus_by_keyboard`, the rule a tooltip's focus follows: `elements.md` "Hints"), as Floating UI's `useFocus` with
+`visibleOnly`: a press, a tap or a click that focuses the trigger or the card (a press handler's `focus()`, a menu
+giving the focus back as a press closes it) neither opens nor holds the card, which stays the pointer's and closes once
+the pointer left. Entering the trigger or the keyboard focusing it waits `openDelay`; leaving the trigger with the
+pointer not on the card, leaving the card with the pointer not on the trigger, or the keyboard's focus leaving both
+waits `closeDelay`, and the close is dropped when it comes due with the pointer on either part or the keyboard's focus
+in them (where they are, `Over`, is a `stored` value, read only by the timer: no signal, nothing rendered again). The
+card counts as left when it goes (a `cleanup` of its region: a view taken away hears no leave). Escape and back
+(`onCancel`) and a press outside close it at once, with no timer. So a hover that does not open the card sends the
+platform nothing, and moving between the two parts sends nothing either; the card's opening and closing are
+`Popover`'s mount items. On phones and tablets (`!is_desktop()`) the trigger gets a press listener instead, which
+toggles it (`gpui-base`'s `tap_to_open`, its default there), and the card's press outside closes it without a
+backdrop, so the press goes on to what is under it.
 
 `Select`'s and `Combobox`'s list (`listbox.rs`) is a state machine of its own, since `gpui-base`'s
 `Select` root leaves it to `gpui-component`'s styled `SearchableList` (`api-naming.md`): the rows for the query

@@ -1,9 +1,11 @@
 //! `HoverCard` on a Mac: it opens once the pointer rested on the trigger
-//! for its open delay (or the keyboard focus came to it), stays open while
-//! the pointer moves into the card, closes its close delay after the
+//! for its open delay (or the keyboard moved the focus to it), stays open
+//! while the pointer moves into the card, closes its close delay after the
 //! pointer left both, and at once on Escape; the pointer back on either
 //! within the close delay, or on the trigger while the card goes, keeps
-//! it, and so does the keyboard focus on the trigger or in the card; a delay of `Infinity` never ends and one of `NaN` is none; a
+//! it, and so does the focus the keyboard moved to the trigger or into the
+//! card, while a click that focuses either (and a key typed after it)
+//! leaves it to the pointer; a delay of `Infinity` never ends and one of `NaN` is none; a
 //! controlled card shows what the app says; a hover sends the platform
 //! nothing until the card opens; what the card shows is no part of a
 //! toolbar its trigger is in. On a phone a press opens and closes it, and
@@ -42,16 +44,40 @@ struct ScreenProps {
     exit: bool,
     /// The card holds a link the keyboard focus can reach.
     link: bool,
+    /// A press on the mention in the trigger (or on the card's link) gives
+    /// it the focus with a press handler's `focus()`, a click that focuses
+    /// (the headless driver moves no focus on a press). The mention is the
+    /// trigger's stop then.
+    press_focus: bool,
 }
 
 /// A mention whose card previews a profile, a place away from it, and
-/// what `onOpenChange` reported on screen.
+/// what `onOpenChange` reported on screen, with how often the mention
+/// took the focus (`Focused: …`).
 #[component]
 fn HoverScreen(props: ScreenProps) -> impl IntoElement {
     let changes = signal(Vec::<String>::new());
     let life = signal(Vec::<&str>::new());
     let shown = signal(false);
     let link_focused = signal(false);
+    let focused = signal(0u32);
+    let press_focus = props.press_focus;
+    let mention = element_ref();
+    let profile = element_ref();
+    let trigger = view().test_id("trigger").w(px(100.0)).h(px(30.0));
+    let trigger = if press_focus {
+        trigger.child(
+            view()
+                .element_ref(&mention)
+                .test_id("mention")
+                .focusable(true)
+                .on_press(move || mention.focus())
+                .on_focus(move || focused.update(|n| *n += 1))
+                .child(text("@ada")),
+        )
+    } else {
+        trigger.focusable(true).child(text("@ada"))
+    };
     // The focus coming into the card's place and leaving it, as the view
     // around the card hears it.
     let within = signal(Vec::<&str>::new());
@@ -72,14 +98,7 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
                 changes.update(|c| c.push(change));
             }
         })
-        .trigger(
-            view()
-                .test_id("trigger")
-                .focusable(true)
-                .w(px(100.0))
-                .h(px(30.0))
-                .child(text("@ada")),
-        )
+        .trigger(trigger)
         .child(
             view()
                 .test_id("card")
@@ -89,8 +108,10 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
                 .when(props.link, |card| {
                     card.child(
                         view()
+                            .element_ref(&profile)
                             .test_id("profile")
                             .focusable(true)
+                            .when(press_focus, |link| link.on_press(move || profile.focus()))
                             .on_focus(move || link_focused.set(true))
                             .on_blur(move || link_focused.set(false))
                             .child(text("Profile")),
@@ -123,6 +144,7 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
             format!("Profile focused: {}", link_focused.get())
         }))
         .child(text(move || format!("Within: {}", within.get().join(" "))))
+        .child(text(move || format!("Focused: {}", focused.get())))
 }
 
 /// The screen on a Mac (or an iPhone) on a manual clock, counting the
@@ -353,6 +375,113 @@ fn escape_closes_a_hover_card_with_the_focus_in_it() {
     app.run_for(Duration::from_millis(1000)).unwrap();
     assert!(!app.shows("Ada Lovelace"));
     app.wait_for("Changes: true:Hover false:Cancel").unwrap();
+}
+
+/// The screen on a Mac with a mention a press focuses (and a link in the
+/// card, when `link`).
+fn start_pressing(link: bool) -> Headless {
+    start_with(
+        ScreenProps {
+            press_focus: true,
+            link,
+            ..ScreenProps::default()
+        },
+        true,
+    )
+    .0
+}
+
+/// A click that gives the trigger the focus opens nothing by itself, and
+/// neither does a key typed after it with the focus staying: that focus
+/// came with a press. The keyboard moving the focus there opens it.
+#[test]
+fn a_click_that_focuses_the_trigger_opens_no_hover_card() {
+    let mut app = start_pressing(false);
+    app.press("id:mention").unwrap();
+    app.wait_for("Focused: 1").unwrap();
+    app.wait_for("Within: in").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(!app.shows("Ada Lovelace"), "a press's focus opens nothing");
+    app.press_key("x").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(!app.shows("Ada Lovelace"), "nor a key typed after it");
+    assert!(app.shows("Changes:"), "nothing asked");
+    // Tab on and Shift+Tab back: the keyboard's focus opens it after its
+    // delay.
+    app.press_key("tab").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.wait_for("Focused: 2").unwrap();
+    app.run_for(Duration::from_millis(500)).unwrap();
+    assert!(!app.shows("Ada Lovelace"), "not before 600 ms");
+    app.run_for(Duration::from_millis(150)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "the keyboard's focus opens it");
+    assert!(app.shows("Changes: true:Focus"));
+}
+
+/// A card the pointer opened stays the pointer's after a click that
+/// focuses the trigger: it stays while the pointer is on the card, closes
+/// its close delay after the pointer left both, the focus still on the
+/// trigger, and the pointer opens and closes it as before. Once the
+/// keyboard moves the focus out and back, the focus opens and holds it.
+#[test]
+fn a_click_that_focuses_the_trigger_leaves_the_card_to_the_pointer() {
+    let mut app = start_pressing(false);
+    open_by_hover(&mut app);
+    app.press("id:mention").unwrap();
+    app.wait_for("Focused: 1").unwrap();
+    // Into the card and out: closed once the pointer left both.
+    app.hover("id:card").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(
+        app.shows("Ada Lovelace"),
+        "the pointer on the card keeps it"
+    );
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(250)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "not before 300 ms");
+    app.run_for(Duration::from_millis(100)).unwrap();
+    assert!(
+        !app.shows("Ada Lovelace"),
+        "the press's focus holds nothing"
+    );
+    assert!(app.shows("Changes: true:Hover false:Hover"));
+    // The pointer opens and closes it as before, the focus staying.
+    open_by_hover(&mut app);
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(350)).unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    assert!(app.shows("Changes: true:Hover false:Hover true:Hover false:Hover"));
+    // Tab on and Shift+Tab back: the keyboard's focus opens it and holds
+    // it with the pointer away, until it leaves.
+    app.press_key("tab").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.wait_for("Focused: 2").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "held by the keyboard's focus");
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(350)).unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    assert!(
+        app.shows("Changes: true:Hover false:Hover true:Hover false:Hover true:Focus false:Focus")
+    );
+}
+
+/// A click that focuses a link in the card leaves the card to the pointer
+/// too: it closes once the pointer left both.
+#[test]
+fn a_click_that_focuses_a_link_in_the_card_leaves_it_to_the_pointer() {
+    let mut app = start_pressing(true);
+    open_by_hover(&mut app);
+    app.hover("id:card").unwrap();
+    app.press("id:profile").unwrap();
+    app.wait_for("Profile focused: true").unwrap();
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(350)).unwrap();
+    assert!(
+        !app.shows("Ada Lovelace"),
+        "the press's focus holds nothing"
+    );
+    assert!(app.shows("Changes: true:Hover false:Hover"));
 }
 
 #[test]

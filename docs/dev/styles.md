@@ -95,7 +95,10 @@
   view taking it (AppKit's first responder when no view has it) is no focus. A view whose classes read only
   `focus-within:` tracks nothing natively. Rust components hear the focus come into an element and leave it with
   `ElementRef::on_focus_in` / `on_focus_out` (GPUI's names, a focus handle's), watches the core runs at the end of
-  the commit round the focus moved in (`core/watch.rs`). `dark:` follows the appearance
+  the commit round the focus moved in (`core/watch.rs`); `focus_by_keyboard()` tells them whether the keyboard moved
+  the focus where it is (the core's decision as the focus was reported, the executor's copy of
+  `Core::focus_by_keyboard`: `focus-visible:`'s rule below without its exception for an input that edits), so
+  `nsh-base`'s `HoverCard` opens for the keyboard's focus and leaves a click's to the pointer. `dark:` follows the appearance
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown

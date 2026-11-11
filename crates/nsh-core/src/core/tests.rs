@@ -21033,6 +21033,101 @@ mod views {
         );
     }
 
+    /// Logs, as the focus comes into its area and leaves it, whether the
+    /// keyboard moved the focus where it is (`focus_by_keyboard`): two
+    /// focusable views inside, one outside.
+    #[component]
+    fn KeyboardFocusArea() -> impl IntoElement {
+        let log = signal(Vec::<String>::new());
+        let area = element_ref();
+        let note = move |what: &str| {
+            let entry = format!("{what}:{}", focus_by_keyboard());
+            log.update(|l| l.push(entry));
+        };
+        area.on_focus_in(move || note("in"));
+        area.on_focus_out(move || note("out"));
+        view()
+            .child(text(move || format!("log {}", log.get().join(" "))))
+            .child(
+                view()
+                    .element_ref(&area)
+                    .child(view().focusable(true).child(text("first")))
+                    .child(view().focusable(true).child(text("second"))),
+            )
+            .child(view().focusable(true).child(text("away")))
+    }
+
+    /// `focus_by_keyboard` tells a focus listener how the focus came: the
+    /// focus before any input and the keyboard's moves count, a press's
+    /// does not (a click that focuses, a press handler's `focus()`). A key
+    /// typed with the focus staying changes nothing, a move decides again,
+    /// and with no focus it is `false`.
+    #[test]
+    fn a_focus_listener_hears_whether_the_keyboard_moved_the_focus() {
+        use crate::{platform::InputModality, tailwind::state::FOCUSED};
+        let keyboard = |c: &Core<FakeEngine>| {
+            let _entered = c.components.runtime.enter();
+            focus_by_keyboard()
+        };
+        let log = |c: &mut Core<FakeEngine>| c.commit().map(|b| texts(&b)).unwrap_or_default();
+        let mut c = core();
+        c.mount_root(&Root::new::<KeyboardFocusArea>(|| ()));
+        let batch = c.commit().unwrap();
+        let first = native_parent(&c, text_node(&batch, "first")).unwrap();
+        let second = native_parent(&c, text_node(&batch, "second")).unwrap();
+        let away = native_parent(&c, text_node(&batch, "away")).unwrap();
+        assert!(!keyboard(&c), "no focus yet");
+        // The app's first focus (an `autoFocus`) comes after no input: the
+        // keyboard's, as it shows `focus-visible:`.
+        c.set_states(first, FOCUSED);
+        let shown = log(&mut c);
+        assert!(shown.contains(&"log in:true".into()), "{shown:?}");
+        // A press elsewhere that focuses what it pressed: the pointer's,
+        // which the leave's listener hears too (the focus where it is).
+        c.set_input_modality(InputModality::Pointer);
+        c.set_states(away, FOCUSED);
+        c.set_states(first, 0);
+        let shown = log(&mut c);
+        assert!(shown.contains(&"log in:true out:false".into()), "{shown:?}");
+        // A press back in: the focus comes in, the pointer's.
+        c.set_states(second, FOCUSED);
+        c.set_states(away, 0);
+        let shown = log(&mut c);
+        assert!(
+            shown.contains(&"log in:true out:false in:false".into()),
+            "{shown:?}"
+        );
+        // A key typed with the focus where it is shows `focus-visible:`,
+        // and the focus is still the press's.
+        c.set_input_modality(InputModality::Keyboard);
+        c.commit();
+        assert!(focus_visible(&c, second), "the key shows the focus");
+        assert!(!keyboard(&c), "it came with a press");
+        // Shift+Tab inside the area: the keyboard's now, with no coming in.
+        c.set_states(first, FOCUSED);
+        c.set_states(second, 0);
+        assert!(log(&mut c).is_empty(), "no news inside");
+        assert!(keyboard(&c));
+        // Tab out of it and back in: the keyboard's.
+        c.set_states(away, FOCUSED);
+        c.set_states(first, 0);
+        let shown = log(&mut c);
+        assert!(
+            shown.contains(&"log in:true out:false in:false out:true".into()),
+            "{shown:?}"
+        );
+        c.set_states(first, FOCUSED);
+        c.set_states(away, 0);
+        let shown = log(&mut c);
+        assert!(
+            shown.contains(&"log in:true out:false in:false out:true in:true".into()),
+            "{shown:?}"
+        );
+        // The focus gone: none.
+        c.set_states(first, 0);
+        assert!(!keyboard(&c), "no focus");
+    }
+
     #[derive(Clone, PartialEq, Props)]
     struct AnchoredCornerProps {
         corner: crate::element::Prop<Option<Slot>>,
