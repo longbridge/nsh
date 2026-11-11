@@ -18,7 +18,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange({ open, reason })` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange({ open: false, reason })` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
-| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS: `WKDownload` into the app's data directory's `downloads/<id>/`, only with a listener), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
+| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS's `WKDownload`, WebKitGTK's session downloads or WebView2's `DownloadStarting` into the app's data directory's `downloads/<id>/`, only with a listener; a Rust `onDownloadPending` listener chooses destinations instead), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
@@ -59,6 +59,40 @@ exist, not an API to be compatible with. Components that need core or native sup
 of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).
+
+## Desktop WebView downloads
+
+`nsh_core::webview` defines the download decision protocol. A Rust host registers `WebView::on_download_pending`;
+that registration alone opts into manual destinations, so there is no separate behavior prop. The platform emits
+`DownloadPending` with the download's `id`, `url` and `filename`; the core's typed listener wraps it in
+`WebDownloadPending`, whose private handle binds the original web view's node, executor and download id. The app
+calls `accept(impl Into<DownloadDestination>)` or `cancel()` and awaits `Answer<Result<(), String>>`: it settles
+the decision, not the transfer. Clones share the decision; a handle cannot be forged for another view or download.
+
+The core assigns a request id, keeps its target node and answer, and sends `Command::WebViewRequest` with the mount
+batch. The platform answers with `WebViewReply` on that node. Only a matching pending request is settled; replies
+from another node, duplicates and late replies are dropped, and unmount, unsupported hosts and `REPLY_TIMEOUT`
+settle with an error.
+
+A `DownloadDestination` is absolute, names a file, and its parent must exist. A `PathBuf` refuses an existing file;
+`DownloadDestination::default().path(..).overwrite(true)` replaces one. Platforms write an owned staging file beside
+the destination and publish atomically only on completion: failure, cancellation and teardown remove only that
+output, never the app's existing or completed file. Native deferrals are bounded; a pending decision the app never
+answers is cancelled. An unknown, duplicate or already-finished decision errors without touching another download.
+
+The handler registration alone sets the internal `WebProps::defer_downloads` flag (Rust-only, hidden, reset when the
+handler goes). On a platform where `Environment::webview_requests` is false, that request cannot be honored: the
+core mounts an inert empty document with JavaScript, injected scripts, source/base URL and back/forward gestures
+disabled, reports `onError`, and refuses app-driven `load`, `reload`, back, forward, `injectJavaScript` and
+`Evaluate` (the evaluation answer settles with an error). Removing the handler resets the flag and restores the
+app's page and automatic downloads. No public behavior enum or config exists for this.
+
+Without an `onDownloadPending` listener the platform keeps its automatic behavior: an `onDownload` listener saves
+into `<data dir>/<app id>/downloads/<id>/<sanitized filename>` (macOS, Windows and Linux). Every platform removes
+path separators, control characters, bidi controls and leading dots, and caps names at 200 bytes; Windows also
+refuses reserved device names (including `CONIN$`/`CONOUT$`, `COM`/`LPT` 0-9 and superscripts) and trailing dots or
+spaces. Downloads are Rust-only; TSX keeps the existing `onDownload` lifecycle and gains no path-writing API.
+Host authority stays with the app: it chooses the path, and capabilities continue to govern which pages load.
 
 ## The main thread never waits for JS
 

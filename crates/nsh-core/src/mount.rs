@@ -87,6 +87,12 @@ pub struct WebProps {
     /// ([`crate::web_resource`]). Read when the platform makes the web
     /// view, as `incognito`.
     pub url_schemes: Vec<crate::web_resource::WebUrlScheme>,
+    /// Internal: an `on_download_pending` listener asks the platform to
+    /// defer every download for the app's destination. A platform without
+    /// web view requests cannot honor it, so the core gives it an inert
+    /// page instead of letting it download automatically.
+    #[doc(hidden)]
+    pub defer_downloads: bool,
 }
 
 impl Default for WebProps {
@@ -103,6 +109,7 @@ impl Default for WebProps {
             back_forward_gestures: false,
             incognito: false,
             url_schemes: Vec::new(),
+            defer_downloads: false,
         }
     }
 }

@@ -1582,6 +1582,43 @@ impl WebView {
             events::navigation,
         )
     }
+
+    /// A download started, finished or failed (the platform's existing
+    /// `onDownload` lifecycle). Registering it makes automatic downloads
+    /// write into the app's data directory (`downloads/<id>/<filename>`),
+    /// unless [`on_download_pending`](Self::on_download_pending) is also
+    /// registered, which makes every destination the app's.
+    pub fn on_download<M>(
+        self,
+        listener: impl IntoListener<crate::webview::WebDownload, M>,
+    ) -> Self {
+        self.listen(
+            EventKind::Download,
+            listener.into_listener(),
+            events::web_download,
+        )
+    }
+
+    /// The page asked to download a file and waits for the app's
+    /// destination. Registering this listener is what asks for that: the
+    /// platform writes nothing until the app answers
+    /// ([`WebDownloadPending::accept`](crate::webview::WebDownloadPending::accept)
+    /// or [`cancel`](crate::webview::WebDownloadPending::cancel)), and a
+    /// download the app never answers is cancelled after a bounded wait.
+    /// Without this listener the platform keeps its automatic behavior.
+    /// Only desktops report pending downloads; elsewhere a download never
+    /// bypasses this choice.
+    pub fn on_download_pending<M>(
+        self,
+        listener: impl IntoListener<crate::webview::WebDownloadPending, M>,
+    ) -> Self {
+        self.listen(
+            EventKind::DownloadPending,
+            listener.into_listener(),
+            events::web_download_pending,
+        )
+        .set(Prop::Native(NativeProp::DeferDownloads(true)))
+    }
 }
 
 impl Video {

@@ -764,6 +764,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
+                    // No desktop web view controls (`Environment::webview_requests`):
+                    // the core answers these first.
+                    | Command::WebViewRequest(_)
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),

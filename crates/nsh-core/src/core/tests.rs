@@ -37944,3 +37944,483 @@ fn big_rows_bench() {
     }
     eprintln!("total {total} views");
 }
+/// Pending download decisions through the event's real handle.
+mod download_decisions {
+    use std::path::PathBuf;
+
+    use super::{views::texts, *};
+    use crate::prelude::*;
+
+    /// A web view whose pending downloads are decided by buttons, with the
+    /// answer each decision produced shown as text.
+    #[component]
+    fn DownloadDecisions() -> impl IntoElement {
+        let held = signal(None::<crate::webview::WebDownloadPending>);
+        let line = signal(String::from("none"));
+        let hidden = signal(false);
+        let target = || {
+            let path =
+                std::env::temp_dir().join(format!("nsh-core-download-{}", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            path
+        };
+        view()
+            .child(dynamic(move || {
+                if hidden.get() {
+                    return view().into_element();
+                }
+                web_view("https://example.com/")
+                    .on_download_pending(move |pending: &crate::webview::WebDownloadPending| {
+                        held.set(Some(pending.clone()));
+                        line.set(format!("pending {}", pending.id));
+                    })
+                    .into_element()
+            }))
+            .child(text(move || line.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let Some(mut pending) = held.get() else {
+                    return;
+                };
+                // The public id is only for matching: a change must not
+                // retarget the private decision.
+                pending.id = "forged".into();
+                let line = line;
+                let path = target();
+                spawn(async move {
+                    line.set(format!("accept {:?}", pending.accept(path).await));
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let Some(pending) = held.get() else { return };
+                let line = line;
+                spawn(async move {
+                    let result = pending.accept(PathBuf::from("relative/out")).await;
+                    line.set(format!("invalid {result:?}"));
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let Some(mut pending) = held.get() else {
+                    return;
+                };
+                pending.id = "forged".into();
+                let line = line;
+                spawn(async move {
+                    line.set(format!("cancel {:?}", pending.cancel().await));
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let line = line;
+                spawn(async move {
+                    let result = crate::webview::WebDownloadPending::default()
+                        .accept(target())
+                        .await;
+                    line.set(format!("unbound {result:?}"));
+                });
+            }))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                hidden.set(true);
+            }))
+    }
+
+    fn web_node(batch: &MountBatch) -> NodeId {
+        batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create { id, kind } if *kind == ViewKind::WebView => Some(*id),
+                _ => None,
+            })
+            .expect("a web view")
+    }
+
+    fn press_nodes(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn requests(items: &[MountItem]) -> Vec<(NodeId, u64, crate::webview::WebViewOperation)> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id,
+                    command: Command::WebViewRequest(request),
+                } => Some((*id, request.id, request.operation.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn pending(id: &str) -> EventPayload {
+        EventPayload::Json(serde_json::json!({
+            "id": id,
+            "url": "https://example.com/a.zip",
+            "filename": "a.zip",
+        }))
+    }
+
+    fn reply(c: &mut Core<FakeEngine>, web: NodeId, request: u64, result: Result<(), &str>) {
+        let value = match result {
+            Ok(()) => serde_json::json!({ "id": request, "ok": true, "value": null }),
+            Err(error) => serde_json::json!({ "id": request, "ok": false, "error": error }),
+        };
+        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(value)));
+    }
+
+    #[test]
+    fn pending_events_decide_through_their_private_handles() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            webview_requests: true,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<DownloadDecisions>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let buttons = press_nodes(&batch);
+        assert_eq!(buttons.len(), 5);
+        let mask = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if *id == web => Some(*events),
+                _ => None,
+            })
+            .expect("the web view listens");
+        assert!(mask.contains(EventKind::DownloadPending));
+
+        // The listener receives the event's fields.
+        assert!(c.component_event(web, EventKind::DownloadPending, &pending("d1")));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["pending d1"]);
+
+        // Accepting goes through the handle's own id and node, even when
+        // the public id was changed.
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let made = requests(&batch.items);
+        let [(node, request, crate::webview::WebViewOperation::AcceptDownload { id, destination })] =
+            &made[..]
+        else {
+            panic!("one accept request: {made:?}");
+        };
+        assert_eq!(*node, web);
+        assert_eq!(id, "d1", "the private id, not the edited public one");
+        assert!(destination.path.is_absolute());
+        assert!(!destination.overwrite);
+        let request = *request;
+
+        // The platform's answer reaches the app.
+        reply(&mut c, web, request, Ok(()));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["accept Ok(())"]);
+
+        // A duplicate decision is settled by the platform's error and does
+        // not move to another download.
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let made = requests(&batch.items);
+        let [(_, duplicate, crate::webview::WebViewOperation::AcceptDownload { id, .. })] =
+            &made[..]
+        else {
+            panic!("the repeat accept: {made:?}");
+        };
+        assert_eq!(id, "d1");
+        let duplicate = *duplicate;
+        reply(
+            &mut c,
+            web,
+            duplicate,
+            Err("no pending download with id d1"),
+        );
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let line = &texts(&batch)[0];
+        assert!(line.starts_with("accept Err("), "{line}");
+
+        // An invalid destination fails in the core, with no request.
+        assert!(c.component_event(buttons[1], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(requests(&batch.items).is_empty());
+        let line = &texts(&batch)[0];
+        assert!(line.starts_with("invalid Err("), "{line}");
+
+        // Cancelling uses the same private identity, after the public id
+        // was changed.
+        assert!(c.component_event(web, EventKind::DownloadPending, &pending("d2")));
+        c.run_component_tasks();
+        let _ = c.commit();
+        assert!(c.component_event(buttons[2], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let made = requests(&batch.items);
+        let [(node, request, crate::webview::WebViewOperation::CancelDownload { id })] = &made[..]
+        else {
+            panic!("one cancel request: {made:?}");
+        };
+        assert_eq!(*node, web);
+        assert_eq!(id, "d2");
+        let request = *request;
+        reply(&mut c, web, request, Ok(()));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["cancel Ok(())"]);
+
+        // A retained decision cannot reach an unmounted view.
+        assert!(c.component_event(web, EventKind::DownloadPending, &pending("d3")));
+        c.run_component_tasks();
+        let _ = c.commit();
+        assert!(c.component_event(buttons[4], EventKind::Press, &EventPayload::None));
+        let _ = c.commit();
+        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(requests(&batch.items).is_empty());
+        let line = &texts(&batch)[0];
+        assert!(line.starts_with("accept Err("), "{line}");
+
+        // A value the app made itself names no download: it fails clearly
+        // and sends nothing.
+        assert!(c.component_event(buttons[3], EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        assert!(requests(&batch.items).is_empty());
+        let line = &texts(&batch)[0];
+        assert!(line.starts_with("unbound Err("), "{line}");
+    }
+
+    /// `1` once a rooted web view's pending decision was accepted, `2`
+    /// when it failed.
+    static ROOTED_ACCEPT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+    /// A component whose root is the web view itself: its pending
+    /// decision must still name the native web view node.
+    #[component]
+    fn RootedWeb() -> impl IntoElement {
+        web_view("https://example.com/").on_download_pending(
+            |pending: &crate::webview::WebDownloadPending| {
+                let pending = pending.clone();
+                spawn(async move {
+                    let path = std::env::temp_dir()
+                        .join(format!("nsh-core-rooted-download-{}", std::process::id()));
+                    let _ = std::fs::remove_file(&path);
+                    let state = match pending.accept(path).await {
+                        Ok(()) => 1,
+                        Err(_) => 2,
+                    };
+                    ROOTED_ACCEPT.store(state, std::sync::atomic::Ordering::SeqCst);
+                });
+            },
+        )
+    }
+
+    #[test]
+    fn a_rooted_web_view_decides_through_the_native_node() {
+        use std::sync::atomic::Ordering;
+        ROOTED_ACCEPT.store(0, Ordering::SeqCst);
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            webview_requests: true,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<RootedWeb>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        assert!(c.component_event(web, EventKind::DownloadPending, &pending("rooted")));
+        c.run_component_tasks();
+        let batch = c.commit().unwrap();
+        let made = requests(&batch.items);
+        let [(node, request, crate::webview::WebViewOperation::AcceptDownload { id, .. })] =
+            &made[..]
+        else {
+            panic!("one rooted accept request: {made:?}");
+        };
+        assert_eq!(*node, web, "the native web view node, not its host");
+        assert_eq!(id, "rooted");
+        reply(&mut c, web, *request, Ok(()));
+        c.run_component_tasks();
+        assert_eq!(ROOTED_ACCEPT.load(Ordering::SeqCst), 1);
+    }
+    /// A web view whose pending-download handler can be removed again.
+    #[component]
+    fn DeferredWeb() -> impl IntoElement {
+        let manual = signal(true);
+        view()
+            .child(dynamic(move || {
+                let web = web_view("https://example.com/page");
+                if manual.get() {
+                    web.on_download_pending(|_: &crate::webview::WebDownloadPending| {})
+                        .into_element()
+                } else {
+                    web.into_element()
+                }
+            }))
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| manual.set(false)),
+            )
+    }
+
+    fn web_props(batch: &MountBatch, web: NodeId) -> Option<crate::WebProps> {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::NativeProps {
+                id,
+                props: crate::NativeProps::WebView(props),
+            } if *id == web => Some((**props).clone()),
+            _ => None,
+        })
+    }
+
+    fn commands_to(c: &mut Core<FakeEngine>, web: NodeId, command: Command) -> Vec<Command> {
+        c.apply(Op::Command { id: web, command }).unwrap();
+        let Some(batch) = c.commit() else {
+            return Vec::new();
+        };
+        batch
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                MountItem::Command { id, command } if id == web => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unsupported_manual_downloads_make_the_page_inert_until_the_handler_goes() {
+        use crate::element::Answer;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_evaluate: true,
+            webview_requests: false,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<DeferredWeb>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let toggle = press_nodes(&batch);
+        assert_eq!(toggle.len(), 1);
+        let toggle = toggle[0];
+        let props = web_props(&batch, web).expect("the web view's props");
+        assert!(props.defer_downloads);
+        assert!(!props.javascript_enabled, "the inert page runs no scripts");
+        assert!(
+            matches!(&props.source, crate::WebSource::Html { .. }),
+            "the app's page was not replaced: {:?}",
+            props.source
+        );
+        assert!(props.injected_js.is_none() && props.injected_js_before.is_none());
+
+        // The app hears that this platform cannot honor the handler.
+        let mut events = Vec::new();
+        c.take_events(&mut events);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            crate::element::JsEvent::Event(id, EventKind::Error, _) if *id == web
+        )));
+
+        // No app-driven navigation or injected script can bypass the inert
+        // page.
+        let load =
+            Command::Load(nsh_core::WebLoad::new("https://example.com/page", Vec::new()).unwrap());
+        for command in [
+            load.clone(),
+            Command::Reload,
+            Command::GoBack,
+            Command::GoForward,
+            Command::InjectJavaScript("location.href='/download'".into()),
+        ] {
+            let kind = std::mem::discriminant(&command);
+            let sent = commands_to(&mut c, web, command);
+            assert!(
+                !sent.iter().any(|sent| std::mem::discriminant(sent) == kind),
+                "a blocked web view received {sent:?}"
+            );
+        }
+
+        // Evaluation is settled with an error rather than reaching the
+        // platform, which could navigate or fetch past the policy.
+        let (future, slot) = Answer::new();
+        c.start_web_evaluation(web, "1".into(), T, slot.clone());
+        assert!(slot.borrow_mut().value.take().unwrap().is_err());
+        let sent = c.commit().is_some_and(|batch| {
+            batch.items.iter().any(|item| {
+                matches!(
+                    item,
+                    MountItem::Command {
+                        command: Command::Evaluate { .. },
+                        ..
+                    }
+                )
+            })
+        });
+        assert!(!sent, "a blocked web view evaluated a script");
+        drop(future);
+
+        // Removing the handler restores the app's page and commands.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        // The same web node may be reconciled without a new `Create` item;
+        // its restored `NativeProps` names it either way.
+        let web = batch
+            .items
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                MountItem::NativeProps {
+                    id,
+                    props: crate::NativeProps::WebView(_),
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap_or(web);
+        let props = web_props(&batch, web).expect("the restored props");
+        assert!(!props.defer_downloads);
+        assert!(props.javascript_enabled);
+        assert!(
+            matches!(props.source, crate::WebSource::Uri(ref url) if url.as_ref() == "https://example.com/page"),
+            "the app's page did not return: {:?}",
+            props.source
+        );
+
+        let load =
+            Command::Load(nsh_core::WebLoad::new("https://example.com/page", Vec::new()).unwrap());
+        assert!(matches!(
+            commands_to(&mut c, web, load).as_slice(),
+            [Command::Load(_)]
+        ));
+        assert!(matches!(
+            commands_to(&mut c, web, Command::InjectJavaScript("1".into())).as_slice(),
+            [Command::InjectJavaScript(script)] if script == "1"
+        ));
+
+        let (future, slot) = Answer::new();
+        c.start_web_evaluation(web, "1".into(), T, slot.clone());
+        let sent = c.commit().is_some_and(|batch| {
+            batch.items.iter().any(|item| {
+                matches!(
+                    item,
+                    MountItem::Command {
+                        command: Command::Evaluate { .. },
+                        ..
+                    }
+                )
+            })
+        });
+        assert!(sent, "the restored web view evaluates scripts again");
+        drop(future);
+    }
+}

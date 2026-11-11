@@ -261,6 +261,8 @@ events! {
     Wheel = "onWheel": "A mouse wheel or touchpad scrolled over the view (payload: [`EventPayload::Wheel`]): the nearest listener around the view under the pointer hears it; one nearer than any scroll view under the pointer takes the wheel, so nothing scrolls or zooms natively ([`crate::input::wheel_listener`]).",
 
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
+    WebViewReply = "onWebViewReply" as "": "A [`Command::WebViewRequest`] was carried out (the web view it was sent to; payload: [`EventPayload::Json`], `{ id, ok, value }` or `{ id, ok, error }`; the core answers the request's typed result and it reaches no listener).",
+    DownloadPending = "onDownloadPending" as "": "A web view's page asked to download a file and waits for the app's destination (payload: [`EventPayload::Json`] `id`, `url`, `filename`; handed to Rust's `WebView::on_download_pending`, not to a JS listener).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2350,6 +2352,10 @@ pub enum Command {
     },
     /// Close the edit menu [`Command::OpenEditMenu`] opened on an input.
     CloseEditMenu,
+    /// A request on a web view ([`crate::webview`]) sent once the target is
+    /// known to be a mounted, granted web view; the platform answers on
+    /// this node with [`EventKind::WebViewReply`] (`id`: the request).
+    WebViewRequest(crate::webview::WebViewRequest),
 }
 
 /// An editing action of an edit menu ([`Command::OpenEditMenu`],
@@ -3153,6 +3159,13 @@ pub enum NativeProp {
     /// `WebView::url_scheme`). Read when the web view is made, as
     /// `incognito`.
     UrlSchemes(Vec<crate::web_resource::WebUrlScheme>),
+    /// Internal: the web view has an `on_download_pending` listener, so it
+    /// must defer downloads for the app's destination. A platform without
+    /// web view requests cannot do that; the core keeps its page inert
+    /// rather than let it download automatically.
+    #[doc(hidden)]
+    #[prop(internal, reset = NativeProp::DeferDownloads(false))]
+    DeferDownloads(bool),
     /// `paused` (videos): playback is paused.
     #[prop(js = "paused", on = VIDEO, shared)]
     Paused(bool),

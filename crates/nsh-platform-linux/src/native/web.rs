@@ -69,19 +69,23 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
+    time::Duration,
 };
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
-use nsh_core::{Command, EventKind, EventPayload, PayloadValue, WebProps, WebSource};
+use nsh_core::{
+    Command, EventKind, EventPayload, JsonValue, PayloadValue, WebProps, WebSource,
+    webview::{self, WebViewOperation, WebViewRequest},
+};
 use nsh_engine::Access;
 use webkit6::{
-    CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkError, NetworkSession,
-    PolicyDecisionType, PolicyError, ResponsePolicyDecision, URIRequest, UserContentInjectedFrames,
-    UserContentManager, UserMediaPermissionRequest, UserScript, UserScriptInjectionTime,
-    UserStyleLevel, UserStyleSheet, WebView, prelude::*,
+    CookiePersistentStorage, Download, DownloadError, LoadEvent, NavigationPolicyDecision,
+    NetworkError, NetworkSession, PolicyDecisionType, PolicyError, ResponsePolicyDecision,
+    URIRequest, UserContentInjectedFrames, UserContentManager, UserMediaPermissionRequest,
+    UserScript, UserScriptInjectionTime, UserStyleLevel, UserStyleSheet, WebView, prelude::*,
 };
 
 use super::{Emitter, UNSCROLLABLE, error, fill_sized};
@@ -96,19 +100,134 @@ const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) 
 /// `scrollable: false`: the top document does not scroll.
 const NO_SCROLL: &str = "html, body { overflow: hidden !important; }";
 
+/// How long a manual download waits for the app's destination.
+const PENDING_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// What a web view's signal handlers share.
-struct Shared {
+pub(super) struct Shared {
     emitter: Emitter,
+    /// Async callbacks may outlive this view or the engine it belonged to.
+    live: Cell<bool>,
     /// What the app may show (its `webview` capability); `None`: nothing
     /// is known about the app, so nothing is refused.
     access: Option<Arc<Access>>,
     /// The current navigation failed (WebKit still finishes it).
     failed: Cell<bool>,
+    /// Where automatic downloads are saved (the app's data directory's
+    /// `downloads`); `None`: nothing is downloaded.
+    downloads_root: Option<PathBuf>,
+    /// Downloads WebKit started for this page, by their id.
+    downloads: RefCell<HashMap<String, Rc<DownloadState>>>,
+    /// The id the next download is reported with.
+    next_download: Cell<u64>,
 }
 
 impl Shared {
     fn emit(&self, kind: EventKind, payload: impl FnOnce() -> EventPayload) {
-        self.emitter.emit(kind, payload);
+        if self.live.get() {
+            self.emitter.emit(kind, payload);
+        }
+    }
+
+    /// Answers a [`Command::WebViewRequest`] `id`: its value, or the
+    /// error. Sent even when nothing listens: the core is waiting.
+    fn reply(&self, id: u64, result: Result<JsonValue, String>) {
+        if !self.live.get() {
+            return;
+        }
+        if let Some(surface) = self.emitter.surface.upgrade() {
+            surface.event(
+                self.emitter.id,
+                EventKind::WebViewReply,
+                webview::reply(id, result),
+            );
+        }
+    }
+
+    /// Whether this page's downloads are wanted: an `onDownloadPending`
+    /// listener (the app chooses every destination), or an `onDownload`
+    /// listener with a directory to save automatic downloads in.
+    fn wants_downloads(&self) -> bool {
+        self.emitter.listens(EventKind::DownloadPending)
+            || (self.downloads_root.is_some() && self.emitter.listens(EventKind::Download))
+    }
+
+    /// Whether this page's downloads wait for the app's destination.
+    fn manual_downloads(&self) -> bool {
+        self.emitter.listens(EventKind::DownloadPending)
+    }
+}
+
+/// A download WebKit started for a page: reported, then either saved to a
+/// directory of its own (automatic) or held without one (nothing is
+/// written) until the app accepts a destination or cancels.
+///
+/// A manual download writes to a staging file of its own beside the app's
+/// destination and is published there only once it finished; a cancel or a
+/// failure removes the staging file, never the destination (which may hold
+/// an older file of the app's).
+struct DownloadState {
+    download: Download,
+    /// Handlers on `download`, disconnected when it ends.
+    handlers: RefCell<Vec<glib::SignalHandlerId>>,
+    /// The id its events use.
+    id: String,
+    url: String,
+    /// The name WebKit suggested, sanitized.
+    filename: RefCell<String>,
+    /// Where it is reported: the app's destination once accepted (manual)
+    /// or its file in the app's data directory (automatic).
+    path: RefCell<Option<PathBuf>>,
+    /// What WebKit writes: `path` itself for an automatic download, a
+    /// hidden file beside it for a manual one until it is published.
+    staging: RefCell<Option<PathBuf>>,
+    /// The app's destination is a staging file to publish (manual).
+    manual: Cell<bool>,
+    /// The app asked to replace the destination's file.
+    overwrite: Cell<bool>,
+    /// The `AcceptDownload` request (its core id) waiting for WebKit to
+    /// create the destination file.
+    accepting: Cell<Option<u64>>,
+    /// The `CancelDownload` request (its core id) waiting for the transfer
+    /// to stop, so it can answer once what was written is gone.
+    cancelling: Cell<Option<u64>>,
+    /// A destination was accepted (it cannot be chosen twice).
+    accepted: Cell<bool>,
+    /// WebKit finished it: it can no longer be accepted.
+    finished: Cell<bool>,
+    /// A manual decision was reported (once).
+    pending: Cell<bool>,
+    /// Its `started` event was reported.
+    started: Cell<bool>,
+    /// A terminal `onDownload` event was reported (at most one).
+    terminal: Cell<bool>,
+    /// The timeout that withdraws an unanswered manual decision.
+    expiry: RefCell<Option<glib::SourceId>>,
+}
+
+impl DownloadState {
+    /// Stops listening (so the download's handlers do not keep this for
+    /// ever).
+    fn disconnect(&self) {
+        for id in self.handlers.borrow_mut().drain(..) {
+            self.download.disconnect(id);
+        }
+    }
+
+    fn clear_expiry(&self) {
+        if let Some(source) = self.expiry.borrow_mut().take() {
+            source.remove();
+        }
+    }
+
+    /// Cancels the download for teardown, keeping its terminal callbacks
+    /// connected: what it wrote (a staging file, or the backend's own
+    /// directory) goes only once WebKit reports the transfer stopped.
+    fn cancel_for_cleanup(&self) {
+        self.clear_expiry();
+        if !self.finished.get() {
+            self.download.cancel();
+        }
     }
 }
 
@@ -116,8 +235,14 @@ impl Shared {
 pub(super) struct WebHost {
     web: WebView,
     content: UserContentManager,
+    /// The app's network session (cookies, downloads).
+    session: NetworkSession,
+    /// What the handlers share (replies, downloads).
+    shared: Rc<Shared>,
     /// Handlers on `web` (disconnected when the host goes).
     handlers: Vec<glib::SignalHandlerId>,
+    /// The session's `download-started` handler: this view's downloads.
+    download_started: Option<glib::SignalHandlerId>,
     /// The script message handler, on `content`.
     message: Option<glib::SignalHandlerId>,
     /// The props applied (`None` before the first).
@@ -143,8 +268,12 @@ impl WebHost {
                 view: view.downgrade(),
                 id: view.id(),
             },
+            live: Cell::new(true),
             access: surface.native.access.borrow().clone(),
             failed: Cell::new(false),
+            downloads_root: surface.native.downloads.borrow().clone(),
+            downloads: RefCell::default(),
+            next_download: Cell::new(0),
         });
         let content = UserContentManager::new();
         content.register_script_message_handler(HANDLER, None);
@@ -159,6 +288,17 @@ impl WebHost {
             .build();
         let schemes = super::web_scheme::serve(&web, &p.url_schemes);
         let default_background = web.background_color();
+        let download_started = {
+            let shared = shared.clone();
+            let page = web.clone();
+            session.connect_download_started(move |_, download| {
+                // Every page of the app hears the app's session: only the
+                // page that started it answers for it.
+                if download.web_view().is_some_and(|view| view == page) {
+                    started_download(&shared, download);
+                }
+            })
+        };
         let message = {
             let shared = shared.clone();
             content.connect_script_message_received(Some(HANDLER), move |_, value| {
@@ -192,7 +332,10 @@ impl WebHost {
         WebHost {
             web,
             content,
+            session,
+            shared,
             handlers,
+            download_started: Some(download_started),
             message: Some(message),
             pending,
             props: None,
@@ -204,6 +347,12 @@ impl WebHost {
     /// The page (to call outside the hosts' borrow).
     pub(super) fn web(&self) -> WebView {
         self.web.clone()
+    }
+
+    /// The page and what its requests share: a request is answered with
+    /// these, outside the hosts' borrow (WebKit may call back at once).
+    pub(super) fn request_target(&self) -> (WebView, Rc<Shared>) {
+        (self.web.clone(), self.shared.clone())
     }
 
     pub(super) fn set(&mut self, view: &NshView, p: &WebProps) {
@@ -296,11 +445,24 @@ fn load(web: &WebView, source: &WebSource) {
 
 impl Drop for WebHost {
     fn drop(&mut self) {
+        self.shared.live.set(false);
         // A removal animation may keep the view on screen a little longer:
         // it shows the page as it was, without loading or reporting.
         self.web.stop_loading();
         for id in self.handlers.drain(..) {
             self.web.disconnect(id);
+        }
+        if let Some(id) = self.download_started.take() {
+            self.session.disconnect(id);
+        }
+        // Downloads of this page still under way: cancelled. Their
+        // terminal callbacks stay connected (they only clean up now): what
+        // an automatic one wrote in the backend's own directory, or a
+        // manual one's staging file, goes once WebKit reports the transfer
+        // stopped. The app's destinations are never touched.
+        let downloads = std::mem::take(&mut *self.shared.downloads.borrow_mut());
+        for download in downloads.into_values() {
+            download.cancel_for_cleanup();
         }
         if let Some(id) = self.message.take() {
             self.content.disconnect(id);
@@ -380,6 +542,18 @@ fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
             true
         }
         PolicyDecisionType::Response => match decision.downcast_ref::<ResponsePolicyDecision>() {
+            Some(response) if is_download(response) => {
+                if shared.wants_downloads() {
+                    // WebKit hands it to the session's downloads, which
+                    // hold it for the destination the host decides.
+                    decision.download();
+                } else {
+                    // Nothing listens: refused like a page WebKit cannot
+                    // show, so nothing goes to the system's Downloads.
+                    response.ignore();
+                }
+                true
+            }
             Some(response) if !response.is_mime_type_supported() => {
                 response.ignore();
                 true
@@ -388,6 +562,22 @@ fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
         },
         _ => false,
     })
+}
+
+/// Whether a response is a file to save: the main resource's, of a type
+/// WebKit cannot show or sent as an attachment.
+fn is_download(decision: &ResponsePolicyDecision) -> bool {
+    if !decision.is_main_frame_main_resource() {
+        return false;
+    }
+    if !decision.is_mime_type_supported() {
+        return true;
+    }
+    decision
+        .response()
+        .and_then(|response| response.http_headers())
+        .and_then(|headers| headers.content_disposition())
+        .is_some_and(|(kind, _)| kind.eq_ignore_ascii_case("attachment"))
 }
 
 /// The page's `getUserMedia` gets what the app's `webview.media` grants;
@@ -471,6 +661,581 @@ fn load_failed(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
         // The app shows failures itself: no WebKit error page.
         true
     })
+}
+
+/// Answers a [`Command::WebViewRequest`] for `web`, whose handlers share
+/// `shared`: the id comes back in the reply
+/// ([`EventKind::WebViewReply`]) on the node the request arrived at.
+pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewRequest) {
+    let id = request.id;
+    match &request.operation {
+        WebViewOperation::AcceptDownload {
+            id: download,
+            destination,
+        } => {
+            accept_download(
+                shared,
+                download,
+                id,
+                &destination.path,
+                destination.overwrite,
+            );
+        }
+        WebViewOperation::CancelDownload { id: download } => {
+            cancel_download(shared, download, id);
+        }
+        // A newer core's operation: answered, never left waiting.
+        _ => {
+            let _ = web;
+            shared.reply(id, Err("unsupported web view operation".into()));
+        }
+    }
+}
+
+/// WebKit reported a download of this page: reported and either saved
+/// (automatic) or held without a destination (manual) until the app
+/// decides.
+fn started_download(shared: &Rc<Shared>, download: &Download) {
+    let n = shared.next_download.get();
+    shared.next_download.set(n + 1);
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let state = Rc::new(DownloadState {
+        download: download.clone(),
+        handlers: RefCell::default(),
+        id: download_id(at, n),
+        url: download
+            .request()
+            .and_then(|request| request.uri())
+            .map(|uri| uri.to_string())
+            .unwrap_or_default(),
+        filename: RefCell::default(),
+        path: RefCell::default(),
+        staging: RefCell::default(),
+        manual: Cell::new(false),
+        overwrite: Cell::new(false),
+        accepting: Cell::new(None),
+        cancelling: Cell::new(None),
+        accepted: Cell::new(false),
+        finished: Cell::new(false),
+        pending: Cell::new(false),
+        started: Cell::new(false),
+        terminal: Cell::new(false),
+        expiry: RefCell::default(),
+    });
+    shared
+        .downloads
+        .borrow_mut()
+        .insert(state.id.clone(), state.clone());
+    let mut handlers = Vec::new();
+    {
+        let shared = shared.clone();
+        let state = state.clone();
+        handlers.push(
+            download.connect_decide_destination(move |download, suggested| {
+                // `true` in every case: WebKit never chooses a destination of
+                // its own (`~/Downloads`); the host does, or cancels.
+                decide_destination(&shared, &state, download, suggested);
+                true
+            }),
+        );
+    }
+    {
+        let shared = shared.clone();
+        let state = state.clone();
+        handlers.push(download.connect_created_destination(move |_, _| {
+            // The app's destination is created: answer its request, then
+            // report the download as started.
+            let Some(request) = state.accepting.take() else {
+                return;
+            };
+            shared.reply(request, Ok(JsonValue::Null));
+            if !state.started.replace(true) {
+                let started = download_event("started", &state, None);
+                shared.emit(EventKind::Download, || started);
+            }
+        }));
+    }
+    {
+        let shared = shared.clone();
+        let state = state.clone();
+        handlers.push(download.connect_failed(move |_, err| {
+            let cancelled = err.matches(DownloadError::CancelledByUser);
+            state.finished.set(true);
+            state.clear_expiry();
+            state.disconnect();
+            shared.downloads.borrow_mut().remove(&state.id);
+            // The transfer stopped: what it wrote is gone (a staging file,
+            // or the backend's own directory).
+            cleanup(&shared, &state);
+            if let Some(request) = state.accepting.take() {
+                shared.reply(
+                    request,
+                    Err(if cancelled {
+                        "download cancelled".into()
+                    } else {
+                        err.message().to_owned()
+                    }),
+                );
+            }
+            if let Some(request) = state.cancelling.take() {
+                // Cleanup happened above, before the acknowledgement and
+                // the lifecycle event. A started download has a terminal
+                // `failed` event even when the platform calls it a user
+                // cancellation; a pending one never started.
+                if take_terminal(state.started.get(), &state.terminal) {
+                    let failed = failed_event(&state, err.message().to_owned());
+                    shared.emit(EventKind::Download, || failed);
+                }
+                shared.reply(request, Ok(JsonValue::Null));
+                return;
+            }
+            if cancelled {
+                // A cancellation with no request (teardown): a started
+                // download still reaches its terminal state exactly once.
+                if take_terminal(state.started.get(), &state.terminal) {
+                    let failed = failed_event(&state, err.message().to_owned());
+                    shared.emit(EventKind::Download, || failed);
+                }
+                return;
+            }
+            log::warn!("web view: download failed: {err}");
+            if !state.terminal.replace(true) {
+                let failed = failed_event(&state, err.message().to_owned());
+                shared.emit(EventKind::Download, || failed);
+            }
+        }));
+    }
+    {
+        let shared = shared.clone();
+        let state = state.clone();
+        handlers.push(download.connect_finished(move |_| {
+            state.finished.set(true);
+            state.clear_expiry();
+            state.disconnect();
+            shared.downloads.borrow_mut().remove(&state.id);
+            if let Some(request) = state.cancelling.take() {
+                // A cancel arrived before the last bytes were taken: what
+                // it wrote is discarded, nothing is published, and a
+                // started download reports `failed` rather than `finished`.
+                cleanup(&shared, &state);
+                if let Some(accepting) = state.accepting.take() {
+                    shared.reply(accepting, Err("download cancelled".into()));
+                }
+                if take_terminal(state.started.get(), &state.terminal) {
+                    let failed = failed_event(&state, "download cancelled".into());
+                    shared.emit(EventKind::Download, || failed);
+                }
+                shared.reply(request, Ok(JsonValue::Null));
+                return;
+            }
+            // A manual download's staging file becomes the app's file
+            // only now; an automatic one is already at its path.
+            if state.manual.get() {
+                let staging = state.staging.borrow().clone();
+                let destination = state.path.borrow().clone();
+                if let (Some(staging), Some(destination)) = (staging, destination)
+                    && let Err(error) = publish(&staging, &destination, state.overwrite.get())
+                {
+                    cleanup(&shared, &state);
+                    if let Some(request) = state.accepting.take() {
+                        shared.reply(request, Err(error.clone()));
+                    }
+                    if take_terminal(state.started.get(), &state.terminal) {
+                        let failed = failed_event(&state, error);
+                        shared.emit(EventKind::Download, || failed);
+                    }
+                    return;
+                }
+                state.staging.borrow_mut().take();
+            }
+            // WebKit creates the destination before it finishes; a reply
+            // still waiting resolves here anyway.
+            if let Some(request) = state.accepting.take() {
+                shared.reply(request, Ok(JsonValue::Null));
+            }
+            if !state.started.get() {
+                return;
+            }
+            state.terminal.set(true);
+            let bytes = state
+                .path
+                .borrow()
+                .as_ref()
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|meta| meta.len());
+            let finished = download_event("finished", &state, bytes);
+            shared.emit(EventKind::Download, || finished);
+        }));
+    }
+    *state.handlers.borrow_mut() = handlers;
+}
+
+/// WebKit asks where a download goes: an automatic one is saved in the
+/// app's data directory, a manual one reports the choice and holds it.
+fn decide_destination(
+    shared: &Rc<Shared>,
+    state: &Rc<DownloadState>,
+    download: &Download,
+    suggested: &str,
+) {
+    if !shared.wants_downloads() {
+        // No one could accept it: nothing may be written.
+        state.finished.set(true);
+        state.clear_expiry();
+        state.disconnect();
+        shared.downloads.borrow_mut().remove(&state.id);
+        download.cancel();
+        return;
+    }
+    let filename = file_name(suggested);
+    *state.filename.borrow_mut() = filename.clone();
+    if shared.manual_downloads() {
+        // Reported once; the app answers with AcceptDownload or
+        // CancelDownload. An unanswered one is withdrawn.
+        if state.pending.replace(true) {
+            return;
+        }
+        let pending = webview::download_pending_payload(&state.id, &state.url, &filename);
+        shared.emit(EventKind::DownloadPending, || pending);
+        let shared = shared.clone();
+        let pending_state = state.clone();
+        let expiry = glib::timeout_add_local_once(PENDING_TIMEOUT, move || {
+            expire_pending(&shared, &pending_state);
+        });
+        *state.expiry.borrow_mut() = Some(expiry);
+        return;
+    }
+    let Some(root) = shared.downloads_root.clone() else {
+        // No directory to save in (the app started without one).
+        state.finished.set(true);
+        state.disconnect();
+        shared.downloads.borrow_mut().remove(&state.id);
+        download.cancel();
+        return;
+    };
+    // A directory of its own: two files of the same name never meet, and a
+    // failed one takes its partial file with it.
+    let dir = root.join(&state.id);
+    let path = dir.join(&filename);
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        log::warn!("web view download into {}: {err}", dir.display());
+        let _ = std::fs::remove_dir_all(&dir);
+        state.finished.set(true);
+        state.disconnect();
+        shared.downloads.borrow_mut().remove(&state.id);
+        let failed = failed_event(state, err.to_string());
+        shared.emit(EventKind::Download, || failed);
+        download.cancel();
+        return;
+    }
+    *state.path.borrow_mut() = Some(path.clone());
+    *state.staging.borrow_mut() = Some(path.clone());
+    state.started.set(true);
+    let started = download_event("started", state, None);
+    shared.emit(EventKind::Download, || started);
+    download.set_destination(&path.to_string_lossy());
+}
+
+/// A manual download nobody chose a destination for: cancelled, and
+/// reported as failed (nothing was written, so there is nothing to
+/// remove).
+fn expire_pending(shared: &Rc<Shared>, state: &Rc<DownloadState>) {
+    state.clear_expiry();
+    if state.accepted.get() || state.finished.get() {
+        return;
+    }
+    // Nothing was accepted yet: WebKit holds it without a destination, so
+    // the terminal `failed` removes only the tracked state.
+    state.download.cancel();
+    shared.downloads.borrow_mut().remove(&state.id);
+    let failed = failed_event(state, "no download destination was accepted in time".into());
+    shared.emit(EventKind::Download, || failed);
+}
+
+/// Writes download `id` to the app's chosen `path`, through a staging
+/// file of its own that only a finished transfer publishes there.
+fn accept_download(shared: &Rc<Shared>, id: &str, request: u64, path: &Path, overwrite: bool) {
+    let Some(state) = shared.downloads.borrow().get(id).cloned() else {
+        shared.reply(request, Err(format!("unknown download {id}")));
+        return;
+    };
+    if state.finished.get() {
+        shared.reply(request, Err(format!("download {id} already finished")));
+        return;
+    }
+    if state.accepted.get() {
+        shared.reply(request, Err(format!("download {id} is already accepted")));
+        return;
+    }
+    if state.cancelling.get().is_some() {
+        shared.reply(request, Err(format!("download {id} is being cancelled")));
+        return;
+    }
+    if state.started.get() {
+        // An automatic download already writes where the platform chose.
+        shared.reply(
+            request,
+            Err(format!("download {id} is already writing its file")),
+        );
+        return;
+    }
+    if let Err(error) = check_destination(path, overwrite) {
+        shared.reply(request, Err(error));
+        return;
+    }
+    let staging = match stage_path(path, id) {
+        Ok(staging) => staging,
+        Err(error) => {
+            shared.reply(request, Err(error));
+            return;
+        }
+    };
+    state.manual.set(true);
+    state.overwrite.set(overwrite);
+    state.accepted.set(true);
+    state.clear_expiry();
+    *state.path.borrow_mut() = Some(path.to_path_buf());
+    *state.staging.borrow_mut() = Some(staging.clone());
+    state.accepting.set(Some(request));
+    // The staging file is new, so it must not be replaced: only the
+    // finished file goes to `path`, where `overwrite` decides.
+    state.download.set_allow_overwrite(false);
+    // The answer waits for WebKit: `created-destination` (ok) or `failed`
+    // (its error). `set_destination` may call back at once.
+    state.download.set_destination(&staging.to_string_lossy());
+}
+
+/// Cancels download `id`: answered once WebKit reports the transfer
+/// stopped and what it wrote is gone.
+fn cancel_download(shared: &Rc<Shared>, id: &str, request: u64) {
+    let Some(state) = shared.downloads.borrow().get(id).cloned() else {
+        shared.reply(request, Err(format!("unknown download {id}")));
+        return;
+    };
+    if state.finished.get() {
+        shared.reply(request, Err(format!("download {id} already finished")));
+        return;
+    }
+    if state.cancelling.get().is_some() {
+        shared.reply(request, Err(format!("download {id} is being cancelled")));
+        return;
+    }
+    state.clear_expiry();
+    state.cancelling.set(Some(request));
+    // The terminal `failed` (or a race's `finished`) removes the staging
+    // file or the backend's directory, then answers both this request and
+    // a waiting acceptance.
+    state.download.cancel();
+}
+
+/// A safe id for a download: hex digits only, so it names a directory
+/// without escaping it. Fixed widths, so no two differ only in where the
+/// clock's digits end.
+fn download_id(at: u128, n: u64) -> String {
+    format!("{at:032x}{n:016x}")
+}
+
+/// A file name for a server's suggested one: its last component, without
+/// separators or a leading dot, at most 200 bytes; `download` when nothing
+/// is left.
+fn file_name(suggested: &str) -> String {
+    let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
+    let mut name: String = last
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, ':' | '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{206f}')
+        })
+        .collect::<String>()
+        .trim()
+        .trim_start_matches('.')
+        .to_owned();
+    if name.len() > 200 {
+        // Preserve a normal extension while shortening the stem on UTF-8
+        // boundaries.
+        let extension = name
+            .rsplit_once('.')
+            .map(|(_, ext)| format!(".{ext}"))
+            .filter(|ext| ext.len() + name.chars().next().map_or(0, char::len_utf8) <= 200);
+        if let Some(extension) = &extension {
+            name.truncate(name.len() - extension.len());
+        }
+        let limit = 200 - extension.as_ref().map_or(0, String::len);
+        while name.len() > limit {
+            name.pop();
+        }
+        if let Some(extension) = extension {
+            name.push_str(&extension);
+        }
+    }
+    if name.is_empty() {
+        "download".to_owned()
+    } else {
+        name
+    }
+}
+
+/// Whether `path` may be a download's destination: absolute, in an
+/// existing folder, a file (replaced only when `overwrite` says so).
+fn check_destination(path: &Path, overwrite: bool) -> Result<(), String> {
+    let Some(text) = path.to_str() else {
+        return Err("a download destination must be a UTF-8 path".into());
+    };
+    if text.is_empty() || text.contains('\0') {
+        return Err("a download destination must be a valid path".into());
+    }
+    if !path.is_absolute() {
+        return Err(format!("download destination {text} is not absolute"));
+    }
+    if path.file_name().is_none() {
+        return Err(format!("download destination {text} has no file name"));
+    }
+    let Some(parent) = path.parent() else {
+        return Err(format!("download destination {text} has no folder"));
+    };
+    if !parent.is_dir() {
+        return Err(format!(
+            "the download destination's folder {} does not exist",
+            parent.display()
+        ));
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => {
+            Err(format!("download destination {text} is a folder"))
+        }
+        Ok(_) if !overwrite => Err(format!(
+            "download destination {text} exists (accept with overwrite to replace it)"
+        )),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("cannot use download destination {text}: {err}")),
+    }
+}
+
+/// Where a manual download writes before it is published: a hidden file
+/// of its own beside the app's destination, so a cancel or a failure
+/// never leaves a part of it there.
+fn stage_path(destination: &Path, id: &str) -> Result<PathBuf, String> {
+    let Some(parent) = destination.parent() else {
+        return Err(format!(
+            "download destination {} has no folder",
+            destination.display()
+        ));
+    };
+    let mut staging = parent.join(format!(".nsh-download-{id}.part"));
+    if staging == destination {
+        staging = parent.join(format!(".nsh-download-{id}.part.tmp"));
+    }
+    match std::fs::symlink_metadata(&staging) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(staging),
+        Ok(_) => Err(format!(
+            "the download's staging file {} exists",
+            staging.display()
+        )),
+        Err(err) => Err(format!("cannot use {}: {err}", staging.display())),
+    }
+}
+
+/// Moves a finished manual download from its staging file to the app's
+/// destination: replacing it only when the app said so (`overwrite`), else
+/// never clobbering a file that appeared meanwhile.
+fn publish(staging: &Path, destination: &Path, overwrite: bool) -> Result<(), String> {
+    if overwrite {
+        return std::fs::rename(staging, destination)
+            .map_err(|err| format!("cannot replace {}: {err}", destination.display()));
+    }
+    match std::fs::hard_link(staging, destination) {
+        Ok(()) => {
+            if let Err(err) = std::fs::remove_file(staging) {
+                log::warn!("web view: cannot remove {}: {err}", staging.display());
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+            "{} exists (accept with overwrite to replace it)",
+            destination.display()
+        )),
+        Err(err) => Err(format!(
+            "cannot publish {} without replacing an existing file: {err}",
+            destination.display()
+        )),
+    }
+}
+
+/// Removes what a failed or cancelled download wrote: its staging file,
+/// or the backend's own directory in the app's data directory. Never the
+/// app's destination, which may hold an older file of its own.
+fn cleanup(shared: &Shared, state: &DownloadState) {
+    let dir = automatic_dir(shared, state);
+    let staging = state.staging.borrow_mut().take();
+    cleanup_output(state.manual.get(), staging.as_deref(), dir.as_deref());
+}
+
+/// Removes what the download owns: its staging file, or the automatic
+/// directory this backend made. Never the app's destination.
+fn cleanup_output(manual: bool, staging: Option<&Path>, automatic_dir: Option<&Path>) {
+    if manual {
+        if let Some(staging) = staging {
+            let _ = std::fs::remove_file(staging);
+        }
+    } else if let Some(dir) = automatic_dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// The folder an automatic download made for itself (`downloads/<id>`),
+/// which only this backend writes in; `None` for a manual download.
+fn automatic_dir(shared: &Shared, state: &DownloadState) -> Option<PathBuf> {
+    if state.manual.get() {
+        return None;
+    }
+    let root = shared.downloads_root.as_ref()?;
+    let staging = state.staging.borrow();
+    let dir = staging.as_ref()?.parent()?;
+    (dir == root.join(&state.id)).then(|| dir.to_path_buf())
+}
+
+/// Takes a download's one terminal event. A pending download never
+/// started, so a cancellation before acceptance reports no lifecycle; a
+/// started one reports `failed` once, never a later `finished`.
+fn take_terminal(started: bool, terminal: &Cell<bool>) -> bool {
+    started && !terminal.replace(true)
+}
+
+/// `onDownload`'s payload for a download that failed, with why.
+fn failed_event(state: &DownloadState, message: String) -> EventPayload {
+    let mut event = download_event("failed", state, None);
+    if let EventPayload::Map(fields) = &mut event {
+        fields.push(("message", PayloadValue::Str(message)));
+    }
+    event
+}
+
+/// `onDownload`'s payload: `state`, `id`, `url`, `filename`, `path` and,
+/// once finished, `bytes`.
+fn download_event(state: &str, download: &DownloadState, bytes: Option<u64>) -> EventPayload {
+    let path = download
+        .path
+        .borrow()
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut fields = vec![
+        ("state", PayloadValue::Str(state.to_owned())),
+        ("id", PayloadValue::Str(download.id.clone())),
+        ("url", PayloadValue::Str(download.url.clone())),
+        (
+            "filename",
+            PayloadValue::Str(download.filename.borrow().clone()),
+        ),
+        ("path", PayloadValue::Str(path)),
+    ];
+    if let Some(bytes) = bytes {
+        fields.push(("bytes", PayloadValue::Number(bytes as f64)));
+    }
+    EventPayload::Map(fields)
 }
 
 /// `{ url, title, loading, canGoBack, canGoForward }` of a page.
@@ -743,5 +1508,133 @@ mod tests {
             history_key(gdk::Key::Left, M::ALT_MASK | M::LOCK_MASK),
             Some(History::Back)
         );
+    }
+    fn download_scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-webview-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temporary directory");
+        dir
+    }
+
+    #[test]
+    fn names_download_file_names_safely() {
+        assert_eq!(file_name("report.pdf"), "report.pdf");
+        assert_eq!(file_name("../../etc/passwd"), "passwd");
+        assert_eq!(file_name(r"..\..\boot.ini"), "boot.ini");
+        assert_eq!(file_name(".profile"), "profile");
+        assert_eq!(file_name("a\u{0}b\u{7}.txt"), "ab.txt");
+        assert_eq!(file_name("   "), "download");
+        assert_eq!(file_name(""), "download");
+        assert_eq!(file_name("/"), "download");
+        assert_eq!(file_name("报告.pdf"), "报告.pdf");
+        let long = format!("{}.gz", "é".repeat(400));
+        let name = file_name(&long);
+        assert!(name.len() <= 200, "{} bytes", name.len());
+        assert!(name.ends_with(".gz"), "{name}");
+        assert_eq!(file_name("invoice\u{202e}fdp.exe"), "invoicefdp.exe");
+    }
+
+    #[test]
+    fn names_download_directories_without_traversal() {
+        let id = download_id(0x1234_5678_9abc_def0, 42);
+        assert!(!id.is_empty());
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_ne!(id, download_id(0x1234_5678_9abc_def0, 43));
+        assert_ne!(id, download_id(0x1234_5678_9abc_def1, 42));
+        assert_eq!(Path::new(&id).components().count(), 1);
+    }
+
+    #[test]
+    fn checks_download_destinations() {
+        let dir = download_scratch("destinations");
+        let target = dir.join("file.txt");
+        assert!(check_destination(Path::new("relative.txt"), false).is_err());
+        assert!(check_destination(Path::new(""), false).is_err());
+        assert!(check_destination(&dir.join("missing").join("file"), false).is_err());
+        assert!(check_destination(&target, false).is_ok());
+        std::fs::write(&target, b"kept").unwrap();
+        assert!(check_destination(&target, false).is_err());
+        assert!(check_destination(&target, true).is_ok());
+        assert!(check_destination(&dir, true).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publishes_staged_downloads_without_clobbering() {
+        let dir = download_scratch("publish");
+        let destination = dir.join("file.txt");
+        let staging = stage_path(&destination, "abc123").unwrap();
+        assert_eq!(
+            staging.file_name().and_then(|name| name.to_str()),
+            Some(".nsh-download-abc123.part")
+        );
+        assert_eq!(staging.parent(), Some(dir.as_path()));
+        // A fresh destination: the staged bytes become the file.
+        std::fs::write(&staging, b"new").unwrap();
+        assert!(publish(&staging, &destination, false).is_ok());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        assert!(!staging.exists());
+        // A file that appeared meanwhile is never replaced without
+        // `overwrite`, and the staging file stays for cleanup.
+        std::fs::write(&staging, b"newer").unwrap();
+        assert!(publish(&staging, &destination, false).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        assert_eq!(std::fs::read(&staging).unwrap(), b"newer");
+        // Only the staging file belongs to the download.
+        cleanup_output(true, Some(&staging), None);
+        assert!(!staging.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        // With overwrite, the staged file replaces the destination.
+        std::fs::write(&staging, b"newer").unwrap();
+        assert!(publish(&staging, &destination, true).is_ok());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"newer");
+        assert!(!staging.exists());
+        // A legitimate destination can itself use the usual staging name.
+        let collision = dir.join(".nsh-download-collision.part");
+        let separate = stage_path(&collision, "collision").unwrap();
+        assert_ne!(separate, collision);
+        std::fs::write(&separate, b"complete").unwrap();
+        assert!(!collision.exists());
+        publish(&separate, &collision, false).unwrap();
+        assert_eq!(std::fs::read(&collision).unwrap(), b"complete");
+        assert!(!separate.exists());
+        // A staging file is never reused, and each download has its own.
+        std::fs::write(&staging, b"x").unwrap();
+        assert!(stage_path(&destination, "abc123").is_err());
+        assert_ne!(stage_path(&destination, "def456").unwrap(), staging);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cleanup_removes_owned_output_only() {
+        let dir = download_scratch("cleanup");
+        let keep = dir.join("file.txt");
+        std::fs::write(&keep, b"completed").unwrap();
+        // A manual download owns its staging file.
+        let staging = dir.join(".nsh-download-id.part");
+        std::fs::write(&staging, b"partial").unwrap();
+        cleanup_output(true, Some(&staging), Some(&dir.join("unused")));
+        assert!(!staging.exists());
+        assert_eq!(std::fs::read(&keep).unwrap(), b"completed");
+        // An automatic download owns its directory of its own.
+        let owned = dir.join("id");
+        std::fs::create_dir_all(&owned).unwrap();
+        std::fs::write(owned.join("file.txt"), b"partial").unwrap();
+        cleanup_output(false, Some(&owned.join("file.txt")), Some(&owned));
+        assert!(!owned.exists());
+        assert_eq!(std::fs::read(&keep).unwrap(), b"completed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancellation_reports_one_failed_terminal_only_after_start() {
+        let terminal = Cell::new(false);
+        // A pending download never started: cancelling it has no lifecycle.
+        assert!(!take_terminal(false, &terminal));
+        assert!(!take_terminal(false, &terminal));
+        assert!(!terminal.get());
+        // A started download fails once; no later event is reported.
+        assert!(take_terminal(true, &terminal));
+        assert!(!take_terminal(true, &terminal));
     }
 }

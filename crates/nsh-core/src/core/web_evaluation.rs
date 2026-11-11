@@ -85,6 +85,17 @@ impl<M: crate::TextEngine> Core<M> {
                 codes::WEBVIEW_ABORTED,
                 "the ref names no web view",
             ))
+        } else if self
+            .key(node)
+            .ok()
+            .is_some_and(|key| self.web_view_key_blocked(key))
+        {
+            // Scripts would let the inert page navigate or fetch past the
+            // manual-download policy this platform cannot carry out.
+            Some(web_evaluation::error(
+                codes::UNAVAILABLE,
+                "the web view does not evaluate scripts while manual downloads are not supported by this platform",
+            ))
         } else if !self.access.allows_webviews() {
             Some(crate::element::JsError::access_denied(
                 "the app's capabilities do not grant webview",

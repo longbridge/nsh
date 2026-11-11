@@ -74,6 +74,8 @@ mod value;
 pub(crate) mod virtual_list;
 pub(crate) mod watch;
 
+pub(crate) use events::download_target;
+
 /// Whether this build carries the text of declarations: the documentation
 /// and TypeScript of the specs, which only make `.nsh/types` (feature
 /// `declarations`, which `nsh` and the program describing an app's UI sets
