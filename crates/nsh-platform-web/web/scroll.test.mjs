@@ -474,3 +474,29 @@ test('one scroll stays on the view that took it, and a scroll going on is only o
   assert.equal(sent.at(-1)[0], 2);
   assert.equal(el.scrollTop, 40, 'the scroll view kept scrolling');
 });
+
+test('onPinch hears a Safari touchpad pinch from its start to its end', (t) => {
+  const { p, el } = scroller();
+  const sent = [];
+  p.event = (id, name, payload) => sent.push([id, name, payload]);
+  p.point = (e) => [e.clientX, e.clientY];
+  const canvas = {
+    _id: 2, _kind: 'view', _events: new Set(['onPinch']), parentNode: el, isConnected: true,
+    getBoundingClientRect: () => ({ left: 10, top: 20 }),
+  };
+  const other = { _id: 4, _kind: 'view', _events: new Set(), parentNode: el, isConnected: true };
+  p.views.set(2, canvas);
+  p.views.set(4, other);
+  let prevented = 0;
+  const gesture = (target, scale) => ({ target, scale, clientX: 15, clientY: 30, preventDefault() { prevented++; } });
+  assert.ok(p.pinchEvent(gesture(canvas, 1), 0), 'the canvas takes the pinch');
+  assert.ok(p.pinchEvent(gesture(other, 1.5), 1), 'it stays on the canvas');
+  assert.ok(p.pinchEvent(gesture(other, 1.2), 2));
+  assert.equal(prevented, 3);
+  assert.deepEqual(sent.map(([id, name, e]) => [id, name, e.phase, Math.round(e.delta * 100) / 100]), [
+    [2, 'onPinch', 'start', 0], [2, 'onPinch', 'move', 0.5], [2, 'onPinch', 'end', 0],
+  ]);
+  assert.deepEqual(sent[1][2].position, { x: 5, y: 10 });
+  // Over no listener the scroll view's own zoom handles it.
+  assert.ok(!p.pinchEvent(gesture(other, 1), 0));
+});

@@ -338,6 +338,29 @@ const offset = signal({ x: 0, y: 0 });
 />
 ```
 
+`onPinch` hears a touchpad pinch over a view, as GPUI's `on_pinch`, on macOS, Linux, the GPUI backend and Safari.
+Windows and the other browsers report a touchpad pinch as Control + wheel, which `onWheel` hears, so a view that zooms
+listens to both. The nearest view around the one under the pointer that listens hears the pinch, from its start to its
+end; when it is nearer than every view that pinches natively (`pinch` values, `onPinchStart`), it takes the pinch and
+nothing zooms natively. A view that starts listening during a pinch hears the rest of it, without its start. Fingers
+pinching a touchscreen are the native gesture's (`onPinchStart`, [Touch and gestures](../docs/touch-and-gestures.md)).
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `onPinch` | `.on_pinch(..)` | `(e: PinchEvent) => void` | A touchpad pinched over the view or a view inside it. |
+
+`PinchEvent` has `position`, `pagePosition` and `modifiers`, as `MouseEvent`, `delta`, how much the scale changed since
+the last event as a fraction (0.1 is 10 % bigger, negative smaller), and `phase`: `"start"`, `"move"` or `"end"`, as a
+touch's. In Rust `delta` is a `Percentage` and `phase` a `PinchPhase`.
+
+```tsx
+<View
+  style={{ flex: 1 }}
+  onPinch={(e) => zoom.update((z) => z * (1 + e.delta))}
+  onWheel={(e) => e.modifiers.control && zoom.update((z) => z * (1 - (e.delta.y * (e.deltaMode === "lines" ? 16 : 1)) / 200))}
+/>
+```
+
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and

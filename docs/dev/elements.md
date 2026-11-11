@@ -150,6 +150,15 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
   (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
   `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
+- **`onPinch`** (any element; GPUI's `PinchEvent` / `on_pinch`): a touchpad pinched over a view.
+  `EventPayload::Pinch` / `PinchEvent { position, page_position, delta, phase, modifiers }`, `delta` the change of scale
+  since the last event (a `Percentage`, as GPUI's), `phase` a `PinchPhase` (`"start"`, `"move"`, `"end"`, as touches').
+  Decided as `onWheel` is (`input::wheel_listener`, with the views that pinch natively, `transforms`, in place of the
+  scroll views) and kept from the pinch's start to its end (`input::WheelLatch`, one per surface): macOS
+  `magnifyWithEvent:` (`input.rs` `pinch_event`), Linux GDK's touchpad pinch (its absolute scale turned into changes),
+  GPUI's `PinchEvent` (`touchpad_pinch`; its Linux deltas change the absolute scale), the web Safari's `gesturestart` /
+  `gesturechange` / `gestureend` (`nsh.js` `pinchEvent`). Windows and the other browsers report a touchpad pinch as
+  Ctrl + wheel, which `onWheel` hears, so they raise no `onPinch`.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first

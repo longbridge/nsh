@@ -58,7 +58,8 @@ use std::{
 use dispatch2::{DispatchQueue, DispatchTime};
 use nsh_core::{
     Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, MouseEvent, NodeId,
-    PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    PayloadValue, PinchEvent, PinchPhase, PointerEvents, ROOT_ID, TouchEvent, TouchPhase,
+    TouchPoint, ViewKind,
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
@@ -135,6 +136,8 @@ pub(crate) struct Input {
     latch: RefCell<Option<(NshView, bool, f64)>>,
     /// The `onWheel` listener a scroll went to, which keeps the rest of it.
     wheel_listener: RefCell<WheelLatch<NshView>>,
+    /// The `onPinch` listener a trackpad pinch went to, to its end.
+    pinch_listener: RefCell<WheelLatch<NshView>>,
     /// The scroll under way has no scroll view of this surface under it:
     /// it goes to the view the surface is in (an embedded app's host).
     forward_scroll: Cell<bool>,
@@ -278,6 +281,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.momentum.borrow_mut().take();
     input.latch.borrow_mut().take();
     input.wheel_listener.borrow_mut().clear();
+    input.pinch_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
     input.link_hovered.borrow_mut().take();
@@ -2350,10 +2354,66 @@ fn trackpad_transform(
 
 /// `magnifyWithEvent:`: a trackpad pinch.
 fn magnify(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) {
+    if pinch_event(surface, event, x, y) {
+        return;
+    }
     let m = event.magnification() as f32;
     trackpad_transform(surface, event, x, y, false, |t| {
         t.scale = (t.scale * (1.0 + m)).max(0.01);
     });
+}
+
+/// `onPinch` for a trackpad pinch step (`magnifyWithEvent:`) at `(x, y)`
+/// (root coordinates): the nearest view around the one under it that
+/// listens hears the pinch from its start to its end ([`WheelLatch`]).
+/// Returns whether that view takes it ([`input::wheel_listener`]: no view
+/// that pinches natively is nearer, nor is it one), so nothing pinches
+/// natively.
+fn pinch_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> bool {
+    let phase = event.phase();
+    let (step, pinch_phase) = if phase.contains(NSEventPhase::Began) {
+        (WheelStep::Begin, PinchPhase::Start)
+    } else if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
+        (WheelStep::End, PinchPhase::End)
+    } else if phase.contains(NSEventPhase::Changed) {
+        (WheelStep::Continue, PinchPhase::Move)
+    } else {
+        return false;
+    };
+    let routed = surface.input.pinch_listener.borrow_mut().route(
+        step,
+        true,
+        false,
+        |view| view.ns().window().is_some(),
+        || {
+            let hit = pick(&event_root(surface), x, y)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Pinch),
+                |v| {
+                    let (id, events) = {
+                        let s = v.state();
+                        (s.id, s.events)
+                    };
+                    transforms(&gesture_values(surface, v, id), events).0
+                },
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    let (location_x, location_y) = local(surface, &view, x, y);
+    let pinch = PinchEvent::new(
+        point(Points(location_x), Points(location_y)),
+        point(Points(x), Points(y)),
+        nsh_core::geometry::Percentage(event.magnification() as f32),
+        pinch_phase,
+        modifiers(event.modifierFlags()),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Pinch, EventPayload::Pinch(pinch));
+    takes
 }
 
 /// `rotateWithEvent:`: a trackpad rotation (AppKit counts degrees

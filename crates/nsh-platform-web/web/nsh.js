@@ -4567,6 +4567,49 @@ class Player {
     return true;
   }
 
+  /** `onPinch` of Safari's touchpad pinches (gesture events, `phase` 0 /
+   * 1 / 2): the nearest view around the target that listens hears the
+   * pinch from its start to its end; true when it takes it: no view that
+   * pinches natively (a zoomable scroll view, `pinch` values) is nearer,
+   * nor is it one (`input::wheel_listener`). Other browsers send a pinch
+   * as Ctrl + wheel, which `onWheel` hears. */
+  pinchEvent(e, phase) {
+    let p = this.pinching;
+    if (phase === 0) {
+      p = this.pinching = null;
+      const view = this.viewOf(e.target);
+      let nearer = false;
+      for (const el of view ? this.ancestors(view) : []) {
+        const zooms = (this.zooms(el) && el._behavior.pinch) || !!el._gestures?.pinch;
+        if (el._events?.has("onPinch")) {
+          p = this.pinching = { el, takes: !nearer && !zooms, scale: 1 };
+          break;
+        }
+        nearer ||= zooms;
+      }
+    }
+    if (!p) return false;
+    if (!p.el.isConnected) {
+      this.pinching = null;
+      return false;
+    }
+    if (p.takes) e.preventDefault();
+    const r = p.el.getBoundingClientRect();
+    const [pageX, pageY] = this.point(e);
+    // Nothing changes at the end, as on the native backends.
+    const delta = phase === 2 ? 0 : e.scale / (p.scale || 1) - 1;
+    p.scale = e.scale;
+    this.event(p.el._id, "onPinch", {
+      position: { x: e.clientX - r.left, y: e.clientY - r.top },
+      pagePosition: { x: pageX, y: pageY },
+      delta,
+      phase: phase === 0 ? "start" : phase === 1 ? "move" : "end",
+      modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+    });
+    if (phase === 2) this.pinching = null;
+    return p.takes;
+  }
+
   /** Safari's touchpad pinches (gesture events; it sends no ctrl+wheel). */
   gestureZoom(e, phase) {
     const el = phase === 0
@@ -7507,9 +7550,9 @@ class Player {
     document.addEventListener("selectionchange", () => this.areaSelectionChanged());
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
-    root.addEventListener("gesturestart", (e) => this.gestureZoom(e, 0));
-    root.addEventListener("gesturechange", (e) => this.gesture && this.gestureZoom(e, 1));
-    root.addEventListener("gestureend", (e) => this.gesture && this.gestureZoom(e, 2));
+    root.addEventListener("gesturestart", (e) => this.pinchEvent(e, 0) || this.gestureZoom(e, 0));
+    root.addEventListener("gesturechange", (e) => this.pinchEvent(e, 1) || (this.gesture && this.gestureZoom(e, 1)));
+    root.addEventListener("gestureend", (e) => this.pinchEvent(e, 2) || (this.gesture && this.gestureZoom(e, 2)));
     root.addEventListener("pointermove", (e) => {
       this.mouseMoved(e);
       if (e.pointerType !== "mouse") return;
