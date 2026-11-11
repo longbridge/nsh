@@ -36,16 +36,26 @@ pub(crate) struct KeymapState {
     keymap: RefCell<Option<Arc<Keymap>>>,
     /// A controller on each window's root view.
     controllers: RefCell<Vec<(glib::WeakRef<NshView>, gtk::ShortcutController)>>,
-    /// Each binding's trigger, whether it fires in a text field
-    /// (`KeyBinding::in_text`), its window (`KeyBinding::window`) and
-    /// whether it gives way to a focused control ([`gives_way`]), for
-    /// [`claims`]; a binding passing its key through claims none.
-    triggers: RefCell<Vec<(gtk::ShortcutTrigger, bool, Option<NodeId>, bool)>>,
+    /// Each binding's trigger, for [`claims`]; a binding passing its key
+    /// through claims none.
+    triggers: RefCell<Vec<Claim>>,
     /// The binding whose key is held down (GDK does not mark auto-repeats):
     /// it does not fire again until a key is released.
     held: Rc<Cell<Option<u32>>>,
     /// The windows' key controllers that see releases, and their windows.
     releases: RefCell<Vec<(glib::WeakRef<gtk::Window>, gtk::EventControllerKey)>>,
+}
+
+/// A binding's trigger and when a press of it is the binding's, for
+/// [`claims`].
+struct Claim {
+    trigger: gtk::ShortcutTrigger,
+    /// It fires in a text field (`KeyBinding::in_text`).
+    in_text: bool,
+    /// Its window (`KeyBinding::window`).
+    window: Option<NodeId>,
+    /// It gives way to a focused control ([`gives_way`]).
+    yields: bool,
 }
 
 /// `MountItem::Keymap`: replaces the surface's shortcuts.
@@ -64,7 +74,12 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
         if let Some(trigger) = trigger(&binding.keystroke, |key| shifted(&display, key))
             .and_then(|t| gtk::ShortcutTrigger::parse_string(&t))
         {
-            triggers.push((trigger, binding.in_text, binding.window, gives_way(binding)));
+            triggers.push(Claim {
+                trigger,
+                in_text: binding.in_text,
+                window: binding.window,
+                yields: gives_way(binding),
+            });
         }
     }
     *surface.keymap.triggers.borrow_mut() = triggers;
@@ -199,16 +214,11 @@ pub(crate) fn claims(surface: &Surface, event: &gtk::gdk::Event) -> bool {
         .surface()
         .and_then(|s| crate::window::root_at(surface, &s))
         .unwrap_or_else(|| surface.root.clone());
-    surface
-        .keymap
-        .triggers
-        .borrow()
-        .iter()
-        .any(|(trigger, in_text, window, yields)| {
-            trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
-                && window.is_none_or(|w| w == root.id())
-                && fires(surface, root.upcast_ref(), *in_text, *yields)
-        })
+    surface.keymap.triggers.borrow().iter().any(|claim| {
+        claim.trigger.trigger(event, false) != gtk::gdk::KeyMatch::None
+            && claim.window.is_none_or(|w| w == root.id())
+            && fires(surface, root.upcast_ref(), claim.in_text, claim.yields)
+    })
 }
 
 /// Listens to the releases of `window` (once per window), so that a held
