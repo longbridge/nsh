@@ -1,6 +1,11 @@
 //! System UI driven from JS: the status bar and alerts / action sheets.
 
-use std::{cell::Cell, ptr::NonNull, rc::Rc};
+use std::{
+    cell::Cell,
+    ptr::NonNull,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use block2::RcBlock;
 use nsh_core::{
@@ -38,7 +43,17 @@ thread_local! {
     /// The orientations the page shown asked for (`supportedOrientations`;
     /// empty: the app's), one per process like the status bar.
     static ORIENTATIONS: Cell<UIInterfaceOrientationMask> = const { Cell::new(UIInterfaceOrientationMask(0)) };
+    /// How the app's own pages (no page's setting) showed the screen when
+    /// a page's setting came, to turn back to when it goes and the device
+    /// says nothing (lying flat).
+    static APP_ORIENTATION: Cell<UIInterfaceOrientation> = const { Cell::new(UIInterfaceOrientation::Unknown) };
+    /// A turn asked for on the app's own pages, and when: the scene shows
+    /// the old orientation until it is done.
+    static TURNING: Cell<Option<(UIInterfaceOrientation, Instant)>> = const { Cell::new(None) };
 }
+
+/// How long a turn asked for may take before the scene shows it.
+const TURN_TIME: Duration = Duration::from_secs(2);
 
 /// The tint of a surface's alerts and action sheets for its design tokens
 /// ([`nsh_core::Command::Tokens`]): the theme's `primary` when the app has
@@ -164,7 +179,9 @@ pub(crate) fn page_orientations() -> Option<UIInterfaceOrientationMask> {
 /// Applies the page's `supportedOrientations` ([`nsh_core::Command::Orientations`]):
 /// asks the controllers of `view`'s window to rotate to them.
 pub(crate) fn set_orientations(bits: u8, view: &UIView) {
-    ORIENTATIONS.set(orientation_mask(bits));
+    let mask = orientation_mask(bits);
+    let was_own = ORIENTATIONS.get().is_empty();
+    ORIENTATIONS.set(mask);
     // The device's orientation, read when the orientations widen again.
     let device = UIDevice::currentDevice(view.mtm());
     if !device.isGeneratingDeviceOrientationNotifications() {
@@ -180,47 +197,72 @@ pub(crate) fn set_orientations(bits: u8, view: &UIView) {
         UIViewController::attemptRotationToDeviceOrientation(view.mtm());
         return;
     }
+    // iOS 16 only turns the screen when its orientation is no longer
+    // allowed: when the orientations widen again (back from a landscape
+    // page), the screen would stay as the page turned it. NSH turns it
+    // itself, only in its own window (a host app's turns as its
+    // controllers say).
+    let own = controller
+        .as_ref()
+        .is_some_and(|c| c.isKindOfClass(crate::app::RootController::class()));
+    let scene = window.windowScene().filter(|_| own);
+    if let Some(scene) = &scene
+        && was_own
+        && !mask.is_empty()
+    {
+        // A page's setting comes: remember how the app's pages show the
+        // screen, unless a turn back to it is not done yet.
+        let shown = scene.effectiveGeometry().interfaceOrientation();
+        let turning = TURNING
+            .take()
+            .is_some_and(|(to, at)| shown != to && at.elapsed() < TURN_TIME);
+        if !turning {
+            APP_ORIENTATION.set(shown);
+        }
+    }
     let mut top = None;
     while let Some(c) = controller {
         c.setNeedsUpdateOfSupportedInterfaceOrientations();
         controller = c.presentedViewController();
         top = Some(c);
     }
-    // iOS 16 only turns the screen when its orientation is no longer
-    // allowed: when the orientations widen again (back from a landscape
-    // page), the screen would stay as the page turned it, whichever way
-    // the device is held. Turn it to the device's, as iOS did before;
-    // only in NSH's own window (a host app's turns as its controllers say).
-    let own = window
-        .rootViewController()
-        .is_some_and(|c| c.isKindOfClass(crate::app::RootController::class()));
-    let (true, Some(top), Some(scene)) = (own, top, window.windowScene()) else {
+    let (Some(top), Some(scene)) = (top, scene) else {
         return;
     };
-    // A device turned left shows the interface turned right, and back.
+    // The way the device is held, as iOS did before 16 (a device turned
+    // left shows the interface turned right, and back); a device lying
+    // flat says nothing, so back on the app's own pages the screen turns
+    // as they showed it.
     let wanted = match device.orientation() {
         UIDeviceOrientation::Portrait => UIInterfaceOrientation::Portrait,
         UIDeviceOrientation::PortraitUpsideDown => UIInterfaceOrientation::PortraitUpsideDown,
         UIDeviceOrientation::LandscapeLeft => UIInterfaceOrientation::LandscapeRight,
         UIDeviceOrientation::LandscapeRight => UIInterfaceOrientation::LandscapeLeft,
-        // Flat or unknown: no way the user holds it to follow.
+        _ if mask.is_empty() => APP_ORIENTATION.get(),
         _ => return,
     };
-    let mask = UIInterfaceOrientationMask(1 << wanted.0);
+    if wanted == UIInterfaceOrientation::Unknown {
+        return;
+    }
+    let wanted_mask = UIInterfaceOrientationMask(1 << wanted.0);
     if scene.effectiveGeometry().interfaceOrientation() == wanted
-        || !top.supportedInterfaceOrientations().contains(mask)
+        || !top.supportedInterfaceOrientations().contains(wanted_mask)
     {
         return;
     }
+    if mask.is_empty() {
+        APP_ORIENTATION.set(wanted);
+        TURNING.set(Some((wanted, Instant::now())));
+    }
     let preferences = UIWindowSceneGeometryPreferencesIOS::initWithInterfaceOrientations(
         UIWindowSceneGeometryPreferencesIOS::alloc(),
-        mask,
+        wanted_mask,
     );
     let failed = RcBlock::new(|error: NonNull<NSError>| {
         // SAFETY: UIKit passes a valid NSError for the call.
         let error = unsafe { error.as_ref() };
         log::warn!(
-            "the screen did not turn to the device's orientation: {}",
+            "the screen did not turn back: {}",
             error.localizedDescription()
         );
     });
