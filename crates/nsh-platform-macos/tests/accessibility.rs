@@ -135,6 +135,7 @@ mod macos {
         let values: Vec<Option<String>> = children
             .iter()
             .map(|child| {
+                // SAFETY: the child implements NSAccessibility.
                 let value: Option<Retained<AnyObject>> =
                     unsafe { msg_send![&*child, accessibilityValue] };
                 string(value)
@@ -157,6 +158,7 @@ mod macos {
             let children = view.accessibilityChildren().unwrap();
             assert_eq!(children.count(), 1, "only the link is a child of {id}");
             let child = children.firstObject().unwrap();
+            // SAFETY: the child implements NSAccessibility.
             let value: Option<Retained<AnyObject>> =
                 unsafe { msg_send![&*child, accessibilityValue] };
             assert_eq!(string(value).as_deref(), Some("Guide"));
@@ -167,6 +169,7 @@ mod macos {
             Some("Summary")
         );
         let allowed = |object: &AnyObject, selector| -> bool {
+            // SAFETY: each tested object implements NSAccessibility.
             unsafe { msg_send![object, isAccessibilitySelectorAllowed: selector] }
         };
         for selector in [
@@ -183,9 +186,12 @@ mod macos {
             assert!(!allowed(&labelled, selector));
         }
         let link = children.objectAtIndex(1);
+        // SAFETY: the link exposes these selection selectors, checked above.
         let _: () =
             unsafe { msg_send![&*link, setAccessibilitySelectedTextRange: NSRange::new(0, 5)] };
+        // SAFETY: the link implements the getter paired with that setter.
         let range: NSRange = unsafe { msg_send![&*link, accessibilitySelectedTextRange] };
+        // SAFETY: selected text is an NSString NSAccessibility property.
         let selected: Option<Retained<AnyObject>> =
             unsafe { msg_send![&*link, accessibilitySelectedText] };
         assert_eq!(range, NSRange::new(0, 5));

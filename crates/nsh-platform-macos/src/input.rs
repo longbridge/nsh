@@ -867,6 +867,18 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     }
 }
 
+/// The innermost span hearing a context menu at this UTF-16 character.
+/// Hover-only inner spans leave the surrounding span's action reachable.
+fn context_link(links: &[nsh_core::TextLink], at: u32) -> Option<nsh_core::TextLink> {
+    links
+        .iter()
+        .filter(|link| {
+            link.start <= at && at < link.end && link.events.contains(EventKind::ContextMenu)
+        })
+        .min_by_key(|link| link.end - link.start)
+        .copied()
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it. Text
 /// fields are AppKit's views, which show their own menu.
@@ -876,8 +888,15 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
     };
     if !hit.native {
         let (lx, ly) = local(surface, &hit.view, x, y);
-        let span = crate::text::link_at(&hit.view.state(), lx, ly)
-            .filter(|link| link.events.contains(EventKind::ContextMenu));
+        let span = {
+            let state = hit.view.state();
+            crate::text::char_at(&state, lx, ly).and_then(|at| {
+                state
+                    .text
+                    .as_ref()
+                    .and_then(|text| context_link(&text.text.links, at))
+            })
+        };
         if let Some(link) = span {
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(lx), Points(ly)),
@@ -3279,6 +3298,33 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inline_context_menu_ignores_hover_only_nested_spans() {
+        let link = |start, end, node, kind| {
+            let mut events = nsh_core::EventMask::default();
+            events.set(kind, true);
+            nsh_core::TextLink {
+                start,
+                end,
+                node,
+                events,
+                focus_stop: false,
+            }
+        };
+        let outer = link(0, 10, 2, nsh_core::EventKind::ContextMenu);
+        let hover = link(2, 8, 3, nsh_core::EventKind::MouseEnter);
+        let inner = link(3, 7, 4, nsh_core::EventKind::ContextMenu);
+        assert_eq!(
+            super::context_link(&[outer, hover], 4).map(|l| l.node),
+            Some(2)
+        );
+        assert_eq!(
+            super::context_link(&[outer, hover, inner], 4).map(|l| l.node),
+            Some(4)
+        );
+        assert!(super::context_link(&[outer, hover], 10).is_none());
+    }
+
     use super::*;
 
     #[test]

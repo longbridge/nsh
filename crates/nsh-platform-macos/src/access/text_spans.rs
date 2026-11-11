@@ -187,7 +187,8 @@ pub(crate) fn separate_text(state: &crate::view::ViewState) -> bool {
 }
 
 /// An AX range is in the displayed value, whose hidden runs and attachments
-/// are omitted. Selection state and keyboard focus stay with the native owner.
+/// are omitted. The enclosing area owns selection; root keyboard focus lets
+/// Copy act on it, as after a pointer selection.
 pub(crate) fn select(view: &NshView, label: Range<u32>, selected: NSRange) {
     let Some(surface) = view.surface() else {
         return;
@@ -209,7 +210,11 @@ pub(crate) fn select(view: &NshView, label: Range<u32>, selected: NSRange) {
     if crate::selectable_view::select_range(&surface, view, range)
         && let Some(window) = view.ns().window()
     {
-        window.makeFirstResponder(Some(crate::input::root_in(&surface, &window).ns()));
+        let root = crate::input::root_in(&surface, &window);
+        if crate::text_input::editing_in(&root) {
+            window.makeFirstResponder(None);
+        }
+        window.makeFirstResponder(Some(root.ns()));
     }
 }
 
@@ -279,7 +284,12 @@ fn stretches(text: &AttributedText) -> Vec<(Range<u32>, Option<NodeId>)> {
             edges.entry(link.end).or_default().push((index, false));
         }
     }
-    let attachments: BTreeSet<_> = text.attachments.iter().map(|a| a.index).collect();
+    let attachments: BTreeSet<_> = text
+        .attachments
+        .iter()
+        .filter(|attachment| attachment.width.0 > 0.0)
+        .map(|a| a.index)
+        .collect();
     for &at in &attachments {
         edges.entry(at).or_default();
         edges.entry((at + 1).min(length)).or_default();
@@ -495,6 +505,20 @@ mod tests {
         text.links = vec![link(0, 7, 2)];
         assert_eq!(stretches(&text), [(0..7, Some(2))]);
         assert_eq!(text.copied_text(0..7), "before");
+    }
+
+    #[test]
+    fn a_plain_word_stays_whole_across_a_zero_width_anchor() {
+        let mut text = AttributedText::default();
+        text.push("be", ResolvedTextStyle::default());
+        text.push_attachment(
+            nsh_core::Size::new(nsh_core::Points::ZERO, nsh_core::Points(1.0)),
+            ResolvedTextStyle::default(),
+        );
+        text.push("fore Guide", ResolvedTextStyle::default());
+        text.links = vec![link(8, 13, 2)];
+        assert_eq!(stretches(&text), [(0..8, None), (8..13, Some(2))]);
+        assert_eq!(text.copied_text(0..8), "before ");
     }
 
     #[test]

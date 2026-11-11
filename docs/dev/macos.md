@@ -241,7 +241,9 @@ runs and attachment placeholders; their bounds follow the current text layout
 and layer transforms. A retained element resolves its logical span against the
 current attributed text, so streaming and recoloring keep it usable; a removed
 link cannot be activated. `AXPress` uses the current event listeners and modal
-scope, as keyboard input does. Headings and app-labelled text keep their name
+scope, as keyboard input does. Secondary clicks target the innermost inline
+span listening to `onContextMenu`, preserving selection and surrounding listeners.
+Clicking an input ends a drawn-text selection; programmatic focus keeps it. Headings and app-labelled text keep their name
 and expose only link children. Selectable drawn text whose accessibility value
 is its text, and its link elements, expose `AXSelectedTextRange` and
 `AXSelectedText` through the same enclosing selection.

@@ -664,7 +664,15 @@ pub(crate) fn text_changed(view: &NshView) {
         match old {
             Some(old)
                 if Arc::ptr_eq(&old, &text)
-                    || (spoken(&old) == spoken(&text) && old.links == text.links) =>
+                    || (old.links == text.links
+                        && old
+                            .visible_text()
+                            .chars()
+                            .filter(|&c| c != nsh_core::ATTACHMENT_CHAR)
+                            .eq(text
+                                .visible_text()
+                                .chars()
+                                .filter(|&c| c != nsh_core::ATTACHMENT_CHAR))) =>
             {
                 return;
             }
