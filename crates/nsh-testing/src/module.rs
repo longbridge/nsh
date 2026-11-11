@@ -1994,6 +1994,21 @@ impl App {
         step(&this, move |app| app.right_click(&selector)).await
     }
 
+    /// An input method composes `text` in the input `selector` names (or
+    /// the first input in it), as a user typing pinyin or kana sees it: the
+    /// input takes the focus and `text` shows marked at the caret, in
+    /// place of what it composed, without changing its value
+    /// (`onCompositionChange`); the input is laid out with it. An empty
+    /// `text` ends the composition with nothing committed: end it so before
+    /// the next step on the input. Headless and on macOS for now.
+    pub async fn compose(
+        this: Instance<Self>,
+        selector: String,
+        text: String,
+    ) -> Result<(), JsError> {
+        step(&this, move |app| app.compose(&selector, &text)).await
+    }
+
     /// Pastes `content` into the input `selector` names (or the first input
     /// in it), as the user's paste does with it on the clipboard: the input
     /// takes the focus and hears `onPaste` (`files` are paths whose bytes

@@ -1093,6 +1093,7 @@ pub fn EmojiPicker(props: EmojiPickerProps, cx: Scope<EmojiPickerEvent>) -> impl
                 KeyOptions {
                     when,
                     repeat,
+                    for_focus: true,
                     ..Default::default()
                 },
                 move |_| f(),

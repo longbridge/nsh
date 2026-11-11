@@ -386,6 +386,9 @@ pub(crate) struct Input {
     /// The edits reported so far ([`nsh_core::EventPayload::Text`]).
     pub(crate) count: u32,
     pub(crate) config: Box<InputConfig>,
+    /// What an input method composes in it (`app.compose`), at the end of
+    /// its text: marked, not in `text` until it commits.
+    pub(crate) composition: Option<String>,
     /// Where its text goes in the view (inside padding and border); the
     /// whole view until the core says.
     pub(crate) content: Option<Bounds<Points>>,
@@ -2211,6 +2214,23 @@ impl Screen {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
     }
 
+    /// The views that hear a mouse button released on `id`: it and every
+    /// view around it listening to `onMouseUp`, inside out, as the
+    /// platforms walk them.
+    pub(crate) fn mouse_up_targets(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        while let Some(view) = self.nodes.get(&id) {
+            if view.events.contains(EventKind::MouseUp) {
+                targets.push(id);
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        targets
+    }
+
     /// The app's keyboard shortcuts (`nsh/keymap`).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn keymap(&self) -> Option<&nsh_core::keymap::Keymap> {
@@ -2352,6 +2372,22 @@ impl Screen {
             props.focus_stop(v.events.contains(EventKind::Press)) && !self.disabled_from(id, None)
         })
         .collect()
+    }
+
+    /// The newest modal shown over `window` (the root of a window of the
+    /// app's own, else the main window's): the desktops and the web keep
+    /// Tab inside it, its views the only stops while it is shown.
+    pub(crate) fn focus_scope(&self, window: NodeId) -> Option<NodeId> {
+        self.shown().into_iter().rev().find(|&id| {
+            self.kind(id) == Some(ViewKind::Modal)
+                && !self.is_window(id)
+                && self.window_of(id) == window
+        })
+    }
+
+    /// Whether view `id` is `scope` or inside it.
+    pub(crate) fn within(&self, id: NodeId, scope: NodeId) -> bool {
+        id == scope || self.is_inside(id, scope)
     }
 
     /// The stop a press on `id` gives the focus to in a terminal: `id` or

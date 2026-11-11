@@ -147,6 +147,8 @@ const quote = signal("");
 
 它读取的是该视图持有的选区：可选择视图嵌套时选区由外层视图持有，内层 `TextView` 的 ref 返回 `""`。
 
+在 Windows 上，可选择视图的文字被右键单击时，如果该视图（或其中包住这段文字的视图）监听了 `onContextMenu`，就由它收到事件，选区保持不变：应用用 `Menu.popup` 显示自己的菜单，其中 `copy` 和 `selectAll` 角色作用于选区，旁边是应用针对选中内容的菜单项。没有监听时，Windows 显示“复制”和“全选”。
+
 [`Input`](./input.md) 的 `onSelectionChange` 是它自己的：输入框文字中的光标和选区（`{ start, end }`）。
 
 ## 如何选择

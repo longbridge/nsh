@@ -117,6 +117,7 @@
 			post(name, data) {
 				nameOf(name);
 				if (initial[0]) invoke(432, [name, data]);
+				else if (environment.host()) platform.post(name, data);
 			}
 		};
 		dom.rootProp("onHost", (value) => {
@@ -2246,6 +2247,7 @@
 		"keyExtractor",
 		"stickyHeaderIndices",
 		"initialScrollIndex",
+		"initialScrollAtEnd",
 		"onViewableItemsChange",
 		"viewabilityConfig",
 		"refreshing",
@@ -2424,7 +2426,12 @@
 				if (delay > 0) state.timer = setTimeout(report, delay);
 				else report();
 			});
-			if (typeof props.initialScrollIndex === "number") invoke(314, [
+			if (props.initialScrollAtEnd) invoke(314, [
+				id,
+				"scrollToEnd",
+				{ animated: false }
+			]);
+			else if (typeof props.initialScrollIndex === "number") invoke(314, [
 				id,
 				"scrollToIndex",
 				{

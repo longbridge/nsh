@@ -686,6 +686,8 @@ impl Session {
             started.map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
         if let Some(host) = page_host {
             host.attach(app.engine().control());
+            let poster = host.clone();
+            app.on_host_post(move |name, args| poster.post(name, args));
             app.on_host_call(move |id, name, args| host.call(id, name, args));
         }
         if let Some(out) = &self.run.trace {
