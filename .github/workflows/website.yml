@@ -81,11 +81,7 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    # The published site builds on the organization's self-hosted runner
-    # (docs/dev/tooling.md "Self-hosted runners"): it waits in no queue and
-    # keeps its builds. Pull requests and merge-queue runs, whose code is
-    # anyone's, stay on GitHub's runners.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -273,7 +269,7 @@ jobs:
   deploy:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     needs: build
-    runs-on: [self-hosted, Linux, Packager]
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

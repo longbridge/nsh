@@ -76,7 +76,7 @@ jobs:
   # the nightly already has it), or the branch the run was started on.
   plan:
     name: Plan
-    runs-on: [self-hosted, Linux, Packager]
+    runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.plan.outputs.ref }}
       build: ${{ steps.plan.outputs.build }}
@@ -125,21 +125,21 @@ jobs:
           # The iOS runtimes and SDK need Xcode and Apple silicon; the macOS
           # runtime is built for this machine.
           - name: macos-arm64
-            os: [self-hosted, macOS, ARM64]
+            os: macos-15
             embed: ios
           - name: macos-x86_64
             os: macos-15-intel
           # Ubuntu 24.04 has GTK 4.14 and Pango 1.52+, what the Linux runtime
           # needs; its binaries need glibc 2.39 and GTK 4.14 or newer where
-          # they run. The self-hosted Linux runner must be 24.04 too.
+          # they run.
           - name: linux-x86_64
-            os: [self-hosted, Linux, Packager]
+            os: ubuntu-24.04
             embed: android
             shared: true
           - name: linux-arm64
             os: ubuntu-24.04-arm
           - name: windows-x86_64
-            os: [self-hosted, Windows]
+            os: windows-latest
           - name: windows-arm64
             os: windows-11-arm
     runs-on: ${{ matrix.os }}
@@ -363,7 +363,7 @@ jobs:
     name: Release
     needs: dist
     if: inputs.tag != '' || github.ref_type == 'tag'
-    runs-on: [self-hosted, Linux, Packager]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -408,7 +408,7 @@ jobs:
     name: Nightly
     needs: [plan, dist]
     if: needs.plan.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.nightly == true)
-    runs-on: [self-hosted, Linux, Packager]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
