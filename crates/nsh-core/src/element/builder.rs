@@ -217,6 +217,7 @@ pub struct Attrs {
     pub(crate) accessible: Option<bool>,
     pub(crate) label: Option<SharedString>,
     pub(crate) hint: Option<SharedString>,
+    pub(crate) description: Option<SharedString>,
     pub(crate) role: AccessibilityRole,
     pub(crate) state: AccessibilityState,
     pub(crate) value: Option<AccessibilityValue>,
@@ -279,6 +280,11 @@ impl Attrs {
         if self.hint != old.hint {
             out.push(Prop::Accessibility(A::Hint(
                 self.hint.as_ref().map(SharedString::to_arc),
+            )));
+        }
+        if self.description != old.description {
+            out.push(Prop::Accessibility(A::Description(
+                self.description.as_ref().map(SharedString::to_arc),
             )));
         }
         if self.role != old.role {
@@ -1302,6 +1308,16 @@ pub trait Accessible: Element {
     /// What happens when activated, for screen readers.
     fn hint(mut self, hint: impl IntoReactive<SharedString>) -> Self {
         self.node().bind_attr(hint, |a, hint| a.hint = Some(hint));
+        self
+    }
+
+    /// More about it than its name, which screen readers read after it
+    /// (TS: `accessibilityDescription`; `gpui-base`'s `aria_description`):
+    /// a dialog's message, what a field expects.
+    fn accessibility_description(mut self, description: impl IntoReactive<SharedString>) -> Self {
+        self.node().bind_attr(description, |a, description| {
+            a.description = Some(description)
+        });
         self
     }
 

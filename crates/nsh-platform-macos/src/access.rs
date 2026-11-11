@@ -9,8 +9,9 @@
 //!   labelled images, a group for other labelled views, none otherwise (the
 //!   view is no element then, and VoiceOver goes through to its children);
 //! - its label (`accessibilityLabel`; a text view's text is its value, as
-//!   VoiceOver reads static text), its help (`accessibilityHint`), its
-//!   value (`accessibilityValue`: a range for range roles, the text
+//!   VoiceOver reads static text), its help (`accessibilityDescription`
+//!   and `accessibilityHint`, as WebKit gives `aria-description` the help),
+//!   its value (`accessibilityValue`: a range for range roles, the text
 //!   otherwise; the checked state of checkable roles) and its states
 //!   (`accessibilityState`);
 //! - buttons, links, tabs, checkboxes, radios, switches, menu items,
@@ -956,7 +957,7 @@ fn spec_for(
     Spec {
         role,
         label,
-        help: a.hint.as_deref().map(str::to_owned),
+        help: a.help_text(None),
         value,
         disabled: a.state.disabled,
         selected: a.state.selected,
@@ -1154,6 +1155,21 @@ mod tests {
         assert_eq!(s.label.as_deref(), Some("Label"));
         assert_eq!(s.help.as_deref(), Some("Opens it"));
         assert!(!s.invalid);
+        // The description goes before the hint in the help.
+        let described = Accessibility {
+            label: Some("Delete file?".into()),
+            role: Role::AlertDialog,
+            description: Some("This can't be undone.".into()),
+            ..Default::default()
+        };
+        let s = spec_for(&described, ViewKind::View, false, None, false);
+        assert_eq!(s.help.as_deref(), Some("This can't be undone."));
+        let both = Accessibility {
+            description: Some("Plays the album".into()),
+            ..labelled.clone()
+        };
+        let s = spec_for(&both, ViewKind::View, true, None, false);
+        assert_eq!(s.help.as_deref(), Some("Plays the album. Opens it"));
         // A field whose content the app rejected (`AXInvalid`).
         let invalid = Accessibility {
             label: Some("Email".into()),

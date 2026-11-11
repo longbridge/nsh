@@ -82,13 +82,15 @@ define_class!(
             self.a11y_label()
         }
 
+        // The description, then the hint: UIKit has one place for what
+        // VoiceOver reads after the name and the value.
         #[unsafe(method_id(accessibilityHint))]
         fn accessibility_hint(&self) -> Option<Retained<NSString>> {
             self.ivars()
                 .props
                 .borrow()
                 .accessibility
-                .hint
+                .help_text(None)
                 .as_deref()
                 .map(NSString::from_str)
         }

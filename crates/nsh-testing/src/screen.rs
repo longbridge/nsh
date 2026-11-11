@@ -215,6 +215,8 @@ struct View {
     accessibility_state: AccessibilityState,
     /// Its `accessibilityLevel`.
     level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    description: Option<Arc<str>>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -492,6 +494,7 @@ impl Screen {
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
+                view.description = props.accessibility.description.clone();
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -1544,6 +1547,21 @@ impl Screen {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [id] => Ok(self.nodes.get(&id).and_then(|v| v.level)),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The description of the view `selector` names (its
+    /// `accessibilityDescription`: a dialog's message), which screen
+    /// readers read after its name; an error when none or several match.
+    pub fn accessibility_description(&self, selector: &str) -> Result<Option<String>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .and_then(|v| v.description.as_deref().map(str::to_owned))),
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }

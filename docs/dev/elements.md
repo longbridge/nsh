@@ -278,9 +278,13 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
-- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `State` / `Value` / `Actions` / `Level` +
+- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `Description` / `State` / `Value` / `Actions` / `Level` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
-  (Android: resource id). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
+  (Android: resource id). `accessibilityDescription` (ARIA's `aria-description`, `gpui-base`'s `aria_description`;
+  Rust `.accessibility_description(..)`) is read after the name: a dialog's message. Windows has a property of its own
+  for it (UIA `FullDescription`); the other platforms have one place for what is read after the name (AppKit's help,
+  UIKit's hint, AT-SPI's and AccessKit's description, Android's hint text, the web's `aria-description`), which gets
+  the description and then the hint (`Accessibility::help_text`). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
   `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
   `Dialog` is a `dialog` unless the app gives it another role, named by its label; the platforms map it to their own
   dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content); `accessibilityState.pressed` (`aria-pressed`:
