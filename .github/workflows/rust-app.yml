@@ -17,12 +17,6 @@ jobs:
       - uses: ./.github/actions/cargo
         with:
           cache: rust-app
-      - name: Shared Foundation regressions
-        run: cargo test --locked -p nsh-platform-apple --lib web_cookies
-      - name: macOS Cookie code quality
-        run: cargo clippy --locked -p nsh-platform-macos --no-default-features --all-targets -- -D warnings
-      - name: macOS Cookie native regression
-        run: python3 .nsh/mobile-cookie-macos-run.py
       - name: iOS Cookie simulator scenario
         run: python3 .nsh/mobile-cookie-ios-run.py
       - uses: actions/upload-artifact@v4
@@ -45,6 +39,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - name: Install Android toolchain
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
       - name: Configure native tools

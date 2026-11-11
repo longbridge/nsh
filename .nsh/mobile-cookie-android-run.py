@@ -28,14 +28,21 @@ shutil.copyfile(root / '.nsh/mobile-cookie-android.rs', app / 'src/lib.rs')
 shutil.copyfile(root / 'Cargo.lock', app / 'Cargo.lock')
 (proof / 'commit.txt').write_text(subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True))
 
-def run(command, name):
+def run(command, name, env=None):
     with (proof / (name + '.log')).open('w') as log:
-        result = subprocess.run(command, cwd=root, stdout=log, stderr=subprocess.STDOUT, timeout=2400)
+        result = subprocess.run(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=2400)
     print((proof / (name + '.log')).read_text()[-20000:], flush=True)
     result.check_returncode()
 
 run(['cargo', 'build', '--locked', '-p', 'nsh-cli'], 'cli-build')
 run(['cargo', 'xtask', 'android', '--abi', 'x86_64'], 'android-build')
+ndk = Path(os.environ['ANDROID_NDK_HOME']) / 'toolchains/llvm/prebuilt/linux-x86_64'
+clang = ndk / 'bin/x86_64-linux-android26-clang'
+include = next((ndk / 'lib/clang').glob('*/include'))
+env = os.environ.copy()
+env.update(CC_x86_64_linux_android=str(clang), AR_x86_64_linux_android=str(ndk / 'bin/llvm-ar'), CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=str(clang), BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android=f'--target=x86_64-linux-android26 --sysroot="{ndk / "sysroot"}" -idirafter "{include}"', CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER='python3 ' + str(root / '.nsh/mobile-cookie-adb-runner.py'))
+run(['cargo', 'clippy', '--locked', '-p', 'nsh-platform-android', '--target', 'x86_64-linux-android', '--no-default-features', '--all-targets', '--', '-D', 'warnings'], 'android-clippy', env)
+run(['cargo', 'test', '--locked', '-p', 'nsh-platform-android', '--target', 'x86_64-linux-android', '--no-default-features', '--lib', 'webview'], 'android-unit', env)
 subprocess.run(['adb', 'logcat', '-c'], check=True)
 run([str(root / 'target/debug/nsh'), 'package', str(app), '--target', 'android', '--abi', 'x86_64', '--run', '-v'], 'package')
 logs = subprocess.Popen(['adb', 'logcat', '-v', 'brief', '-s', 'nsh', 'AndroidRuntime'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

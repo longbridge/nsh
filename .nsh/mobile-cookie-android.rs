@@ -317,7 +317,7 @@ pub fn App() -> impl IntoElement {
     });
 
     view()
-        .padding(px(16.0))
+        .p(px(16.0))
         .gap(px(8.0))
         .child(text("Android cookie store smoke").text_size(px(16.0)))
         .child(view().w_full().h(px(320.0)).child(when(

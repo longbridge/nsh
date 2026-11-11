@@ -36,10 +36,12 @@ shutil.copyfile(root / '.nsh/mobile-cookie-ios.rs', crate / 'src/main.rs')
 (proof / 'commit.txt').write_text(subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True))
 target = 'aarch64-apple-ios-sim' if os.uname().machine == 'arm64' else 'x86_64-apple-ios'
 run(['cargo', 'clippy', '--locked', '-p', 'nsh-platform-ios', '--no-default-features', '--target', target, '--', '-D', 'warnings'], 'clippy')
-run(['cargo', 'build', '--manifest-path', str(crate / 'Cargo.toml'), '--target', target, '--target-dir', str(root / 'target')], 'build')
+run(['cargo', 'build', '--manifest-path', str(crate / 'Cargo.toml'), '--target', target, '--message-format=json'], 'build')
+artifacts = [json.loads(line) for line in (proof / 'build.log').read_text().splitlines() if line.startswith('{')]
+executable = next(item['executable'] for item in artifacts if item.get('reason') == 'compiler-artifact' and item.get('target', {}).get('name') == 'mobile-cookie-ios' and item.get('executable'))
 app = area / 'MobileCookie.app'
 app.mkdir(exist_ok=True)
-shutil.copy2(root / 'target' / target / 'debug/mobile-cookie-ios', app / 'MobileCookie')
+shutil.copy2(executable, app / 'MobileCookie')
 with (app / 'Info.plist').open('wb') as file:
     plistlib.dump({'CFBundleIdentifier': 'com.nsh.mobile-cookie', 'CFBundleName': 'MobileCookie', 'CFBundleExecutable': 'MobileCookie', 'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1', 'CFBundleShortVersionString': '1.0', 'MinimumOSVersion': '15.0', 'UIDeviceFamily': [1, 2], 'UILaunchScreen': {}, 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {}}, 'NSAppTransportSecurity': {'NSAllowsArbitraryLoads': True, 'NSAllowsArbitraryLoadsInWebContent': True}}, file)
 run(['codesign', '--force', '--sign', '-', str(app)], 'codesign')

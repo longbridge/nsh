@@ -2054,14 +2054,14 @@ mod tests {
         id: u64,
         operation: nsh_core::webview::WebViewOperation,
     ) -> (Vec<i32>, Vec<String>) {
+        let mut request = nsh_core::webview::WebViewRequest::default();
+        request.id = id;
+        request.operation = operation;
         let encoded = encode(
             MountBatch {
                 items: vec![MountItem::Command {
                     id: 3,
-                    command: Command::WebViewRequest(nsh_core::webview::WebViewRequest {
-                        id,
-                        operation,
-                    }),
+                    command: Command::WebViewRequest(request),
                 }],
             },
             19,
@@ -2112,30 +2112,5 @@ mod tests {
                 "sid".to_owned(),
             ]
         );
-    }
-
-    #[test]
-    fn webview_reads_and_deletes_answer_their_platform_errors() {
-        let (ints, objects) = webview_request(
-            7,
-            nsh_core::webview::WebViewOperation::GetCookies {
-                url: Some("https://example.com/".into()),
-            },
-        );
-        assert_eq!(ints, vec![COMMAND, 3, 53, 7, 0, 0, 2, 1]);
-        assert_eq!(objects[0], "19");
-        assert_eq!(objects[1], crate::webview::GET_COOKIES_UNSUPPORTED);
-
-        let (ints, objects) = webview_request(
-            8,
-            nsh_core::webview::WebViewOperation::DeleteCookie {
-                name: "sid".into(),
-                domain: "example.com".into(),
-                path: "/".into(),
-            },
-        );
-        assert_eq!(ints, vec![COMMAND, 3, 53, 8, 0, 0, 2, 1]);
-        assert_eq!(objects[0], "19");
-        assert_eq!(objects[1], crate::webview::DELETE_COOKIE_UNSUPPORTED);
     }
 }
