@@ -3611,6 +3611,10 @@ tap id:bad-length
 expect theme result bad-length refused TypeError
 expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
+tap id:bad-suffix
+expect theme result bad-suffix refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
 tap id:built
 expect theme result built
 expect theme up #138a5aff
