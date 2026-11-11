@@ -2166,3 +2166,88 @@ fn env_in_arbitrary_spacing() {
     );
     assert_eq!(list.unknown().len(), 5, "{:?}", list.unknown());
 }
+
+/// A text color with an opacity modifier where the color is arbitrary or a
+/// design token (`text-[#ff0000]/50`, `text-primary/50`): the color at
+/// that alpha, as `bg-` and `border-` take it. A size keeps its line
+/// height (`text-[14px]/6`).
+mod text_color_opacity {
+    use super::*;
+
+    fn text_color(classes: &str, dark: bool) -> Option<Color> {
+        let env = ClassEnvironment {
+            dark,
+            ..Default::default()
+        };
+        styled_with(classes, env, (390.0, 844.0), 0).0.text.color
+    }
+
+    #[test]
+    fn an_arbitrary_text_color_takes_an_opacity() {
+        for (class, color) in [
+            ("text-[#ff0000]", 0xff00_00ff_u32),
+            ("text-[#ff0000]/50", 0xff00_0080),
+            ("text-[#ff0000]/[0.5]", 0xff00_0080),
+            ("text-[color:#ff0000]/50", 0xff00_0080),
+            ("text-[rgb(0_0_255)]/25", 0x0000_ff40),
+            ("text-[color:rgb(0_0_255)]/25", 0x0000_ff40),
+            ("text-[color:rgb(0_0_255)]", 0x0000_ffff),
+        ] {
+            assert_eq!(text_color(class, false), Some(Color(color)), "{class}");
+        }
+        // What `bg-` makes of the same value.
+        for value in [
+            "[#336699]/30",
+            "[color:#336699]/30",
+            "[hsl(210_50%_40%)]/[30%]",
+        ] {
+            let s = styled(&format!("text-{value} bg-{value}"));
+            assert_eq!(s.text.color, Some(s.view.background_color), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_token_text_color_takes_an_opacity() {
+        let ui = ui_theme();
+        for dark in [false, true] {
+            let primary = ui.color("primary").unwrap();
+            let primary = Color::from(if dark { primary.dark } else { primary.light });
+            let half = primary.with_alpha(0.5);
+            assert_eq!(text_color("text-primary", dark), Some(primary), "{dark}");
+            assert_eq!(text_color("text-primary/50", dark), Some(half), "{dark}");
+            assert_eq!(
+                text_color("text-(--primary)/50", dark),
+                Some(half),
+                "{dark}"
+            );
+            assert_eq!(
+                text_color("text-(color:--primary)/50", dark),
+                Some(half),
+                "{dark}"
+            );
+        }
+        // Under a variant too.
+        let theme = themed();
+        assert!(
+            parse(&theme, "hover:text-muted-foreground/70")
+                .unknown()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_size_keeps_its_line_height() {
+        let s = styled("text-[14px]/6");
+        assert_eq!(s.text.font_size, Some(px(14.0)));
+        assert_eq!(s.text.line_height, Some(px(24.0)));
+        let s = styled("text-[14px]/[1.5]");
+        assert_eq!(s.text.font_size, Some(px(14.0)));
+        assert_eq!(s.text.line_height_multiple, Some(1.5));
+        let s = styled("text-[14px]/[150%]");
+        assert_eq!(s.text.line_height_em, Some(1.5));
+        assert_eq!(s.text.color, None);
+        let s = styled("text-lg/7");
+        assert_eq!(s.text.font_size, Some(px(18.0)));
+        assert_eq!(s.text.line_height, Some(px(28.0)));
+    }
+}
