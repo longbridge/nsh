@@ -51,6 +51,8 @@ pollster = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 # A packaged app's update configuration (`updates`).
 nsh-updater.workspace = true
+# `RUST_LOG` of the desktop release runners' logger (`logging`).
+env_filter.workspace = true
 
 # Apple: shader frames on IOSurfaces (`shader`; the type is in the API with
 # or without it).

@@ -461,9 +461,10 @@ shows its window itself (`focus()` from its tray).
 
 ## Packaged apps' logs
 
-An app opened from Finder or the Dock has its stderr on `/dev/null`, so `nsh-macos-app` (like `nsh-ios-app` and the
-iOS SDK's C ABI without `dev`) installs `nsh_platform_apple::unified_log`, a `log` logger that writes to the unified
-log. The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
+An app opened from Finder or the Dock has its stderr on `/dev/null`, so its lines go to the unified log through
+`nsh_platform_apple::unified_log`, a `log` logger: `nsh-ios-app` and the iOS SDK's C ABI without `dev` install it,
+and `nsh-macos-app` installs the desktop runners' logger (`nsh_engine::logging`: `RUST_LOG`, the rolling file in the
+app's data directory) with it as the output (`unified_log::logger`, `Options::filtered`). The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
 record's target, with each category's `os_log_t` made once. Errors are `OS_LOG_TYPE_ERROR`; warnings (their text
 after `WARN`) and info are `OS_LOG_TYPE_DEFAULT`, which the log stores and Console shows without "Include Info
 Messages"; debug and trace are `OS_LOG_TYPE_DEBUG`. The text is logged `%{public}s`, a NUL in it written `\0`, in

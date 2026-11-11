@@ -497,6 +497,9 @@ In a terminal ([the terminal backend](./tui.md)), `platform.idiom` is `"terminal
 
 `data_dir()` in Rust, `process.dataDir` in TSX, is the directory the app keeps its own files in, such as a SQLite database: `<data dir>/<app id>`, beside its `storage.json`, on every native platform, Android and iOS included. It is `None` (`null`) where the host keeps no files for the app, such as the web. The directory may not exist yet, so create it before writing.
 
+A packaged desktop app writes its log lines to `logs/app.log` there: `log_file()` in Rust, `process.logFile` in TSX
+([Log files and levels on the desktop](./dev-server-and-debugging.md#log-files-and-levels-on-the-desktop)).
+
 ```rust
 use nsh_core::prelude::*;
 
