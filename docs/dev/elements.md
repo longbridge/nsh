@@ -510,18 +510,25 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
   for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
-  it. In every idiom the keyboard focus shows it too (WAI-ARIA's tooltip pattern; the focus is keyboard focus, a click
-  moves none): `Core::focus_hints`, after `update_focus_within`, shows the hint of the nearest anchor on the focus
-  chain (up to the overlay the focus is in, so a popup's focus is not on its trigger's hint) at once and hides it when
-  the focus leaves. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same `ESCAPE_BINDING`):
-  Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint (`overlay_escape`); a hint
-  Escape or a press hid shows for the focus again only once the focus comes back. The overlay hears what the pointer
-  and the focus ask for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`,
-  `Escape`, `View`), and
-  `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
-  is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
-  so. The overlay should
-  not take the pointer (`pointerEvents: "none"`).
+  it. In every idiom the focus the keyboard moved shows it too (WAI-ARIA's tooltip pattern): `Core::focus_hints`,
+  after `update_focus_within`, shows the hint of the nearest anchor on the focus chain (up to the overlay the focus is
+  in, so a popup's focus is not on its trigger's hint) at once when the keyboard brought the focus there, and hides it
+  when the focus leaves. Which input moved the focus is decided as it is reported (`classes::focus_reported`:
+  `Core::focus_by_keyboard`, by `keyboard_moves_focus`: `focus-visible:`'s rule, `styles.md`, without its exception
+  for an input that edits), so Tab, a group's arrows, a shortcut and the app's `focus()` after a key show the hint, and
+  a press, a tap or a click that focuses the anchor (a click on a stop where the platform focuses it, a tap into a
+  field, a component's or the app's `focus()` after a press) leaves the hint to the pointer, as Radix's tooltips do:
+  the press hid it, and it stays hidden after the pointer left. A key typed later, the focus staying, shows
+  `focus-visible:` and no hint; the hint shows once the keyboard moves the focus to the anchor (a move inside the
+  anchor decides nothing again). Before any input the focus counts as the keyboard's (an `autoFocus`), as it
+  does for `focus-visible:`. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same
+  `ESCAPE_BINDING`): Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint
+  (`overlay_escape`); a hint Escape or a press hid shows for the focus again only once the keyboard brings the focus
+  back. The overlay hears what the pointer and the focus ask for (`Show`, `Dismiss`: `on_hint_show` /
+  `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`, `Escape`, `View`), and `OverlayConfig::open`
+  (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state is controlled or not).
+  Touch screens never watch the pointer: a hint shows there for the keyboard's focus (a hardware keyboard) or when
+  `open` says so. The overlay should not take the pointer (`pointerEvents: "none"`).
 - **A link's hint** (a hint overlay whose parent is a link of a text: a nested span, `AttributedText::links`): the
   span is its anchor (`Core::hint_anchor` takes any span, `is_text_span`, since the watch is what makes it a link;
   `is_link_span`: a span taking presses or watched for a hint). A span taking no presses (`RichEditor`'s link mark,

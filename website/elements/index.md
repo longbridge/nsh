@@ -339,7 +339,9 @@ const offset = signal({ x: 0, y: 0 });
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
 desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
-every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
+that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
+exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|

@@ -26612,6 +26612,191 @@ fn a_tooltip_element_that_is_a_hint_overlay_is_the_tooltip_itself() {
     assert_ne!(c.overlay_state.tooltips[&2].overlay, 4);
 }
 
+/// Gives element `id` a `tooltip` saying `says`: the app's element, a
+/// text `content` out of the tree (its run `content + 2`).
+fn give_tooltip(c: &mut Core<FakeEngine>, id: NodeId, content: NodeId, says: &str) {
+    apply(
+        c,
+        vec![
+            Op::Create {
+                id: content,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: content + 2,
+                text: says.into(),
+            },
+            Op::Insert {
+                parent: content,
+                child: content + 2,
+                before: None,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(content)),
+            },
+        ],
+    );
+}
+
+/// Whether the `tooltip` of element `id` is shown: its hint overlay is
+/// in a root view.
+fn tooltip_shown(c: &Core<FakeEngine>, id: NodeId) -> bool {
+    let overlay = c.overlay_state.tooltips[&id].overlay;
+    c.key(overlay)
+        .ok()
+        .and_then(|k| c.overlay(k))
+        .is_some_and(|s| s.host.is_some())
+}
+
+#[test]
+fn a_tooltip_shows_for_the_focus_the_keyboard_moved_only() {
+    use StyleValue::Number;
+
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    // A trigger with a tooltip (2), and a view with none (8).
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 8, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    give_tooltip(&mut c, 2, 4, "Saves it");
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+    // A press gives the trigger the focus (a click, or the app's
+    // `focus()` after one): no hint for that focus.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2), "a press's focus shows no hint");
+    // A key typed with the focus where it is shows the focus, not the
+    // hint: only a move decides.
+    c.set_input_modality(InputModality::Keyboard);
+    c.commit();
+    assert!(focus_visible(&c, 2));
+    assert!(!tooltip_shown(&c, 2), "a key alone shows no hint");
+    // Tab to the next view, and Shift+Tab back: the keyboard's focus
+    // shows it at once, as the platforms report the move (the view it
+    // reaches first).
+    c.set_states(8, FOCUSED);
+    c.set_states(2, 0);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+    c.set_states(2, FOCUSED);
+    c.set_states(8, 0);
+    let batch = c.commit().unwrap();
+    assert!(tooltip_shown(&c, 2), "the keyboard's focus shows it");
+    assert_eq!(texts_of(&batch), ["Saves it"]);
+    // A press elsewhere takes the focus and hides it; a press back on the
+    // trigger shows none.
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(8, FOCUSED);
+    c.set_states(2, 0);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+    c.set_states(2, FOCUSED);
+    c.set_states(8, 0);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+}
+
+#[test]
+fn a_click_that_focuses_the_trigger_leaves_its_tooltip_to_the_pointer() {
+    use StyleValue::Number;
+
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+    let _clock = clock.enter();
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::Linux,
+        idiom: crate::platform::Idiom::Desktop,
+        ..crate::element::Environment::default()
+    });
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    give_tooltip(&mut c, 2, 4, "Saves it");
+    c.commit();
+    let mouse = EventPayload::Mouse(crate::MouseEvent::default());
+    let rest = |c: &mut Core<FakeEngine>| {
+        clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+        c.run_component_tasks();
+        c.commit();
+    };
+    // The pointer rests on the trigger: its tooltip shows.
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    rest(&mut c);
+    assert!(tooltip_shown(&c, 2));
+    // A click: the button goes down on the trigger, which hides the hint,
+    // and gives it the focus, as AppKit gives a clicked stop the focus.
+    c.set_input_modality(InputModality::Pointer);
+    c.component_event(ROOT_ID, EventKind::Touch, &touch_down(vec![2, ROOT_ID]));
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(
+        !tooltip_shown(&c, 2),
+        "the click hid it, and the focus it gave shows none"
+    );
+    // The pointer leaves, the focus staying: nothing is left up.
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    rest(&mut c);
+    assert!(!tooltip_shown(&c, 2), "nothing stays once the pointer left");
+    // The pointer coming again shows it after its delay, and leaving
+    // hides it, the focus still on the trigger.
+    c.component_event(2, EventKind::MouseEnter, &mouse);
+    rest(&mut c);
+    assert!(tooltip_shown(&c, 2));
+    c.component_event(2, EventKind::MouseLeave, &mouse);
+    c.commit();
+    assert!(!tooltip_shown(&c, 2));
+}
+
+#[test]
+fn a_click_into_a_field_shows_its_focus_but_leaves_its_tooltip_to_the_pointer() {
+    use crate::{platform::InputModality, tailwind::state::FOCUSED};
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    give_tooltip(&mut c, 2, 4, "Your name");
+    c.commit();
+    c.set_input_modality(InputModality::Pointer);
+    c.set_states(2, FOCUSED);
+    c.commit();
+    // `focus-visible:` shows on a field that edits whatever gave it the
+    // focus; its hint does not.
+    assert!(focus_visible(&c, 2));
+    assert!(!tooltip_shown(&c, 2));
+}
+
+#[test]
+fn a_tooltip_shows_for_a_focus_before_any_input() {
+    use crate::tailwind::state::FOCUSED;
+    // The app's first focus (an `autoFocus`) comes after no press: it
+    // shows the hint, as it shows `focus-visible:`.
+    let mut c = core();
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[("height", StyleValue::Number(40.0))],
+    );
+    give_tooltip(&mut c, 2, 4, "Saves it");
+    c.commit();
+    c.set_states(2, FOCUSED);
+    c.commit();
+    assert!(tooltip_shown(&c, 2));
+}
+
 /// An image node `id` showing `source` (and `placeholder`), in the root.
 fn image_ops(id: NodeId, source: ImageSource, placeholder: Option<ImageSource>) -> Vec<Op> {
     let mut ops = vec![
