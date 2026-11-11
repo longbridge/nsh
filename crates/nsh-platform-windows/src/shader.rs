@@ -796,33 +796,34 @@ fn children(
 
 #[cfg(test)]
 thread_local! {
-    /// A test observing the backdrop pixels a shader is given.
-    static CAPTURE: std::cell::RefCell<Option<Box<dyn FnMut(&[u8])>>> =
-        const { std::cell::RefCell::new(None) };
+    /// Whether a test observes the backdrop pixels a shader is given.
+    static CAPTURING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The backdrop pixels it saw.
+    static CAPTURE: std::cell::RefCell<Vec<Vec<u8>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Observes (tests only) the backdrop pixels [`give`] hands to a shader,
-/// without changing what the shader does with them.
+/// Starts observing (tests only) the backdrop pixels [`give`] hands to a
+/// shader, without changing what the shader does with them.
 #[cfg(test)]
-pub(crate) fn set_capture(capture: impl FnMut(&[u8]) + 'static) {
-    CAPTURE.with(|cell| *cell.borrow_mut() = Some(Box::new(capture)));
+pub(crate) fn set_capture() {
+    CAPTURE.with(|captured| captured.borrow_mut().clear());
+    CAPTURING.with(|on| on.set(true));
 }
 
-/// Stops observing backdrop pixels (tests only).
+/// Stops observing and returns the backdrop pixel buffers seen (tests
+/// only).
 #[cfg(test)]
-pub(crate) fn take_capture() {
-    CAPTURE.with(|cell| *cell.borrow_mut() = None);
+pub(crate) fn take_capture() -> Vec<Vec<u8>> {
+    CAPTURING.with(|on| on.set(false));
+    CAPTURE.with(|captured| std::mem::take(&mut *captured.borrow_mut()))
 }
 
 /// Gives `pixels` to `view`'s shader as `input` when they changed.
 fn give(view: &NshView, input: ShaderInput, pixels: &Pixels) {
     #[cfg(test)]
-    if input == ShaderInput::Backdrop {
-        CAPTURE.with(|cell| {
-            if let Some(capture) = cell.borrow_mut().as_mut() {
-                capture(&pixels.data);
-            }
-        });
+    if input == ShaderInput::Backdrop && CAPTURING.with(std::cell::Cell::get) {
+        CAPTURE.with(|captured| captured.borrow_mut().push(pixels.data.clone()));
     }
     let mut hasher = rustc_hash::FxHasher::default();
     (pixels.width, pixels.height).hash(&mut hasher);

@@ -264,6 +264,37 @@ window. Changes wholly outside the window (an animation scrolled out of it) draw
 `render.rs`'s `a_partial_frame_draws_what_a_whole_one_does` draws a tree whole, changes it (a move, a color, a
 removal) and checks that drawing the damage over the old pixels gives the bytes a whole frame gives.
 
+A view whose own painted area (its box, shadows, outline and shader overflow) meets no damage paints none of its
+own decoration in a partial frame: no backdrop filter, shadows, background, shader, content, hosted items, scroll
+indicator or border (`render::own_paint_needed`). It is still walked, because its children may reach the damage, and
+its clip, opacity group and `set_painted` bookkeeping stay. Views whose own paint has effects beyond its pixels keep
+the whole path: hosted items (drawn above the children at their own rectangles), filters and blend modes (drawn
+offscreen as one image), and shader views (an effect shader's children are its content, and a shader reading a
+backdrop must still call `shader::take_backdrop`, whose pixels are read as its own paint begins; the shader state
+that tells the inputs apart is private to `shader.rs`, so every shader view stays conservative). The fixtures
+(`a_partial_frame_draws_a_child_without_repainting_its_parent`, `..._keeps_clips_opacity_and_transforms`,
+`..._applies_backdrop_readers_with_off_damage_parent` and their siblings) compare every partial frame with a fresh
+whole frame byte for byte. A test-only probe counts the decoration entry points by view: the parent whose own area
+misses the damage reaches `draw_backdrop`, `draw_background` and the outer-shadow bake zero times (1, 1, 1 before the
+skip), while the parent whose shadow meets the damage reaches all three.
+
+A rounded box's `ID2D1Geometry` is made lazily (`decor::BoxShape`): a uniform fill draws `FillRoundedRectangle`, a
+multi-fill clip takes one geometry once and forgets it after squaring the corners, and only corners that differ
+(`FillGeometry`) make one.
+
+Decoration bitmaps (blurred shadows, conic gradients) live in a 96 MiB LRU cache whose eviction now knows the
+drawing pass: `render::draw_into` opens a frame (`decor::begin_frame`, nested offscreen passes share it, `Drop`
+closes it on early returns), `get_or_make` records it beside the LRU use, and eviction drops other passes' bitmaps
+first, so a pass keeps what it draws with. When every cached bitmap is current the bound still wins and the oldest
+current bitmaps go; the bitmap just returned is already cloned out for its caller.
+
+Outer shadows stay whole-bitmap bakes. A nine-patch of one small square's blur was implemented and measured, then
+removed: Direct2D's Gaussian blur is translation-invariant in the corner, edge and middle for the same local shape on
+different bitmap sizes, but a destination whose shape extent differs moves the faint outer tail by one alpha unit
+(a 66 × 66 shape and a 200 × 80 one on the same 224 × 104 canvas differ at alpha 1 versus 0), so sliced pixels cannot
+equal a whole-frame bake byte for byte. The reference bake and its cache key stay, and the deferral is recorded on
+the performance page.
+
 What a frame costs then follows what changed: the gallery's Stocks page (~690 views, 1200 × 800 points on a 150%
 display) changes ~34 views a frame (pulsing sparklines, prices, the chart's live point), drawn in ~1.4 ms of
 `paint`. Canvases record their animated tail only (see the table above), omit paints whose current values cannot

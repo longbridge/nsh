@@ -707,6 +707,46 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
   bundle is 2 110 929 bytes from both). The scripted light and dark screenshots of the gallery's home page are
   byte-identical between the binaries (SHA-256 `6a3568db…` light, `b24d354d…` dark).
 
+  Off-damage own painting, lazy box geometry and current-frame cache retention (`docs/dev/windows.md`
+  "Partial frames"), release, the same host and a 1200 × 800 point gallery window, base `f0b4659e`
+  (the detached worktree's binary). Three alternating baseline/new runs per side
+  (`examples/gallery/tools/perf.py --nsh <binary> --only Stocks,Canvas --seconds 4 --size
+  1200x800`, the logs kept by an external collector); `n` is the pooled seconds, each cell the median
+  of the per-second means and the nearest-rank p95 of the per-second p95s:
+
+  | Scenario (n before / after) | Phase | Before, mean / p50 / p95 | After, mean / p50 / p95 |
+  |---|---|---|---|
+  | Home idle (9 / 9) | paint | 4.40 / 3.60 / 7.79 ms | 3.16 / 2.55 / 7.01 ms |
+  | Home idle (9 / 9) | canvas | 0.47 / 0.24 / 2.20 ms | 0.37 / 0.23 / 1.51 ms |
+  | Home scroll (40 / 39) | paint | 4.60 / 4.06 / 8.38 ms | 3.66 / 2.73 / 8.77 ms |
+  | Stocks idle (9 / 9) | paint | 4.54 / 3.88 / 9.35 ms | 4.52 / 3.84 / 9.59 ms |
+  | Stocks scroll (41 / 38) | paint | 4.64 / 4.03 / 9.43 ms | 4.13 / 3.44 / 9.10 ms |
+  | Canvas idle (9 / 9) | paint | 0.52 / 0.51 / 0.77 ms | 0.45 / 0.44 / 0.60 ms |
+  | Canvas scroll (14 / 14) | paint | 1.07 / 0.57 / 2.69 ms | 1.04 / 0.51 / 2.65 ms |
+
+  The gallery's home index gains the most: its cards are non-clipping parents with children, so an
+  off-damage card no longer paints its background, border and shadow (paint's mean −28% idle, −20%
+  scrolled). Stocks' idle paint barely moves because its pulsing sparklines sit inside every visible
+  card's own box (the card is in damage); scrolling improves its mean by 11%. Frames per second are
+  unchanged or better (Home idle median 191 → 218, Stocks scroll 181 → 195, Canvas 240 both sides)
+  and commits are identical (17 / 18 / 49); CPU readings move by ±10 points between runs and are not
+  used to judge this change. The decoration cache does not reach its 96 MiB limit in the gallery, so
+  current-frame retention is covered by its unit tests rather than these runs. A nine-patch outer
+  shadow was tried and rejected: Direct2D's blur moves its faint outer tail by one alpha unit when
+  the destination shape's extent changes, so sliced pixels cannot equal the whole-box bake (the
+  measurement and the two fixes tried are in `windows.md` "Partial frames"); outer shadows keep the
+  original bake.
+
+  Headless `nsh test examples/gallery/App.tsx --trace` is unchanged: both binaries bundle
+  2 110 929 bytes; 3174 ops / 3169 mount items / 859 nodes in the first commit and 11 ops / 0 items /
+  859 nodes in the second, with every item line identical (only timings differ). The scripted light and
+  dark screenshots of the gallery's home page, the Styles demo (cards and shadows) and the Canvas demo
+  are byte-identical between the binaries: home `6a3568db…` light and `b24d354d…` dark, Styles
+  `ca47dbd1…` / `6e754557…`, Canvas `1d189674…` / `26ebaf3e…`. A resized viewport (777 × 523) is not
+  comparable byte for byte: shots a second apart in one run differ by 17 064 pixels (new binary) and
+  18 093 (baseline) of 965 448, the resized frames keep repainting, so the resize evidence is visual
+  only and the partial-frame BGRA tests cover the drawing.
+
 - Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
   both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes

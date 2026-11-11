@@ -2827,23 +2827,13 @@ mod tests {
         size: (u32, u32),
         areas: &[D2D_RECT_F],
     ) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, ID2D1Bitmap1) {
-        let captured = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
-        crate::shader::set_capture({
-            let captured = captured.clone();
-            move |pixels: &[u8]| captured.borrow_mut().push(pixels.to_vec())
-        });
+        crate::shader::set_capture();
         draw_into(surface, gfx, back, 1.0, false, None, Some(areas), None).unwrap();
-        crate::shader::take_capture();
-        let partial = captured.borrow().clone();
-        captured.borrow_mut().clear();
-        crate::shader::set_capture({
-            let captured = captured.clone();
-            move |pixels: &[u8]| captured.borrow_mut().push(pixels.to_vec())
-        });
+        let partial = crate::shader::take_capture();
+        crate::shader::set_capture();
         let fresh = target(gfx, size);
         draw_into(surface, gfx, &fresh, 1.0, false, None, None, None).unwrap();
-        crate::shader::take_capture();
-        let whole = captured.borrow().clone();
+        let whole = crate::shader::take_capture();
         (partial, whole, fresh)
     }
 
