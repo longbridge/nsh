@@ -75,6 +75,18 @@ The `content` part is the box of the document inside the editor's scroll view: i
 is the room around the text, and the scroll bar runs along the editor's own edge. A drag that selects past the top
 or bottom of the editor scrolls the document along, faster the further the pointer goes.
 
+### Sizing
+
+An editor is sized as a block with `height: auto`: without a height it is as tall as its document laid out at its
+width, plus its padding, and it grows and shrinks with each edit. `maxHeight` (`max-h-*`) stops it there, and the
+document scrolls inside it from then on, keeping the caret in view, as a multiline `Input` does; `minHeight`
+(`min-h-*`) keeps it at least that tall. A height or flex sizing (`h-*`, `flex-1`) gives it a fixed box that the
+document scrolls in. A chat composer is an editor with a `maxHeight` and no height:
+
+```tsx
+<RichEditor editor={editor} class="max-h-40 px-3 py-2" />
+```
+
 ### Touch selection
 
 On iOS and Android the editor selects as the platform's own text views do. A long press selects the word under the
