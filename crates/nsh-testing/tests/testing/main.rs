@@ -232,6 +232,51 @@ fn a_test_file_reads_its_imports_wherever_its_entry_is_written() {
     }
 }
 
+/// Test files of one name in different directories of an app run their
+/// own tests from entries of their own in its `.nsh/test`: the parallel
+/// `nsh test`s of an app never write one's entry over the other's.
+#[test]
+fn test_files_of_one_name_run_from_entries_of_their_own() {
+    let app = std::env::temp_dir().join(format!("nsh-testing-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&app);
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("nsh.json"), "{}").unwrap();
+    let dirs = ["core", "state"];
+    for dir in dirs {
+        let file = app.join(format!("src/{dir}/typing.test.ts"));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &file,
+            format!("import {{ test }} from \"nsh/test\";\ntest(\"{dir}\", () => {{}});\n"),
+        )
+        .unwrap();
+    }
+    let run = TestRun {
+        work_dir: app.join(".nsh/test"),
+        ..test_run(None)
+    };
+    for dir in dirs {
+        let results = run_file(
+            &run,
+            &app.join(format!("src/{dir}/typing.test.ts")),
+            &mut |_| {},
+        )
+        .unwrap();
+        let names: Vec<_> = results.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, [dir]);
+    }
+    for dir in dirs {
+        let entry = app.join(format!(".nsh/test/src/{dir}/typing.test.ts.run.js"));
+        let code =
+            std::fs::read_to_string(&entry).unwrap_or_else(|e| panic!("{}: {e}", entry.display()));
+        assert!(
+            code.contains(&format!("/src/{dir}/typing.test.ts\"")),
+            "{code}"
+        );
+    }
+    std::fs::remove_dir_all(&app).unwrap();
+}
+
 #[test]
 fn describe_hooks_skip_only_todo_and_timeouts_behave_as_jest_s() {
     use nsh_testing::TestStatus::{Failed, Passed, Skipped, Todo};
