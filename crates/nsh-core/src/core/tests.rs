@@ -27593,6 +27593,71 @@ fn text_a_hair_over_a_pixel_wide_keeps_its_line() {
 }
 
 #[test]
+fn padded_text_as_wide_as_its_content_keeps_its_line_at_fractional_ratios() {
+    // A bordered and padded label (a stamp on a tile), absolutely placed at
+    // a fractional offset: its border and padding were each rounded from
+    // the outer edge, so at 1.1 pixels per point they took a pixel more
+    // than the 8.25 pixels they are, and the 24 point text wrapped in the
+    // content box left.
+    for ratio in [1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.625, 0.9] {
+        for tenth in 0..10 {
+            let left = 160.0 + tenth as f32 / 10.0;
+            let mut c = Core::new(HairEngine(24.0), size_pt(320.0, 480.0));
+            at_ratio(&mut c, ratio);
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: 3,
+                        tag: Tag::Text,
+                    },
+                    Op::CreateText {
+                        id: 4,
+                        text: "label".into(),
+                    },
+                    Op::Insert {
+                        parent: 3,
+                        child: 4,
+                        before: None,
+                    },
+                    style_op(
+                        3,
+                        &[
+                            ("position", StyleValue::Str("absolute")),
+                            ("left", StyleValue::Number(left)),
+                            ("top", StyleValue::Number(6.0)),
+                            ("paddingHorizontal", StyleValue::Number(6.0)),
+                            ("paddingVertical", StyleValue::Number(1.0)),
+                            ("borderWidth", StyleValue::Number(1.5)),
+                        ],
+                    ),
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: 3,
+                        before: None,
+                    },
+                ],
+            );
+            let batch = c.commit().unwrap();
+            let content = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id: 3, content, .. } => Some(*content),
+                    _ => None,
+                })
+                .expect("text content");
+            // Whole pixels, but for the last bits of an `f32` (30 pixels
+            // at 1.25 come to 23.999998 points).
+            assert!(
+                content.size.width.0 >= 24.0 - 1.0e-3,
+                "at {ratio}, left {left}: {content:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn frames_stay_on_device_pixels_at_fractional_ratios() {
     // A view 4 points down (10.5 pixels at 2.625) holding a child as tall as
     // itself: rounded to whole points, the platform rounding each frame to
