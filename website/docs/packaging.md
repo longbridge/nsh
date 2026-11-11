@@ -313,6 +313,7 @@ says what to set instead:
 | `CFBundleName`, `CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`, `CFBundleVersion` | `version`, `build` |
 | `CFBundleURLTypes` | `schemes` |
+| `CFBundleDocumentTypes` | `fileTypes` ([Opening files](../modules/nsh-desktop.md#opening-files)) |
 | iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
 | iOS: `UIUserInterfaceStyle` | `appearance` |
 | iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
@@ -384,18 +385,27 @@ Without an icon, the system shows its default.
 
 ## Camera, Bluetooth and other hardware
 
-NSH has no API for the camera, video recording, Bluetooth or location, and `nsh package` cannot make an app that uses
-them: NSH's runtime has no code that reaches this hardware, `nsh.json` adds keys to `Info.plist`
-([above](#infoplist-keys-and-entitlements)) but none to the Android manifest, and a packaged Android app cannot add Java
-code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
-protected hardware without a usage description in `Info.plist`, and the Android manifest of a packaged app declares
-only `INTERNET`.
+A packaged app declares the hardware NSH's own features use, from its `nsh.json`:
 
-An app that needs them embeds NSH in its own Xcode or Gradle project ([iOS](./ios.md#embedding-in-an-ios-app),
-[Android](./android.md#embedding-in-an-android-app)). That project owns `Info.plist` and `AndroidManifest.xml`, so it
-declares what it uses there and writes the platform code itself: a camera preview is a
-[native component](./native-components.md), and the app reaches everything else through
-[`host.call`](./ios.md#talking-to-the-app) ([on Android](./android.md#talking-to-the-app)).
+| Feature | iOS and macOS | Android |
+|---|---|---|
+| [`Speech`](../modules/nsh.md#speech), when the app grants `speech` or declares no capabilities | `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` | |
+| Web pages that capture media ([`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)) | `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`; on macOS the entitlements `com.apple.security.device.audio-input` and `com.apple.security.device.camera` | `RECORD_AUDIO`, `CAMERA` |
+| [`Notifications`](../modules/nsh.md#notifications), when the app grants `notifications` or declares no capabilities | | `POST_NOTIFICATIONS` |
+
+Every Android package also declares `INTERNET`. A usage description is what the system shows when the app first asks;
+the app's `infoPlist` words it its own way ([above](#infoplist-keys-and-entitlements)).
+
+On iOS and macOS, an app's own [Rust crate](./rust.md) reaches other hardware through the system's frameworks, with the
+usage descriptions it needs in `infoPlist` and, on macOS, the entitlements in `entitlements`: the system ends an app
+that reaches protected hardware without its usage description.
+
+An Android app that uses other hardware embeds NSH in its own Gradle project
+([Android](./android.md#embedding-in-an-android-app)), and an iOS app may do the same in its Xcode project
+([iOS](./ios.md#embedding-in-an-ios-app)). That project owns `AndroidManifest.xml` and `Info.plist`, so it declares
+what it uses there and writes the platform code itself: a camera preview is a [native component](./native-components.md),
+and the app reaches everything else through [`host.call`](./ios.md#talking-to-the-app)
+([on Android](./android.md#talking-to-the-app)).
 
 ## What is inside
 
