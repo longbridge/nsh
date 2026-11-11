@@ -273,6 +273,15 @@ pub struct WebViewRequest {
     pub operation: WebViewOperation,
 }
 
+impl Default for WebViewRequest {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            operation: WebViewOperation::CancelDownload { id: String::new() },
+        }
+    }
+}
+
 /// What an accepted download did ([`crate::EventKind::Download`], the
 /// Rust `WebView::on_download`).
 #[non_exhaustive]
@@ -312,7 +321,7 @@ pub enum WebDownloadState {
 impl WebDownloadState {
     /// The state named `name` in a platform's payload (`"started"`,
     /// `"finished"`, `"failed"`).
-    pub fn parse(name: &str) -> Option<Self> {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "started" => Some(WebDownloadState::Started),
             "finished" => Some(WebDownloadState::Finished),
@@ -357,6 +366,7 @@ pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The event payload answering [`WebViewRequest`] `id` with `result`
 /// ([`crate::EventKind::WebViewReply`]).
+#[doc(hidden)]
 pub fn reply(id: u64, result: Result<JsonValue, String>) -> EventPayload {
     let value = match result {
         Ok(value) => serde_json::json!({ "id": id, "ok": true, "value": value }),
@@ -367,6 +377,7 @@ pub fn reply(id: u64, result: Result<JsonValue, String>) -> EventPayload {
 
 /// The event payload reporting a download that waits for the app's
 /// destination ([`crate::EventKind::DownloadPending`]).
+#[doc(hidden)]
 pub fn download_pending_payload(id: &str, url: &str, filename: &str) -> EventPayload {
     EventPayload::Json(serde_json::json!({ "id": id, "url": url, "filename": filename }))
 }
