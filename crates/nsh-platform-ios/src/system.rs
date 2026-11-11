@@ -45,7 +45,10 @@ thread_local! {
     static ORIENTATIONS: Cell<UIInterfaceOrientationMask> = const { Cell::new(UIInterfaceOrientationMask(0)) };
     /// How the app's own pages (no page's setting) showed the screen when
     /// a page's setting came, to turn back to when it goes and the device
-    /// says nothing (lying flat).
+    /// says nothing (lying flat). Like `ORIENTATIONS` and `TURNING`, one
+    /// per process, not per scene: right for a phone's single window; on
+    /// an iPad with several scenes, one scene's turn can be recorded for
+    /// another.
     static APP_ORIENTATION: Cell<UIInterfaceOrientation> = const { Cell::new(UIInterfaceOrientation::Unknown) };
     /// A turn asked for on the app's own pages, and when: the scene shows
     /// the old orientation until it is done.
