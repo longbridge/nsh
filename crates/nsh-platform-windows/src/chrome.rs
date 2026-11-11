@@ -20,7 +20,8 @@
 //!   menus, the `WM_UAHDRAWMENU*` messages for the bar, which has no dark
 //!   theme of its own). Their shortcuts are matched here before the keys
 //!   reach the app; the editing roles act on the focused text field by
-//!   sending it their keys.
+//!   sending it their keys. A popup for a selectable view's context-menu
+//!   request sends Copy and Select All to that view's selection instead.
 //! - **Menu icons** are `hbmpItem` bitmaps: 32-bit premultiplied DIB sections
 //!   of `SM_CXSMICON` at the window's DPI, which Windows alpha blends, set
 //!   as each icon arrives from the image loader and kept with their menu
@@ -83,6 +84,7 @@ use crate::{
     input::{KeyEvent, Modifiers},
     render::{color_f, rect_f},
     surface::Surface,
+    view::NshView,
 };
 
 /// The hidden title bar's height when the app gives none, in points
@@ -129,6 +131,8 @@ struct Popup {
     /// What the items of a menu of the platform's own do, by id - 1 (the
     /// app's menus report their ids instead).
     actions: Vec<Action>,
+    /// The selectable area this popup was requested on, if any.
+    area: Option<NshView>,
     /// The app's `Menu.popup` waits for it to close (the tray's menu is
     /// not one the app awaits).
     awaited: bool,
@@ -150,6 +154,8 @@ pub(crate) struct Chrome {
     bar_icons: RefCell<MenuIcons>,
     /// The context menu to show once the batch is applied.
     popup: RefCell<Option<Popup>>,
+    /// The last context-menu request, consumed by the app's next popup.
+    pub(crate) context_area: RefCell<Option<NshView>>,
     /// The loads of its icons, which it opens once it has or after
     /// [`ICON_WAIT`].
     popup_icons: RefCell<Vec<crate::image::Load>>,
@@ -159,6 +165,20 @@ pub(crate) struct Chrome {
     tracked_popup: RefCell<Option<Arc<[MenuItem]>>>,
     #[cfg(feature = "dev")]
     test_choice: Cell<Option<(u32, Option<MenuRole>)>>,
+}
+
+impl Chrome {
+    /// Captures and consumes this surface's context-menu request. Native
+    /// tracking starts later; cancellation still consumes the request.
+    fn app_popup(&self, items: Arc<[MenuItem]>, at: Option<(f32, f32)>) -> Popup {
+        Popup {
+            items,
+            at,
+            actions: Vec::new(),
+            area: self.context_area.take(),
+            awaited: true,
+        }
+    }
 }
 
 /// Chooses the item of the app's open context menu at the end of `path`
@@ -398,12 +418,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::SetMenuBar(_) => {}
         DesktopCommand::PopupMenu { items, at } => popup(
             surface,
-            Popup {
-                items: items.clone(),
-                at: at.map(|p| (p.x.0, p.y.0)),
-                actions: Vec::new(),
-                awaited: true,
-            },
+            c.app_popup(items.clone(), at.map(|p| (p.x.0, p.y.0))),
         ),
         DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
         DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
@@ -509,6 +524,7 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
             items: items.into(),
             at: None,
             actions,
+            area: None,
             awaited: false,
         },
     );
@@ -517,12 +533,14 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
 /// Shows the tray icon's menu at `at` (in the window's points): its items
 /// are reported as the app's context menus' are.
 pub(crate) fn popup_tray(surface: &Surface, items: Arc<[MenuItem]>, at: (f32, f32)) {
+    surface.chrome.context_area.take();
     popup(
         surface,
         Popup {
             items,
             at: Some(at),
             actions: Vec::new(),
+            area: None,
             awaited: false,
         },
     );
@@ -1394,13 +1412,13 @@ pub(crate) fn menu_command(surface: &Rc<Surface>, command: u16) {
         .get((command as usize).wrapping_sub(1))
         .copied();
     if let Some(entry) = entry {
-        choose(surface, entry.id, entry.role);
+        choose(surface, entry.id, entry.role, None);
     }
 }
 
 /// An item was chosen: the platform carries out its role, the app hears
 /// about the rest.
-fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
+fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>, area: Option<&NshView>) {
     let hwnd = surface.hwnd();
     match role {
         // An embedding app's window is its own to close or keep.
@@ -1419,6 +1437,9 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
         }
         Some(MenuRole::Zoom) => toggle_maximize(hwnd),
         Some(MenuRole::ToggleFullScreen) => crate::window::toggle_full_screen(hwnd),
+        // The area the app's menu is for, as its own menu would.
+        Some(role)
+            if area.is_some_and(|area| crate::selectable_view::menu_role(surface, area, role)) => {}
         Some(role) if role.edits_text() => {
             // The focused field's own keys.
             let (vk, shift) = match role {
@@ -1460,6 +1481,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         items,
         at,
         actions,
+        area,
         awaited,
     }) = surface.chrome.popup.borrow_mut().take()
     else {
@@ -1514,13 +1536,13 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
     {
         surface.chrome.tracked_popup.borrow_mut().take();
         if let Some((id, role)) = surface.chrome.test_choice.take() {
-            choose(surface, id, role);
+            choose(surface, id, role, area.as_ref());
         }
     }
     if let Some(entry) = entries.get(chosen.wrapping_sub(1)).copied() {
         match actions.get((entry.id as usize).wrapping_sub(1)) {
             Some(action) => action(surface),
-            None => choose(surface, entry.id, entry.role),
+            None => choose(surface, entry.id, entry.role, area.as_ref()),
         }
     }
     // The app's `Menu.popup` promise settles.
@@ -1600,7 +1622,7 @@ pub(crate) fn shortcut(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     };
     match found {
         Some((id, role)) => {
-            choose(surface, id, role);
+            choose(surface, id, role, None);
             true
         }
         None => false,
@@ -1764,4 +1786,133 @@ pub(crate) fn appearance_changed(surface: &Surface) {
         let _ = unsafe { DrawMenuBar(hwnd) };
     }
     surface.invalidate();
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{AttributedText, TextLayout, ViewKind, platform::Environment};
+
+    use super::*;
+
+    fn selectable_text(surface: &Surface) -> (NshView, NshView) {
+        let area = NshView::new(2, ViewKind::View);
+        area.state_mut().props.selectable_view = true;
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        area.insert_before(&surface.root, None);
+        let text = NshView::new(4, ViewKind::Text);
+        text.insert_before(&area, None);
+        let content = AttributedText {
+            text: "Selected text".into(),
+            ..Default::default()
+        };
+        crate::text::set(
+            &text,
+            &Arc::new(content),
+            &TextLayout(Arc::new(())),
+            crate::geom::rect(0.0, 0.0, 100.0, 20.0),
+        );
+        (area, text)
+    }
+
+    fn selection(text: &NshView) -> Option<(u32, u32)> {
+        text.state().text.as_ref().unwrap().area_range.get()
+    }
+
+    #[test]
+    fn only_the_requested_popup_selects_its_context_area() {
+        let surface = Surface::new(Environment::default());
+        let (_, text) = selectable_text(&surface);
+        assert!(crate::input::show_context_menu(&surface, &text));
+        let popup = surface.chrome.app_popup(Arc::from([]), None);
+        choose(&surface, 0, Some(MenuRole::SelectAll), popup.area.as_ref());
+        assert_eq!(selection(&text), Some((0, 13)));
+        crate::selectable_view::clear();
+
+        // The request was consumed even if the popup was cancelled.
+        let popup = surface.chrome.app_popup(Arc::from([]), None);
+        choose(&surface, 0, Some(MenuRole::SelectAll), popup.area.as_ref());
+        assert_eq!(selection(&text), None);
+    }
+
+    #[test]
+    fn an_unopened_context_menu_cannot_take_over_bar_roles() {
+        let surface = Surface::new(Environment::default());
+        let (_, text) = selectable_text(&surface);
+        surface.chrome.entries.borrow_mut().push(Entry {
+            id: 0,
+            role: Some(MenuRole::SelectAll),
+        });
+        assert!(crate::input::show_context_menu(&surface, &text));
+        menu_command(&surface, 1);
+        assert_eq!(selection(&text), None);
+    }
+
+    #[test]
+    fn modifiers_keep_the_context_request_but_another_key_discards_it() {
+        for vk in [0x10, 0x41] {
+            let surface = Surface::new(Environment::default());
+            let (_, text) = selectable_text(&surface);
+            assert!(crate::input::show_context_menu(&surface, &text));
+            crate::input::key(
+                &surface,
+                KeyEvent {
+                    vk,
+                    down: true,
+                    repeat: true,
+                    modifiers: Modifiers {
+                        shift: true,
+                        ..Default::default()
+                    },
+                },
+            );
+            let popup = surface.chrome.app_popup(Arc::from([]), None);
+            choose(&surface, 0, Some(MenuRole::SelectAll), popup.area.as_ref());
+            assert_eq!(
+                selection(&text),
+                if vk == 0x10 { Some((0, 13)) } else { None }
+            );
+            crate::selectable_view::clear();
+        }
+    }
+
+    #[test]
+    fn an_accessibility_press_discards_an_unanswered_context_request() {
+        let surface = Surface::new(Environment::default());
+        let (_, text) = selectable_text(&surface);
+        assert!(crate::input::show_context_menu(&surface, &text));
+        let button = NshView::new(8, ViewKind::View);
+        button.state_mut().events.set(EventKind::Press, true);
+        button.insert_before(&surface.root, None);
+        assert!(crate::access::activate(&surface, &button));
+        let popup = surface.chrome.app_popup(Arc::from([]), None);
+        choose(&surface, 0, Some(MenuRole::SelectAll), popup.area.as_ref());
+        assert_eq!(selection(&text), None);
+    }
+
+    #[test]
+    fn a_bar_action_cannot_open_a_popup_for_an_old_context_request() {
+        let surface = Surface::new(Environment::default());
+        let (_, text) = selectable_text(&surface);
+        assert!(crate::input::show_context_menu(&surface, &text));
+        surface
+            .chrome
+            .entries
+            .borrow_mut()
+            .push(Entry { id: 7, role: None });
+        menu_command(&surface, 1);
+        let popup = surface.chrome.app_popup(Arc::from([]), None);
+        choose(&surface, 0, Some(MenuRole::SelectAll), popup.area.as_ref());
+        assert_eq!(selection(&text), None);
+    }
+
+    #[test]
+    fn a_context_request_belongs_to_its_surface() {
+        let first = Surface::new(Environment::default());
+        let (_, text) = selectable_text(&first);
+        assert!(crate::input::show_context_menu(&first, &text));
+        let second = Surface::new(Environment::default());
+        let popup = second.chrome.app_popup(Arc::from([]), None);
+        choose(&second, 0, Some(MenuRole::SelectAll), popup.area.as_ref());
+        assert_eq!(selection(&text), None);
+    }
 }

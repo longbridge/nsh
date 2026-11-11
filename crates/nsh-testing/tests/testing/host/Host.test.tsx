@@ -15,6 +15,20 @@ test("a call the host fails rejects with its message", async () => {
   await app.waitFor("text:/result: rejected: .*BigInt/");
 });
 
+test("posts reach the page's host's call, its failures dropped", async () => {
+  const app = await open("./App.tsx");
+  await app.press("label:post fail");
+  await app.waitFor("text:result: posted");
+  await app.press("label:post note");
+  await app.waitFor('text:noted: [{"n":2}]');
+});
+
+test("a post of a function the app does not declare throws", async () => {
+  const app = await open("./App.tsx");
+  await app.press("label:post other");
+  await app.waitFor("text:result: threw: ERR_ACCESS_DENIED");
+});
+
 test("events sent before the app started reach it in order", async () => {
   const app = await open("./App.tsx");
   await app.waitFor("text:ticks: [1,2]");

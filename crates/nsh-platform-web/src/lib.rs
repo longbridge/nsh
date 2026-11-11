@@ -747,11 +747,9 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
     });
     let Some(mut engine) = LocalEngine::start_with(config, text.clone(), Sink, |control| {
         if let Some(payload) = page {
-            control.dispatch_event(
-                ROOT_ID,
-                EventKind::UrlScheme,
-                event::payload(EventKind::UrlScheme, payload),
-            );
+            if let Some(payload) = event::payload(EventKind::UrlScheme, payload) {
+                control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
+            }
         }
     }) else {
         return -1.0;
@@ -1206,7 +1204,9 @@ pub unsafe extern "C" fn nsh_event(
     // SAFETY: guaranteed by the caller.
     let json = unsafe { string(ptr, len) };
     let value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-    let payload = event::payload(kind, value);
+    let Some(payload) = event::payload(kind, value) else {
+        return pump();
+    };
     send(|app| app.control.dispatch_event(id, kind, payload))
 }
 

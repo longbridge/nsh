@@ -1310,6 +1310,11 @@ pub struct Core<M: TextEngine> {
     /// The focus shows (`focus-visible:`), decided when it was reported
     /// (`classes::focus_shows`) and again when a key is typed.
     focus_visible: bool,
+    /// The keyboard moved the focus, decided when it was reported
+    /// (`classes::keyboard_moves_focus`) and kept until it moves again,
+    /// whatever is typed meanwhile: only such a focus shows the hint of
+    /// the anchor it comes to (`overlay::focus_hints`).
+    focus_by_keyboard: bool,
     /// The view in the `FOCUS_VISIBLE` state, by key and id
     /// (`classes::update_focus_visible`).
     focus_visible_on: Option<(Key, NodeId)>,
@@ -1537,6 +1542,7 @@ impl<M: TextEngine> Core<M> {
             focus_within_changed: false,
             modality: None,
             focus_visible: false,
+            focus_by_keyboard: false,
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
@@ -2980,6 +2986,8 @@ impl<M: TextEngine> Core<M> {
                 self.focus_hints();
             }
         } else if visible_moved {
+            // A key typed with the focus where it is shows its ring, and no
+            // hint: a hint shows only for a focus the keyboard moved.
             self.update_focus_visible();
         }
         self.sync_colors();
@@ -3246,6 +3254,14 @@ impl<M: TextEngine> Core<M> {
                     let error = crate::host_channel::not_granted(name);
                     self.deny(error.message().to_owned());
                     self.answer_host(*call, Err(error));
+                    continue;
+                }
+                Command::HostPost { name, .. }
+                    if crate::host_channel::check_call(&self.access, name).is_err() =>
+                {
+                    let error = crate::host_channel::check_call(&self.access, name)
+                        .expect_err("a refused name");
+                    self.deny(error.message().to_owned());
                     continue;
                 }
                 Command::SendInput(_) if !self.access.allows_web_input() => {
@@ -5539,6 +5555,7 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::Accessible(v) => a.accessible = v,
                     AccessibilityProp::Label(v) => a.label = v,
                     AccessibilityProp::Hint(v) => a.hint = v,
+                    AccessibilityProp::Description(v) => a.description = v,
                     AccessibilityProp::Role(v) => a.role = v,
                     AccessibilityProp::State(v) => a.state = v,
                     AccessibilityProp::Value(v) => a.value = v,
@@ -8737,16 +8754,32 @@ impl<M: TextEngine> Core<M> {
                     )?;
                     Some(i + at)
                 });
-            if let Some(j) = queued {
+            // A shrink after a scroll must keep the earlier extent until
+            // that scroll has applied. Growth can replace the extent once.
+            let shrunk = old.is_some_and(|old| {
+                if scroll.horizontal {
+                    size.width < old.width
+                } else {
+                    size.height < old.height
+                }
+            });
+            let keep_earlier = shrunk
+                && queued.is_some_and(|j| {
+                    self.mount[j + 1..].iter().any(|item| match item {
+                        MountItem::ScrollBy { id: scrolled, .. } => *scrolled == id,
+                        MountItem::Command {
+                            id: scrolled,
+                            command: Command::ScrollTo { .. },
+                        } => *scrolled == id,
+                        _ => false,
+                    })
+                });
+            if let Some(j) = queued
+                && !keep_earlier
+            {
                 self.mount[j] = MountItem::ScrollContent { id, size };
             }
-            // A scroll queued after it must still come before the new size.
-            let scrolled_since = queued.is_some_and(|j| {
-                self.mount[j + 1..]
-                    .iter()
-                    .any(|m| matches!(m, MountItem::ScrollBy { id: s, .. } if *s == id))
-            });
-            if queued.is_none() || scrolled_since {
+            if queued.is_none() || keep_earlier {
                 scroll.content_item = Some((batch, self.mount.len()));
                 self.mount.push(MountItem::ScrollContent { id, size });
             }
@@ -10222,7 +10255,8 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::Audio { .. }
                 | C::Notification { .. }
                 | C::Desktop { .. }
-                | C::HostCall { .. } => Shown::Nothing,
+                | C::HostCall { .. }
+                | C::HostPost { .. } => Shown::Nothing,
                 // The design tokens: every view's colors.
                 C::Tokens { .. } => Shown::Everywhere,
                 _ => Shown::View(*id),

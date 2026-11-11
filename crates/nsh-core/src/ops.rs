@@ -262,6 +262,7 @@ events! {
     Pinch = "onPinch": "A touchpad pinch over the view (payload: [`EventPayload::Pinch`]; macOS, Linux, GPUI, Safari): the nearest listener around the view under the pointer hears it; one nearer than any view that pinches natively takes it, so nothing zooms or pinches natively ([`crate::input::wheel_listener`]); a pinch stays on the view its start went to.",
 
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
+    MouseUp = "onMouseUp": "A mouse button was released over the view or a view inside it (payload: [`EventPayload::Mouse`], its `button` naming the released one, with where and the modifiers). The primary button's release also reports `onPressUp`.",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -403,8 +404,9 @@ pub struct TouchPoint {
 }
 
 /// Where the mouse is over a view ([`EventKind::MouseEnter`],
-/// [`EventKind::MouseMove`], [`EventKind::MouseLeave`]), in points, as
-/// GPUI's `MouseMoveEvent`.
+/// [`EventKind::MouseMove`], [`EventKind::MouseLeave`]), and where a mouse
+/// button was released ([`EventKind::MouseUp`]), in points, as GPUI's
+/// `MouseMoveEvent`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[non_exhaustive]
 pub struct MouseEvent {
@@ -417,6 +419,9 @@ pub struct MouseEvent {
     pub modifiers: crate::keymap::Modifiers,
     /// The button held down, if any (a drag).
     pub pressed_button: Option<MouseButton>,
+    /// The button that changed at this event: the released one on
+    /// [`EventKind::MouseUp`], none on a move.
+    pub button: Option<MouseButton>,
 }
 
 impl MouseEvent {
@@ -433,6 +438,25 @@ impl MouseEvent {
             page_position,
             modifiers,
             pressed_button,
+            button: None,
+        }
+    }
+
+    /// A mouse button released at `position` in the view and
+    /// `page_position` in its root view, with `modifiers` held
+    /// ([`EventKind::MouseUp`]).
+    pub fn released(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        modifiers: crate::keymap::Modifiers,
+        button: MouseButton,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            modifiers,
+            pressed_button: None,
+            button: Some(button),
         }
     }
 }
@@ -995,7 +1019,8 @@ pub enum EventPayload {
     /// Touches (`onTouch`).
     Touch(Box<TouchEvent>),
     /// The mouse over a view (`onMouseEnter`, `onMouseMove`,
-    /// `onMouseLeave`).
+    /// `onMouseLeave`) or a button released over it (`onMouseUp`, its
+    /// `button` naming the released one).
     Mouse(MouseEvent),
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
@@ -2398,6 +2423,17 @@ pub enum Command {
     HostCall {
         /// The call, echoed by the reply.
         id: u64,
+        /// The host's function.
+        name: String,
+        /// Its argument (any JSON value; `null` without one).
+        args: crate::JsonValue,
+    },
+    /// Hand `args` to function `name` of the app embedding NSH, with no
+    /// answer (on the root; `nsh/host`'s `host.post` without a native SDK
+    /// channel). Sent only on platforms whose
+    /// [`crate::platform::Environment::host`] is set, for functions the
+    /// app's `capabilities.host` grants.
+    HostPost {
         /// The host's function.
         name: String,
         /// Its argument (any JSON value; `null` without one).

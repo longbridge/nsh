@@ -524,7 +524,7 @@ export interface PressEvent {
   clickCount: number;
 }
 
-/** Where the mouse is over a view: the payload of `onMouseEnter`, `onMouseMove` and `onMouseLeave` (GPUI's `MouseMoveEvent`). */
+/** Where the mouse is over a view, or where a button was released over it: the payload of `onMouseEnter`, `onMouseMove`, `onMouseLeave` and `onMouseUp` (GPUI's `MouseMoveEvent`). */
 export interface MouseEvent {
   /** Position in the view (its transforms undone). */
   position: Point;
@@ -533,6 +533,8 @@ export interface MouseEvent {
   modifiers: Modifiers;
   /** The button held down (a drag), or `null`. */
   pressedButton: MouseButton | null;
+  /** The button that changed at this event: the released one on `onMouseUp`, `null` on a move. */
+  button: MouseButton | null;
 }
 
 /** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
@@ -701,6 +703,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::ALL,
         "(e: PinchEvent) => void",
         "A touchpad pinch over the view (or a view inside it); macOS, Linux, the GPUI backend and Safari (Windows and the other browsers report a touchpad pinch as Control + wheel: `onWheel`). The nearest listener hears it; a listener nearer than any view that pinches natively takes it, and nothing zooms natively. A pinch stays on the view its start went to. Fingers pinching a touchscreen are `onPinchStart`'s.",
+    ),
+    (
+        EventKind::MouseUp,
+        on::ALL,
+        "(e: MouseEvent) => void",
+        "A mouse button was released over the view (or a view inside it): which button (`e.button`), where, and with the modifiers. The primary button's release also reports `onPressUp`. Desktops, the terminal and the web; a release outside the view is not reported.",
     ),
     (
         EventKind::ContextMenu,

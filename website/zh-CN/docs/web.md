@@ -61,7 +61,7 @@ frame.src = "https://apps.example.com/player.html"; // 播放器设置 dialogs: 
 - **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会关闭最上层的对话框或弹出当前显示的最内层的栈（未选中的 tab 里的栈保留它的页面），和 Android 返回键一样；`popOnBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，正在显示的栈里压入的每个页面和打开的每个对话框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。`nsh.json` 的 `web.history` 为打包的页面和开发服务器的页面决定这一点：`false` 让浏览器历史只保留页面自己的记录，`true` 在 iframe 里也加入应用的记录。
 - **地址**：应用占据整个页面时，[`UrlScheme.setUrl(url)`](../modules/nsh.md#urlscheme) 设置当前历史记录的地址，相对于页面地址（以及它的 `<base href>`）解析，`UrlScheme.url()` 读取它。浏览器的后退按钮在应用内后退：栈的页面返回，地址变为那条记录的地址。用户输入的地址（`#fragment`）是应用在当前页面上的一条记录，后退或前进到页面相同的记录时，[`UrlScheme.on("change")`](../modules/nsh.md#urlschemeonchange) 把那条记录的地址告诉应用。`setUrl(url, { history: "push" })` 为应用自己的地址（标签页、筛选）新建这样一条记录。
 - **触摸**：只有滚动视图可以平移；应用下面的页面本身不会滚动、缩放或下拉刷新，点按没有延迟。嵌在 iframe 里时，应用不处理的滑动会滚动外层页面。在带原生平移、捏合的视图和响应者系统上的拖动都交给应用处理。
-- **无障碍**：`role`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`announce` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。对话框或提示框下面的视图不可交互。
+- **无障碍**：`role`、`accessibilityLabel`、`accessibilityHint`、`accessibilityDescription`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`announce` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。对话框或提示框下面的视图不可交互。
 - **选择和菜单**：在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素里的文字（带按压或触摸处理的视图：按钮、可按压的列表行、标签栏）以及设置了 `userSelect: "none"` 或 `select-none` 的文字除外；在上面拖动鼠标会选择文字，Ctrl/Cmd+C 按行复制，Ctrl/Cmd+A 全选选区所在的这段文字。在手机和平板浏览器中，只有设置了 `userSelect: "text"` 的文字可以选择，和原生应用一样。浏览器的右键菜单只在可选文字和输入框里出现。
 
 
@@ -299,7 +299,7 @@ Dialog、Sheet 和 AlertDialog 默认覆盖容器。设置 `dialogs: "viewport"`
 
 ## 宿主的函数
 
-在 Web 上，页面就是应用的宿主：它应答 [`host`](../modules/nsh.md#host) 的 `host.call(name, args)`，并发送 `host.on` 监听的事件。`createPlayer` 的 `host` 是一个对象，它的 `call(name, args)` 返回结果或结果的 Promise；抛出异常或 Promise 被拒绝时，应用的调用以错误消息被拒绝。`player.hostEvent(event, payload)` 发送一个带 JSON 数据的事件（数据不是 JSON 时抛出异常）。传入 `host` 后，`host.available()` 为 `true`。
+在 Web 上，页面就是应用的宿主：它应答 [`host`](../modules/nsh.md#host) 的 `host.call(name, args)`，接收它的 `host.post(name, args)`，并发送 `host.on` 监听的事件。`createPlayer` 的 `host` 是一个对象，它的 `call(name, args)` 返回结果或结果的 Promise；抛出异常或 Promise 被拒绝时，应用的调用以错误消息被拒绝。它可选的 `post(name, args)` 接收应用的投递；没有 `post` 时，投递交给 `call`。投递没有回答：它的结果、抛出的异常或被拒绝的 Promise 都留在页面里。`player.hostEvent(event, payload)` 发送一个带 JSON 数据的事件（数据不是 JSON 时抛出异常）。传入 `host` 后，`host.available()` 为 `true`。
 
 ```js
 const player = await createPlayer(container, {
@@ -308,6 +308,9 @@ const player = await createPlayer(container, {
     async call(name, args) {
       if (name === "user.info") return { name: "Ada" };
       throw new Error(`no host function ${name}`);
+    },
+    post(name, args) {
+      if (name === "analytics") navigator.sendBeacon("/analytics", JSON.stringify(args));
     },
   },
 });

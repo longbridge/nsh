@@ -90,6 +90,7 @@ final class Native {
     static final int WHEEL = 78;
     static final int PINCH = 79;
     static final int WEB_EVALUATION = 80;
+    static final int MOUSE_UP = 81;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

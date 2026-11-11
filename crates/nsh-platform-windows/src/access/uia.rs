@@ -365,6 +365,14 @@ pub(super) fn changed(surface: &Rc<Surface>, view: &NshView, old: &Exposed, new:
             Var::opt_str(new.help.as_deref()),
         );
     }
+    if old.description != new.description {
+        property_changed(
+            &p,
+            UIA_FullDescriptionPropertyId,
+            Var::opt_str(old.description.as_deref()),
+            Var::opt_str(new.description.as_deref()),
+        );
+    }
     if old.enabled != new.enabled {
         property_changed(
             &p,
@@ -814,6 +822,9 @@ impl IRawElementProviderSimple_Impl for Element_Impl {
             UIA_HelpTextPropertyId => {
                 let s = view.state();
                 Var::opt_str(super::help_of(&s.props.accessibility, Some(control)).as_deref())
+            }
+            UIA_FullDescriptionPropertyId => {
+                Var::opt_str(view.state().props.accessibility.description.as_deref())
             }
             UIA_IsEnabledPropertyId => Var::bool(!view.state().props.accessibility.state.disabled),
             UIA_IsKeyboardFocusablePropertyId => Var::bool(

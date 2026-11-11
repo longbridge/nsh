@@ -493,6 +493,42 @@ fn asset_directories_take_the_first_that_has_the_file() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn bundled_files_load_whatever_fs_read_roots_are_declared() {
+    let root = std::env::temp_dir().join(format!("nsh-asset-fs-read-{}", std::process::id()));
+    let (bundle, data) = (root.join("bundle"), root.join("data"));
+    std::fs::create_dir_all(&bundle).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(bundle.join("logo.png"), b"logo").unwrap();
+    std::fs::write(root.join("outside.png"), b"outside").unwrap();
+    let declared = crate::access::Capabilities::from_json(&serde_json::json!({
+        "fs": { "read": [data.to_str().unwrap()] }
+    }))
+    .unwrap();
+    let access = Access {
+        declared,
+        granted: None,
+    };
+    let context = Context {
+        asset_base: Some(AssetBase::Directory(bundle.clone())),
+        media_files: Arc::new(crate::access::MediaFiles::new(
+            &access,
+            None,
+            &Default::default(),
+            true,
+        )),
+        ..Context::default()
+    };
+    let read = |uri: &str| read_now(&context.resolve(uri).unwrap(), &context);
+    assert_eq!(&*read("asset:/logo.png").unwrap(), b"logo");
+    // Out of the bundle by `..`: an `fs.read` read, outside the roots.
+    assert!(read("asset:/../outside.png").is_err());
+    let outside = root.join("outside.png");
+    assert!(read(outside.to_str().unwrap()).is_err());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn resolves_uris() {
     // Declared before `key`, which borrows it.

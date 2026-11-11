@@ -215,6 +215,8 @@ struct View {
     accessibility_state: AccessibilityState,
     /// Its `accessibilityLevel`.
     level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    description: Option<Arc<str>>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -492,6 +494,7 @@ impl Screen {
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
+                view.description = props.accessibility.description.clone();
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -1549,6 +1552,21 @@ impl Screen {
         }
     }
 
+    /// The description of the view `selector` names (its
+    /// `accessibilityDescription`: a dialog's message), which screen
+    /// readers read after its name; an error when none or several match.
+    pub fn accessibility_description(&self, selector: &str) -> Result<Option<String>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .and_then(|v| v.description.as_deref().map(str::to_owned))),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
     /// The views on screen `selector` matches, in the order a user's eyes
     /// find them ([`Screen::by_layer`]): each part looks inside what the
     /// one before matched.
@@ -2191,6 +2209,23 @@ impl Screen {
     /// nearest around it listening to `onContextMenu`.
     pub(crate) fn context_menu_target(&self, id: NodeId) -> Option<NodeId> {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
+    }
+
+    /// The views that hear a mouse button released on `id`: it and every
+    /// view around it listening to `onMouseUp`, inside out, as the
+    /// platforms walk them.
+    pub(crate) fn mouse_up_targets(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        while let Some(view) = self.nodes.get(&id) {
+            if view.events.contains(EventKind::MouseUp) {
+                targets.push(id);
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        targets
     }
 
     /// The app's keyboard shortcuts (`nsh/keymap`).

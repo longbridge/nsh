@@ -4,8 +4,10 @@
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS and macOS packages add the app's
   `ios` / `macos` `infoPlist` keys and `entitlements` (`crates/nsh-cli/src/apple.rs`: JSON as property list values,
-  the keys NSH sets refused with what to set instead; device builds check entitlements against the profile, which
-  keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
+  the keys NSH sets refused with what to set instead; `MinimumOSVersion` / `LSMinimumSystemVersion` are the runtime's
+  minimum, `IOS_MINIMUM` / `MACOS_MINIMUM`, which an app may raise but not lower (checked when `nsh.json` is read;
+  `actool` compiles the iOS icon for the version declared); device builds check entitlements against the profile,
+  which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
@@ -291,6 +293,9 @@
   with arm64 by `lipo`: apps whose simulator builds run under Rosetta; `rustup target add x86_64-apple-ios`);
   `--no-catalyst` and `--no-dev` leave out the Catalyst slice and `NativeShellDev`. The C functions return errors as strings
   (`nsh_string_free`) that Swift throws as `NshError`; the error handler's context is released by a callback.
+  `NativeShell`'s logs go to the unified log under the host app's bundle identifier (`nsh_platform_apple::unified_log`,
+  installed by the first `nsh_app_create` or `nsh_trust_create` unless the process has a logger; `macos.md` "Packaged
+  apps' logs"); `NativeShellDev`'s go to the dev server while connected, to stderr otherwise (`dev.rs`).
 
 ## GPUI and GPUI Kit apps
 
