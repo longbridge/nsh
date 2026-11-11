@@ -1941,7 +1941,8 @@ impl NshView {
     }
 
     /// Part of what it draws changed (`rect`, in its own coordinates, y
-    /// down): only that is drawn again (a canvas's animated values).
+    /// down): only that is drawn again (a canvas's animated values, a
+    /// text's recolored lines).
     pub(crate) fn redraw_rect(&self, rect: nsh_core::Bounds<nsh_core::Points>) {
         crate::shader::ui_changed(self);
         let Some(layer) = self.content_layer() else {

@@ -2113,6 +2113,60 @@ fn spans_differing_only_in_colors_are_told_apart_from_other_changes() {
 }
 
 #[test]
+fn recolored_ranges_are_the_characters_drawn_otherwise() {
+    let style = ResolvedTextStyle::default();
+    let red = ResolvedTextStyle {
+        color: Color(0xff00_00ff),
+        ..style
+    };
+    let bold = ResolvedTextStyle {
+        font_weight: 700,
+        ..style
+    };
+    let text = |words: &[(&str, ResolvedTextStyle)]| {
+        let mut t = AttributedText::default();
+        for &(w, s) in words {
+            t.push(w, s);
+        }
+        t
+    };
+    let words = |styles: [ResolvedTextStyle; 5]| {
+        text(&[
+            ("one ", styles[0]),
+            ("two ", styles[1]),
+            ("three ", styles[2]),
+            ("four ", styles[3]),
+            ("five", styles[4]),
+        ])
+    };
+    // The ranges, written as pairs.
+    let ranges = |pairs: &[(u32, u32)]| Some(pairs.iter().map(|&(a, b)| a..b).collect::<Vec<_>>());
+    let plain = words([style; 5]);
+    // Nothing drawn otherwise, however the spans split.
+    assert_eq!(plain.recolored_ranges(&plain), ranges(&[]));
+    let same = text(&[("one two ", style), ("three four five", style)]);
+    assert_eq!(plain.recolored_ranges(&same), ranges(&[]));
+    // A word shown: its characters; neighbors join into one range.
+    let fading = words([style, style, style, red.hide(), red.hide()]);
+    assert_eq!(fading.recolored_ranges(&plain), ranges(&[(14, 23)]));
+    let started = words([style, style, style, red, red.hide()]);
+    assert_eq!(fading.recolored_ranges(&started), ranges(&[(14, 19)]));
+    // Apart: two ranges, either way round.
+    let apart = words([red, style, style, red, style]);
+    assert_eq!(plain.recolored_ranges(&apart), ranges(&[(0, 4), (14, 19)]));
+    assert_eq!(apart.recolored_ranges(&plain), ranges(&[(0, 4), (14, 19)]));
+    // Spans that start and end elsewhere in the two texts.
+    let halves = text(&[("one two th", red), ("ree four five", style)]);
+    assert_eq!(plain.recolored_ranges(&halves), ranges(&[(0, 10)]));
+    // Anything else changed: not a recoloring.
+    assert_eq!(
+        plain.recolored_ranges(&words([style, bold, style, style, style])),
+        None
+    );
+    assert_eq!(plain.recolored_ranges(&text(&[("one", style)])), None);
+}
+
+#[test]
 fn image_uses_natural_size_and_aspect_ratio() {
     let mut c = core();
     apply(
