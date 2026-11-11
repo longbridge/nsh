@@ -404,6 +404,20 @@ fn an_app_inserts_the_pastes_it_allows_as_the_user_s_edits() {
 }
 
 #[test]
+fn a_paste_goes_in_clipped_to_max_length() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/paste");
+    let results = run_file(
+        &test_run(None),
+        &dir.join("MaxLength.test.tsx"),
+        &mut |_| {},
+    )
+    .unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 4);
+}
+
+#[test]
 fn a_main_window_nsh_json_starts_hidden_shows_when_the_app_asks() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/hidden-main");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
