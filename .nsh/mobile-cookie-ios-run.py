@@ -47,9 +47,9 @@ with (app / 'Info.plist').open('wb') as file:
 run(['codesign', '--force', '--sign', '-', str(app)], 'codesign')
 runtimes = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'runtimes', '-j']))['runtimes']
 runtime = next(r['identifier'] for r in reversed(runtimes) if r.get('isAvailable') and 'iOS' in r['name'])
-types = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devicetypes', '-j']))['devicetypes']
-device_type = next(d['identifier'] for d in reversed(types) if d['name'].startswith('iPhone'))
-udid = subprocess.check_output(['xcrun', 'simctl', 'create', 'NSH Cookie Verification', device_type, runtime], text=True).strip()
+devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))['devices']
+source = next(d['udid'] for d in devices[runtime] if d['name'].startswith('iPhone') and d['state'] == 'Shutdown')
+udid = subprocess.check_output(['xcrun', 'simctl', 'clone', source, 'NSH Cookie Verification'], text=True).strip()
 fixture = None
 try:
     run(['xcrun', 'simctl', 'boot', udid], 'boot')
