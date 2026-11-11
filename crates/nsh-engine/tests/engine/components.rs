@@ -6151,7 +6151,8 @@ function App() {
     <TabBar
       items={[
         { title: "Records", icon: "list.bullet" },
-        { title: "Stats", icon: "chart.bar" },
+        { title: "Stats", icon: "chart.bar", badge: "3" },
+        { title: "Brain", badge: "" },
       ]}
       selectedIndex={selected()}
       onChange={({ index }: { index: number }) => selected.set(index)}
@@ -6168,7 +6169,7 @@ fn is_tab_bar(item: &MountItem) -> bool {
 }
 
 /// `nsh/mobile`'s `TabBar` is the system's component on iOS and Android,
-/// given the tabs as the app wrote them.
+/// given the tabs as the app wrote them, badges included.
 #[test]
 fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
     use nsh_core::platform::Os;
@@ -6199,7 +6200,8 @@ fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
             value("items"),
             Some(serde_json::json!([
                 { "title": "Records", "icon": "list.bullet" },
-                { "title": "Stats", "icon": "chart.bar" },
+                { "title": "Stats", "icon": "chart.bar", "badge": "3" },
+                { "title": "Brain", "badge": "" },
             ])),
             "{os:?}"
         );
