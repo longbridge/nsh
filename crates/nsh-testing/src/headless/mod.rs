@@ -2805,6 +2805,54 @@ mod tests {
         );
     }
 
+    /// A chat composer: a multiline input that submits on return, and a
+    /// single-line one beside it.
+    #[component]
+    fn Composer() -> impl IntoElement {
+        let draft = signal(String::new());
+        let sent = signal(String::new());
+        let title = signal(String::new());
+        view()
+            .child(
+                input()
+                    .test_id("draft")
+                    .multiline(true)
+                    .submit_behavior(SubmitBehavior::Submit)
+                    .value(move || draft.get())
+                    .on_change(move |text: &str| draft.set(text.to_owned()))
+                    .on_submit(move |text: &str| sent.set(text.to_owned())),
+            )
+            .child(
+                input()
+                    .test_id("title")
+                    .on_submit(move |text: &str| title.set(text.to_owned())),
+            )
+            .child(text(move || format!("Draft: {:?}", draft.get())))
+            .child(text(move || format!("Sent: {:?}", sent.get())))
+            .child(text(move || format!("Title: {:?}", title.get())))
+    }
+
+    #[test]
+    fn shift_or_alt_return_breaks_the_line_of_a_multiline_input_that_submits() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Composer>())).unwrap();
+        app.first_render().unwrap();
+        app.type_text("id:draft", "Hi").unwrap();
+        // Shift+Return and Alt (Option)+Return break the line, as on every
+        // platform; Return sends.
+        app.press_key("shift+enter").unwrap();
+        app.type_text("id:draft", "there").unwrap();
+        app.press_key("alt+enter").unwrap();
+        app.type_text("id:draft", "!").unwrap();
+        app.wait_for(r#"Draft: "Hi\nthere\n!""#).unwrap();
+        assert!(app.shows(r#"Sent: """#));
+        app.press_key("enter").unwrap();
+        app.wait_for(r#"Sent: "Hi\nthere\n!""#).unwrap();
+        // A single line holds no line break: Shift+Return submits it.
+        app.type_text("id:title", "Plan").unwrap();
+        app.press_key("shift+enter").unwrap();
+        app.wait_for(r#"Title: "Plan""#).unwrap();
+    }
+
     /// A list of rows taller than the screen, saying where it is.
     #[component]
     fn Rows() -> impl IntoElement {

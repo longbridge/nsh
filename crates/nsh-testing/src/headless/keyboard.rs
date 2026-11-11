@@ -159,7 +159,14 @@ impl Headless {
             return self.done();
         }
         if let Some(input) = self.screen.focused() {
+            let multiline = self.screen.input(input).is_some_and(|i| i.config.multiline);
             match stroke.key {
+                // Shift+Return and Alt (Option)+Return break the line of a
+                // multiline input whatever its return does, as the platforms'
+                // inputs do (a chat composer that sends on return).
+                Key::Enter if multiline && (m.shift || m.alt) && !(m.ctrl || m.cmd) => {
+                    self.key(input, '\n');
+                }
                 Key::Enter if plain => self.return_key(input),
                 Key::Backspace if plain => self.backspace(input),
                 Key::Char(c) if plain => {
