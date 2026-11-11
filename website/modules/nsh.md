@@ -286,7 +286,8 @@ and the classes naming tokens, `nsh/base` and Rust components' `theme()` follow 
 appearances. An embedding app's [theme overrides](../docs/tailwind.md#theme-tokens) still win over it. `null` gives
 back the theme the app was built with.
 
-The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz` or `lab()`, a `var()`
+The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz`, `lab()` or
+`rgb(255 0 0)garbage`, a `var()`
 that names no color, or a value that is no color in one appearance where the other's is), `setTheme` throws a
 `TypeError` that names each one, and the theme shown stays. Values of no kind a token has, such as shadows, are left
 out as they are from `nsh.json`'s. Build the new theme from the app's own, so the tokens its classes name keep a value

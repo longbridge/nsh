@@ -144,19 +144,32 @@ belong to the app, which owns retention and its storage budget.
   draws the finished `CTLine`s. A final layout is made when first read (`CoreTextLayout`), so text nothing shows is
   not typeset twice; when that read is the main thread's, it holds the text's lock for the time of one layout. Texts
   with attachments are made at once on the engine.
-- **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
-  link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
-  screen's `maximumFramesPerSecond`, or less while everything that wants frames asked for a lower rate (`frameRate`,
-  `animationFrameRate`: `animation.md` "Frame rate"): `Surface::frame_rate` folds the graph's rate with the frame
-  callbacks that report one (`Surface::cap_frame`, a view's keyframes alone); anything else (a JS frame request, a
-  batch waiting, a transition, a scroll glide) wants the screen's highest. The range (`frame_rate_range`) is set when
-  the link starts or resumes, whenever the folded rate changes, and when the window's screen refreshes at another
-  highest rate than the range was made for (`Surface::follow_screen`, checked each frame). The link does not fire while the window is
-  occluded or minimized or the screen is locked. Frame callbacks report what they have left (`Next`: done, drawing
-  only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch
-  waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so
-  animations end and report it on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an
-  endless animation, a shader, a JS frame request) waits for the link.
+- **Frames**: native animations, JS frame requests, scroll glides and transitions run on one display link per surface
+  (`NSView::displayLinkWithTarget_selector`) while something animates, which drives every window of the surface, the
+  app's own (`Window.open`) too. AppKit fires a view's link only while some of the view's window shows on a screen
+  (`pitfalls.md`), so the link is made from the root view of a window that shows (`window::link_root`; the choice is
+  `window::link_window`): the main window's root (the surface's, an embedded `AppView`'s in its host's window) while
+  that window shows, as always; else, the main window hidden (a tray app's, `defaultVisible: false`), minimized or
+  covered, the root of a window of the app's own that shows, the key one first, then the one the link follows now,
+  then any. While none shows, the link stays where it is. A window shows (`window::Sight::seen`) while it is ordered
+  in, its app not hidden, not minimized, on a screen and its `occlusionState` `Visible` (not wholly covered, the
+  screen not locked; the window server sets it a moment after the window is ordered in or out). The choice is checked
+  where the link starts, resumes or keeps running (`Surface::ensure_ticking`), on each window's notifications of being
+  shown, hidden, minimized, covered or uncovered, moved to another screen or made key (`window_state.rs`), and when a
+  window of the app's own closes (`Surface::follow_windows`): a link made from a window that is no longer the one is
+  made again from the right one while it runs (a paused one goes, and the next start makes it there). Its
+  `preferredFrameRateRange` asks for the `maximumFramesPerSecond` of the screen of the window it follows, or less
+  while everything that wants frames asked for a lower rate (`frameRate`, `animationFrameRate`: `animation.md` "Frame
+  rate"): `Surface::frame_rate` folds the graph's rate with the frame callbacks that report one (`Surface::cap_frame`,
+  a view's keyframes alone); anything else (a JS frame request, a batch waiting, a transition, a scroll glide) wants
+  the screen's highest. The range (`frame_rate_range`) is set when the link is made, starts or resumes, whenever the
+  folded rate changes, and when that screen refreshes at another highest rate than the range was made for
+  (`Surface::follow_screen`, checked each frame). No link fires while none of the surface's windows shows or the
+  screen is locked. Frame callbacks report what they have left (`Next`: done, drawing only, or a deadline), and
+  `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch waiting for a frame) with
+  one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so animations end and report it
+  on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an endless animation, a shader, a
+  JS frame request, a trackpad gesture's resampled offsets) waits for the link.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a view. One placed in another view's content (not its
   window's content view) passes a scroll that begins where none of its scroll views can move up the responder chain,
   so the host scrolls (`input::forwards_scroll`). `run_app` opens one in a window with a standard menu
@@ -445,6 +458,24 @@ host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in
 `activate`): an accessory app's windows become key as a regular app's do. The Dock's features (the badge, the
 attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
 shows its window itself (`focus()` from its tray).
+
+## Packaged apps' logs
+
+An app opened from Finder or the Dock has its stderr on `/dev/null`, so `nsh-macos-app` (like `nsh-ios-app` and the
+iOS SDK's C ABI without `dev`) installs `nsh_platform_apple::unified_log`, a `log` logger that writes to the unified
+log. The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
+record's target, with each category's `os_log_t` made once. Errors are `OS_LOG_TYPE_ERROR`; warnings (their text
+after `WARN`) and info are `OS_LOG_TYPE_DEFAULT`, which the log stores and Console shows without "Include Info
+Messages"; debug and trace are `OS_LOG_TYPE_DEBUG`. The text is logged `%{public}s`, a NUL in it written `\0`, in
+entries of at most 960 bytes split between lines (the store keeps about 1 KB of an entry). What is logged is the
+runners' rule: warnings, errors and target `js`, everything from info in development (`NSH_APP_DIR`, iOS's
+`NSH_DEVELOPMENT`). Lines also go to stderr in development, and wherever else stderr goes but `/dev/null` (`fstat`
+against `/dev/null`'s device: a terminal, a file, a pipe, launchd's `StandardErrorPath`) unless Xcode's console shows
+the log already (`IDE_DISABLED_OS_ACTIVITY_DT_MODE`, `OS_ACTIVITY_DT_MODE`); a scheme with `OS_ACTIVITY_MODE=disable`
+turns the process's log off, so they go to stderr under Xcode then. `os_log_with_type` is a C
+macro: `src/os_log.c` wraps it in `platform_apple_os_log` (hidden, and outside the iOS SDK's exported `_nsh_*`),
+which the crate's `build.rs` compiles with `cc` for Apple targets. The development host logs through `dev.rs` (to
+the dev server while connected, to stderr otherwise).
 
 ## Keyboard focus for views
 

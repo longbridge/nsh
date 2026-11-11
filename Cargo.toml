@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples/gallery-rs/native", "examples/rust-exports/native", "examples/tasks-rs", "examples/embed-gpui/run"]
+members = ["crates/*", "examples/gallery-rs/native", "examples/rust-exports/native", "examples/post-editor/native", "examples/tasks-rs", "examples/embed-gpui/run"]
 # The GPUI backend is a workspace of its own (`crates/gpui/Cargo.toml`).
 exclude = ["crates/gpui"]
 # `cargo run` runs the gallery (`crates/xtask/src/run.rs`).
 default-members = ["crates/xtask"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.97"
 license = "Apache-2.0"
@@ -34,25 +34,25 @@ unicode-width = "0.2.2"
 vte = { version = "0.15", default-features = false }
 unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
-nsh-core = { version = "0.4.0", path = "crates/nsh-core" }
-nsh-package = { version = "0.4.0", path = "crates/nsh-package" }
-nsh-i18n = { version = "0.4.0", path = "crates/nsh-i18n" }
-nsh-updater = { version = "0.4.0", path = "crates/nsh-updater" }
+nsh-core = { version = "0.5.0", path = "crates/nsh-core" }
+nsh-package = { version = "0.5.0", path = "crates/nsh-package" }
+nsh-i18n = { version = "0.5.0", path = "crates/nsh-i18n" }
+nsh-updater = { version = "0.5.0", path = "crates/nsh-updater" }
 # Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.
-nsh-base = { version = "0.4.0", path = "crates/nsh-base", default-features = false }
-nsh-macros = { version = "0.4.0", path = "crates/nsh-macros" }
+nsh-base = { version = "0.5.0", path = "crates/nsh-base", default-features = false }
+nsh-macros = { version = "0.5.0", path = "crates/nsh-macros" }
 # Without `zlib` and `crypto`: what enables the VM picks them (`nsh-engine`'s `js`, the web runtime).
-nsh-js = { version = "0.4.0", path = "crates/nsh-js", default-features = false }
-nsh-engine = { version = "0.4.0", path = "crates/nsh-engine", default-features = false }
-nsh-bundler = { version = "0.4.0", path = "crates/nsh-bundler", default-features = false }
-nsh-platform-ios = { version = "0.4.0", path = "crates/nsh-platform-ios", default-features = false }
-nsh-platform-linux = { version = "0.4.0", path = "crates/nsh-platform-linux", default-features = false }
-nsh-platform-apple = { version = "0.4.0", path = "crates/nsh-platform-apple" }
-nsh-platform-macos = { version = "0.4.0", path = "crates/nsh-platform-macos", default-features = false }
-nsh-platform-windows = { version = "0.4.0", path = "crates/nsh-platform-windows", default-features = false }
-nsh-platform-tui = { version = "0.4.0", path = "crates/nsh-platform-tui", default-features = false }
-nsh-dev = { version = "0.4.0", path = "crates/nsh-dev" }
-nsh-testing = { version = "0.4.0", path = "crates/nsh-testing", default-features = false }
+nsh-js = { version = "0.5.0", path = "crates/nsh-js", default-features = false }
+nsh-engine = { version = "0.5.0", path = "crates/nsh-engine", default-features = false }
+nsh-bundler = { version = "0.5.0", path = "crates/nsh-bundler", default-features = false }
+nsh-platform-ios = { version = "0.5.0", path = "crates/nsh-platform-ios", default-features = false }
+nsh-platform-linux = { version = "0.5.0", path = "crates/nsh-platform-linux", default-features = false }
+nsh-platform-apple = { version = "0.5.0", path = "crates/nsh-platform-apple" }
+nsh-platform-macos = { version = "0.5.0", path = "crates/nsh-platform-macos", default-features = false }
+nsh-platform-windows = { version = "0.5.0", path = "crates/nsh-platform-windows", default-features = false }
+nsh-platform-tui = { version = "0.5.0", path = "crates/nsh-platform-tui", default-features = false }
+nsh-dev = { version = "0.5.0", path = "crates/nsh-dev" }
+nsh-testing = { version = "0.5.0", path = "crates/nsh-testing", default-features = false }
 
 anyhow = "1"
 thiserror = "2"
@@ -63,6 +63,8 @@ log = "0.4"
 ordered-float = { version = "5", default-features = false }
 env_logger = "0.11"
 libc = "0.2"
+# C functions over macros Rust cannot call (`nsh-platform-apple`'s `os_log_with_type`).
+cc = "1.8"
 imagesize = "0.15"
 # A GIF's first frame (the size resvg decodes) for the SVG layer budget.
 gif = "0.14"

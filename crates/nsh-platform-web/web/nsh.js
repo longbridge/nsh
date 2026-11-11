@@ -35,7 +35,9 @@
 // popovers), `overlay` (false: no error box), `onError`, `onLog`, `host`
 // (the functions `nsh/host`'s `host.call(name, args)` reaches: an object
 // whose `call(name, args)` returns the result or a promise of it; a throw
-// or a rejection rejects the app's call; without it `host.available()` is
+// or a rejection rejects the app's call; its optional `post(name, args)`
+// takes the app's `host.post`, which goes to `call` without one, its result
+// and failures dropped; without it `host.available()` is
 // false). The page sends
 // `host.on` listeners events with `player.hostEvent(event, payload)`
 // (JSON; it throws when the payload is not); events sent before the app
@@ -6250,6 +6252,7 @@ class Player {
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
+      case "hostPost": this.hostPost(args[0], args[1]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
@@ -6926,6 +6929,19 @@ class Player {
       reply = JSON.stringify({ type: "reply", id: request, ok: false, error: String(err?.message ?? err) });
     }
     if (app === this.app) this.eventJson(ROOT_ID, "onHost", reply);
+  }
+
+  /**
+   * `nsh/host`'s `host.post`: `options.host.post(name, args)`, or its
+   * `call(name, args)` when it has no `post`. Nothing goes back to the
+   * app, so a throw, a rejection or a result is dropped.
+   */
+  hostPost(name, args) {
+    const host = this.options.host;
+    try {
+      const done = typeof host?.post === "function" ? host.post(name, args) : host?.call?.(name, args);
+      Promise.resolve(done).catch(() => {});
+    } catch {}
   }
 
   /**

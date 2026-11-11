@@ -535,6 +535,12 @@ Things that were found the hard way. Read the section of the area you change bef
   built-in screen and a 60 Hz external one). `Surface::follow_screen` asks for the range again when the screen's
   `maximumFramesPerSecond` differs from the one it was made for.
 
+- **The unified log stores about 1 KB of an entry's text** (iOS too): a `%{public}s` message of 1010 bytes came back
+  whole from `log show` and one of 1016 bytes cut (measured, macOS 26.6), so `nsh_platform_apple::unified_log` logs
+  in entries of at most 960 bytes, split between lines. A packaged app opened from Finder, the Dock or the Home screen
+  has stderr on `/dev/null`, which is why its lines go there. In a non-interactive zsh (scripts, agents' shells) `log`
+  is zsh's builtin, which `/etc/zshrc` disables only for interactive shells: call `/usr/bin/log`.
+
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
@@ -566,7 +572,9 @@ Things that were found the hard way. Read the section of the area you change bef
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
   400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
   `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
-  the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
+  the bar's height whatever the window's, and uses `contentLayoutRect` only without one; a measure from it runs
+  again on the next main-queue turn, once AppKit has laid the window out, since the root view's size may not change
+  again to trigger one.
 
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
@@ -583,9 +591,15 @@ Things that were found the hard way. Read the section of the area you change bef
   hand them to the view under the pointer.
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
-- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked. What ends
-  an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
-  one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
+- `NSView`'s display link fires only while some of the view's window shows on a screen: not while the window is
+  hidden (ordered out, or never shown), minimized, wholly covered or off every screen, or the screen is locked. A
+  surface's one link drives all of its windows, so a link made from the root of a hidden main window (a tray app's,
+  `window.defaultVisible: false`) gave the app's other windows no frames at all: made from the hidden window's view
+  it fired 0 times in a second, from a shown window's 126, and in a `Window.open` window a trackpad scroll froze
+  under the fingers and jumped into place when the gesture ended (`settle`), and animations did not run. The link is
+  made from a window that shows and made again when that one hides (`window::link_root`, `macos.md` "Frames"). What
+  ends an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with
+  a one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
 - **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
   makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its

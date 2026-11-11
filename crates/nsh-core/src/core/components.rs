@@ -4488,17 +4488,9 @@ impl<M: TextEngine> Core<M> {
         };
         self.send_list_rows(id, before.as_ref(), count, keys.as_ref());
         if before.is_none()
-            && let Some(index) = list.initial_index
+            && let Some(command) = list.initial_scroll
         {
-            let _ = self.apply_op(Op::Command {
-                id,
-                command: Command::ScrollToIndex {
-                    index,
-                    animated: false,
-                    view_position: crate::geometry::Percentage(0.0),
-                    view_offset: Points::ZERO,
-                },
-            });
+            let _ = self.apply_op(Op::Command { id, command });
         }
         let state = self.components.virtual_lists.get_mut(&id).expect("list");
         state.row = list.row;
@@ -5786,6 +5778,16 @@ impl<M: TextEngine> Core<M> {
                     id: crate::ROOT_ID,
                     command: Command::HostCall { id, name, args },
                 });
+            }
+            // Dropped without a host, as an SDK channel drops it without
+            // an embedding app.
+            Action::HostPost { name, args } => {
+                if self.components.environment.host {
+                    let _ = self.apply_op(Op::Command {
+                        id: crate::ROOT_ID,
+                        command: Command::HostPost { name, args },
+                    });
+                }
             }
             // A call timed out (`runtime/host.rs`), its answer dropped: its
             // slot waits no more.

@@ -328,6 +328,32 @@ thread_local! {
     static DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// A Copy or Select All of the app's menu for an area: acts on that area,
+/// as its own menu does; true when handled.
+pub(crate) fn menu_role(
+    surface: &Surface,
+    area: &NshView,
+    role: nsh_core::desktop::MenuRole,
+) -> bool {
+    use nsh_core::desktop::MenuRole;
+    if !area.attached() {
+        return false;
+    }
+    match role {
+        MenuRole::Copy => {
+            if let Some(text) = selected_text(surface.key(), Some(area)) {
+                crate::system::set_clipboard_text(&text);
+            }
+            true
+        }
+        MenuRole::SelectAll => {
+            select_all(surface.key(), area);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// The current area of `surface`, taken out (put it back with
 /// [`put`]).
 fn take(surface: u64, area: Option<&NshView>) -> Option<Current> {

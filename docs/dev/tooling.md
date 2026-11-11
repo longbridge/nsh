@@ -437,7 +437,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   its own thread: timers on the app's clock, woken by its alarms (`Clock::at`), `console` to the `js` log, no imports), `Environment::host` set, and the
   driver hands the root's `Command::HostCall`s to it as their batches are applied (`Headless::on_host_call`); it
   answers each with a `Host` `{ type: "reply" }` event as `nsh.js` `hostCall` does (`ok: false` with the message on a throw, a rejection or
-  a value that is not JSON), and `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
+  a value that is not JSON); the root's `Command::HostPost`s go to its `post`, or its `call` without one, as `nsh.js`
+  `hostPost` does (`Headless::on_host_post`, the result and failures dropped); `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
   `page_host::Target` until `attach`, so the app's top-level `host.on` hears it, and the host goes with the app
   (its thread ends when the driver drops its calls). A module that does not load, exports no `createHost` or whose
   `createHost` returns no `call` fails the `open`. A call's timeout (`runtime/host.rs`) is the core's timer, on the

@@ -446,9 +446,14 @@ readback) is not this implementation. Linux `backdropFilter` remains unsupported
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
 
 - A call from app code into the runtime (a signal read or set, an element made) outside a Wasm entry costs ~1µs
-  however many values the app holds: the weak tracing runs at most every 100ms after the call
-  (`values.js` `schedule`), not inside it. With a full trace per call it cost ~0.11ms at 1 700 retained values and
-  ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each), and a message pushed every second froze the page.
+  however many values the app holds: the weak tracing runs after the call, not inside it, at least 100ms apart
+  and twenty times as long after a run as it took (`values.js` `schedule`, `collectDelay`). With a full trace per
+  call it cost ~0.11ms at 1 700 retained values and ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each),
+  and a message pushed every second froze the page.
+- Typing into a controlled `Input` beside 10 000 rows that each hold a handler, a key every 80ms, 2026-11-11: with
+  accessors keyed by numbers and the accounting spaced by its own cost, the accounting took ~3.65ms per key instead
+  of ~9.4ms and script ~5.4ms instead of ~10.7ms; with the CPU slowed 4×, accounting ~3.6ms instead of ~50.4ms,
+  script ~6.9ms instead of ~65ms, main-thread task time ~20.9ms instead of ~79.5ms per key.
 - The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
   (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
   ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.

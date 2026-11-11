@@ -16,7 +16,9 @@ use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
 use crate::{
-    apple::{ActivationPolicy, AppleConfig, ApplePlatform, MacosConfig},
+    apple::{
+        ActivationPolicy, AppleConfig, ApplePlatform, IOS_MINIMUM, MACOS_MINIMUM, MacosConfig,
+    },
     runtime::{self, Platform},
     ui,
 };
@@ -1046,7 +1048,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     url_types(&mut info, &id, &schemes);
     document_types(&mut info, &config.file_types());
     if let Some(icon) = config.icon(PackageTarget::Ios) {
-        let partial = compile_icon(icon, &app, sdk)?;
+        let partial = compile_icon(icon, &app, sdk, minimum_os(&info))?;
         for (key, value) in partial {
             info.insert(key, value);
         }
@@ -1677,6 +1679,7 @@ fn macos_info_plist(
         "CFBundleSupportedPlatforms".into(),
         Value::Array(vec![s("MacOSX")]),
     );
+    // The runtime's, unless the app raises it (`macos.infoPlist`).
     d.insert("LSMinimumSystemVersion".into(), s(MACOS_MINIMUM));
     d.insert("NSHighResolutionCapable".into(), true.into());
     d.insert("NSPrincipalClass".into(), s("NSApplication"));
@@ -1693,10 +1696,6 @@ fn macos_info_plist(
     d.extend(config.macos.info_plist()?);
     Ok(d)
 }
-
-/// The oldest macOS the AppKit runtime runs on (its display links are
-/// `NSView`'s, new in macOS 14).
-const MACOS_MINIMUM: &str = "14.0";
 
 /// The MIME types of `types`, each once, for a Linux desktop entry.
 pub(crate) fn file_mime_types(types: &[nsh_core::file_type::FileType]) -> Vec<String> {
@@ -1778,7 +1777,8 @@ fn info_plist(
             "iPhoneSimulator"
         })]),
     );
-    d.insert("MinimumOSVersion".into(), s(MINIMUM_OS));
+    // The runtime's, unless the app raises it (`ios.infoPlist`).
+    d.insert("MinimumOSVersion".into(), s(IOS_MINIMUM));
     d.insert(
         "UIDeviceFamily".into(),
         Value::Array(vec![1.into(), 2.into()]),
@@ -1842,12 +1842,24 @@ fn info_plist(
     Ok(d)
 }
 
-/// The deployment target the runtime is built for (`cargo xtask dist`).
-const MINIMUM_OS: &str = "15.0";
+/// The oldest iOS an app's `Info.plist` (`info`) declares: the app's own
+/// `MinimumOSVersion`, or the runtime's.
+fn minimum_os(info: &plist::Dictionary) -> &str {
+    info.get("MinimumOSVersion")
+        .and_then(plist::Value::as_string)
+        .unwrap_or(IOS_MINIMUM)
+}
 
 /// Compiles `icon` into the app's asset catalog (`Assets.car`) with
-/// `actool`, returning the Info.plist keys it produces.
-fn compile_icon(icon: &Path, app: &Path, sdk: &str) -> anyhow::Result<plist::Dictionary> {
+/// `actool`, for `minimum`, the oldest iOS the app declares (as Xcode
+/// compiles it for the deployment target), returning the Info.plist keys
+/// it produces.
+fn compile_icon(
+    icon: &Path,
+    app: &Path,
+    sdk: &str,
+    minimum: &str,
+) -> anyhow::Result<plist::Dictionary> {
     let work = app.with_extension("xcassets-work");
     let set = work.join("Assets.xcassets/AppIcon.appiconset");
     fs::create_dir_all(&set)?;
@@ -1865,7 +1877,7 @@ fn compile_icon(icon: &Path, app: &Path, sdk: &str) -> anyhow::Result<plist::Dic
     let output = Command::new("xcrun")
         .args(["actool", "--compile"])
         .arg(app)
-        .args(["--platform", sdk, "--minimum-deployment-target", MINIMUM_OS])
+        .args(["--platform", sdk, "--minimum-deployment-target", minimum])
         .args(["--app-icon", "AppIcon", "--output-partial-info-plist"])
         .arg(&partial)
         .args([
@@ -2392,6 +2404,60 @@ mod tests {
         );
         assert!(!macos.contains_key("ITSAppUsesNonExemptEncryption"));
         assert!(!macos.contains_key("LSUIElement"));
+    }
+
+    /// A package runs from the runtime's oldest system on, or from the
+    /// later one the app names, which the iOS icon is compiled for too.
+    #[test]
+    fn apps_raise_the_minimum_system_version() {
+        let string = |value: &str| plist::Value::String(value.into());
+        let config = AppConfig::default();
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(macos["LSMinimumSystemVersion"], string(MACOS_MINIMUM));
+        let ios = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert_eq!(ios["MinimumOSVersion"], string(IOS_MINIMUM));
+        assert_eq!(minimum_os(&ios), IOS_MINIMUM);
+
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "ios": { "infoPlist": { "MinimumOSVersion": "16.4" } },
+            "macos": { "infoPlist": { "LSMinimumSystemVersion": "15.2" } }
+        }))
+        .unwrap();
+        let macos = macos_info_plist("A", "com.a", "a", &config, false).unwrap();
+        assert_eq!(macos["LSMinimumSystemVersion"], string("15.2"));
+        assert!(!macos.contains_key("MinimumOSVersion"));
+        let ios = info_plist("A", "com.a", "a", &config, "iphonesimulator").unwrap();
+        assert_eq!(ios["MinimumOSVersion"], string("16.4"));
+        assert!(!ios.contains_key("LSMinimumSystemVersion"));
+        assert_eq!(minimum_os(&ios), "16.4");
+
+        // Reading nsh.json refuses one below the runtime's.
+        let app = std::env::temp_dir().join(format!("nsh-minimum-{}", std::process::id()));
+        fs::create_dir_all(&app).unwrap();
+        fs::write(
+            app.join("nsh.json"),
+            serde_json::json!({ "macos": { "infoPlist": { "LSMinimumSystemVersion": "13.0" } } })
+                .to_string(),
+        )
+        .unwrap();
+        let error = read_config(&app.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "nsh.json macos.infoPlist.LSMinimumSystemVersion: \"13.0\" is below NSH's minimum"
+            ),
+            "{error}"
+        );
+        fs::write(
+            app.join("nsh.json"),
+            serde_json::json!({ "ios": { "infoPlist": { "MinimumOSVersion": 17 } } }).to_string(),
+        )
+        .unwrap();
+        let error = read_config(&app.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("nsh.json ios.infoPlist.MinimumOSVersion: 17 is no string"),
+            "{error}"
+        );
+        fs::remove_dir_all(&app).unwrap();
     }
 
     /// A menu bar app's package launches as one (`LSUIElement`).

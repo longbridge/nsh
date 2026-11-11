@@ -29,7 +29,9 @@
 //! `accessibilityRole`'s, `Text` for text views, `Button` for views with
 //! press handlers, `Image` for labelled images, `Group` for other labelled
 //! views), its `testID` as the automation id, its `accessibilityHint` as
-//! help text, and the patterns its role and state call for: Invoke
+//! help text, its `accessibilityDescription` as its full description
+//! (ARIA's `aria-description`, as browsers expose it), and the patterns
+//! its role and state call for: Invoke
 //! (presses; [`activate`] sends the press as a tap would, or the
 //! `activate` action), Toggle (`accessibilityState.checked`),
 //! ExpandCollapse (`expanded`), SelectionItem (tabs, radios, options,
@@ -259,6 +261,8 @@ struct Spec {
     /// content is followed through its texts' changes).
     name: Option<Arc<str>>,
     help: Option<String>,
+    /// The full description (`accessibilityDescription`).
+    description: Option<Arc<str>>,
     disabled: bool,
     selected: bool,
     checked: Option<Checked>,
@@ -552,6 +556,7 @@ fn spec_of(s: &ViewState) -> Spec {
             .clone()
             .or_else(|| s.text.as_ref().map(|t| Arc::from(&*t.text.visible_text()))),
         help: help_of(a, control),
+        description: a.description.clone(),
         disabled: a.state.disabled,
         selected: a.state.selected,
         checked: toggled(a),
@@ -716,6 +721,8 @@ pub(crate) struct Exposed {
     pub(crate) name: Option<Arc<str>>,
     /// The help text.
     pub(crate) help: Option<String>,
+    /// The full description.
+    pub(crate) description: Option<Arc<str>>,
     /// Enabled.
     pub(crate) enabled: bool,
     /// Selected.
@@ -736,6 +743,7 @@ fn exposed_of(s: &Spec) -> Exposed {
     Exposed {
         name: s.name.clone(),
         help: s.help.clone(),
+        description: s.description.clone(),
         enabled: !s.disabled,
         selected: s.selected,
         checked: s.checked,
@@ -1197,6 +1205,15 @@ mod tests {
         assert_eq!(range_of(&button, Control::Button), None);
         assert_eq!(
             help_of(&button, Some(Control::Button)).as_deref(),
+            Some("3 of 10. Plays")
+        );
+        // The description is the full description, not part of the help.
+        let described = Accessibility {
+            description: Some("The whole album".into()),
+            ..button.clone()
+        };
+        assert_eq!(
+            help_of(&described, Some(Control::Button)).as_deref(),
             Some("3 of 10. Plays")
         );
         // Defaults: 0 to 100; the value is clamped; no value, no range.

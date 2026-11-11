@@ -371,8 +371,8 @@ fn the_page_s_host_answers_the_apps_tests_open() {
         assert!(failed.is_empty(), "{file}: {failed:#?}");
         results.len()
     };
-    assert_eq!(run(Some("host.js"), "Host.test.tsx"), 8);
-    assert_eq!(run(None, "NoHost.test.tsx"), 2);
+    assert_eq!(run(Some("host.js"), "Host.test.tsx"), 10);
+    assert_eq!(run(None, "NoHost.test.tsx"), 3);
     assert_eq!(run(Some("none.js"), "Broken.test.tsx"), 1);
 }
 

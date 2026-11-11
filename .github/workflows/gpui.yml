@@ -111,6 +111,9 @@ jobs:
         uses: ./.github/actions/cargo
         with:
           cache: gpui
+          # The GPUI workspace's and the GPUI Kit example's, besides the
+          # main workspace's.
+          lockfiles: "**/Cargo.lock"
 
       # A workspace of its own: huacnlee/cargo builds the dependencies it
       # shares with the main workspace once (`shared-deps`).

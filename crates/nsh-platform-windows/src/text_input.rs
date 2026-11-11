@@ -981,6 +981,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     if old.as_ref() == view {
         return;
     }
+    surface.chrome.context_area.take();
     if let Some(old) = &old {
         if let Some(input) = input_of(old) {
             if input.composing.get().is_some() {

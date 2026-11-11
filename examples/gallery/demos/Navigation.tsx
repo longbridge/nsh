@@ -610,6 +610,7 @@ export function Navigation() {
         animation="fade"
         role="alertdialog"
         accessibilityLabel="Delete “Launch notes”?"
+        accessibilityDescription="The note and its 14 comments go for everyone it is shared with. This cannot be undone."
         onOpenChange={({ open }) => !open && close()}
         backdropStyle={backdrop()}
         style={{ margin: "auto", width: platform.desktop ? 360 : 340, maxWidth: "90%" }}

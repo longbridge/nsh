@@ -2326,6 +2326,17 @@ pub enum Command {
         /// Its argument (any JSON value; `null` without one).
         args: crate::JsonValue,
     },
+    /// Hand `args` to function `name` of the app embedding NSH, with no
+    /// answer (on the root; `nsh/host`'s `host.post` without a native SDK
+    /// channel). Sent only on platforms whose
+    /// [`crate::platform::Environment::host`] is set, for functions the
+    /// app's `capabilities.host` grants.
+    HostPost {
+        /// The host's function.
+        name: String,
+        /// Its argument (any JSON value; `null` without one).
+        args: crate::JsonValue,
+    },
     /// A call on a registered native component (`ref.command(name, args)`).
     Native {
         /// The command.
