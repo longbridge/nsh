@@ -128,7 +128,9 @@
   `ViewProps::screen_order` (its axis): the platforms read its cells in the order they are on screen, as they read a
   scroll view's content, since recycled cells are not in their rows' order in the tree. Lists of their
   own pay nothing (`crates/nsh-core/src/core/parent_viewport.rs`).
-- **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`.
+- **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`; its rows under a
+  layout animation (they slide though the core scrolls the list, a recycled cell appears in place): `core/list_motion.rs`
+  (`docs/dev/animation.md` "Layout animation").
 - **Paced binding** (the runtime's lists): what shows binds in the commit that assigns it (the viewport, sticky items,
   cells whose item moved); the rest of the overscan is bound by the engine over the following turns and frames
   within a budget. Cells assigned but not bound yet are moved out of sight like unassigned ones. Rust components'
