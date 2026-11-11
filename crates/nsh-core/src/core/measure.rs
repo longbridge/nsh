@@ -224,6 +224,26 @@ impl<M: TextEngine> Core<M> {
         })
     }
 
+    /// Inline attachments get their positions from their text's final layout.
+    /// A reveal must make a culled text first, as other commands make their view,
+    /// so its attachment can be measured before reveal expands into scrolls.
+    pub(super) fn prepare_reveals(&mut self) {
+        for index in 0..self.commands.len() {
+            let (id, command) = &self.commands[index];
+            if !matches!(command, Command::Reveal(_)) {
+                continue;
+            }
+            let Ok(key) = self.key(*id) else {
+                continue;
+            };
+            if let Some(block) = self.attachment_block(key)
+                && !self.nodes[block as usize].created
+            {
+                self.uncull(block);
+            }
+        }
+    }
+
     /// The `ScrollTo` commands that bring view `id` into view, as
     /// `options` places it: one for each scroll view around it that has to
     /// move, innermost first, each from where the ones inside it end up.
