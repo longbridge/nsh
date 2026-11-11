@@ -288,6 +288,22 @@ const offset = signal({ x: 0, y: 0 });
 />
 ```
 
+`onPinch` 在触控板于视图上捏合时触发，与 GPUI 的 `on_pinch` 相同：macOS、Linux、GPUI 后端和 Safari 都支持。Windows 和其他浏览器把触控板捏合报告为 Control + 滚轮，由 `onWheel` 收到，所以需要缩放的视图要同时监听两者。指针下方视图及其外层中，最近的监听者从捏合开始到结束一直收到它；若该视图比所有原生捏合的视图（`pinch` 值、`onPinchStart`）都更近，它就接管这次捏合，系统不再原生缩放。在捏合中途才开始监听的视图收到其余部分，没有开始事件。触摸屏上的手指捏合属于原生手势（`onPinchStart`，见[触摸与手势](../docs/touch-and-gestures.md)）。
+
+| 属性 | Rust | 类型 | 说明 |
+|---|---|---|---|
+| `onPinch` | `.on_pinch(..)` | `(e: PinchEvent) => void` | 触控板在视图或其内部的视图上捏合。 |
+
+`PinchEvent` 与 `MouseEvent` 一样带有 `position`、`pagePosition` 和 `modifiers`，以及 `delta`（相对上一次事件的缩放变化，0.1 即放大 10%，负数为缩小）和 `phase`：`"start"`、`"move"` 或 `"end"`，与触摸的阶段相同。Rust 中 `delta` 是 `Percentage`，`phase` 是 `PinchPhase`。
+
+```tsx
+<View
+  style={{ flex: 1 }}
+  onPinch={(e) => zoom.update((z) => z * (1 + e.delta))}
+  onWheel={(e) => e.modifiers.control && zoom.update((z) => z * (1 - (e.delta.y * (e.deltaMode === "lines" ? 16 : 1)) / 200))}
+/>
+```
+
 <a id="tooltips"></a>
 
 ### 工具提示

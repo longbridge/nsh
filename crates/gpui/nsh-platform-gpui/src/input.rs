@@ -277,6 +277,10 @@ pub(crate) struct Input {
     latch: RefCell<Option<(NshView, bool, f64)>>,
     /// The `onWheel` listener a scroll went to, which keeps the rest of it.
     wheel_listener: RefCell<WheelLatch<NshView>>,
+    /// The `onPinch` listener a touchpad pinch went to, to its end, and the
+    /// pinch's absolute scale (GPUI's Linux deltas change it).
+    pinch_listener: RefCell<WheelLatch<NshView>>,
+    pinch_scale: Cell<f32>,
     /// When the gesture [`Input::wheel_listener`] follows last moved (ms):
     /// GPUI tells no end of the momentum after it, so a pause ends it.
     wheel_listener_last: Cell<f64>,
@@ -317,9 +321,11 @@ pub(crate) struct Input {
 }
 
 impl Input {
-    /// A touchpad pinch is going on ([`touchpad_pinch`]).
+    /// A touchpad pinch is going on ([`touchpad_pinch`]): a native one, or
+    /// one an `onPinch` listener took (a pinch nothing takes or pinches
+    /// is not the surface's, so a lost end cannot keep it).
     pub(crate) fn pinching(&self) -> bool {
-        self.pinch.borrow().is_some()
+        self.pinch.borrow().is_some() || self.pinch_listener.borrow().taker().is_some()
     }
 }
 
@@ -493,6 +499,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.momentum.set(None);
     input.latch.borrow_mut().take();
     input.wheel_listener.borrow_mut().clear();
+    input.pinch_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -2935,6 +2942,9 @@ pub(crate) fn touchpad_pinch(
     phase: GesturePhase,
 ) {
     let input = &surface.input;
+    if pinch_event(surface, x, y, delta, phase) {
+        return;
+    }
     if phase == GesturePhase::Began {
         if let Some((old, _)) = input.pinch.borrow_mut().take() {
             transform_end(surface, &old);
@@ -2969,6 +2979,66 @@ pub(crate) fn touchpad_pinch(
     {
         transform_end(surface, &t);
     }
+}
+
+/// `onPinch` for a touchpad pinch event in `phase` at `(x, y)` (`delta`:
+/// GPUI's): the nearest view around the one under the pointer that
+/// listens hears the pinch from its start to its end ([`WheelLatch`]).
+/// Returns whether that view takes it ([`input::wheel_listener`]: no view
+/// that pinches natively is nearer, nor is it one), so nothing pinches
+/// natively.
+fn pinch_event(surface: &Rc<Surface>, x: f32, y: f32, delta: f32, phase: GesturePhase) -> bool {
+    let input = &surface.input;
+    let (step, pinch_phase) = match phase {
+        GesturePhase::Began => {
+            input.pinch_scale.set(1.0);
+            (WheelStep::Begin, nsh_core::PinchPhase::Start)
+        }
+        GesturePhase::Moved => (WheelStep::Continue, nsh_core::PinchPhase::Move),
+        GesturePhase::Ended | GesturePhase::Cancelled => {
+            (WheelStep::End, nsh_core::PinchPhase::End)
+        }
+    };
+    let routed = input
+        .pinch_listener
+        .borrow_mut()
+        .route(step, true, false, shown, || {
+            let hit = pick(&surface.input_root(), x, y, true)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Pinch),
+                |v| {
+                    let (id, events) = {
+                        let s = v.state();
+                        (s.id, s.events)
+                    };
+                    transforms(&gesture_values(surface, v, id), events).0
+                },
+            )
+        });
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    // The change of scale since the last event: GPUI's on macOS and
+    // Windows; on Linux its delta changes the gesture's absolute scale.
+    let relative = if cfg!(target_os = "linux") {
+        let before = input.pinch_scale.get().max(0.01);
+        input.pinch_scale.set(before + delta);
+        (before + delta) / before - 1.0
+    } else {
+        delta
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let pinch = nsh_core::PinchEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        nsh_core::geometry::Percentage(relative),
+        pinch_phase,
+        input.modifiers.get().core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Pinch, EventPayload::Pinch(pinch));
+    takes
 }
 
 /// The scale of a touchpad pinch at `scale` (its absolute scale so far

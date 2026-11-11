@@ -136,6 +136,10 @@ pub(crate) struct Input {
     latch: RefCell<Option<(NshView, bool, f64)>>,
     /// The `onWheel` listener a scroll went to, which keeps the rest of it.
     wheel_listener: RefCell<WheelLatch<NshView>>,
+    /// The `onPinch` listener a touchpad pinch went to, to its end, and the
+    /// scale it was at (GDK's is the gesture's own, from 1).
+    pinch_listener: RefCell<WheelLatch<NshView>>,
+    pinch_scale: std::cell::Cell<f32>,
     /// Views that track `HOVERED` or listen to `onMouseEnter` /
     /// `onMouseLeave` / `onMouseMove` (hover is only tested while there
     /// are).
@@ -312,6 +316,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.wheel.borrow_mut().take();
     input.latch.borrow_mut().take();
     input.wheel_listener.borrow_mut().clear();
+    input.pinch_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -2193,7 +2198,69 @@ fn end_two_finger(surface: &Rc<Surface>) {
     transform_end(surface, &t.transform);
 }
 
+/// `onPinch` for a touchpad pinch event at `(x, y)` (root coordinates):
+/// the nearest view around the one under it that listens hears the pinch
+/// from its start to its end ([`WheelLatch`]). Returns whether that view
+/// takes it ([`input::wheel_listener`]: no view that pinches natively is
+/// nearer, nor is it one), so nothing pinches natively.
+fn pinch_event(surface: &Rc<Surface>, event: &gdk::TouchpadEvent, x: f32, y: f32) -> bool {
+    let input = &surface.input;
+    let (step, phase) = match event.gesture_phase() {
+        gdk::TouchpadGesturePhase::Begin => {
+            input.pinch_scale.set(1.0);
+            (WheelStep::Begin, nsh_core::PinchPhase::Start)
+        }
+        gdk::TouchpadGesturePhase::Update => (WheelStep::Continue, nsh_core::PinchPhase::Move),
+        _ => (WheelStep::End, nsh_core::PinchPhase::End),
+    };
+    let routed = input.pinch_listener.borrow_mut().route(
+        step,
+        true,
+        false,
+        |view| view.is_mapped(),
+        || {
+            let hit = pick(&event_root(surface), x, y)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Pinch),
+                |v| {
+                    let (id, events) = {
+                        let s = v.state();
+                        (s.id, s.events)
+                    };
+                    transforms(&gesture_values(surface, v, id), events).0
+                },
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    let delta = if phase == nsh_core::PinchPhase::Move {
+        let scale = event.pinch_scale() as f32;
+        let before = input.pinch_scale.get().max(0.01);
+        input.pinch_scale.set(scale);
+        scale / before - 1.0
+    } else {
+        0.0
+    };
+    let (location_x, location_y) = local(surface, &view, x, y);
+    let pinch = nsh_core::PinchEvent::new(
+        point(Points(location_x), Points(location_y)),
+        point(Points(x), Points(y)),
+        nsh_core::geometry::Percentage(delta),
+        phase,
+        modifiers(event.modifier_state()),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Pinch, EventPayload::Pinch(pinch));
+    takes
+}
+
 fn touchpad_pinch(surface: &Rc<Surface>, event: &gdk::TouchpadEvent, x: f32, y: f32) -> bool {
+    if pinch_event(surface, event, x, y) {
+        return true;
+    }
     match event.gesture_phase() {
         gdk::TouchpadGesturePhase::Begin => {
             let Some(hit) = pick(&event_root(surface), x, y) else {
