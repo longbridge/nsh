@@ -82,7 +82,11 @@ WORKFLOWS = {
         "files": ["examples/counter/**", "examples/gallery/**"],
     },
     "rust-app.yml": {
-        "packages": ["gallery-native", "rust-exports-native", "post-editor-native", "tasks-rs", "nsh-cli", "nsh-platform-web"],
+        # The macOS check also tests nsh-platform-apple.
+        "packages": [
+            "gallery-native", "rust-exports-native", "post-editor-native", "tasks-rs",
+            "nsh-cli", "nsh-platform-web", "nsh-platform-apple",
+        ],
         # `nsh test` runs the examples' tests.
         "files": [
             "examples/counter/**", "examples/gallery/**", "examples/gallery-rs/**",
