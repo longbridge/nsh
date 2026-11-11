@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
-    WheelEvent,
+    MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points, PressEvent, Prop, Size, Tag,
+    TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1510,6 +1510,23 @@ pub trait Interactive: Element {
         self.on(
             EventKind::Wheel,
             events::typed(listener.into_listener(), events::wheel),
+        )
+    }
+
+    /// A touchpad pinch over it (or an element inside it), as GPUI's
+    /// `on_pinch`: by how much the scale changed since the last event
+    /// ([`PinchEvent::delta`]), in which phase, where and with which
+    /// modifier keys (macOS, Linux, GPUI and Safari; Windows and the other
+    /// browsers report a touchpad pinch as Control + wheel, which
+    /// [`Self::on_wheel`] hears). The nearest element that listens hears
+    /// it; when it is nearer than any view that pinches natively it takes
+    /// the pinch and nothing zooms natively; a pinch stays on the element
+    /// its start went to. A pinch of fingers on a touchscreen is
+    /// [`Self::on_pinch_start`]'s.
+    fn on_pinch<M>(self, listener: impl IntoListener<PinchEvent, M>) -> Self {
+        self.on(
+            EventKind::Pinch,
+            events::typed(listener.into_listener(), events::touchpad_pinch),
         )
     }
 
