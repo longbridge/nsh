@@ -174,7 +174,9 @@ belong to the app, which owns retention and its storage budget.
   window's content view) passes a scroll that begins where none of its scroll views can move up the responder chain,
   so the host scrolls (`input::forwards_scroll`). `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
-  Full Screen, Close), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
+  Full Screen, Close: items of those roles, `chrome::role_item`, labelled in the language the app
+  shows, as its role-only menu items are; the core sends `DesktopCommand::SetMenuLabels` when that language changes
+  (`nsh/i18n`), rebuilding both and the tray menu (`chrome::relabel`)), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
   menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The window
   opens centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
   `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
