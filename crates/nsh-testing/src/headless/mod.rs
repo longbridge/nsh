@@ -3155,6 +3155,66 @@ mod tests {
             }))
     }
 
+    /// A page with two buttons and a dialog over it, open at first, with
+    /// two buttons of its own.
+    #[component]
+    fn PageUnderDialog() -> impl IntoElement {
+        let open = signal(true);
+        let button = move |id: &'static str| {
+            view()
+                .test_id(id)
+                .on_press(move || {
+                    if id == "close" {
+                        open.set(false);
+                    }
+                })
+                .child(text(id))
+        };
+        view()
+            .flex_1()
+            .child(button("settings"))
+            .child(button("help"))
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog()
+                        .child(button("confirm"))
+                        .child(button("close"))
+                })
+            }))
+    }
+
+    #[test]
+    fn tab_stays_in_the_newest_dialog_as_on_the_desktops() {
+        let mut config = EngineConfig::new(Root::of::<PageUnderDialog>());
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (confirm, close) = (id(&app, "id:confirm"), id(&app, "id:close"));
+        // Into the dialog, around inside it, never to the page under it.
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(confirm));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(close));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(confirm));
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(close));
+        // Closed: Tab goes through the page again.
+        app.press_key("return").unwrap();
+        app.wait_for_gone("id:close", Duration::from_secs(2))
+            .unwrap();
+        let (settings, help) = (id(&app, "id:settings"), id(&app, "id:help"));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(settings));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(help));
+    }
+
     #[test]
     fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
         let mut config = EngineConfig::new(Root::of::<FocusStops>());
@@ -3437,6 +3497,169 @@ mod tests {
         app.press_key("tab").unwrap();
         app.wait_for("Focused row 1.").unwrap();
         assert!(shows(&app), "row 1 is scrolled into view");
+    }
+
+    /// A card's height once its content is loaded: never the list's
+    /// estimate, cards before the 50th growing by `grown` once "Grow" is
+    /// pressed. Before, a placeholder of 30 points.
+    fn card_height(i: usize, loaded: bool, grown: f32) -> f32 {
+        if !loaded {
+            return 30.0;
+        }
+        60.0 + (i % 4) as f32 * 50.0 + if i < 50 { grown } else { 0.0 }
+    }
+
+    /// 200 cards estimated at 40 points, placeholders until "Load" is
+    /// pressed, in a list of its own or in a page's viewport (below a
+    /// header); "Go" scrolls the list to card 50, "Grow" makes the cards
+    /// before it taller.
+    fn cards(viewport: nsh_core::ListViewport, alignment: nsh_core::ListAlignment) -> AnyElement {
+        let list = element_ref();
+        let loaded = signal(false);
+        let grown = signal(0.0f32);
+        let cards = virtual_list(200, move |at| {
+            view()
+                .h(move || Length::from(px(card_height(at.index(), loaded.get(), grown.get()))))
+                .child(text(move || format!("Card {}", at.index())))
+        })
+        .element_ref(&list)
+        .estimated_item_size(px(40.0))
+        .viewport(viewport)
+        .alignment(alignment);
+        let controls =
+            view()
+                .flex_row()
+                .child(text("Go").on_press(move |_: &()| {
+                    list.scroll_to_index(50, percentage(0.0), px(0.0), false)
+                }))
+                .child(text("Load").on_press(move |_: &()| loaded.set(true)))
+                .child(text("Grow").on_press(move |_: &()| grown.set(40.0)));
+        match viewport {
+            nsh_core::ListViewport::Own => view()
+                .flex_1()
+                .child(controls)
+                .child(cards.test_id("viewport").flex_1())
+                .into_element(),
+            _ => view()
+                .flex_1()
+                .child(controls)
+                .child(
+                    scroll()
+                        .test_id("viewport")
+                        .flex_1()
+                        .child(text("Header").h(px(120.0)))
+                        .child(cards),
+                )
+                .into_element(),
+        }
+    }
+
+    #[component]
+    fn OwnCards() -> impl IntoElement {
+        cards(nsh_core::ListViewport::Own, nsh_core::ListAlignment::Top)
+    }
+
+    #[component]
+    fn PageCards() -> impl IntoElement {
+        cards(nsh_core::ListViewport::Parent, nsh_core::ListAlignment::Top)
+    }
+
+    #[component]
+    fn BottomCards() -> impl IntoElement {
+        cards(nsh_core::ListViewport::Own, nsh_core::ListAlignment::Bottom)
+    }
+
+    /// The distance from the top of the viewport to the top of `label`'s
+    /// text, `None` while it is not shown.
+    fn from_top(app: &Headless, label: &str) -> Option<f32> {
+        let pick = |s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => app.screen().bounds_in_root(id),
+            _ => None,
+        };
+        let viewport = pick("id:viewport")?;
+        let card = pick(label)?;
+        Some(card.origin.y.0 - viewport.origin.y.0)
+    }
+
+    /// Scrolled to a card, a list keeps it at the top of its viewport as
+    /// the cards above it are measured at heights other than the estimate,
+    /// as their content loads after the scroll (all the cards around the
+    /// viewport changing in one layout) and as they grow later: the rows
+    /// above the viewport anchor the visible ones, whether the list scrolls
+    /// itself or its page does.
+    #[test]
+    fn rows_measured_above_the_viewport_keep_the_visible_row_in_place() {
+        let at_top = |app: &Headless, by: f32, what: &str| {
+            let at = from_top(app, "Card 50");
+            assert!(
+                at.is_some_and(|y| (y + by).abs() < 1.0),
+                "{what}: card 50 at {at:?}"
+            );
+        };
+        for (name, root) in [
+            ("own", Root::of::<OwnCards> as fn() -> Root),
+            ("page", Root::of::<PageCards>),
+        ] {
+            // Measured from the estimate.
+            let mut app = Headless::start(EngineConfig::new(root())).unwrap();
+            app.first_render().unwrap();
+            app.press("Load").unwrap();
+            app.press("Go").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 0.0, &format!("{name}, measured"));
+
+            // Placeholders, then content.
+            let mut app = Headless::start(EngineConfig::new(root())).unwrap();
+            app.first_render().unwrap();
+            app.press("Go").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 0.0, &format!("{name}, placeholders"));
+            // Scrolled a little, the scroll command's target is let go.
+            app.scroll("id:viewport", px(10.0)).unwrap();
+            app.wait(Duration::from_millis(200)).unwrap();
+            at_top(&app, 10.0, &format!("{name}, scrolled"));
+            app.press("Load").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 10.0, &format!("{name}, loaded"));
+            // The cards above it grow: it stays where it is.
+            app.press("Grow").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 10.0, &format!("{name}, grown"));
+        }
+    }
+
+    /// A bottom-aligned list rests at its end while the cards above the
+    /// viewport are measured and their content loads: it anchors to its
+    /// end, not to its first visible row.
+    #[test]
+    fn a_bottom_aligned_list_stays_at_its_end_as_rows_above_are_measured() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<BottomCards>())).unwrap();
+        app.first_render().unwrap();
+        app.wait(Duration::from_millis(500)).unwrap();
+        // How far above the viewport's end card 199's text starts: at the
+        // top of its card.
+        let from_end = |app: &Headless| {
+            let pick = |s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+                crate::screen::Pick::One(id) => app.screen().bounds_in_root(id),
+                _ => None,
+            };
+            let viewport = pick("id:viewport")?;
+            let card = pick("Card 199")?;
+            Some(viewport.origin.y.0 + viewport.size.height.0 - card.origin.y.0)
+        };
+        let at = from_end(&app);
+        assert!(
+            at.is_some_and(|d| (d - 30.0).abs() < 1.0),
+            "placeholder {at:?} above the end"
+        );
+        app.press("Load").unwrap();
+        app.wait(Duration::from_millis(500)).unwrap();
+        // 210 points tall loaded.
+        let at = from_end(&app);
+        assert!(
+            at.is_some_and(|d| (d - 210.0).abs() < 1.0),
+            "card 199 {at:?} above the end"
+        );
     }
 
     #[cfg(feature = "js")]
