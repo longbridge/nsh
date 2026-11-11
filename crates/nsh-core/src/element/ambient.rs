@@ -433,11 +433,11 @@ pub fn os_version() -> (u16, u16) {
 
 /// The kind of device (TS: `platform.idiom`): [`Idiom::Terminal`] in a
 /// terminal, else [`Idiom::Desktop`] exactly where [`is_desktop`] holds
-/// ([`Idiom::reported_on`]).
+/// ([`Environment::reported_idiom`]).
 pub fn idiom() -> Idiom {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
-        .with_untracked(|e| e.idiom.reported_on(e.os))
+        .with_untracked(|e| e.reported_idiom())
 }
 
 /// The size of one Cell of a grid surface (a terminal), in points, as
@@ -457,13 +457,13 @@ pub fn is_catalyst() -> bool {
 }
 
 /// Whether desktop behavior applies, NSH's one definition of desktop: a
-/// desktop OS (macOS, Windows, Linux), a browser in the desktop idiom or
-/// a terminal (TS: `platform.desktop`, [`Idiom::desktop_on`]); it does not
-/// change.
+/// desktop OS (macOS, Windows, Linux), a browser or a platform built
+/// outside NSH in the desktop idiom, or a terminal (TS: `platform.desktop`,
+/// [`Environment::desktop`]); it does not change.
 pub fn is_desktop() -> bool {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
-        .with_untracked(|e| e.idiom.desktop_on(e.os))
+        .with_untracked(|e| e.desktop())
 }
 
 /// The design tokens the app is drawn with (reading them subscribes: new

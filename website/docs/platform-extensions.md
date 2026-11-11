@@ -66,7 +66,7 @@ let config = EngineConfig {
 let mut engine = LocalEngine::start(config, text_engine, sink).expect("the app starts");
 ```
 
-`LocalEngine::pump()` runs what is due and returns when it is due again: the platform calls it at that time and after each input. Depend on `nsh-engine` with `default-features = false` for apps written in Rust: the engine then builds for `wasm32-unknown-unknown` too.
+`LocalEngine::pump()` runs what is due and returns when it is due again: the platform calls it at that time and after each input. `idiom` sets the device form factor at start for the life of the surface (`Idiom::Phone`, `Idiom::Pad`, or `Idiom::Desktop` where desktop behavior applies, honored on any `Os` when `platform` is set; a mode switch takes a new surface). Depend on `nsh-engine` with `default-features = false` for apps written in Rust: the engine then builds for `wasm32-unknown-unknown` too.
 
 ## 2. Show what the engine commits
 

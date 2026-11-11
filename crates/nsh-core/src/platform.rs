@@ -139,8 +139,9 @@ pub enum Idiom {
     Mac,
     /// A TV.
     Tv,
-    /// Desktop: a desktop backend (macOS, Windows, Linux), or a browser with
-    /// a mouse and a wide viewport ([`Idiom::desktop_on`]). Mac Catalyst is
+    /// Desktop: a desktop backend (macOS, Windows, Linux), a browser with a
+    /// mouse and a wide viewport, or a platform built outside NSH in the
+    /// desktop idiom ([`Environment::desktop`]). Mac Catalyst is
     /// [`Idiom::Pad`] or [`Idiom::Mac`], as UIKit reports.
     Desktop,
     /// A terminal: drawn on a grid of Cells, keyboard first (the terminal
@@ -148,32 +149,23 @@ pub enum Idiom {
     Terminal,
 }
 
-impl Idiom {
-    /// Whether desktop behavior applies on `os` in this idiom, NSH's one
-    /// definition of desktop: a desktop OS (macOS, Windows, Linux), a
-    /// browser in the desktop idiom, or a terminal. `desktop={{…}}` props,
-    /// `platform.select({ desktop })` and `platform.desktop` all follow it,
-    /// and so does `platform.idiom === "desktop"` outside a terminal
-    /// ([`Idiom::reported_on`]).
-    pub fn desktop_on(self, os: Os) -> bool {
-        os.is_desktop() || (os == Os::Web && self == Idiom::Desktop) || self == Idiom::Terminal
-    }
+/// NSH's one definition of desktop (`Environment::desktop` on both faces).
+pub(crate) fn is_desktop(os: Os, platform: Option<&str>, idiom: Idiom) -> bool {
+    os.is_desktop()
+        || ((os == Os::Web || platform.is_some()) && idiom == Idiom::Desktop)
+        || idiom == Idiom::Terminal
+}
 
-    /// The idiom apps see on `os` (TS: `platform.idiom`): [`Idiom::Terminal`]
-    /// in a terminal, else [`Idiom::Desktop`] exactly where
-    /// [`Idiom::desktop_on`] holds, so that `"desktop"` agrees with desktop
-    /// behavior whatever a platform (or a test) set. Elsewhere this idiom,
-    /// and [`Idiom::Phone`] for [`Idiom::Desktop`] on a mobile OS.
-    pub fn reported_on(self, os: Os) -> Idiom {
-        if self == Idiom::Terminal {
-            Idiom::Terminal
-        } else if self.desktop_on(os) {
-            Idiom::Desktop
-        } else if self == Idiom::Desktop {
-            Idiom::Phone
-        } else {
-            self
-        }
+/// The idiom apps see (`Environment::reported_idiom` on both faces).
+pub(crate) fn reported_idiom(os: Os, platform: Option<&str>, idiom: Idiom) -> Idiom {
+    if idiom == Idiom::Terminal {
+        Idiom::Terminal
+    } else if is_desktop(os, platform, idiom) {
+        Idiom::Desktop
+    } else if idiom == Idiom::Desktop {
+        Idiom::Phone
+    } else {
+        idiom
     }
 }
 
@@ -257,7 +249,13 @@ pub struct Environment {
     /// The OS version: major and minor (iOS, desktops), Android's API level
     /// and 0.
     pub os_version: (u16, u16),
-    /// The kind of device.
+    /// The kind of device, set when the surface starts and kept for its life
+    /// (`is_desktop()` and JS's `platform` are read once; a mode switch takes
+    /// a new surface). On a platform built outside NSH
+    /// ([`Environment::platform`]), [`Idiom::Desktop`] turns on desktop
+    /// behavior ([`Environment::desktop`]) on any [`Os`], while
+    /// [`Os::is_desktop`] stays the desktop OSes' (`nsh/desktop`'s windows
+    /// and menus and child processes stay off).
     pub idiom: Idiom,
     /// A browser on an Apple platform (macOS, iOS): its keyboard shortcuts
     /// follow Apple's conventions ([`crate::keymap::apple_keys`]: `mod` is
@@ -348,17 +346,20 @@ impl Environment {
         self.platform.unwrap_or(self.os.name())
     }
 
-    /// Desktop behavior applies: a desktop OS, a browser in the desktop
-    /// idiom or a terminal ([`Idiom::desktop_on`]: `desktop={{…}}` props,
-    /// `platform.select({ desktop })`, `platform.desktop`, `platform.idiom`
-    /// `"desktop"` outside a terminal).
+    /// Desktop behavior applies, NSH's one definition of desktop: a desktop
+    /// OS, a browser or a platform built outside NSH in the desktop idiom, or
+    /// a terminal (`desktop={{…}}` props, `platform.select({ desktop })`,
+    /// `platform.desktop`, `platform.idiom` `"desktop"` outside a terminal).
     pub fn desktop(&self) -> bool {
-        self.idiom.desktop_on(self.os)
+        is_desktop(self.os, self.platform, self.idiom)
     }
 
-    /// The idiom apps see (TS: `platform.idiom`, [`Idiom::reported_on`]).
+    /// The idiom apps see (TS: `platform.idiom`): [`Idiom::Terminal`] in a
+    /// terminal, else [`Idiom::Desktop`] exactly where [`Self::desktop`]
+    /// holds, [`Idiom::Phone`] for [`Idiom::Desktop`] where it does not, and
+    /// [`Self::idiom`] elsewhere.
     pub fn reported_idiom(&self) -> Idiom {
-        self.idiom.reported_on(self.os)
+        reported_idiom(self.os, self.platform, self.idiom)
     }
 }
 
@@ -1485,8 +1486,44 @@ mod tests {
     #[test]
     fn desktop_behavior_applies_in_the_terminal_idiom_on_any_os() {
         for os in [Os::MacOs, Os::Windows, Os::Linux, Os::Ios, Os::Web] {
-            assert!(Idiom::Terminal.desktop_on(os), "{os:?}");
-            assert_eq!(Idiom::Terminal.reported_on(os), Idiom::Terminal, "{os:?}");
+            let env = Environment {
+                os,
+                idiom: Idiom::Terminal,
+                ..Environment::default()
+            };
+            assert!(env.desktop(), "{os:?}");
+            assert_eq!(env.reported_idiom(), Idiom::Terminal, "{os:?}");
+        }
+    }
+
+    #[test]
+    fn external_platforms_honor_the_desktop_idiom_on_any_os() {
+        for os in [Os::Android, Os::Ios] {
+            for platform in ["miniprogram", "harmonyos"] {
+                let env = |idiom| Environment {
+                    os,
+                    platform: Some(platform),
+                    idiom,
+                    ..Environment::default()
+                };
+                assert!(env(Idiom::Desktop).desktop(), "{platform} {os:?}");
+                assert_eq!(env(Idiom::Desktop).reported_idiom(), Idiom::Desktop);
+                assert!(!env(Idiom::Phone).desktop());
+                assert_eq!(env(Idiom::Phone).reported_idiom(), Idiom::Phone);
+                assert!(!env(Idiom::Pad).desktop());
+                assert_eq!(env(Idiom::Pad).reported_idiom(), Idiom::Pad);
+                assert!(env(Idiom::Terminal).desktop());
+                assert_eq!(env(Idiom::Terminal).reported_idiom(), Idiom::Terminal);
+            }
+            // NSH's own mobile backends (`platform: None`) keep their guard.
+            let builtin = Environment {
+                os,
+                idiom: Idiom::Desktop,
+                ..Environment::default()
+            };
+            assert!(!builtin.desktop());
+            assert_eq!(builtin.reported_idiom(), Idiom::Phone);
+            assert!(!os.is_desktop());
         }
     }
 

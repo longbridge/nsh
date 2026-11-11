@@ -1155,7 +1155,7 @@ The platform the app runs on, constant while it runs.
 | `os` | `os() -> Os` (`os().name()` is the TS string) | The operating system. iOS, the iOS simulator and Mac Catalyst report `"ios"`, browsers `"web"`. |
 | `version` | `os_version() -> (u16, u16)` | iOS and desktops: the OS version (`"17.5"`); Android: the API level (`"35"`); the web: `"0.0"`. Rust gives the major and minor version, or the API level and 0 on Android. |
 | `idiom` | `idiom() -> Idiom` | The kind of device: `"terminal"` in a terminal (`--target tui`): drawn on a grid of character cells, with desktop behavior (`desktop` is `true`; `os` is still the machine's); elsewhere `"desktop"` exactly where `desktop` is `true`, else `"phone"`, `"pad"` (an iPad, an Android tablet, Mac Catalyst in the iPad idiom), `"mac"` (Mac Catalyst in UIKit's Mac idiom, a mobile idiom) or `"tv"` (Apple TV, Android TV). |
-| `desktop` | `is_desktop() -> bool` | Desktop behavior applies: macOS, Windows, Linux, browsers with a mouse and a wide window, and terminals. `desktop={{…}}` props, `select({ desktop })` and `idiom` `"desktop"` (outside a terminal) all follow it. Mac Catalyst runs the iOS backend, so it is mobile: `ios={{…}}` props apply there. [`nsh/desktop`](./nsh-desktop.md#isavailable)'s `isAvailable` is the narrower check for its window and menu APIs, which macOS, Windows and Linux have. |
+| `desktop` | `is_desktop() -> bool` | Desktop behavior applies: macOS, Windows, Linux, browsers with a mouse and a wide window, platforms built outside NSH in the desktop idiom, and terminals. `desktop={{…}}` props, `select({ desktop })` and `idiom` `"desktop"` (outside a terminal) all follow it. Mac Catalyst runs the iOS backend, so it is mobile: `ios={{…}}` props apply there. [`nsh/desktop`](./nsh-desktop.md#isavailable)'s `isAvailable` is the narrower check for its window and menu APIs, which macOS, Windows and Linux have. |
 | `catalyst` | `is_catalyst() -> bool` | The app runs under Mac Catalyst, in the Mac or the iPad idiom (`os` is `"ios"`). |
 | `select(spec)` | `match os() { … }` | The value for this platform (see below). |
 
@@ -1177,8 +1177,8 @@ interface PlatformSelectSpec<T> {
   windows?: T;
   linux?: T;
   web?: T;
-  mobile?: T;   // platform.desktop false: iOS (Mac Catalyst included), Android, phone and tablet browsers
-  desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers, terminals
+  mobile?: T;   // platform.desktop false: iOS (Mac Catalyst included), Android, phone/tablet browsers, mobile external platforms
+  desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers and external platforms, terminals
   native?: T;   // every platform but the web
   default?: T;
 }

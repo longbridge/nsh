@@ -856,3 +856,112 @@ fn platform_classes_follow_the_os() {
     assert_eq!(background(Os::Android), Some(Color(0x00ff_00ff)));
     assert_eq!(background(Os::Web), Some(Color(0x0000_ffff)));
 }
+
+const EXTERNAL_DESKTOP_APP: &str = r##"import { mount, platform, Text, View } from "nsh";
+import { isAvailable } from "nsh/desktop";
+
+mount(
+  () => (
+    <View
+      class="pointer-fine:bg-[#112233] pointer-coarse:bg-[#445566]"
+      ios={{ accessibilityHint: "ios" }}
+      android={{ accessibilityHint: "android" }}
+      desktop={{ accessibilityLabel: "desktop" }}
+    >
+      <Text>{`${platform.name} ${platform.os} ${platform.idiom} ${platform.desktop} ${platform.select({ desktop: "d", mobile: "m" })} ${isAvailable}`}</Text>
+    </View>
+  ),
+);
+"##;
+
+#[test]
+fn external_platforms_honor_the_desktop_idiom_on_any_os() {
+    use nsh_core::Color;
+    let dir = std::env::temp_dir().join(format!("nsh-external-desktop-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, EXTERNAL_DESKTOP_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
+    })
+    .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let run = |os: Os, platform: Option<&'static str>, idiom: Idiom| {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let config = EngineConfig {
+            environment: Environment {
+                os,
+                platform,
+                idiom,
+                ..Environment::default()
+            },
+            ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code.clone())))
+        };
+        let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+        let items = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first frame")
+            .items;
+        let mut texts = Vec::new();
+        let mut labels = Vec::new();
+        let mut colors = Vec::new();
+        for item in items {
+            match item {
+                MountItem::Text { text, .. } => texts.push(text.text.to_string()),
+                MountItem::ViewProps { props, .. } => {
+                    labels.extend(props.accessibility.label.as_deref().map(str::to_owned));
+                    labels.extend(props.accessibility.hint.as_deref().map(str::to_owned));
+                }
+                MountItem::ViewStyle { style, .. } if style.background_color.0 != 0 => {
+                    colors.push(style.background_color);
+                }
+                _ => {}
+            }
+        }
+        (texts, labels, colors)
+    };
+    assert_eq!(
+        run(Os::Ios, Some("miniprogram"), Idiom::Desktop),
+        (
+            vec!["miniprogram ios desktop true d false".to_owned()],
+            vec!["desktop".to_owned(), "ios".to_owned()],
+            vec![Color(0x1122_33ff)],
+        )
+    );
+    assert_eq!(
+        run(Os::Android, Some("harmonyos"), Idiom::Desktop),
+        (
+            vec!["harmonyos android desktop true d false".to_owned()],
+            vec!["desktop".to_owned(), "android".to_owned()],
+            vec![Color(0x1122_33ff)],
+        )
+    );
+    assert_eq!(
+        run(Os::Android, Some("harmonyos"), Idiom::Phone),
+        (
+            vec!["harmonyos android phone false m false".to_owned()],
+            vec!["android".to_owned()],
+            vec![Color(0x4455_66ff)],
+        )
+    );
+    assert_eq!(
+        run(Os::Android, Some("harmonyos"), Idiom::Pad),
+        (
+            vec!["harmonyos android pad false m false".to_owned()],
+            vec!["android".to_owned()],
+            vec![Color(0x4455_66ff)],
+        )
+    );
+    assert_eq!(
+        run(Os::Android, None, Idiom::Desktop),
+        (
+            vec!["android android phone false m false".to_owned()],
+            vec!["android".to_owned()],
+            vec![Color(0x4455_66ff)],
+        )
+    );
+}

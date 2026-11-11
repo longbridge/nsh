@@ -552,12 +552,7 @@ impl<M: TextEngine> Core<M> {
         self.overlay_state.watched = watched;
         // Hints only follow a pointer (the desktops).
         let mut hinting: Vec<(Key, NodeId)> = Vec::new();
-        if self
-            .components
-            .environment
-            .idiom
-            .desktop_on(self.components.environment.os)
-        {
+        if self.components.environment.desktop() {
             for &key in hints {
                 if let Some(k) = self.hint_anchor(key) {
                     hinting.push((k, self.nodes[k as usize].id));

@@ -66,7 +66,7 @@ let config = EngineConfig {
 let mut engine = LocalEngine::start(config, text_engine, sink).expect("the app starts");
 ```
 
-`LocalEngine::pump()` 运行到期的工作，并返回下次到期的时间：平台在那个时间以及每次输入之后调用它。对用 Rust 编写的应用，以 `default-features = false` 依赖 `nsh-engine`，引擎就能构建到 `wasm32-unknown-unknown`。
+`LocalEngine::pump()` 运行到期的工作，并返回下次到期的时间：平台在那个时间以及每次输入之后调用它。`idiom` 在启动时为整个 surface 生命周期设定设备形态（`Idiom::Phone`、`Idiom::Pad`，或启用桌面行为的 `Idiom::Desktop`——设置了 `platform` 时在任意 `Os` 上都会生效；切换形态需要新建 surface）。对用 Rust 编写的应用，以 `default-features = false` 依赖 `nsh-engine`，引擎就能构建到 `wasm32-unknown-unknown`。
 
 ## 2. 显示引擎提交的内容
 

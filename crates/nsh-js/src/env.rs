@@ -849,7 +849,7 @@ fn os_version(env: &Environment) -> String {
 
 /// `platform.idiom`: `"terminal"` in a terminal, else `"desktop"` exactly
 /// where desktop behavior applies
-/// ([`nsh_core::platform::Idiom::reported_on`]).
+/// ([`nsh_core::platform::Environment::reported_idiom`]).
 fn idiom(env: &Environment) -> &'static str {
     match env.reported_idiom() {
         Idiom::Phone => "phone",
@@ -1017,10 +1017,11 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   linux?: T;
   web?: T;
   /** Where `platform.desktop` is false: iOS (Mac Catalyst included),
-   * Android, and browsers in the phone or tablet idiom. */
+   * Android, browsers in the phone or tablet idiom, and platforms built
+   * outside NSH in a mobile idiom. */
   mobile?: T;
-  /** Where `platform.desktop` is true: macOS, Windows, Linux, browsers in
-   * the desktop idiom, and terminals. */
+  /** Where `platform.desktop` is true: macOS, Windows, Linux, browsers and
+   * platforms built outside NSH in the desktop idiom, and terminals. */
   desktop?: T;
   /** Every platform but the web. */
   native?: T;
@@ -1081,10 +1082,11 @@ export interface PlatformInfo {
   readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop" | "terminal";
   /** Desktop behavior applies, NSH's one definition of desktop: macOS,
    * Windows, Linux, browsers in the desktop idiom (a mouse and a wide
-   * viewport), and terminals. `desktop={{…}}` props and `select({ desktop })`
-   * follow it. Mac Catalyst runs the iOS backend and is mobile.
-   * `nsh/desktop`'s `isAvailable` is narrower: its window and menu APIs work
-   * on the desktop OSes, not in browsers. */
+   * viewport), platforms built outside NSH in the desktop idiom, and
+   * terminals. `desktop={{…}}` props and `select({ desktop })` follow it.
+   * Mac Catalyst runs the iOS backend and is mobile. `nsh/desktop`'s
+   * `isAvailable` is narrower: its window and menu APIs work on the
+   * desktop OSes, not in browsers. */
   readonly desktop: boolean;
   /** The app runs under Mac Catalyst, in the Mac or the iPad idiom
    * (`os` is `"ios"`, `desktop` false). */

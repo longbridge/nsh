@@ -1112,7 +1112,7 @@ interface Platform {
 | `os` | `os() -> Os`（`os().name()` 即 TS 的字符串） | 操作系统。iOS、iOS 模拟器和 Mac Catalyst 都报告 `"ios"`，浏览器报告 `"web"`。 |
 | `version` | `os_version() -> (u16, u16)` | iOS 和桌面系统：系统版本（`"17.5"`）；Android：API 级别（`"35"`）；Web：`"0.0"`。Rust 给出主版本和次版本号，在 Android 上是 API 级别和 0。 |
 | `idiom` | `idiom() -> Idiom` | 设备类型：在终端里（`--target tui`）是 `"terminal"`：画在字符格子上，适用桌面行为（`desktop` 为 `true`；`os` 仍是本机的操作系统）；其他情况下 `desktop` 为 `true` 时恰好是 `"desktop"`，否则是 `"phone"`、`"pad"`（iPad、Android 平板、以 iPad 形态运行的 Mac Catalyst）、`"mac"`（以 UIKit 的 Mac 形态运行的 Mac Catalyst，属于移动端形态）或 `"tv"`（Apple TV、Android TV）。 |
-| `desktop` | `is_desktop() -> bool` | 适用桌面行为：macOS、Windows、Linux、有鼠标且窗口较宽的浏览器，以及终端。`desktop={{…}}` 属性、`select({ desktop })` 和 `idiom` 的 `"desktop"`（终端除外）都以它为准。Mac Catalyst 运行 iOS 后端，属于移动端：那里适用 `ios={{…}}` 属性。[`nsh/desktop`](./nsh-desktop.md#isavailable) 的 `isAvailable` 是更窄的判断，表示它的窗口和菜单 API 可用，即 macOS、Windows 和 Linux。 |
+| `desktop` | `is_desktop() -> bool` | 适用桌面行为：macOS、Windows、Linux、有鼠标且窗口较宽的浏览器、以桌面形态运行的外部平台，以及终端。`desktop={{…}}` 属性、`select({ desktop })` 和 `idiom` 的 `"desktop"`（终端除外）都以它为准。Mac Catalyst 运行 iOS 后端，属于移动端：那里适用 `ios={{…}}` 属性。[`nsh/desktop`](./nsh-desktop.md#isavailable) 的 `isAvailable` 是更窄的判断，表示它的窗口和菜单 API 可用，即 macOS、Windows 和 Linux。 |
 | `catalyst` | `is_catalyst() -> bool` | 应用运行在 Mac Catalyst 下，无论是 Mac 形态还是 iPad 形态（`os` 为 `"ios"`）。 |
 | `select(spec)` | `match os() { … }` | 当前平台对应的值（见下文）。 |
 
@@ -1134,8 +1134,8 @@ interface PlatformSelectSpec<T> {
   windows?: T;
   linux?: T;
   web?: T;
-  mobile?: T;   // platform.desktop 为 false：iOS（包括 Mac Catalyst）、Android，以及手机和平板上的浏览器
-  desktop?: T;  // platform.desktop 为 true：macOS、Windows、Linux、桌面浏览器，以及终端
+  mobile?: T;   // platform.desktop 为 false：iOS（包括 Mac Catalyst）、Android、手机和平板上的浏览器，以及移动端外部平台
+  desktop?: T;  // platform.desktop 为 true：macOS、Windows、Linux、桌面浏览器与桌面形态外部平台，以及终端
   native?: T;   // 除 Web 外的所有平台
   default?: T;
 }

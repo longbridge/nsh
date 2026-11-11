@@ -43,7 +43,7 @@ pub struct Environment {
     pub platform: Option<&'static str>,
     /// The OS version: major and minor (iOS), Android's API level and 0.
     pub os_version: (u16, u16),
-    /// The kind of device.
+    /// The kind of device ([`crate::platform::Environment::idiom`]).
     pub idiom: Idiom,
     /// The user's locale, for formatting numbers and dates.
     pub locale: Locale,
@@ -103,6 +103,16 @@ impl Environment {
     /// NSH's own, else the OS's.
     pub fn platform_name(&self) -> &'static str {
         self.platform.unwrap_or(self.os.name())
+    }
+
+    /// Desktop behavior applies ([`crate::platform::Environment::desktop`]).
+    pub fn desktop(&self) -> bool {
+        crate::platform::is_desktop(self.os, self.platform, self.idiom)
+    }
+
+    /// The idiom apps see ([`crate::platform::Environment::reported_idiom`]).
+    pub fn reported_idiom(&self) -> Idiom {
+        crate::platform::reported_idiom(self.os, self.platform, self.idiom)
     }
 }
 

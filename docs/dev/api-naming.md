@@ -168,11 +168,12 @@ go elsewhere under these rules rather than into them.
   `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
   2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `MacOSProps`, `DesktopProps`, an element's own
   extending them), so a key no platform has fails the type check.
-- **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux), the web in the desktop idiom or
-  a terminal (`Idiom::desktop_on`, `Environment::desktop()`); everything else is mobile, Mac Catalyst included (it
-  runs the iOS backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`,
-  `platform.desktop`, `platform.idiom === "desktop"` (`Idiom::reported_on`; a terminal reports `"terminal"`), Rust's
-  `is_desktop()` and `nsh-base`'s per-device presentation all follow it; nothing apps see defines desktop otherwise. `"mac"` stays UIKit's Mac idiom under
+- **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux), the web or a platform built outside
+  NSH in the desktop idiom, or a terminal (`Environment::desktop()`); everything else is mobile, Mac Catalyst included
+  (it runs the iOS backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`,
+  `platform.desktop`, `platform.idiom === "desktop"` (`Environment::reported_idiom()`; a terminal reports
+  `"terminal"`), Rust's `is_desktop()` and `nsh-base`'s per-device presentation all follow it; nothing apps see defines
+  desktop otherwise. `"mac"` stays UIKit's Mac idiom under
   Catalyst (mobile), `platform.catalyst` is Catalyst in either idiom (`Os::is_catalyst`). The one narrower check is
   `nsh/desktop`'s `isAvailable` (`Os::is_desktop`): where its window and menu APIs work, the desktop OSes (decided by
   the user, 2026-10-29).

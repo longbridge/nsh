@@ -975,3 +975,50 @@ fn a_rust_apps_main_window_takes_its_launch_options() {
     let set = set.expect("the main window's attributes");
     assert_eq!(set.title.as_deref(), Some("Notes"));
 }
+
+#[component]
+fn ExternalIdiom() -> impl IntoElement {
+    view().child(text(|| {
+        format!(
+            "{} {} {:?} {} {}",
+            platform_name(),
+            os().name(),
+            idiom(),
+            is_desktop(),
+            os().is_desktop(),
+        )
+    }))
+}
+
+#[test]
+fn components_read_an_external_platforms_desktop_idiom() {
+    for (os, platform, idiom, shown) in [
+        (
+            Os::Ios,
+            Some("miniprogram"),
+            Idiom::Desktop,
+            "miniprogram ios Desktop true false",
+        ),
+        (
+            Os::Android,
+            Some("harmonyos"),
+            Idiom::Desktop,
+            "harmonyos android Desktop true false",
+        ),
+        (
+            Os::Android,
+            Some("harmonyos"),
+            Idiom::Phone,
+            "harmonyos android Phone false false",
+        ),
+    ] {
+        let (_engine, rx, _) = start::<ExternalIdiom>(Environment {
+            os,
+            platform,
+            idiom,
+            ..Environment::default()
+        });
+        let (texts, ..) = until(&rx, shown);
+        assert!(texts.iter().any(|t| t == shown), "{texts:?}");
+    }
+}

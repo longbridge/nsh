@@ -102,8 +102,10 @@ system, so the environment holds both: the platform's name and the OS beneath it
 `Environment::os` is always the device's real OS (`platform.os`, `os()`), so a platform built outside NSH picks the `Os` it
 runs on: the Mini Program platform reports iOS or Android from `wx.getDeviceInfo().platform`, and in WeChat DevTools
 the simulated device's `system`. The OS's props (`ios={{…}}`, `android={{…}}`) then apply as they do on that OS, and
-the backend skips the mount items it does not show. `Idiom` says whether desktop behavior applies (`Idiom::Desktop`)
-or mobile (`Phone`, `Pad`).
+the backend skips the mount items it does not show. `Idiom` says whether desktop behavior applies (`Idiom::Desktop`,
+honored on any `Os` when `platform` is `Some`, while `Os::is_desktop()` stays `false` so `nsh/desktop`'s windows and
+menus and child processes stay off) or mobile (`Phone`, `Pad`). It is set at start for the life of the surface
+(`is_desktop()` and JS's `platform` are read once; a mode switch takes a new surface).
 
 ## WebAssembly hosts
 

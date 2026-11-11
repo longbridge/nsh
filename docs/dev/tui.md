@@ -326,7 +326,7 @@ operating system (macOS, Windows or Linux), as the desktop development hosts rep
 `process` run under the app's declared capabilities and `platform.os` names the real system. The terminal is a form
 of device, as the phone, pad and desktop are, so it is an idiom rather than a flag beside one: an app that lays out
 for Cells asks the one question it asks for every other device form, and the OS stays free to say which system it
-runs on. Desktop behavior applies to the idiom on any OS (`Idiom::desktop_on`): keyboard shortcuts, hover,
+runs on. Desktop behavior applies to the idiom on any OS (`Environment::desktop()`): keyboard shortcuts, hover,
 tooltips, context menus, `desktop={{…}}` props and `platform.select`'s `desktop` key. `nsh/desktop`'s
 `isAvailable` follows the OS, so an app that draws its own window chrome there (the gallery's `TitleBar`) draws it
 in the terminal too, as the app's own content, until it leaves it out for `platform.idiom === "terminal"`. Code
