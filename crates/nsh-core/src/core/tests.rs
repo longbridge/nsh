@@ -22971,6 +22971,73 @@ mod rust_windows {
         );
     }
 
+    /// The root's desktop commands that are not about a window.
+    fn app_commands(batch: &MountBatch) -> Vec<DesktopCommand> {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Desktop(command),
+                } if !command.is_window_command() => Some((**command).clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn quit_requests_go_to_the_app_while_it_listens() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let first = c.commit().unwrap();
+        assert_eq!(
+            app_commands(&first),
+            [],
+            "nothing listens: quitting as before"
+        );
+        let heard = Rc::new(std::cell::Cell::new(0));
+        let (owner, ()) = {
+            let _entered = c.components.runtime.enter();
+            let heard = heard.clone();
+            crate::element::create_root(move || {
+                crate::element::desktop::on_quit_request(move || heard.set(heard.get() + 1));
+            })
+        };
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            app_commands(&batch),
+            [DesktopCommand::SetQuitOnRequest(false)],
+            "the platform leaves quitting to the app"
+        );
+        // The platform reports the user's request instead of quitting.
+        c.component_event(
+            crate::ROOT_ID,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+        );
+        let after = c.commit();
+        assert_eq!(heard.get(), 1);
+        assert!(
+            after.is_none_or(|b| app_commands(&b).is_empty()),
+            "the app decides when to quit"
+        );
+        {
+            let _entered = c.components.runtime.enter();
+            owner.dispose();
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            app_commands(&batch),
+            [DesktopCommand::SetQuitOnRequest(true)],
+            "without a listener quit requests quit again"
+        );
+    }
+
     thread_local! {
         static FITTED: RefCell<Option<crate::element::desktop::WindowRef>> =
             const { RefCell::new(None) };
