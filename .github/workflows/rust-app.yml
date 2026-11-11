@@ -32,6 +32,7 @@ on:
       - "examples/gallery/**"
       - "examples/gallery-rs/**"
       - "examples/rust-exports/**"
+      - "examples/post-editor/**"
       - "examples/tasks/**"
       - "examples/tasks-rs/**"
       - "Cargo.toml"
@@ -195,7 +196,7 @@ jobs:
           check test '(nsh-bundler|rolldown|oxc_parser)([ _-]|$)' "the bundler"
       - name: Run the examples' tests
         run: |
-          for app in counter gallery rust-exports tasks tasks-rs; do
+          for app in counter gallery post-editor rust-exports tasks tasks-rs; do
             ./target/debug/nsh test "examples/$app"
           done
       # NSH's generated declarations type-check themselves: apps skip
