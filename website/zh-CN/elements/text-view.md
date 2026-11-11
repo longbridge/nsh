@@ -592,7 +592,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 文档还可以有 `footnotes?`：`{ label, index, children }`，按首次引用的顺序显示在文档块之后。应用可以把回复存成文档、用自己的数据构建文档，或者混入由 `renderCustom` 显示的自定义节点。
 
-代码块的 `id` 是应用自己的标识；`wrap: true` 让正文在视图宽度内换行。`content` 为代码正文提供行内标注，其纯文本与 `code` 相同时显示；复制保留原始 `code`。`renderCodeBlockActions` 根据当前块绘制操作控件，例如逐块切换换行。Rust 的行内 `renderCustom` 返回 `Text` 时直接加入段落的文本，随正文换行和选择；返回 `View` 时作为行内附件。Rust 还可以调用 `repair_streaming(&str)`，在构建自有文档前复用流式 Markdown 修复。
+代码块的 `id` 是应用自己的标识；`wrap: true` 让正文在视图宽度内换行。`content` 为代码正文提供行内标注，其纯文本与 `code` 相同时显示；代码复制按钮保留原始 `code`，文本选择跟随实际绘制的字符。`renderCodeBlockActions` 根据当前块绘制操作控件，例如逐块切换换行。用 `renderInlineCustom` 为行内节点覆盖 `renderCustom`。Rust 渲染器返回 `Text` 时直接加入段落的文本，随正文换行和选择；返回 `View` 时作为行内附件。Rust 还可以调用 `repair_streaming(&str)`，在构建自有文档前复用流式 Markdown 修复。
 
 <a id="parsing-and-plain-text"></a>
 

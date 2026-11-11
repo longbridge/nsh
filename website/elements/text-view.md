@@ -661,7 +661,7 @@ A document also has `footnotes?`: `{ label, index, children }`, shown after the 
 reference. An app can store replies as documents, build them from its own data, or mix in custom nodes that
 `renderCustom` shows.
 
-A code block’s `id` identifies it to the app. Set `wrap: true` to fit its code to the view. `content` supplies inline annotations when its plain text equals `code`; copying keeps the original `code`. `renderCodeBlockActions` receives the current block, so controls can toggle wrapping for that block. In Rust, an inline `renderCustom` returning `Text` joins the paragraph’s spans, wrapping and selecting with them; a `View` becomes an inline attachment. Rust apps building their own documents can reuse streaming repair with `repair_streaming(&str)`.
+A code block’s `id` identifies it to the app. Set `wrap: true` to fit its code to the view. `content` supplies inline annotations when its plain text equals `code`; the built-in code copy action keeps the original `code`, while selection follows rendered characters. `renderCodeBlockActions` receives the current block, so controls can toggle wrapping for that block. Opt in with `renderInlineCustom` to override `renderCustom` for inline nodes. In Rust, returning `Text` joins the paragraph's spans, wrapping and selecting with them; a `View` becomes an inline attachment. Rust apps building their own documents can reuse streaming repair with `repair_streaming(&str)`.
 
 ### Parsing and plain text
 

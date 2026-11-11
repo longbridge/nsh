@@ -129,6 +129,10 @@ function App() {
         classes={{ heading1: "text-[#ff0000]" }}
         styles={{ paragraph: { color: "#00ff00" } }}
       />
+      <TextView
+        document={{ blocks: [{ type: "paragraph", content: [{ type: "custom", name: "token", text: "value" }] }] }}
+        renderInlineCustom={(node) => <Text>{`Inline ${node.text}`}</Text>}
+      />
       <Text>{`Plain: ${TextView.plainText(parsed)}`}</Text>
       <Text>{`Parsed: ${parsed.blocks.length} ${first.type}`}</Text>
       <Text>{`Cited: ${cited.type}`}</Text>

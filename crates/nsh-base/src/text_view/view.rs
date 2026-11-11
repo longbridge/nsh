@@ -76,6 +76,9 @@ pub struct TextViewProps {
     /// Shows a custom node (an extension's or the document's): `node.name`
     /// tells which. Without it, a custom node shows its content.
     pub render_custom: Prop<Option<Renderer<CustomNode>>>,
+    /// Overrides `renderCustom` for inline nodes. A Rust `Text` joins the
+    /// paragraph spans; views and JS renderers remain inline attachments.
+    pub render_inline_custom: Prop<Option<Renderer<CustomNode>>>,
     /// Shows a code block in place of the default (the code in a
     /// horizontal scroll view): syntax highlighting of the app's.
     pub render_code_block: Prop<Option<Renderer<CodeBlock>>>,
@@ -469,6 +472,7 @@ struct Cx {
     table_scrollbar: bool,
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
+    render_inline_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
     render_code_block_actions: Option<Renderer<CodeBlock>>,
     render_code_block_action: Option<Renderer<TextViewCodeAction>>,
@@ -511,6 +515,7 @@ impl Cx {
             table_scrollbar: props.table_scrollbar.get(),
             caret: props.streaming_caret.get(),
             render_custom: props.render_custom.get(),
+            render_inline_custom: props.render_inline_custom.get(),
             render_code_block: props.render_code_block.get(),
             render_code_block_actions: props.render_code_block_actions.get(),
             render_code_block_action: props.render_code_block_action.get(),
@@ -1786,9 +1791,14 @@ impl Cx {
                 if let Some(el) = self.plugins.render(node) {
                     return el;
                 }
-                if let Some(render) = &self.render_custom {
+                if let Some(render) = &self.render_inline_custom {
                     return render
                         .render_inline(format!("custom:{key}"), node.clone())
+                        .into_element();
+                }
+                if let Some(render) = &self.render_custom {
+                    return render
+                        .render(format!("custom:{key}"), node.clone())
                         .into_element();
                 }
                 let el = if node.content.is_empty() {

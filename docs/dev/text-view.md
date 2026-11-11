@@ -119,14 +119,16 @@ refines a part's `StyleRefinement` (theme colors stay adaptive) before the app's
 A document's `CodeBlock` can carry `id` (the app's identity), `content` (inline
 annotations) and `wrap` (default false). When the annotations' plain text equals
 `code`, they supply the code body's spans; otherwise the normal highlighter and
-literal source render. Selection and the built-in copy action always use `code`.
+literal source render. The built-in code copy action uses `code`. Text selection follows the rendered
+characters, so annotation renderers preserve their plain text.
 `wrap: true` fits the code to the view instead of making a horizontal scroll area.
 `renderCodeBlockActions` (`render_code_block_actions`, `Renderer<CodeBlock>`) places
 an app-owned set of controls in a header before the body, in place of
 `codeBlockActions`; it receives the current block, including its identity and wrap
 state. Updating the document updates those controls while TextView keeps the body.
 
-A Rust `renderCustom` returning `Text` for an inline custom node becomes a span of
+Opt in with `renderInlineCustom` (`render_inline_custom`) to override `renderCustom`
+for inline nodes. A Rust renderer returning `Text` becomes a span of
 its paragraph, so annotations wrap and select with their surrounding text.
 Returning a `View` keeps an inline attachment, as does a JS renderer. For apps that
 build their own documents, Rust's `repair_streaming(&str) -> Cow<'_, str>` exposes

@@ -111,12 +111,12 @@ parts! {
     task_marker_checked => TaskMarkerChecked,
     /// The column of an item's blocks.
     list_item_content => ListItemContent,
-    /// Code blocks (the code, the actions floating over it).
+    /// Code blocks and their actions.
     code_block => CodeBlock,
-    /// The row of a code block's actions (`codeBlockActions`), floating
-    /// over its top right corner (only with actions).
+    /// Code actions: floating for `codeBlockActions`, or a preceding row
+    /// for `renderCodeBlockActions` (only with actions).
     code_block_header => CodeBlockHeader,
-    /// The horizontal scroll view of a code block's code.
+    /// The horizontal scroll view of unwrapped code (`wrap: false`).
     code_block_scroll => CodeBlockScroll,
     /// The code of a code block (monospace, as written).
     code_block_code => CodeBlockCode,

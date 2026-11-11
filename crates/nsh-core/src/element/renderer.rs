@@ -136,7 +136,8 @@ impl<T: JsValue + Clone + PartialEq + 'static> Renderer<T> {
     }
 
     /// Content in a text run. A Rust renderer returning a Text keeps its
-    /// spans in that run, preserving wrapping and selection. Views and JS
+    /// spans in that run, preserving wrapping and selection; the returned
+    /// `Rendered` is then the Text itself, with no wrapper view. Views and JS
     /// renderers keep their inline attachment wrapper.
     pub fn render_inline(&self, key: impl Into<SharedString>, value: T) -> Rendered {
         match &self.kind {

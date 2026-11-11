@@ -33,7 +33,7 @@ fn AnnotatedCode() -> impl IntoElement {
             Block::CodeBlock(code),
             Block::CodeBlock(fallback),
         ]))
-        .render_custom(|node: &CustomNode| {
+        .render_inline_custom(|node: &CustomNode| {
             text(node.text.clone())
                 .test_id("annotation")
                 .font_weight(FontWeight::SEMIBOLD)
