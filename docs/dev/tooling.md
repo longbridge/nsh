@@ -159,6 +159,20 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
   `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
   browser, even on loopback or under a name rebound to this machine, gets 403.
+- Asset names: `asset:/<path>` is a file's path in the app's directory, the bundle's asset root
+  (`nsh_bundler::Bundle::asset_root`, `HotBundle::asset_root`; `bundle.rs` `app_dir`: the entry's directory when it
+  holds an `nsh.json` or an `App.tsx`, else the nearest one up with an `nsh.json`, else the nearest one up with an
+  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<file>.run.js` name
+  `assets/dot.png` as `App.tsx` does. An import from outside it fails the build (`NshPlugin::ship`), as a package holds
+  only the app's directory; so does a file that is inside by name but links out (checked on its real path), a
+  pixel-density variant found beside an image too, while a link to elsewhere in the app keeps the name it has
+  (`logo@2x.png`). The entry made for a test file may be written outside the app (`TestRun::work_dir` is any
+  directory): `nsh_testing::compiler` builds it with `BundleOptions::asset_root_from`, the test file, so what the
+  test file imports is named from the test file's app (`nsh test` writes it in the app's `.nsh/test`, which roots it
+  alike). What reads assets joins their names to that root: the CLI's `build::Built::asset_root`
+  (its `assets`' sources), the dev server's media files (`DevServer::set_assets_root`, set by every build of `nsh run`;
+  `test_host::serve` starts there), headless runs' `DirectoryAssets` (`nsh_testing::Built::Js`'s `asset_root`, the
+  runner protocol's `Reply::Js` `asset_root`), and `examples/embed-gpui`'s build script.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK

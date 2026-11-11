@@ -276,12 +276,17 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
     } else {
         Some(build::compile(entry, false).map_err(|e| e.plain)?)
     };
-    let dir = entry.parent().unwrap_or(Path::new("."));
+    // The media files a literal `asset:/` URL names, from where the build
+    // named the imported ones: the app's directory, as a package has them.
+    let dir = built
+        .as_ref()
+        .and_then(|built| built.asset_root.clone())
+        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
     let trace = options.trace.clone();
     let server = DevServer::start(
         "127.0.0.1:0".parse().expect("an address"),
         nsh_js::BYTECODE_VERSION,
-        Some(dir.to_path_buf()),
+        Some(dir),
         move |event| match event {
             // The app's log lines, as `nsh run` shows them (a traced app's
             // commit timings among them); the host's own coming and going
