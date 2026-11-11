@@ -5,8 +5,8 @@ use std::{borrow::Cow, sync::Arc};
 
 use super::builder::Listener;
 use crate::{
-    Bounds, ContextMenuEvent, EventPayload, JsonValue, MouseEvent, PayloadValue, Point, Points,
-    PressEvent, Size, TouchEvent, WheelEvent,
+    Bounds, ContextMenuEvent, EventPayload, JsonValue, MouseEvent, PayloadValue, PinchEvent, Point,
+    Points, PressEvent, Size, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
 };
 
@@ -598,6 +598,13 @@ pub(crate) fn mouse(p: &EventPayload) -> Option<Cow<'_, MouseEvent>> {
 pub(crate) fn context_menu(p: &EventPayload) -> Option<Cow<'_, ContextMenuEvent>> {
     match p {
         EventPayload::ContextMenu(e) => Some(Cow::Borrowed(e)),
+        _ => None,
+    }
+}
+
+pub(crate) fn touchpad_pinch(p: &EventPayload) -> Option<Cow<'_, PinchEvent>> {
+    match p {
+        EventPayload::Pinch(e) => Some(Cow::Borrowed(e)),
         _ => None,
     }
 }
