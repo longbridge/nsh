@@ -10,6 +10,7 @@ import { RichEditor, StarterKit, TableKit, createRichEditor } from "nsh/base";
 function App() {
   const editor = createRichEditor({ extensions: [StarterKit], content: "Some text" });
   const open = signal(true);
+  const drop = signal("none");
   const tables = createRichEditor({
     extensions: [StarterKit, TableKit],
     content: "| CellA | CellB |\n| --- | --- |\n| CellC | CellD |\n",
@@ -34,6 +35,10 @@ function App() {
         bubbleMenuOffset={4}
         classes={{ selectionHandle: "bg-blue-500", selectionHandleStart: "size-3", selectionHandleEnd: "size-3" }}
         styles={{ selectionHandle: { opacity: 0.9 } }}
+        testID="rich-drop"
+        onFileDragEnter={(e) => drop.set(`enter ${e.uris.join(" ")} [${e.mimeTypes.join(" ")}]`)}
+        onFileDragLeave={() => drop.set(`${drop()} leave`)}
+        onFileDrop={(e) => drop.set(`dropped ${e.uris.join(" ")} [${e.mimeTypes.join(" ")}]`)}
       />
       <RichEditor
         editor={tables}
@@ -49,6 +54,8 @@ function App() {
       />
       <RichEditor testID="rich-auto" editor={auto} />
       <RichEditor testID="rich-capped" editor={capped} style={{ maxHeight: 40 }} />
+      {/* Last, so it moves none of the frames the script checks. */}
+      <Text>{`RichDrop: ${drop()}`}</Text>
     </View>
   );
 }

@@ -3722,7 +3722,10 @@
 			"disabledStyle",
 			"testID",
 			"tooltip",
-			"onLayout"
+			"onLayout",
+			"onFileDragEnter",
+			"onFileDragLeave",
+			"onFileDrop"
 		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {
