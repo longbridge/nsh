@@ -8737,27 +8737,32 @@ impl<M: TextEngine> Core<M> {
                     )?;
                     Some(i + at)
                 });
-            // A scroll queued after it (a correction, or a jump) must
-            // still come before the new size.
-            let scrolled_since = queued.is_some_and(|j| {
-                self.mount[j + 1..].iter().any(|m| match m {
-                    MountItem::ScrollBy { id: s, .. } => *s == id,
-                    MountItem::Command {
-                        id: s,
-                        command: Command::ScrollTo { .. },
-                    } => *s == id,
-                    _ => false,
-                })
+            // A shrink after a scroll must keep the earlier extent until
+            // that scroll has applied. Growth can replace the extent once.
+            let shrunk = old.is_some_and(|old| {
+                if scroll.horizontal {
+                    size.width < old.width
+                } else {
+                    size.height < old.height
+                }
             });
-            // Grown, the size it replaces lets those scrolls go further;
-            // shrunk, it would clamp them first, so it stays.
-            let shrunk = old.is_some_and(|o| size.width < o.width || size.height < o.height);
+            let keep_earlier = shrunk
+                && queued.is_some_and(|j| {
+                    self.mount[j + 1..].iter().any(|item| match item {
+                        MountItem::ScrollBy { id: scrolled, .. } => *scrolled == id,
+                        MountItem::Command {
+                            id: scrolled,
+                            command: Command::ScrollTo { .. },
+                        } => *scrolled == id,
+                        _ => false,
+                    })
+                });
             if let Some(j) = queued
-                && !(scrolled_since && shrunk)
+                && !keep_earlier
             {
                 self.mount[j] = MountItem::ScrollContent { id, size };
             }
-            if queued.is_none() || scrolled_since {
+            if queued.is_none() || keep_earlier {
                 scroll.content_item = Some((batch, self.mount.len()));
                 self.mount.push(MountItem::ScrollContent { id, size });
             }

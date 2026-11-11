@@ -2540,6 +2540,82 @@ fn scroll_content_is_sent_once_per_batch() {
     ));
 }
 
+/// Native scroll commands see the old extent before a shrink and the new
+/// extent before growth. A change of cross size must not override that.
+#[test]
+fn scroll_content_preserves_the_extent_each_scroll_command_needs() {
+    for horizontal in [false, true] {
+        for absolute in [false, true] {
+            for (next_length, shrinking) in [(500.0, true), (900.0, false), (1200.0, false)] {
+                let mut c = core();
+                apply(
+                    &mut c,
+                    vec![
+                        Op::Create {
+                            id: 2,
+                            tag: Tag::Scroll,
+                        },
+                        Op::SetProp {
+                            id: 2,
+                            prop: Prop::Horizontal(horizontal),
+                        },
+                        Op::Insert {
+                            parent: ROOT_ID,
+                            child: 2,
+                            before: None,
+                        },
+                    ],
+                );
+                c.commit();
+                let key = c.key(2).unwrap();
+                let dimensions = |length, cross| {
+                    if horizontal {
+                        size_pt(length, cross)
+                    } else {
+                        size_pt(cross, length)
+                    }
+                };
+                let old = dimensions(900.0, 320.0);
+                let new = dimensions(next_length, 200.0);
+                c.set_scroll_content(key, old);
+                c.mount.push(if absolute {
+                    MountItem::Command {
+                        id: 2,
+                        command: Command::ScrollTo {
+                            x: px(50.0),
+                            y: px(50.0),
+                            animated: false,
+                        },
+                    }
+                } else {
+                    MountItem::ScrollBy {
+                        id: 2,
+                        dx: px(50.0),
+                        dy: px(50.0),
+                    }
+                });
+                c.set_scroll_content(key, new);
+                let sizes: Vec<_> = c
+                    .mount
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(at, item)| match item {
+                        MountItem::ScrollContent { id: 2, size } => Some((at, *size)),
+                        _ => None,
+                    })
+                    .collect();
+                if shrinking {
+                    assert_eq!(c.mount.len(), 3);
+                    assert_eq!(sizes, [(0, old), (2, new)]);
+                } else {
+                    assert_eq!(c.mount.len(), 2);
+                    assert_eq!(sizes, [(0, new)]);
+                }
+            }
+        }
+    }
+}
+
 /// Plays JS: creates a cell per new slot, renders a fixed-height
 /// row for each bind and confirms the index; the overscan too, as an
 /// engine with time to spare does.
