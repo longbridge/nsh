@@ -101,7 +101,8 @@ nsh test --filter "adds"      # 名称包含 "adds" 的测试
 error 2 tests: 1 passed, 1 failed (0.9s)
 ```
 
-失败的测试会显示抛出的内容、它在测试文件中的位置，以及所打开应用当时屏幕上的文字。只要有失败，`nsh test` 就以非零
+失败的测试会显示抛出的内容、它在测试文件中的位置，以及所打开应用当时屏幕上的文字。这些文字会被截断到几 KB（尾部以
+`… (<n> more characters)` 标出剩余内容），以免长文档刷屏输出；`-v` 会显示全部。只要有失败，`nsh test` 就以非零
 退出码结束。`nsh init` 会随应用创建一个 `App.test.tsx`，`nsh check` 会连同其他代码一起对测试文件做类型检查
 （`.nsh/types` 中声明了 `nsh/test`）。
 

@@ -1420,9 +1420,15 @@ impl Headless {
         true
     }
 
-    /// The texts on screen, for errors.
+    /// The texts on screen, for errors: cut to
+    /// [`SCREEN_TEXT_LIMIT`](crate::failure::SCREEN_TEXT_LIMIT) so a long
+    /// document cannot flood the error.
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.screen.texts())
+        let texts = self.screen.texts();
+        format!(
+            "on screen: [{}]",
+            crate::failure::screen_texts(&texts, Some(crate::failure::SCREEN_TEXT_LIMIT))
+        )
     }
 
     /// The first render: waits for the app's first batch ([`WAIT`] at
