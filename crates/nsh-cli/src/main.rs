@@ -186,6 +186,10 @@ enum Command {
         /// `nsh/host` calls of each app the tests open and sends its events.
         #[arg(long, value_name = "JS")]
         web_host: Option<PathBuf>,
+        /// With `--target ios`: the simulator the apps run in (name or
+        /// UDID); default: a booted one, else the newest iPhone.
+        #[arg(long, value_name = "DEVICE")]
+        device: Option<String>,
         /// With `--target macos`: the display the apps' windows open on,
         /// centered: 1 is the primary display (the one with the menu bar),
         /// 2 the next, and so on; the main one when there is no such
@@ -557,6 +561,11 @@ struct PackageArgs {
     /// App Bundle (`aab`, uploaded to Google Play).
     #[arg(long, value_enum, default_value_t)]
     format: crate::android::Format,
+    /// macOS: the processors the app runs on, `arm64` (Apple silicon),
+    /// `x86_64` (Intel) or `universal` (both, in one executable). Default:
+    /// this Mac's.
+    #[arg(long, value_enum)]
+    arch: Option<package::Arch>,
     /// Install and launch the app in the simulator or on the Android device
     /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
     /// machine at the address it prints).
@@ -865,6 +874,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser,
             web_host,
+            device,
             display,
             foreground,
         } => test::test(
@@ -877,6 +887,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser.as_deref(),
             web_host,
+            device.as_deref(),
             display.map(|n| n as usize),
             foreground,
         ),
@@ -935,6 +946,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 keystore_password,
                 abi,
                 format,
+                arch,
                 run,
                 asset_url,
             } = *args;
@@ -943,7 +955,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             config.id = id.or(config.id);
             config.version = version.or(config.version);
             config.build = build.or(config.build);
-            config.icon = icon.or(config.icon);
+            config.icon = icon.map(package::AppIcon::All).or(config.icon);
             package::package(package::PackageOptions {
                 entry: &entry,
                 target,
@@ -960,6 +972,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 }),
                 abis: &abi,
                 format,
+                arch,
                 run,
                 asset_url: asset_url.as_deref(),
             })
@@ -1182,19 +1195,21 @@ mod command_tests {
                 .err()
                 .expect("version exits");
             assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
-            assert_eq!(
-                error.to_string(),
-                format!(
-                    "nsh {} ({}{})\n",
-                    env!("CARGO_PKG_VERSION"),
-                    env!("NSH_GIT_SHA"),
-                    if env!("NSH_CHANNEL") == "nightly" {
-                        " nightly"
-                    } else {
-                        ""
-                    }
-                )
-            );
+            let text = error.to_string();
+            let prefix = format!("nsh {} ({}", env!("CARGO_PKG_VERSION"), env!("NSH_GIT_SHA"));
+            let rest = text.strip_prefix(&prefix).expect("version and revision");
+            if env!("NSH_CHANNEL") == "nightly" {
+                // ` nightly YYYY-MM-DD)`: the date it was built.
+                let date = rest
+                    .strip_prefix(" nightly ")
+                    .and_then(|r| r.strip_suffix(")\n"))
+                    .expect("nightly build date");
+                assert!(
+                    date.len() == 10 && date.as_bytes()[4] == b'-' && date.as_bytes()[7] == b'-'
+                );
+            } else {
+                assert_eq!(rest, ")\n");
+            }
         }
     }
 
@@ -1212,6 +1227,32 @@ mod command_tests {
         assert!(
             matches!(cli.command, Command::Build { out, .. } if out == std::path::Path::new("custom"))
         );
+    }
+
+    #[test]
+    fn macos_packages_name_their_processors() {
+        use super::package::Arch;
+        let arch = |args: &[&str]| {
+            let mut line = vec!["nsh", "package", "--target", "macos"];
+            line.extend_from_slice(args);
+            match Cli::try_parse_from(line).map(|cli| cli.command) {
+                Ok(Command::Package(args)) => Ok(args.arch),
+                Ok(_) => panic!("expected nsh package"),
+                Err(e) => Err(e),
+            }
+        };
+        assert_eq!(arch(&[]).unwrap(), None);
+        for (value, expected) in [
+            ("arm64", Arch::Arm64),
+            ("aarch64", Arch::Arm64),
+            ("x86_64", Arch::X86_64),
+            ("universal", Arch::Universal),
+        ] {
+            assert_eq!(arch(&["--arch", value]).unwrap(), Some(expected), "{value}");
+        }
+        for value in ["x86-64", "i386", "x86_64-apple-darwin"] {
+            assert!(arch(&["--arch", value]).is_err(), "{value}");
+        }
     }
 
     #[test]

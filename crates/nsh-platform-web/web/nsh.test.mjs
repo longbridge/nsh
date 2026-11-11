@@ -159,6 +159,36 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   }
 });
 
+test("an invalid view is aria-invalid, and so is the field of an input", () => {
+  const { player } = fakePlayer();
+  const element = () => {
+    const attrs = new Map();
+    return {
+      attrs,
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+    };
+  };
+  const el = { ...element(), _props: { invalid: true } };
+  const field = element();
+  player.updateAria(el);
+  assert.equal(el.attrs.get("aria-invalid"), "true");
+  // The field made after the props takes them too: it is what screen readers read.
+  field.classList = { toggle() {} };
+  field.tagName = "INPUT";
+  el._field = field;
+  player.view = () => el;
+  player.op_in(["in", 1, { multiline: false }, null]);
+  assert.equal(field.attrs.get("aria-invalid"), "true");
+  el._props.invalid = false;
+  player.updateAria(el);
+  assert.equal(el.attrs.has("aria-invalid"), false);
+  assert.equal(field.attrs.has("aria-invalid"), false);
+  el._props.invalid = true;
+  player.updateAria(el);
+  assert.equal(field.attrs.get("aria-invalid"), "true");
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
@@ -451,6 +481,35 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   assert.equal(chart.hasAttribute("tabindex"), false);
   assert.equal(chart.blurred, true);
   delete globalThis.document;
+});
+
+test("a touch whose press focused a field leaves the focus there", () => {
+  const { player } = fakePlayer();
+  player.editable = (target) => target.field === true;
+  const field = { focus() {} };
+  const pressable = {};
+  player.view = () => ({ _field: field });
+  globalThis.window = { focus() {} };
+  // Whether the mouse events of a press of `pointer` leave the focus alone.
+  const kept = (pointer, target, focused, focuses) => {
+    globalThis.document = { activeElement: focused, hasFocus: () => true };
+    player.lastPointer = pointer;
+    player.pressFocus = null;
+    if (focuses) player.op_cmd([0, 1, "focus"]);
+    let prevented = false;
+    player.mouseDown({ target, preventDefault: () => (prevented = true) });
+    return prevented;
+  };
+  assert.equal(kept("mouse", pressable, field, false), true, "a click moves no focus");
+  assert.equal(kept("mouse", { field: true }, null, false), false, "a click in a field is the field's");
+  // A tap outside a field leaves it, and the keyboard closes.
+  assert.equal(kept("touch", pressable, field, false), false, "a tap elsewhere");
+  // The app focused the field for this press (an editor's text): it stays.
+  assert.equal(kept("touch", pressable, field, true), true, "a tap that focused the field");
+  // The focus moved on since (the app focused something else).
+  assert.equal(kept("touch", pressable, {}, true), false, "the field no longer has the focus");
+  delete globalThis.document;
+  delete globalThis.window;
 });
 
 test("Return presses a focused pressable, not a focused stop that takes no presses", () => {
@@ -1890,14 +1949,24 @@ test("a forward the app shows goes on from the entry the browser is at", () => {
  * the browser gives them: `go(n)` lands at once (the player's own pops are
  * ignored), `user(n)` is the browser's back (-1) or forward (1). `depth` is
  * the app's back depth; `calls` what reaches the history and the core. */
-function historyPlayer(t, { href = "https://a.test/inbox" } = {}) {
+/** `before`: the page's own state-less entries before the app's first (a
+ * `#fragment` followed while the app loaded, the host page's `pushState`).
+ * `navigation`: whether the browser has the Navigation API. */
+function historyPlayer(t, { href = "https://a.test/inbox", before = [], navigation = true } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const calls = [];
-  const saved = { history: globalThis.history, location: globalThis.location, window: globalThis.window, document: globalThis.document };
+  const saved = {
+    history: globalThis.history,
+    location: globalThis.location,
+    window: globalThis.window,
+    document: globalThis.document,
+    navigation: globalThis.navigation,
+  };
   t.after(() => Object.assign(globalThis, saved));
-  const entries = [{ state: null, url: href }];
+  const entries = [...before.map((url) => ({ state: null, url })), { state: null, url: href }];
   globalThis.document = { baseURI: href };
-  let at = 0;
+  let at = entries.length - 1;
+  globalThis.navigation = navigation ? { get currentEntry() { return { index: at }; } } : undefined;
   globalThis.location = { href, origin: "https://a.test" };
   globalThis.window = { addEventListener() {} };
   const land = () => {
@@ -1961,6 +2030,39 @@ test("an address the user types is an entry of the app's, and back and forward b
   assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox#archive", page: true, change: "forward" }]]);
   // Its pages stayed: the app's back from a page pushed there goes back to it.
   assert.equal(player.historyDepth, 0);
+});
+
+test("a back to the page's own entry before the app's first is a back past the first entry, not a typed address", (t) => {
+  const { player, calls, app, user } = historyPlayer(t, { before: ["https://a.test/inbox#intro"] });
+  app.depth = 1;
+  player.syncHistory();
+  calls.splice(0);
+  // Back twice from the page: past the app's first entry, to the page's own.
+  user(-2);
+  // The app goes back to its start, and hears no change.
+  assert.equal(app.depth, 0);
+  assert.deepEqual(calls.splice(0), []);
+  assert.equal(player.historyIndex, 0);
+});
+
+test("a forward from the page's own entry back to the app's first is no back", (t) => {
+  const { calls, user } = historyPlayer(t, { before: ["https://a.test/inbox#intro"] });
+  user(-1);
+  assert.deepEqual(calls.splice(0), []);
+  user(1);
+  assert.ok(
+    calls.every(([kind, , payload]) => kind !== "event" || payload?.change !== "back"),
+    JSON.stringify(calls),
+  );
+});
+
+test("without the Navigation API a state-less entry is an address the user typed", (t) => {
+  const { calls, type } = historyPlayer(t, { navigation: false });
+  type("https://a.test/inbox#archive");
+  assert.deepEqual(calls.splice(0), [
+    ["replace", 0, 1],
+    ["event", "onUrlScheme", { url: "https://a.test/inbox#archive", page: true, change: "address" }],
+  ]);
 });
 
 test("an address typed over a pushed page stays at its depth, and the app's own back goes over it", (t) => {
@@ -2134,4 +2236,146 @@ test("a key event without `key` falls back to its physical key instead of throwi
   assert.equal(keyCode({ key: null, code: "Digit3" }), 51);
   assert.equal(keyCode({}), -1);
   assert.equal(keyCode({ key: "a", code: "KeyA" }), 97);
+});
+
+/** A browser clipboard that keeps what is written and image codecs that
+ * record their work; `failWrite` makes `navigator.clipboard.write` reject. */
+function fakeClipboard(t, { failWrite } = {}) {
+  const log = { items: [], decoded: [], closed: 0, warnings: [] };
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const { ClipboardItem, createImageBitmap, OffscreenCanvas } = globalThis;
+  const warn = console.warn;
+  t.after(() => {
+    Object.defineProperty(globalThis, "navigator", saved);
+    Object.assign(globalThis, { ClipboardItem, createImageBitmap, OffscreenCanvas });
+    console.warn = warn;
+  });
+  console.warn = (m) => log.warnings.push(m);
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      clipboard: {
+        write(items) {
+          log.items.push(...items);
+          return failWrite ? Promise.reject(new Error(failWrite)) : Promise.resolve();
+        },
+      },
+    },
+  });
+  globalThis.ClipboardItem = class {
+    constructor(data) {
+      this.data = data;
+    }
+  };
+  globalThis.createImageBitmap = async (blob) => {
+    log.decoded.push(blob.type);
+    return { width: 3, height: 2, close: () => log.closed++ };
+  };
+  globalThis.OffscreenCanvas = class {
+    constructor(width, height) {
+      Object.assign(this, { width, height });
+    }
+    getContext() {
+      return { drawImage() {} };
+    }
+    async convertToBlob({ type }) {
+      return new Blob([`${this.width}x${this.height}`], { type });
+    }
+  };
+  return log;
+}
+
+test("an image that is not a PNG goes on the clipboard as a PNG", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  const done = player.writeClipboardImage("data:image/jpeg;base64,/9j/");
+  // Written at once: Safari only writes within the user's gesture.
+  assert.equal(log.items.length, 1);
+  await done;
+  assert.deepEqual(Object.keys(log.items[0].data), ["image/png", "text/html"]);
+  const png = await log.items[0].data["image/png"];
+  assert.equal(png.type, "image/png");
+  assert.equal(await png.text(), "3x2");
+  assert.deepEqual(log.decoded, ["image/jpeg"]);
+  assert.equal(log.closed, 1);
+  assert.deepEqual(log.warnings, []);
+});
+
+test("a PNG goes on the clipboard as it is", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  await player.writeClipboardImage(`data:image/png;base64,${btoa("png bytes")}`);
+  const png = await log.items[0].data["image/png"];
+  assert.equal(await png.text(), "png bytes");
+  assert.deepEqual(log.decoded, []);
+});
+
+test("a data: URI's image is decoded without fetch, which a page's CSP may refuse", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  const fetched = await withFetch(() => {
+    throw new TypeError("Failed to fetch");
+  }, () => player.writeClipboardImage(`data:image/png;base64,${btoa("png bytes")}`));
+  assert.deepEqual(fetched, []);
+  assert.equal(await (await log.items[0].data["image/png"]).text(), "png bytes");
+  assert.deepEqual(log.warnings, []);
+});
+
+test("a GIF goes on beside its PNG as it is, as HTML and as Chromium's web format", async (t) => {
+  const log = fakeClipboard(t);
+  globalThis.ClipboardItem.supports = (type) => type === "web image/gif";
+  const { player } = fakePlayer();
+  const uri = `data:image/gif;base64,${btoa("GIF89a frames")}`;
+  await player.writeClipboardImage(uri);
+  const { data } = log.items[0];
+  assert.deepEqual(Object.keys(data), ["image/png", "text/html", "web image/gif"]);
+  assert.equal(await data["text/html"].text(), `<img src="${uri}">`);
+  assert.equal(await (await data["web image/gif"]).text(), "GIF89a frames");
+  assert.equal((await data["image/png"]).type, "image/png");
+});
+
+test("reading the clipboard's image takes the original kept beside its PNG", async (t) => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const { FileReader, Image } = globalThis;
+  t.after(() => {
+    Object.defineProperty(globalThis, "navigator", saved);
+    Object.assign(globalThis, { FileReader, Image });
+  });
+  const item = {
+    types: ["image/png", "web image/gif"],
+    getType: async (type) => new Blob([type === "image/png" ? "png" : "GIF89a"], { type }),
+  };
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { read: async () => [item] } } });
+  globalThis.FileReader = class {
+    async readAsDataURL(blob) {
+      this.result = `data:${blob.type};base64,${btoa(await blob.text())}`;
+      this.onload();
+    }
+  };
+  globalThis.Image = class {
+    naturalWidth = 1;
+    naturalHeight = 1;
+    set src(_) {
+      this.onload();
+    }
+  };
+  const { player, sent } = fakePlayer();
+  await player.readClipboardImage(7, false);
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(sent, [["onClipboard", { id: 7, has: true, uri: `data:image/gif;base64,${btoa("GIF89a")}`, width: 1, height: 1 }]]);
+});
+
+test("an image the clipboard does not take is reported with a warning", async (t) => {
+  const log = fakeClipboard(t, { failWrite: "Document is not focused." });
+  const { player } = fakePlayer();
+  await player.writeClipboardImage("data:image/png;base64,");
+  assert.deepEqual(log.warnings, ["[nsh] Clipboard.writeImage: Document is not focused."]);
+});
+
+test("a page without the async clipboard reports a write with a warning", async (t) => {
+  const log = fakeClipboard(t);
+  globalThis.navigator.clipboard = undefined;
+  const { player } = fakePlayer();
+  await player.writeClipboardImage("data:image/png;base64,");
+  assert.equal(log.warnings.length, 1);
 });

@@ -791,6 +791,9 @@ fn props_json(p: &ViewProps) -> String {
     if a.state.has_popup {
         s.push_str(",\"hasPopup\":true");
     }
+    if a.state.invalid {
+        s.push_str(",\"invalid\":true");
+    }
     if let Some(p) = a.state.pressed {
         let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
     }
@@ -945,11 +948,20 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
                 LayoutCurve::EaseIn => "ease-in".to_owned(),
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
                 LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => "ease-in-out".to_owned(),
-                LayoutCurve::Spring { damping } => spring_easing(damping),
+                LayoutCurve::FittedSpring { damping_ratio } => spring_easing(damping_ratio),
+                // It times itself: its progress over the time it settles in,
+                // ending on its place.
+                LayoutCurve::Spring(spring) => sampled_easing(|x| {
+                    if x >= 1.0 {
+                        1.0
+                    } else {
+                        spring.progress(x * spring.settle_ms())
+                    }
+                }),
             };
             format!(
                 "{{\"duration\":{},\"delay\":{},\"easing\":{},\"property\":{}}}",
-                t.duration_ms,
+                t.run_ms(),
                 t.delay_ms,
                 json_str(&easing),
                 json_str(&kebab(&format!("{:?}", t.property)))
@@ -986,10 +998,16 @@ fn spring(damping: f32, x: f32) -> f32 {
 /// Samples of the spring as a CSS `linear()` easing (piecewise linear,
 /// enough points that the overshoot keeps its shape).
 fn spring_easing(damping: f32) -> String {
+    sampled_easing(|x| spring(damping, x))
+}
+
+/// Samples of `curve` (progress at a fraction of the duration, from 0 to
+/// 1) as a CSS `linear()` easing.
+fn sampled_easing(curve: impl Fn(f32) -> f32) -> String {
     const SAMPLES: usize = 48;
     let mut out = String::from("linear(0");
     for i in 1..=SAMPLES {
-        let v = spring(damping, i as f32 / SAMPLES as f32);
+        let v = curve(i as f32 / SAMPLES as f32);
         let _ = write!(out, ",{}", (v * 1000.0).round() / 1000.0);
     }
     out.push(')');

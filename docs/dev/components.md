@@ -359,7 +359,7 @@ reasons: `reactive-components.md`.
 | `<List viewport="parent">` (in a `Scroll` with the rest of the page) | `.viewport(ListViewport::Parent)` (`ListLayout`): laid out at its full length, its rows follow the scroll view around it; fixed when the list is made |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
-  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `focus-within:`, `activeStyle` / `hoverStyle` / `focusStyle` / `focusWithinStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)`, `.focus_within(\|s\| ..)` (native, no binding) |
+  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `focus-visible:`, `focus-within:`, `activeStyle` / `hoverStyle` / `focusStyle` / `focusVisibleStyle` / `focusWithinStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)`, `.focus_visible(\|s\| ..)`, `.focus_within(\|s\| ..)` (native, no binding) |
   | `<Button disabled={saving()} onPress={save} class="px-4 active:opacity-60">Save</Button>` | `button().disabled(move \|\| saving.get()).on_press(move \|\| save()).px_4().active(\|s\| s.opacity(0.6)).child(text("Save"))`: a setter per prop, a listener method per event |
   | `<Button class="bg-blue-500 active:opacity-70 selected:bg-green-500">` (state styles on a component) | `button().bg(..).active(\|s\| s.opacity(0.7))`: `ComponentBuilder`'s `active` / `hover` / `focus` / `disabled_style` and `Styled`'s `selected` / `checked`, on the component's root (`Styled::selected(el, \|s\| ..)` where a `selected` prop's setter comes first) |
   | `<NavPage headerClass="bg-white text-black tint-blue-500">` | `nav_page().header_style_with(\|s\| s.bg(..).text_color(..).tint_color(..))` (theme colors follow the appearance natively; `header_style(Style)`, TS `headerStyle`, wins key by key) |
@@ -739,7 +739,8 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `indeterminate:` / `disabled:` in the part's class, and only the control's root is an accessibility element.
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
-  no active descendant, and the platform's focus stays where it is.
+  no active descendant, and the platform's focus stays where it is. While that focus shows the part shows
+  `focus-visible:` too: a tree's keyboard ring goes on `focus-visible:` and stays off after a click.
   What a part shows beyond the states screen readers hear is a boolean `data-*` attribute:
   `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
   with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes
@@ -824,9 +825,10 @@ forgotten.
 A view JS made (`<Chip>` in TSX) is made when its host is first in the root's tree, so it is under the view that
 placed it: it adopts the owner of the nearest component above it (where that one places its JS children, else its
 own owner), and `use_context` and failures reach that far (`owner_above`, `adopt`). Until then it waits
-(`components.waiting`). A component a Rust view passes as a nested component's content (`tabs().child(tab())`)
-joins that host as JS children do (`Instance::joined`) and waits the same way, so it reads the context of the view
-that places it, not only its maker's.
+(`components.waiting`). A component a Rust view passes as a nested component's content (`tabs().child(tab())`),
+directly or inside plain views of that content (`tabs().child(view().child(tab()))`), joins that host as JS
+children do (`Instance::joined`) and waits the same way, so it reads the context of the view that places it, not
+only its maker's.
 
 JS allocates even node ids (from 2), the core odd ones (from 3), so both id spaces stay dense and never collide. JS
 never sees the made nodes; their events are the component's (below).
@@ -992,7 +994,9 @@ what changed.
   The executor keeps the closures in two queues: `Core::take_events` (the engine handing the events out) makes the
   waiting ones due, and the next `Core::commit` runs the due ones first, before its views render, each under the owner
   current when it was registered (dropped unrun once that owner is disposed), so what they change shows in that
-  commit with the app's props. The engine's commit loop goes on for another round while some are due
+  commit with the app's props. A closure that must run even when the answer takes away what the event came from (a
+  popup's content, which Escape inside it closes) is registered under the component's own owner (`Owner::run`), as
+  the popups' open state does. The engine's commit loop goes on for another round while some are due
   (`Core::has_due_answers`), so they go out in the batch of the events they waited for. With a Rust owner, whose
   listener ran when the event was emitted, `f` runs in the commit after the one that rendered what the listener
   changed. The web's browser engine delivers the events the same way (its JS runs in the engine's call, its ops are
@@ -1092,7 +1096,9 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   trigger gained or lost the keyboard focus; the keyboard focus moved to another item of a submenu's menu), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
   motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
-  closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `Tooltip` has these two and
+  closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `onOpen` comes in the commit after
+  the one that made the content, so the app's refs inside it name their views and `focus()` there moves the
+  keyboard focus in; a popup gone before then reports neither. `Tooltip` has these two and
   `onOpenChange`; `HoverCard` these three and `onPosition`.
 - **`onPosition({ placement, bounds, available })`** (`Popover`, `HoverCard`, and `Menu` / `ContextMenu` on the desktops): the
   popup's overlay was placed (the core's `onPosition`, `elements.md` "Overlays"): the side it went on (the other side
@@ -1115,6 +1121,14 @@ inside (`indicator`) follows them through `group-checked:` with `group` on the p
 part's own `checked:` styles. A new value rebinds that item's state and its indicator's projection alone, so only the
 item and its indicator are sent (`crates/nsh-base/tests/base/menu.rs`).
 
+**A menu held to its room.** Each level's items are in a scroll view inside its popup (or sheet), which is held to
+the room its overlay is told on its side, as the dropdown's list is, so the core picks the side at the popup's
+natural size and the items scroll past the room (`gpui-component`'s `PopupMenu` scrolls the same way past its
+`max_h`; NSH needs no `scrollable` switch, `api-naming.md`). The app draws the surface on the popup's own box
+(`popupClass` / `popupStyle`), around the scroll view, so its edges and shadow stay put. The keys measure where the
+items are: the item they move to is scrolled into view, and Page Up / Page Down go a viewport at a time
+(`crates/nsh-base/tests/base/menu.rs`).
+
 **Menu lists.** `MenuList` (Rust, `menu.rs`) puts a level's items in a virtualized list of the menu's own. The menu
 counts it as one place per row among the level's items, made or not, so its keys walk the rows by index: a row not
 made yet is scrolled to and focused once the list has made it, and a disabled row is passed over as an item is. A
@@ -1134,7 +1148,10 @@ core (`ElementRef::transition_time`, an `Action::TransitionTime` the commit answ
 `transition`, the app's `class`, `style` and theme included: the longest duration plus delay, two seconds at most),
 waits that long, then unmounts, and `onClose` follows. A generation counter keeps a stale frame or exit from acting on
 a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
-never gone, so neither `onClose` nor `onOpen` fires. Without a look for a state, or while the user asks for less
+never gone, so neither `onClose` nor `onOpen` fires. On its way out it takes no keys either: the keyboard focus inside
+goes back to the trigger as it closes, not once it is gone (`PopupPresence::focus_back_on_close`, `Popover`'s and a
+desktop menu's), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
+during the exit is the trigger's (Return opens it again, taking it back). Without a look for a state, or while the user asks for less
 motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
 for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
@@ -1148,7 +1165,7 @@ is for, never by replacing one popup with another everywhere:
 | | Desktops (and desktop browsers) | Phones and tablets |
 |---|---|---|
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
-| `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press, or Right / Return on it (Left / Escape go back to it); opened by a press (or the secondary button, a `ContextMenu`) with no item focused, Down / Home focus its first enabled item and Up / End its last | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
+| `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), never taller than the room on its side (`onPosition`'s `available`), its items scrolling inside it; `Submenu`s cascade beside their item, on hover or press, or Right / Return on it (Left / Escape go back to it), each held to its own room, and close once the menu scrolls their item out of view; opened by a press (or the secondary button, a `ContextMenu`) with no item focused, Down / Home focus its first enabled item and Up / End its last; the keys bring the item they reach into view and page by the viewport | a sheet at the bottom over a backdrop, below the status bar at most, its items scrolling; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) with no item focused; Shift+F10 and the Menu key on the focused trigger (the web) and a screen reader's "show menu" action (macOS VoiceOver's VO-Shift-M, Windows UI Automation) open it below the trigger (`pointerType: null`, the trigger's bottom-start corner) with the keyboard focus on its first enabled item, as WAI-ARIA has it | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
 | `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms), and at once while the keyboard focus is on it; leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the keyboard focus is on the trigger (a hardware keyboard), else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) or the keyboard focus comes to it, stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both or the focus left the trigger; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |

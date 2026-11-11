@@ -172,6 +172,7 @@ viewable rows, `changed()` the rows that came or went.
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(px(..), animated)` | Scrolls to an offset along the list's axis. |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | Scrolls to the end of the content (the start of an inverted list). |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point(..), animated)` | Scrolls to an offset. |
+| `measureScrollPosition()` | `measure_scroll_position()` | Where the viewport starts among the rows, once this turn's changes are laid out: `{ index, offset }`, the row there and how far into it, as the list lays its rows out; `null` without items. See [keeping a reading position](../docs/lists.md#keeping-a-reading-position). |
 
 ## Examples
 

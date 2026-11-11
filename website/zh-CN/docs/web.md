@@ -57,7 +57,7 @@ frame.src = "https://apps.example.com/player.html"; // 播放器设置 dialogs: 
 发布出去的应用，在桌面浏览器里表现得像桌面应用，在手机浏览器里表现得像手机应用：
 
 - **滚轮和触控板**滚动沿其方向、还能继续滚动的最内层滚动视图（没有可滚动的纵向视图时，纵向滚轮也会滚动横向列表），并且直到这次滚动结束都停留在这个视图上；滚轮的每一格平滑滑动，分页和吸附的视图每次滚动移动一页。Ctrl + 滚轮和触控板捏合会捏合带原生捏合值的视图，而不是缩放页面。和桌面平台一样，用鼠标拖动不会滚动：鼠标拖动交给拖拽手势、响应者系统和文字选择。滚动视图像桌面平台一样上报 `onScrollDragStart` / `onScrollDragEnd`、`onMomentumStart` / `End` 和 `onScrollEnd`。
-- **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（应用的 `focus:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
+- **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（应用的 `focus-visible:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
 - **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会关闭最上层的对话框或弹出当前显示的最内层的栈（未选中的 tab 里的栈保留它的页面），和 Android 返回键一样；`popOnBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，正在显示的栈里压入的每个页面和打开的每个对话框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。`nsh.json` 的 `web.history` 为打包的页面和开发服务器的页面决定这一点：`false` 让浏览器历史只保留页面自己的记录，`true` 在 iframe 里也加入应用的记录。
 - **地址**：应用占据整个页面时，[`UrlScheme.setUrl(url)`](../modules/nsh.md#urlscheme) 设置当前历史记录的地址，相对于页面地址（以及它的 `<base href>`）解析，`UrlScheme.url()` 读取它。浏览器的后退按钮在应用内后退：栈的页面返回，地址变为那条记录的地址。用户输入的地址（`#fragment`）是应用在当前页面上的一条记录，后退或前进到页面相同的记录时，[`UrlScheme.on("change")`](../modules/nsh.md#urlschemeonchange) 把那条记录的地址告诉应用。`setUrl(url, { history: "push" })` 为应用自己的地址（标签页、筛选）新建这样一条记录。
 - **触摸**：只有滚动视图可以平移；应用下面的页面本身不会滚动、缩放或下拉刷新，点按没有延迟。嵌在 iframe 里时，应用不处理的滑动会滚动外层页面。在带原生平移、捏合的视图和响应者系统上的拖动都交给应用处理。

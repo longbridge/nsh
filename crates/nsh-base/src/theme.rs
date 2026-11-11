@@ -325,26 +325,38 @@ fn written_as_color(value: &str) -> bool {
     if value.starts_with('#') {
         return true;
     }
-    let Some((function, _)) = value.split_once('(') else {
+    let Some((function, rest)) = value.split_once('(') else {
         return false;
     };
+    if !matches!(
+        function.trim().to_ascii_lowercase().as_str(),
+        "rgb"
+            | "rgba"
+            | "hsl"
+            | "hsla"
+            | "hwb"
+            | "lab"
+            | "lch"
+            | "oklab"
+            | "oklch"
+            | "color"
+            | "color-mix"
+            | "light-dark"
+            | "var"
+    ) {
+        return false;
+    }
+    // A shadow may start with a complete color function and end in lengths.
+    let mut depth = 1;
     value.ends_with(')')
-        && matches!(
-            function.trim().to_ascii_lowercase().as_str(),
-            "rgb"
-                | "rgba"
-                | "hsl"
-                | "hsla"
-                | "hwb"
-                | "lab"
-                | "lch"
-                | "oklab"
-                | "oklch"
-                | "color"
-                | "color-mix"
-                | "light-dark"
-                | "var"
-        )
+        || !rest.chars().any(|c| {
+            depth += match c {
+                '(' => 1,
+                ')' => -1,
+                _ => 0,
+            };
+            depth == 0
+        })
 }
 
 /// A CSS length in points: `0.625rem`, `10px`, `10`.
@@ -409,7 +421,8 @@ fn apply_onto(tokens: &mut Tokens, base: &Tokens, json: &str) -> Result<Vec<Stri
         serde_json::from_str(json).map_err(|e| ThemeError(format!("not JSON: {e}")))?;
     let mut ignored = Vec::new();
     match value.get("cssVars") {
-        Some(vars) => apply_css_vars(tokens, base, vars, &mut ignored),
+        Some(vars) if vars.is_object() => apply_css_vars(tokens, base, vars, &mut ignored),
+        Some(_) => ignored.push("cssVars: expected an object".into()),
         None => ignored.push("no shadcn `{ \"cssVars\": { ... } }`".into()),
     }
     Ok(ignored)
@@ -494,19 +507,19 @@ fn apply_css_vars(tokens: &mut Tokens, base: &Tokens, vars: &JsonValue, ignored:
                 }
                 tokens.set_color(name, c.into());
             }
-            (None, None) => match length(value) {
-                Some(n) => tokens.set_number(name, n),
-                None => {
-                    let mut given: Vec<&String> = [light_vars.get(name), dark_vars.get(name)]
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                    given.dedup();
-                    for v in given.into_iter().filter(|v| written_as_color(v)) {
-                        ignored.push(format!("`{name}`: {v} is no color"));
-                    }
+            (None, None) => {
+                if let Some(n) = length(value) {
+                    tokens.set_number(name, n);
                 }
-            },
+                let mut given: Vec<&String> = [light_vars.get(name), dark_vars.get(name)]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                given.dedup();
+                for v in given.into_iter().filter(|v| written_as_color(v)) {
+                    ignored.push(format!("`{name}`: {v} is no color"));
+                }
+            }
         }
     }
 }
@@ -699,6 +712,45 @@ mod tests {
         let (theme, ignored) = Theme::from_json_lenient(r#"{ "colors": {} }"#).unwrap();
         assert_eq!(theme, Theme::default());
         assert_eq!(ignored.len(), 1);
+    }
+
+    #[test]
+    fn a_non_object_css_vars_is_listed() {
+        for vars in ["null", "[]", "true", "12", r#""light""#] {
+            let json = format!(r#"{{ "cssVars": {vars} }}"#);
+            let (_, ignored) = Theme::from_json_lenient(&json).unwrap();
+            assert_eq!(ignored, ["cssVars: expected an object"], "{json}");
+        }
+        let (_, ignored) = Theme::from_json_lenient(r#"{ "cssVars": {} }"#).unwrap();
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_color_function_is_listed() {
+        for value in [
+            "rgb(255 0 0",
+            "oklch(0.7 0.1",
+            "color-mix(in srgb, rgb(255 0 0), #fff",
+        ] {
+            let json = format!(r#"{{ "cssVars": {{ "light": {{ "brand": "{value}" }} }} }}"#);
+            let (_, ignored) = Theme::from_json_lenient(&json).unwrap();
+            assert_eq!(ignored, [format!("`brand`: {value} is no color")]);
+        }
+        let (_, ignored) = Theme::from_json_lenient(
+            r#"{ "cssVars": { "theme": { "shadow-sm": "rgb(0 0 0 / 0.1) 0px 1px 2px" } } }"#,
+        )
+        .unwrap();
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn a_dark_length_does_not_hide_an_unreadable_light_color() {
+        let (theme, ignored) = Theme::from_json_lenient(
+            r##"{ "cssVars": { "light": { "brand": "#zz" }, "dark": { "brand": "12px" } } }"##,
+        )
+        .unwrap();
+        assert_eq!(ignored, ["`brand`: #zz is no color"]);
+        assert_eq!(theme.number("brand"), Some(12.0));
     }
 
     #[test]

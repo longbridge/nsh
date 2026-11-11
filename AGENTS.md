@@ -336,7 +336,7 @@ empty off macOS (`target_os = "macos"`, not Catalyst). `nsh-platform-windows` an
 check them on Windows, with the MSVC Build Tools, the Windows SDK and LLVM (libclang for QuickJS' bindings);
 `RUST_MIN_STACK=268435456` if rustc overflows its stack on the `windows` crate. The GPUI backend (`crates/gpui`) is
 a workspace of its own: the main workspace's `cargo test --workspace` and clippy never build it, and its CI runs only when
-it changes (and daily). Its crates build on all three desktops and are empty elsewhere; on Linux they need GPUI's X11 /
+it changes (and on main's scheduled runs). Its crates build on all three desktops and are empty elsewhere; on Linux they need GPUI's X11 /
 Wayland / xkbcommon / fontconfig packages plus GTK 3, WebKitGTK 4.1 (feature `webview`, on by default) and GStreamer
 1.20+ with its base plug-ins (feature `video`, the host's); on macOS Xcode's Metal Toolchain, or the
 feature `runtime-shaders` (`docs/dev/gpui.md`), which the CLI turns on when `xcrun metal` fails. It builds into the
@@ -436,7 +436,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   "Extensions").
 - **API shapes: one form per thing, shapes that can grow** (decided by the user before the freeze; details and
   examples in `docs/dev/api-naming.md` "Conventions", "Shapes that can grow" and "Units"; the API is being brought to
-  them). Names come from `gpui-base` / GPUI and the DOM; React Native is a reference only.
+  them). Names are short, accurate and neutral: the project's own word for a concept first, then `gpui-base` /
+  GPUI's and the DOM's (`CONTRIBUTING.md` "API design"); React Native is a reference only.
   - Units: one per quantity. Lengths are points; an image's or a video's own size is pixels, typed `PixelSize`
     (never `Size`); times are milliseconds; velocities points per second; shares fractions from 0 to 1 (no `Percent`
     in names). Only media time is seconds (HTML's `currentTime`) and a deceleration the velocity kept per
@@ -447,7 +448,9 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
     Only the responder callbacks keep React Native's `(e, gestureState)`.
   - Mouse events are the DOM's and GPUI's: `onMouseEnter` / `onMouseMove` / `onMouseLeave`, each with a
     `MouseEvent { position, pagePosition, modifiers, pressedButton }`; `onMouseMove` fires with or without a button
-    down. State styles keep CSS's names (`hover:`, `hoverStyle`).
+    down. `onWheel` passes `WheelEvent { position, pagePosition, delta, deltaMode, modifiers }` (GPUI's
+    `ScrollWheelEvent`, the DOM's sign); a listener nearer than the scroll views under the pointer takes the wheel.
+    State styles keep CSS's names (`hover:`, `hoverStyle`).
   - Returns: an object, never a bare value that may need a second field (`AlertDialog.show` → `{ action }`,
     animations → `{ finished }`); yes / no questions (`hasText()`, `canUndo()`) return booleans.
   - Failures (of what JS calls): a function returning a promise never throws, every failure rejects (arguments,
@@ -596,7 +599,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 
 ## CI
 
-Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+The checks run on pull requests and on `main` every three hours when it moved (and on manual runs), not on every push to `main`: the
+pull request already ran them, and the scheduled run saves the dependencies' caches pull requests restore. Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
 It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow
@@ -622,7 +626,9 @@ CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` install
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
 `main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
-directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`.
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The release and the
+website's deployment run on the organization's self-hosted runners, never pull requests (`docs/dev/tooling.md`
+"Self-hosted runners").
 
 ## Parallel agents
 

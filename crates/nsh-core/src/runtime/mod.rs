@@ -21,7 +21,7 @@ mod desktop;
 mod device;
 mod fonts;
 mod fps;
-mod fs;
+pub(crate) mod fs;
 mod haptics;
 mod host;
 mod image;

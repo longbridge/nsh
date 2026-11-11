@@ -839,3 +839,55 @@ mount(App);
     assert!(!fired(&drain(300), "starts 2"), "fired again");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `ref.measureScrollPosition()` answers, after the layout of the turn
+/// that asks, which row the viewport starts in and how far into it, as
+/// the list lays out its rows of different sizes.
+#[test]
+fn a_list_measures_where_its_viewport_starts() {
+    let app = r#"
+import { List, mount, signal, Text, View, type ListRef } from "nsh";
+const shown = signal("waiting");
+let list!: ListRef;
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text>{shown()}</Text>
+      <List ref={list} each={Array.from({ length: 100 }, (_, i) => i)} estimatedItemSize={50} style={{ flex: 1 }}
+            onScroll={async () => {
+              const at = await list.measureScrollPosition();
+              shown.set(at ? `at ${at.index} ${at.offset}` : "none");
+            }}>
+        {(row) => <View style={{ height: 40 + (row() % 3) * 20 }} />}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let (engine, rx, dir) = start(app);
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let list = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: ViewKind::Scroll,
+            } => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {}
+    // Rows of 40, 60 and 80 points: row 8 starts at 460.
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(px(0.0), px(500.0)),
+        u32::MAX,
+    );
+    let shown: Vec<String> = std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(2)).ok())
+        .flat_map(|b| texts(&b))
+        .collect();
+    assert!(shown.iter().any(|t| t == "at 8 40"), "{shown:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

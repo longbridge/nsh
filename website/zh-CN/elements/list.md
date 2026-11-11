@@ -154,6 +154,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(px(..), animated)` | 沿列表方向滚动到某个偏移。 |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | 滚动到内容末端（倒序列表则是起始端）。 |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point(..), animated)` | 滚动到某个偏移。 |
+| `measureScrollPosition()` | `measure_scroll_position()` | 本轮改动排版后，视口起点落在哪一行：`{ index, offset }`，即那一行和视口起点在行内多深，与列表排行时一致；没有条目时为 `null`。见[记住阅读位置](../docs/lists.md#keeping-a-reading-position)。 |
 
 ## 示例
 

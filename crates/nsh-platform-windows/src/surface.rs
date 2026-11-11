@@ -171,9 +171,9 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
-    /// The URL the app was launched with, for the next engine to start
-    /// ([`Surface::set_launch_link`]).
-    launch_link: RefCell<Option<String>>,
+    /// The URLs the app was launched with, for the next engine to start
+    /// ([`Surface::set_launch_links`]).
+    launch_links: RefCell<Vec<String>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
     /// The window drawn into (shared with the engine's sink).
@@ -188,6 +188,12 @@ pub(crate) struct Surface {
     pub(crate) target_scale: Cell<f32>,
     /// A paint is requested.
     invalid: Cell<bool>,
+    /// A frame is being drawn ([`Surface::paint`]).
+    painting: Cell<bool>,
+    /// A paint was requested while a frame was drawn: asked for again
+    /// once it is done (the request made inside `WM_PAINT` does not come
+    /// back as another `WM_PAINT`).
+    repaint: Cell<bool>,
     /// The next frame draws the whole window ([`Surface::invalidate`]).
     full_damage: Cell<bool>,
     /// The change stamp of the last request to draw the whole window
@@ -297,7 +303,7 @@ impl Surface {
             file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
-            launch_link: RefCell::new(None),
+            launch_links: RefCell::new(Vec::new()),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             hwnd: Arc::new(std::sync::atomic::AtomicIsize::new(0)),
@@ -307,6 +313,8 @@ impl Surface {
             fps: RefCell::new(None),
             target_scale: Cell::new(0.0),
             invalid: Cell::new(false),
+            painting: Cell::new(false),
+            repaint: Cell::new(false),
             // The first frame draws everything.
             full_damage: Cell::new(true),
             whole_change: Cell::new(0),
@@ -356,12 +364,17 @@ impl Surface {
     }
 
     /// The GPU device shader views render with ([`crate::shader`]), opened
-    /// the first time one asks.
+    /// the first time one asks; without one the app hears that shader views
+    /// draw nothing (`shadersAvailable()`).
     pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
             .get_or_init(|| {
-                nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra)
-                    .map(Rc::new)
+                let renderer =
+                    nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra);
+                if renderer.is_none() {
+                    self.control(EngineControl::shaders_unavailable);
+                }
+                renderer.map(Rc::new)
             })
             .clone()
     }
@@ -482,7 +495,7 @@ impl Surface {
         // the launch URL is the app's address when its code first runs
         // (`UrlScheme.url()`).
         let tokens = self.host_tokens.borrow().clone();
-        let launch = self.launch_link.take();
+        let launch = self.launch_links.take();
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
@@ -490,7 +503,7 @@ impl Surface {
             if let Some(displays) = displays {
                 control.set_displays(displays);
             }
-            if let Some(url) = launch {
+            for url in launch {
                 crate::linking::dispatch(control, url);
             }
         };
@@ -540,10 +553,11 @@ impl Surface {
         }
     }
 
-    /// Sets the URL the app was launched with (`EventKind::UrlScheme`), which
-    /// the next engine to start applies before the app's code first runs.
-    pub(crate) fn set_launch_link(&self, url: String) {
-        *self.launch_link.borrow_mut() = Some(url);
+    /// Sets the URLs the app was launched with (`EventKind::UrlScheme`: links
+    /// and files), which the next engine to start applies before the app's
+    /// code first runs.
+    pub(crate) fn set_launch_links(&self, urls: Vec<String>) {
+        *self.launch_links.borrow_mut() = urls;
     }
 
     /// Sends an event to JS.
@@ -675,6 +689,10 @@ impl Surface {
     }
 
     fn request_paint(&self) {
+        if self.painting.get() {
+            self.repaint.set(true);
+            return;
+        }
         if !self.invalid.replace(true) {
             crate::window::invalidate(self.hwnd());
         }
@@ -724,10 +742,29 @@ impl Surface {
     /// Draws the window (`WM_PAINT`).
     pub(crate) fn paint(self: &Rc<Self>) {
         self.invalid.set(false);
+        self.painting.set(true);
         // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
         // `invalid` stays set (no second `WM_PAINT` meanwhile).
-        if crate::render::frame(self) {
+        let deferred = crate::render::frame(self);
+        self.painting.set(false);
+        if deferred {
             self.invalid.set(true);
+        } else if self.repaint.replace(false) {
+            // What changed while the frame was drawn (a text field's text
+            // services laying out as they draw) is drawn by the next one.
+            self.invalid.set(true);
+            let hwnd = self.hwnd();
+            if !hwnd.is_invalid() {
+                // SAFETY: a plain call on a window of this thread.
+                let _ = unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        Some(hwnd),
+                        crate::window::WM_NSH_PAINT,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    )
+                };
+            }
         }
     }
 

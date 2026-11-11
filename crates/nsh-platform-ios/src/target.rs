@@ -545,6 +545,13 @@ impl EventTarget {
         self.ivars().scrolls_applied.borrow_mut().remove(&id);
     }
 
+    /// The user gave the surface input with `modality` (a finger going
+    /// down, a hardware key): told before it acts, so the focus it moves
+    /// shows or not (`focus-visible:`).
+    pub(crate) fn input_with(&self, modality: nsh_core::platform::InputModality) {
+        self.ivars().control.set_input_modality(modality);
+    }
+
     /// The app's keyboard shortcuts.
     pub(crate) fn keymap(&self) -> &crate::keymap::KeymapState {
         &self.ivars().keymap

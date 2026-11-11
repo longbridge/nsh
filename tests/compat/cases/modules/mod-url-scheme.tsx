@@ -14,7 +14,7 @@ function App() {
   const address = signal(`${UrlScheme.url()}`);
   const stop = UrlScheme.on("open", ({ url }) => links.set(url));
   const changes = signal("none");
-  const stopChanges = UrlScheme.on("change", ({ url, cause }) => changes.set(`${cause} ${url}`));
+  const stopChanges = UrlScheme.on("change", ({ url, reason }) => changes.set(`${reason} ${url}`));
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`Links: ${links()}`}</Text>

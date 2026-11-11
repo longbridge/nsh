@@ -114,6 +114,7 @@ expect Imported: asset:/sounds/click.wav
 tap id:play
 expect Refused: threw RangeError
 expect Sound: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+expect Bytes: rejected ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
 expect Player: rejected, error unavailable, idle true 1.5
 covers [nsh] Sound
 covers [nsh] AudioPlayer
@@ -184,7 +185,7 @@ tap id:menu
 expect Calls: menu done
 expect Popup: closed
 tap id:application
-expect Calls: application done, quit function, restart function
+expect Calls: application done, quit function, restart function, stop function
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] windowState

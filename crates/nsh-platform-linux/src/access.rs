@@ -72,6 +72,8 @@ struct Spec {
     level: Option<u32>,
     expanded: Option<bool>,
     busy: bool,
+    /// The content does not pass the app's checks (AT-SPI's invalid entry).
+    invalid: bool,
     hidden: bool,
 }
 
@@ -529,6 +531,12 @@ fn apply(view: &NshView, old: Option<&Spec>, new: &Spec) {
             gtk::AccessibleState::Busy,
         ),
         (
+            new.invalid,
+            old.map(|o| o.invalid),
+            accessible::State::Invalid(gtk::AccessibleInvalidState::True),
+            gtk::AccessibleState::Invalid,
+        ),
+        (
             new.hidden,
             old.map(|o| o.hidden),
             accessible::State::Hidden(true),
@@ -646,6 +654,7 @@ fn spec_for(
         level: a.level,
         expanded: a.state.expanded,
         busy: a.state.busy,
+        invalid: a.state.invalid,
         hidden: a.hidden || invisible,
     }
 }
@@ -705,6 +714,8 @@ fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Gtk {
         Role::Navigation => Gtk::Navigation,
         Role::Tree => Gtk::Tree,
         Role::TreeItem => Gtk::TreeItem,
+        Role::Dialog => Gtk::Dialog,
+        Role::AlertDialog => Gtk::AlertDialog,
     }
 }
 
@@ -2349,6 +2360,8 @@ mod tests {
             (Role::TreeItem, Gtk::TreeItem),
             (Role::MenuItemCheckbox, Gtk::MenuItemCheckbox),
             (Role::MenuItemRadio, Gtk::MenuItemRadio),
+            (Role::Dialog, Gtk::Dialog),
+            (Role::AlertDialog, Gtk::AlertDialog),
         ] {
             assert_eq!(
                 role_for(&with_role(role), ViewKind::View, false),
@@ -2383,6 +2396,21 @@ mod tests {
             spec_for(&checkbox, ViewKind::View, true, None, false).checked,
             None
         );
+    }
+
+    /// An invalid field is AT-SPI's invalid entry (GTK's `Invalid`).
+    #[test]
+    fn invalid() {
+        let field = Accessibility {
+            label: Some("Email".into()),
+            state: AccessibilityState {
+                invalid: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(spec_for(&field, ViewKind::Input, false, None, false).invalid);
+        assert!(!spec_for(&with_role(Role::Button), ViewKind::View, true, None, false).invalid);
     }
 
     #[test]

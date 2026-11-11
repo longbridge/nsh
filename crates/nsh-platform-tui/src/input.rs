@@ -200,6 +200,7 @@ impl Drag {
                     page: self.page,
                     location: self.page - self.origin,
                     changed: true,
+                    pointer_type: nsh_core::PointerType::Mouse,
                 }],
             })),
         );

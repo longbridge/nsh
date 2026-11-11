@@ -2426,6 +2426,93 @@ fn tray_clicks_report_the_icons_bounds() {
     assert_eq!(trays(&removed), [None]);
 }
 
+const TRAY_TITLE: &str = r##"import { mount, signal, Text } from "nsh";
+import { Tray } from "nsh/desktop";
+
+const log = signal([]);
+Tray.set({ tooltip: "Quotes", title: [{ text: "AAPL " }, { text: "228.00 +1.33%", color: "#d92d20" }], titlePlacement: "left", onClick: () => log.set([...log(), "click"]) });
+
+const errors = [];
+for (const title of ["AAPL", [{ color: "#d92d20" }], [{ text: 228 }], [{ text: "AAPL", color: "not a color" }]]) {
+  try {
+    Tray.set({ title, onClick: () => log.set([...log(), "wrong click"]) });
+  } catch (e) {
+    errors.push(e instanceof TypeError);
+  }
+}
+try {
+  Tray.set({ title: [{ text: "AAPL" }], titlePlacement: "top", onClick: () => log.set([...log(), "wrong click"]) });
+} catch (e) {
+  errors.push(e instanceof TypeError);
+}
+
+mount(() => <Text>{`errors ${errors.join(",")} ${log().join(",")}`}</Text>);
+"##;
+
+/// A tray's title reaches the platform as its runs, each with its color
+/// (`None` for the panel's text color), and the side it shows on; a title of another shape, a run
+/// without its text, a text that is not a string, a color that is not one or
+/// a `titlePlacement` other than `"right"` and `"left"` throws a `TypeError` and changes nothing: the tray shown keeps its click.
+#[test]
+fn tray_titles_reach_the_platform_with_their_colors() {
+    use nsh_core::{EventKind, EventPayload, PayloadValue, color::Hsla, desktop::DesktopCommand};
+
+    let (engine, rx) = start_in(
+        TRAY_TITLE,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| {
+        shows(batch, "errors true,true,true,true,true ")
+    });
+    let trays: Vec<_> = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter_map(|item| match item {
+            MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(command),
+            } => match &**command {
+                DesktopCommand::SetTray(tray) => Some(tray.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let [Some(tray)] = &trays[..] else {
+        panic!("only the valid tray is set: {trays:?}");
+    };
+    let runs: Vec<_> = tray
+        .title
+        .iter()
+        .map(|run| (run.text.as_str(), run.color))
+        .collect();
+    let red: Hsla = "#d92d20".parse().unwrap();
+    assert_eq!(runs, [("AAPL ", None), ("228.00 +1.33%", Some(red))]);
+    assert_eq!(
+        tray.title_placement,
+        nsh_core::desktop::TrayTitlePlacement::Left
+    );
+
+    // The failed sets left the first tray's click in place.
+    engine.control().dispatch_event(
+        ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(tray.click)))]),
+    );
+    let clicked = until(&rx, |batch| {
+        shows(batch, "errors true,true,true,true,true click")
+    });
+    assert!(
+        clicked
+            .iter()
+            .any(|b| shows(b, "errors true,true,true,true,true click")),
+        "{clicked:?}"
+    );
+}
+
 const QUIT: &str = r#"import { mount, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
@@ -4983,6 +5070,7 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
                 page: nsh_core::geometry::point(px(150.0), px(10.0)),
                 location: nsh_core::geometry::point(px(150.0), px(10.0)),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     };
@@ -5101,6 +5189,7 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
                 page: at,
                 location: at,
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     };
@@ -5193,7 +5282,7 @@ function App() {
         items={items}
         defaultValue="rice"
         accessibilityLabel="Own"
-        trigger={<View><Text>Own</Text></View>}
+        trigger={<View accessibilityState={{ invalid: true }}><Text>Own</Text></View>}
       />
       <Text>{`Changes: ${changes().join(",")}`}</Text>
     </View>
@@ -5206,7 +5295,8 @@ mount(App);
 /// `nsh/base`'s `Select` through its JS face: `value={null}` is nothing
 /// chosen (the app's), a left-out `value` the select's own from
 /// `defaultValue`; the items' objects, the app's `renderItem` and
-/// `renderGroup`, and `onChange` with the chosen value.
+/// `renderGroup`, and `onChange` with the chosen value; the app's
+/// `invalid` on its trigger kept beside the select's own states.
 #[test]
 fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
     use nsh_core::{AccessibilityRole, ViewProps};
@@ -5250,6 +5340,13 @@ fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
         Some("Rice"),
         "its own, from defaultValue"
     );
+    let state = own.accessibility.state;
+    assert!(state.invalid, "the app's invalid state");
+    assert!(
+        state.has_popup && state.expanded == Some(false),
+        "{state:?}"
+    );
+    assert!(!trigger.accessibility.state.invalid);
 
     // The list, its rows drawn by the app.
     engine

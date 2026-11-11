@@ -1140,6 +1140,7 @@ fn variants() {
         dark: true,
         platform: Platform::Android,
         reduce_motion: false,
+        ..ClassEnvironment::default()
     };
     let (s, _) = styled_with("bg-white dark:bg-black", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color(0x0000_00ff));
@@ -1175,6 +1176,71 @@ fn variants() {
     );
     assert_eq!(s.layout.size.width, taffy::Dimension::length(390.0));
     assert_eq!(s.layout.size.height, taffy::Dimension::length(844.0));
+}
+
+#[test]
+fn pointer_and_terminal_variants_follow_the_device() {
+    // Tailwind's `pointer-fine:` / `pointer-coarse:` and NSH's `terminal:`,
+    // which comes after them: a terminal is a fine pointer too.
+    let theme = themed();
+    let list = parse(
+        &theme,
+        "h-10 pointer-coarse:h-9 pointer-fine:h-7 terminal:h-1",
+    );
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    assert_eq!(list.deps(), deps::DEVICE);
+    let height = |pointer: Pointer, terminal: bool| {
+        let env = ClassEnvironment {
+            pointer,
+            terminal,
+            ..ClassEnvironment::default()
+        };
+        let (s, _) = styled_with(
+            "h-10 pointer-coarse:h-9 pointer-fine:h-7 terminal:h-1",
+            env,
+            (390.0, 844.0),
+            0,
+        );
+        s.layout.size.height
+    };
+    assert_eq!(
+        height(Pointer::Coarse, false),
+        taffy::Dimension::length(36.0)
+    );
+    assert_eq!(height(Pointer::Fine, false), taffy::Dimension::length(28.0));
+    assert_eq!(height(Pointer::Fine, true), taffy::Dimension::length(4.0));
+    // A hover look that only a pointer gets.
+    let list = parse(&theme, "pointer-fine:hover:bg-white");
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+}
+
+#[test]
+fn focus_visible_is_the_shown_focus_not_any_focus() {
+    // `focus:` holds while the view has the focus, `focus-visible:` only
+    // while the core shows it (the keyboard moved it there).
+    let theme = themed();
+    let list = parse(&theme, "focus-visible:p-2 group-focus-visible:m-2");
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    // The platform reports `FOCUSED` alone: nothing more to track.
+    assert_eq!(list.tracked_states() & !state::FOCUS_VISIBLE, 0);
+    let pad = |states: u16| {
+        let (env, states) = cx(states);
+        styled_with(
+            "p-1 focus:p-3 focus-visible:p-5",
+            env,
+            (390.0, 844.0),
+            states,
+        )
+        .0
+        .layout
+        .padding
+        .top
+    };
+    let p = |n: f32| taffy::LengthPercentage::length(n);
+    assert_eq!(pad(0), p(4.0));
+    assert_eq!(pad(state::FOCUSED), p(12.0));
+    // After `focus:` in Tailwind's order: it wins while both hold.
+    assert_eq!(pad(state::FOCUSED | state::FOCUS_VISIBLE), p(20.0));
 }
 
 #[test]
@@ -1343,8 +1409,8 @@ fn data_variants() {
     assert_eq!(s.view.background_color, Color(0xffff_ffff));
 }
 
-/// `aria-pressed:`, `aria-busy:`, `aria-checked:` and `aria-selected:`
-/// as Tailwind v4 has them (`&[aria-pressed="true"]`, ...): the core's
+/// `aria-pressed:`, `aria-busy:`, `aria-checked:`, `aria-invalid:` and
+/// `aria-selected:` as Tailwind v4 has them (`&[aria-pressed="true"]`, ...): the core's
 /// states from the accessibility state, ordered by their names after the
 /// pseudo-classes.
 #[test]
@@ -1353,8 +1419,8 @@ fn aria_state_variants() {
     let list = parse(
         &theme,
         "aria-pressed:bg-black aria-busy:opacity-50 aria-checked:p-1 aria-selected:p-2 \
-         group-aria-pressed:rotate-180 group-aria-busy:opacity-0 group-aria-checked:p-3 \
-         group-aria-selected:p-4",
+         aria-invalid:p-5 group-aria-pressed:rotate-180 group-aria-busy:opacity-0 \
+         group-aria-checked:p-3 group-aria-selected:p-4 group-aria-invalid:p-6",
     );
     assert!(list.unknown().is_empty(), "{:?}", list.unknown());
     assert!(list.deps() & deps::STATE != 0 && list.deps() & deps::GROUP != 0);
@@ -1394,19 +1460,31 @@ fn aria_state_variants() {
         pressed,
     );
     assert_eq!(s.view.background_color, Color(0x0000_00ff));
-    // Among themselves, by their names: busy, checked, expanded, pressed,
-    // selected.
-    let all =
-        state::BUSY | state::CHECKED | state::EXPANDED | state::ARIA_PRESSED | state::SELECTED;
+    // Among themselves, by their names: busy, checked, expanded, invalid,
+    // pressed, selected.
+    let all = state::BUSY
+        | state::CHECKED
+        | state::EXPANDED
+        | state::INVALID
+        | state::ARIA_PRESSED
+        | state::SELECTED;
     let order = [
         ("aria-busy", Color(0xfb2c_36ff)),
         ("aria-checked", Color(0x0000_00ff)),
         ("aria-expanded", Color(0xffff_ffff)),
+        ("aria-invalid", Color(0xe4e4_e7ff)),
         ("aria-pressed", Color(0x00bc_7dff)),
         ("aria-selected", Color(0x2b7f_ffff)),
     ];
     let classes = |order: &[(&str, Color)]| {
-        let names = ["red-500", "black", "white", "emerald-500", "blue-500"];
+        let names = [
+            "red-500",
+            "black",
+            "white",
+            "zinc-200",
+            "emerald-500",
+            "blue-500",
+        ];
         order
             .iter()
             .zip(names)
@@ -1416,14 +1494,15 @@ fn aria_state_variants() {
     let mut reversed = classes(&order);
     reversed.reverse();
     let (s, _) = styled_with(&reversed.join(" "), env, at, all);
-    assert_eq!(s.view.background_color, order[4].1);
-    for i in 0..4 {
+    assert_eq!(s.view.background_color, order[5].1);
+    for i in 0..5 {
         let below = order[..=i].iter().fold(0, |states, (v, _)| {
             states
                 | match *v {
                     "aria-busy" => state::BUSY,
                     "aria-checked" => state::CHECKED,
                     "aria-expanded" => state::EXPANDED,
+                    "aria-invalid" => state::INVALID,
                     "aria-pressed" => state::ARIA_PRESSED,
                     _ => state::SELECTED,
                 }

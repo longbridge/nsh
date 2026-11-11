@@ -29,26 +29,15 @@ on:
     # `closed` runs nothing, but it takes the pull request's concurrency group
     # and so cancels its runs still queued or running once it merges or closes.
     types: [opened, synchronize, reopened, ready_for_review, closed]
+    # Only the site and the web runtime: Rust application's `web` job builds
+    # the web runtime for every change to the crates, and main's deployment
+    # builds the site after a merge (.github/ci/paths.py).
     paths:
       - "website/**"
       - "skills/**"
       - "examples/tasks/**"
       - "examples/tasks-rs/**"
-      - "crates/nsh-base/**"
-      - "crates/nsh-bundler/**"
-      - "crates/nsh-cli/**"
-      - "crates/nsh-core/**"
-      - "crates/nsh-dev/**"
-      - "crates/nsh-engine/**"
-      - "crates/nsh-i18n/**"
-      - "crates/nsh-js/**"
-      - "crates/nsh-macros/**"
-      - "crates/nsh-package/**"
       - "crates/nsh-platform-web/**"
-      - "crates/nsh-testing/**"
-      - "crates/nsh-updater/**"
-      - "crates/xtask/**"
-      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -92,7 +81,11 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    runs-on: ubuntu-latest
+    # The published site builds on the organization's self-hosted runner
+    # (docs/dev/tooling.md "Self-hosted runners"): it waits in no queue and
+    # keeps its builds. Pull requests and merge-queue runs, whose code is
+    # anyone's, stay on GitHub's runners.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,6 +95,7 @@ jobs:
       # The web runtime's C code (zstd): clang compiles it for wasm32 (llvm-ar
       # archives it); bindgen needs libclang for the host build of the nsh CLI.
       - name: Install clang and LLVM
+        if: runner.environment == 'github-hosted'
         run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev
 
       - name: Setup Rust
@@ -151,11 +145,17 @@ jobs:
           NSH_BROWSER_WASM=target/wasm32-unknown-unknown/web/nsh_platform_web.wasm node --expose-gc --test crates/nsh-platform-web/web/browser/*.test.mjs
 
       - name: Install browser test engines
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           python3 -m venv "$RUNNER_TEMP/nsh-browser-tests"
           "$RUNNER_TEMP/nsh-browser-tests/bin/pip" install playwright==1.62.0
+          # The browsers' system libraries come with them on GitHub's
+          # runners; a self-hosted one has them installed.
+          deps=--with-deps
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted ]] || deps=
           "$RUNNER_TEMP/nsh-browser-tests/bin/python" -m playwright \
-            install --with-deps chromium firefox webkit
+            install $deps chromium firefox webkit
 
       # One Wasm build, serial engines: keep Chromium's interaction coverage
       # and still report the other engines if one lifecycle suite fails.
@@ -273,7 +273,7 @@ jobs:
   deploy:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, Packager]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

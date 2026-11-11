@@ -1053,6 +1053,20 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### shadersAvailable
+
+```ts
+const shadersAvailable: Accessor<boolean>;
+```
+
+平台能否绘制 shader 视图（`Shader`、`ShaderEffect`、`ShaderTransition`、`ScreenEffect`、`ScreenTransition`），响应式。在 iOS、Android、macOS、Windows、Linux、GPUI、Web 和无头测试中为 `true`；在终端中、以及关闭 `shader` 特性构建的应用中为 `false`。它从 `true` 开始，当第一个 shader 挂载、而 NSH 打不开这台机器的 GPU 时（例如浏览器没有 WebGL 2）变为 `false`，之后不再变回；所以在它为真时显示 shader，否则显示应用自己的绘制（见 [Shader](../elements/shader.md#shader-能否绘制)）。Rust：`shaders_available() -> bool`。
+
+```tsx
+<If when={shadersAvailable()} else={<Image src={backdrop} style={{ flex: 1 }} />}>
+  <Shader source={BACKDROP} style={{ flex: 1 }} />
+</If>
+```
+
 ### platform
 
 ```ts
@@ -1629,7 +1643,7 @@ hasImage(): Promise<boolean>;
 writeImage(src: string): Promise<void>;
 ```
 
-把 `src`（base64 `data:` URL，或 `readImage` 给的 `url`）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。Android 上以 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` 拒绝。
+把 `src`（base64 `data:` URL，或 `readImage` 给的 `url`）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。Web 上图片以 PNG 放到剪贴板，这是浏览器写入的图片格式；其他格式的图片同时原样放上去：作为 HTML（`<img>`，粘贴时在 `html` 里），在 Chromium 系浏览器中还作为原图，`readImage` 读回的就是它，所以 GIF 保留动画。Android 上以 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` 拒绝。
 
 ```rust tabs
 set_clipboard_image(image.url.clone());
@@ -1855,7 +1869,7 @@ for (const { file } of picked) {
 
 | 平台 | 选择器 | 过滤器 |
 |---|---|---|
-| macOS | `NSOpenPanel` 表单 | 所有扩展名合为一组 |
+| macOS | `NSOpenPanel`：应用窗口上的表单；该窗口不可见时（如托盘应用隐藏的主窗口）在最前面单独显示 | 所有扩展名合为一组 |
 | Windows | `IFileOpenDialog` | 每个过滤器一个选项，显示其名称 |
 | Linux | `GtkFileDialog`（有 portal 时用 portal 的） | 每个过滤器一个选项，显示其名称 |
 | iOS | `UIDocumentPickerViewController`，以副本形式 | 所有扩展名合为一组 |
@@ -1979,7 +1993,7 @@ scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小�
 const UrlScheme: {
   on(event: "open", listener: (event: { url: string }) => void): () => void;
   /** 地址不是应用自己改的（Web 上的后退和前进、用户输入的地址）。 */
-  on(event: "change", listener: (event: { url: string; cause: "back" | "forward" | "address" }) => void): () => void;
+  on(event: "change", listener: (event: { url: string; reason: "back" | "forward" | "address" }) => void): () => void;
   /** 应用的地址，没有时为 null。 */
   url(): string | null;
   /** 设置当前页面的地址；应用的页面保持不变。 */
@@ -2060,14 +2074,14 @@ UrlScheme.on("change", ({ url }) => current.set(tabOf(url)));
 UrlScheme.on("change", ({ url }) => tab.set(tabOf(url)));
 ```
 
-| `cause` | 何时（Web 上，应用占满整个页面时） |
+| `reason` | 何时（Web 上，应用占满整个页面时） |
 | --- | --- |
 | `"back"`、`"forward"` | 浏览器的后退或前进到了页面相同、地址不同的条目（用户输入的地址），或者后退弹出了页面，而应用在响应时没有设置地址（没有 `onChange` 设置地址），留下的地址也不是应用设置的 |
 | `"address"` | 用户给页面输入了应用的地址，即在地址栏里输入 `#fragment`：在当前条目之后新建一个条目，应用的页面保持不变 |
 
 栈能说明的情况保持不变：弹出页面的后退归栈处理（`onChange`），前进到栈里已经没有的页面是 `open`，应用自己的 `setUrl`
 不是 `change`。没有监听者时发生的变化不会保留：`url()` 里有它们。原生平台、GPUI 宿主和终端没有地址的历史记录，所以
-`change` 只在 Web 上出现。Rust 代码 await `nsh_core::prelude` 的 `next_app_url_change()`，得到带有 `url` 和 `cause` 的
+`change` 只在 Web 上出现。Rust 代码 await `nsh_core::prelude` 的 `next_app_url_change()`，得到带有 `url` 和 `reason` 的
 `AppUrlChange`。
 
 ## Speech
@@ -2224,7 +2238,7 @@ import { AudioPlayer, Sound } from "nsh";
 ```ts
 declare class Sound {
   static available(): Promise<boolean>;
-  static load(src: string): Promise<Sound>;
+  static load(src: string | Uint8Array): Promise<Sound>;
   play(options?: { volume?: number; rate?: number }): void;
   stop(): void;
   readonly duration: number;
@@ -2268,7 +2282,7 @@ type AudioErrorCode =
 
 ### Sound.load
 
-从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，并解码进内存。引擎已加载过的源会共享：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
+从导入的音频文件（`import click from "./sounds/click.wav"`：导入得到文件的 `asset:/` URL，文件随应用发布）、`file:` URL、`data:` URI 或应用 `network` capability 授权的 `http(s)` URL 加载音效，也可以直接给音频文件的字节（应用生成或下载的 `Uint8Array`；Rust 里还可以是嵌进程序的字节，`load_sound(include_bytes!("tick.wav"))`），并解码进内存。字节的格式（WAV、AAC、MP3 等）从字节本身读出。引擎已加载过的源会共享，相同的字节也一样：两个组件加载同一个点击音只解码一次。音效在 `dispose()` 时释放，或在加载它的一方离开时（组件卸载）释放。单个音效编码后最大 8 MB、时长最长 5 秒，一个应用同时最多持有 64 个音效、共 16 MB 解码后音频；超出时 `load` 以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 拒绝。更长的音频交给 `AudioPlayer`。
 
 ### Sound.play
 

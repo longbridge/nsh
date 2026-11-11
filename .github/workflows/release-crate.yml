@@ -55,7 +55,8 @@ jobs:
   publish:
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs to
     # build when `cargo publish` verifies it.
-    runs-on: ubuntu-24.04
+    # The organization's self-hosted runner (docs/dev/tooling.md "Self-hosted runners").
+    runs-on: [self-hosted, Linux, Packager]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,6 +87,7 @@ jobs:
       # Wayland / xkbcommon / fontconfig libraries, GTK 3 and WebKitGTK 4.1
       # (feature `webview`) and GStreamer (feature `video`), as in gpui.yml.
       - name: Install Linux dependencies
+        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
