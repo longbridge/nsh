@@ -245,6 +245,7 @@ The keyboard type (`.keyboard_type(..)`, TSX `keyboardType`) picks the layout:
 | `KeyboardType::Numeric` | `"numeric"` | As React Native: iOS's decimal pad; on Android digits with a sign and a decimal separator. |
 | `KeyboardType::NumbersAndPunctuation` | `"numbers-and-punctuation"` | Digits, a minus sign and punctuation (iOS's numbers and punctuation keyboard; on Android digits with a sign and a decimal separator). Use it for negative numbers on iOS. |
 | `KeyboardType::Phone` | `"phone-pad"` | A phone dial pad. |
+| `KeyboardType::VisiblePassword` | `"visible-password"` | A password shown as plain text (a "show password" toggle, a token): Android's visible password keyboard, iOS's ASCII keyboard, with no capitalization, suggestions or autocorrection whatever `autoCapitalize` and `autoCorrect` say. On the web, a text field with autocapitalization and spellcheck off. `secure` still hides the text. |
 
 On iOS, `.keyboard_appearance(KeyboardAppearance::Dark)` (TSX `ios={{ keyboardAppearance: "dark" }}`; or light, default) gives the keyboard a light or dark look regardless of the system's appearance, for a dark app in light mode. Android's keyboards always follow the system's theme.
 

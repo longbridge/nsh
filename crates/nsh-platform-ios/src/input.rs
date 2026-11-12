@@ -1329,6 +1329,7 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         KeyboardType::Email => UIKeyboardType::EmailAddress,
         KeyboardType::Phone => UIKeyboardType::PhonePad,
         KeyboardType::Url => UIKeyboardType::URL,
+        KeyboardType::VisiblePassword => UIKeyboardType::ASCIICapable,
     };
     let return_key = match config.return_key {
         ReturnKeyType::Default => UIReturnKeyType::Default,
@@ -1338,7 +1339,10 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         ReturnKeyType::Search => UIReturnKeyType::Search,
         ReturnKeyType::Send => UIReturnKeyType::Send,
     };
+    // A visible password is typed as it is: never capitalized or corrected.
+    let password = config.keyboard == KeyboardType::VisiblePassword;
     let capitalize = match config.auto_capitalize {
+        _ if password => UITextAutocapitalizationType::None,
         AutoCapitalize::None => UITextAutocapitalizationType::None,
         AutoCapitalize::Sentences => UITextAutocapitalizationType::Sentences,
         AutoCapitalize::Words => UITextAutocapitalizationType::Words,
@@ -1349,7 +1353,7 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         KeyboardAppearance::Light => UIKeyboardAppearance::Light,
         KeyboardAppearance::Dark => UIKeyboardAppearance::Dark,
     };
-    let correct = if config.auto_correct {
+    let correct = if config.auto_correct && !password {
         UITextAutocorrectionType::Default
     } else {
         UITextAutocorrectionType::No

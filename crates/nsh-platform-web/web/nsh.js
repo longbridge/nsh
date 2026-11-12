@@ -5036,18 +5036,22 @@ class Player {
         : config.keyboard === "email-address" ? "email"
           : config.keyboard === "url" ? "url"
             : config.keyboard === "phone-pad" ? "tel" : "text";
-      field.inputMode = { "number-pad": "numeric", numeric: "decimal", "decimal-pad": "decimal", "numbers-and-punctuation": "text", "phone-pad": "tel", "email-address": "email", url: "url" }[config.keyboard] ?? "text";
+      field.inputMode = { "number-pad": "numeric", numeric: "decimal", "decimal-pad": "decimal", "numbers-and-punctuation": "text", "phone-pad": "tel", "email-address": "email", url: "url", "visible-password": "text" }[config.keyboard] ?? "text";
     }
     // A textarea that submits shows the return key's action too.
     if (!config.multiline || config.submit !== "newline") {
       field.enterKeyHint = { done: "done", go: "go", next: "next", search: "search", send: "send" }[config.returnKey] ?? "enter";
     } else field.removeAttribute("enterkeyhint");
     field.readOnly = !config.editable;
-    field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
-    field.spellcheck = config.autoCorrect;
+    // A visible password is never capitalized or checked (the closest the
+    // browser has to Android's visible password keyboard).
+    const password = config.keyboard === "visible-password";
+    const correct = config.autoCorrect && !password;
+    field.autocapitalize = password || config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
+    field.spellcheck = correct;
     // `spellcheck` alone only stops suggestions: Chrome on Android still asks
     // the keyboard to autocorrect unless this attribute is off.
-    field.setAttribute("autocorrect", config.autoCorrect ? "on" : "off");
+    field.setAttribute("autocorrect", correct ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;

@@ -243,6 +243,7 @@ input()
 | `KeyboardType::Numeric` | `"numeric"` | 与 React Native 相同：iOS 上是小数键盘；Android 上是带正负号和小数点的数字键盘。 |
 | `KeyboardType::NumbersAndPunctuation` | `"numbers-and-punctuation"` | 数字、负号和标点（iOS 的数字与标点键盘；Android 上是带正负号和小数点的数字键盘）。在 iOS 上输入负数时使用它。 |
 | `KeyboardType::Phone` | `"phone-pad"` | 电话拨号盘。 |
+| `KeyboardType::VisiblePassword` | `"visible-password"` | 以明文显示的密码（“显示密码”开关、令牌）：Android 的可见密码键盘、iOS 的 ASCII 键盘，无论 `autoCapitalize` 和 `autoCorrect` 如何都不自动大写、不提供建议或自动更正。在 Web 上是关闭了自动大写和拼写检查的文本框。`secure` 仍会隐藏文本。 |
 
 在 iOS 上，`.keyboard_appearance(KeyboardAppearance::Dark)`（TSX 的 `ios={{ keyboardAppearance: "dark" }}`；或浅色、默认）让键盘使用浅色或深色外观而不随系统外观变化，适合在浅色模式下运行的深色应用。Android 的键盘始终跟随系统主题。
 

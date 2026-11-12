@@ -88,7 +88,7 @@ view styles apply):
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `keyboardType` | `.keyboard_type(KeyboardType::Email)` | `"default" \| "number-pad" \| "decimal-pad" \| "numeric" \| "numbers-and-punctuation" \| "email-address" \| "phone-pad" \| "url"` | `"default"` | The keyboard layout ([the values](../docs/forms-and-keyboard.md#keyboards-and-autofill); `numbers-and-punctuation` has a minus sign on iOS). |
+| `keyboardType` | `.keyboard_type(KeyboardType::Email)` | `"default" \| "number-pad" \| "decimal-pad" \| "numeric" \| "numbers-and-punctuation" \| "email-address" \| "phone-pad" \| "url" \| "visible-password"` | `"default"` | The keyboard layout ([the values](../docs/forms-and-keyboard.md#keyboards-and-autofill); `numbers-and-punctuation` has a minus sign on iOS). |
 | `returnKeyType` | `.return_key_type(ReturnKeyType::Next)` | `"default" \| "done" \| "go" \| "next" \| "search" \| "send"` | `"default"` | The label of the return key. |
 | `autoCapitalize` | `.auto_capitalize(AutoCapitalize::None)` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | Automatic capitalization. |
 | `autoCorrect` | `.auto_correct(..)` | `boolean` | `true` | The system's corrections. |

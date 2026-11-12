@@ -327,16 +327,20 @@ final class InputBox extends FrameLayout implements Node {
             case 3: type = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS; break;
             case 4: type = InputType.TYPE_CLASS_PHONE; break;
             case 5: type = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI; break;
+            case 8: type = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD; break;
             default: type = InputType.TYPE_CLASS_TEXT;
         }
         if ((type & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT) {
-            switch (capitalize) {
+            // A visible password is typed as it is: never capitalized,
+            // suggested or corrected.
+            switch (keyboard == 8 ? 0 : capitalize) {
                 case 1: type |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES; break;
                 case 2: type |= InputType.TYPE_TEXT_FLAG_CAP_WORDS; break;
                 case 3: type |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS; break;
                 default: break;
             }
-            type |= autoCorrect ? InputType.TYPE_TEXT_FLAG_AUTO_CORRECT : InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+            type |= autoCorrect && keyboard != 8
+                    ? InputType.TYPE_TEXT_FLAG_AUTO_CORRECT : InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
             if (multiline) type |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
             if (secure) type = (type & ~InputType.TYPE_MASK_VARIATION) | InputType.TYPE_TEXT_VARIATION_PASSWORD;
         } else if (secure && (type & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_NUMBER) {

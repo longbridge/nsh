@@ -1544,6 +1544,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
         KeyboardType::Url => 5,
         KeyboardType::Numeric => 6,
         KeyboardType::NumbersAndPunctuation => 7,
+        KeyboardType::VisiblePassword => 8,
     });
     e.int(match c.return_key {
         ReturnKeyType::Default => 0,

@@ -20,6 +20,7 @@ tap id:case-props-input-config
 # for each input.
 prop id:keys keyboardType email-address
 prop id:plain keyboardType default
+prop id:token keyboardType visible-password
 prop id:keys returnKeyType send
 prop id:plain returnKeyType default
 prop id:keys autoCapitalize none
