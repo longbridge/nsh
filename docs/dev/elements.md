@@ -525,7 +525,8 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
   moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
+  (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
+  its side, so a submenu's first item is level with its trigger, and places it outside the menu
   around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
   `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
   what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`

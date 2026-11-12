@@ -1750,8 +1750,11 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         }
         theme_menus(crate::system::dark(surface));
         // The window must be in front for the menu to close when clicking
-        // elsewhere.
-        let _ = SetForegroundWindow(hwnd);
+        // elsewhere; a background app's stays behind (the test agent closes
+        // its menus itself).
+        if !crate::window::in_background() {
+            let _ = SetForegroundWindow(hwnd);
+        }
         #[cfg(feature = "dev")]
         if actions.is_empty() {
             *surface.chrome.tracked_popup.borrow_mut() = Some(items.clone());

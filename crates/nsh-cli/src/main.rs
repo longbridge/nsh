@@ -190,18 +190,20 @@ enum Command {
         /// UDID); default: a booted one, else the newest iPhone.
         #[arg(long, value_name = "DEVICE")]
         device: Option<String>,
-        /// With `--target macos`: the display the apps' windows open on,
-        /// centered: 1 is the primary display (the one with the menu bar),
-        /// 2 the next, and so on; the main one when there is no such
-        /// display. Default: the first display besides the primary one
-        /// (not a mirror of it), so that a run keeps off the screen in use;
-        /// the primary one when there is no other.
+        /// With `--target macos` or `gpui`: the display the apps' windows
+        /// open on, centered: 1 is the primary display (on macOS the one with
+        /// the menu bar), 2 the next, and so on; the main one when there is
+        /// no such display. Default: the first display besides the primary
+        /// one (not a mirror of it), so that a run keeps off the screen in
+        /// use; the primary one when there is no other.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
-        /// With `--target macos`: lets the apps become the active app, as
-        /// they would run for a user. By default they run in the
-        /// background: their windows show but never take the keyboard from
-        /// the app in use, and the tests' input goes to them directly.
+        /// With `--target macos`, `windows`, `gpui` or `linux`: lets the apps
+        /// become the active app, as they would run for a user. By default
+        /// they run in the background: their windows show but never take the
+        /// keyboard from the app in use, and the tests' input goes to them
+        /// directly (on Linux the keys go to the widgets, as on Wayland,
+        /// except on a display nobody types on, such as Xvfb).
         #[arg(long)]
         foreground: bool,
     },

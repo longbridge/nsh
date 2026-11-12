@@ -170,6 +170,43 @@ pub struct AppOptions {
     /// same app itself. The apps' `windows` capability limits what they
     /// may open either way.
     pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
+    /// Runs [`run_app`]'s app in the background: it never becomes the
+    /// active app (on macOS its activation policy is `Prohibited`) and its
+    /// windows show without taking the keyboard from the app the user works
+    /// in, while the window that would have it reads as focused to the app.
+    /// `nsh test --target gpui` sets it (the development host's
+    /// `--background`), so tests leave the keyboard where it is; the test
+    /// agent's input goes to the window directly. Views embedded in an app
+    /// of the embedder's ([`AppView::new`]) ignore it. False by default.
+    pub background: bool,
+    /// The display [`run_app`]'s windows open on, centered: the main window
+    /// and the app's own windows that name no display or position of their
+    /// own. `None` (the default), or a display that is not there, centers
+    /// them on the primary display. `nsh test --target gpui` sets it (a
+    /// secondary display, unless `--display` names one; the development
+    /// host's `--display`), so a test run's windows keep off the screen in
+    /// use.
+    pub display: Option<WindowDisplay>,
+    /// Keeps [`run_app`]'s windows at the size they open at when they do
+    /// not fit on their display, where they would be made to fit it (and
+    /// on macOS AppKit shrinks a window taller than its screen as it shows
+    /// it): a test's app lays out in the room it asked for. False by
+    /// default; `nsh test --target gpui` sets it (the development host's
+    /// `--keep-window-size`).
+    pub keep_size: bool,
+}
+
+/// The display a window opens on ([`AppOptions::display`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WindowDisplay {
+    /// The display at this index of the system's list, the primary display
+    /// (on macOS the one with the menu bar) first.
+    Index(usize),
+    /// The first display of the list besides the primary one that does not
+    /// mirror it (shows the same part of the desktop); the primary one when
+    /// there is no other.
+    Secondary,
 }
 
 impl std::fmt::Debug for AppOptions {
@@ -191,6 +228,9 @@ impl std::fmt::Debug for AppOptions {
             .field("host", &self.host)
             .field("transparent", &self.transparent)
             .field("windows", &self.windows.is_some())
+            .field("background", &self.background)
+            .field("display", &self.display)
+            .field("keep_size", &self.keep_size)
             .finish()
     }
 }
@@ -214,6 +254,9 @@ impl Default for AppOptions {
             host: nsh_engine::HostChannel::default(),
             transparent: false,
             windows: None,
+            background: false,
+            display: None,
+            keep_size: false,
         }
     }
 }
@@ -973,7 +1016,8 @@ fn open(
     let held = app.is_err() && !SHOWN_AS_OPENED;
     let shown = !held && (main.visible_at_launch() || SHOWN_AS_OPENED);
     window_options.show = shown;
-    window_options.focus = shown;
+    // A background app's window shows without the keyboard ([`run_app`]).
+    window_options.focus = shown && !options.background;
     if !held && !shown {
         log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
     }
@@ -1084,11 +1128,18 @@ fn main_window_options(
             })
             .map(|d| d.id())
     });
+    // The app's display, else, for a window centered on its display, the
+    // one the windows open on (a test's).
+    let display = display.or_else(|| {
+        (!matches!(main.default_position, Some(WindowPosition::At(_))))
+            .then(|| crate::window::default_display(cx))
+            .flatten()
+    });
     let bounds = match main.default_position {
         Some(WindowPosition::At(p)) => {
             gpui::Bounds::new(gpui::point(gpui::px(p.x.0), gpui::px(p.y.0)), size)
         }
-        _ => gpui::Bounds::centered(display, size, cx),
+        _ => crate::window::centered(display, size, cx),
     };
     let window_bounds = match main.default_mode {
         Some(WindowMode::Maximized) => gpui::WindowBounds::Maximized(bounds),
@@ -1136,7 +1187,19 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
             }
         })
         .detach();
+        let background = options.background;
+        if background {
+            crate::window::run_in_background(cx);
+        }
+        crate::window::place_windows(options.display, options.keep_size, cx);
         match open(source, options, cx) {
+            // Shown without activating anything: the window that would have
+            // the keyboard.
+            Ok((handle, true)) if background => {
+                let _ = handle.update(cx, |_, window, cx| {
+                    crate::window::show_window(window, true, cx)
+                });
+            }
             Ok((_, true)) => cx.activate(true),
             // Hidden: the app stays where the user is.
             Ok((_, false)) => {}

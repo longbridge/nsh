@@ -53,8 +53,11 @@ pub(crate) async fn drawn(window: AnyWindowHandle, cx: &mut AsyncApp) -> bool {
     let start = std::time::Instant::now();
     while !done.get() {
         if start.elapsed() > Duration::from_secs(1) {
-            log::warn!("test: the window draws no frames");
-            break;
+            // Covered by other windows (a background app's under the app
+            // the user works in), hidden or minimized: drawn here, so its
+            // frame has everything changed so far.
+            log::debug!("test: the window draws no frames; drawing it");
+            return in_window(window, cx, |window, cx| window.draw(cx).clear(cx)).is_some();
         }
         sleep(cx, 4).await;
     }

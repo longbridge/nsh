@@ -9485,8 +9485,22 @@ impl<M: TextEngine> Core<M> {
             this.set_left_behind(cell, false);
             this.set_spare(cell, false);
             if std::mem::take(&mut this.nodes[cell as usize].relaid) {
+                // A cell that waits to be made (`pace.rs`) made none of
+                // its views: they wait with it, placed as culled views
+                // are, so the ones that show are made when the cell is,
+                // not behind every view that waits out of sight.
+                let waits = {
+                    let node = &this.nodes[cell as usize];
+                    !node.created && node.culled
+                };
                 let children = std::mem::take(&mut this.nodes[cell as usize].children);
                 for &child in &children {
+                    if waits {
+                        let node = &mut this.nodes[child as usize];
+                        if !node.created && !node.is_layout_root() {
+                            node.culled = true;
+                        }
+                    }
                     this.emit_frames(child);
                 }
                 this.nodes[cell as usize].children = children;
