@@ -386,7 +386,6 @@ password required right after sleep) to run tests that way.
 
 ## Not implemented, or different
 
-- **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
 - **`brightness()` above 1** is not drawn. **Blend modes** are the layer's `compositingFilter`
   (`multiplyBlendMode` … `plusD` / `plusL`), set on the view's own layer — its content, fill and clipped-child layers
   are its sublayers — and cleared for `normal`; a change never moves it between layers (`visual.rs`).
