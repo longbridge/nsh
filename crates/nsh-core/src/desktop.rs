@@ -805,8 +805,9 @@ impl MenuItem {
     /// Expands [`inline`](Self::Submenu::inline) submenus into their items
     /// between separators (no leading or trailing separator, label not
     /// shown), for the desktops. Nested non-inline submenus are kept;
-    /// their children are expanded the same way. iOS header menus keep
-    /// inline sections as they are.
+    /// their children are expanded the same way. A disabled inline section
+    /// disables the items it brings, as iOS disables a disabled section's
+    /// children. iOS header menus keep inline sections as they are.
     #[doc(hidden)]
     pub fn with_inline_expanded(items: &[MenuItem]) -> Vec<MenuItem> {
         let mut out = Vec::new();
@@ -814,13 +815,19 @@ impl MenuItem {
             match item {
                 MenuItem::Submenu {
                     items,
+                    enabled,
                     inline: true,
                     ..
                 } => {
                     if !out.is_empty() && !matches!(out.last(), Some(MenuItem::Separator)) {
                         out.push(MenuItem::Separator);
                     }
-                    out.extend(Self::with_inline_expanded(items));
+                    let expanded = Self::with_inline_expanded(items);
+                    if *enabled {
+                        out.extend(expanded);
+                    } else {
+                        out.extend(expanded.into_iter().map(MenuItem::disabled));
+                    }
                     if !matches!(out.last(), Some(MenuItem::Separator) | None) {
                         out.push(MenuItem::Separator);
                     }
@@ -850,6 +857,33 @@ impl MenuItem {
             out.pop();
         }
         out
+    }
+
+    /// This item, disabled: an action can't be chosen, a submenu can't be
+    /// opened. A separator stays as it is.
+    fn disabled(self) -> MenuItem {
+        match self {
+            MenuItem::Action(action) => MenuItem::Action(MenuAction {
+                enabled: false,
+                ..action
+            }),
+            MenuItem::Submenu {
+                label,
+                items,
+                icon,
+                symbol,
+                inline,
+                ..
+            } => MenuItem::Submenu {
+                label,
+                enabled: false,
+                items,
+                icon,
+                symbol,
+                inline,
+            },
+            MenuItem::Separator => MenuItem::Separator,
+        }
     }
 
     /// Calls `f` with the icon of every item of `items`, submenus' too.
@@ -1393,6 +1427,72 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             ["A", "—", "B", "—", "C"]
+        );
+    }
+
+    #[test]
+    fn a_disabled_inline_section_disables_its_items() {
+        let action = |label: &str| {
+            MenuItem::Action(MenuAction {
+                id: 1,
+                label: label.into(),
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                role: None,
+                when: Default::default(),
+                icon: None,
+                symbol: None,
+                destructive: false,
+            })
+        };
+        let section = |enabled: bool| MenuItem::Submenu {
+            label: "Group".into(),
+            enabled,
+            items: vec![
+                action("B"),
+                MenuItem::Submenu {
+                    label: "More".into(),
+                    enabled: true,
+                    items: vec![action("C")],
+                    icon: None,
+                    symbol: None,
+                    inline: false,
+                },
+            ],
+            icon: None,
+            symbol: None,
+            inline: true,
+        };
+        let enabled = |items: &[MenuItem]| {
+            items
+                .iter()
+                .map(|i| match i {
+                    MenuItem::Action(a) => (a.label.clone(), a.enabled),
+                    MenuItem::Submenu { label, enabled, .. } => (label.clone(), *enabled),
+                    MenuItem::Separator => ("—".into(), true),
+                })
+                .collect::<Vec<_>>()
+        };
+        let off = MenuItem::with_inline_expanded(&[action("A"), section(false)]);
+        assert_eq!(
+            enabled(&off),
+            [
+                ("A".into(), true),
+                ("—".into(), true),
+                ("B".into(), false),
+                ("More".into(), false)
+            ]
+        );
+        let on = MenuItem::with_inline_expanded(&[action("A"), section(true)]);
+        assert_eq!(
+            enabled(&on),
+            [
+                ("A".into(), true),
+                ("—".into(), true),
+                ("B".into(), true),
+                ("More".into(), true)
+            ]
         );
     }
 }
