@@ -1864,8 +1864,9 @@ pub enum ScreenProp {
     /// shown one with a setting decides; the core sends the result as
     /// [`Command::Orientations`].
     ///
-    /// [`crate::ModalConfig::PORTRAIT`] bits.
-    #[prop(ios = "supportedOrientations", android = "supportedOrientations", with = crate::js::host_values::page_orientations, reset = ScreenProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = SCREEN)]
+    /// [`crate::ModalConfig::PORTRAIT`] bits. `shared`: a dialog's
+    /// `supportedOrientations` is [`ModalProp::Orientations`].
+    #[prop(ios = "supportedOrientations", android = "supportedOrientations", with = crate::js::host_values::page_orientations, reset = ScreenProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = SCREEN, shared)]
     Orientations(u8),
 }
 
