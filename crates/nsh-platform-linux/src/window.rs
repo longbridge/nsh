@@ -179,7 +179,8 @@ fn activate(surface: &Rc<Surface>, window: &gtk::Window) {
 /// itself whether a new window takes the focus.
 fn show_inactive(window: &gtk::Window) {
     if in_background() && !window.is_visible() {
-        window.realize();
+        // The widget, not its native surface: `gtk::Native` has its own `realize`.
+        WidgetExt::realize(window);
         #[cfg(feature = "dev")]
         if let Some(surface) = window.surface() {
             crate::xtest::no_focus_on_map(&surface);
