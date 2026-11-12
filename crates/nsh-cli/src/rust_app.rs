@@ -1706,6 +1706,9 @@ panic = \"abort\"
         let mut hash = Sha256::new();
         hash.update(triple);
         hash.update(env!("CARGO_PKG_VERSION"));
+        // What the hack leaves out: a hack written before a change to it
+        // is written again.
+        hash.update(format!("{HOST_ONLY_FEATURES:?}"));
         let mut manifests = vec![ws.join("Cargo.toml")];
         if let Ok(entries) = fs::read_dir(ws) {
             let mut members: Vec<PathBuf> = entries
@@ -3898,6 +3901,43 @@ mod tests {
         // WebKitGTK's crates are the host's alone.
         assert!(!hack.contains("webkit6"), "{hack}");
         assert!(!hack.contains("soup3"), "{hack}");
+    }
+
+    /// A dependency a host's feature turns on stays in the hack when
+    /// another feature the platform has turns it on too.
+    #[test]
+    fn the_hack_keeps_what_another_feature_needs() {
+        let crates_io = "registry+https://github.com/rust-lang/crates.io-index";
+        let metadata = serde_json::json!({
+            "workspace_members": ["describe", "hack"],
+            "packages": [
+                { "id": "describe", "name": "app-describe", "version": "0.0.0", "source": null, "manifest_path": "/ws/describe/Cargo.toml" },
+                { "id": "hack", "name": "app-hack", "version": "0.0.0", "source": null, "manifest_path": "/ws/hack/Cargo.toml" },
+                {
+                    "id": "linux", "name": "nsh-platform-linux", "version": "0.5.0", "source": null,
+                    "manifest_path": "/nsh/crates/nsh-platform-linux/Cargo.toml",
+                    "features": { "webview": ["dep:webkit6"], "pages": ["dep:webkit6"] },
+                    "dependencies": [{ "name": "webkit6", "rename": null, "optional": true }]
+                },
+                { "id": "webkit", "name": "webkit6", "version": "0.6.1", "source": crates_io, "manifest_path": "/r/Cargo.toml" }
+            ],
+            "resolve": { "nodes": [
+                { "id": "describe", "features": [], "deps": [{ "pkg": "linux", "dep_kinds": [{ "kind": null }] }] },
+                { "id": "hack", "features": [], "deps": [] },
+                { "id": "linux", "features": ["pages", "webview"], "deps": [
+                    { "pkg": "webkit", "dep_kinds": [{ "kind": null }] }
+                ] },
+                { "id": "webkit", "features": [], "deps": [] }
+            ] }
+        });
+        let hack = super::hack_dependencies(
+            &metadata,
+            "app-describe",
+            "app-hack",
+            "x86_64-unknown-linux-gnu",
+        );
+        assert!(hack.contains("features = [\"pages\"] }"), "{hack}");
+        assert!(hack.contains("package = \"webkit6\""), "{hack}");
     }
 
     #[test]
