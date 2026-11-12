@@ -62,7 +62,7 @@
 //! theme's), as the root view has none of its own.
 //!
 //! The status bar has no desktop equivalent. (`AccessibilityFocus`, which
-//! moves keyboard focus when the view can take it, is the mounter's.)
+//! moves the screen reader's focus, is the mounter's: `access::focus`.)
 //!
 //! The clipboard is the display's (`GdkClipboard`, the "CLIPBOARD"
 //! selection): `Clipboard.writeText` sets its text, reads are answered as
