@@ -622,8 +622,9 @@ makes their window point the agent's), so the tests run the same on any display.
 The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network; the dev hosts link it). Its
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
-selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+selector on the model, scrolls the view into view when it is not (the innermost scroll view around it, inside the modal it is in, that
+hides it and can still move it, a gesture at a time: one already at the end a gesture would move it towards,
+`Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
 the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
