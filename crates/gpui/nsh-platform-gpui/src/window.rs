@@ -516,6 +516,19 @@ pub(crate) fn run_in_background(cx: &mut App) {
     native::run_in_background();
 }
 
+/// Runs the app in the background from now on, or no longer, leaving the
+/// platform's app as it is (the tests' is GPUI's test platform's).
+#[cfg(all(test, feature = "shot"))]
+pub(crate) fn set_in_background(on: bool, cx: &mut App) {
+    if on {
+        cx.set_global(Background {
+            key: Cell::new(None),
+        });
+    } else if in_background(cx) {
+        cx.remove_global::<Background>();
+    }
+}
+
 /// Whether the app runs in the background ([`run_in_background`]).
 pub(crate) fn in_background(cx: &App) -> bool {
     cx.has_global::<Background>()
@@ -528,9 +541,16 @@ fn background_key(cx: &App) -> Option<AnyWindowHandle> {
 
 /// Whether `window` has the keyboard (`WindowState.focused`, a field's
 /// caret): it is the active window, or the one that would be in a
-/// background app.
+/// background app while it shows (the system gives a hidden or minimized
+/// window's keyboard to another).
 pub(crate) fn is_active(window: &Window, cx: &App) -> bool {
-    window.is_window_active() || background_key(cx) == Some(window.window_handle())
+    window.is_window_active()
+        || (background_key(cx) == Some(window.window_handle()) && shows(window))
+}
+
+/// On screen: neither hidden nor minimized.
+fn shows(window: &Window) -> bool {
+    native::visible(window) && !native::minimized(window)
 }
 
 /// Activates the app and gives `window` the keyboard (a press in it, its
@@ -604,8 +624,8 @@ fn became_key(handle: AnyWindowHandle, cx: &mut App) {
 }
 
 /// Window `handle` hid or closed: in a background app, when it was the
-/// window that would have the keyboard, the main window `main` becomes it,
-/// as the system gives the keyboard to the next window.
+/// window that would have the keyboard, the main window `main` becomes it
+/// if it shows, as the system gives the keyboard to the next window.
 fn lost_key(handle: AnyWindowHandle, main: Option<AnyWindowHandle>, cx: &mut App) {
     let Some(background) = cx.try_global::<Background>() else {
         return;
@@ -614,7 +634,10 @@ fn lost_key(handle: AnyWindowHandle, main: Option<AnyWindowHandle>, cx: &mut App
         return;
     }
     background.key.set(None);
-    if let Some(main) = main.filter(|&m| m != handle) {
+    let main = main
+        .filter(|&m| m != handle)
+        .filter(|m| m.update(cx, |_, window, _| shows(window)).unwrap_or(false));
+    if let Some(main) = main {
         became_key(main, cx);
     }
 }
@@ -1001,7 +1024,11 @@ fn request(
                 main_opened(surface, window);
             }
         }
-        WindowRequest::Hide => native::hide(window),
+        // An own window hides through [`hide`].
+        WindowRequest::Hide => {
+            native::hide(window);
+            lost_key(window.window_handle(), surface.chrome.window(), cx);
+        }
         WindowRequest::Focus => {
             restore(window, cx);
             focus_window(window, cx);
@@ -1010,6 +1037,9 @@ fn request(
             }
         }
         WindowRequest::Close => {}
+        // A minimized window keeps the keyboard it would have in a
+        // background app, and counts as focused again once restored
+        // ([`is_active`]).
         WindowRequest::Minimize => window.minimize_window(),
         WindowRequest::Restore => restore(window, cx),
         WindowRequest::SetMode(mode) => set_mode(window, mode),
@@ -1559,6 +1589,7 @@ fn destroy(surface: &Surface, w: &Rc<AppWindow>) {
         crate::rt::on_app(move |cx| {
             let _ = handle.update(cx, |_, window, _| {
                 native::set_parent(window, None, false, WindowKind::Normal);
+                native::removing(window);
                 window.remove_window();
             });
             lost_key(handle, main, cx);

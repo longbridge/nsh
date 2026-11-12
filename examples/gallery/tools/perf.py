@@ -120,7 +120,7 @@ def main() -> int:
         "}, 3_600_000);\n"
     )
     command = [args.nsh, "-v", "test", str(test), "--target", args.target, "--fps"]
-    if args.target in ("macos", "windows", "linux"):
+    if args.target in ("macos", "windows", "linux", "gpui"):
         # The active app, as the baseline's runs were (`nsh test` runs these apps in the background by default).
         command.append("--foreground")
     print("$", " ".join(command), file=sys.stderr)
