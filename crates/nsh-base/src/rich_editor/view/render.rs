@@ -135,6 +135,7 @@ fn content(rv: Rv) -> impl IntoElement {
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let (long, lift, armed, sweep) = (rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let over = rv.clone();
+    let claim = rv.clone();
     let placed = rv.clone();
     let height = rv.content_height;
     part(
@@ -152,7 +153,8 @@ fn content(rv: Rv) -> impl IntoElement {
     )
     .on(EventKind::PressDown, move |p: &EventPayload| {
         match (desktop, p) {
-            (true, EventPayload::Press(e)) => {
+            // A checkbox's press is its own: the caret stays where it is.
+            (true, EventPayload::Press(e)) if !down.on_checkbox(e.position) => {
                 down.press(e.position, e.page_position, e.modifiers, e.clicks.max(1))
             }
             (false, _) => down.touch_down(),
@@ -185,8 +187,15 @@ fn content(rv: Rv) -> impl IntoElement {
     })
     // The mouse selects as it drags; a finger scrolls, unless a long press
     // armed its sweep, which selects by words.
+    // Not from a task's checkbox: a responder granted after the pointer
+    // moved takes the press from the view under it, and a hand moves as it
+    // clicks, so the checkbox would miss presses.
     .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
-        if desktop {
+        let page = request.event.page;
+        let on_checkbox = claim
+            .page_shift()
+            .is_some_and(|shift| claim.on_checkbox(Point::new(page.x + shift.x, page.y + shift.y)));
+        if desktop && !on_checkbox {
             request.claim();
         }
     }))
