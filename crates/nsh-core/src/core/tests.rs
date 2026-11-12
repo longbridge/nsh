@@ -39791,3 +39791,65 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         size_pt(40.0, 20.0)
     );
 }
+
+/// A list bound after the turn's budget of views: its cell waits
+/// (`pace.rs`), and what the cell holds is placed with it, so the rows
+/// that show are made in the turn the cell is, down to their leaves, not
+/// behind every view that waits out of sight.
+#[test]
+fn a_list_bound_after_the_mount_budget_makes_the_rows_that_show_at_once() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Repro() -> impl IntoElement {
+        scroll().horizontal().flex_1().child(
+            view()
+                .w(px(1000.0))
+                .h_full()
+                .child(
+                    view()
+                        .flex_row()
+                        .h(px(26.0))
+                        .flex_none()
+                        .children((0..64).map(|_| view().w(px(10.0)).h(px(26.0)))),
+                )
+                .child(
+                    virtual_list(3_usize, |_| {
+                        view().h(px(26.0)).test_id("row").child(
+                            view().child(
+                                view().child(view().w(px(40.0)).h(px(20.0)).test_id("label")),
+                            ),
+                        )
+                    })
+                    .estimated_item_size(px(26.0))
+                    .flex_1(),
+                ),
+        )
+    }
+
+    let mut c = core();
+    c.begin_mount_turn();
+    c.mount_root(&crate::element::Root::of::<Repro>());
+    // One turn: nothing that shows is left for a later one.
+    let items = c.commit().unwrap().items;
+    let frames = |test_id: &str| -> Vec<_> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .map(|id| {
+                items.iter().rev().find_map(|item| match item {
+                    MountItem::Frame { id: i, frame } if *i == id => Some(frame.size),
+                    _ => None,
+                })
+            })
+            .collect()
+    };
+    assert_eq!(frames("row"), vec![Some(size_pt(1000.0, 26.0)); 3]);
+    assert_eq!(frames("label"), vec![Some(size_pt(40.0, 20.0)); 3]);
+}
+
