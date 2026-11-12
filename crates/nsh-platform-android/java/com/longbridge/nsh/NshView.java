@@ -103,10 +103,13 @@ public class NshView extends FrameLayout {
 
     @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-        boolean tracking = touches.onTouch(e);
+        android.view.MotionEvent t = mounter.keyboardTap(e);
+        boolean tracking = touches.onTouch(t);
         // A tracked finger went down: hear the rest of the gesture even if
         // no view takes it.
-        return super.dispatchTouchEvent(e) || tracking;
+        boolean handled = super.dispatchTouchEvent(t) || tracking;
+        if (t != e) t.recycle();
+        return handled;
     }
 
     /**
@@ -361,6 +364,25 @@ public class NshView extends FrameLayout {
      */
     public void setFontScale(float scale) {
         hostFontScale = scale;
+        publishEnvironment(getRootWindowInsets());
+    }
+
+    /**
+     * Insets the host app adds to the safe area, like UIKit's
+     * {@code additionalSafeAreaInsets}: for its own UI that floats over this
+     * view, such as a tab bar drawn over the content. They add to the parts
+     * of the system bars the view sits under, and {@code safeAreaInsets()}
+     * reads the sum, so content can scroll under that UI and still end
+     * clear of it. Pages already shown follow a change. Call it on the UI
+     * thread.
+     *
+     * @param left   pixels added on the left
+     * @param top    pixels added at the top
+     * @param right  pixels added on the right
+     * @param bottom pixels added at the bottom
+     */
+    public void setAdditionalSafeAreaInsets(int left, int top, int right, int bottom) {
+        additional = new int[] {Math.max(0, top), Math.max(0, right), Math.max(0, bottom), Math.max(0, left)};
         publishEnvironment(getRootWindowInsets());
     }
 
@@ -830,8 +852,15 @@ public class NshView extends FrameLayout {
             mounter.keyboard(ime > 0 && !systemPans()
                     ? at[1] + getHeight() - Math.round(ime) : Integer.MAX_VALUE);
         }
+        // The host's own floating UI (setAdditionalSafeAreaInsets), on top of
+        // the system bars'; the keyboard keeps measuring from the view's edge.
+        top += additional[0];
+        right += additional[1];
+        bottom += additional[2];
+        left += additional[3];
         Configuration c = getResources().getConfiguration();
         boolean dark = (c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        float[] previous = safe;
         safe = new float[] {top / density, right / density, bottom / density, left / density};
         java.util.Locale locale = hostLocale != null ? hostLocale : java.util.Locale.getDefault();
         float fontScale = hostFontScale > 0 && !Float.isInfinite(hostFontScale) ? hostFontScale : c.fontScale;
@@ -857,6 +886,9 @@ public class NshView extends FrameLayout {
                 // 14 keeps the first day of the week and the temperature unit
                 // in its extension.
                 java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
+        // Screens report their own insets only when their options change, so
+        // a page already shown would keep the old safe area.
+        if (!java.util.Arrays.equals(previous, safe)) mounter.reportAllScreenInsets();
     }
 
     /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
@@ -930,6 +962,9 @@ public class NshView extends FrameLayout {
     /** TalkBack turning on or off: `screenReaderEnabled()`. */
     private final android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener screenReader =
             enabled -> publishEnvironment(getRootWindowInsets());
+
+    /** The host's additional safe-area insets (px: top, right, bottom, left). */
+    private int[] additional = new int[4];
 
     /** The safe-area insets last published (dp: top, right, bottom, left). */
     private float[] safe = new float[4];

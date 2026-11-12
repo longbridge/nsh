@@ -127,13 +127,10 @@ pub(crate) fn state(hwnd: HWND) -> Option<WindowState> {
     with_screens(|screens| {
         let screen = screen_of(screens, hwnd, rect)?;
         // SAFETY: plain queries on a live window.
-        let (minimized, shown, foreground) = unsafe {
-            (
-                IsIconic(hwnd).as_bool(),
-                IsWindowVisible(hwnd).as_bool(),
-                GetForegroundWindow() == hwnd,
-            )
-        };
+        let (minimized, shown) =
+            unsafe { (IsIconic(hwnd).as_bool(), IsWindowVisible(hwnd).as_bool()) };
+        // In a background app: the window that would have the keyboard.
+        let foreground = window::foreground() == hwnd;
         let full = window::is_full_screen(hwnd);
         let maximized = !full
             && (zoomed(hwnd) || (minimized && placement.flags.contains(WPF_RESTORETOMAXIMIZED)));

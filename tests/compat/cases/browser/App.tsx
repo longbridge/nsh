@@ -8,6 +8,7 @@ import BasePopupAnchorsDesktop from "./base-popup-anchors-desktop";
 import BasePopupLooks from "./base-popup-looks";
 import BasePopupsDesktop from "./base-popups-desktop";
 import BaseSelectDesktop from "./base-select-desktop";
+import BaseTooltipGracePeriodDesktop from "./base-tooltip-grace-period-desktop";
 import PropsPlatformWeb from "./props-platform-web";
 import PropsViewWebElement from "./props-view-web-element";
 import PropsTextScaling from "./props-text-scaling";
@@ -26,6 +27,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-select-desktop": BaseSelectDesktop,
   "base-hover-card-desktop": BaseHoverCardDesktop,
   "base-popup-anchors-desktop": BasePopupAnchorsDesktop,
+  "base-tooltip-grace-period-desktop": BaseTooltipGracePeriodDesktop,
 };
 const shown = signal("");
 

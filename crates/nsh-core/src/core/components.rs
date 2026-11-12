@@ -649,6 +649,10 @@ pub(super) struct Components {
     /// The language the app asked to show in (`Some(None)`: the user's
     /// again), for the engine ([`Core::take_locale_request`]).
     pub(super) locale_request: Option<Option<crate::platform::Locale>>,
+    /// The app listened to quit requests at the last commit: the platform
+    /// was told its quit requests go to the app
+    /// ([`crate::desktop::DesktopCommand::SetQuitOnRequest`]).
+    asks_quit: bool,
     /// Functions for the platform's main thread, for the engine
     /// ([`Core::take_main_thread_tasks`]).
     main_thread: Vec<crate::main_thread::MainThreadTask>,
@@ -762,6 +766,7 @@ impl Default for Components {
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
             locale_request: None,
+            asks_quit: false,
             main_thread: Vec::new(),
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
@@ -1282,6 +1287,37 @@ impl<M: TextEngine> Core<M> {
         }
         self.apply_actions();
         self.quit_pending()
+    }
+
+    /// The user asked to quit while the app listens to quit requests:
+    /// each listener hears it, oldest first.
+    fn quit_requested(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.quit_requests.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a quit request listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// Tells the platform whether its quit requests go to the app, when
+    /// that changed since the last call (a listener came or went): whether
+    /// it did.
+    pub(super) fn sync_quit_requests(&mut self) -> bool {
+        let asks = !self.components.executor.quit_requests.borrow().is_empty();
+        if asks == self.components.asks_quit {
+            return false;
+        }
+        self.components.asks_quit = asks;
+        let _ = self.apply_op(crate::Op::Command {
+            id: crate::ROOT_ID,
+            command: crate::Command::Desktop(Box::new(
+                crate::desktop::DesktopCommand::SetQuitOnRequest(!asks),
+            )),
+        });
+        true
     }
 
     /// Whether the work quit listeners started is still running.
@@ -5235,6 +5271,12 @@ impl<M: TextEngine> Core<M> {
                 }
                 NotificationCommand::Close(id)
             }
+            NotificationAction::CloseAll => {
+                if !available {
+                    return;
+                }
+                NotificationCommand::CloseAll
+            }
             NotificationAction::SetBadge(count) => {
                 if !allowed {
                     return;
@@ -6150,6 +6192,10 @@ impl<M: TextEngine> Core<M> {
                             if id == crate::ROOT_ID =>
                         {
                             self.components.runtime.main_close_pressed(*reason);
+                        }
+                        crate::desktop::WindowEvent::QuitRequest if id == crate::ROOT_ID => {
+                            self.quit_requested();
+                            return true;
                         }
                         _ => {}
                     }

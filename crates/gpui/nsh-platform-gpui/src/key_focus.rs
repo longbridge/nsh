@@ -102,7 +102,9 @@ pub(crate) fn pointer_down(surface: &Surface, hit: &NshView) {
     clear(surface);
 }
 
-/// A view was removed: if it holds the focused stop, the focus goes.
+/// A view was removed: if it holds the focused stop, the focus goes, at
+/// once (a removal animation or a departing screen keeps it attached a
+/// while, when Return and Space must not press it).
 pub(crate) fn detached(surface: &Surface, view: &NshView) {
     let Some(stop) = focused(surface) else {
         return;
@@ -110,8 +112,10 @@ pub(crate) fn detached(surface: &Surface, view: &NshView) {
     let mut at = Some(stop.clone());
     while let Some(v) = at {
         if v == *view {
-            // Gone: no `onBlur` to a view that no longer exists.
+            // Gone: no `onBlur` to a view that no longer exists. Its state
+            // is cleared all the same: a kept node may be inserted again.
             FOCUSED.with_borrow_mut(|f| f.remove(&surface.key()));
+            crate::input::set_state(surface, &stop, state::FOCUSED, false);
             return;
         }
         at = v.parent_view();

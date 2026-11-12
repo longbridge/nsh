@@ -311,7 +311,7 @@ fn web_desktop_wheel_offsets_are_not_amplified_by_the_table_extent() {
                 ..
             } = item
             {
-                *found.lock().unwrap() = Some(*id);
+                found.lock().unwrap().get_or_insert(*id);
             }
         }
     });
@@ -445,4 +445,76 @@ fn touch_reverse_scroll_after_settling_near_top_stays_one_to_one() {
         scroll_to.is_empty(),
         "a rest within the edge reserve keeps its native offset: {scroll_to:?}"
     );
+}
+
+#[test]
+fn web_scaled_scrollbar_does_not_follow_the_hit_layers_recenter() {
+    let viewport = Size::new(px(1000.0), px(750.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            os: Os::Web,
+            idiom: Idiom::Desktop,
+            window: viewport,
+            ..Default::default()
+        },
+        ..EngineConfig::new(Root::of::<HugeWebTable>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    let vertical = Arc::new(Mutex::new(Vec::new()));
+    let commands = Arc::new(Mutex::new(HashMap::new()));
+    let (v, c) = (vertical.clone(), commands.clone());
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            match item {
+                MountItem::ScrollConfig {
+                    id,
+                    horizontal: false,
+                    ..
+                } => v.lock().unwrap().push(*id),
+                MountItem::Command {
+                    id,
+                    command: Command::ScrollTo { y, .. },
+                } => {
+                    c.lock().unwrap().insert(*id, *y);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let ids = vertical.lock().unwrap().clone();
+    assert_eq!(
+        ids.len(),
+        2,
+        "a hit layer and an independent proportional bar"
+    );
+    let (hit, bar) = (ids[0], ids[1]);
+    let control = app.engine().control();
+    let down = point(px(0.0), px(170_000.0));
+    control.scroll(hit, down, 0);
+    app.wait_for("First row 5000").unwrap();
+    let before = commands.lock().unwrap()[&bar];
+    control.dispatch_event(
+        hit,
+        nsh_core::EventKind::ScrollEnd,
+        nsh_core::EventPayload::Scroll(down),
+    );
+    app.settle();
+    app.wait_for("First row 5000").unwrap();
+    assert_eq!(
+        commands.lock().unwrap()[&bar],
+        before,
+        "settling must leave the visible thumb in place"
+    );
+    let rest = commands.lock().unwrap()[&hit];
+    assert_ne!(rest, down.y, "the invisible hit layer still recenters");
+    control.scroll(hit, point(px(0.0), rest - px(68.0)), 0);
+    app.wait_for("First row 4998").unwrap();
+    control.scroll(bar, point(px(0.0), px((3_000_000.0 - 672.0) / 2.0)), 0);
+    app.wait_for("First row 999990").unwrap();
+    control.scroll(bar, point(px(0.0), px(3_000_000.0 - 672.0)), 0);
+    app.wait_for("First row 1999980").unwrap();
+    control.scroll(bar, Point::default(), 0);
+    app.wait_for("First row 0").unwrap();
 }

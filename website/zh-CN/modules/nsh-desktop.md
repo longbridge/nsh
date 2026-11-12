@@ -274,7 +274,7 @@ Rust 列给出 `WindowRef` 的方法。
 | `state()` | `state()` | 平台报告的它的状态（响应式；[见下](#窗口状态与显示器)）。在非桌面平台上、显示之前和关闭之后为 `null`。 |
 | `titleBar()` | `title_bar()` | 它隐藏的标题栏的区域（[见下](#titlebar)）。 |
 | `set(attributes)` | `set(WindowAttributes)` | 修改给出的[属性](#属性)；其他保持原值。应用的权限不允许的属性保持不变，并给出警告。 |
-| `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。 |
+| `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。macOS 上全屏窗口会先退出全屏再隐藏（与 macOS 应用的窗口一致），再次显示时是普通窗口。 |
 | `focus()` | `focus()` | 显示它，提到所在层级的最前并给它键盘焦点；应用随之激活。窗口保持原有层级。 |
 | `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何。应用自己的窗口卸载其内容（`<Window>`：`reason` 为 `"close"` 的 `onOpenChange`）；主窗口像用户关闭它那样关闭，最后一个窗口关闭时应用结束。 |
 | `minimize()`、`restore()` | `minimize()`、`restore()` | 最小化它，或按原来的模式还原：最大化的窗口最小化后还原时仍是最大化。 |
@@ -380,6 +380,7 @@ const Application: {
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
   on(event: "openFiles", listener: (files: { paths: string[] }) => void): () => void;
   on(event: "quit", listener: () => void): () => void;
+  on(event: "quitRequest", listener: () => void): () => void;
 };
 ```
 
@@ -390,6 +391,7 @@ const Application: {
 | `on("secondInstance", listener)` | `next_second_instance()` | 应用运行时再次被启动（[单实例](#单实例)）。 |
 | `on("openFiles", listener)` | `next_open_files()` | 系统用应用声明的类型的文件打开了它（[打开文件](#打开文件)）。 |
 | `on("quit", listener)` | `on_app_quit(f)` | 应用正在退出：运行它的清理（[退出](#退出)）。 |
+| `on("quitRequest", listener)` | `on_quit_request(f)` | 用户要求退出；监听期间由应用决定何时退出（[退出](#退出)）。 |
 
 `Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（为 Dock 保留的隐藏窗口、托盘图标）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
 
@@ -410,28 +412,29 @@ async function changeLanguage(language: string) {
 
 ### 退出
 
-「退出」由应用自己负责，就像 GPUI 应用自己处理 `Quit` 动作。应用菜单的 `{ role: "quit" }` 项和它的快捷键会立即退出。
-需要先询问用户的应用（有未保存的修改、正在上传）在菜单里放一个自己的「退出」项，绑定退出快捷键，询问之后再调用 `quit()`：
+「退出」由应用自己负责，就像 GPUI 应用自己处理 `Quit` 动作。没有监听 `quitRequest` 时，应用菜单的 `{ role: "quit" }`
+项和平台的退出快捷键（Cmd+Q、Ctrl+Q）会立即退出。需要先询问用户的应用（有未保存的修改、正在上传）用
+`Application.on("quitRequest", listener)`（Rust：`on_quit_request`）监听它，与 AppKit 的 `applicationShouldTerminate:`
+相同：此后「退出」项、退出快捷键和 Dock 的「退出」都交给 listener，应用不会退出；应用询问之后调用 `quit()`，`quit()`
+总会退出。最后一个 listener 停止后，「退出」项和快捷键恢复立即退出。系统结束应用（用户注销、关机）时不会询问。
+它适用于 macOS、Windows 和 Linux 的独立应用；拥有窗口的 GPUI 应用以 `CloseRequest::Quit` 收到这个请求。
 
 ```rust tabs
 use nsh_core::{
-    desktop::MenuItem,
-    element::desktop::{on_app_quit, quit, set_application_menu},
+    element::desktop::{on_app_quit, on_quit_request, quit},
     prelude::*,
 };
 
 #[component]
 fn Editor() -> impl IntoElement {
     let dirty = signal(false);
-    set_application_menu(vec![MenuItem::submenu("File", vec![
-        MenuItem::new("Quit").shortcut("mod+q").on_select(move || {
-            if dirty.get_untracked() {
-                ask_to_save(); // 它的「退出」按钮调用 `quit()`
-            } else {
-                quit();
-            }
-        }),
-    ])]);
+    on_quit_request(move || {
+        if dirty.get_untracked() {
+            ask_to_save(); // 它的「退出」按钮调用 `quit()`
+        } else {
+            quit();
+        }
+    });
     // 不论应用怎样退出都会运行；它不能让应用继续运行。
     on_app_quit(move || async move { save_session().await });
     editor()
@@ -439,15 +442,10 @@ fn Editor() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Application, Menu } from "nsh/desktop";
+import { Application } from "nsh/desktop";
 
 function Editor() {
-  Menu.setApplicationMenu([
-    {
-      label: "File",
-      submenu: [{ label: "Quit", shortcut: "mod+q", onSelect: () => (dirty() ? askToSave() : Application.quit()) }],
-    },
-  ]);
+  Application.on("quitRequest", () => (dirty() ? askToSave() : Application.quit()));
   // 不论应用怎样退出都会运行；它不能让应用继续运行。
   Application.on("quit", async () => {
     await saveSession();

@@ -45,7 +45,7 @@ use nsh_core::{
     EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
     desktop::{
         CloseReason, DesktopCommand, Key, MenuItem, MenuRole, Shortcut, TitleBarOptions,
-        TitleBarStyle,
+        TitleBarStyle, WindowEvent,
     },
     geometry::{Edges, Points},
 };
@@ -89,6 +89,10 @@ pub(crate) struct Chrome {
     /// The last primary press (ms, surface coordinates), for double
     /// presses.
     last_press: Cell<Option<(u32, f64, f64)>>,
+    /// The app listens to quit requests
+    /// (`DesktopCommand::SetQuitOnRequest(false)`): Ctrl+Q and the Quit
+    /// item ask it ([`ask_quit`]).
+    asks_quit: Cell<bool>,
 }
 
 /// Ties the chrome to the `AppView`'s widgets (`AppView::new`).
@@ -171,6 +175,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => {
             crate::app::quit();
         }
+        DesktopCommand::SetQuitOnRequest(quit) => c.asks_quit.set(!quit),
         // Quits as above, then the runner starts the app again.
         DesktopCommand::Restart => crate::app::restart(),
         // Addressed to a dialog root ([`crate::window`]).
@@ -187,6 +192,21 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             crate::global_shortcut::unregister(surface, *id)
         }
     }
+}
+
+/// The user asked to quit (Ctrl+Q, the Quit item): while the app listens
+/// to quit requests, it hears this one ([`WindowEvent::QuitRequest`]) and
+/// decides, and this is true; false when quitting goes on.
+pub(crate) fn ask_quit(surface: &Surface) -> bool {
+    if !surface.chrome.asks_quit.get() {
+        return false;
+    }
+    surface.event(
+        ROOT_ID,
+        EventKind::Window,
+        EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+    );
+    true
 }
 
 /// The main window's title bar (its `titleBar` attribute).
@@ -841,7 +861,7 @@ fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
 /// about the rest.
 pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
     match role {
-        Some(MenuRole::Quit) if crate::app::quit() => {}
+        Some(MenuRole::Quit) if crate::app::request_quit(surface) => {}
         // A view embedded in another app closes its window, as before.
         Some(MenuRole::Quit) => close(surface),
         // As the user closing it from a menu (`closeOnPress` applies).
@@ -896,5 +916,24 @@ pub(crate) fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>) {
             EventKind::Menu,
             EventPayload::Map(vec![("id", PayloadValue::Number(id as f64))]),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::desktop::DesktopCommand;
+
+    use crate::gtk_test;
+
+    #[test]
+    fn quit_requests_ask_the_app_only_while_it_listens() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            assert!(!super::ask_quit(&surface), "quits as before");
+            super::command(&surface, &DesktopCommand::SetQuitOnRequest(false));
+            assert!(super::ask_quit(&surface), "the app decides");
+            super::command(&surface, &DesktopCommand::SetQuitOnRequest(true));
+            assert!(!super::ask_quit(&surface), "quits again");
+        });
     }
 }

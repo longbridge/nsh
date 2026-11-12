@@ -263,6 +263,8 @@ pub(crate) enum NotificationAction {
     },
     /// Removes the notification called this.
     Close(String),
+    /// Removes every notification of the app's.
+    CloseAll,
     /// Sets the app's badge.
     SetBadge(u32),
     /// The id of the next notification pressed resolves the slot.
@@ -427,6 +429,8 @@ pub(crate) struct Executor {
     pub(crate) quit: Rc<RefCell<super::quit::QuitListeners>>,
     /// The quit listeners' work still running ([`crate::Core::start_quit`]).
     pub(crate) quitting: Rc<std::cell::Cell<usize>>,
+    /// What hears the user ask to quit ([`super::desktop::on_quit_request`]).
+    pub(crate) quit_requests: Rc<RefCell<super::quit::QuitRequestListeners>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
     /// The views' menus' handlers.
