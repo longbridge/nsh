@@ -365,6 +365,24 @@ public class NshView extends FrameLayout {
     }
 
     /**
+     * Insets the host app adds to the safe area, like UIKit's
+     * {@code additionalSafeAreaInsets}: for its own UI that floats over this
+     * view, such as a tab bar drawn over the content. They add to the parts
+     * of the system bars the view sits under, and {@code safeAreaInsets()}
+     * reads the sum, so content can scroll under that UI and still end
+     * clear of it.
+     *
+     * @param left   pixels added on the left
+     * @param top    pixels added at the top
+     * @param right  pixels added on the right
+     * @param bottom pixels added at the bottom
+     */
+    public void setAdditionalSafeAreaInsets(int left, int top, int right, int bottom) {
+        additional = new int[] {Math.max(0, top), Math.max(0, right), Math.max(0, bottom), Math.max(0, left)};
+        publishEnvironment(getRootWindowInsets());
+    }
+
+    /**
      * Runs a JS bundle written by `nsh build` (`bundle.js`); assets come from
      * `assets/` next to it. Bytecode only loads from the APK's own assets
      * ({@link #loadAssetBundle}) or a signed package ({@link #runPackage}):
@@ -830,6 +848,12 @@ public class NshView extends FrameLayout {
             mounter.keyboard(ime > 0 && !systemPans()
                     ? at[1] + getHeight() - Math.round(ime) : Integer.MAX_VALUE);
         }
+        // The host's own floating UI (setAdditionalSafeAreaInsets), on top of
+        // the system bars'; the keyboard keeps measuring from the view's edge.
+        top += additional[0];
+        right += additional[1];
+        bottom += additional[2];
+        left += additional[3];
         Configuration c = getResources().getConfiguration();
         boolean dark = (c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         safe = new float[] {top / density, right / density, bottom / density, left / density};
@@ -930,6 +954,9 @@ public class NshView extends FrameLayout {
     /** TalkBack turning on or off: `screenReaderEnabled()`. */
     private final android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener screenReader =
             enabled -> publishEnvironment(getRootWindowInsets());
+
+    /** The host's additional safe-area insets (px: top, right, bottom, left). */
+    private int[] additional = new int[4];
 
     /** The safe-area insets last published (dp: top, right, bottom, left). */
     private float[] safe = new float[4];
