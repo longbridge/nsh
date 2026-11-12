@@ -831,6 +831,9 @@ impl<'a> Converter<'a> {
             return None;
         }
         *slot = self.inlines(&nodes[open + 1..close]);
+        if let Inline::Link { content, .. } = &mut element {
+            *content = unlink(std::mem::take(content));
+        }
         Some(element)
     }
 
@@ -857,10 +860,10 @@ impl<'a> Converter<'a> {
             Node::Link(link) => out.push(Inline::Link {
                 url: link.url.clone(),
                 title: link.title.clone(),
-                content: self.inlines(&link.children),
+                content: unlink(self.inlines(&link.children)),
             }),
             Node::LinkReference(link) => {
-                let content = self.inlines(&link.children);
+                let content = unlink(self.inlines(&link.children));
                 match self.definitions.get(link.identifier.as_str()) {
                     Some(def) => out.push(Inline::Link {
                         url: def.url.clone(),
@@ -1134,6 +1137,58 @@ fn push_text(out: &mut Vec<Inline>, text: &str) {
         last.push_str(text);
     } else {
         out.push(Inline::text(text));
+    }
+}
+
+/// A link's `content` without the links in it, each replaced by its own
+/// content: links do not contain links (GFM), and the parser still reads a
+/// bare URL in a link's text (`[https://a.dev](https://b.dev)`) as one.
+fn unlink(content: Vec<Inline>) -> Vec<Inline> {
+    if !content.iter().any(has_link) {
+        return content;
+    }
+    let mut out = Vec::with_capacity(content.len());
+    for inline in content {
+        match inline {
+            Inline::Link { content, .. } => extend(&mut out, unlink(content)),
+            mut other => {
+                if let Some(content) = formatted_content(&mut other) {
+                    *content = unlink(std::mem::take(content));
+                }
+                push(&mut out, other);
+            }
+        }
+    }
+    out
+}
+
+fn has_link(inline: &Inline) -> bool {
+    match inline {
+        Inline::Link { .. } => true,
+        Inline::Strong { content }
+        | Inline::Emphasis { content }
+        | Inline::Strikethrough { content }
+        | Inline::Underline { content }
+        | Inline::Highlight { content, .. }
+        | Inline::Superscript { content }
+        | Inline::Subscript { content }
+        | Inline::Small { content } => content.iter().any(has_link),
+        _ => false,
+    }
+}
+
+/// The content of a formatting inline (`Strong`, `Emphasis`, ...).
+fn formatted_content(inline: &mut Inline) -> Option<&mut Vec<Inline>> {
+    match inline {
+        Inline::Strong { content }
+        | Inline::Emphasis { content }
+        | Inline::Strikethrough { content }
+        | Inline::Underline { content }
+        | Inline::Highlight { content, .. }
+        | Inline::Superscript { content }
+        | Inline::Subscript { content }
+        | Inline::Small { content } => Some(content),
+        _ => None,
     }
 }
 

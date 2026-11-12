@@ -4334,6 +4334,7 @@ expect Configure: false true unknown
 expect Extension: bold mark 100 true
 expect Extend: 200 underline true
 expect Define: HEY extension xHI
+expect Suggest: true true
 expect Named: text threw
 expect Editable: false
 expect Both: threw

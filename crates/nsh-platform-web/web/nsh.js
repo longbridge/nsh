@@ -2047,6 +2047,38 @@ class Player {
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
     if (this.readingHosts?.size) this.orderReading();
+    if (this.relating?.size) this.linkRelations();
+  }
+
+  /** The DOM id of view `id`: unique on the page, beside other players. */
+  domId(id) {
+    return `${this.classPrefix}v${id}`;
+  }
+
+  /** The views that name others (`aria-activedescendant`,
+   * `aria-controls`) point at them by DOM id, after the batch made them:
+   * a row may be made after the field naming it. A view named that is
+   * not there yet is looked for again after the next batch. */
+  linkRelations() {
+    const pending = this.relating;
+    this.relating = null;
+    for (const el of pending) {
+      if (el.isConnected === false) continue;
+      const p = el._props ?? {};
+      // The element that keeps the focus: an input's field.
+      const focused = el._field ?? el;
+      for (const [name, id] of [["aria-activedescendant", p.activeDescendant], ["aria-controls", p.controls]]) {
+        if (focused !== el) el.removeAttribute(name);
+        const target = id == null ? null : this.view(id);
+        if (!target) {
+          focused.removeAttribute(name);
+          if (id != null) (this.relating ??= new Set()).add(el);
+          continue;
+        }
+        if (!target.id) target.id = this.domId(id);
+        focused.setAttribute(name, target.id);
+      }
+    }
   }
 
   /** `el` was placed or added in `parent`: when that is a scroll view's
@@ -2745,14 +2777,17 @@ class Player {
     const p = el._props ?? {};
     const set = (name, value) => (value == null || value === false ? el.removeAttribute(name) : el.setAttribute(name, String(value)));
     const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
-    set("role", role);
+    // A combo box that is an input is its field, which keeps the focus
+    // (`fieldAria`).
+    set("role", el._field && p.role === "combobox" ? null : role);
     set("aria-label", p.label ?? el._textLabel);
     set("aria-description", p.hint);
     set("aria-disabled", p.disabled && "true");
     set("aria-selected", p.selected && "true");
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
-    set("aria-expanded", p.expanded);
+    // `false` too: a collapsed combo box or disclosure says so.
+    set("aria-expanded", p.expanded == null ? null : String(p.expanded));
     set("aria-haspopup", p.hasPopup && "true");
     set("aria-pressed", p.pressed);
     set("aria-current", p.current);
@@ -2766,6 +2801,11 @@ class Player {
     set("aria-valuetext", text);
     set("aria-live", p.live);
     set("aria-hidden", p.hidden && "true");
+    if (p.activeDescendant != null || p.controls != null || el._related) {
+      // Linked once the batch is applied (`linkRelations`).
+      el._related = p.activeDescendant != null || p.controls != null;
+      (this.relating ??= new Set()).add(el);
+    }
   }
 
   /** The stops of the keyboard focus (Tab), as `ViewProps::focus_stop`
@@ -2804,8 +2844,18 @@ class Player {
   /** The states of input view `el` that belong on its `field` too: the
    * field is the element screen readers read as the input. */
   fieldAria(el, field) {
-    if (el._props?.invalid) field.setAttribute("aria-invalid", "true");
-    else field.removeAttribute("aria-invalid");
+    const p = el._props ?? {};
+    const set = (name, value) => (value == null || value === false ? field.removeAttribute(name) : field.setAttribute(name, String(value)));
+    set("aria-invalid", p.invalid && "true");
+    // A combo box's field is the combo box: the focus stays in it while
+    // its list is open, and its active descendant is the highlighted row.
+    const combobox = p.role === "combobox";
+    set("role", combobox && "combobox");
+    set("aria-label", combobox && (p.label ?? null));
+    set("aria-expanded", combobox && p.expanded != null ? String(p.expanded) : null);
+    set("aria-haspopup", combobox && p.hasPopup && "listbox");
+    // A field made after the relations takes them (`linkRelations`).
+    if (el._related) (this.relating ??= new Set()).add(el);
   }
 
   /** The keyboard focus reached pressable `el`: `focus:` and `onFocus`. */
@@ -4602,6 +4652,49 @@ class Player {
     clearTimeout(el._wheelZoomTimer);
     el._wheelZoomTimer = setTimeout(() => this.zoomEnded(el, fx, fy), 200);
     return true;
+  }
+
+  /** `onPinch` of Safari's touchpad pinches (gesture events, `phase` 0 /
+   * 1 / 2): the nearest view around the target that listens hears the
+   * pinch from its start to its end; true when it takes it: no view that
+   * pinches natively (a zoomable scroll view, `pinch` values) is nearer,
+   * nor is it one (`input::wheel_listener`). Other browsers send a pinch
+   * as Ctrl + wheel, which `onWheel` hears. */
+  pinchEvent(e, phase) {
+    let p = this.pinching;
+    if (phase === 0) {
+      p = this.pinching = null;
+      const view = this.viewOf(e.target);
+      let nearer = false;
+      for (const el of view ? this.ancestors(view) : []) {
+        const zooms = (this.zooms(el) && el._behavior.pinch) || !!el._gestures?.pinch;
+        if (el._events?.has("onPinch")) {
+          p = this.pinching = { el, takes: !nearer && !zooms, scale: 1 };
+          break;
+        }
+        nearer ||= zooms;
+      }
+    }
+    if (!p) return false;
+    if (!p.el.isConnected) {
+      this.pinching = null;
+      return false;
+    }
+    if (p.takes) e.preventDefault();
+    const r = p.el.getBoundingClientRect();
+    const [pageX, pageY] = this.point(e);
+    // Nothing changes at the end, as on the native backends.
+    const delta = phase === 2 ? 0 : e.scale / (p.scale || 1) - 1;
+    p.scale = e.scale;
+    this.event(p.el._id, "onPinch", {
+      position: { x: e.clientX - r.left, y: e.clientY - r.top },
+      pagePosition: { x: pageX, y: pageY },
+      delta,
+      phase: phase === 0 ? "start" : phase === 1 ? "move" : "end",
+      modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+    });
+    if (phase === 2) this.pinching = null;
+    return p.takes;
   }
 
   /** Safari's touchpad pinches (gesture events; it sends no ctrl+wheel). */
@@ -7579,9 +7672,9 @@ class Player {
     document.addEventListener("selectionchange", () => this.areaSelectionChanged());
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
-    root.addEventListener("gesturestart", (e) => this.gestureZoom(e, 0));
-    root.addEventListener("gesturechange", (e) => this.gesture && this.gestureZoom(e, 1));
-    root.addEventListener("gestureend", (e) => this.gesture && this.gestureZoom(e, 2));
+    root.addEventListener("gesturestart", (e) => this.pinchEvent(e, 0) || this.gestureZoom(e, 0));
+    root.addEventListener("gesturechange", (e) => this.pinchEvent(e, 1) || (this.gesture && this.gestureZoom(e, 1)));
+    root.addEventListener("gestureend", (e) => this.pinchEvent(e, 2) || (this.gesture && this.gestureZoom(e, 2)));
     root.addEventListener("pointermove", (e) => {
       this.mouseMoved(e);
       if (e.pointerType !== "mouse") return;
@@ -8054,32 +8147,56 @@ class Player {
   /**
    * `onWheel` of the nearest view around `e`'s target that listens; true
    * when it takes the wheel: no scroll view is nearer, nor is it one
-   * (`input::wheel_listener`). Deltas are lines for `DOM_DELTA_LINE`,
-   * points otherwise (a page is the viewport's height).
+   * (`input::wheel_listener`). One scroll stays where it went
+   * (`input::WheelLatch`): a view that took it keeps it while it keeps
+   * coming (events 200 ms apart, whichever way it turns, as `wheelLock`
+   * keeps a scroll view's), and a scroll going on in a scroll view
+   * (`wheelLock`) is only observed. Deltas are lines for
+   * `DOM_DELTA_LINE`, points otherwise (a page is the viewport's height).
    */
   wheelEvent(e) {
     if (!this.wheelTracked?.size) return false;
-    const view = this.viewOf(e.target);
-    if (!view) return false;
+    const now = performance.now();
+    const held = this.wheelTaker;
+    let el = null;
+    let takes = false;
+    if (held && now - held.t < 200
+      && held.el.isConnected && held.el._events?.has("onWheel")) {
+      el = held.el;
+      takes = true;
+    } else {
+      [el, takes] = this.wheelListenerOf(e.target) ?? [null, false];
+      const lock = this.wheelLock;
+      if (takes && lock && now - lock.t <= 200 && lock.el.isConnected) takes = false;
+    }
+    this.wheelTaker = takes ? { el, t: now } : null;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    const [pageX, pageY] = this.point(e);
+    const page = e.deltaMode === 2 ? this.size[1] : 1;
+    this.event(el._id, "onWheel", {
+      position: { x: e.clientX - r.left, y: e.clientY - r.top },
+      pagePosition: { x: pageX, y: pageY },
+      delta: { x: e.deltaX * page, y: e.deltaY * page },
+      deltaMode: e.deltaMode === 1 ? "lines" : "points",
+      modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+    });
+    return takes;
+  }
+
+  /** The nearest view around `target` listening to `onWheel`, and whether
+   * it takes the wheel (`input::wheel_listener`): no scroll view is nearer,
+   * nor is it one. */
+  wheelListenerOf(target) {
+    const view = this.viewOf(target);
+    if (!view) return null;
     let scrollSeen = false;
     for (const el of this.ancestors(view)) {
       const scrolls = el._kind === "scroll";
-      if (el._events?.has("onWheel")) {
-        const r = el.getBoundingClientRect();
-        const [pageX, pageY] = this.point(e);
-        const page = e.deltaMode === 2 ? this.size[1] : 1;
-        this.event(el._id, "onWheel", {
-          position: { x: e.clientX - r.left, y: e.clientY - r.top },
-          pagePosition: { x: pageX, y: pageY },
-          delta: { x: e.deltaX * page, y: e.deltaY * page },
-          deltaMode: e.deltaMode === 1 ? "lines" : "points",
-          modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
-        });
-        return !scrollSeen && !scrolls;
-      }
+      if (el._events?.has("onWheel")) return [el, !scrollSeen && !scrolls];
       scrollSeen ||= scrolls;
     }
-    return false;
+    return null;
   }
 
   /** Moves `el` by (`dx`, `dy`), gliding there when `smooth`; once it
