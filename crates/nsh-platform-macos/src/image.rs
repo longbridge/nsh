@@ -136,7 +136,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
         access: surface.native.access(),
-        media_files: Arc::default(),
+        media_files: surface.media_files.borrow().clone(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -356,8 +356,10 @@ impl Transport for UrlSession {
                         .lock()
                         .ok()
                         .and_then(|mut h| h.2.take());
+                    // The redirect not followed is the response (`status`):
+                    // the disk cache drops its copy of the URL.
                     if let Some(refused) = refused {
-                        return Err(refused);
+                        return Ok(Fetched::refused(status, refused));
                     }
                     if let Some(error) = error {
                         return Err(error);

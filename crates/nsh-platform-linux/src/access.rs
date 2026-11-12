@@ -10,7 +10,8 @@
 //!   element), `Generic` otherwise;
 //! - its label (`accessibilityLabel`, or a text view's text; GTK computes
 //!   the name of buttons, links, headings, ... without a label from the
-//!   text inside them), its description (`accessibilityHint`), its value
+//!   text inside them), its description (`accessibilityDescription` and
+//!   `accessibilityHint`), its value
 //!   (`accessibilityValue`: a range for range roles, else read as part of
 //!   the description) and its states (`accessibilityState`,
 //!   `accessibilityElementsHidden`, which hides the subtree, and
@@ -630,11 +631,7 @@ fn spec_for(
     // Outside range roles, a value is only read as part of the
     // description.
     let value_text = value.and_then(|v| v.text.as_deref()).filter(|_| !ranged);
-    let description = match (value_text, a.hint.as_deref()) {
-        (Some(v), Some(h)) => Some(format!("{v}. {h}")),
-        (Some(t), None) | (None, Some(t)) => Some(t.to_owned()),
-        (None, None) => None,
-    };
+    let description = a.help_text(value_text);
     Spec {
         role,
         label,
@@ -2457,6 +2454,24 @@ mod tests {
         let s = spec_for(&button, ViewKind::View, false, None, false);
         assert_eq!(s.range, None);
         assert_eq!(s.description.as_deref(), Some("3 of 10. Plays"));
+        // The app's description goes between the value and the hint.
+        let described = Accessibility {
+            description: Some("The whole album".into()),
+            ..button
+        };
+        let s = spec_for(&described, ViewKind::View, false, None, false);
+        assert_eq!(
+            s.description.as_deref(),
+            Some("3 of 10. The whole album. Plays")
+        );
+        let dialog = Accessibility {
+            role: Role::AlertDialog,
+            label: Some("Delete file?".into()),
+            description: Some("This can't be undone.".into()),
+            ..Default::default()
+        };
+        let s = spec_for(&dialog, ViewKind::View, false, None, false);
+        assert_eq!(s.description.as_deref(), Some("This can't be undone."));
     }
 
     /// `visibility: hidden` hides the view and its subtree as

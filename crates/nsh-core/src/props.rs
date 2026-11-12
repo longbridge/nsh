@@ -249,6 +249,10 @@ pub struct Accessibility {
     pub label: Option<Arc<str>>,
     /// `accessibilityHint`.
     pub hint: Option<Arc<str>>,
+    /// `accessibilityDescription`: more about the element than its name
+    /// (ARIA's `aria-description`): a dialog's message, what a field
+    /// expects.
+    pub description: Option<Arc<str>>,
     /// `role`.
     pub role: AccessibilityRole,
     /// `accessibilityState`.
@@ -265,12 +269,53 @@ pub struct Accessibility {
     /// `accessibilityLevel`: the level of a heading (1 the top), the depth
     /// of a tree item (1 at the top); `None` has none.
     pub level: Option<u32>,
+    /// `accessibilityActiveDescendant`: the view (its native id) that is
+    /// the active one inside this focused view, which keeps the keyboard
+    /// focus (ARIA's `aria-activedescendant`): a combo box's highlighted
+    /// option, a list's cursor row. Resolved by the core from the element
+    /// the app names; `None` when it names none or that element is gone.
+    pub active_descendant: Option<crate::NodeId>,
+    /// `accessibilityControls`: the view (its native id) whose content
+    /// this one controls (ARIA's `aria-controls`): a combo box's listbox,
+    /// a tab's panel. Resolved as [`Accessibility::active_descendant`].
+    pub controls: Option<crate::NodeId>,
 }
 
 impl Accessibility {
     /// True if nothing is set.
     pub fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// What a platform with one place for everything read after the name
+    /// (AT-SPI's and AccessKit's description, AppKit's help, UIKit's
+    /// hint) gets: `value_text` (a value it reads nowhere else), the
+    /// description and the hint, in that order, each a sentence of its
+    /// own (". " between them, or only a space after a part that already
+    /// ends with `.`, `!`, `?` or `…`, nothing after a full-width `。`,
+    /// `！` or `？`); `None` when there is none of them.
+    pub fn help_text(&self, value_text: Option<&str>) -> Option<String> {
+        let mut parts = [
+            value_text,
+            self.description.as_deref(),
+            self.hint.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.is_empty());
+        let first = parts.next()?;
+        let mut out = first.to_owned();
+        for part in parts {
+            // A part that already ends its sentence keeps its own mark: a
+            // full-width one needs no space after it, a Latin one a space.
+            match out.chars().last() {
+                Some('。' | '！' | '？') => {}
+                Some('.' | '!' | '?' | '…') => out.push(' '),
+                _ => out.push_str(". "),
+            }
+            out.push_str(part);
+        }
+        Some(out)
     }
 }
 
@@ -287,6 +332,10 @@ pub enum AccessibilityProp {
     /// `accessibilityHint`: what activating the element does.
     #[prop(js = "accessibilityHint")]
     Hint(Option<Arc<str>>),
+    /// `accessibilityDescription`: more about the element than its name,
+    /// read after it: a dialog's message, what a field expects.
+    #[prop(js = "accessibilityDescription")]
+    Description(Option<Arc<str>>),
     /// `role`: what the element is.
     #[prop(js = "role", with = crate::js::host_values::role, reset = AccessibilityProp::Role(AccessibilityRole::None))]
     Role(AccessibilityRole),
@@ -317,6 +366,16 @@ pub enum AccessibilityProp {
     /// top); others than whole numbers from 1 are none.
     #[prop(js = "accessibilityLevel", with = crate::js::host_values::accessibility_level, reset = AccessibilityProp::Level(None), ts = "number")]
     Level(Option<u32>),
+    /// `accessibilityActiveDescendant`: the element that is the active one
+    /// while this element keeps the keyboard focus (ARIA's
+    /// `aria-activedescendant`): a combo box's highlighted option, a
+    /// list's cursor row. Screen readers read it as it changes.
+    #[prop(js = "accessibilityActiveDescendant", with = crate::js::host_values::active_descendant, reset = AccessibilityProp::ActiveDescendant(None), ts = "ViewRef | null")]
+    ActiveDescendant(Option<crate::element::ElementTarget>),
+    /// `accessibilityControls`: the element whose content this one
+    /// controls (ARIA's `aria-controls`): a combo box's listbox.
+    #[prop(js = "accessibilityControls", with = crate::js::host_values::accessibility_controls, reset = AccessibilityProp::Controls(None), ts = "ViewRef | null")]
+    Controls(Option<crate::element::ElementTarget>),
 }
 
 /// Android's press ripple (`android={{ ripple }}`).

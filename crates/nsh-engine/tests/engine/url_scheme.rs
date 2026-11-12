@@ -338,3 +338,55 @@ fn a_pushed_address_reads_back_at_once_and_an_unknown_history_is_a_type_error() 
         "url: push:myapp://tabs/live replace:myapp://tabs/all wrong:TypeError:myapp://tabs/all done"
     );
 }
+
+/// Hears links on `UrlScheme` and files on `Application.on("openFiles")`,
+/// listening only after a while, so the files reported at the start wait.
+const FILES_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+function App() {
+  const said = signal("");
+  const note = (s: string) => said.set(`${said()} ${s}`);
+  setTimeout(() => {
+    UrlScheme.on("open", ({ url }) => note(`link:${url}`));
+    Application.on("openFiles", ({ paths }) => note(`files:${paths.join(",")}`));
+    note("later:");
+  }, 200);
+  setTimeout(() => note("done"), 1000);
+  return <Text>{`opened:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
+#[cfg(unix)]
+#[test]
+fn opened_files_come_as_paths_apart_from_links() {
+    let launch = [
+        "file:///home/u/a%20b.mp4".to_owned(),
+        "myapp://launch".to_owned(),
+        "file:///home/u/c.mov".to_owned(),
+    ];
+    let text = run_app(
+        bundle_of(FILES_APP, "nsh-open-files"),
+        &["myapp", nsh_core::file_type::FILE_SCHEME],
+        &launch,
+        |control| open(control, "file:///home/u/d.mp4"),
+    );
+    // A slow machine may report the later file before the app listens, and
+    // then it waits in the same batch as the launch files.
+    let apart = "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov files:/home/u/d.mp4 done";
+    let batched =
+        "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov,/home/u/d.mp4 done";
+    assert!(text == apart || text == batched, "{text}");
+}
+
+#[test]
+fn an_app_that_declares_no_file_types_hears_no_file() {
+    let text = run_app(
+        bundle_of(FILES_APP, "nsh-open-no-files"),
+        &["myapp"],
+        &["file:///home/u/a.mp4".to_owned()],
+        |control| open(control, "file:///home/u/d.mp4"),
+    );
+    assert_eq!(text, "opened: later: done");
+}

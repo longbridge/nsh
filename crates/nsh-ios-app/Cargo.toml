@@ -40,5 +40,7 @@ log.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 nsh-platform-ios.workspace = true
+# The app's logs in the unified log (`unified_log`).
+nsh-platform-apple.workspace = true
 # Over-the-air packages of the app's code (`nsh_engine::updates`).
 nsh-engine.workspace = true

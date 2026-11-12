@@ -12,6 +12,7 @@ const malformed = [
   ["bad-structure", '{"cssVars":null}'],
   ["bad-function", '{"cssVars":{"light":{"up":"rgb(255 0 0"}}}'],
   ["bad-length", '{"cssVars":{"light":{"up":"#zz"},"dark":{"up":"12px"}}}'],
+  ["bad-suffix", '{"cssVars":{"light":{"up":"rgb(255 0 0)garbage"}}}'],
 ] as const;
 
 function BaseSetTheme() {

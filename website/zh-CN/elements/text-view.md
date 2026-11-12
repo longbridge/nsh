@@ -240,7 +240,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 ## 流式 AI 回复
 
-随着回复增长传入它，并设置 `options={{ streaming: true }}`（Rust 中是 `MarkdownOptions { streaming: true, .. }`）。仍在到达的文本末尾常常留着未闭合的语法（`**bold`、`` `code ``、`[a link](htt`、刚到达表头的表格）；流式模式会把它显示成闭合后的样子，读者不会看到零散的 `**` 或 `[`。文档块按位置保留：已完成的块保留它们的视图，只有正在写的块会重新生成，因此长回复的更新依然很轻。
+随着回复增长传入它，并设置 `options={{ streaming: true }}`（Rust 中是 `MarkdownOptions { streaming: true, .. }`）。仍在到达的文本末尾常常留着未闭合的语法（`**bold`、`` `code ``、`[a link](htt`、刚到达表头的表格）；流式模式会把它显示成闭合后的样子，读者不会看到零散的 `**` 或 `[`。含义要看后面字符的末行在这一行结束时显示：单独的列表标记、段落下的 `-` 或 `=` 行、代码围栏的开头行或打了一半的收尾围栏，因此列表项、标题和代码块一出现就是最终的样子。词内的 `*`（`a*b`）保持原样。回复结束后（关闭 `streaming`），文本按原样解析。文档块按位置保留：已完成的块保留它们的视图，只有正在写的块会重新生成，因此长回复的更新依然很轻。
 
 `streamingCaret` 跟随文档末尾：以行内方式显示在最后一段文本的末尾，无论最后一个块在哪里结束（段落、列表项、代码块、表格的最后一个单元格）；否则单独一行显示在最后一个块之后（分隔线、渲染函数的内容）。回复结束后去掉它。
 
@@ -416,6 +416,8 @@ import { Image, View } from "nsh";
   renderMath={(math) => <MathView tex={math.tex} display={math.display} />}
 />
 ```
+
+单独成段的图片（一段或一个表格单元格里只有图片）放在与正文同宽的框里：`w-full` 填满这个宽度，`max-w-full` 让更宽的图片收在其中，固定宽度的图片保持自己的宽度，靠行首排列。位于一行文字中的图片保持它要求的尺寸。
 
 `Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致；无法解析的 TeX 以等宽字体显示其源码。
 
