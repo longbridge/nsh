@@ -6676,7 +6676,10 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
+        // What its classes and styles say of `pointer-events` was worked out
+        // before the view was there to hear it.
         if node.props.is_some()
+            || node.class_pointer != crate::props::PointerEvents::Auto
             || node.spare
             || node.hidden_in_text
             || node.list.as_ref().is_some_and(|l| l.parent)
