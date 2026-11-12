@@ -1605,13 +1605,6 @@ fn setup(view: &NSView) {
 #[derive(Clone)]
 pub(crate) struct NshView(Retained<ViewObj>);
 
-impl NshView {
-    /// The surface owning this view, including child views with no root hooks.
-    pub(crate) fn surface(&self) -> Option<std::rc::Rc<Surface>> {
-        self.0.keyboard_surface()
-    }
-}
-
 impl std::fmt::Debug for NshView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.state();
