@@ -9892,6 +9892,31 @@ fn measure_leaf<M: TextEngine>(
     cx: Option<&mut LeafContext<M::Prepared>>,
     style: &taffy::Style,
 ) -> taffy::LayoutOutput {
+    use taffy::{MaybeResolve as _, ResolveOrZero as _};
+    // An input's text scrolls within its maximum height: its content is
+    // never taller than its content box can be. Taffy leaves the maximum out
+    // of the content size it asks for a flex basis (`SizingMode::ContentSize`)
+    // and a column container sizes itself from the flex bases, so without
+    // this a long value grew the input's parent past the input.
+    let input_max_height = match &cx {
+        Some(LeafContext::Text(cx)) if cx.field.is_some() => {
+            let parent = input.parent_size;
+            let max: Option<f32> = style
+                .max_size
+                .height
+                .maybe_resolve(parent.height, |_, _| 0.0);
+            max.map(|max| {
+                let inset = (style.padding.resolve_or_zero(parent.width, |_, _| 0.0)
+                    + style.border.resolve_or_zero(parent.width, |_, _| 0.0))
+                .vertical_axis_sum();
+                match style.box_sizing {
+                    taffy::BoxSizing::BorderBox => (max - inset).max(0.0),
+                    taffy::BoxSizing::ContentBox => max,
+                }
+            })
+        }
+        _ => None,
+    };
     taffy::compute_leaf_layout(
         input,
         style,
@@ -9923,7 +9948,10 @@ fn measure_leaf<M: TextEngine>(
                         .width
                         .or(field.and(max_width))
                         .unwrap_or(measured.width.0),
-                    height: known.height.unwrap_or(measured.height.0),
+                    height: known.height.unwrap_or(match input_max_height {
+                        Some(max) => measured.height.0.min(max),
+                        None => measured.height.0,
+                    }),
                 }
             }
             Some(LeafContext::Image(Some(natural))) => {
