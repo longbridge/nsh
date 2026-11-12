@@ -157,6 +157,41 @@ fn declining_a_controlled_request_returns_the_sheet() {
         .unwrap();
 }
 
+/// A swipeable sheet holding an input over its handle.
+#[component]
+fn EditingScreen() -> impl IntoElement {
+    let editing = signal(false);
+    sheet().open(Some(true)).close_on_swipe(true).child(
+        view()
+            .h(px(200.0))
+            .child(text(move || format!("editing:{}", editing.get())))
+            .child(
+                nsh_base::input()
+                    .test_id("field")
+                    .h(px(40.0))
+                    .on_focus(move || editing.set(true))
+                    .on_blur(move || editing.set(false)),
+            )
+            .child(
+                view()
+                    .test_id("handle")
+                    .h(px(44.0))
+                    .child(text("Sheet body")),
+            ),
+    )
+}
+
+#[test]
+fn dragging_a_sheet_ends_editing_in_it() {
+    let mut app = start::<EditingScreen>();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    app.type_text("id:field", "hi").unwrap();
+    app.wait_for("text:editing:true").unwrap();
+    app.drag("id:handle", point(px(0.0), px(20.0))).unwrap();
+    app.wait_for("text:editing:false").unwrap();
+    app.wait_for("Sheet body").unwrap();
+}
+
 #[test]
 fn swiping_is_opt_in() {
     let mut app = start::<Screen>();

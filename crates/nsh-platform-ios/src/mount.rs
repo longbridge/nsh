@@ -156,6 +156,9 @@ struct Gestures {
 struct PanScroll {
     view: Retained<UIScrollView>,
     offset: f32,
+    /// `onPanStart` went out: it waits for the panel to move, so scrolling
+    /// alone does not start a sheet's drag (which ends editing).
+    started: bool,
 }
 
 /// Pull-to-refresh. `UIRefreshControl` throws under Mac Catalyst's Mac
@@ -4097,6 +4100,7 @@ impl Mounter {
                     view: scroll.retain(),
                     offset: (scroll.contentOffset().y + scroll.adjustedContentInset().top).max(0.0)
                         as f32,
+                    started: false,
                 });
                 break;
             }
@@ -4189,7 +4193,8 @@ impl Mounter {
             if let Some(s) = self.slot_mut(id) {
                 (s.gesture_start[0], s.gesture_start[1]) = (x, y);
             }
-            if events.contains(EventKind::PanStart) {
+            let deferred = self.slot(id).is_some_and(|s| s.pan_scroll.is_some());
+            if events.contains(EventKind::PanStart) && !deferred {
                 self.control
                     .dispatch_event(id, EventKind::PanStart, payload(self));
             }
@@ -4209,6 +4214,15 @@ impl Mounter {
                     .map_or(start[1] + t.y as f32, |scroll| {
                         (start[1] + t.y as f32 - scroll.offset).max(0.0)
                     });
+                let begins = y != start[1]
+                    && self
+                        .slot_mut(id)
+                        .and_then(|s| s.pan_scroll.as_mut())
+                        .is_some_and(|scroll| !std::mem::replace(&mut scroll.started, true));
+                if begins && events.contains(EventKind::PanStart) {
+                    self.control
+                        .dispatch_event(id, EventKind::PanStart, payload(self));
+                }
                 self.animator.set(n, y);
                 if let Some(scroll) = self.slot(id).and_then(|s| s.pan_scroll.as_ref()) {
                     let offset = scroll.view.contentOffset();

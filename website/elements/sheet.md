@@ -85,7 +85,8 @@ The panel fits its content, including short menus; use `popupStyle` or a child's
 The app draws its own handle, which can be any view inside the panel. On iOS, an inner vertical `Scroll` or `List`
 consumes the drag until its top and hands the remaining downward motion to the panel within the same gesture.
 On Android, desktops and the web, dragging the handle or content outside a scroll uses their native pan support;
-inner scrolls keep their platform's normal gesture arbitration. Setting `closeOnSwipe` to false keeps the panel
+inner scrolls keep their platform's normal gesture arbitration. When the panel starts to follow the finger, editing
+ends: the focused input inside blurs and the software keyboard goes down; scrolling an inner list keeps it. Setting `closeOnSwipe` to false keeps the panel
 stationary and preserves the mounted content and scroll position. Other sides retain their existing behavior.
 
 ## Native sheets
