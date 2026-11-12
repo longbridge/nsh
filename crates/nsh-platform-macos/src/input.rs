@@ -867,6 +867,18 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     }
 }
 
+/// The innermost span hearing a context menu at this UTF-16 character.
+/// Hover-only inner spans leave the surrounding span's action reachable.
+fn context_link(links: &[nsh_core::TextLink], at: u32) -> Option<nsh_core::TextLink> {
+    links
+        .iter()
+        .filter(|link| {
+            link.start <= at && at < link.end && link.events.contains(EventKind::ContextMenu)
+        })
+        .min_by_key(|link| link.end - link.start)
+        .copied()
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it. Text
 /// fields are AppKit's views, which show their own menu.
@@ -874,6 +886,32 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return;
     };
+    if !hit.native {
+        let (lx, ly) = local(surface, &hit.view, x, y);
+        let span = {
+            let state = hit.view.state();
+            crate::text::char_at(&state, lx, ly).and_then(|at| {
+                state
+                    .text
+                    .as_ref()
+                    .and_then(|text| context_link(&text.text.links, at))
+            })
+        };
+        if let Some(link) = span {
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(lx), Points(ly)),
+                point(Points(x), Points(y)),
+                modifiers(flags),
+                Some(nsh_core::PointerType::Mouse),
+            );
+            surface.event(
+                link.node,
+                EventKind::ContextMenu,
+                EventPayload::ContextMenu(event),
+            );
+            return;
+        }
+    }
     for v in chain(&hit.view) {
         let (id, listens, input) = {
             let s = v.state();
@@ -920,7 +958,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     }
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
-            activate(surface, &view, "keyboard");
+            activate(surface, view.id(), view.state().events, "keyboard");
         }
         return true;
     }
@@ -1076,12 +1114,11 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
 /// Presses `view` with no pointer to report, as Return and Space press a
 /// focused control and `AXPress` presses any: its `onPressDown`,
 /// `onPressUp` and `onPress`. `from` names the source in the log.
-fn activate(surface: &Surface, view: &NshView, from: &str) {
-    let events = view.state().events;
+fn activate(surface: &Surface, node: nsh_core::NodeId, events: nsh_core::EventMask, from: &str) {
     for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
         if events.contains(kind) {
-            log::debug!(target: "nsh::input", "{} on {} ({from})", kind.prop_name(), view.id());
-            surface.event(view.id(), kind, EventPayload::None);
+            log::debug!(target: "nsh::input", "{} on {} ({from})", kind.prop_name(), node);
+            surface.event(node, kind, EventPayload::None);
         }
     }
 }
@@ -1122,7 +1159,47 @@ pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
         crate::window::control_window(&surface, &window, control, false);
         return true;
     }
-    activate(surface, view, "accessibility");
+    activate(surface, view.id(), view.state().events, "accessibility");
+    true
+}
+
+/// An accessible inline link uses the same node and events as a pointer
+/// press, while retaining the input's keyboard focus.
+pub(crate) fn accessibility_span_events(
+    surface: &Surface,
+    view: &NshView,
+    node: nsh_core::NodeId,
+) -> Option<nsh_core::EventMask> {
+    if !view.can_target()
+        || !view
+            .ns()
+            .isDescendantOf(&crate::navigation::focus_scope(surface))
+    {
+        return None;
+    }
+    let state = view.try_state()?;
+    if state.props.accessibility.state.disabled {
+        return None;
+    }
+    state
+        .text
+        .as_ref()?
+        .text
+        .links
+        .iter()
+        .find(|link| link.node == node && link.events.contains(EventKind::Press))
+        .map(|link| link.events)
+}
+
+pub(crate) fn accessibility_span_press(
+    surface: &Surface,
+    view: &NshView,
+    node: nsh_core::NodeId,
+) -> bool {
+    let Some(events) = accessibility_span_events(surface, view, node) else {
+        return false;
+    };
+    activate(surface, node, events, "accessibility");
     true
 }
 
@@ -3221,6 +3298,33 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inline_context_menu_ignores_hover_only_nested_spans() {
+        let link = |start, end, node, kind| {
+            let mut events = nsh_core::EventMask::default();
+            events.set(kind, true);
+            nsh_core::TextLink {
+                start,
+                end,
+                node,
+                events,
+                focus_stop: false,
+            }
+        };
+        let outer = link(0, 10, 2, nsh_core::EventKind::ContextMenu);
+        let hover = link(2, 8, 3, nsh_core::EventKind::MouseEnter);
+        let inner = link(3, 7, 4, nsh_core::EventKind::ContextMenu);
+        assert_eq!(
+            super::context_link(&[outer, hover], 4).map(|l| l.node),
+            Some(2)
+        );
+        assert_eq!(
+            super::context_link(&[outer, hover, inner], 4).map(|l| l.node),
+            Some(4)
+        );
+        assert!(super::context_link(&[outer, hover], 10).is_none());
+    }
+
     use super::*;
 
     #[test]
