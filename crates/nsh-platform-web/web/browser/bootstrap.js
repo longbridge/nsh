@@ -5232,6 +5232,7 @@
 			host: false,
 			lifecycle: "active",
 			shaders: true,
+			wakeCount: 0,
 			localeSettings: {
 				languages: ["en-US"],
 				timeZone: "UTC",
@@ -5275,8 +5276,8 @@
 			lifecycle: () => fields.lifecycle(),
 			platform,
 			shadersAvailable: () => fields.shaders(),
-			fpsEnabled: () => false,
-			wakeCount: () => 0
+			wakeCount: () => fields.wakeCount(),
+			fpsEnabled: () => false
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),

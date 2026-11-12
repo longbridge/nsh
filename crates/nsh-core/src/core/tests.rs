@@ -39117,6 +39117,100 @@ fn big_rows_bench() {
     eprintln!("total {total} views");
 }
 
+/// Texts whose first baseline is 0.95 of their largest font size below their
+/// top, in lines 1.25 of it tall, 10 points a character wide: a font with
+/// half-leading as CSS sets it.
+struct BaselineEngine;
+
+impl TextEngine for BaselineEngine {
+    /// Characters and the largest font size.
+    type Prepared = (usize, f32);
+
+    fn prepare(&self, text: &AttributedText) -> (usize, f32) {
+        let size = text
+            .spans
+            .iter()
+            .fold(0.0f32, |max, s| max.max(s.style.font_size.0));
+        (text.text.chars().count(), size)
+    }
+
+    fn measure(&self, &(chars, size): &(usize, f32), _: Option<Points>) -> Size<Points> {
+        size_pt(chars as f32 * 10.0, size * 1.25)
+    }
+
+    fn first_baseline(&self, &(_, size): &(usize, f32), _: Points) -> Option<Points> {
+        Some(Points(size * 0.95))
+    }
+
+    fn layout(&self, _: &(usize, f32), _: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(()))
+    }
+}
+
+#[test]
+fn a_row_aligned_by_baseline_lines_its_texts_up_by_their_first_baselines() {
+    let mut c = Core::new(BaselineEngine, size_pt(320.0, 480.0));
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let text = |id, size: f32| {
+        [
+            Op::Create { id, tag: Tag::Text },
+            Op::SetStyle {
+                id,
+                style: style(&[("fontSize", StyleValue::Number(size))]),
+                patch: Default::default(),
+            },
+        ]
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        class_op(2, "flex-row items-baseline"),
+    ];
+    ops.extend(text(3, 30.0));
+    ops.extend(text(5, 10.0));
+    ops.extend([
+        Op::CreateText {
+            id: 4,
+            text: "Chat".into(),
+        },
+        Op::CreateText {
+            id: 6,
+            text: "2 people".into(),
+        },
+        insert(3, 4),
+        insert(5, 6),
+        insert(2, 3),
+        insert(2, 5),
+        insert(ROOT_ID, 2),
+    ]);
+    for op in ops {
+        c.apply(op).unwrap();
+    }
+    let batch = c.commit().unwrap();
+    let top = |id| frame_of(&batch, id).map(|f| f.origin.y.0);
+    // The title's baseline is 28.5 below the row's top; the small text's,
+    // 9.5 below its own, so it starts 19 down. By their bottom edges (37.5
+    // and 12.5 tall) it would start 25 down, its baseline 6 under the title's.
+    assert_eq!(top(3), Some(0.0));
+    assert_eq!(top(5), Some(19.0));
+    // Aligned another way, the texts' layouts cached for baselines are not
+    // kept: by their bottom edges, then by baseline again.
+    c.apply(style_op(2, &[("alignItems", StyleValue::Str("flex-end"))]))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5).map(|f| f.origin.y.0), Some(25.0));
+    c.apply(style_op(2, &[("alignItems", StyleValue::Str("baseline"))]))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 5).map(|f| f.origin.y.0), Some(19.0));
+}
+
 #[test]
 fn a_lowered_sibling_keeps_a_new_default_view_above_it() {
     let mut c = core();

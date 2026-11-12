@@ -273,6 +273,8 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
+A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
+zoomed.
 Selectable text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,
 Cmd+[ and the mouse's back button close the newest dialog or go back in a stack (Escape in a focused field or web page
 only leaves it; a page gets these keys first, and keeps those it uses); a `Dialog` is a layer over the whole window
@@ -314,7 +316,6 @@ what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escap
 
 Not supported, or different:
 
-- **Zooming scroll views** (`zoomTo`, the zoom props).
 - **`brightness()`** above 1 is not drawn. **`mixBlendMode`** and **backdrops** are drawn by Core Animation:
   `mixBlendMode` as the view layer's compositing filter, `macos={{ backdrop: { material, blending, state } }}` as an
   `NSVisualEffectView` below the view (any AppKit material and state, whether or not a `backdropFilter` is set), and

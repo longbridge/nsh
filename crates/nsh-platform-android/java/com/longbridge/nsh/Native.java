@@ -199,8 +199,12 @@ final class Native {
 
     static native void packageFree(long pkg);
 
-    /** The images picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height in pixels. */
-    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes);
+    /**
+     * The images or files picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height
+     * in pixels; a file not read (larger than the pick reads) has {@code null} data and its size in bytes in
+     * {@code lengths}.
+     */
+    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes, long[] lengths);
 
     /** A native component emitted {@code name} with {@code json} data (null: none). */
     static native void componentEvent(long handle, int id, String name, String json);
