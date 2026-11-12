@@ -6361,6 +6361,40 @@ fn backdrop_material_survives_restyling_and_resets() {
     assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
 }
 
+/// A page and a dialog share the name `supportedOrientations`: each element
+/// decodes its own, so a dialog's is not taken for a page's and dropped.
+#[test]
+fn supported_orientations_decode_as_the_element_s_own() {
+    use crate::{
+        ModalConfig, ModalProp, ScreenProp,
+        js::host::{HostCx, HostProps},
+    };
+    let names = || {
+        HostTestValue::Array(vec![
+            HostTestValue::String("portrait"),
+            HostTestValue::String("landscape-left"),
+        ])
+    };
+    let bits = ModalConfig::PORTRAIT | ModalConfig::LANDSCAPE_LEFT;
+    let decode = |tag: Tag| {
+        <Prop as HostProps>::decode(
+            "supportedOrientations",
+            &names(),
+            &mut HostCx::for_element(tag),
+        )
+        .expect("a prop")
+        .expect("a value")
+    };
+    assert_eq!(
+        decode(Tag::Modal),
+        Prop::Modal(ModalProp::Orientations(bits))
+    );
+    assert_eq!(
+        decode(Tag::Screen),
+        Prop::Screen(ScreenProp::Orientations(bits))
+    );
+}
+
 #[test]
 fn macos_backdrop_decodes_and_survives_restyling() {
     use crate::{
