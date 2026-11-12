@@ -40364,3 +40364,230 @@ mod part_class_tokens {
         assert_eq!(padding(&c), (px(20.0), px(8.0)));
     }
 }
+
+/// A style set on a view whose layout style stays what it was (a change
+/// of colors: a token, the appearance, a state) lays nothing out again;
+/// one that changes the layout style still does.
+mod layout_kept_by_restyle {
+    use super::*;
+
+    /// View 2 with `classes` holding the text 3 (`hello`, classes
+    /// `text_classes`), committed.
+    fn card(classes: &str, text_classes: &str) -> Core<FakeEngine> {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                class_op(2, classes),
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                class_op(3, text_classes),
+                Op::CreateText {
+                    id: 4,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert!(!c.needs_layout);
+        c
+    }
+
+    fn frames(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Frame { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_change_of_colors_asks_for_no_layout() {
+        let mut c = card("w-20 p-2 bg-red-500", "text-black");
+        apply(&mut c, vec![class_op(2, "w-20 p-2 bg-blue-500")]);
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            Color::from(crate::element::palette::BLUE.shade(500))
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn a_text_color_is_drawn_again_without_a_layout() {
+        let mut c = card("w-20 p-2", "text-black");
+        apply(&mut c, vec![class_op(3, "text-red-500")]);
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        let color = batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id: 3, text, .. } => Some(text.spans[0].style.color),
+            _ => None,
+        });
+        assert_eq!(
+            color,
+            Some(Color::from(crate::element::palette::RED.shade(500)))
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn an_inline_color_asks_for_no_layout() {
+        let mut c = card("w-20 p-2", "text-black");
+        apply(
+            &mut c,
+            vec![style_op(
+                2,
+                &[("backgroundColor", StyleValue::Str("#0000ff"))],
+            )],
+        );
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            Color(0x0000_ffff)
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn a_change_of_the_layout_style_still_lays_out() {
+        let mut c = card("w-20 p-2 bg-red-500", "text-black");
+        apply(&mut c, vec![class_op(2, "w-40 p-2 bg-red-500")]);
+        assert!(c.needs_layout);
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 2).expect("a new frame");
+        assert_eq!(frame.size.width.0, 160.0);
+        // And back, with another color in the same change.
+        apply(&mut c, vec![class_op(2, "w-20 p-4 bg-blue-500")]);
+        assert!(c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 80.0);
+        // The padding moved the text.
+        assert!(frames(&batch).contains(&3));
+    }
+
+    /// 300 cards, each a text and a row of three boxes, every box given
+    /// another background: the restyle and its commit.
+    /// `cargo test --release -p nsh-core bench_restyle_colors -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_restyle_colors() {
+        const CARDS: u32 = 300;
+        let mut c = core();
+        let mut ops = Vec::new();
+        let mut boxes = Vec::new();
+        for card in 0..CARDS {
+            let id = 10 + card * 10;
+            let (text, raw, row) = (id + 1, id + 2, id + 3);
+            ops.extend([
+                Op::Create { id, tag: Tag::View },
+                class_op(
+                    id,
+                    "p-4 gap-2 rounded-lg border border-neutral-200 bg-white",
+                ),
+                Op::Create {
+                    id: text,
+                    tag: Tag::Text,
+                },
+                class_op(text, "text-base font-semibold text-neutral-950"),
+                Op::CreateText {
+                    id: raw,
+                    text: format!("Card {card}"),
+                },
+                Op::Insert {
+                    parent: text,
+                    child: raw,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: id,
+                    child: text,
+                    before: None,
+                },
+                Op::Create {
+                    id: row,
+                    tag: Tag::View,
+                },
+                class_op(row, "flex-row gap-2"),
+            ]);
+            for k in 0..3 {
+                let b = id + 4 + k;
+                boxes.push(b);
+                ops.extend([
+                    Op::Create {
+                        id: b,
+                        tag: Tag::View,
+                    },
+                    class_op(b, "px-3 py-2 rounded-md bg-neutral-100"),
+                    Op::Insert {
+                        parent: row,
+                        child: b,
+                        before: None,
+                    },
+                ]);
+            }
+            ops.extend([
+                Op::Insert {
+                    parent: id,
+                    child: row,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        apply(&mut c, ops);
+        c.commit().unwrap();
+        let mut times = Vec::new();
+        let mut frames_sent = 0;
+        for round in 0..400 {
+            let class = if round % 2 == 0 {
+                "px-3 py-2 rounded-md bg-blue-600"
+            } else {
+                "px-3 py-2 rounded-md bg-neutral-100"
+            };
+            let ops: Vec<Op> = boxes.iter().map(|&b| class_op(b, class)).collect();
+            let start = std::time::Instant::now();
+            apply(&mut c, ops);
+            let batch = c.commit().unwrap();
+            times.push(start.elapsed());
+            frames_sent += frames(&batch).len();
+            assert!(view_style_of(&batch, boxes[0]).is_some());
+        }
+        times.sort();
+        println!(
+            "{} boxes given another background: {:.0} us (median {:.0} us), {frames_sent} frames sent",
+            boxes.len(),
+            times[0].as_secs_f64() * 1e6,
+            times[times.len() / 2].as_secs_f64() * 1e6,
+        );
+    }
+}
