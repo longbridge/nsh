@@ -1680,9 +1680,9 @@ impl Cx {
                     )
                 });
                 let el = span
-                    .text_color(move || theme().primary)
+                    .text_color(link_color)
                     .underline()
-                    .text_decoration_color(move || theme().primary.opacity(0.4))
+                    .text_decoration_color(|| link_color().opacity(0.4))
                     .text_decoration_thickness(px(1.0))
                     // No offset of its own: the native backends clip a
                     // decoration to the text's box, so a fixed one below a
@@ -1742,7 +1742,7 @@ impl Cx {
                 self.part(
                     text(number)
                         .text_size(rems(0.75))
-                        .text_color(move || theme().primary)
+                        .text_color(link_color)
                         .role(AccessibilityRole::Link)
                         .on_press(move |press: &PressEvent| {
                             scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
@@ -2065,6 +2065,14 @@ impl TextView {
 /// rules'): the text's color, faint.
 fn strong_border() -> AdaptiveColor {
     theme().foreground.opacity(0.15)
+}
+
+/// Links remain recognizable with neutral themes whose primary is a button
+/// color. A theme can choose its own `link` token without recoloring actions.
+fn link_color() -> AdaptiveColor {
+    theme()
+        .color("link")
+        .unwrap_or(AdaptiveColor::rgb(0x0969da, 0x4493f8))
 }
 
 /// Code in text: monospace, smaller, on a rounded background (the text's

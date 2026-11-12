@@ -407,7 +407,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens, shadcn/ui's, are the app's to draw with; the
   exceptions are `TextView`'s default reading typography, its colors the theme's shadcn tokens (alerts GitHub's alert
-  colors, highlights a marker's yellow), every part overridable by the
+  colors, highlights a marker's yellow, links blue unless the theme supplies a `link` token), every part overridable by the
   app's `classes` / `styles` / `TextViewParts`, and its built-in syntax highlighting colors, Allsum's code palette, which an app's
   `CodeHighlighter` or `renderCodeBlock` replaces, and the `Editor`'s default look, its colors the theme's shadcn tokens
   (search matches amber, warnings amber, information blue), its font the theme's `font-mono`, every part overridable by

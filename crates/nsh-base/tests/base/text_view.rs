@@ -385,3 +385,38 @@ fn a_wide_image_on_its_own_is_at_most_as_wide_as_the_text() {
         "the aspect ratio kept: {bounds:?}"
     );
 }
+
+#[test]
+fn links_have_readable_colors_in_light_and_dark_neutral_themes() {
+    use nsh_core::{Color, platform::ColorScheme};
+    for (scheme, expected) in [
+        (ColorScheme::Light, Color(0x0969daff)),
+        (ColorScheme::Dark, Color(0x4493f8ff)),
+    ] {
+        let mut config = EngineConfig::new(Root::of::<Links>());
+        config.environment.color_scheme = scheme;
+        let mut app = Headless::start(config).unwrap();
+        app.wait_for("the guide").unwrap();
+        let link = app.screen().span_style("the guide").unwrap();
+        assert_eq!(link.color, expected);
+        assert!(link.decoration.underline);
+    }
+}
+
+#[test]
+fn link_theme_token_overrides_the_default() {
+    use nsh_core::{
+        Color,
+        element::{AdaptiveColor, Tokens},
+    };
+    let mut app = Headless::start(EngineConfig::new(Root::of::<Links>())).unwrap();
+    app.wait_for("the guide").unwrap();
+    let mut tokens = Tokens::default();
+    tokens.set_color("link", AdaptiveColor::rgb(0x008040, 0x80ffb0));
+    app.engine().control().set_tokens(Some(tokens));
+    app.first_render().unwrap();
+    assert_eq!(
+        app.screen().span_style("the guide").unwrap().color,
+        Color(0x008040ff)
+    );
+}
