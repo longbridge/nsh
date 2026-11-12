@@ -1339,6 +1339,7 @@ fn handle(
             crate::tray::destroyed(hwnd);
             crate::global_shortcut::destroyed(hwnd);
             surface.stop();
+            crate::text_input::destroyed(surface);
             surface.set_hwnd(HWND::default());
         }
         _ => {}
