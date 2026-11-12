@@ -218,7 +218,7 @@ final class EmbedController: UIViewController {
 | `handle(_ name: String, _ handler:)` | 在主线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）：`{ data, reply in … }`，或一个 `async throws` 函数 `{ data in … }`，其结果即调用的回答。 |
 | `removeHandler(_ name: String)` | 移除 `name` 的处理函数：应用对它的调用随即失败。 |
 | `static preferredStatusBarStyle`、`prefersStatusBarHidden`、`preferredStatusBarUpdateAnimation` | 正在运行的应用请求的状态栏设置（其页面和对话框的 `statusBar`、`nsh.json` 的默认值）：在宿主视图控制器的对应重写中返回它们。 |
-| `static supportedInterfaceOrientations: UIInterfaceOrientationMask?` | 显示中的页面请求的方向（`NavPage` 的 `supportedOrientations`），没有页面请求时为 `nil`：在宿主视图控制器的 `supportedInterfaceOrientations` 中返回它，为 `nil` 时返回控制器自己的。它变化时，NSH 会请窗口中的控制器更新。 |
+| `static supportedInterfaceOrientations` | 显示中的页面请求的方向（`NavPage` 的 `supportedOrientations`）：在宿主视图控制器的对应重写中返回它，为 `nil` 时返回控制器自己的。 |
 
 > [!IMPORTANT]
 > `bundle.nshc`（字节码）只能从应用包内部加载。QuickJS 不校验字节码，其他来源的字节码可能破坏内存：对于应用包之外的文件，请加载

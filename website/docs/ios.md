@@ -231,7 +231,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `handle(_ name: String, _ handler:)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the main thread: `{ data, reply in … }`, or an `async throws` function `{ data in … }` whose result answers the call. |
 | `removeHandler(_ name: String)` | Removes the handler of `name`: the app's calls of it fail at once. |
 | `static preferredStatusBarStyle`, `prefersStatusBarHidden`, `preferredStatusBarUpdateAnimation` | What the running apps asked for (their pages' and dialogs' `statusBar`, `nsh.json`'s default): return them from the hosting view controller's overrides. |
-| `static supportedInterfaceOrientations: UIInterfaceOrientationMask?` | The orientations the page shown asked for (`NavPage`'s `supportedOrientations`), `nil` when no page asks: return it from the hosting view controller's `supportedInterfaceOrientations`, its own when `nil`. NSH asks the window's controllers to update when it changes. |
+| `static supportedInterfaceOrientations` | The orientations the page shown asked for (`NavPage`'s `supportedOrientations`): return it from the hosting view controller's override, its own when `nil`. |
 
 > [!IMPORTANT]
 > `bundle.nshc` (bytecode) loads only from inside the app bundle. QuickJS does not validate bytecode, so bytecode from

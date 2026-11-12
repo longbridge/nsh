@@ -380,7 +380,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `presentation: "actionSheet"` is a list dialog on Android; every label is the app's: NSH adds no strings of its
   own, and an iPad / Mac action sheet gets an untitled cancel action). Answers come back as the
   root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`,
-  and its `supportedInterfaceOrientations` to `nsh_supported_orientations()` (a page's `supportedOrientations`; empty: the controller's own).
+  and its `supportedInterfaceOrientations` to `NshAppView.supportedInterfaceOrientations` (a page's `supportedOrientations`; `nil`: the controller's own).
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right), keeps the left and right properties
