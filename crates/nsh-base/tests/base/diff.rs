@@ -769,6 +769,21 @@ fn the_view_reports_where_its_rows_are_scrolled() {
     assert!(shown.ends_with(" 800 340 300"), "{shown}");
 }
 
+/// The rows and sides grow with the user's text size, as the texts drawn in
+/// them do: measured in the app's font alone, a line drawn larger would
+/// wrap within its side and run over the next row.
+#[test]
+fn rows_follow_the_user_s_text_size() {
+    let mut app = start(two_far_changes());
+    see(&mut app, "Scrolled 0 0 800 340 400");
+    app.set_environment("fontScale", |env| env.font_scale = 1.25)
+        .unwrap();
+    see(&mut app, "Scrolled 0 0 800 425 400");
+    app.set_environment("fontScale", |env| env.font_scale = 1.0)
+        .unwrap();
+    see(&mut app, "Scrolled 0 0 800 340 400");
+}
+
 /// In a terminal a row is one Cell, as the text engine measures a line,
 /// whatever the app's `lineHeight`: rows on another step would land on
 /// the Cell grid unevenly, a blank row every few lines.
