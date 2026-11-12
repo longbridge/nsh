@@ -291,6 +291,36 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 
 弹出层属于应用：它读取建议的状态，放在 `coordsAtPos(range.from)` 处，并以自己的方式绘制条目。
 
+## 块编辑器
+
+Notion 式的编辑器由上面这些部分组成，文档周围的界面是应用自己的。画廊的 Block editor 演示（`examples/gallery/demos/BlockEditorDemo.tsx`）就是一个：`/` 块菜单、每个块上的手柄，以及选区上方的工具栏。
+
+```tsx
+import { Overlay } from "nsh";
+import { RichEditor, StarterKit, chain, command, createRichEditor, defineExtension, deleteRange, suggestion } from "nsh/base";
+
+// 扩展排在键位之前，所以回车会先选中菜单项，再轮到它拆分段落。
+const slash = defineExtension({
+  name: "slashCommand",
+  priority: 1000,
+  addProseMirrorPlugins: () => [suggestion({ key: "slash", char: "/", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] })],
+});
+const editor = createRichEditor({ extensions: [StarterKit, slash] });
+
+// `editor.suggestion("slash")?.active` 时，菜单放进 `bubbleMenu`；选中一项就替换触发符和查询。
+const { range } = editor.suggestion("slash")!;
+editor.run(chain([deleteRange({ from: range.from, to: range.to }), command("toggleBulletList")]));
+
+// 手柄：指针下的块，以及它在页面上的位置，供锚定在那里的 `Overlay` 使用。
+const start = editor.posAtPageCoords(event.pagePosition);
+const rect = editor.pageNodeRect(start!);
+editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // 移动时 dragTo(point)，松开时 endDrag()
+```
+
+- `createRichEditor` 自己的 `plugins` 排在扩展和键位之后；键要先处理的插件（建议菜单的回车）写成 `priority` 较高的扩展。
+- `pageNodeRect(pos)` 和 `posAtPageCoords(point)` 用页面点作答，与 `Overlay` 的 `anchor` 和指针事件的坐标相同，所以手柄可以作为跟随块的浮层放在编辑器的边距里。
+- `dragBlock(pos, point)`、`dragTo(point)` 和 `endDrag()` 随指针移动一个块：落点线跟着指针，放下是一步撤销。点一下还要打开菜单的手柄，在指针移动之后才认领指针（`onMoveShouldSetResponder`），点按仍走 `onPress`；`Button` 自己处理按压，不会把拖动交给响应器。
+
 ## 表格
 
 `TableKit` 提供 Tiptap 的表格：`RichTable`（Tiptap 的 `Table`）、`RichTableRow`、`RichTableHeader` 和 `RichTableCell`。它与 `StarterKit` 一起添加：
