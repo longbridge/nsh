@@ -24,6 +24,7 @@ on:
       - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-platform-apple/**"
+      - "crates/nsh-platform-ios/**"
       - "crates/nsh-platform-macos/**"
       - "crates/nsh-platform-web/**"
       - "crates/nsh-platform-windows/**"
