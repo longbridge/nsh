@@ -660,9 +660,12 @@ define_class!(
             let accepted: bool = unsafe { msg_send![super(self), resignFirstResponder] };
             if accepted && let Some(surface) = self.keyboard_surface() {
                 let view = NshView(self.retain());
+                // Not when leaving the tree: its focus went unannounced
+                // (`input::removed`).
+                let focused = view.state().states & nsh_core::tailwind::state::FOCUSED != 0;
                 crate::input::set_state(&surface, &view, nsh_core::tailwind::state::FOCUSED, false);
                 // The stops Tab reaches report it, as inputs do.
-                if view.id() != ROOT_ID {
+                if focused && view.id() != ROOT_ID {
                     surface.event(view.id(), nsh_core::EventKind::Blur, nsh_core::EventPayload::None);
                 }
             }

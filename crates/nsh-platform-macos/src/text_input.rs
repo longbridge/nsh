@@ -1291,7 +1291,6 @@ pub(crate) fn test_paste(
 
 /// Runs `f` with the text view that edits the focused input and its
 /// context: an error when no input of the app has the focus.
-#[cfg(feature = "dev")]
 fn with_focused<R>(
     window: &objc2_app_kit::NSWindow,
     f: impl FnOnce(&NSTextView, Ctx) -> R,
@@ -1307,6 +1306,19 @@ fn with_focused<R>(
             return Err("no input of the app has the focus".into());
         };
     Ok(f(text_view, cx.ok_or("the focused input is gone")?))
+}
+
+/// The input focused in `window` leaves the tree
+/// ([`crate::input::removed`]): its focus is reported gone now, so the end
+/// of its editing says nothing to it.
+pub(crate) fn taken_out(window: &objc2_app_kit::NSWindow) {
+    let _ = with_focused(window, |_, cx| {
+        if let Some((surface, view, input)) = cx.get()
+            && input.focused.replace(false)
+        {
+            set_focused(&surface, &view, false);
+        }
+    });
 }
 
 /// The input that has the keyboard focus, if one of the app's has it.

@@ -297,6 +297,7 @@ impl Mounter {
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
+                    crate::input::removed(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -318,6 +319,10 @@ impl Mounter {
                         && view
                             .parent_view()
                             .is_some_and(|p| self.deleting.contains(&p.id()));
+                    // Inside, it leaves with its root.
+                    if !inside {
+                        crate::input::removed(surface, &view);
+                    }
                     if inside {
                         // Its running layout animation ends with it.
                         crate::transition::deleted(&view);
