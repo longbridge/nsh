@@ -6,8 +6,10 @@
 //! nothing more is sent. On its way out it takes no keys: the focus is the
 //! trigger's again as a menu or popover closes, so Return during its exit
 //! chooses nothing in it and opens it again, its keys working as before. A tooltip's `delay` of `Infinity` never ends and
-//! one of `NaN` is none; the keyboard focus shows a tooltip in every idiom
-//! until it leaves or Escape is pressed. Escape or a choice closes a menu
+//! one of `NaN` is none; the focus the keyboard moves to its trigger shows
+//! a tooltip in every idiom until it leaves or Escape is pressed, while a
+//! press or a tap that gives the trigger the focus leaves it to the
+//! pointer. Escape or a choice closes a menu
 //! whose `open` the app controls every time, also when the app opened it itself. On a manual clock: time moves only as the test
 //! says.
 
@@ -692,16 +694,19 @@ fn a_tooltip_shows_once_the_pointer_rested_for_its_delay() {
 #[derive(Clone, PartialEq, Props)]
 struct FocusProps {
     /// The trigger is a text field the app focuses and blurs with two
-    /// buttons (a phone's headless driver moves no focus with Tab), not a
-    /// view Tab stops at.
+    /// buttons, and focuses with F5 too (a phone's headless driver moves no
+    /// focus with Tab), not a view Tab stops at.
     fields: bool,
 }
 
 /// Two stops, the first with a tooltip whose open changes are written
-/// down with their reasons.
+/// down with their reasons, and how often it took the focus (`Focused:
+/// …`). A press on the first view gives it the focus, as AppKit gives a
+/// clicked stop the focus.
 #[component]
 fn FocusScreen(props: FocusProps) -> impl IntoElement {
     let changes = signal(Vec::<String>::new());
+    let focused = signal(0u32);
     let tip = move || {
         tooltip()
             .on_open_change(move |e: &TooltipEvent| {
@@ -714,12 +719,16 @@ fn FocusScreen(props: FocusProps) -> impl IntoElement {
     };
     let field = element_ref();
     let (trigger, next) = if props.fields {
+        // A shortcut that focuses the field: the app's `focus()` after a
+        // key, a move of the keyboard's.
+        on_key("f5", move |_| field.focus());
         (
             input()
                 .element_ref(&field)
                 .test_id("trigger")
                 .w(px(80.0))
                 .h(px(30.0))
+                .on_focus(move || focused.update(|n| *n += 1))
                 .tooltip(tip())
                 .into_element(),
             view()
@@ -739,12 +748,16 @@ fn FocusScreen(props: FocusProps) -> impl IntoElement {
                 .into_element(),
         )
     } else {
+        let own = element_ref();
         (
             view()
+                .element_ref(&own)
                 .test_id("trigger")
                 .w(px(80.0))
                 .h(px(30.0))
                 .focusable(true)
+                .on_press(move || own.focus())
+                .on_focus(move || focused.update(|n| *n += 1))
                 .tooltip(tip())
                 .child(text("Trigger"))
                 .into_element(),
@@ -763,10 +776,11 @@ fn FocusScreen(props: FocusProps) -> impl IntoElement {
         .child(text(move || {
             format!("Changes: {}", changes.get().join(" "))
         }))
+        .child(text(move || format!("Focused: {}", focused.get())))
 }
 
-/// A tooltip shows for the keyboard focus on its trigger at once (Tab),
-/// hides when the focus leaves and on Escape, in `idiom`.
+/// A tooltip shows for the focus the keyboard moves to its trigger at once
+/// (Tab), hides when the focus leaves and on Escape, in `idiom`.
 fn the_focus_shows_a_tooltip_in(os: Os, idiom: Idiom) {
     let root = Root::new::<FocusScreen>(|| FocusProps { fields: false });
     let mut app = start_on(root, false, os, idiom).app;
@@ -798,19 +812,55 @@ fn the_keyboard_focus_shows_a_tooltip_on_a_desktop() {
     the_focus_shows_a_tooltip_in(Os::MacOs, Idiom::Desktop);
 }
 
+/// A click that gives the trigger the focus shows no tooltip for that
+/// focus: the press hides what the pointer showed, nothing is left once
+/// the pointer goes, and the keyboard moving the focus there shows it.
 #[test]
-fn the_focus_shows_a_tooltip_on_a_phone() {
+fn a_click_that_focuses_the_trigger_leaves_its_tooltip_to_the_pointer() {
+    let root = Root::new::<FocusScreen>(|| FocusProps { fields: false });
+    let mut app = start(root, false).app;
+    app.hover("id:trigger").unwrap();
+    app.run_for(Duration::from_millis(600)).unwrap();
+    assert!(app.shows("Tip"), "the pointer rested on it");
+    app.press("id:trigger").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    app.wait_for("Focused: 1").unwrap();
+    assert!(!app.shows("Tip"), "the press hid it, its focus shows none");
+    app.hover("id:next").unwrap();
+    app.run_for(Duration::from_millis(600)).unwrap();
+    assert!(!app.shows("Tip"), "nothing is left once the pointer went");
+    assert!(app.shows("Changes: true:Hover false:Hover"));
+    // Tab on and Shift+Tab back: the keyboard's focus shows it at once.
+    app.press_key("tab").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"), "shown at once for the keyboard's focus");
+    app.wait_for("Changes: true:Hover false:Hover true:Focus")
+        .unwrap();
+}
+
+#[test]
+fn the_keyboard_focus_shows_a_tooltip_on_a_phone() {
     let root = Root::new::<FocusScreen>(|| FocusProps { fields: true });
     let mut app = start_on(root, false, Os::Ios, Idiom::Phone).app;
+    // A tap focusing the field (the app's `focus()` after it) shows none.
     app.press("id:focus").unwrap();
     app.run_for(Duration::from_millis(20)).unwrap();
-    assert!(app.shows("Tip"), "shown at once for the focus");
+    app.wait_for("Focused: 1").unwrap();
+    assert!(!app.shows("Tip"), "a tap's focus shows no tooltip");
+    assert!(app.shows("Changes:"), "nothing asked");
+    app.press("id:blur").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    // A hardware keyboard's shortcut focusing it: shown at once.
+    app.press_key("f5").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Tip"), "shown at once for the keyboard's focus");
     app.wait_for("Changes: true:Focus").unwrap();
     app.press("id:blur").unwrap();
     app.run_for(Duration::from_millis(20)).unwrap();
     assert!(!app.shows("Tip"), "hidden with the focus gone");
     app.wait_for("Changes: true:Focus false:Focus").unwrap();
-    app.press("id:focus").unwrap();
+    app.press_key("f5").unwrap();
     app.run_for(Duration::from_millis(20)).unwrap();
     assert!(app.shows("Tip"), "shown again");
     app.press_key("escape").unwrap();

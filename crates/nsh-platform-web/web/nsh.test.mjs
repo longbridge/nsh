@@ -189,6 +189,59 @@ test("an invalid view is aria-invalid, and so is the field of an input", () => {
   assert.equal(field.attrs.get("aria-invalid"), "true");
 });
 
+test("a combo box's field names its highlighted row and its list by DOM id", () => {
+  const { player } = fakePlayer();
+  player.classPrefix = "nsh-p1-";
+  const element = (extra = {}) => {
+    const attrs = new Map();
+    return {
+      attrs,
+      id: "",
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+      ...extra,
+    };
+  };
+  const views = new Map();
+  player.view = (id) => views.get(id);
+  const field = element({ classList: { toggle() {} }, tagName: "INPUT" });
+  const el = element({ _field: field, _props: { role: "combobox", label: "Tags", expanded: true, hasPopup: true, activeDescendant: 6, controls: 4 } });
+  const list = element();
+  views.set(2, el);
+  views.set(4, list);
+  // The row named is made after the field's props: linked after the
+  // batch (`apply` ends with `linkRelations`).
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-controls"), "nsh-p1-v4");
+  assert.equal(list.id, "nsh-p1-v4");
+  assert.equal(field.attrs.has("aria-activedescendant"), false, "not made yet");
+  const row = element();
+  views.set(6, row);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-activedescendant"), "nsh-p1-v6");
+  assert.equal(row.id, "nsh-p1-v6");
+  // The field is the combo box: the wrapper has no role of its own.
+  assert.equal(field.attrs.get("role"), "combobox");
+  assert.equal(field.attrs.get("aria-label"), "Tags");
+  assert.equal(field.attrs.get("aria-expanded"), "true");
+  assert.equal(field.attrs.get("aria-haspopup"), "listbox");
+  assert.equal(el.attrs.has("role"), false);
+  assert.equal(el.attrs.has("aria-activedescendant"), false);
+  // The highlight moves, then the list closes.
+  el._props = { ...el._props, activeDescendant: 8 };
+  views.set(8, element());
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-activedescendant"), "nsh-p1-v8");
+  el._props = { role: "combobox", expanded: false, hasPopup: true };
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.has("aria-activedescendant"), false);
+  assert.equal(field.attrs.has("aria-controls"), false);
+  assert.equal(field.attrs.get("aria-expanded"), "false");
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
@@ -201,6 +254,24 @@ test("events sent before the app runs reach it in order once it starts, later on
   ]);
   player.hostEvent("c");
   assert.deepEqual(events(sent), ["a", "b", "c"]);
+});
+
+test("posts go to the page host's post, else its call, and nothing comes back", async () => {
+  const posted = [];
+  const { player, sent } = fakePlayer({ host: { call: () => 1, post: (...args) => posted.push(args) } });
+  player.begin(390, started);
+  player.hostPost("note", { a: 1 });
+  assert.deepEqual(posted, [["note", { a: 1 }]]);
+  const called = [];
+  const fallback = fakePlayer({ host: { call: async (...args) => { called.push(args); throw new Error("boom"); } } });
+  fallback.player.begin(390, started);
+  fallback.player.hostPost("note", 2);
+  const throwing = fakePlayer({ host: { call() {}, post() { throw new Error("boom"); } } });
+  throwing.player.hostPost("note", 3);
+  fakePlayer().player.hostPost("note", 4);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(called, [["note", 2]]);
+  assert.deepEqual([...sent, ...fallback.sent, ...throwing.sent], []);
 });
 
 test("events for an app that failed to start reach neither it nor the next app", () => {
@@ -538,6 +609,60 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   assert.deepEqual(pressed, [button]);
   assert.equal(key(chart), false);
   assert.deepEqual(pressed, [button]);
+});
+
+test("Return and Space press the focused control unless the focus binds them", () => {
+  const { player } = fakePlayer();
+  // The app binds Return, Space and Mod+Return everywhere but text fields
+  // (binding 7), as the native match answers: on a control (focus bit 2)
+  // plain Return and Space fire only the focus' own bindings (binding 9,
+  // while `own`).
+  let own = false;
+  player.wasm.nsh_key = (code, mods, focus) => {
+    const pressing = (code === keyCode({ key: "Enter" }) || code === keyCode({ key: " " })) && !(mods & 11);
+    if (focus & 2 && pressing) return own ? 9 : -1;
+    return 7;
+  };
+  const fired = [];
+  player.call = (f) => f({ nsh_key_command: (id) => fired.push(id) });
+  player.modifiersChanged = () => {};
+  player.takesKeys = () => true;
+  player.selectionKey = () => false;
+  player.scrollKey = () => false;
+  player.back = () => false;
+  player.ancestors = () => [];
+  const pressed = [];
+  player.pressIn = (p) => pressed.push(p.press);
+  player.pressOut = () => {};
+  player.root = { contains: () => true };
+  const key = (focus, e) => {
+    globalThis.document = { activeElement: focus };
+    player.keyDown({ preventDefault() {}, stopPropagation() {}, ...e });
+    if (e.key === " ") player.keyUp({ key: " " });
+    delete globalThis.document;
+  };
+  const button = focusView(true, {});
+  const chart = focusView(false, { focusable: true });
+  // On a button: the button takes them, the app's binding never fires.
+  key(button, { key: "Enter" });
+  key(button, { key: " " });
+  key(button, { key: "Enter", shiftKey: true });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, []);
+  // With Control or Command held the binding fires, as it does with the
+  // focus on no control or on a stop that takes no presses.
+  key(button, { key: "Enter", ctrlKey: true });
+  key(button, { key: "Enter", metaKey: true });
+  key(null, { key: "Enter" });
+  key(chart, { key: "Enter" });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, [7, 7, 7, 7]);
+  // The focus' own binding (a menu button opening its menu) takes them
+  // before the press.
+  own = true;
+  key(button, { key: "Enter" });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, [7, 7, 7, 7, 9]);
 });
 
 /**
