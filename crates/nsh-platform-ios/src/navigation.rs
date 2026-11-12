@@ -24,7 +24,7 @@ use nsh_core::{
     ModalAnimation, ModalConfig, ModalPresentation, NavShader, NodeId, PayloadValue, Points,
     ScreenAnimation, ScreenConfig, Size,
     desktop::{MenuAction, MenuItem},
-    element::header::same_right_buttons,
+    element::header::{KeptContent, same_right_buttons},
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -1105,25 +1105,24 @@ fn update_right_item(
     target: Option<&HeaderItemTarget>,
     mounter: &SharedMounter,
 ) {
-    match &item.content {
-        HeaderItemContent::Label(title) => {
+    // What to show is the core's (`kept_button`, tested there); this applies it.
+    let kept = nsh_core::element::header::kept_button(item);
+    match kept.content {
+        KeptContent::Title(title) => {
             button.setTitle(Some(&NSString::from_str(title)));
             button.setImage(None);
         }
-        HeaderItemContent::Symbol(name) => match system_image(name) {
+        KeptContent::Symbol { name, fallback } => match system_image(name) {
             Some(image) => {
                 button.setImage(Some(&image));
                 button.setTitle(None);
             }
             None => {
-                let fallback = item.label.as_deref().unwrap_or(name.as_ref());
                 button.setTitle(Some(&NSString::from_str(fallback)));
                 button.setImage(None);
             }
         },
-        // Kept only when the system item is unchanged; nothing to set.
-        HeaderItemContent::SystemItem(_) => {}
-        _ => {}
+        KeptContent::Unchanged => {}
     }
     if let Some(menu) = &item.menu {
         button.setMenu(Some(&make_menu(mtm, menu, mounter)));
@@ -1135,10 +1134,12 @@ fn update_right_item(
         // (0 when `onPress` was removed).
         target.set_press_id(item.press_id);
     }
-    button.setEnabled(!item.disabled);
-    if let Some(label) = item.label.as_deref() {
+    button.setEnabled(kept.enabled);
+    {
         use objc2_ui_kit::NSObjectUIAccessibility;
-        button.setAccessibilityLabel(Some(&NSString::from_str(label)), mtm);
+        // `None` clears a label an earlier binding set.
+        let label = kept.label.map(NSString::from_str);
+        button.setAccessibilityLabel(label.as_deref(), mtm);
     }
 }
 

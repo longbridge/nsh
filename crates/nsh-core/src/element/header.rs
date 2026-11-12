@@ -177,6 +177,50 @@ pub fn same_right_buttons(a: &[crate::HeaderItem], b: &[crate::HeaderItem]) -> b
             .all(|(x, y)| keepable(x, y) && x.menu.is_some() == y.menu.is_some())
 }
 
+/// What a kept button ([`same_right_buttons`]) shows once updated to an
+/// item: the platforms apply it to the button they kept, so a changed
+/// label, symbol, accessibility label or `disabled` reaches the screen.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeptButton<'a> {
+    pub content: KeptContent<'a>,
+    /// VoiceOver's label; `None` clears the one set before.
+    pub label: Option<&'a str>,
+    pub enabled: bool,
+}
+
+/// A kept button's content after an update.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeptContent<'a> {
+    /// This title, and no image.
+    Title(&'a str),
+    /// This SF Symbol, and no title; `fallback` is the title where the
+    /// platform has no such symbol.
+    Symbol { name: &'a str, fallback: &'a str },
+    /// A system item: kept only while it is the same item, so its look
+    /// stays as it is.
+    Unchanged,
+}
+
+/// What the button kept for `item` shows ([`KeptButton`]).
+#[doc(hidden)]
+pub fn kept_button(item: &crate::HeaderItem) -> KeptButton<'_> {
+    let content = match &item.content {
+        HeaderItemContent::Label(title) => KeptContent::Title(title),
+        HeaderItemContent::Symbol(name) => KeptContent::Symbol {
+            name,
+            fallback: item.label.as_deref().unwrap_or(name),
+        },
+        _ => KeptContent::Unchanged,
+    };
+    KeptButton {
+        content,
+        label: item.label.as_deref(),
+        enabled: !item.disabled,
+    }
+}
+
 /// Whether UIKit can keep `a`'s `UIBarButtonItem` and apply `b` in place.
 fn keepable(a: &crate::HeaderItem, b: &crate::HeaderItem) -> bool {
     match (a.key.as_deref(), b.key.as_deref()) {
@@ -233,6 +277,39 @@ mod tests {
             same_right_buttons(&[a], &[b]),
             "same key + Symbol→Symbol: update image in place"
         );
+    }
+
+    #[test]
+    fn a_kept_button_shows_the_new_title_symbol_label_and_state() {
+        // Edit → Done: the same key, a new title.
+        let done = keyed("edit", HeaderItemContent::Label(Arc::from("Done")));
+        assert_eq!(kept_button(&done).content, KeptContent::Title("Done"));
+        // star → star.fill: a new image; the label is the fallback title.
+        let mut filled = keyed("fav", HeaderItemContent::Symbol(Arc::from("star.fill")));
+        filled.label = Some(Arc::from("Favorite"));
+        assert_eq!(
+            kept_button(&filled).content,
+            KeptContent::Symbol {
+                name: "star.fill",
+                fallback: "Favorite"
+            }
+        );
+        // An accessibility label taken away is cleared, not kept.
+        filled.label = None;
+        filled.disabled = true;
+        let kept = kept_button(&filled);
+        assert_eq!(kept.label, None);
+        assert!(!kept.enabled);
+        assert_eq!(
+            kept.content,
+            KeptContent::Symbol {
+                name: "star.fill",
+                fallback: "star.fill"
+            }
+        );
+        // A system item keeps its look.
+        let system = keyed("x", HeaderItemContent::SystemItem(HeaderSystemItem::Edit));
+        assert_eq!(kept_button(&system).content, KeptContent::Unchanged);
     }
 
     #[test]
