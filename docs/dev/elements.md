@@ -302,7 +302,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
   views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
   interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
-  touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them. Web: `nsh.js` defers its
+  touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
+  (no activation, within the touch slop) to the nearest pressable `Box` around it. Web: `nsh.js` defers its
   drag scrolling while the gate is undecided. The activation travels with the touches (`TouchEvent::activated`; the
   iOS gate hands it to the root's tracker, which reports it with these touches or the next), and the gated view
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`

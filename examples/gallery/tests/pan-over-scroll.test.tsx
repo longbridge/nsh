@@ -14,3 +14,12 @@ test("a vertical drag on a sideways pan view inside a scroll view scrolls it", a
   await app.drag("id:chart", { x: 0, y: -200 });
   await app.waitFor("text:list: scrolled");
 });
+
+test("a tap on a pan view inside a pressable view presses it; a pan does not", async () => {
+  const app = await open("./fixtures/pan-over-scroll.tsx");
+  await app.drag("id:spark", { x: 120, y: 0 });
+  await app.waitFor("text:spark: scrubbed");
+  expect(app.texts()).toContain("stock: closed");
+  await app.press("id:spark");
+  await app.waitFor("text:stock: opened");
+});

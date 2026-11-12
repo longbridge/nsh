@@ -367,7 +367,9 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, a pan view over a scroll view**: a `Box` that handles nothing leaves the down untaken, and Android then
   offers it to the views under it: a scroll view the box lies over (a chat's composer over its messages) took the
   drag and scrolled, and the box's pan never activated. A `Box` with a `panActivation` takes the down, as UIKit's hit
-  test gives the touch to the topmost view; a press handler of a view around it then gets no press from it.
+  test gives the touch to the topmost view. Having taken the down from the views around it, the box hands its touch to
+  the nearest pressable `Box` around it (`Box.forwardTap`, in that box's coordinates) until its gate activates or the
+  finger passes the touch slop, so a tap presses that box as UIKit's press recognizers around a view do.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
