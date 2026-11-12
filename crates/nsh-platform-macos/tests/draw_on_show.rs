@@ -4,7 +4,8 @@
 //! batch, input or animation). A host app makes the view and puts it in a
 //! window itself. AppKit views live on the main thread, so this test runs
 //! without libtest's harness, on the process's own. Its arguments pick the
-//! cases to run (`window`, `unhide`, `scaled`, `animated`); none runs all.
+//! cases to run (`window`, `unhide`, `scaled`, `animated`, `sharp`); none
+//! runs all.
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -37,6 +38,10 @@ mod macos {
 
     /// Starts the native transform after the test checks deferred text.
     static REVEAL: AtomicBool = AtomicBool::new(false);
+
+    /// Shrinks the scale of [`Sharpened`]'s ancestor after the test checks
+    /// the content layer's resolution.
+    static SHRINK: AtomicBool = AtomicBool::new(false);
 
     /// A text, in a view the test finds.
     #[component]
@@ -135,6 +140,38 @@ mod macos {
             )
     }
 
+    /// A text inside an ancestor whose scale the test changes.
+    #[component]
+    fn Sharpened() -> impl IntoElement {
+        let zoom = signal(2.0);
+        set_interval(Duration::from_millis(20), move || {
+            let next: f32 = if SHRINK.load(Ordering::SeqCst) {
+                0.5
+            } else {
+                2.0
+            };
+            if zoom.get_untracked() != next {
+                zoom.set(next);
+            }
+        });
+        view().flex_1().overflow_hidden().child(
+            view()
+                .w(px(200.0))
+                .h(px(120.0))
+                .origin_top_left()
+                .scale(move || zoom.get())
+                .child(
+                    text("Sharp")
+                        .test_id("sharp")
+                        .absolute()
+                        .left(px(20.0))
+                        .top(px(20.0))
+                        .w(px(120.0))
+                        .h(px(24.0)),
+                ),
+        )
+    }
+
     /// Runs the main run loop until `done` holds, for at most 5 s.
     fn until(what: &str, mut done: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -189,6 +226,18 @@ mod macos {
     /// Whether anything was drawn in `view`.
     fn drawn(view: &NSView) -> bool {
         picture(view).iter().any(|&b| b != 0)
+    }
+
+    /// The density of `view`'s content layer: the pixels it draws per
+    /// point, which must follow a scaled ancestor.
+    fn content_scale(view: &NSView) -> Option<f64> {
+        let layer = view.layer()?;
+        let sublayers = unsafe { layer.sublayers() }?;
+        sublayers
+            .iter()
+            .filter(|layer| layer.delegate().is_some())
+            .map(|layer| layer.contentsScale())
+            .reduce(f64::max)
     }
 
     fn window(mtm: MainThreadMarker) -> Retained<NSWindow> {
@@ -302,6 +351,47 @@ mod macos {
         println!("draw_on_show: scaled: ok");
     }
 
+    /// A text under a scaled ancestor draws at the ancestor's resolution:
+    /// its content layer must not stretch the bitmap the window's backing
+    /// scale gave it. Shrinking the ancestor puts the density back.
+    fn sharp_scaled_window(mtm: MainThreadMarker) {
+        let window = window(mtm);
+        window.setContentSize(NSSize::new(400.0, 200.0));
+        let app = AppView::new(
+            mtm,
+            AppOptions {
+                size: (400, 200),
+                ..AppOptions::default()
+            },
+        );
+        let root = app.view();
+        window.setContentView(Some(&root));
+        window.orderFrontRegardless();
+        app.load(Root::of::<Sharpened>().into());
+        until("the sharpened mount", || find(&root, "sharp").is_some());
+        let text = find(&root, "sharp").unwrap();
+        until("the sharp text", || drawn(&text));
+
+        let backing = window.backingScaleFactor();
+        let scale = content_scale(&text).expect("a content layer");
+        assert!(
+            scale >= backing * 2.0,
+            "content drawn at {scale}, below {backing} x 2"
+        );
+        assert!(
+            scale <= backing * 2.5,
+            "content drawn at {scale}, above {backing} x 2.5"
+        );
+
+        SHRINK.store(true, Ordering::SeqCst);
+        until("the unzoomed text", || {
+            content_scale(&text).is_some_and(|scale| scale <= backing * 1.001)
+        });
+        app.stop();
+        window.close();
+        println!("draw_on_show: sharp: ok");
+    }
+
     /// A native transform must reveal deferred text on itself and below
     /// it, without a layout change or a drawing-forcing screenshot.
     fn animated_window(mtm: MainThreadMarker) {
@@ -344,6 +434,9 @@ mod macos {
         }
         if runs("animated") {
             animated_window(mtm);
+        }
+        if runs("sharp") {
+            sharp_scaled_window(mtm);
         }
     }
 }

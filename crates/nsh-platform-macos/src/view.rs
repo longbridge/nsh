@@ -323,6 +323,40 @@ pub(crate) fn ca_transform(m: &Matrix) -> CATransform3D {
     }
 }
 
+/// The scale a Core Animation transform applies to the 2D axes it maps
+/// content onto.
+fn transform_scale(t: &CATransform3D) -> f64 {
+    // Row-vector matrix: the x axis maps to (m11, m12), y to (m21, m22).
+    let x = (t.m11 * t.m11 + t.m12 * t.m12).sqrt();
+    let y = (t.m21 * t.m21 + t.m22 * t.m22).sqrt();
+    if x.is_finite() && y.is_finite() {
+        x.max(y)
+    } else {
+        1.0
+    }
+}
+
+/// Whether two transforms change the density their content draws at.
+fn scale_changed(before: &CATransform3D, after: &CATransform3D) -> bool {
+    let (before, after) = (transform_scale(before), transform_scale(after));
+    (before - after).abs() > 1e-4 * before.max(after).max(1.0)
+}
+
+/// The density multiplier a content layer draws at for `scale`: the next
+/// 1.25x step, never below the backing scale and at most 25% above what
+/// the scale needs. A smooth zoom then redraws at a few densities, not
+/// every frame.
+fn raster_zoom(scale: f64) -> f64 {
+    const STEP: f64 = 1.25;
+    // Below this the stretch is in glyph antialiasing only.
+    const CLEAR: f64 = 1.1;
+    if !scale.is_finite() || scale < CLEAR {
+        return 1.0;
+    }
+    let scale = scale.min(64.0);
+    STEP.powf((scale.ln() / STEP.ln()).ceil())
+}
+
 /// The identity transform.
 pub(crate) const IDENTITY: CATransform3D = CATransform3D {
     m11: 1.0,
@@ -382,6 +416,10 @@ pub(crate) struct Ivars {
     /// Deferred drawing and placement marks in this subtree, including
     /// this view. Only their transforms can reveal deferred work.
     waiting: Cell<usize>,
+    /// The density (`contentsScale`) last applied to its content subtree,
+    /// or 0 before one is. A translation leaves it alone; a scale change
+    /// compares against it before walking anything.
+    sharpened: Cell<f64>,
 }
 
 define_class!(
@@ -1180,6 +1218,9 @@ define_class!(
             // view: views placed before they were inserted lose their
             // transforms.
             NshView(self.retain()).set_layer_geometry();
+            // Its place in a transformed ancestor may have changed even
+            // when its own transform did not.
+            NshView(self.retain()).sharpen();
         }
 
         #[unsafe(method(viewDidMoveToWindow))]
@@ -1647,6 +1688,7 @@ impl NshView {
             // Not known until a first scan.
             foreign: Cell::new(true),
             waiting: Cell::new(0),
+            sharpened: Cell::new(0.0),
         });
         // SAFETY: NSView's designated initializer.
         let obj: Retained<ViewObj> = unsafe { msg_send![super(obj), initWithFrame: NSRect::ZERO] };
@@ -1937,7 +1979,7 @@ impl NshView {
             let layer = CALayer::new();
             layer.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*drawer)));
             layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
-            layer.setContentsScale(self.backing_scale());
+            layer.setContentsScale(self.content_scale());
             layer.setZPosition(crate::decor::BEHIND / 4.0);
             host.addSublayer(&layer);
             *overlay = Some((layer, drawer));
@@ -1977,7 +2019,7 @@ impl NshView {
         if self.state().text.is_some() {
             layer.setContentsGravity(unsafe { kCAGravityTopLeft });
         }
-        layer.setContentsScale(self.backing_scale());
+        layer.setContentsScale(self.content_scale());
         // Above the decoration behind it (fills, gradients, inset
         // shadows), below the children and the borders in front.
         layer.setZPosition(crate::decor::BEHIND / 2.0);
@@ -2016,15 +2058,67 @@ impl NshView {
         self.ns().window().map_or(2.0, |w| w.backingScaleFactor())
     }
 
+    /// The scale its own transform's 2D axes apply, or 1 without one.
+    fn layer_scale(&self) -> f64 {
+        let transform = self.state().transform();
+        transform
+            .as_ref()
+            .map_or(1.0, |m| transform_scale(&ca_transform(m)))
+    }
+
+    /// The scale the transforms and scroll zooms above it apply.
+    fn inherited_scale(&self) -> f64 {
+        let mut scale = 1.0;
+        let mut parent = self.parent_view();
+        while let Some(view) = parent {
+            scale *= view.layer_scale() * f64::from(crate::scroll::zoom(&view));
+            parent = view.parent_view();
+        }
+        scale
+    }
+
+    /// The density its own content layers draw at for its place in the
+    /// tree.
+    fn content_scale(&self) -> CGFloat {
+        self.backing_scale() * raster_zoom(self.inherited_scale() * self.layer_scale())
+    }
+
+    /// Draws its content layers and its descendants' again at the density
+    /// the scale of their transforms and scroll zooms needs. The target
+    /// covers the subtree, so a translation, or a zoom within one density,
+    /// walks nothing.
+    pub(crate) fn sharpen(&self) {
+        let inherited = self.inherited_scale();
+        let own = inherited * self.layer_scale();
+        let target = self.backing_scale() * raster_zoom(own * f64::from(crate::scroll::zoom(self)));
+        if self.ivars().sharpened.get() == target {
+            return;
+        }
+        self.ivars().sharpened.set(target);
+        self.sharpen_subtree(inherited);
+    }
+
+    /// `parent` is the scale above it; its own transform and scroll zoom
+    /// apply below it.
+    fn sharpen_subtree(&self, parent: f64) {
+        let own = parent * self.layer_scale();
+        self.draw_zoomed(self.backing_scale(), raster_zoom(own));
+        let below = own * f64::from(crate::scroll::zoom(self));
+        for child in self.child_views() {
+            child.sharpen_subtree(below);
+        }
+    }
+
     /// Its window or screen changed: the content layer draws at the new
     /// scale.
     fn rescale(&self) {
-        self.draw_zoomed(self.backing_scale(), 1.0);
+        let zoom = raster_zoom(self.inherited_scale() * self.layer_scale());
+        self.draw_zoomed(self.backing_scale(), zoom);
     }
 
-    /// Draws its content at `zoom` times the window's backing `scale` (in
-    /// a zoomable scroll view zoomed in), never below it and at most 4096
-    /// pixels a side.
+    /// Draws its content at `zoom` times the window's backing `scale`: the
+    /// scale of the transforms above it, or a zoomable scroll view's zoom.
+    /// Never below the backing scale and at most 4096 pixels a side.
     pub(crate) fn draw_zoomed(&self, scale: CGFloat, zoom: CGFloat) {
         for surface in [&self.ivars().content, &self.ivars().overlay] {
             if let Some((layer, _)) = &*surface.borrow() {
@@ -2179,14 +2273,19 @@ impl NshView {
         };
         layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
         layer.setPosition(self.ns().frame().origin);
+        let before = layer.transform();
         let t = transform.as_ref().map_or(IDENTITY, ca_transform);
         // Unrelated spinners must not rescan a long list's deferred rows.
-        if self.ivars().waiting.get() != 0 && layer.transform() != t {
+        if self.ivars().waiting.get() != 0 && before != t {
             crate::sight::moved();
         }
+        let rescaled = scale_changed(&before, &t);
         layer.setTransform(t);
         layer.setOpacity(opacity.clamp(0.0, 1.0));
         layer.setHidden(hidden);
+        if rescaled {
+            self.sharpen();
+        }
     }
 
     /// Hosted native views at their rectangles.
@@ -2446,6 +2545,18 @@ impl crate::sight::Tree for Planned {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_rasters_step_with_the_scale() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(close(raster_zoom(0.5), 1.0));
+        assert!(close(raster_zoom(1.0), 1.0));
+        assert!(close(raster_zoom(1.1), 1.25));
+        assert!(close(raster_zoom(2.0), 1.25_f64.powi(4)));
+        assert!(close(raster_zoom(f64::INFINITY), 1.0));
+        assert!(raster_zoom(2.5) >= 2.5);
+        assert!(raster_zoom(2.5) <= 2.5 * 1.25);
+    }
 
     #[test]
     fn scripted_wheels_are_the_event_handled() {
