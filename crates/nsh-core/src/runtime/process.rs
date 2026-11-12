@@ -158,6 +158,14 @@ impl Process {
     pub(crate) fn data_dir(sys: System) -> Option<String> {
         sys.data_dir.map(|dir| dir.to_string_lossy().into_owned())
     }
+
+    /// The file the app's log lines are written to (a packaged desktop
+    /// app's rolling log in its data directory), `null` when they go to the
+    /// platform's log only.
+    #[getter]
+    pub(crate) fn log_file() -> Option<String> {
+        crate::log_file::path().map(|file| file.to_string_lossy().into_owned())
+    }
 }
 
 /// Options of `run`.
@@ -1658,6 +1666,7 @@ mod tests {
             "export declare const platform: string;",
             "  readonly env: Record<string, string>;",
             "  readonly dataDir: string | null;",
+            "  readonly logFile: string | null;",
             "} & { nextTick: typeof nextTick };",
             "  on(event: ExitEvent, handler: (result: ExitResult) => void): ChildProcess;",
             "  on(event: OutputEvent, handler: (text: string) => void): ChildProcess;",

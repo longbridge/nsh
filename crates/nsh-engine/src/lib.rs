@@ -18,6 +18,8 @@ mod cache;
 mod error;
 mod host_channel;
 mod local_storage;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod logging;
 #[cfg(feature = "net")]
 pub mod net;
 pub mod perf;
