@@ -24,7 +24,22 @@ What one app or a few apps need belongs there, or in a community crate, not in N
 delivering apps (packaging, signing, updates) exist because every app needs to be delivered; they are not precedent
 for adding other features.
 
-A new feature is accepted only when all of these hold:
+Most contributions we take improve what NSH already has. In order of preference:
+
+- **Bug fixes**, on any platform.
+- **Performance**: faster rendering, layout, scrolling and start-up, less memory, fewer mount items.
+- **Refinements of existing behavior**: smoother animations and gestures, better input, focus and accessibility,
+  details that make a platform feel right.
+- **Completing existing components** within their domain. `DiffView`, `Editor`, `DataTable` and the other components
+  of `nsh/base` are not finished, and an option or part they lack is welcome when it is common in that domain: the
+  design and API that comparable components (GPUI Kit's first, then well-known editors, diff viewers or data grids)
+  share. A `DiffView` option that diff viewers generally offer fits; one shaped by a single app's workflow does not,
+  and belongs in the app, built on the component's parts and slots.
+- **Bringing an existing feature to every platform** where a backend lacks it.
+
+These need no prior issue.
+
+A new feature, one NSH does not have in any form, is accepted only when all of these hold:
 
 - **Apps cannot build it themselves**, with NSH's existing APIs or through the Rust extension points above. A
   WebView's page and the app already talk through `postMessage` / `onMessage` and `evaluate`, for example, so a flow
@@ -41,8 +56,7 @@ platforms can support, and options that serve one app.
 
 Before writing a new feature, open an issue that answers these points and wait for a maintainer to agree. A pull
 request that adds a feature without that agreement may be closed without a review of its code, however well it is
-written. Bug fixes, performance work, documentation and completing what NSH already has on every platform need no
-prior issue.
+written.
 
 Reviewers, people and AI agents alike, judge scope first: a pull request that adds public API or a dependency is
 checked against this section before its implementation is reviewed.
