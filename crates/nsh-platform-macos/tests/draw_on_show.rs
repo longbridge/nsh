@@ -4,7 +4,8 @@
 //! batch, input or animation). A host app makes the view and puts it in a
 //! window itself. AppKit views live on the main thread, so this test runs
 //! without libtest's harness, on the process's own. Its arguments pick the
-//! cases to run (`window`, `unhide`, `scaled`, `animated`); none runs all.
+//! cases to run (`window`, `unhide`, `scaled`, `animated`, `grown`); none runs
+//! all.
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -37,6 +38,28 @@ mod macos {
 
     /// Starts the native transform after the test checks deferred text.
     static REVEAL: AtomicBool = AtomicBool::new(false);
+
+    /// The test sets it to narrow the wrapping text's box.
+    static NARROW: AtomicBool = AtomicBool::new(false);
+
+    /// A text whose box a layout animation narrows: it wraps onto more
+    /// lines and grows taller.
+    #[component]
+    fn Wrapping() -> impl IntoElement {
+        let narrow = signal(false);
+        set_interval(Duration::from_millis(20), move || {
+            if NARROW.load(Ordering::SeqCst) && !narrow.get_untracked() {
+                animate_layout(nsh_core::LayoutAnimation::EASE_IN_EASE_OUT);
+                narrow.set(true);
+            }
+        });
+        view()
+            .w(move || px(if narrow.get() { 90.0 } else { 380.0 }))
+            .child(
+                text("One two three four five six seven eight nine ten eleven twelve")
+                    .test_id("wrapping"),
+            )
+    }
 
     /// A text, in a view the test finds.
     #[component]
@@ -328,6 +351,42 @@ mod macos {
         println!("draw_on_show: animated: ok");
     }
 
+    /// A layout animation grows a text's box as its new lines arrive: the
+    /// text is drawn at its new size by the animation's end, not left as
+    /// the picture made in the box it had.
+    fn grown_window(mtm: MainThreadMarker) {
+        let window = window(mtm);
+        let app = app_view(mtm);
+        let root = app.view();
+        window.setContentView(Some(&root));
+        window.orderFrontRegardless();
+        app.load(Root::of::<Wrapping>().into());
+        until("the wrapping mount", || find(&root, "wrapping").is_some());
+        let label = find(&root, "wrapping").unwrap();
+        until("the text's drawing", || drawn(&label));
+        let line = label.frame().size.height;
+
+        NARROW.store(true, Ordering::SeqCst);
+        until("the taller box", || label.frame().size.height > line * 2.0);
+        // Past the animation's end.
+        spin(0.6);
+        let picture = picture(&label);
+        let part = picture.len() / 5;
+        let ink = |bytes: &[u8]| bytes.iter().any(|&b| b != 0);
+        assert!(
+            ink(&picture[..part]),
+            "the text's first lines are not drawn"
+        );
+        assert!(
+            ink(&picture[picture.len() - part..]),
+            "the text's last lines are not drawn"
+        );
+
+        app.stop();
+        window.close();
+        println!("draw_on_show: grown: ok");
+    }
+
     pub(super) fn run() {
         let mtm = MainThreadMarker::new().expect("the main thread");
         let _app = NSApplication::sharedApplication(mtm);
@@ -344,6 +403,9 @@ mod macos {
         }
         if runs("animated") {
             animated_window(mtm);
+        }
+        if runs("grown") {
+            grown_window(mtm);
         }
     }
 }

@@ -1298,9 +1298,10 @@ pub(crate) struct DrawnText {
     pub(crate) layout: TextLayout,
     /// The content box in the view (inside padding and borders).
     pub(crate) content: nsh_core::Bounds<nsh_core::Points>,
-    /// It was last drawn in a layer narrower than its box (a view waiting
-    /// to be placed, `Mounter::unplaced`): its picture misses what passes
-    /// that layer, so it draws again once placed.
+    /// It was last drawn in a layer narrower or shorter than its box (a
+    /// view waiting to be placed, `Mounter::unplaced`; one whose frame a
+    /// layout animation is still growing): its picture misses what passes
+    /// that layer, so it draws again as the layer gets its size.
     pub(crate) cut: std::cell::Cell<bool>,
     /// The selection of selectable text, kept across new content.
     selection: Option<Selection>,
@@ -1526,8 +1527,8 @@ pub(crate) fn selectable(state: &crate::view::ViewState) -> bool {
 }
 
 /// Draws a text view's text (in its content layer's `drawLayer:inContext:`;
-/// the context is y down).
-pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
+/// the context is y down). `height` is the layer's.
+pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState, height: CGFloat) {
     use objc2_core_foundation::CGAffineTransform;
     let Some(drawn) = &state.text else { return };
     let Some(text) = drawn.layout.downcast::<CoreTextLayout>() else {
@@ -1536,9 +1537,12 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
     let content = drawn.content;
     let c = Some(cx);
     let drawn_width = CGContext::clip_bounding_box(c).size.width;
-    drawn
-        .cut
-        .set(drawn_width < (content.origin.x.0 + content.size.width.0) as CGFloat);
+    // The layer's height, not the clip's: a part drawn again (`damage`) is
+    // as wide as the view but only as tall as its lines.
+    drawn.cut.set(
+        drawn_width < (content.origin.x.0 + content.size.width.0) as CGFloat
+            || height < (content.origin.y.0 + content.size.height.0) as CGFloat,
+    );
     CGContext::save_g_state(c);
     if drawn.text.has_backgrounds() {
         draw_backgrounds(cx, &drawn.text, text, content);

@@ -432,7 +432,7 @@ define_class!(
                 let origin = layer.frame().origin;
                 CGContext::translate_ctm(c, -origin.x, -origin.y);
             } else {
-                crate::text::draw(cx, &state);
+                crate::text::draw(cx, &state, layer.bounds().size.height);
             }
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
