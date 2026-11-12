@@ -46,20 +46,16 @@ pub fn main() -> std::process::ExitCode {
     std::process::ExitCode::FAILURE
 }
 
-/// Installs the logger and reads the app's resources: its `nsh` directory
+/// Reads the app's resources and installs the logger: its `nsh` directory
 /// (in the app bundle, or `NSH_APP_DIR`: `nsh run` of a Rust app) and the
 /// window's options.
 #[cfg(target_os = "macos")]
 fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     use nsh_platform_macos::{ActivationPolicy, AppOptions, Appearance, AssetBase, Limits};
 
-    // Warnings, errors and the app's `js` lines go to the unified log (an
-    // app opened from Finder or the Dock writes stderr to /dev/null). Run by
-    // `nsh run`, the app's own logs go there too, and to its terminal.
+    // Run by `nsh run`: the app's own logs go to its terminal too.
     let development = std::env::var_os("NSH_APP_DIR");
-    let mut logging = nsh_platform_apple::unified_log::Options::default();
-    logging.development = development.is_some();
-    nsh_platform_apple::unified_log::install(logging);
+    let developing = development.is_some();
 
     // `<App>.app/Contents/MacOS/<exe>` -> `<App>.app/Contents/Resources/nsh`.
     let dir = match development {
@@ -112,7 +108,28 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     // app's own runtime-delivered modules (the bundle's resources are
     // read-only).
     options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
+    install_logger(developing, &options.app_id);
     (dir, options)
+}
+
+/// Installs the runners' logger (`nsh_engine::logging`): `RUST_LOG`'s
+/// levels or the default ones (warnings, errors and the app's `js` lines;
+/// from info up when run by `nsh run`), the rolling file in the app's data
+/// directory, and the unified log, as an app opened from Finder or the Dock
+/// writes stderr to /dev/null (and run by `nsh run`, its terminal too). An
+/// app that installed its own logger (from its native module, which runs
+/// first) keeps it, and its level.
+#[cfg(target_os = "macos")]
+fn install_logger(development: bool, app_id: &str) {
+    let mut unified = nsh_platform_apple::unified_log::Options::default();
+    unified.development = development;
+    unified.filtered = true;
+    let unified = nsh_platform_apple::unified_log::logger(unified);
+    let mut logging = nsh_engine::logging::LogOptions::default();
+    logging.development = development;
+    logging.directory = nsh_engine::logging::log_dir(app_id);
+    logging.output = Some(Box::new(move |r: &log::Record<'_>| unified.log(r)));
+    nsh_engine::logging::install(logging);
 }
 
 /// Whether the bundle's Info.plist has `NSHPerformanceMonitor` true.

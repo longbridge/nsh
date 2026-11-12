@@ -286,6 +286,34 @@ fn a_link_press_reports_the_modifier_keys_held() {
     .unwrap();
 }
 
+/// An image at the end of a paragraph that wraps in a narrow column.
+#[component]
+fn WrappedInlineImage() -> impl IntoElement {
+    view().w(px(120.0)).child(text_view().html(
+        "<p>A paragraph long enough to wrap onto several lines <img src=\"https://example.com/dot.png\" alt=\"Dot\" width=\"10\" height=\"10\"></p>",
+    ))
+}
+
+#[test]
+fn an_image_in_a_wrapped_line_is_inside_the_column() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<WrappedInlineImage>())).unwrap();
+    app.wait_for("label:Dot").unwrap();
+    let id = app.screen().id("label:Dot").unwrap();
+    let nodes = app.screen().layout_nodes();
+    let dot = nodes.iter().find(|n| n.id == id).unwrap().bounds;
+    let text = nodes
+        .iter()
+        .find(|n| n.text.is_some())
+        .expect("the paragraph")
+        .bounds;
+    assert!(dot.origin.x < px(120.0), "{dot:?}");
+    // On the last line, not the first.
+    assert!(
+        dot.origin.y > text.origin.y + px(25.0),
+        "{dot:?} in {text:?}"
+    );
+}
+
 /// An app's own image as wide as it asks, at most its box: 400 points
 /// wide in a column of 300, on its own and in a link.
 fn wide_card(image: &nsh_base::text_view::Image) -> View {

@@ -150,6 +150,20 @@ impl Geometry {
         )
     }
 
+    /// Whether the content point `at` is in a block's box before where its
+    /// children start: on a task item's checkbox, or under it.
+    pub(crate) fn before_holder(&self, at: Point<Points>) -> bool {
+        self.insets.iter().any(|(id, inset)| {
+            let (Some(origin), Some((_, frame))) = (self.origin(*id), self.frames.get(id)) else {
+                return false;
+            };
+            at.x >= origin.x
+                && at.x < origin.x + inset.x
+                && at.y >= origin.y
+                && at.y < origin.y + frame.size.height
+        })
+    }
+
     /// Block `id`'s top left in the content box.
     pub(crate) fn origin(&self, id: u64) -> Option<Point<Points>> {
         let mut at = Point::default();
@@ -494,6 +508,23 @@ mod tests {
         assert_eq!(geo.origin(2), Some(Point::new(px(24.0), px(40.0))));
         // The item itself is in its own parent's box: no inset of its own.
         assert_eq!(geo.origin(1), Some(Point::new(px(0.0), px(40.0))));
+    }
+
+    /// The checkbox is in the item's box before its content: a press there
+    /// is the checkbox's, wherever the item is in the document.
+    #[test]
+    fn a_point_before_a_holder_is_on_the_items_checkbox() {
+        let mut geo = Geometry::default();
+        let at =
+            |x: f32, y: f32| Bounds::new(Point::new(px(x), px(y)), Size::new(px(100.0), px(20.0)));
+        geo.frames.insert(1, (Some(DOC), at(10.0, 40.0)));
+        geo.frames.insert(2, (Some(DOC), at(10.0, 60.0)));
+        geo.insets.insert(1, Point::new(px(24.0), px(0.0)));
+        let on = |x: f32, y: f32| geo.before_holder(Point::new(px(x), px(y)));
+        assert!(on(10.0, 40.0) && on(33.0, 59.0));
+        // The item's text, the margin beside it, and a block without a
+        // holder are not.
+        assert!(!on(34.0, 50.0) && !on(9.0, 50.0) && !on(20.0, 70.0));
     }
 
     fn map() -> InlineMap {

@@ -50,42 +50,16 @@ pub fn main() -> std::process::ExitCode {
     std::process::ExitCode::FAILURE
 }
 
-/// Installs the logger (unless the app has its own) and reads the
-/// package: its `nsh` directory (next to the executable, or
-/// `NSH_APP_DIR`: `nsh run` of a Rust app) and the window's options.
+/// Reads the package and installs the logger (unless the app has its
+/// own): its `nsh` directory (next to the executable, or `NSH_APP_DIR`:
+/// `nsh run` of a Rust app) and the window's options.
 #[cfg(windows)]
 fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     use nsh_platform_windows::{AppOptions, Appearance, AssetBase, Limits};
 
-    /// Run by `nsh run`: the app's own logs go to its terminal too.
-    static DEVELOPMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    // A GUI program has no console: warnings go to the debugger
-    // (`OutputDebugString`), where DebugView and Visual Studio show them;
-    // run by `nsh run`, everything also goes to the pipe it reads.
-    struct Logger;
-    impl log::Log for Logger {
-        fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-            m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
-        }
-        fn log(&self, r: &log::Record<'_>) {
-            if self.enabled(r.metadata()) {
-                let line = format!("{} {}: {}\n", r.level(), r.target(), r.args());
-                nsh_platform_windows::debug_output(&line);
-                if DEVELOPMENT.get() == Some(&true) {
-                    eprint!("{line}");
-                }
-            }
-        }
-        fn flush(&self) {}
-    }
-    static LOGGER: Logger = Logger;
+    // Run by `nsh run`: the app's own logs go to its terminal too.
     let development = std::env::var_os("NSH_APP_DIR");
-    let _ = DEVELOPMENT.set(development.is_some());
-    // An app that installed its own logger (from its native module, which
-    // runs first) keeps it, and its level, as on macOS and iOS.
-    if log::set_logger(&LOGGER).is_ok() {
-        log::set_max_level(log::LevelFilter::Info);
-    }
+    let developing = development.is_some();
 
     let dir = match development {
         Some(dir) => std::path::PathBuf::from(dir),
@@ -142,7 +116,30 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
         Some("dark") => options.appearance = Appearance::Dark,
         _ => {}
     }
+    install_logger(developing, &options.app_id);
     (dir, options)
+}
+
+/// Installs the runners' logger (`nsh_engine::logging`): `RUST_LOG`'s
+/// levels or the default ones, and the rolling file in the app's data
+/// directory. A GUI program has no console: the lines also go to the
+/// debugger (`OutputDebugString`), where DebugView and Visual Studio show
+/// them; run by `nsh run`, to the pipe it reads too. An app that installed
+/// its own logger (from its native module, which runs first) keeps it, and
+/// its level.
+#[cfg(windows)]
+fn install_logger(development: bool, app_id: &str) {
+    let mut logging = nsh_engine::logging::LogOptions::default();
+    logging.development = development;
+    logging.directory = nsh_engine::logging::log_dir(app_id);
+    logging.output = Some(Box::new(move |r: &log::Record<'_>| {
+        let line = format!("{} {}: {}\n", r.level(), r.target(), r.args());
+        nsh_platform_windows::debug_output(&line);
+        if development {
+            eprint!("{line}");
+        }
+    }));
+    nsh_engine::logging::install(logging);
 }
 
 /// Not on Windows: says so and exits.

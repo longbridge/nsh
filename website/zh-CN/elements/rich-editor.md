@@ -86,6 +86,17 @@ const inLink = () => (revision(), editor.isActive("link"));
 
 链接菜单用 `chain([extendMarkRange("link"), command("setLink", { href })])` 编辑光标所在的链接，用同样的 `extendMarkRange` 之后的 `command("unsetLink")` 移除它。
 
+`contentLayer` 是应用自己铺在文档上的一层，位于滚动的内容框之内：它里面的内容与文字在同一帧一起移动。它的子元素按内容框的点来摆放，`editor.nodeRect(pos)`（从 `pos` 开始的块的框）和 `editor.coordsAtPos(pos)` 用的就是这套坐标：块边距里的手柄、节点旁的标记。这一层本身不接收按压，它的子元素接收。
+
+```tsx
+const box = editor.nodeRect(blockStart);
+
+<RichEditor
+  editor={editor}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+/>
+```
+
 ## Schema
 
 `defineSchema(spec)` 读取 ProseMirror 形式的 schema，并在出错时抛出错误说明哪里不对。节点类型声明它们的 `content`（内容表达式：`"inline*"`、`"paragraph+"`、`"(heading | paragraph) block*"`）、`group`、是否为 `inline` 或 `atom`、允许的 `marks`，以及带默认值和校验（`"string"`、`"number"`、`"boolean"`）的 `attrs`。第一个块类型是默认类型：回车创建的、填充必需内容的类型。spec 中其他的键作为类型的附加数据保留，供构建在编辑器之上的框架使用。
