@@ -1697,6 +1697,64 @@ fn picked_files_reach_js_with_their_names_and_bytes() {
     assert_eq!(asked.filters[0].extensions, ["pdf", "md"]);
 }
 
+const FILE_PICKER_LIMIT: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("");
+setTimeout(async () => {
+  const refused = await Picker.pickFiles({ maxSize: -1 }).catch((e) => e.name);
+  const files = await Picker.pickFiles({ multiple: true, maxSize: 4 });
+  shown.set(
+    `${refused} ` +
+      files.map((f) => `${f.name}:${f.type}:${f.size}:${f.status}:${f.file === null ? "none" : f.file.size}`).join(" "),
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_files_past_the_apps_limit_reach_js_unread() {
+    let (engine, rx) = start(FILE_PICKER_LIMIT);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickFiles { id, request },
+            } = item
+            {
+                asked = Some(request.clone());
+                let read = |name: &str, bytes: &[u8]| {
+                    let mut file = nsh_core::picker::PickedFile::default();
+                    file.name = name.into();
+                    file.data = nsh_core::ImageData::new(bytes.to_vec());
+                    file
+                };
+                // Read, read but past the limit (a platform that could not
+                // tell its size first), and not read.
+                let files = vec![
+                    read("a.txt", b"abcd"),
+                    read("b.txt", b"abcde"),
+                    nsh_core::picker::PickedFile::too_large("clip.mp4", "", 400_000_000),
+                ];
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id: *id, files },
+                );
+            }
+        }
+        shows(
+            batch,
+            "RangeError a.txt:text/plain:4:read:4 b.txt:text/plain:5:tooLarge:none \
+             clip.mp4:video/mp4:400000000:tooLarge:none",
+        )
+    });
+    assert_eq!(asked.expect("a pick").max_size, Some(4));
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
