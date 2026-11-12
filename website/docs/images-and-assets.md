@@ -53,7 +53,7 @@ Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` (
 
 **Natural size.** An image from an asset lays out at its natural size when its style leaves the width or height open, so `image(LOGO)` and `<Image src={logo} />` need no style. Set one dimension and the aspect ratio, or both, to size it differently.
 
-In Rust, a missing or broken file fails the build, and a changed one builds the crate again. In TSX, assets are resolved relative to the importing module, and their `url` is relative to the app's root (the entry's directory). `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
+In Rust, a missing or broken file fails the build, and a changed one builds the crate again. In TSX, assets are resolved relative to the importing module, and their `url` is their path in the app's directory (where its `nsh.json` is, or without one, its `App.tsx`), so an entry below the app that a test opens (`tests/SubApp.tsx`) names them as the app does. Imported files live in the app's directory: a build stops at an import from outside it and names the file. `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
 
 > [!TIP]
 > In TSX, `src` also accepts `asset:/path` strings, and imported files are the ones guaranteed to ship. A path that is never imported works with the dev server for images, fonts, audio and video in the app's directory (outside hidden directories), and is missing from packaged apps. Import every image you use. A Rust crate ships its whole `assets/` directory through `assets!()`.
@@ -112,6 +112,17 @@ An SVG is sharp at the size it is shown. The browser draws it as vectors; iOS, m
 
 **Reported sizes on the web.** The browser measures SVGs itself, imported or remote: `onLoad` and `Image.getSize` report an SVG's `width` and `height` when it has them, and otherwise the size the browser gives it, which browsers typically derive from a default of 300 × 150 and the `viewBox`'s aspect ratio. Imported SVGs lay out at the bundler's size on every platform. Give SVGs a `width` and `height` for the same reported size everywhere.
 
+## Pixel buffers
+
+A Rust component that draws pixels itself (a renderer, a camera, a preview made on another thread) shows them with `ImageSrc::rgba(width, height, pixels)`: straight (not premultiplied) 8-bit RGBA, rows top to bottom with no padding, `width * height * 4` bytes in any owner (`Vec<u8>`, `Arc<[u8]>`). Nothing is encoded and nothing is copied when the source is made.
+
+```rust
+let page: Arc<[u8]> = render_page(); // 1192 × 1684 pixels
+image(ImageSrc::rgba(1192, 1684, page)).w_full()
+```
+
+The image lays out at `width` × `height` points, as a `data:` image does; style it to size it. Each buffer is an image of its own: give the view a new source for a new frame, and the caches drop the old one once no view shows it. Windows, macOS, Linux and GPUI draw the pixels as they are; iOS, Android and the browser load images from encoded bytes, so there the buffer becomes an uncompressed PNG the first time it is shown (a copy, no compression). TSX has `Blob` URLs for bytes it holds.
+
 ## Remote images
 
 Give the element a URL: a string in Rust (a closure for one that changes), a URL string in TSX:
@@ -131,7 +142,7 @@ image(move || user.with(|u| u.avatar_url.clone()))
 - **A background color** shows while the image loads, or use a placeholder (below).
 - Downloads are shared: several views showing the same URL download it once, also when they decode it at different sizes. A download nobody waits for any more is cancelled.
 - Decoded images are cached in memory (the cache is purged under memory pressure), keyed by URL, decode size and blur radius.
-- When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`; a refused image fails with its error event.
+- When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`; a refused image fails with its error event. A local file (an absolute path or a `file:` URL, as `onFileDrop`, the clipboard and `import.meta.url` give on the desktops) needs an `fs.read` root that holds it, and loads only on the desktops.
 
 ### Kept on disk
 
@@ -149,6 +160,8 @@ The cache follows the server's HTTP caching headers:
   `Last-Modified`): an unchanged image (`304`) is used again without downloading it, a changed one replaces it.
 - When the request fails (no network) or the server has an error (`5xx`), the kept copy is shown, unless the response
   said `must-revalidate` or `no-cache`.
+- When a request for the image is redirected to an address the app's `network` capability does not allow, the image
+  fails and the kept copy is dropped.
 
 Each app has its own cache of 256 MiB; past that, the images used least recently are dropped first. Several views,
 surfaces and processes of one app share it safely. Embedding apps choose where it is and how large, or turn it off:

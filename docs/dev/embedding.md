@@ -4,8 +4,10 @@
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS and macOS packages add the app's
   `ios` / `macos` `infoPlist` keys and `entitlements` (`crates/nsh-cli/src/apple.rs`: JSON as property list values,
-  the keys NSH sets refused with what to set instead; device builds check entitlements against the profile, which
-  keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
+  the keys NSH sets refused with what to set instead; `MinimumOSVersion` / `LSMinimumSystemVersion` are the runtime's
+  minimum, `IOS_MINIMUM` / `MACOS_MINIMUM`, which an app may raise but not lower (checked when `nsh.json` is read;
+  `actool` compiles the iOS icon for the version declared); device builds check entitlements against the profile,
+  which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
@@ -45,7 +47,9 @@
   applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
   while Java code names few of them, so R8 removed or renamed them (`ClassNotFoundException: TextLayouts`). The rule
-  keeps the whole package rather than a list that a new JNI lookup would have to extend.
+  keeps the whole package rather than a list that a new JNI lookup would have to extend, including the
+  package-private `NshView.handle` field custom Rust hosts read. Hosts packaging the Java sources or `classes.jar`
+  themselves include the same consumer rule, plus rules keeping their own JNI bridge names.
 - Fonts the host ships: `NshView.registerFont(byte[])` and `NshAppView.registerFont(_:)` register a TrueType, OpenType, WOFF or WOFF2 file with the view, before a load or while an app runs. Apps then set `fontFamily` to the family name in the file and do not import it, so the file is not packed into each bundle. The same file registered again is kept once.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
@@ -64,6 +68,11 @@
   the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
   one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
+- **An application-owned Tokio runtime (Rust-linked mobile hosts)**: iOS `SurfaceOptions::runtime` and Android
+  `nsh::set_runtime(handle, runtime)` (`host.rs`) forward an optional `tokio::runtime::Handle` to
+  `EngineConfig::runtime`, per view; `None` keeps the process-wide shared runtime. Both are read each time an engine
+  starts, so a change applies from the next load and a running engine keeps its runtime. NSH only clones the handle;
+  the app owns the runtime. The engine's `runtime` tests cover it (`nsh-engine/tests/engine/runtime.rs`).
 - **Native components** (`nsh`'s `nativeComponent`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`
@@ -249,7 +258,7 @@
   in classes included, stay as they are. The layout direction stays the system's language's.
 - **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme
   tokens (brand colors, `radius`, ...) at run time: Rust `AppView::set_theme_overrides(Option<&str>)` (AppKit, GTK,
-  Win32; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
+  Win32; GPUI's takes `cx` as well; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
   `NshView.setThemeOverrides`. The value is a theme file in the format of `nsh.json`'s `"theme"` (shadcn's `cssVars`:
   `theme`, `light` and `dark` sections, values as CSS writes them; `components.md` "The theme"); it is parsed on the
   calling thread by `nsh_base::theme_overrides`, which keeps only the tokens the file sets (a `var()` it names and
@@ -262,7 +271,8 @@
   every app loaded later, a development reload included; `None` / `nil` / `null` gives the app its own theme back. A
   token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as
   in a theme file, so an override that differs in dark mode names it in `dark`. GPUI's `AppView::set_theme` /
-  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent.
+  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent; GPUI's surface keeps
+  the two apart and sends the overrides over the theme (`Tokens::over`), so each stays when the other changes.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -284,6 +294,9 @@
   with arm64 by `lipo`: apps whose simulator builds run under Rosetta; `rustup target add x86_64-apple-ios`);
   `--no-catalyst` and `--no-dev` leave out the Catalyst slice and `NativeShellDev`. The C functions return errors as strings
   (`nsh_string_free`) that Swift throws as `NshError`; the error handler's context is released by a callback.
+  `NativeShell`'s logs go to the unified log under the host app's bundle identifier (`nsh_platform_apple::unified_log`,
+  installed by the first `nsh_app_create` or `nsh_trust_create` unless the process has a logger; `macos.md` "Packaged
+  apps' logs"); `NativeShellDev`'s go to the dev server while connected, to stderr otherwise (`dev.rs`).
 
 ## GPUI and GPUI Kit apps
 

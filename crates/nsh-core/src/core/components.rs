@@ -526,6 +526,15 @@ struct UrlScheme {
     address: crate::url_scheme::AppUrlCell,
 }
 
+/// Files the system opened the app with ([`crate::file_type`]).
+#[derive(Default)]
+struct OpenFiles {
+    /// Files no listener took yet, at most [`crate::file_type::MAX_PENDING`].
+    pending: std::collections::VecDeque<std::path::PathBuf>,
+    /// The listener waiting for files.
+    next: Option<AnswerSlot<Vec<std::path::PathBuf>>>,
+}
+
 /// Later launches of the app ([`crate::single_instance`]).
 #[derive(Default)]
 struct SecondInstances {
@@ -628,6 +637,7 @@ pub(super) struct Components {
     /// The links that open the app ([`crate::url_scheme`]).
     url_schemes: UrlScheme,
     second_instances: SecondInstances,
+    open_files: OpenFiles,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -639,6 +649,10 @@ pub(super) struct Components {
     /// The language the app asked to show in (`Some(None)`: the user's
     /// again), for the engine ([`Core::take_locale_request`]).
     pub(super) locale_request: Option<Option<crate::platform::Locale>>,
+    /// The app listened to quit requests at the last commit: the platform
+    /// was told its quit requests go to the app
+    /// ([`crate::desktop::DesktopCommand::SetQuitOnRequest`]).
+    asks_quit: bool,
     /// Functions for the platform's main thread, for the engine
     /// ([`Core::take_main_thread_tasks`]).
     main_thread: Vec<crate::main_thread::MainThreadTask>,
@@ -662,6 +676,9 @@ pub(super) struct Components {
     /// Elements to measure once this commit is laid out
     /// ([`crate::element::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
+    /// Lists to tell where their viewports start once this commit is laid
+    /// out ([`crate::element::ElementRef::measure_scroll_position`]).
+    pub(super) scroll_positions: Vec<(NodeId, AnswerSlot<Option<crate::ListScrollPosition>>)>,
     /// Elements whose transitions' time to tell once this commit is
     /// styled ([`crate::element::ElementRef::transition_time`]).
     pub(super) transition_times: Vec<(NodeId, AnswerSlot<std::time::Duration>)>,
@@ -749,6 +766,7 @@ impl Default for Components {
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
             locale_request: None,
+            asks_quit: false,
             main_thread: Vec::new(),
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
@@ -763,6 +781,7 @@ impl Default for Components {
             notifications: Notifications::default(),
             url_schemes: UrlScheme::default(),
             second_instances: SecondInstances::default(),
+            open_files: OpenFiles::default(),
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             web_evaluations: Default::default(),
@@ -771,6 +790,7 @@ impl Default for Components {
             next_fetch: 1,
             animations: FxHashMap::default(),
             measures: Vec::new(),
+            scroll_positions: Vec::new(),
             transition_times: Vec::new(),
             presses: Vec::new(),
             virtual_lists: FxHashMap::default(),
@@ -939,7 +959,42 @@ impl<M: TextEngine> Core<M> {
     /// read from now on.
     pub fn set_translations(&mut self, translations: crate::i18n::Translations) {
         let _entered = self.components.runtime.enter();
-        crate::element::global::<crate::i18n::Translations>().set(translations);
+        let stored = crate::element::global::<crate::i18n::Translations>();
+        let env = self.components.environment;
+        let before =
+            crate::i18n::text_locale(&stored.get(), env.locale, env.locale_settings.languages);
+        stored.set(translations);
+        if crate::i18n::text_locale(&stored.get(), env.locale, env.locale_settings.languages)
+            != before
+        {
+            self.localize_menus();
+        }
+    }
+
+    /// The menus NSH owns use the same language selection as the app's text.
+    fn localize_menus(&mut self) {
+        let _entered = self.components.runtime.enter();
+        if !matches!(
+            self.components.environment.os,
+            crate::platform::Os::MacOs | crate::platform::Os::Windows
+        ) || self.components.environment.idiom == crate::platform::Idiom::Terminal
+        {
+            return;
+        }
+        let translations = crate::element::global::<crate::i18n::Translations>().get();
+        let env = self.components.environment;
+        let locale =
+            crate::i18n::text_locale(&translations, env.locale, env.locale_settings.languages);
+        let labels = crate::desktop::MenuLabels::for_locale(
+            locale,
+            self.components.environment.os == crate::platform::Os::MacOs,
+        );
+        let _ = self.apply_op(crate::Op::Command {
+            id: crate::ROOT_ID,
+            command: crate::Command::Desktop(Box::new(
+                crate::desktop::DesktopCommand::SetMenuLabels(Box::new(labels)),
+            )),
+        });
     }
 
     /// The language the app asked to show in since the last call
@@ -1103,6 +1158,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
         let changed = self.components.environment != environment;
+        let language_changed = self.components.environment.idiom != environment.idiom
+            || self.components.environment.os != environment.os
+            || self.components.environment.locale != environment.locale
+            || self.components.environment.locale_settings.languages
+                != environment.locale_settings.languages;
         self.keyboard_moved |=
             self.components.environment.keyboard_height != environment.keyboard_height;
         let ratio = self.components.environment.pixel_ratio;
@@ -1117,6 +1177,9 @@ impl<M: TextEngine> Core<M> {
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
+        }
+        if language_changed {
+            self.localize_menus();
         }
         // A main window that keeps its placement saves it as it changes.
         if let Some(state) = environment.window_state {
@@ -1192,6 +1255,74 @@ impl<M: TextEngine> Core<M> {
                 self.component_failed(host, message);
             }
         }
+    }
+
+    /// Whether something runs as the app quits ([`crate::element::desktop::on_app_quit`],
+    /// `Application.on("quit")`): the engine gives it time to.
+    pub fn has_quit_listeners(&self) -> bool {
+        !self.components.executor.quit.borrow().is_empty()
+    }
+
+    /// The app quits: starts each quit listener's work, oldest first, as
+    /// tasks the engine runs ([`Core::run_component_tasks`]) until
+    /// [`Core::quit_pending`] is false or
+    /// [`QUIT_TIMEOUT`](crate::element::desktop::QUIT_TIMEOUT) has passed.
+    /// Whether any started.
+    pub fn start_quit(&mut self) -> bool {
+        let _entered = self.components.runtime.enter();
+        let executor = self.components.executor.clone();
+        let listeners = executor.quit.borrow().all();
+        for listener in listeners {
+            match caught(|| listener()) {
+                Ok(future) => {
+                    let pending = crate::element::quit::Pending::new(&executor.quitting);
+                    // Detached: it runs until it ends or the engine stops.
+                    drop(crate::element::task::spawn_future(&executor, async move {
+                        future.await;
+                        drop(pending);
+                    }));
+                }
+                Err(message) => log::error!(target: "js", "a quit listener failed: {message}"),
+            }
+        }
+        self.apply_actions();
+        self.quit_pending()
+    }
+
+    /// The user asked to quit while the app listens to quit requests:
+    /// each listener hears it, oldest first.
+    fn quit_requested(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.quit_requests.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a quit request listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// Tells the platform whether its quit requests go to the app, when
+    /// that changed since the last call (a listener came or went): whether
+    /// it did.
+    pub(super) fn sync_quit_requests(&mut self) -> bool {
+        let asks = !self.components.executor.quit_requests.borrow().is_empty();
+        if asks == self.components.asks_quit {
+            return false;
+        }
+        self.components.asks_quit = asks;
+        let _ = self.apply_op(crate::Op::Command {
+            id: crate::ROOT_ID,
+            command: crate::Command::Desktop(Box::new(
+                crate::desktop::DesktopCommand::SetQuitOnRequest(!asks),
+            )),
+        });
+        true
+    }
+
+    /// Whether the work quit listeners started is still running.
+    pub fn quit_pending(&self) -> bool {
+        self.components.executor.quitting.get() > 0
     }
 
     /// Runs the closures that waited for the app's answer to the events
@@ -3097,6 +3228,21 @@ impl<M: TextEngine> Core<M> {
             // its focus (Android: an input that gains a sibling would lose
             // the keyboard on each keystroke).
             let ids: Vec<NodeId> = wanted().copied().collect();
+            // A first fill appends them in order: no child to find its place
+            // among (from the end, each would scan the ones placed already).
+            let empty = self
+                .key(parent)
+                .is_ok_and(|k| self.nodes[k as usize].children.is_empty());
+            if empty {
+                for &child in &ids {
+                    let _ = self.apply_op(Op::Insert {
+                        parent,
+                        child,
+                        before: None,
+                    });
+                }
+                return out;
+            }
             let mut before = None;
             for &child in ids.iter().rev() {
                 if !self.precedes(parent, child, before) {
@@ -4393,17 +4539,9 @@ impl<M: TextEngine> Core<M> {
         };
         self.send_list_rows(id, before.as_ref(), count, keys.as_ref());
         if before.is_none()
-            && let Some(index) = list.initial_index
+            && let Some(command) = list.initial_scroll
         {
-            let _ = self.apply_op(Op::Command {
-                id,
-                command: Command::ScrollToIndex {
-                    index,
-                    animated: false,
-                    view_position: crate::geometry::Percentage(0.0),
-                    view_offset: Points::ZERO,
-                },
-            });
+            let _ = self.apply_op(Op::Command { id, command });
         }
         let state = self.components.virtual_lists.get_mut(&id).expect("list");
         state.row = list.row;
@@ -5177,9 +5315,40 @@ impl<M: TextEngine> Core<M> {
         url: String,
         page: bool,
         quiet: bool,
-        change: Option<crate::url_scheme::AppUrlChangeCause>,
+        change: Option<crate::url_scheme::AppUrlChangeReason>,
     ) {
         let links = &mut self.components.url_schemes;
+        // A file the system opened the app with (nsh.json `fileTypes`): the
+        // platforms report it as a `file://` URL, the core hands it to the
+        // app as a file ([`crate::file_type`]), never as a link.
+        if !page && change.is_none() && crate::file_type::is_file_url(&url) {
+            if !links
+                .schemes
+                .iter()
+                .any(|s| s == crate::file_type::FILE_SCHEME)
+            {
+                log::warn!("file dropped: the app declares no file types (nsh.json `fileTypes`)");
+                return;
+            }
+            let Some(path) = crate::file_type::file_path(&url) else {
+                log::warn!("file dropped: {url} is not a local file");
+                return;
+            };
+            let files = &mut self.components.open_files;
+            if let Some(answer) = files.next.take() {
+                answer.borrow_mut().deliver(vec![path]);
+                return;
+            }
+            if files.pending.len() == crate::file_type::MAX_PENDING {
+                log::warn!(
+                    "file dropped: {} came while nothing listened",
+                    crate::file_type::MAX_PENDING
+                );
+                files.pending.pop_front();
+            }
+            files.pending.push_back(path);
+            return;
+        }
         let checked = if page {
             crate::url_scheme::check_page_url(&url)
         } else {
@@ -5194,11 +5363,11 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let links = &mut self.components.url_schemes;
-        if let Some(cause) = change {
+        if let Some(reason) = change {
             if !links.hears_changes {
                 return;
             }
-            let change = crate::url_scheme::AppUrlChange { url, cause };
+            let change = crate::url_scheme::AppUrlChange { url, reason };
             if let Some(answer) = links.next_change.take() {
                 answer.borrow_mut().deliver(change);
                 return;
@@ -5381,7 +5550,7 @@ impl<M: TextEngine> Core<M> {
                 answer.borrow_mut().deliver(available);
                 return;
             }
-            AudioAction::Open { command, sink } => {
+            AudioAction::Open { mut command, sink } => {
                 debug_assert!(matches!(
                     command,
                     AudioCommand::Load { .. }
@@ -5401,16 +5570,33 @@ impl<M: TextEngine> Core<M> {
                     );
                     return;
                 }
+                // A sound loads what the check granted (`Access::media_url`).
                 if let AudioCommand::Open { src, .. } | AudioCommand::LoadUrl { url: src, .. } =
-                    &command
-                    && !self.access.allows_media(src)
+                    &mut command
                 {
-                    sink.send(failed(AudioError::NotAllowed, "the source is not granted"));
-                    sink.close();
-                    self.deny(format!(
-                        "`{src}` is not granted by capabilities.network in nsh.json"
-                    ));
-                    return;
+                    match self.media_source(src) {
+                        Some(granted) => {
+                            if let Some(url) = granted {
+                                *src = url.to_string();
+                            }
+                        }
+                        None => {
+                            let base = self.base_url.as_deref();
+                            let capability = crate::access::media_capability(src, base);
+                            let advice = crate::access::media_grant_advice(src, base);
+                            // Worded without the app's text: the player's
+                            // error names the capability from it.
+                            sink.send(failed(
+                                AudioError::NotAllowed,
+                                &format!("{}{capability}", super::SOURCE_NOT_GRANTED),
+                            ));
+                            sink.close();
+                            self.deny(format!(
+                                "`{src}` is not granted by capabilities.{capability}: {advice}"
+                            ));
+                            return;
+                        }
+                    }
                 }
                 if self.audio.is_none() && !self.components.environment.audio {
                     sink.send(failed(AudioError::Unavailable, "nothing plays sound here"));
@@ -5494,6 +5680,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
+            Action::MeasureScrollPosition(id, answer) => {
+                self.components.scroll_positions.push((id, answer))
+            }
             Action::Evaluate(node, script, timeout, answer) => {
                 self.start_web_evaluation(node, script, timeout, answer)
             }
@@ -5641,6 +5830,16 @@ impl<M: TextEngine> Core<M> {
                     command: Command::HostCall { id, name, args },
                 });
             }
+            // Dropped without a host, as an SDK channel drops it without
+            // an embedding app.
+            Action::HostPost { name, args } => {
+                if self.components.environment.host {
+                    let _ = self.apply_op(Op::Command {
+                        id: crate::ROOT_ID,
+                        command: Command::HostPost { name, args },
+                    });
+                }
+            }
             // A call timed out (`runtime/host.rs`), its answer dropped: its
             // slot waits no more.
             Action::ForgetHostCalls => {
@@ -5672,6 +5871,16 @@ impl<M: TextEngine> Core<M> {
                 match links.pending.pop_front() {
                     Some(url) => answer.borrow_mut().deliver(url),
                     None => links.next = Some(answer),
+                }
+            }
+            Action::NextOpenFiles(answer) => {
+                let files = &mut self.components.open_files;
+                if files.pending.is_empty() {
+                    files.next = Some(answer);
+                } else {
+                    answer
+                        .borrow_mut()
+                        .deliver(files.pending.drain(..).collect());
                 }
             }
             Action::NextSecondInstance(answer) => {
@@ -5978,6 +6187,10 @@ impl<M: TextEngine> Core<M> {
                         {
                             self.components.runtime.main_close_pressed(*reason);
                         }
+                        crate::desktop::WindowEvent::QuitRequest if id == crate::ROOT_ID => {
+                            self.quit_requested();
+                            return true;
+                        }
                         _ => {}
                     }
                 }
@@ -6202,17 +6415,17 @@ impl<M: TextEngine> Core<M> {
                 let page = flag(crate::url_scheme::PAGE).unwrap_or(false);
                 let quiet = flag(crate::url_scheme::QUIET).unwrap_or(false);
                 // An address move the app did not make (the web's back or
-                // forward), by its cause; one of a newer platform's causes
+                // forward), by its reason; one of a newer platform's reasons
                 // is still the address, quietly.
                 let change = entries.iter().find_map(|(k, v)| match v {
                     crate::PayloadValue::Str(s) if *k == crate::url_scheme::CHANGE => {
-                        Some(crate::url_scheme::AppUrlChangeCause::parse(s))
+                        Some(crate::url_scheme::AppUrlChangeReason::parse(s))
                     }
                     _ => None,
                 });
                 let (quiet, change) = match change {
                     Some(None) => (true, None),
-                    Some(cause) => (quiet, cause),
+                    Some(reason) => (quiet, reason),
                     None => (quiet, None),
                 };
                 // The page's base URL (the web), which Rust's `set_app_url`

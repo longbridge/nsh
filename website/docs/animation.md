@@ -460,8 +460,8 @@ The value is kept alive by the views bound to it and by the component that made 
 | `setOffset(offset)` | `set_offset(offset)` | Adds `offset` to what the value shows: bindings see value + offset, while `set`, animations and drags move the value. |
 | `flattenOffset()` | `flatten_offset()` | Adds the offset to the value and makes the offset 0. |
 | `extractOffset()` | `extract_offset()` | Moves the value into the offset and makes the value 0: a drag then starts from 0, on top of where the last one left it. |
-| `timing(to, { duration?, easing?, delay?, frameRate? })` | `timing(to, ms, easing)`, `timing_with(to, Timing { .. })` | Animates to `to` over `duration` ms (default 300, easing `"easeInOut"`). |
-| `spring(to, { stiffness?, damping?, mass?, velocity?, frameRate? })` | `spring(to, Spring { .. })` | Springs to `to` (defaults: stiffness 170, damping 26, mass 1). |
+| `timing(to, { duration?, easing?, delay?, frameRate? })` | `timing(to, ms, easing)`, `timing_with(to, Timing { .. })` | Animates to `to` over `duration` ms (default 300, easing `"easeInOut"`). A NaN or infinite `duration` jumps to `to`; an easing whose numbers are not finite is linear. |
+| `spring(to, { stiffness?, damping?, mass?, velocity?, frameRate? })` | `spring(to, Spring { .. })` | Springs to `to` (defaults: stiffness 170, damping 26, mass 1). Stiffness and mass above 0 and a finite damping move the value; otherwise it jumps to `to`. Negative damping counts as 0: the value keeps oscillating. |
 | `decay({ velocity?, deceleration?, clamp?, bounce?, frameRate? })` | `decay(velocity, deceleration)`, `decay_within(velocity, deceleration, (min, max), bounce)` | Coasts from `velocity` (units per second) and slows down (deceleration 0.998 per ms by default). With a clamp of `[min, max]` it stops at a bound, or bounces back from it keeping `bounce` (0..1) of its speed. |
 
 Each animation gives an answer you can await, whether it finished: `true` when it played to the end, `false` when something stopped it (`stop()`, `set()`, or a new animation on the same value). It is a `Promise<{ finished: boolean }>` in TSX and an `AnimationEnd` in Rust, which a task awaits for the `bool`. Starting a new animation on a moving value interrupts the old one smoothly: a spring or decay without a velocity continues with the value's current velocity.
@@ -811,7 +811,9 @@ LayoutAnimation.configureNext({
 });
 ```
 
-A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it. In a Rust component, animate only what one element's change moves with `ElementRef::animate_layout(transition)`: the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen). The update's other frames change at once. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content.
+A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it.
+
+In a `List`, the rows already shown slide to their new places and a row that comes in appears in its own, as UIKit's batch updates do: a chat's new message at the bottom of an `inverted` list pushes the messages above it up, while the list keeps its distance from the end. A new row that takes a recycled cell shows at its place at once. In a Rust component, animate only what one element's change moves with `ElementRef::animate_layout(transition)`: the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen). The update's other frames change at once. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content.
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};

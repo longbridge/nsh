@@ -553,6 +553,7 @@ impl Ed {
                     KeyOptions {
                         when: When::Always,
                         repeat,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| f(&e),
@@ -1228,6 +1229,7 @@ fn always() -> KeyOptions {
     KeyOptions {
         when: When::Always,
         repeat: false,
+        for_focus: true,
         ..Default::default()
     }
 }

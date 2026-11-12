@@ -627,6 +627,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                 KeyOptions {
                     when: When::NotEditing,
                     repeat: false,
+                    for_focus: true,
                     ..Default::default()
                 },
                 move |_| change(!open.get_untracked(), OpenChangeReason::TriggerPress),

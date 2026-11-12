@@ -220,7 +220,7 @@ events! {
     MomentumEnd = "onMomentumEnd": "A scroll view stopped gliding (payload: [`EventPayload::Scroll`]).",
     Dialog = "onDialog": "An alert or action sheet closed (root only; payload: `id`, `index`, -1 when dismissed).",
     Touch = "onTouch": "Touches on the view or inside it, for the JS touch and responder handlers (payload: [`EventPayload::Touch`]).",
-    SelectionChange = "onSelectionChange": "The selection (or caret) of an input moved (payload: `start`, `end` in UTF-16 units), or the selection of a selectable view changed (payload: `text`, the selected text as a copy gives it, empty once nothing is selected; `start`, where it starts in the view's whole text).",
+    SelectionChange = "onSelectionChange": "The selection (or caret) of an input moved (payload: `start`, `end` in UTF-16 units), or the selection of a selectable view changed (payload: `text`, the selected text as a copy gives it, empty once nothing is selected; `start`, where it starts in the view's whole text; `bounds`, the box around it in the view, to which the core adds `pageBounds`).",
     KeyPress = "onKeyPress": "A key was pressed in an input (payload: `key`: the character, `Backspace` or `Enter`).",
     LoadEnd = "onLoadEnd": "An image finished loading, or failed.",
     ImageInfo = "onImageInfo": "An `Image.getSize` / `Image.prefetch` request finished (root only; payload: `id`, `width` and `height` in pixels, or `error`).",
@@ -258,8 +258,11 @@ events! {
     Audio = "onAudio": "A sound or a player reported (root only; payload: [`EventPayload::Audio`]).",
     Window = "onWindow" as "": "A window of the app's own reported its state, a close press or that it closed (on its root node; desktops; payload: [`EventPayload::Window`]).",
     EditAction = "onEditAction" as "": "An action was chosen from the edit menu a [`Command::OpenEditMenu`] opened on an input (payload: `action`, an [`EditAction`]'s name); Paste is the input's own paste (`onPaste`), never reported.",
+    Wheel = "onWheel": "A mouse wheel or touchpad scrolled over the view (payload: [`EventPayload::Wheel`]): the nearest listener around the view under the pointer hears it; one nearer than any scroll view under the pointer takes the wheel, so nothing scrolls or zooms natively ([`crate::input::wheel_listener`]).",
+    Pinch = "onPinch": "A touchpad pinch over the view (payload: [`EventPayload::Pinch`]; macOS, Linux, GPUI, Safari): the nearest listener around the view under the pointer hears it; one nearer than any view that pinches natively takes it, so nothing zooms or pinches natively ([`crate::input::wheel_listener`]); a pinch stays on the view its start went to.",
 
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
+    MouseUp = "onMouseUp": "A mouse button was released over the view or a view inside it (payload: [`EventPayload::Mouse`], its `button` naming the released one, with where and the modifiers). The primary button's release also reports `onPressUp`.",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -394,11 +397,16 @@ pub struct TouchPoint {
     /// This finger is one the event is about (it went down, moved or
     /// lifted).
     pub changed: bool,
+    /// What the pointer is: a finger, a pen, or the mouse, which desktops
+    /// also report as a touch (what a held finger does, such as opening a
+    /// context menu, a held mouse button does not).
+    pub pointer_type: PointerType,
 }
 
 /// Where the mouse is over a view ([`EventKind::MouseEnter`],
-/// [`EventKind::MouseMove`], [`EventKind::MouseLeave`]), in points, as
-/// GPUI's `MouseMoveEvent`.
+/// [`EventKind::MouseMove`], [`EventKind::MouseLeave`]), and where a mouse
+/// button was released ([`EventKind::MouseUp`]), in points, as GPUI's
+/// `MouseMoveEvent`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[non_exhaustive]
 pub struct MouseEvent {
@@ -411,6 +419,9 @@ pub struct MouseEvent {
     pub modifiers: crate::keymap::Modifiers,
     /// The button held down, if any (a drag).
     pub pressed_button: Option<MouseButton>,
+    /// The button that changed at this event: the released one on
+    /// [`EventKind::MouseUp`], none on a move.
+    pub button: Option<MouseButton>,
 }
 
 impl MouseEvent {
@@ -427,7 +438,100 @@ impl MouseEvent {
             page_position,
             modifiers,
             pressed_button,
+            button: None,
         }
+    }
+
+    /// A mouse button released at `position` in the view and
+    /// `page_position` in its root view, with `modifiers` held
+    /// ([`EventKind::MouseUp`]).
+    pub fn released(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        modifiers: crate::keymap::Modifiers,
+        button: MouseButton,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            modifiers,
+            pressed_button: None,
+            button: Some(button),
+        }
+    }
+}
+
+/// A touchpad pinch over a view ([`EventKind::Pinch`]), as GPUI's
+/// `PinchEvent`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct PinchEvent {
+    /// Position in the view, its transforms undone.
+    pub position: Point<Points>,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal), as touches' `page`.
+    pub page_position: Point<Points>,
+    /// How much the scale changed since the last event, as a fraction
+    /// (0.1: 10 % bigger; negative: smaller), as GPUI's.
+    pub delta: crate::geometry::Percentage,
+    /// Where it is in the gesture.
+    pub phase: PinchPhase,
+    /// The modifier keys held.
+    pub modifiers: crate::keymap::Modifiers,
+}
+
+impl PinchEvent {
+    /// A pinch step of `delta` in `phase` at `position` in the view and
+    /// `page_position` in its root view, with `modifiers` held.
+    pub fn new(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        delta: crate::geometry::Percentage,
+        phase: PinchPhase,
+        modifiers: crate::keymap::Modifiers,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            delta,
+            phase,
+            modifiers,
+        }
+    }
+}
+
+/// Where a pinch is in its gesture ([`PinchEvent::phase`]), as a touch's
+/// [`TouchPhase`] (TS: `"start"`, `"move"`, `"end"`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PinchPhase {
+    /// The fingers began pinching.
+    Start,
+    /// The fingers moved.
+    #[default]
+    Move,
+    /// The fingers lifted, or the system cancelled the pinch.
+    End,
+}
+
+impl PinchPhase {
+    /// Its TS name.
+    pub fn name(self) -> &'static str {
+        match self {
+            PinchPhase::Start => "start",
+            PinchPhase::Move => "move",
+            PinchPhase::End => "end",
+        }
+    }
+
+    /// The phase named `name` (its TS name).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "start" => PinchPhase::Start,
+            "move" => PinchPhase::Move,
+            "end" => PinchPhase::End,
+            _ => return None,
+        })
     }
 }
 
@@ -515,6 +619,93 @@ impl ContextMenuEvent {
             page_position,
             modifiers,
             pointer_type,
+        }
+    }
+}
+
+/// How far a wheel scrolled ([`WheelEvent::delta`]), as GPUI's
+/// `ScrollDelta`: positive `y` scrolls toward the end (down), positive `x`
+/// toward the right, as the DOM's `WheelEvent`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WheelDelta {
+    /// Points, from a precise device (a touchpad, a Magic Mouse; AppKit's
+    /// `hasPreciseScrollingDeltas`, the DOM's `DOM_DELTA_PIXEL`).
+    Points(Point<Points>),
+    /// Lines (notches) of a mouse wheel, the DOM's `DOM_DELTA_LINE`.
+    Lines(Point<f32>),
+}
+
+impl Default for WheelDelta {
+    fn default() -> Self {
+        WheelDelta::Points(Point::default())
+    }
+}
+
+impl WheelDelta {
+    /// The delta in points, a line being `line_height` points (GPUI's
+    /// `ScrollDelta::pixel_delta`).
+    pub fn points(self, line_height: Points) -> Point<Points> {
+        match self {
+            WheelDelta::Points(p) => p,
+            WheelDelta::Lines(l) => Point {
+                x: Points(l.x * line_height.0),
+                y: Points(l.y * line_height.0),
+            },
+        }
+    }
+
+    /// Whether the delta is in precise points rather than lines.
+    pub fn precise(self) -> bool {
+        matches!(self, WheelDelta::Points(_))
+    }
+
+    /// Its TS `deltaMode`: `"points"` or `"lines"`.
+    pub fn mode_name(self) -> &'static str {
+        match self {
+            WheelDelta::Points(_) => "points",
+            WheelDelta::Lines(_) => "lines",
+        }
+    }
+
+    /// Its raw `(x, y)`, in its own unit.
+    pub fn xy(self) -> (f32, f32) {
+        match self {
+            WheelDelta::Points(p) => (p.x.0, p.y.0),
+            WheelDelta::Lines(l) => (l.x, l.y),
+        }
+    }
+}
+
+/// A wheel over a view ([`EventKind::Wheel`]), in points, as GPUI's
+/// `ScrollWheelEvent`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct WheelEvent {
+    /// Position in the view, its transforms undone.
+    pub position: Point<Points>,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal), as touches' `page`.
+    pub page_position: Point<Points>,
+    /// How far it scrolled, in lines or points.
+    pub delta: WheelDelta,
+    /// The modifier keys held (Control + wheel zooms by convention).
+    pub modifiers: crate::keymap::Modifiers,
+}
+
+impl WheelEvent {
+    /// A wheel by `delta` at `position` in the view and `page_position` in
+    /// its root view, with `modifiers` held.
+    pub fn new(
+        position: Point<Points>,
+        page_position: Point<Points>,
+        delta: WheelDelta,
+        modifiers: crate::keymap::Modifiers,
+    ) -> Self {
+        Self {
+            position,
+            page_position,
+            delta,
+            modifiers,
         }
     }
 }
@@ -828,10 +1019,15 @@ pub enum EventPayload {
     /// Touches (`onTouch`).
     Touch(Box<TouchEvent>),
     /// The mouse over a view (`onMouseEnter`, `onMouseMove`,
-    /// `onMouseLeave`).
+    /// `onMouseLeave`) or a button released over it (`onMouseUp`, its
+    /// `button` naming the released one).
     Mouse(MouseEvent),
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
+    /// A wheel over a view (`onWheel`).
+    Wheel(WheelEvent),
+    /// A touchpad pinch over a view (`onPinch`).
+    Pinch(PinchEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
     /// `onPressDown`, `onPressUp`), with the modifier keys and the click
     /// count, on backends that know it.
@@ -1661,6 +1857,16 @@ pub enum ScreenProp {
     /// and dialogs share it.
     #[prop(js = "statusBar", on = SCREEN | MODAL)]
     StatusBar(Option<StatusBarSetting>),
+    /// `ios={{ supportedOrientations }}` / `android={{ supportedOrientations }}`:
+    /// the orientations the screen may take while the page is shown
+    /// (default: the app's). Of the pages in the tree and displayed (not
+    /// under `display: none`, as a tab not shown is), the most recently
+    /// shown one with a setting decides; the core sends the result as
+    /// [`Command::Orientations`].
+    ///
+    /// [`crate::ModalConfig::PORTRAIT`] bits.
+    #[prop(ios = "supportedOrientations", android = "supportedOrientations", with = crate::js::host_values::page_orientations, reset = ScreenProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = SCREEN)]
+    Orientations(u8),
 }
 
 /// How a modal appears (`animation`).
@@ -2104,6 +2310,15 @@ pub enum Command {
         /// The call to answer.
         call: u32,
     },
+    /// Where a list's viewport starts among its rows, with this commit's
+    /// layout (`ref.measureScrollPosition()`): answered by the core in its
+    /// events for promise `call` (a [`crate::ListScrollPosition`], or null
+    /// for a view that is no list or a list without items); never
+    /// mounted.
+    MeasureScrollPosition {
+        /// The call to answer.
+        call: u32,
+    },
     /// Put `text` on the system clipboard (on the root; `Clipboard.writeText`).
     SetClipboard(String),
     /// Read the system clipboard and report it as [`EventKind::Clipboard`]
@@ -2207,6 +2422,11 @@ pub enum Command {
     /// Play a haptic (on the root; `Haptics` of `nsh/mobile`,
     /// [`crate::element::haptic`]). Platforms without haptics ignore it.
     Haptic(Haptic),
+    /// The orientations the screen may take (on the root; the
+    /// `supportedOrientations` of the page shown, [`ScreenProp::Orientations`]):
+    /// [`crate::ModalConfig::PORTRAIT`] bits, 0 for the app's own. iOS and
+    /// Android; the other platforms ignore it.
+    Orientations(u8),
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),
@@ -2218,6 +2438,17 @@ pub enum Command {
     HostCall {
         /// The call, echoed by the reply.
         id: u64,
+        /// The host's function.
+        name: String,
+        /// Its argument (any JSON value; `null` without one).
+        args: crate::JsonValue,
+    },
+    /// Hand `args` to function `name` of the app embedding NSH, with no
+    /// answer (on the root; `nsh/host`'s `host.post` without a native SDK
+    /// channel). Sent only on platforms whose
+    /// [`crate::platform::Environment::host`] is set, for functions the
+    /// app's `capabilities.host` grants.
+    HostPost {
         /// The host's function.
         name: String,
         /// Its argument (any JSON value; `null` without one).
@@ -3199,4 +3430,49 @@ pub enum Op {
     /// posted during a synchronous call ([`crate::element::RustCall`]). Never
     /// reaches a platform.
     Rust(crate::element::RustOp),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EventKind;
+
+    /// Android reads an event's kind by its index in [`EventKind::ALL`], so
+    /// `Native.java`'s codes must follow this order: a kind inserted here
+    /// and not there makes Android report the kinds after it as others.
+    #[test]
+    fn androids_event_codes_follow_the_kinds() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nsh-platform-android/java/com/longbridge/nsh/Native.java"
+        );
+        let java = std::fs::read_to_string(path).expect("Native.java");
+        let codes: std::collections::HashMap<&str, usize> = java
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("static final int ")?;
+                let (name, value) = rest.strip_suffix(';')?.split_once(" = ")?;
+                Some((name, value.parse().ok()?))
+            })
+            .collect();
+        for (index, kind) in EventKind::ALL.iter().enumerate() {
+            let prop = kind.prop_name().trim_start_matches("on");
+            let mut name = String::new();
+            for (i, c) in prop.chars().enumerate() {
+                if c.is_ascii_uppercase() && i > 0 {
+                    name.push('_');
+                }
+                name.push(c.to_ascii_uppercase());
+            }
+            assert_eq!(
+                codes.get(name.as_str()),
+                Some(&index),
+                "Native.{name} for {kind:?}"
+            );
+        }
+        assert_eq!(
+            codes.len(),
+            EventKind::ALL.len(),
+            "Native.java has codes of no kind"
+        );
+    }
 }

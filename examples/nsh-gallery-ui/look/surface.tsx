@@ -133,7 +133,7 @@ export interface ListRowOptions {
   first?: boolean;
   /** More room before the content (a child row under a "Select all"). */
   start?: number;
-  /** No hover; dimmed to 40% (`disabledStyle`). Pass the same value to the control's `disabled`. */
+  /** No hover; dimmed to 50% (`disabledStyle`). Pass the same value to the control's `disabled`. */
   disabled?: Live<boolean | undefined>;
   /** More style (`flexDirection: "row-reverse"` for a switch at the trailing edge, `alignItems`), over the row's. */
   style?: Live<ViewStyle | undefined>;
@@ -156,7 +156,7 @@ export interface ListRowLook {
  * reaching `ROW_BLEED` (8) past the content on both sides with rounded
  * corners, so the content stays where the section's padding puts it: put
  * rows on a padded surface (`sectionSurface({ padded: true })`). Pressed it
- * dims to 70%, natively; keyboard focus is `focusRing()`; disabled, 40% and
+ * dims to 70%, natively; keyboard focus is `focusRing()`; disabled, 50% and
  * no hover. The hairline above a row that is not the first is a
  * `RowDivider` among its children; the point it takes stays in the padding,
  * so nothing moves.
@@ -185,7 +185,7 @@ export function listRow(o?: ListRowOptions): ListRowLook {
     get focusVisibleStyle(): ViewStyle {
       return focusRing();
     },
-    disabledStyle: { opacity: 0.4 },
+    disabledStyle: { opacity: 0.5 },
   };
 }
 

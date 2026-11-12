@@ -256,8 +256,8 @@ function App() {
   const said = signal("");
   const note = (s: string) => said.set(`${said()} ${s}`);
   note(`start:${UrlScheme.url()}`);
-  UrlScheme.on("change", ({ url, cause }) => {
-    note(`${cause}:${url}`);
+  UrlScheme.on("change", ({ url, reason }) => {
+    note(`${reason}:${url}`);
     if (url.endsWith("last")) note(`now:${UrlScheme.url()} done`);
   });
   UrlScheme.on("open", ({ url }) => note(`open:${url}`));
@@ -272,14 +272,14 @@ fn page_event(control: &EngineControl, url: &str, change: Option<&str>) {
         (nsh_core::url_scheme::URL, PayloadValue::Str(url.into())),
         ("page", PayloadValue::Bool(true)),
     ];
-    if let Some(cause) = change {
-        payload.push(("change", PayloadValue::Str(cause.into())));
+    if let Some(reason) = change {
+        payload.push(("change", PayloadValue::Str(reason.into())));
     }
     control.dispatch_event(ROOT_ID, EventKind::UrlScheme, EventPayload::Map(payload));
 }
 
 #[test]
-fn address_moves_the_app_did_not_make_reach_change_with_their_cause() {
+fn address_moves_the_app_did_not_make_reach_change_with_their_reason() {
     let text = run_app_with(
         bundle_of(CHANGE_APP, "nsh-app-url-change"),
         &[],
@@ -288,7 +288,7 @@ fn address_moves_the_app_did_not_make_reach_change_with_their_cause() {
         |control| {
             page_event(control, "https://a.test/inbox#archive", Some("address"));
             page_event(control, "https://a.test/inbox", Some("back"));
-            // A cause of a newer platform's is the address alone.
+            // A reason of a newer platform's is the address alone.
             page_event(control, "https://a.test/inbox?unknown", Some("teleport"));
             page_event(control, "https://a.test/inbox#last", Some("forward"));
         },
@@ -337,4 +337,56 @@ fn a_pushed_address_reads_back_at_once_and_an_unknown_history_is_a_type_error() 
         text,
         "url: push:myapp://tabs/live replace:myapp://tabs/all wrong:TypeError:myapp://tabs/all done"
     );
+}
+
+/// Hears links on `UrlScheme` and files on `Application.on("openFiles")`,
+/// listening only after a while, so the files reported at the start wait.
+const FILES_APP: &str = r#"
+import { mount, UrlScheme, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+function App() {
+  const said = signal("");
+  const note = (s: string) => said.set(`${said()} ${s}`);
+  setTimeout(() => {
+    UrlScheme.on("open", ({ url }) => note(`link:${url}`));
+    Application.on("openFiles", ({ paths }) => note(`files:${paths.join(",")}`));
+    note("later:");
+  }, 200);
+  setTimeout(() => note("done"), 1000);
+  return <Text>{`opened:${said()}`}</Text>;
+}
+mount(App);
+"#;
+
+#[cfg(unix)]
+#[test]
+fn opened_files_come_as_paths_apart_from_links() {
+    let launch = [
+        "file:///home/u/a%20b.mp4".to_owned(),
+        "myapp://launch".to_owned(),
+        "file:///home/u/c.mov".to_owned(),
+    ];
+    let text = run_app(
+        bundle_of(FILES_APP, "nsh-open-files"),
+        &["myapp", nsh_core::file_type::FILE_SCHEME],
+        &launch,
+        |control| open(control, "file:///home/u/d.mp4"),
+    );
+    // A slow machine may report the later file before the app listens, and
+    // then it waits in the same batch as the launch files.
+    let apart = "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov files:/home/u/d.mp4 done";
+    let batched =
+        "opened: later: link:myapp://launch files:/home/u/a b.mp4,/home/u/c.mov,/home/u/d.mp4 done";
+    assert!(text == apart || text == batched, "{text}");
+}
+
+#[test]
+fn an_app_that_declares_no_file_types_hears_no_file() {
+    let text = run_app(
+        bundle_of(FILES_APP, "nsh-open-no-files"),
+        &["myapp"],
+        &["file:///home/u/a.mp4".to_owned()],
+        |control| open(control, "file:///home/u/d.mp4"),
+    );
+    assert_eq!(text, "opened: later: done");
 }

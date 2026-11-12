@@ -1,18 +1,24 @@
 package com.longbridge.nsh;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import java.util.ArrayList;
+import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Objects;
@@ -28,14 +34,21 @@ import org.json.JSONTokener;
  * one store per app, which every web view shares and which stays. An
  * incognito web view only changes what is its own: it loads without the
  * HTTP cache and saves no form data.
+ *
+ * <p>When the page's renderer process ends (it crashed, or the system
+ * reclaimed its memory), the app stays: this WebView is dropped, the app
+ * hears {@code onError} with {@code ERR_NSH_WEBVIEW_TERMINATED}, and the
+ * next {@code reload()}, {@code load()} or new source makes a new one.
  */
 @SuppressLint({"ViewConstructor", "SetJavaScriptEnabled"})
 final class WebBox extends WidgetBox {
-    private final WebView web;
+    private WebView web;
     /** Source kind (0 none, 1 uri, 2 html) and fields; null before the first load. */
     private Object[] source;
     private String injected, injectedBefore, userAgent;
     private boolean scrollable = true;
+    // The last props, to set up a WebView made after a renderer ended.
+    private boolean javaScriptEnabled, incognito;
     private boolean disposed, processGone;
     private final Handler evaluationHandler = new Handler(Looper.getMainLooper());
     private final HashMap<Integer, Evaluation> evaluations = new HashMap<>();
@@ -59,9 +72,14 @@ final class WebBox extends WidgetBox {
     private WebBox(Context context, Mounter mounter, int id, WebView web) {
         super(context, mounter, id, web);
         this.web = web;
+        attach(web);
+    }
+
+    private void attach(WebView web) {
         web.getSettings().setDomStorageEnabled(true);
         web.addJavascriptInterface(new Bridge(), "nsh");
         web.setWebViewClient(new Client());
+        web.setWebChromeClient(new Chrome());
         web.setOnTouchListener((v, e) -> {
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 // The page scrolls itself: keep enclosing scroll views out.
@@ -142,14 +160,111 @@ final class WebBox extends WidgetBox {
 
         @Override
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-            if (disposed || processGone) return true;
+            // Returning true for every WebView keeps the app alive: unhandled,
+            // Android ends the app's process along with the renderer.
+            if (disposed || processGone || view != web) return true;
             processGone = true;
             cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The web content process terminated");
-            // A WebView with a lost renderer cannot be reused. Handling the
-            // callback and destroying it keeps the embedding app alive.
+            // A WebView with a lost renderer cannot be reused: drop it and
+            // make a new one when the app asks for a page again.
             removeView(web);
             web.destroy();
+            String message = detail.didCrash()
+                    ? "The web content process crashed"
+                    : "The system ended the web content process";
+            android.util.Log.w("nsh", "web view: " + message);
+            mounter.eventMap(id, Native.ERROR, new String[] {"message", "code"},
+                    new Object[] {message, "ERR_NSH_WEBVIEW_TERMINATED"});
             return true;
+        }
+    }
+
+    /** Media capture ({@code getUserMedia}): what the app's {@code webview.media} grants. */
+    private final class Chrome extends WebChromeClient {
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+            List<String> granted = new ArrayList<>();
+            List<String> system = new ArrayList<>();
+            for (String resource : request.getResources()) {
+                String kind, permission;
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                    kind = "microphone";
+                    permission = android.Manifest.permission.RECORD_AUDIO;
+                } else if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                    kind = "camera";
+                    permission = android.Manifest.permission.CAMERA;
+                } else {
+                    continue;
+                }
+                if (!mounter.allowsWebMedia(kind)) {
+                    android.util.Log.w("nsh", "web view " + kind + " capture is not granted: add it to capabilities.webview.media");
+                    continue;
+                }
+                granted.add(resource);
+                system.add(permission);
+            }
+            if (granted.isEmpty()) {
+                request.deny();
+                return;
+            }
+            String[] resources = granted.toArray(new String[0]);
+            Context context = getContext();
+            List<String> missing = new ArrayList<>();
+            for (String p : system) {
+                if (context.checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) missing.add(p);
+            }
+            if (missing.isEmpty()) {
+                request.grant(resources);
+            } else if (context instanceof Activity) {
+                MediaPermissions.of((Activity) context).ask(missing.toArray(new String[0]), allowed -> {
+                    if (allowed) request.grant(resources);
+                    else request.deny();
+                });
+            } else {
+                request.deny();
+            }
+        }
+    }
+
+    /** Asks the user for the system's media permissions, across configuration changes. */
+    @SuppressWarnings("deprecation")
+    public static final class MediaPermissions extends android.app.Fragment {
+        private static final String TAG = "com.longbridge.nsh.WebBox.MediaPermissions";
+        private static final int CODE = 0x4f01;
+        private final List<java.util.function.Consumer<Boolean>> waiting = new ArrayList<>();
+
+        static MediaPermissions of(Activity activity) {
+            android.app.FragmentManager fragments = activity.getFragmentManager();
+            MediaPermissions found = (MediaPermissions) fragments.findFragmentByTag(TAG);
+            if (found == null) {
+                found = new MediaPermissions();
+                fragments.beginTransaction().add(found, TAG).commitNow();
+            }
+            return found;
+        }
+
+        @Override
+        public void onCreate(android.os.Bundle state) {
+            super.onCreate(state);
+            setRetainInstance(true);
+        }
+
+        void ask(String[] permissions, java.util.function.Consumer<Boolean> answer) {
+            waiting.add(answer);
+            if (waiting.size() == 1) requestPermissions(permissions, CODE);
+        }
+
+        @Override
+        public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+            if (code != CODE) {
+                super.onRequestPermissionsResult(code, permissions, results);
+                return;
+            }
+            boolean allowed = results.length > 0;
+            for (int r : results) allowed &= r == PackageManager.PERMISSION_GRANTED;
+            List<java.util.function.Consumer<Boolean>> answered = new ArrayList<>(waiting);
+            waiting.clear();
+            for (java.util.function.Consumer<Boolean> a : answered) a.accept(allowed);
         }
     }
 
@@ -165,7 +280,9 @@ final class WebBox extends WidgetBox {
     @SuppressWarnings("deprecation") // setSaveFormData: still honored before Android 8.
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
             boolean scrollable, boolean javaScriptEnabled, boolean incognito) {
-        if (disposed || processGone) return;
+        if (disposed) return;
+        boolean revived = processGone;
+        if (processGone && !revive()) return;
         if (!javaScriptEnabled) cancelEvaluations("ERR_NSH_WEBVIEW_SCRIPT", "JavaScript is disabled");
         // Read with the first props: the core keeps it from changing.
         if (this.source == null && incognito) {
@@ -178,6 +295,8 @@ final class WebBox extends WidgetBox {
         this.injected = injected;
         this.injectedBefore = injectedBefore;
         this.scrollable = scrollable;
+        this.javaScriptEnabled = javaScriptEnabled;
+        if (this.source == null) this.incognito = incognito;
         web.setVerticalScrollBarEnabled(scrollable);
         web.setHorizontalScrollBarEnabled(scrollable);
         web.getSettings().setJavaScriptEnabled(javaScriptEnabled);
@@ -185,22 +304,63 @@ final class WebBox extends WidgetBox {
             this.userAgent = userAgent;
             web.getSettings().setUserAgentString(userAgent);
         }
-        if (this.source == null || !java.util.Arrays.equals(source, this.source) || scriptsChanged) {
+        if (revived || this.source == null || !java.util.Arrays.equals(source, this.source) || scriptsChanged) {
             this.source = source;
             if ((int) source[0] != 0) {
                 cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
             }
-            switch ((int) source[0]) {
-                case 1: web.loadUrl((String) source[1]); break;
-                case 2: web.loadDataWithBaseURL((String) source[2], (String) source[1], "text/html", "UTF-8", null); break;
-                default: break;
-            }
+            loadSource();
         }
+    }
+
+    private void loadSource() {
+        switch ((int) source[0]) {
+            case 1: web.loadUrl((String) source[1]); break;
+            case 2: web.loadDataWithBaseURL((String) source[2], (String) source[1], "text/html", "UTF-8", null); break;
+            default: break;
+        }
+    }
+
+    /**
+     * A new WebView in place of the one whose renderer ended, set up with
+     * the last props; false (the app hears why) when none can be made.
+     */
+    @SuppressWarnings("deprecation") // setSaveFormData, as in configure.
+    private boolean revive() {
+        WebView fresh;
+        try {
+            fresh = new WebView(getContext());
+        } catch (RuntimeException e) {
+            android.util.Log.w("nsh", "WebView is not available: " + e);
+            mounter.eventMap(id, Native.ERROR, new String[] {"message", "code"},
+                    new Object[] {"WebView is not available: " + e.getMessage(),
+                            "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"});
+            return false;
+        }
+        web = fresh;
+        attach(fresh);
+        replaceWidget(fresh);
+        processGone = false;
+        WebSettings settings = fresh.getSettings();
+        if (incognito) {
+            settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+            settings.setSaveFormData(false);
+        }
+        settings.setJavaScriptEnabled(javaScriptEnabled);
+        if (userAgent != null) settings.setUserAgentString(userAgent);
+        fresh.setVerticalScrollBarEnabled(scrollable);
+        fresh.setHorizontalScrollBarEnabled(scrollable);
+        return true;
     }
 
     /** Commands 4–9 of `Mounter.command`. */
     void command(int kind, String text) {
-        if (disposed || processGone) return;
+        if (disposed) return;
+        if (processGone) {
+            // reload() shows the app's page again in a new WebView.
+            if (kind == 4 && source != null && revive()) loadSource();
+            return;
+        }
         if (kind >= 4 && kind <= 6) {
             cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
         }
@@ -223,7 +383,8 @@ final class WebBox extends WidgetBox {
      * own request; WebView sends them with no subresource or later navigation.
      */
     void load(String url, java.util.Map<String, String> headers) {
-        if (disposed || processGone) return;
+        if (disposed) return;
+        if (processGone && !revive()) return;
         cancelEvaluations("ERR_NSH_WEBVIEW_ABORTED", "The document navigated");
         web.loadUrl(url, headers);
     }

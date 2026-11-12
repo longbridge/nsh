@@ -116,9 +116,10 @@ changes) or an animated value (`&AnimatedValue`, `&AnimatedNode`), whose node it
 `nsh_engine::shader::Renderer` holds a wgpu device and queue, two bind group layouts (built-ins alone; built-ins and
 uniforms) and the render pipelines by source hash (`None` for one the device refused, reported once with a `js`
 warning). A backend opens it the first time a shader is mounted on a surface (Android: on the `NshView`, kept across
-app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter on the primary
-backends and GL (`WGPU_BACKEND` overrides) with WebGL 2's downlevel limits; where no adapter or device is found it is
-`None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
+app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter with WebGL 2's
+downlevel limits backend by backend (Linux: GL, then the primary ones; elsewhere the primary ones and GL at once;
+no setting chooses one) and keeps the first whose device opens, so an adapter that refuses its device gives the
+next backend its turn; where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
 `nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
 clock of `nsh.time` (kept while paused), and its frames.

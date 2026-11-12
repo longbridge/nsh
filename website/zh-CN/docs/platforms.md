@@ -68,6 +68,38 @@ Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::
 > [!NOTE]
 > Rust 宿主通过 NSH 仓库里的平台 crate 嵌入 NSH；macOS、Windows 和 Linux 的 `AppView` 从应用自己的文件（或源代码）加载 bundle，使用默认限制。GPUI crate 以及 iOS 和 Android SDK 还能加载[签名包](./signed-packages.md)，并为每个视图设置限制和能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
 
+### 共享移动宿主的 Tokio 运行时
+
+链接 Rust 的移动宿主可以让 NSH 的异步任务运行在应用已有的 Tokio 运行时上。每个视图保存运行时 `Handle` 的一份克隆；运行时归应用所有，应用保持它（启用 IO 和时间驱动）运转到视图停止。`None` 使用 NSH 共享的运行时。
+
+iOS 在 `AppView`（或 `Surface`）的选项里设置运行时，视图的每次加载都使用它：
+
+```rust
+let mut options = SurfaceOptions::default();
+options.runtime = Some(runtime.handle().clone());
+let view = AppView::new(mtm, frame, options);
+view.load(bundle);
+```
+
+Android 在 UI 线程上用 `NshView` 的原生句柄（它的 `handle` 字段）调用 `nsh::set_runtime`，时机在视图加载应用或连接开发服务器之前。设置属于这个视图，从它的下一次加载起生效；运行中的引擎继续使用启动时的运行时。应用自己库里的 JNI 函数读取句柄：
+
+```rust
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_example_app_RuntimeBridge_configure(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    view: JObject<'_>,
+) {
+    let Ok(handle) = env.get_field(&view, "handle", "J").and_then(|v| v.j()) else {
+        return;
+    };
+    // SAFETY: called on the UI thread with a live NshView of this library.
+    unsafe { nsh::set_runtime(handle, Some(app_runtime().clone())) };
+}
+```
+
+开启混淆时，保留桥接类的名称（`-keep class com.example.app.RuntimeBridge { *; }`）；分发的 AAR 已保留 `com.longbridge.nsh` 包，包括 `NshView.handle`。
+
 ## 为每个平台编写
 
 应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，NSH 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：

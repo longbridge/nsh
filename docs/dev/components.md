@@ -243,7 +243,7 @@ reasons: `reactive-components.md`.
   presses of their own, strings, inline views and images, regions; the core merges them into one paragraph),
   `image(..)`, the other host elements (`input()`, `scroll()`, `nsh_base`'s `nav_stack()` of `nav_page()`s and
   `dialog()`, `canvas(painter)`, `svg(src)` (an SVG drawn as authored, from an `ImageSrc` as `image`'s or `ImageSrc::svg_markup(text)`: `docs/dev/canvas.md` "SVGs"), `web_view(url)` / `web_view_html(html, base_url)`, `video(url)`,
-  `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty on Android), `native(name)` for the
+  `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty off iOS), `native(name)` for the
   embedder's components; `element/host.rs`), strings (as texts) and other components, made as primitives are
   (`chip().label("New").on_press(move || ..)`, below). `.child(..)` (an element, or
   an `Option`, a `Vec`, an array or an iterator of them: `IntoChild<M>`, its marker telling an element from what holds
@@ -354,7 +354,7 @@ reasons: `reactive-components.md`.
   | `ref={el}`, `el.focus()`, `await el.measure()` | `element_ref()`, `.element_ref(&r)` on the element, `r.focus()` / `.scroll_to(..)` / `.seek(..)` / `.command(..)` from listeners and tasks; `r.measure()` is an `Answer<Option<Measurement>>` (`frame: Bounds<Points>`, `page: Point<Points>`) to await in a task |
   | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(px(10.0), px(10.0)))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location` and `page`, `Point<Points>`, and `gesture: PanGesture`: `delta`, `vx`, `vy`, the centroid's `position` and `origin`; `PanGesture::begin` / `update` follow one from `on_touch`) |
   | a ref to a component, `await counter.value()`, `counter.setValue(5)` | `component_ref::<Counter>()`, `counter().component_ref(&r)`, `r.api::<CounterApi>()`: the API its view registered, its methods called directly |
-  | `<List header footer empty separator stickyHeaderIndices stickyHeaderOffset viewabilityConfig onViewableItemsChange loadMoreThreshold initialScrollIndex>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).sticky_header_offset(..).viewability(..).minimum_view_time(..).on_viewable_items_change(..).load_more_threshold(..).initial_scroll_index(..)`: the header, footer and empty view are part of the view, never recycled |
+  | `<List header footer empty separator stickyHeaderIndices stickyHeaderOffset viewabilityConfig onViewableItemsChange loadMoreThreshold initialScrollIndex initialScrollAtEnd>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).sticky_header_offset(..).viewability(..).minimum_view_time(..).on_viewable_items_change(..).load_more_threshold(..).initial_scroll_index(..)` (or `.initial_scroll_at_end()`): the header, footer and empty view are part of the view, never recycled |
   | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(px(40.0))` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
 | `<List viewport="parent">` (in a `Scroll` with the rest of the page) | `.viewport(ListViewport::Parent)` (`ListLayout`): laid out at its full length, its rows follow the scroll view around it; fixed when the list is made |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
@@ -666,7 +666,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `RichEditor` | a list marker in flow before its item's content, a space after it, numbers right-aligned to the list's widest (Cells round the indent it sits in elsewhere); a table's box closed on every side; a `blockquote` (its `to_dom` tag) has `▎` in the accent down its left side, a Cell before its blocks; an `hr` is a row of `─` across the editor, in place of the app's hairline (`horizontalRule` part); the caret is the terminal's own cursor, at the sink, which sits on the caret's Cell |
 | `DataTable` | a sortable title's indicator is text: `↑` ascending, `↓` descending, `↕` unsorted |
 | `Scrollbar` | nothing: the terminal draws its own scroll bars |
-| `Tooltip` | a line, not a bubble: its children on the status line, the viewport's bottom row (`status_line.rs`), at once while the focus or the pointer is on its trigger (the pointer's over the focus's, a toast's message over both); the core's hint overlay follows the trigger and asks as elsewhere, shown with no size and holding the line; no `delay` but `Infinity`, no look or transitions of its own |
+| `Tooltip` | a line, not a bubble: its children on the status line, the viewport's bottom row (`status_line.rs`), at once while the focus the keyboard moved or the pointer is on its trigger (the pointer's over the focus's, a toast's message over both); the core's hint overlay follows the trigger and asks as elsewhere, shown with no size and holding the line; no `delay` but `Infinity`, no look or transitions of its own |
 
 Rows that fill a width (a slider's track, a progress bar, a separator) are `terminal::line`: a view one Cell by
 itself, stretched by its parent, whose text is made for the number of whole Cells its frame holds (`on_layout` over
@@ -739,7 +739,8 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `indeterminate:` / `disabled:` in the part's class, and only the control's root is an accessibility element.
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
-  no active descendant, and the platform's focus stays where it is.
+  no active descendant, and the platform's focus stays where it is. While that focus shows the part shows
+  `focus-visible:` too: a tree's keyboard ring goes on `focus-visible:` and stays off after a click.
   What a part shows beyond the states screen readers hear is a boolean `data-*` attribute:
   `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
   with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes
@@ -993,7 +994,9 @@ what changed.
   The executor keeps the closures in two queues: `Core::take_events` (the engine handing the events out) makes the
   waiting ones due, and the next `Core::commit` runs the due ones first, before its views render, each under the owner
   current when it was registered (dropped unrun once that owner is disposed), so what they change shows in that
-  commit with the app's props. The engine's commit loop goes on for another round while some are due
+  commit with the app's props. A closure that must run even when the answer takes away what the event came from (a
+  popup's content, which Escape inside it closes) is registered under the component's own owner (`Owner::run`), as
+  the popups' open state does. The engine's commit loop goes on for another round while some are due
   (`Core::has_due_answers`), so they go out in the batch of the events they waited for. With a Rust owner, whose
   listener ran when the event was emitted, `f` runs in the commit after the one that rendered what the listener
   changed. The web's browser engine delivers the events the same way (its JS runs in the engine's call, its ops are
@@ -1093,7 +1096,9 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   trigger gained or lost the keyboard focus; the keyboard focus moved to another item of a submenu's menu), `"longPress"`, `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
   motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
-  closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `Tooltip` has these two and
+  closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `onOpen` comes in the commit after
+  the one that made the content, so the app's refs inside it name their views and `focus()` there moves the
+  keyboard focus in; a popup gone before then reports neither. `Tooltip` has these two and
   `onOpenChange`; `HoverCard` these three and `onPosition`.
 - **`onPosition({ placement, bounds, available })`** (`Popover`, `HoverCard`, and `Menu` / `ContextMenu` on the desktops): the
   popup's overlay was placed (the core's `onPosition`, `elements.md` "Overlays"): the side it went on (the other side
@@ -1116,6 +1121,14 @@ inside (`indicator`) follows them through `group-checked:` with `group` on the p
 part's own `checked:` styles. A new value rebinds that item's state and its indicator's projection alone, so only the
 item and its indicator are sent (`crates/nsh-base/tests/base/menu.rs`).
 
+**A menu held to its room.** Each level's items are in a scroll view inside its popup (or sheet), which is held to
+the room its overlay is told on its side, as the dropdown's list is, so the core picks the side at the popup's
+natural size and the items scroll past the room (`gpui-component`'s `PopupMenu` scrolls the same way past its
+`max_h`; NSH needs no `scrollable` switch, `api-naming.md`). The app draws the surface on the popup's own box
+(`popupClass` / `popupStyle`), around the scroll view, so its edges and shadow stay put. The keys measure where the
+items are: the item they move to is scrolled into view, and Page Up / Page Down go a viewport at a time
+(`crates/nsh-base/tests/base/menu.rs`).
+
 **Menu lists.** `MenuList` (Rust, `menu.rs`) puts a level's items in a virtualized list of the menu's own. The menu
 counts it as one place per row among the level's items, made or not, so its keys walk the rows by index: a row not
 made yet is scrolled to and focused once the list has made it, and a disabled row is passed over as an item is. A
@@ -1135,7 +1148,10 @@ core (`ElementRef::transition_time`, an `Action::TransitionTime` the commit answ
 `transition`, the app's `class`, `style` and theme included: the longest duration plus delay, two seconds at most),
 waits that long, then unmounts, and `onClose` follows. A generation counter keeps a stale frame or exit from acting on
 a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
-never gone, so neither `onClose` nor `onOpen` fires. Without a look for a state, or while the user asks for less
+never gone, so neither `onClose` nor `onOpen` fires. On its way out it takes no keys either: the keyboard focus inside
+goes back to the trigger as it closes, not once it is gone (`PopupPresence::focus_back_on_close`, `Popover`'s and a
+desktop menu's), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
+during the exit is the trigger's (Return opens it again, taking it back). Without a look for a state, or while the user asks for less
 motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
 for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
@@ -1149,9 +1165,9 @@ is for, never by replacing one popup with another everywhere:
 | | Desktops (and desktop browsers) | Phones and tablets |
 |---|---|---|
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
-| `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press, or Right / Return on it (Left / Escape go back to it); opened by a press (or the secondary button, a `ContextMenu`) with no item focused, Down / Home focus its first enabled item and Up / End its last | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
-| `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) with no item focused; Shift+F10 and the Menu key on the focused trigger (the web) and a screen reader's "show menu" action (macOS VoiceOver's VO-Shift-M, Windows UI Automation) open it below the trigger (`pointerType: null`, the trigger's bottom-start corner) with the keyboard focus on its first enabled item, as WAI-ARIA has it | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
-| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms), and at once while the keyboard focus is on it; leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the keyboard focus is on the trigger (a hardware keyboard), else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
+| `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), never taller than the room on its side (`onPosition`'s `available`), its items scrolling inside it; `Submenu`s cascade beside their item, on hover or press, or Right / Return on it (Left / Escape go back to it), each held to its own room, and close once the menu scrolls their item out of view; opened by a press (or the secondary button, a `ContextMenu`) with no item focused, Down / Home focus its first enabled item and Up / End its last; the keys bring the item they reach into view and page by the viewport | a sheet at the bottom over a backdrop, below the status bar at most, its items scrolling; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
+| `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) with no item focused; Shift+F10 and the Menu key on the focused trigger (the web) and a screen reader's "show menu" action (macOS VoiceOver's VO-Shift-M, Windows UI Automation) open it below the trigger (`pointerType: null`, the trigger's bottom-start corner) with the keyboard focus on its first enabled item, as WAI-ARIA has it; so does the app setting `open` itself (no request from the trigger: the popup goes against the trigger's box, and back to a point if the secondary button asks again) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms), and at once when the keyboard moves the focus to it (Tab, an arrow, a shortcut, the app's `focus()` after a key; a click that focuses it leaves it to the pointer); leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the focus a hardware keyboard moved is on the trigger, else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) or the keyboard focus comes to it, stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both or the focus left the trigger; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
@@ -1267,13 +1283,14 @@ presented by the platform (`navigation.rs`); `AlertDialog` and `nsh/desktop`'s m
 view's root, so the component's host is the overlay. It is given as an element's `tooltip` (as GPUI's
 `.tooltip(..)`), never placed among children: the core takes such an element as the hint overlay itself, in the
 element (`Core::adopt_hint_tooltips` once its view made it one; Rust: `IntoTooltip for TooltipElement`), so the
-element is what the pointer rests on and what it is placed against. The core follows the pointer and the keyboard
-focus on it and asks (`on_hint_show` / `on_hint_hide`, with a `HintReason`: `onOpenChange`'s `reason` `"hover"`,
-`"focus"`, or `"cancel"` for Escape); the tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring
-the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app's `class` / `style`), its children
-what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
-`Prop::Tooltip`) takes any other element too, shown as it is in a hint overlay the core makes itself
-(`Core::set_tooltip`); it takes no text, so every tooltip's look is the app's.
+element is what the pointer rests on and what it is placed against. The core follows the pointer and the focus the
+keyboard moves to it (`focus-visible:`'s rule: a press that focuses it asks nothing) and asks (`on_hint_show` /
+`on_hint_hide`, with a `HintReason`: `onOpenChange`'s `reason` `"hover"`, `"focus"`, or `"cancel"` for Escape); the
+tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring the requests) decides, as `hint_open`. The
+tooltip itself is the bubble (the app's `class` / `style`), its children what it says; it never takes the pointer
+(`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`, `Prop::Tooltip`) takes any other
+element too, shown as it is in a hint overlay the core makes itself (`Core::set_tooltip`); it takes no text, so every
+tooltip's look is the app's.
 
 ## Carousels
 

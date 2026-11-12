@@ -34,23 +34,23 @@ pub const URL: &str = "url";
 /// marking the address of the page the app is (the web): an `http(s)` URL
 /// of the page's own, which needs no scheme the app claims. Only the
 /// platform sends root events.
-pub(crate) const PAGE: &str = "page";
+pub const PAGE: &str = "page";
 
 /// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
 /// that, `true`, only takes the URL as the app's address (the page's
 /// address at start), with no `open` event.
-pub(crate) const QUIET: &str = "quiet";
+pub const QUIET: &str = "quiet";
 
 /// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
 /// with the page's base URL (the web: its `document.baseURI`).
-pub(crate) const BASE: &str = "base";
+pub const BASE: &str = "base";
 
 /// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
 /// that makes the URL an address the app moved to without making the move
-/// itself, and says how ([`AppUrlChangeCause::as_str`]: the web's back or
-/// forward to an entry, or an address the user typed): the app hears it as
+/// itself, and says how (`"back"`, `"forward"`: the web's back or forward
+/// to an entry; `"address"`: an address the user typed): the app hears it as
 /// a change ([`crate::element::next_app_url_change`]), not as `open`.
-pub(crate) const CHANGE: &str = "change";
+pub const CHANGE: &str = "change";
 
 /// How the app's address it sets meets the history (TS: `UrlScheme.setUrl`'s
 /// `history`, Rust: [`set_app_url_with`](crate::element::set_app_url_with)):
@@ -73,20 +73,21 @@ pub enum HistoryBehavior {
 /// [`next_app_url_change`](crate::element::next_app_url_change)): on the
 /// web, the browser's back or forward to an entry the app's pages do not
 /// account for, or an address the user typed. The app shows what it names.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AppUrlChange {
     /// The address now, as [`app_url`](crate::element::app_url) reads it.
     pub url: String,
     /// What moved it.
-    pub cause: AppUrlChangeCause,
+    pub reason: AppUrlChangeReason,
 }
 
 /// What moved the app's address ([`AppUrlChange`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum AppUrlChangeCause {
+pub enum AppUrlChangeReason {
     /// The browser's back (or a step back from its menu).
+    #[default]
     Back,
     /// The browser's forward.
     Forward,
@@ -95,19 +96,10 @@ pub enum AppUrlChangeCause {
     Address,
 }
 
-impl AppUrlChangeCause {
-    /// Its name in [`CHANGE`] and in TS (`"back"`, `"forward"`,
-    /// `"address"`).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Back => "back",
-            Self::Forward => "forward",
-            Self::Address => "address",
-        }
-    }
-
-    /// The cause called `name` ([`Self::as_str`]); `None` for another.
-    pub fn parse(name: &str) -> Option<Self> {
+impl AppUrlChangeReason {
+    /// The reason called `name` in [`CHANGE`] and in TS (`"back"`,
+    /// `"forward"`, `"address"`); `None` for another.
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "back" => Some(Self::Back),
             "forward" => Some(Self::Forward),
@@ -341,16 +333,17 @@ mod tests {
     }
 
     #[test]
-    fn an_address_change_names_its_cause_as_ts_does() {
-        for cause in [
-            AppUrlChangeCause::Back,
-            AppUrlChangeCause::Forward,
-            AppUrlChangeCause::Address,
+    fn an_address_change_names_its_reason_as_ts_does() {
+        for (name, reason) in [
+            ("back", AppUrlChangeReason::Back),
+            ("forward", AppUrlChangeReason::Forward),
+            ("address", AppUrlChangeReason::Address),
         ] {
-            assert_eq!(AppUrlChangeCause::parse(cause.as_str()), Some(cause));
+            assert_eq!(AppUrlChangeReason::parse(name), Some(reason));
         }
-        assert_eq!(AppUrlChangeCause::parse("open"), None);
-        assert_eq!(AppUrlChangeCause::parse("Back"), None);
+        assert_eq!(AppUrlChangeReason::parse("open"), None);
+        assert_eq!(AppUrlChangeReason::parse("Back"), None);
+        assert_eq!(AppUrlChange::default().reason, AppUrlChangeReason::Back);
     }
 
     #[test]

@@ -107,6 +107,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
         access: surface.access.borrow().clone(),
+        media_files: surface.media_files.borrow().clone(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -397,13 +398,23 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
     Ok(Picture::still(texture(image.into_rgba8())))
 }
 
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size.
+fn from_rgba((w, h, rgba): (u32, u32, &[u8])) -> Result<Picture, String> {
+    let rgba = image::RgbaImage::from_raw(w, h, rgba.to_vec()).ok_or("RGBA of the wrong size")?;
+    Ok(Picture::still(texture(rgba)))
+}
+
 /// The process's decoded images, in the core's budget.
 fn images() -> &'static Images<Picture> {
     static IMAGES: LazyLock<Images<Picture>> = LazyLock::new(|| {
         Images::new(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let picture = decode(bytes, target)?;
+                let picture = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = picture.cost();
                 Ok((picture.clone(), picture.natural, cost))
             },
@@ -1472,6 +1483,14 @@ mod tests {
             frames: Frames::All,
         };
         decode(bytes, &target)
+    }
+
+    #[test]
+    fn takes_rgba_buffers_as_they_are() {
+        let picture = from_rgba((2, 1, &[255, 0, 0, 255, 0, 0, 255, 128])).unwrap();
+        assert_eq!(picture.natural, Natural::Pixels(2, 1));
+        // Downloaded as premultiplied BGRA.
+        assert_eq!(pixels(&picture.texture), [0, 0, 255, 255, 128, 0, 0, 128]);
     }
 
     #[test]

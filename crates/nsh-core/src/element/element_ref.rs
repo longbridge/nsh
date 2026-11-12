@@ -27,7 +27,8 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
+    Command, EditAction, JsonValue, LayoutAnimation, LayoutTransition, ListScrollPosition,
+    Measurement, NodeId,
     geometry::{Bounds, Percentage, Point, Points},
 };
 
@@ -102,7 +103,46 @@ impl FollowTarget {
     }
 }
 
+/// An element another one names for assistive technologies
+/// ([`crate::AccessibilityProp::ActiveDescendant`],
+/// [`crate::AccessibilityProp::Controls`]): a node JS passes (a `ref`),
+/// or whatever element carries a Rust [`ElementRef`], looked up as the
+/// core commits, so the element may be rendered after the one naming it
+/// (a list's row made as the list lays out).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElementTarget(pub(crate) Named);
+
+/// What an [`ElementTarget`] names.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Named {
+    /// A node JS made.
+    Node(NodeId),
+    /// The node carrying a Rust ref.
+    Ref(RefTarget),
+}
+
+impl ElementTarget {
+    /// Node `node` (JS's ref).
+    pub(crate) fn of_node(node: NodeId) -> Self {
+        Self(Named::Node(node))
+    }
+
+    /// The node it names now.
+    pub(crate) fn node(&self) -> Option<NodeId> {
+        match &self.0 {
+            Named::Node(node) => Some(*node),
+            Named::Ref(target) => Some(target.0.node.get()).filter(|&n| n != 0),
+        }
+    }
+}
+
 impl ElementRef {
+    /// What names the element carrying it for assistive technologies
+    /// ([`ElementTarget`]); `None` once its owner is gone.
+    pub(crate) fn element_target(&self) -> Option<ElementTarget> {
+        self.target().map(|t| ElementTarget(Named::Ref(t)))
+    }
+
     pub(crate) fn new(executor: &Rc<Executor>) -> Self {
         Self(Kept::new(Rc::new(Target {
             node: Cell::new(0),
@@ -378,6 +418,25 @@ impl ElementRef {
         let pending = slot.clone();
         if self
             .reach(|node, executor| executor.act(Action::Measure(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(None);
+        }
+        answer
+    }
+
+    /// Where a list's viewport starts among its rows (TS:
+    /// `ref.measureScrollPosition()`): the row there and how far into it,
+    /// as the list lays its rows out, from the layout of the commit this
+    /// call goes out with. [`ElementRef::scroll_to_index`] with the row
+    /// and a view offset of `-offset` puts the viewport's start back
+    /// there, as for a list made anew. `None` when no rendered list
+    /// carries the ref or it has no items. Await it in a task.
+    pub fn measure_scroll_position(&self) -> Answer<Option<ListScrollPosition>> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::MeasureScrollPosition(node, pending)))
             .is_none()
         {
             slot.borrow_mut().deliver(None);

@@ -159,6 +159,20 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
   `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
   browser, even on loopback or under a name rebound to this machine, gets 403.
+- Asset names: `asset:/<path>` is a file's path in the app's directory, the bundle's asset root
+  (`nsh_bundler::Bundle::asset_root`, `HotBundle::asset_root`; `bundle.rs` `app_dir`: the entry's directory when it
+  holds an `nsh.json` or an `App.tsx`, else the nearest one up with an `nsh.json`, else the nearest one up with an
+  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<path>.run.js` name
+  `assets/dot.png` as `App.tsx` does. An import from outside it fails the build (`NshPlugin::ship`), as a package holds
+  only the app's directory; so does a file that is inside by name but links out (checked on its real path), a
+  pixel-density variant found beside an image too, while a link to elsewhere in the app keeps the name it has
+  (`logo@2x.png`). The entry made for a test file may be written outside the app (`TestRun::work_dir` is any
+  directory): `nsh_testing::compiler` builds it with `BundleOptions::asset_root_from`, the test file, so what the
+  test file imports is named from the test file's app (`nsh test` writes it in the app's `.nsh/test`, which roots it
+  alike). What reads assets joins their names to that root: the CLI's `build::Built::asset_root`
+  (its `assets`' sources), the dev server's media files (`DevServer::set_assets_root`, set by every build of `nsh run`;
+  `test_host::serve` starts there), headless runs' `DirectoryAssets` (`nsh_testing::Built::Js`'s `asset_root`, the
+  runner protocol's `Reply::Js` `asset_root`), and `examples/embed-gpui`'s build script.
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK
@@ -262,7 +276,8 @@ applied to a model of the native views (`headless::Screen`, `headless/screen.rs`
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
 
-Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide) unless the test starts the app
+Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide, wrapped at the box's width,
+an inline view or image on the line its character wraps to) unless the test starts the app
 with `Headless::start_with_text_engine`, which takes a function that makes a platform's engine on the engine's thread
 (`CoreTextEngine` on macOS, `DWriteTextEngine` on Windows) so text measures as it does on screen. `Screen::layout_nodes`
 returns the views that are on screen in tree order as layout placed them (`LayoutNode`: kind, `testID`, parent,
@@ -329,7 +344,10 @@ report it:
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
-  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down);
+  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down); a view
+  removed or deleted leaves the hover, the focus and the keyboard focus with its subtree, its states cleared without
+  a `MouseLeave` or `Blur` (`Screen::taken_out`), as a removed DOM element: JS may keep a removed view alive
+  (a cycle through its ref) after its component is gone;
 - `right_click`, `choose_menu_item`, `close_menu` (`headless/menus.rs`): on a desktop environment the match, or the
   nearest view around it listening, hears `ContextMenu`; the menu the app then shows (`Menu.popup`,
   `DesktopCommand::PopupMenu`) is the model's (`Screen::menu`, read through `menu.rs`: its actions by label, a
@@ -351,9 +369,13 @@ report it:
   (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
   hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
-  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
+  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around; only the newest
+  dialog's while one is shown over the focus' window, `Screen::focus_scope`, as the platforms keep Tab inside it; on the
+  desktops and the web a dialog presented takes the focus off the view under it and gives it back when it goes,
+  `Headless::modals_closed`), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
-  presses (a press of the pointer takes it off), and on the web Shift+F10 raises `ContextMenu` with no pointer on
+  presses (a press of the pointer takes it off; on such a view they reach only the focus' own bindings in the keymap
+  above, `Keymap::find_at`, and the application menu not at all), and on the web Shift+F10 raises `ContextMenu` with no pointer on
   the nearest view around it that listens (`pointerType: null`, at its bottom-start corner); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
@@ -366,7 +388,7 @@ A step first applies the batches that came since the last one (they belong to it
 for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
 waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
-time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
+time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output), when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
 failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
 edits than were typed is dropped. `headless::StubNetwork` (routes by `"<METHOD> <URL>"`, `*` matching any text, others
@@ -423,7 +445,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   its own thread: timers on the app's clock, woken by its alarms (`Clock::at`), `console` to the `js` log, no imports), `Environment::host` set, and the
   driver hands the root's `Command::HostCall`s to it as their batches are applied (`Headless::on_host_call`); it
   answers each with a `Host` `{ type: "reply" }` event as `nsh.js` `hostCall` does (`ok: false` with the message on a throw, a rejection or
-  a value that is not JSON), and `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
+  a value that is not JSON); the root's `Command::HostPost`s go to its `post`, or its `call` without one, as `nsh.js`
+  `hostPost` does (`Headless::on_host_post`, the result and failures dropped); `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
   `page_host::Target` until `attach`, so the app's top-level `host.on` hears it, and the host goes with the app
   (its thread ends when the driver drops its calls). A module that does not load, exports no `createHost` or whose
   `createHost` returns no `call` fails the `open`. A call's timeout (`runtime/host.rs`) is the core's timer, on the
@@ -432,6 +455,11 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
   app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
   device's;
+- an app started at a page's address (`Headless::start_at_page`, on `Os::Web`) has the page's browser history
+  (`headless/browser.rs`, `Headless::browser`): the driver keeps the entries `nsh.js` keeps (a stack's pages and the
+  modals, the root's `SetAppUrl` / `PushAppUrl`), brought to the screen after each batch, and the user's `back`,
+  `forward`, `go` and `type_address` report the root's `UrlScheme` events the page reports (`quiet`, `change`,
+  `open`); a change to the web's history in `nsh.js` changes it too;
 - URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
   `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`);
 - the platform has no eyedropper (`Environment::screen_color` false) until a Rust test calls
@@ -459,7 +487,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
 Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
-`Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.
+`Screen` (texts in tree order, the commands sent since the last `clear_commands`, `press_target`, `matches`,
+`input_text`) and `Headless`.
 `EngineConfig::new(app)` is the phone-sized config the tests start from. The features add the rest in layers, so a
 Rust app's tests link neither the bundler nor QuickJS: `js` is `nsh test`'s side (below), `bundle` builds a TSX entry
 against given sets in process (`compile_tsx`, `tsx`, `compiler`).
@@ -474,9 +503,11 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
 `nsh_testing::run_file` runs one test file (`run.rs`):
 
 - It writes an entry for the file in `<app>/.nsh/test/` that imports it and then calls `run` of the internal set
-  `nsh/test/runner`, and builds it through `TestRun::compile` (`Entry::TestFile`: the app's sets plus
-  `nsh_testing::test_sets()`). The file's source map gets its sources relative to the current directory, so failures
-  name `App.test.tsx:12:5`.
+  `nsh/test/runner`, at the file's path in the app (`src/core/typing.test.ts` → `src/core/typing.test.ts.run.js`;
+  in a `TestRun::work_dir` outside the app, below the nearest directory holding both, or one named by a hash of the
+  file's directory: `run.rs` `entry_path`), so parallel runs of same-named files never share one; it builds it
+  through `TestRun::compile` (`Entry::TestFile`: the app's sets plus `nsh_testing::test_sets()`). The file's source
+  map gets its sources relative to the current directory, so failures name `App.test.tsx:12:5`.
 - The test file runs on an engine of its own (the VM). As it loads, `test`, `describe`, the hooks and the variants
   (`test.skip` / `only` / `todo`, `describe.skip` / `only`: modules named `test` and `describe`, whose functions are
   the functions' properties, `docs/dev/components.md`) declare a tree of `Suite`s in a thread-local of the VM's
@@ -513,10 +544,14 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   leaves; `toContain` is `===`. A `RegExp` given to `toMatch` or `toThrow` runs on the JS engine (`text.search(re)`
   through `JsHost::invoke`). `rejects.toMatchObject` compares what was thrown as `Exception::thrown` holds it (its own
   properties with its `name` and `message`), made a JS value again. Failure messages show values as `values::show`
-  writes them (compact JSON, with `undefined`, `NaN`, dates, maps, typed arrays and classes as JS would write them).
+  writes them (compact JSON, with `undefined`, `NaN`, dates, maps, typed arrays and classes as JS would write them),
+  bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters (around the first difference when two values are
+  shown) so a long value cannot flood the message.
 
 `crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
-`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen),
+`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen,
+bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output with the rest counted; `-v` shows the
+terminal's all, the JUnit report is always cut),
 writes a JUnit XML report with `--junit` (`Tally::junit`) and fails when any test failed. Given a directory of an
 app with Rust crates, it first runs `cargo test --no-fail-fast` for each crate in that directory, in the crate's own
 directory (`test::cargo_test`), and parses libtest's output (`cargo_test_results`: the test targets by their
@@ -597,8 +632,9 @@ makes their window point the agent's), so the tests run the same on any display.
 The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network; the dev hosts link it). Its
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
-selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+selector on the model, scrolls the view into view when it is not (the innermost scroll view around it, inside the modal it is in, that
+hides it and can still move it, a gesture at a time: one already at the end a gesture would move it towards,
+`Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
 the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
@@ -709,12 +745,13 @@ input goes through (`synth.rs`), back the mouse's back button, dialogs pressed a
 GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s clicked, screenshots rendered
 offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
-feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (a booted one, else the newest
-iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the simulator shares the Mac's network
-and files). As `nsh run --target ios` and `nsh package --target ios-simulator --run` do, it passes the app the variables
-of its environment that the app's `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads
-them as on the desktops, whose hosts are the CLI's children; the paths the simulator sets for its apps (`HOME`,
-`TMPDIR`, `PATH`, ...) keep the simulator's values. Touches are IOHID digitizer events handed to UIKit
+feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (the one `--device` names, else a
+booted one, else the newest iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
+simulator shares the Mac's network and files). As `nsh run --target ios` and
+`nsh package --target ios-simulator --run` do, it passes the app the variables of its environment that the app's
+`capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads them as on the desktops, whose
+hosts are the CLI's children; the paths the simulator sets for its apps (`HOME`, `TMPDIR`, `PATH`, ...) keep the
+simulator's values. Touches are IOHID digitizer events handed to UIKit
 (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's and BackBoardServices' functions looked up at run time,
 `synth.rs`), so UIKit makes the `UITouch`es and runs hit
 testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept
@@ -767,7 +804,7 @@ browser's JavaScript engine, its timers, clock and `fetch` through the engine wh
 DOM, in `nsh.js`'s `testPage`). The CLI's agent sees the app through `RemoteScene`, which asks those questions
 through `DevServer::step`, and acts with the browser's trusted input over the DevTools protocol (`Input.dispatch*`:
 mouse presses, wheel events of 20 px a frame apart, key events with macOS's editing commands, as Playwright sends
-them), `history.back()` for back, `Emulation.*` for the viewport and the color scheme and `Page.captureScreenshot`.
+them), `history.back()` for back and `history.forward()` for forward (`app.forward()`), `Emulation.*` for the viewport and the color scheme and `Page.captureScreenshot`.
 Headless Chromium finds no input device and reports `pointer: none` / `hover: none`, which `nsh.js`'s `measureIdiom`
 reads as a touch screen; `cdp.rs` launches it with `--blink-settings` giving it a fine, hovering pointer (as
 Playwright does), so the page measures as a browser with a mouse: the desktop idiom at any width (`open`'s `width`). A desktop's `platform` (`macos`, `windows`, `linux`) skips the measuring: `run.rs`'s
@@ -927,7 +964,10 @@ program that describes them, builds the hosts and runners with them, and does ev
   dev-dependencies: `RustApp::watched`): a change to their `.rs` files, `Cargo.toml` or `assets/` ends the session
   with `rust_app::Restart` (the hosts it started are stopped with it), and the command starts again in the same
   process (`main.rs` `run`): the app is described again, the hosts are built again and start anew; JS and TSX edits
-  stay hot. After a restart a failing build reports the error and waits for the next change (`RustApp::wait_after`).
+  stay hot. A Rust change saved within the watcher's debounce after a TSX one (a checkout, a formatter) restarts too,
+  without building the TSX first: the new session builds it against the sets described anew
+  (`dev::rust_changed_until`). After a restart a failing build reports the error and waits for the next change
+  (`RustApp::wait_after`).
 - **Rust apps.** With `"root": "<path in the crate>"` in `nsh.json` (in the first crate `"rust"` lists), the app's
   directory resolves to its `nsh.json` (`entry::resolve`; a named `App.tsx` stays the TSX entry), and the app runs with
   no JS: `rust_app::RootConfig` (with `"theme"`, `"appearance"`, `"statusBar"` and `"id"`) adds the members `rust-linux`,
@@ -1078,34 +1118,18 @@ How users get it (`website/docs/installation.md`):
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.
 - mise: its `github:` backend picks the archive by OS and architecture, strips `nsh/` and finds `bin/`.
 
-### Self-hosted runners
+### Runners
 
-The release (its builds, its `Plan`, `Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's
-update) and the Website workflow's build and deployment of the published site run on the organization's self-hosted
-runners, the machines longbridge-pro releases on: `[self-hosted, macOS, ARM64]`, `[self-hosted, Linux, Packager]`
-and `[self-hosted, Windows]`. Their runner groups allow this public repository. They take no pull request: a pull
-request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
-events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
+Every workflow runs on GitHub's runners: the checks, the release (its builds, its `Plan`, `Release` and `Nightly`
+jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's build and deployment of the
+published site. This repository is public, so its jobs run on GitHub's fresh runners, never on machines shared with
+other projects.
 
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed
-them. The scheduled runs are on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
+them. The scheduled runs save the dependencies' caches the pull requests restore. TUI's
 macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
 requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
-
-`.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
-`~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds
-only what changed. What the workflows install on GitHub's runners is installed on these machines beforehand:
-
-- every one: rustup, `git`, `curl`, `gh`, `jq`, `zip`;
-- macOS: Xcode (the iOS SDKs) and its command line tools;
-- Linux: Ubuntu 24.04 (the Linux runtime's glibc and GTK), the packages of `release.yml`'s "Install clang, GTK 4
-  and GPUI's libraries" step, `envsubst`, Java 17 and an Android SDK with an NDK (`ANDROID_HOME`), Node.js,
-  Python 3 with `venv`, and Playwright's system libraries for Chromium, Firefox and WebKit
-  (`playwright install-deps`), and what the CI workflows' `apt-get` steps install (`xvfb`, `xauth`,
-  `dbus`, `at-spi2-core`, `libxtst6`, GStreamer's good plug-ins, `libvulkan1`, `libasound2-dev`, `libssl-dev`);
-- Windows: the MSVC Build Tools, the Windows SDK, LLVM in `C:\Program Files\LLVM` and Git for Windows, whose
-  `bash` is the first on `PATH`.
 
 ### Homebrew publishing setup and recovery
 

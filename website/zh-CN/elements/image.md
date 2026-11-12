@@ -84,6 +84,8 @@ upload(photo).then((url) => {
 
 > [!NOTE]
 > 应用声明了[能力](../docs/sandbox-and-capabilities.md)时，远程图片从其中列出的主机加载；来自其他主机的图片不会被请求，并以 `onError` 失败，其 `code` 为 `"ERR_ACCESS_DENIED"`。`asset:` URI、`data:` URI 和 `blob:` URL 始终可以加载。
+> 本地文件（绝对路径或 `file:` URL）只有在 `fs.read` 包含它时才能在桌面上加载，在移动端和 Web 上不会加载。来自 `onFileDrop`、
+> 剪贴板以及由 `import.meta.url` 得到的文件都是 `file:` URL，因此同样需要一个读取根目录。
 
 ## 属性
 

@@ -49,6 +49,10 @@ pub(crate) struct Built {
     /// The files the app ships: those it imports and those its UI sets'
     /// crates ship ([`crate_assets`]).
     pub(crate) assets: Vec<Asset>,
+    /// The directory its imported assets are named from
+    /// (`nsh_bundler::Bundle::asset_root`), where the dev server finds the
+    /// media files a literal `asset:/` URL names; `None` for a Rust app.
+    pub(crate) asset_root: Option<PathBuf>,
     /// Files of the last build, including shared sources outside the app.
     pub(crate) watch_files: Vec<PathBuf>,
     /// What the app declares it may reach (`nsh.json` `capabilities`).
@@ -80,6 +84,7 @@ pub(crate) fn rust_root() -> Built {
         chunks: Vec::new(),
         entry_imports: Vec::new(),
         assets: crate_assets().collect(),
+        asset_root: None,
         watch_files: Vec::new(),
         capabilities: None,
         ui_sets: Vec::new(),
@@ -141,10 +146,9 @@ fn imported_sets(natives: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The app's assets: `imported` (relative to the entry's directory `root`)
-/// and the UI sets' ([`crate_assets`]).
-fn assets(root: Option<&Path>, imported: &[PathBuf]) -> Vec<Asset> {
-    let root = root.unwrap_or(Path::new("."));
+/// The app's assets: `imported` (relative to the app's directory `root`,
+/// the bundle's `asset_root`) and the UI sets' ([`crate_assets`]).
+fn assets(root: &Path, imported: &[PathBuf]) -> Vec<Asset> {
     let mut assets: Vec<Asset> = imported
         .iter()
         .map(|rel| Asset {
@@ -255,10 +259,8 @@ fn compile_with(
         split,
         ui_sets: crate::ui_sets().to_vec(),
         app,
+        asset_root_from: None,
     })?;
-    let dir = dunce::canonicalize(entry)
-        .ok()
-        .and_then(|e| e.parent().map(Path::to_path_buf));
     let sources: Vec<(&str, &str)> = std::iter::once((nsh_js::BUNDLE_NAME, bundle.code.as_str()))
         .chain(
             bundle
@@ -290,7 +292,8 @@ fn compile_with(
         source_map: bundle.source_map,
         chunks,
         entry_imports: bundle.entry_imports,
-        assets: assets(dir.as_deref(), &bundle.assets),
+        assets: assets(&bundle.asset_root, &bundle.assets),
+        asset_root: Some(bundle.asset_root),
         watch_files: bundle.watch_files,
         capabilities: bundle.capabilities,
         ui_sets: imported_sets(&bundle.natives),
@@ -306,9 +309,6 @@ fn compile_with(
 pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle), BuildError> {
     let start = Instant::now();
     let hot = nsh_bundler::bundle_hot(entry, &crate::ui_sets())?;
-    let dir = dunce::canonicalize(entry)
-        .ok()
-        .and_then(|e| e.parent().map(Path::to_path_buf));
     let (code, source_map) = hot.script();
     let bytecode = nsh_js::compile_bytecode_with(&code, false, &crate::ui_sets())?;
     let built = Built {
@@ -317,7 +317,8 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
         source_map,
         chunks: Vec::new(),
         entry_imports: Vec::new(),
-        assets: assets(dir.as_deref(), &hot.assets),
+        assets: assets(&hot.asset_root, &hot.assets),
+        asset_root: Some(hot.asset_root.clone()),
         watch_files: hot.watch_files.clone(),
         capabilities: hot.capabilities.clone(),
         ui_sets: imported_sets(hot.natives()),
@@ -375,7 +376,11 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
     fs::write(
         &app,
         crate::package::app_json(
-            serde_json::json!({ "id": id }),
+            {
+                let mut info = serde_json::json!({ "id": id });
+                config.add_file_types_to_app_json(&mut info);
+                info
+            },
             &schemes,
             config.window.as_ref(),
         ),
@@ -462,9 +467,9 @@ mod tests {
     }
 
     #[test]
-    fn imported_assets_keep_their_paths_under_the_entry() {
+    fn imported_assets_keep_their_paths_under_the_app() {
         let assets = super::assets(
-            Some(Path::new("/app")),
+            Path::new("/app"),
             &[PathBuf::from("img/a.png"), PathBuf::from("b.ttf")],
         );
         let paths: Vec<_> = assets
@@ -478,5 +483,49 @@ mod tests {
                 ("img/a.png", PathBuf::from("/app/img/a.png")),
             ]
         );
+    }
+
+    /// An entry below its app (`tests/SubApp.tsx`, which a test opens)
+    /// ships the files it imports from anywhere in the app, named from the
+    /// app's directory as the app's own entry names them (#1483).
+    #[test]
+    fn an_entry_below_its_app_ships_assets_named_from_the_app() {
+        let dir = std::env::temp_dir().join(format!("nsh-cli-sub-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(dir.join("nsh.json"), "{}").unwrap();
+        std::fs::write(dir.join("App.tsx"), "export {};\n").unwrap();
+        // A PNG's header: all the bundler reads of it.
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(4u32.to_be_bytes());
+        png.extend(4u32.to_be_bytes());
+        png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        std::fs::write(dir.join("assets/dot.png"), &png).unwrap();
+        std::fs::write(
+            dir.join("tests/SubApp.tsx"),
+            "import { Image, mount } from \"nsh\";\nimport dot from \"../assets/dot.png\";\nmount(() => <Image src={dot} />);\n",
+        )
+        .unwrap();
+        let root = dunce::canonicalize(&dir).unwrap();
+        let check = |built: &super::Built| {
+            assert!(
+                built.code.contains("\"asset:/assets/dot.png\""),
+                "{}",
+                built.code
+            );
+            let asset = built
+                .assets
+                .iter()
+                .find(|a| a.path == "assets/dot.png")
+                .expect("the image ships");
+            assert_eq!(asset.source, root.join("assets/dot.png"));
+            assert!(asset.source.is_file());
+            assert_eq!(built.asset_root.as_deref(), Some(root.as_path()));
+        };
+        let entry = dir.join("tests/SubApp.tsx");
+        check(&super::compile(&entry, false).unwrap());
+        check(&super::compile_hot(&entry).unwrap().0);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

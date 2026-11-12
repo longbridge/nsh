@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.TimeInterpolator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.pm.ActivityInfo;
 import android.graphics.Rect;
 import android.text.Layout;
 import android.util.SparseArray;
@@ -244,6 +245,11 @@ final class Mounter {
     /** Whether the running app's web views may navigate to {@code url} (its capabilities). */
     boolean allowsWebview(String url) {
         return Native.allowsWebview(handle(), url);
+    }
+
+    /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
+    boolean allowsWebMedia(String kind) {
+        return Native.allowsWebMedia(handle(), kind);
     }
 
     long handle() {
@@ -730,6 +736,8 @@ final class Mounter {
      */
     void destroyComponents() {
         Notifications.forget(this);
+        // A page's orientations go with the app.
+        orientations(0);
         if (audio != null) {
             audio.release();
             audio = null;
@@ -2152,6 +2160,49 @@ final class Mounter {
         if (f.getRootView() == host.getRootView()) host.requestFocus();
     }
 
+    /** The activity's requested orientation before a page set one (null: none set). */
+    private Integer ownOrientation;
+
+    /**
+     * A page's {@code supportedOrientations} ({@code nsh_core::ModalConfig}
+     * bits: 1 portrait, 2 upside down, 4 landscape-left, 8 landscape-right;
+     * 0 gives the activity back the orientation it had). Landscape-left is
+     * UIKit's {@code UIInterfaceOrientationLandscapeLeft}, the device
+     * turned clockwise: Android's reverse landscape. Two-sided sets follow
+     * the user's rotation lock ({@code USER_*}).
+     */
+    private void orientations(int bits) {
+        android.app.Activity activity = SystemUi.activity(context);
+        if (activity == null) return;
+        if (bits == 0) {
+            if (ownOrientation != null) activity.setRequestedOrientation(ownOrientation);
+            ownOrientation = null;
+            return;
+        }
+        if (ownOrientation == null) ownOrientation = activity.getRequestedOrientation();
+        boolean portrait = (bits & 1) != 0, upsideDown = (bits & 2) != 0;
+        boolean left = (bits & 4) != 0, right = (bits & 8) != 0;
+        int requested;
+        if ((portrait || upsideDown) && (left || right)) {
+            requested = portrait && upsideDown && left && right
+                    ? ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                    : ActivityInfo.SCREEN_ORIENTATION_USER;
+        } else if (portrait && upsideDown) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT;
+        } else if (portrait) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+        } else if (upsideDown) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT;
+        } else if (left && right) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE;
+        } else if (left) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE;
+        } else {
+            requested = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        }
+        activity.setRequestedOrientation(requested);
+    }
+
     /**
      * `Haptics` of `nsh/mobile`: the haptic feedback constant closest to
      * `haptic` (`nsh_core::Haptic`, in the order `encode.rs` writes), which
@@ -2435,6 +2486,10 @@ final class Mounter {
             }
             case 48: {
                 haptic(host, b.getInt());
+                break;
+            }
+            case 54: {
+                orientations(b.getInt());
                 break;
             }
             case 18: {
