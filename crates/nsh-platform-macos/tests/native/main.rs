@@ -58,6 +58,8 @@ fn main() {
                 || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
             {
                 zoom::run();
+            } else if std::env::var_os("NSH_IME_CHECK_ONLY").is_some() {
+                ime::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
