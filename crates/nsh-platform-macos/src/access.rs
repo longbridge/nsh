@@ -108,6 +108,8 @@ pub(crate) struct Applied {
     columns: Vec<Retained<table::Column>>,
     /// A scroll area's scroll bar, created only when an AX client asks.
     scroll_bar: Option<Retained<scroll_bar::ScrollBar>>,
+    /// The active descendant last told of ([`relations_changed`]).
+    active: Option<nsh_core::NodeId>,
 }
 
 /// Which of its children VoiceOver reaches through a view.
@@ -614,6 +616,96 @@ pub(crate) fn props_changed(view: &NshView) {
         view.state_mut().access.test_id = id;
     }
     update(view);
+    relations_changed(view);
+}
+
+/// The view `id` names in `view`'s surface.
+fn named(view: &NshView, id: Option<nsh_core::NodeId>) -> Option<NshView> {
+    let surface = view.surface()?;
+    let mounter = surface.mounter.try_borrow().ok()?;
+    mounter.views.get(&id?).cloned()
+}
+
+/// The view that is active inside `view` while it keeps the focus
+/// (`accessibilityActiveDescendant`): its `AXSelectedChildren`, as WebKit
+/// and Chromium answer for an ARIA active descendant.
+pub(crate) fn active_descendant(view: &NshView) -> Option<Retained<AnyObject>> {
+    let id = view.try_state()?.props.accessibility.active_descendant;
+    named(view, id)
+        .map(|v| Retained::into_super(Retained::into_super(Retained::into_super(v.ns().retain()))))
+}
+
+/// The view whose content `view` controls (`accessibilityControls`): its
+/// `AXLinkedUIElements`, as WebKit gives ARIA's `aria-controls`.
+pub(crate) fn controlled(view: &NshView) -> Option<Retained<AnyObject>> {
+    let id = view.try_state()?.props.accessibility.controls;
+    named(view, id)
+        .map(|v| Retained::into_super(Retained::into_super(Retained::into_super(v.ns().retain()))))
+}
+
+/// What a combo box's field answers ([`combobox_field`]).
+pub(crate) struct ComboboxField {
+    /// The input's label.
+    pub(crate) label: Option<Arc<str>>,
+    /// Its list is open.
+    pub(crate) expanded: bool,
+    /// Its active descendant.
+    pub(crate) active: Option<Retained<AnyObject>>,
+    /// The list it controls.
+    pub(crate) controls: Option<Retained<AnyObject>>,
+}
+
+/// An input that is a combo box (`role="combobox"`): its field, which
+/// keeps the keyboard focus, is the combo box VoiceOver is on, as WebKit's
+/// editable combo box is, and the input view is no element of its own
+/// ([`base_role`]).
+pub(crate) fn combobox_field(view: &NshView) -> Option<ComboboxField> {
+    let (label, expanded) = {
+        let s = view.try_state()?;
+        let a = &s.props.accessibility;
+        if s.kind != ViewKind::Input || a.role != Role::Combobox {
+            return None;
+        }
+        (a.label.clone(), a.state.expanded == Some(true))
+    };
+    Some(ComboboxField {
+        label,
+        expanded,
+        active: active_descendant(view),
+        controls: controlled(view),
+    })
+}
+
+/// The view's active descendant changed: VoiceOver, which stays on the
+/// focused element, hears of its selected children changing and reads the
+/// one now active (`NSAccessibilitySelectedChildrenChangedNotification`,
+/// as WebKit and Chromium post for a combo box's active descendant).
+fn relations_changed(view: &NshView) {
+    let active = view.state().props.accessibility.active_descendant;
+    if view.state().access.active == active {
+        return;
+    }
+    view.state_mut().access.active = active;
+    if active.is_none() {
+        return;
+    }
+    let element = crate::text_input::accessibility_element(view);
+    // A text field's notifications go out from its cell: AppKit passes on
+    // none posted on the field itself.
+    let cell = element
+        .downcast_ref::<objc2_app_kit::NSControl>()
+        .and_then(|f| f.cell());
+    let from: &AnyObject = match &cell {
+        Some(cell) => cell,
+        None => &element,
+    };
+    // SAFETY: a notification AppKit defines, on a live element.
+    unsafe {
+        objc2_app_kit::NSAccessibilityPostNotification(
+            from,
+            objc2_app_kit::NSAccessibilitySelectedChildrenChangedNotification,
+        )
+    };
 }
 
 /// The view's event listeners changed: views with press handlers are
@@ -1152,6 +1244,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::Summary => Ax::Status,
         Role::Alert => Ax::Alert,
         Role::Checkbox => Ax::CheckBox,
+        // An input's field is the combo box (`combobox_field`).
+        Role::Combobox if kind == ViewKind::Input => Ax::Generic,
         Role::Combobox => Ax::ComboBox,
         Role::Menu => Ax::Menu,
         Role::Menubar => Ax::MenuBar,

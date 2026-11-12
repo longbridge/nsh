@@ -9,6 +9,7 @@ mod measure;
 mod overlay;
 mod pace;
 mod parent_viewport;
+mod relations;
 mod renders;
 mod resize_anchor;
 mod scrollbars;
@@ -1196,6 +1197,9 @@ pub struct Core<M: TextEngine> {
     sticky_changed: bool,
     /// Views whose frame follows an element's ([`Core::place_followers`]).
     followers: Vec<Key>,
+    /// Views naming other elements for assistive technologies
+    /// ([`Core::sync_relations`]).
+    relators: Vec<relations::Relator>,
     /// What they follow, or frames around them, changed since they were
     /// placed.
     follow_changed: bool,
@@ -1505,6 +1509,7 @@ impl<M: TextEngine> Core<M> {
             decorated: Vec::new(),
             sticky_changed: false,
             followers: Vec::new(),
+            relators: Vec::new(),
             follow_changed: false,
             sticky_warned: false,
             inset_warned: false,
@@ -2892,6 +2897,7 @@ impl<M: TextEngine> Core<M> {
             self.run_answers();
         }
         self.pace_commit();
+        self.sync_quit_requests();
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -2916,6 +2922,10 @@ impl<M: TextEngine> Core<M> {
         }
         if !self.outer_asked.is_empty() {
             self.send_outer_scrolls();
+        }
+        // What mounted in the rounds listens already.
+        if self.sync_quit_requests() {
+            self.commit_round();
         }
         self.split_scoped_frames();
         self.mark_shader_inputs();
@@ -3035,6 +3045,9 @@ impl<M: TextEngine> Core<M> {
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
         self.flush_pointer_events();
+        if !self.relators.is_empty() {
+            self.sync_relations();
+        }
         self.flush_dirty();
         let relayout = self.needs_layout;
         if relayout {
@@ -4952,6 +4965,14 @@ impl<M: TextEngine> Core<M> {
                 self.set_follow_transition(key, transition);
                 return Ok(());
             }
+            Prop::Accessibility(AccessibilityProp::ActiveDescendant(target)) => {
+                self.set_relation(key, relations::Relation::ActiveDescendant, target);
+                return Ok(());
+            }
+            Prop::Accessibility(AccessibilityProp::Controls(target)) => {
+                self.set_relation(key, relations::Relation::Controls, target);
+                return Ok(());
+            }
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
@@ -5596,6 +5617,8 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::LiveRegion(v) => a.live_region = v,
                     AccessibilityProp::Actions(v) => a.actions = v,
                     AccessibilityProp::Level(v) => a.level = v,
+                    // Set as relations, above.
+                    AccessibilityProp::ActiveDescendant(_) | AccessibilityProp::Controls(_) => {}
                 }
                 let states = classes::accessibility_states(&a.state);
                 let states_changed = states != classes::accessibility_states(&before.state);
@@ -6358,6 +6381,9 @@ impl<M: TextEngine> Core<M> {
         }
         if node.follow.is_some() {
             self.release_follower(key);
+        }
+        if !self.relators.is_empty() {
+            self.release_relator(key);
         }
         if let Some(scroll) = node.scroll.as_ref() {
             if !scroll.dependents.is_empty() {

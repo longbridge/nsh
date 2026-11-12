@@ -50,6 +50,8 @@ export function createEnvironment(reactive, invoke, dom) {
     shadersAvailable: () => fields.shaders(),
     // A browser page has no performance monitor (its developer tools measure it).
     fpsEnabled: () => false,
+    // Browsers do not report system wakes; match the native web backend.
+    wakeCount: () => 0,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   // nsh-js's `appInfo` (`env.rs`): what the build wrote, handed over by

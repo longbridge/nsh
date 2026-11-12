@@ -69,6 +69,14 @@ test("the environment serves every export of nsh/device and nsh/accessibility", 
   }
 });
 
+test("the browser reports no system wakes", () => {
+  const { env } = environment();
+  assert.equal(env.api.wakeCount(), 0);
+  env.update(engine({ lifecycle: "background" }));
+  env.update(engine({ lifecycle: "active" }));
+  assert.equal(env.modules["nsh/device"].wakeCount(), 0);
+});
+
 test("setTheme hands the theme to the engine and reads the tokens again once it took", () => {
   const calls = [];
   const theme = { cssVars: { light: { brand: "#e11d48" } } };

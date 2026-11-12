@@ -865,6 +865,14 @@ pub enum DesktopCommand {
     /// ([`crate::restart`]). A view embedded in another app leaves the
     /// app's lifecycle to that app: nothing happens there.
     Restart,
+    /// Whether the user's quit requests quit the app: its Quit item and
+    /// the platform's quit key (Command-Q, Ctrl+Q). `false` while the app
+    /// listens to them ([`crate::element::desktop::on_quit_request`]): the
+    /// platform reports them on the root ([`WindowEvent::QuitRequest`])
+    /// instead, and the app sends [`DesktopCommand::Quit`] when it is
+    /// ready. The system ending the app (logging out, shutting down) quits
+    /// either way. Sent when it changes; `true` until the first.
+    SetQuitOnRequest(bool),
     /// The application menu (macOS's menu bar, the window's menu bar on
     /// Windows and Linux; not shown there while the title bar is hidden,
     /// its shortcuts still work); `None` restores the platform's default.

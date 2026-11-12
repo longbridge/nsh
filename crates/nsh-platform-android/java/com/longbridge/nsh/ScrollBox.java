@@ -754,6 +754,10 @@ final class ScrollBox extends FrameLayout implements Node {
         private final int slop, minFling, maxFling;
         private float downX, downY, lastX, lastY;
         private boolean panning;
+        /** The touch went down on content that pans: the first drag past the slop is this view's to give away. */
+        private boolean deciding;
+        /** Panning at an edge, the drag outward is left to a scroll view around (a pager's next page). */
+        private boolean yielding;
         private android.animation.ValueAnimator zoomAnimation;
 
         ZScroll(Context context) {
@@ -957,8 +961,12 @@ final class ScrollBox extends FrameLayout implements Node {
                     boolean gliding = !glide.isFinished();
                     stop();
                     panning = gliding;
+                    yielding = false;
                     downX = lastX = fx;
                     downY = lastY = fy;
+                    // A scroll view around (a pager) intercepts at the same slop, before this view sees the move.
+                    deciding = !panning && (maxX() > 0 || maxY() > 0);
+                    if (deciding) getParent().requestDisallowInterceptTouchEvent(true);
                     break;
                 case MotionEvent.ACTION_POINTER_DOWN:
                 case MotionEvent.ACTION_POINTER_UP:
@@ -969,6 +977,14 @@ final class ScrollBox extends FrameLayout implements Node {
                 case MotionEvent.ACTION_MOVE: {
                     if (!panning) {
                         float dx = fx - downX, dy = fy - downY;
+                        if (deciding && (Math.abs(dx) > slop || Math.abs(dy) > slop)) {
+                            deciding = false;
+                            if (!pans(dx, dy)) {
+                                // Nothing to move this way: the views around get the next move.
+                                getParent().requestDisallowInterceptTouchEvent(false);
+                                break;
+                            }
+                        }
                         boolean along = (Math.abs(dx) > slop && (maxX() > 0 || bounces))
                                 || (Math.abs(dy) > slop && (maxY() > 0 || bounces));
                         if (along && (maxX() > 0 || maxY() > 0 || scale != 1)) {
@@ -978,7 +994,16 @@ final class ScrollBox extends FrameLayout implements Node {
                         }
                     }
                     if (panning) {
-                        panBy(lastX - fx, lastY - fy);
+                        float mx = lastX - fx, my = lastY - fy;
+                        boolean out = e.getPointerCount() == 1 && !detector.isInProgress()
+                                && (yielding ? !inward(mx) : handsOver(mx, my));
+                        if (out != yielding) {
+                            yielding = out;
+                            getParent().requestDisallowInterceptTouchEvent(!out);
+                        }
+                        // Handed over from the edge, not from the rubber band past it: a cancel does not spring back.
+                        if (out) scrollTo(clamp(getScrollX(), maxX()), getScrollY());
+                        panBy(out ? 0 : mx, my);
                         lastX = fx;
                         lastY = fy;
                     }
@@ -988,6 +1013,27 @@ final class ScrollBox extends FrameLayout implements Node {
                     break;
             }
             return panning;
+        }
+
+        /** Whether a finger's drag by ({@code dx}, {@code dy}) has content to move along its main axis. */
+        private boolean pans(float dx, float dy) {
+            if (Math.abs(dx) >= Math.abs(dy)) return dx < 0 ? getScrollX() < maxX() : getScrollX() > 0;
+            return dy < 0 ? getScrollY() < maxY() : getScrollY() > 0;
+        }
+
+        /** Whether a horizontal scroll by {@code mx} goes back into the content. */
+        private boolean inward(float mx) {
+            return mx > 0 ? getScrollX() < maxX() : mx < 0 && getScrollX() > 0;
+        }
+
+        /** Whether a scroll by ({@code mx}, {@code my}) pushes past a horizontal edge where a scroll view around can go on. */
+        private boolean handsOver(float mx, float my) {
+            if (Math.abs(mx) <= Math.abs(my)) return false;
+            if (mx > 0 ? getScrollX() < maxX() : getScrollX() > 0) return false;
+            for (ViewParent p = ScrollBox.this.getParent(); p != null; p = p.getParent()) {
+                if (p instanceof ScrollBox && ((ScrollBox) p).scrolls(-mx, -my)) return true;
+            }
+            return false;
         }
 
         /** Scrolls by a finger's move, resisting past the edges (or stopping there). */

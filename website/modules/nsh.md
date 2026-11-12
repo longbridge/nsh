@@ -1071,6 +1071,28 @@ effect(() => {
 });
 ```
 
+### wakeCount
+
+```ts
+const wakeCount: Accessor<number>;
+```
+
+How many times the system woke from sleep while the app ran: 0 at the start, one more after each wake. A sleep may leave `lifecycle()` as it was (a laptop's lid closed and opened with the app in front), while network connections and timers did not live through it. Reactive: an effect that reads it runs again after each wake, where the app checks its connections or opens them again. macOS, Windows and Linux count wakes; on iOS and Android a sleeping device takes the app to the background, which `lifecycle()` reports. Rust: `wake_count() -> u32`.
+
+```rust tabs
+effect(move || {
+    if wake_count() > 0 {
+        feed.reconnect();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (wakeCount() > 0) feed.reconnect();
+});
+```
+
 ### setColorScheme
 
 ```ts
