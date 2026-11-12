@@ -339,7 +339,14 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `UIA_LevelPropertyId`, `current` and `invalid` in `AriaProperties`, `invalid` also as `IsDataValidForForm` false;
   Linux GTK's roles, `Pressed` on buttons, `Level`, `Invalid` (AT-SPI's invalid entry); GPUI AccessKit's roles,
   `toggled`, `level`, `aria_current`, `invalid`; the web the ARIA attributes (`aria-invalid` on an input's field
-  too). Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
+  too). `accessibilityActiveDescendant` and `accessibilityControls` (`aria-activedescendant`, `aria-controls`) name
+  another element by its ref: the item active inside a focused control, the element it controls. The core looks the
+  refs up each round into the native ids of `Accessibility::active_descendant` / `controls` (`core/relations.rs`),
+  so what is named may render later or go away; the web sets the ARIA attributes on the focused element (an input's
+  field), macOS answers them as `AXSelectedChildren` / `AXLinkedUIElements` and tells VoiceOver when the active item
+  changes (an input that is a combo box is its field's `AXComboBox`). `Environment::reads_active_descendants` says
+  the platform reads them; elsewhere `nsh-base`'s `Select`, `Combobox` and `Command` announce the highlighted item
+  themselves. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
@@ -624,4 +631,10 @@ navigation, explicit navigation commands, a reloading source, renderer loss and
 disposal; page-initiated same-document history updates keep them. Platforms that leave
 `web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
 `WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
+
+When a web view's web content process ends, the platform keeps the app running and
+sends `onError` with `ERR_NSH_WEBVIEW_TERMINATED` (Rust `on_process_terminated`); the
+next `reload()`, `load()` or new source shows a page again. Android's `WebBox` handles
+`onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
+same web view.
 

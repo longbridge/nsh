@@ -2414,6 +2414,17 @@ impl App {
         step(&this, move |app| app.open_with_url(&url)).await
     }
 
+    /// The images whose source is `url` fail to load from now on, those
+    /// loading now included: each reports the failure as on a device
+    /// (`onError`), so a test checks what the app shows instead (an
+    /// avatar's initials, a placeholder). `url` is matched whole and `*`
+    /// in it matches anything (`"https://cdn.example.com/avatars/*"`), as
+    /// `open`'s `network` routes are; a bundled image's is
+    /// `asset:/<path>`. Then waits until the app is quiet. Headless only.
+    pub async fn fail_images(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.fail_images(&url)).await
+    }
+
     /// Moves the app to `state`, as the system does when the user leaves it
     /// (`"background"`), switches to another app or window (`"inactive"`)
     /// and comes back (`"active"`); `lifecycle()` follows. Headless only.

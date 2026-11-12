@@ -116,7 +116,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
 /// levels or the default ones (warnings, errors and the app's `js` lines;
 /// from info up when run by `nsh run`), the rolling file in the app's data
 /// directory, and the unified log, as an app opened from Finder or the Dock
-/// writes stderr to /dev/null (and run by `nsh run`, its terminal too).
+/// writes stderr to /dev/null (and run by `nsh run`, its terminal too). An
+/// app that installed its own logger (from its native module, which runs
+/// first) keeps it, and its level.
 #[cfg(target_os = "macos")]
 fn install_logger(development: bool, app_id: &str) {
     let mut unified = nsh_platform_apple::unified_log::Options::default();

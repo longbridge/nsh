@@ -41,9 +41,9 @@ pub fn run_rust(root: nsh_platform_linux::Root) -> std::process::ExitCode {
     run(nsh_platform_linux::AppSource::Rust(root), options)
 }
 
-/// Reads the package and installs the logger: its `nsh` directory (next
-/// to the executable, or `NSH_APP_DIR`: `nsh run` of a Rust app) and the
-/// window's options.
+/// Reads the package and installs the logger (unless the app has its
+/// own): its `nsh` directory (next to the executable, or `NSH_APP_DIR`:
+/// `nsh run` of a Rust app) and the window's options.
 #[cfg(target_os = "linux")]
 fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
     use nsh_platform_linux::{AppOptions, Appearance, AssetBase, Limits};
@@ -112,7 +112,8 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
 
 /// Installs the runners' logger (`nsh_engine::logging`): `RUST_LOG`'s
 /// levels or the default ones, the rolling file in the app's data
-/// directory, and standard error.
+/// directory, and standard error. An app that installed its own logger
+/// (from its native module, which runs first) keeps it, and its level.
 #[cfg(target_os = "linux")]
 fn install_logger(development: bool, app_id: &str) {
     let mut logging = nsh_engine::logging::LogOptions::default();

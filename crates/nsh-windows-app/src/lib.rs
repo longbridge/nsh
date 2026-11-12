@@ -50,9 +50,9 @@ pub fn main() -> std::process::ExitCode {
     std::process::ExitCode::FAILURE
 }
 
-/// Reads the package and installs the logger: its `nsh` directory (next
-/// to the executable, or `NSH_APP_DIR`: `nsh run` of a Rust app) and the
-/// window's options.
+/// Reads the package and installs the logger (unless the app has its
+/// own): its `nsh` directory (next to the executable, or `NSH_APP_DIR`:
+/// `nsh run` of a Rust app) and the window's options.
 #[cfg(windows)]
 fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     use nsh_platform_windows::{AppOptions, Appearance, AssetBase, Limits};
@@ -124,7 +124,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
 /// levels or the default ones, and the rolling file in the app's data
 /// directory. A GUI program has no console: the lines also go to the
 /// debugger (`OutputDebugString`), where DebugView and Visual Studio show
-/// them; run by `nsh run`, to the pipe it reads too.
+/// them; run by `nsh run`, to the pipe it reads too. An app that installed
+/// its own logger (from its native module, which runs first) keeps it, and
+/// its level.
 #[cfg(windows)]
 fn install_logger(development: bool, app_id: &str) {
     let mut logging = nsh_engine::logging::LogOptions::default();
