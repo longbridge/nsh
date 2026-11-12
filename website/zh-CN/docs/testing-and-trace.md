@@ -555,7 +555,7 @@ nsh test --target tui                         # 在内存终端里运行
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
-窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。应用以目标平台运行（`platform.os`）。
+窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。在 macOS、Windows、GPUI 和 Linux 上，应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，步骤的点击、按键和快捷键直接发给这些窗口（`--foreground` 让它们成为当前活跃的应用）。应用以目标平台运行（`platform.os`）。
 手动 `clock` 和 headless 时一样：`app.clock.runFor`、
 `fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)`、`waitFor` 和 `waitUntil` 也会推进它；
 平台每显示一帧，时钟前进一帧（1/60 秒），所以应用在动画时时间照常流逝。平台自身的动画和路由的 `delay` 按真实时间进行。应用的请求和 headless
@@ -583,7 +583,7 @@ Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，
 每次 `open` 得到一个拥有独立存储的页面。输入是浏览器的可信输入，与用户的输入一样：鼠标点击、滚轮滚动和按键。
 
 在 iOS 上，应用运行在 iOS 模拟器里的开发 host 中：使用 `--device` 指定的模拟器（名称或 UDID），否则使用已启动的模拟器，
-再否则 `nsh test` 会启动最新的 iPhone。步骤是手指的触摸和软键盘的输入，
+再否则 `nsh test` 会启动最新的 iPhone。模拟器应用在你正在输入的应用后面打开，步骤直接发给模拟器中的应用。步骤是手指的触摸和软键盘的输入，
 UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟器的外观，`nsh test` 会在应用结束后把它恢复原样；屏幕是所模拟设备的尺寸。
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）；
 `HOME`、`TMPDIR` 和 `PATH` 是模拟器为应用设置的路径。

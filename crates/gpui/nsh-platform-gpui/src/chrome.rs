@@ -887,6 +887,7 @@ pub(crate) fn own_window_parts(
     height: Option<f32>,
     resizable: bool,
     window: &Window,
+    cx: &gpui::App,
 ) -> Vec<AnyElement> {
     let client = PLATFORM == Platform::Linux
         && matches!(
@@ -907,7 +908,7 @@ pub(crate) fn own_window_parts(
                 surface,
                 Some(root),
                 window.is_maximized(),
-                window.is_window_active(),
+                crate::window::is_active(window, cx),
                 height,
                 &theme,
             ))
@@ -927,7 +928,7 @@ fn observe(surface: &Rc<Surface>, window: &Window, cx: &App) {
         menus::close(surface);
     }
     c.maximized.set(window.is_maximized());
-    c.active.set(window.is_window_active());
+    c.active.set(crate::window::is_active(window, cx));
     c.client_decorated.set(matches!(
         window.window_decorations(),
         gpui::Decorations::Client { .. }

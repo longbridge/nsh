@@ -140,7 +140,7 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
     setAttribute: (name, value) => attrs.set(name, value),
     removeAttribute: (name) => attrs.delete(name),
   };
-  const el = { _field: field };
+  const el = { _field: field, removeAttribute() {} };
   player.view = () => el;
   for (const multiline of [false, true]) {
     field.tagName = multiline ? "TEXTAREA" : "INPUT";
@@ -188,6 +188,80 @@ test("an invalid view is aria-invalid, and so is the field of an input", () => {
   player.updateAria(el);
   assert.equal(field.attrs.get("aria-invalid"), "true");
 });
+
+for (const multiline of [false, true]) {
+  for (const propsFirst of [false, true]) {
+    test(`a ${multiline ? "textarea" : "single-line input"} takes its name and description with props ${propsFirst ? "before" : "after"} its field`, () => {
+      const { player } = fakePlayer();
+      const element = () => {
+        const attrs = new Map();
+        return {
+          attrs, style: {}, classList: { toggle() {} },
+          setAttribute: (name, value) => attrs.set(name, value),
+          removeAttribute: (name) => attrs.delete(name),
+        };
+      };
+      const el = { ...element(), _props: {} };
+      const field = { ...element(), tagName: multiline ? "TEXTAREA" : "INPUT" };
+      player.view = () => el;
+      const props = { label: "价格", hint: "Amount in USD", invalid: true };
+      const update = (changes) => {
+        Object.assign(el._props, changes);
+        player.updateAria(el);
+      };
+      const input = () => {
+        el._field = field;
+        player.op_in(["in", 2, { multiline }, null]);
+      };
+      if (propsFirst) {
+        update(props);
+        assert.equal(el.attrs.get("aria-label"), "价格");
+        assert.equal(el.attrs.get("aria-description"), "Amount in USD");
+        input();
+      } else {
+        input();
+        update(props);
+      }
+      const named = (label, hint) => {
+        assert.equal(field.attrs.get("aria-label"), label);
+        assert.equal(field.attrs.get("aria-description"), hint);
+        assert.equal(el.attrs.has("aria-label"), false);
+        assert.equal(el.attrs.has("aria-description"), false);
+      };
+      named("价格", "Amount in USD");
+      assert.equal(field.attrs.get("aria-invalid"), "true");
+      player.op_al(["al", 2, "Limit price"]);
+      update({ hint: "Amount in EUR" });
+      named("Limit price", "Amount in EUR");
+      player.op_al(["al", 2, null]);
+      update({ hint: null, invalid: false });
+      named(undefined, undefined);
+      assert.equal(field.attrs.has("aria-invalid"), false);
+
+      // Text mount items supply the fallback name, independently of props.
+      player.updateRuns = () => true;
+      const text = (label) => player.op_t(["t", 2, 0, 0, 0, 0,
+        label ? [[0, 0, label, 0, 0]] : [], [], false, null]);
+      text("Price");
+      named("Price", undefined);
+      text("Market price");
+      named("Market price", undefined);
+      player.op_al(["al", 2, "Explicit price"]);
+      text("Latest price");
+      named("Explicit price", undefined);
+      player.op_al(["al", 2, null]);
+      named("Latest price", undefined);
+      text("");
+      named(undefined, undefined);
+      player.op_al(["al", 2, "Price"]);
+      update({ hint: "Enter a price" });
+      named("Price", "Enter a price");
+      player.op_al(["al", 2, ""]);
+      update({ hint: "" });
+      named(undefined, undefined);
+    });
+  }
+}
 
 test("a combo box's field names its highlighted row and its list by DOM id", () => {
   const { player } = fakePlayer();
@@ -599,7 +673,7 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   const key = (focus) => {
     globalThis.document = { activeElement: focus };
     let prevented = false;
-    player.keyDown({ key: "Enter", preventDefault: () => (prevented = true), stopPropagation() {} });
+    player.keyDown({ key: "Enter", composedPath: () => [], preventDefault: () => (prevented = true), stopPropagation() {} });
     delete globalThis.document;
     return prevented;
   };
@@ -637,7 +711,7 @@ test("Return and Space press the focused control unless the focus binds them", (
   player.root = { contains: () => true };
   const key = (focus, e) => {
     globalThis.document = { activeElement: focus };
-    player.keyDown({ preventDefault() {}, stopPropagation() {}, ...e });
+    player.keyDown({ composedPath: () => [], preventDefault() {}, stopPropagation() {}, ...e });
     if (e.key === " ") player.keyUp({ key: " " });
     delete globalThis.document;
   };
@@ -663,6 +737,47 @@ test("Return and Space press the focused control unless the focus binds them", (
   key(button, { key: "Enter" });
   assert.deepEqual(pressed, [button, button, button]);
   assert.deepEqual(fired, [7, 7, 7, 7, 9]);
+});
+
+test("a key a field's own handler took is not the page's shortcut as well", () => {
+  const { player } = fakePlayer();
+  // The app binds Return and Escape everywhere but text fields (binding 7),
+  // as the native match answers.
+  player.wasm.nsh_key = (_code, _mods, focus) => (focus & 1 ? -1 : 7);
+  const fired = [];
+  player.call = (f) => f({ nsh_key_command: (id) => fired.push(id) });
+  player.modifiersChanged = () => {};
+  player.selectionKey = () => false;
+  player.scrollKey = () => false;
+  player.back = () => false;
+  player.ancestors = () => [];
+  // A field in the root; once its handler has closed it, the root no longer
+  // holds it and the focus is on the body.
+  let mounted = true;
+  const body = { closest: () => null };
+  const field = { ...focusView(false, {}), classList: { contains: () => true }, closest: (selector) => (selector.includes(".nsh-field") ? field : null) };
+  const root = { contains: (el) => mounted && el === field };
+  player.root = root;
+  globalThis.document = { activeElement: field, body };
+  Player.active = player;
+  const press = (key, path) => {
+    const e = { key, composedPath: () => path, preventDefault() {}, stopPropagation() {} };
+    player.keyDown(e);
+  };
+  try {
+    // The key bubbles to the window after the field's handler ran.
+    mounted = false;
+    document.activeElement = body;
+    press("Enter", [field, root, body]);
+    press("Escape", [field, root, body]);
+    assert.deepEqual(fired, [], "the field's key is not a shortcut too");
+    // The same key on the page itself fires it.
+    press("Enter", [body]);
+    assert.deepEqual(fired, [7]);
+  } finally {
+    delete globalThis.document;
+    Player.active = null;
+  }
 });
 
 /**
