@@ -359,6 +359,9 @@ struct ScrollState {
     /// the offset before the content grows back). With the batch it is in
     /// ([`Core::batches`]).
     content_item: Option<(u64, usize)>,
+    /// Its content size laid out while it was culled
+    /// ([`Core::cull_frames_in`]): the first its native view gets.
+    culled_content: Option<Size<Points>>,
     behavior: ScrollBehavior,
     /// Minimum milliseconds between `onScroll` events.
     event_throttle_ms: f32,
@@ -405,6 +408,7 @@ impl Default for ScrollState {
             keyboard_dismiss: KeyboardDismissMode::None,
             content: None,
             content_item: None,
+            culled_content: None,
             behavior: ScrollBehavior::default(),
             event_throttle_ms: 0.0,
             zoom: 1.0,
@@ -6741,6 +6745,15 @@ impl<M: TextEngine> Core<M> {
         if let Some(frame) = culled_frame {
             self.nodes[key as usize].frame = frame;
             self.mount.push(MountItem::Frame { id, frame });
+            // And its content size, before any scroll it is made for: the
+            // platform clamps a scroll to the content it knows.
+            let content = self.nodes[key as usize]
+                .scroll
+                .as_mut()
+                .and_then(|s| s.culled_content.take());
+            if let Some(size) = content {
+                self.set_scroll_content(key, size);
+            }
             if kind == Kind::Canvas
                 && self.nodes[key as usize]
                     .drawing
@@ -8789,17 +8802,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         if kind == Kind::Scroll {
-            // Scrollable extent: the overflow rectangle is measured from the
-            // padding box origin and stops at the children's border boxes, so
-            // add the leading border and trailing padding.
-            let o = l.scrollable_overflow_rect;
-            let size = size_pt(
-                l.size.width.max(l.border.left + o.right + l.padding.right),
-                l.size
-                    .height
-                    .max(l.border.top + o.bottom + l.padding.bottom),
-            );
-            self.set_scroll_content(key, size);
+            self.set_scroll_content(key, scroll_extent(&l));
         }
         // List cells are positioned by `update_lists`, roots by
         // `layout_roots`.
@@ -9668,6 +9671,20 @@ fn span(from: f32, to: f32, ratio: f32) -> f32 {
 fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
     let up = (value.0 * ratio - 1.0e-3).ceil().max(0.0) / ratio;
     Points(if up < value.0 { up + 1.0 / ratio } else { up })
+}
+
+/// A scroll view's scrollable extent from its rounded layout: the overflow
+/// rectangle is measured from the padding box origin and stops at the
+/// children's border boxes, so the leading border and trailing padding are
+/// added.
+fn scroll_extent(l: &taffy::Layout) -> Size<Points> {
+    let o = l.scrollable_overflow_rect;
+    size_pt(
+        l.size.width.max(l.border.left + o.right + l.padding.right),
+        l.size
+            .height
+            .max(l.border.top + o.bottom + l.padding.bottom),
+    )
 }
 
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds
