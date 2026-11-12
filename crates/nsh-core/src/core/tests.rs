@@ -39444,3 +39444,86 @@ mod first_mount {
         }
     }
 }
+#[test]
+fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Repro() -> impl IntoElement {
+        scroll().horizontal().flex_1().child(
+            view()
+                .w(px(1000.0))
+                .h_full()
+                .child(
+                    view()
+                        .flex_row()
+                        .h(px(26.0))
+                        .flex_none()
+                        .children((0..64).map(|_| view().w(px(10.0)).h(px(26.0)))),
+                )
+                .child(
+                    virtual_list(1_usize, |_| {
+                        view()
+                            .h(px(26.0))
+                            .test_id("row")
+                            .child(view().w(px(40.0)).h(px(20.0)).test_id("label"))
+                    })
+                    .estimated_item_size(px(26.0))
+                    .flex_1(),
+                ),
+        )
+    }
+
+    let mut c = core();
+    c.begin_mount_turn();
+    c.mount_root(&crate::element::Root::of::<Repro>());
+    let mut items = c.commit().unwrap().items;
+    for _ in 0..50 {
+        if !c.has_paced_mounts() {
+            break;
+        }
+        c.begin_mount_turn();
+        if let Some(batch) = c.commit() {
+            items.extend(batch.items);
+        }
+    }
+    assert!(!c.has_paced_mounts());
+    let row = items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("row") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("row created");
+    let frame = items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::Frame { id, frame } if *id == row => Some(*frame),
+            _ => None,
+        })
+        .expect("row received a frame");
+    assert_eq!(frame.size, size_pt(1000.0, 26.0));
+    // What the row holds, made in a later turn still, is placed too.
+    let frame_of = |test_id: &str| {
+        let id = items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect("view created");
+        items.iter().rev().find_map(|item| match item {
+            MountItem::Frame { id: i, frame } if *i == id => Some(*frame),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        frame_of("label").expect("label frame").size,
+        size_pt(40.0, 20.0)
+    );
+}
