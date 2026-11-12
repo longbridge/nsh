@@ -940,8 +940,7 @@ impl Mounter {
         &self.target
     }
 
-    /// Node `id`'s view (`nsh test --target ios`).
-    #[cfg(feature = "dev")]
+    /// Node `id`'s view, for orientation updates and native tests.
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
         Some(self.slot(id)?.native.view().retain())
     }
