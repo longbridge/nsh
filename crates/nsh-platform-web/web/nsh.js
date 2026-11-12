@@ -2512,7 +2512,10 @@ class Player {
     // Its `--nsh-selection`.
     swapClass(el, "_selection", this.styleClass(selection));
     el._textLabel = runs.map((r) => r[2] + (r[6] ?? "")).join("").trimEnd();
-    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
+    if (el._props?.label == null) {
+      if (el._field) this.fieldAria(el, el._field);
+      else el.setAttribute("aria-label", el._textLabel);
+    }
   }
 
   /**
@@ -2780,8 +2783,8 @@ class Player {
     // A combo box that is an input is its field, which keeps the focus
     // (`fieldAria`).
     set("role", el._field && p.role === "combobox" ? null : role);
-    set("aria-label", p.label ?? el._textLabel);
-    set("aria-description", p.hint);
+    set("aria-label", el._field ? null : p.label ?? el._textLabel);
+    set("aria-description", el._field ? null : p.hint);
     set("aria-disabled", p.disabled && "true");
     set("aria-selected", p.selected && "true");
     set("aria-checked", p.checked);
@@ -2841,17 +2844,21 @@ class Player {
     this.updateAria(el);
   }
 
-  /** The states of input view `el` that belong on its `field` too: the
-   * field is the element screen readers read as the input. */
+  /** The name, description and states of input view `el` go on its `field`:
+   * the field is the element screen readers read as the input. */
   fieldAria(el, field) {
     const p = el._props ?? {};
     const set = (name, value) => (value == null || value === false ? field.removeAttribute(name) : field.setAttribute(name, String(value)));
+    set("aria-label", (p.label ?? el._textLabel) || null);
+    set("aria-description", p.hint || null);
+    // Props may arrive before the field exists; its wrapper then held the name.
+    el.removeAttribute("aria-label");
+    el.removeAttribute("aria-description");
     set("aria-invalid", p.invalid && "true");
     // A combo box's field is the combo box: the focus stays in it while
     // its list is open, and its active descendant is the highlighted row.
     const combobox = p.role === "combobox";
     set("role", combobox && "combobox");
-    set("aria-label", combobox && (p.label ?? null));
     set("aria-expanded", combobox && p.expanded != null ? String(p.expanded) : null);
     set("aria-haspopup", combobox && p.hasPopup && "listbox");
     // A field made after the relations takes them (`linkRelations`).
@@ -7837,8 +7844,13 @@ class Player {
   keyDown(e) {
     if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
-    const focus = document.activeElement;
-    const inRoot = focus && this.root.contains(focus);
+    // Where the key was pressed, not where the focus is by now: a field's
+    // own handler (its submit, its Escape) may have closed the field, and
+    // the focus with it, before the key reached the window. The path was
+    // fixed when the key was dispatched.
+    const path = e.composedPath();
+    const focus = path.includes(this.root) ? path[0] : document.activeElement;
+    const inRoot = path.includes(this.root) || (focus && this.root.contains(focus));
     const editing = inRoot && !!focus.closest(".nsh-field, iframe");
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     // The control the focus is on, which Return and Space press (a stop

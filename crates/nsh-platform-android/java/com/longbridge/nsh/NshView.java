@@ -103,10 +103,13 @@ public class NshView extends FrameLayout {
 
     @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-        boolean tracking = touches.onTouch(e);
+        android.view.MotionEvent t = mounter.keyboardTap(e);
+        boolean tracking = touches.onTouch(t);
         // A tracked finger went down: hear the rest of the gesture even if
         // no view takes it.
-        return super.dispatchTouchEvent(e) || tracking;
+        boolean handled = super.dispatchTouchEvent(t) || tracking;
+        if (t != e) t.recycle();
+        return handled;
     }
 
     /**

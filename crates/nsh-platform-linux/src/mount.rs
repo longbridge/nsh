@@ -131,6 +131,7 @@ impl Mounter {
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
                     crate::selectable_view::touched(surface, view);
+                    crate::input::removed(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -142,6 +143,7 @@ impl Mounter {
                 crate::navigation::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
                     crate::selectable_view::touched(surface, &view);
+                    crate::input::removed(surface, &view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.

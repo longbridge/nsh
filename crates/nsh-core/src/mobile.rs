@@ -24,6 +24,13 @@ pub struct TabBarItem {
     /// `platform.select` picks one per platform.
     #[prop(skip_none)]
     pub icon: Option<SharedString>,
+    /// Its badge: a text (`"3"`, `"New"`), or `""` for a badge with no
+    /// text (Material 3's small dot on Android, UIKit's empty badge on iOS).
+    /// `None` (the default) shows none. The badge is the system's
+    /// (`badgeValue` on iOS, Material 3's on Android), and screen readers
+    /// say its text with the title.
+    #[prop(skip_none)]
+    pub badge: Option<SharedString>,
 }
 
 impl TabBarItem {
@@ -38,6 +45,13 @@ impl TabBarItem {
     /// Its icon, by the platform's name for it ([`TabBarItem::icon`]).
     pub fn icon(mut self, name: impl Into<SharedString>) -> Self {
         self.icon = Some(name.into());
+        self
+    }
+
+    /// Its badge ([`TabBarItem::badge`]): a text, or `""` for a badge with
+    /// no text.
+    pub fn badge(mut self, text: impl Into<SharedString>) -> Self {
+        self.badge = Some(text.into());
         self
     }
 }
@@ -106,7 +120,7 @@ pub fn TabBar(props: TabBarProps, cx: Scope<TabBarEvent>) -> impl IntoElement {
         .into_element()
 }
 
-/// The tabs as the platforms read them: `[{ title, icon? }]`.
+/// The tabs as the platforms read them: `[{ title, icon?, badge? }]`.
 fn tabs_json(items: &[TabBarItem]) -> JsonValue {
     items
         .iter()
@@ -115,6 +129,9 @@ fn tabs_json(items: &[TabBarItem]) -> JsonValue {
             tab.insert("title".into(), item.title.as_ref().into());
             if let Some(icon) = &item.icon {
                 tab.insert("icon".into(), icon.as_ref().into());
+            }
+            if let Some(badge) = &item.badge {
+                tab.insert("badge".into(), badge.as_ref().into());
             }
             JsonValue::Object(tab)
         })
@@ -136,6 +153,23 @@ mod tests {
         assert_eq!(
             tabs_json(&tabs),
             json!([{ "title": "Records", "icon": "list.bullet" }, { "title": "Stats" }])
+        );
+    }
+
+    #[test]
+    fn badges_reach_the_platform_as_texts_and_empty_ones() {
+        let tabs = [
+            TabBarItem::new("Inbox").badge("3"),
+            TabBarItem::new("Brain").badge(""),
+            TabBarItem::new("Stats"),
+        ];
+        assert_eq!(
+            tabs_json(&tabs),
+            json!([
+                { "title": "Inbox", "badge": "3" },
+                { "title": "Brain", "badge": "" },
+                { "title": "Stats" },
+            ])
         );
     }
 }

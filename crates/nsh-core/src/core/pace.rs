@@ -294,9 +294,17 @@ impl<M: TextEngine> Core<M> {
                 }
                 // One view: its children wait, ranked in the next pass.
                 self.pace.holding = true;
-                let parent = self.nodes[key as usize].parent;
+                let node = &self.nodes[key as usize];
+                let parent = node.parent;
+                // Held back in a view the layout walked past unmade (a
+                // list's cell, #1783): no frame, and nothing may lay the
+                // tree out again.
+                let unplaced = node.frame.origin.x.0.is_nan() && !node.is_layout_root();
                 self.make_culled(parent, key);
                 self.pace.holding = false;
+                if unplaced {
+                    self.emit_frames(key);
+                }
                 made = true;
             }
             // Only what shows goes down a level in this turn; the rest
