@@ -88,6 +88,7 @@ impl<M: TextEngine> Core<M> {
     pub fn begin_mount_turn(&mut self) {
         self.pace.in_turn = true;
         self.reset_pace();
+        self.reset_list_motion();
     }
 
     /// Whether views wait to be made in a later turn: ask the platform for
@@ -100,6 +101,7 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn pace_commit(&mut self) {
         if !self.pace.in_turn {
             self.reset_pace();
+            self.reset_list_motion();
         }
     }
 
