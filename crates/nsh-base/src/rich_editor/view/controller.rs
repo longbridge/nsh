@@ -1632,8 +1632,6 @@ impl Rv {
             .unwrap_or_else(|| TextSelection::between(anchor, head, None))
     }
 
-    /// The pointer is over the content at `at` and the page at `page`: the
-    /// offset a drag the app starts from the page (a handle's) maps by.
     /// Whether the content point `at` is on a task item's checkbox: its
     /// press is the checkbox's, and neither moves the caret nor starts a
     /// selection.
@@ -1641,6 +1639,8 @@ impl Rv {
         self.geo.borrow().before_holder(at)
     }
 
+    /// The pointer is over the content at `at` and the page at `page`: the
+    /// offset a drag the app starts from the page (a handle's) maps by.
     pub(crate) fn note_pointer(&self, at: Point<Points>, page: Point<Points>) {
         self.pointer.set(Some((
             Point::new(at.x - page.x, at.y - page.y),
