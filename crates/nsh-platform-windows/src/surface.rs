@@ -403,6 +403,11 @@ impl Surface {
         SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
     }
 
+    /// The live surfaces of this thread.
+    pub(crate) fn all() -> Vec<Rc<Surface>> {
+        SURFACES.with(|s| s.borrow().values().filter_map(Weak::upgrade).collect())
+    }
+
     /// The UI thread it lives on ([`crate::window::UiThread::invoke`] runs closures there).
     pub(crate) fn ui_thread(&self) -> crate::window::UiThread {
         self.ui_thread
@@ -1061,7 +1066,7 @@ impl Surface {
     }
 
     /// Whether `nsh test --target windows` drives the app.
-    fn testing(&self) -> bool {
+    pub(crate) fn testing(&self) -> bool {
         #[cfg(feature = "dev")]
         return self.test_model.borrow().is_some();
         #[cfg(not(feature = "dev"))]
