@@ -119,6 +119,8 @@ pub(crate) fn watch(surface: &Rc<Surface>, window: &gtk::Window) {
     let current = RefCell::new(None::<NshView>);
     window.connect_focus_widget_notify(move |window| {
         if let Some(surface) = weak.upgrade() {
+            // The screen reader follows the keyboard focus again.
+            crate::access::clear_reader_focus(&surface);
             moved(&surface, window, &current);
         }
     });
