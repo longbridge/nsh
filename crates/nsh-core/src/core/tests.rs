@@ -6432,32 +6432,6 @@ fn backdrop_material_survives_restyling_and_resets() {
     assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
 }
 
-/// `supportedOrientations` names a dialog's prop and a page's: each element
-/// decodes its own, so a dialog's is not taken for a page's.
-#[test]
-fn supported_orientations_decode_per_element() {
-    use crate::js::host::{HostCx, HostProps};
-    let value = HostTestValue::Array(vec![
-        HostTestValue::String("portrait"),
-        HostTestValue::String("landscape-left"),
-    ]);
-    let bits = crate::ModalConfig::PORTRAIT | crate::ModalConfig::LANDSCAPE_LEFT;
-    let decode = |tag| {
-        let mut cx = HostCx::for_element(tag);
-        <Prop as HostProps>::decode("supportedOrientations", &value, &mut cx)
-            .expect("an orientations prop")
-            .expect("a value")
-    };
-    assert_eq!(
-        decode(Tag::Modal),
-        Prop::Modal(crate::ModalProp::Orientations(bits))
-    );
-    assert_eq!(
-        decode(Tag::Screen),
-        Prop::Screen(crate::ScreenProp::Orientations(bits))
-    );
-}
-
 #[test]
 fn supported_orientations_decode_per_element() {
     use crate::{
