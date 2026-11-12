@@ -62,6 +62,16 @@ expect DeskCopy
 frame parent:parent:parent:text:DeskCopy 291 203 90 40
 covers [props] ContextMenu.offset
 covers [props] ContextMenu.margin
+# A context menu the app opens: below its trigger (200, 100, 120 × 30),
+# from its start, not at the window's corner.
+event text:DeskCopy onCancel
+absent DeskCopy
+tap text:ShowAppMenu
+expect ShownCopy
+frame parent:parent:parent:text:ShownCopy 200 130 90 40
+tap text:ShownCopy
+absent ShownCopy
+covers [props] ContextMenu.open
 # A tooltip after the pointer rested on its trigger for `delay`, gone when
 # the pointer leaves.
 event text:SlowTrigger onMouseEnter
@@ -296,3 +306,26 @@ covers [props] Menu.trigger
 covers [props] Menu.offset
 tap id:icon-trigger
 absent IconItem
+# base-tooltip-grace-period-desktop
+tap id:case-base-tooltip-grace-period-desktop
+# A tooltip after the pointer rested on its trigger for its delay.
+event text:FirstTrigger onMouseEnter
+wait 700
+expect FirstTip
+# The pointer comes to the next trigger while that tooltip is still up:
+# its tooltip shows at once, though its delay is a minute. (The grace
+# period after the pointer left, 300 ms, ends before the next step: each
+# step waits 300 ms of quiet first; the Rust and gallery tests check it.)
+event text:GraceTrigger onMouseEnter
+expect GraceTip
+event text:FirstTrigger onMouseLeave
+absent FirstTip
+# A second after the pointer left that one, past the grace period, a
+# trigger waits for its delay.
+event text:GraceTrigger onMouseLeave
+absent GraceTip
+wait 1000
+event text:WaitTrigger onMouseEnter
+wait 500
+absent WaitTip
+event text:WaitTrigger onMouseLeave

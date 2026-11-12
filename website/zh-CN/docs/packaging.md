@@ -117,7 +117,7 @@ security find-identity -v -p codesigning
 
 如果没有传 `--sign` 和 `--profile`，NSH 会写出一个未签名的 `.nsh/out/<Name>.app` 并给出提示；它无法直接安装到真机上。
 
-应用支持 iPhone 和 iPad，支持竖屏和横屏（倒置竖屏仅限 iPad），要求 iOS 15.0 或更高版本。
+应用支持 iPhone 和 iPad，支持竖屏和横屏（倒置竖屏仅限 iPad），要求 iOS 15.0 或更高版本，或应用指定的更高版本（见[最低系统版本](#最低系统版本)）。
 
 ## Android
 
@@ -198,7 +198,8 @@ nsh package --target macos --run
 ```
 
 写出 `.nsh/out/<Name>.app`：可执行文件位于 `Contents/MacOS/`，`nsh/assets/…`、`nsh/app.json`（窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置）以及
-TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上；要分发它，请用 Developer ID 签名并进行公证。见
+TSX 应用的 `nsh/bundle.nshc` 位于 `Contents/Resources/`。应用使用 ad hoc 签名，要求 macOS 14 及以上，或应用指定的更高版本（见[最低系统版本](#最低系统版本)）；
+要分发它，请用 Developer ID 签名并进行公证。见
 [macOS](./macos.md#打包)。
 
 应用运行在本机的处理器上。`--arch` 可以换成别的：`x86_64` 面向 Intel Mac，`arm64` 面向 Apple 芯片，`universal` 把两者合在一个可执行文件里。为另一种处理器编 runner
@@ -269,7 +270,7 @@ App Store 分类、App Transport Security 例外）和 entitlements（例如 Ass
 ```
 
 值按属性列表（property list）写入：字符串、数字（整数或实数）、布尔值、数组和对象（字典）；`null` 会报错。应用设置的键会替换 NSH
-的默认值，因此应用也可以改写 NSH 添加的权限说明文字，或缩小支持的屏幕方向。
+的默认值，因此应用也可以改写 NSH 添加的权限说明文字、缩小支持的屏幕方向，或提高最低系统版本（见[下文](#最低系统版本)）。
 
 NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖的键由 NSH 掌握。设置其中之一会报错，并说明应改设什么：
 
@@ -279,11 +280,12 @@ NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖�
 | `CFBundleName`、`CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`、`CFBundleVersion` | `version`、`build` |
 | `CFBundleURLTypes` | `schemes` |
+| `CFBundleDocumentTypes` | `fileTypes`（见[打开文件](../modules/nsh-desktop.md#opening-files)） |
 | iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
 | iOS：`UIUserInterfaceStyle` | `appearance` |
 | iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |
 | macOS：`LSUIElement` | `macos.activationPolicy`（见[菜单栏应用](./macos.md#菜单栏应用)） |
-| `CFBundleExecutable`、`CFBundlePackageType`、`CFBundleSupportedPlatforms`；iOS：`MinimumOSVersion`、`LSRequiresIPhoneOS`、`UIApplicationSceneManifest`、`UIApplicationSupportsMultipleScenes`；macOS：`LSMinimumSystemVersion`、`NSPrincipalClass` | 包本身 |
+| `CFBundleExecutable`、`CFBundlePackageType`、`CFBundleSupportedPlatforms`；iOS：`LSRequiresIPhoneOS`、`UIApplicationSceneManifest`、`UIApplicationSupportsMultipleScenes`；macOS：`NSPrincipalClass` | 包本身 |
 | entitlements：`application-identifier`、`com.apple.application-identifier`、`com.apple.developer.team-identifier` | `id` 和描述文件 |
 
 entitlements：
@@ -294,6 +296,22 @@ entitlements：
 - **iOS 模拟器**包直接用应用写的 entitlements 签名。
 - **macOS** 包用应用的 entitlements 做 ad hoc 签名。带 `com.apple.developer.*` entitlements 或钥匙串分组的应用，macOS 只在授予它们的描述文件下启动：
   `nsh package` 会对这些项给出警告，应用要先用 Developer ID 和这样的描述文件重新签名才能运行。
+
+### 最低系统版本
+
+打包后的应用运行在 iOS 15.0 和 macOS 14 及以上，即 NSH 运行时支持的系统。应用要用更高版本系统的 API 时（例如通过它自己的
+[Rust crate](./rust.md)），用系统读取的键提高最低版本：`ios.infoPlist` 中的 `MinimumOSVersion`，`macos.infoPlist` 中的
+`LSMinimumSystemVersion`。
+
+```json
+{
+  "ios": { "infoPlist": { "MinimumOSVersion": "16.4" } },
+  "macos": { "infoPlist": { "LSMinimumSystemVersion": "15.2" } }
+}
+```
+
+值是由一到三个数字以点连接而成的字符串（`"15"`、`"15.2"`、`"15.2.1"`），不低于 NSH 在该平台的最低版本：iOS 为 `"15.0"`，macOS 为
+`"14.0"`。包按应用写的原样声明它，iOS 的应用图标也按它编译。更低的版本或其他形式的值会在读取 `nsh.json` 时报错，错误信息给出 NSH 的最低版本。
 
 ## 图标
 
@@ -322,6 +340,27 @@ entitlements：
 
 没有图标时，系统显示默认图标。
 
+## 相机、蓝牙和其他硬件
+
+打包后的应用根据 `nsh.json` 声明 NSH 自身功能用到的硬件：
+
+| 功能 | iOS 和 macOS | Android |
+|---|---|---|
+| [`Speech`](../modules/nsh.md#speech)，应用授予 `speech` 或没有声明 capabilities 时 | `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription` | |
+| 采集媒体的网页（[`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)） | `NSMicrophoneUsageDescription`、`NSCameraUsageDescription`；macOS 上还有 entitlements `com.apple.security.device.audio-input` 和 `com.apple.security.device.camera` | `RECORD_AUDIO`、`CAMERA` |
+| [`Notifications`](../modules/nsh.md#notifications)，应用授予 `notifications` 或没有声明 capabilities 时 | | `POST_NOTIFICATIONS` |
+
+每个 Android 包还声明了 `INTERNET`。权限说明文字是应用第一次请求时系统显示的内容，应用可以在 `infoPlist` 中改用自己的措辞
+（见[上文](#infoplist-keys-and-entitlements)）。
+
+在 iOS 和 macOS 上，应用自己的 [Rust crate](./rust.md) 通过系统框架访问其他硬件，所需的权限说明文字写在 `infoPlist` 中，macOS
+上的 entitlements 写在 `entitlements` 中：应用访问受保护的硬件而没有相应的权限说明文字时，系统会终止它。
+
+使用其他硬件的 Android 应用把 NSH 嵌入自己的 Gradle 项目（[Android](./android.md#embedding-in-an-android-app)），iOS 应用也可以同样嵌入自己的
+Xcode 项目（[iOS](./ios.md#embedding-in-an-ios-app)）。`AndroidManifest.xml` 和 `Info.plist` 归这个项目所有，所以由它在其中声明自己用到的内容，
+并自己编写平台代码：相机预览是一个[原生组件](./native-components.md)，其余一切由应用通过 `host.call` 访问（[iOS](./ios.md#talking-to-the-app)、
+[Android](./android.md#talking-to-the-app)）。
+
 ## 包里有什么
 
 Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组件，再加上它的 crate 注册的资源（`assets!()`）。TSX 应用的包中包含应用的字节码、
@@ -338,6 +377,12 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 
 打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 
+## 日志
+
+打包后的应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入平台日志：macOS 和 iOS 上是统一日志，以应用的 id 为子系统（“控制台”
+应用，或 `log stream --predicate 'subsystem == "com.example.notes"'`），Android 上是 logcat，Windows 上是调试器输出，Linux
+上是标准错误，Web 上是浏览器控制台。参见[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)。
+
 ## 查找运行时
 
 Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI 旁边查找预构建运行时（发行包中的 `bin/../runtime`）。在 NSH 的源码仓库中，它使用
@@ -353,6 +398,7 @@ Rust 应用构建自己的 runner。对 TSX 应用，`nsh package` 会在 CLI �
 - [OTA 更新](./ota-updates.md)：无需新构建，为打包应用（包括 iOS 和 Android）下发新的 TSX
 - [签名包](./signed-packages.md)：应用下载的更新
 - [项目结构](./project-structure.md)：`nsh.json` 与应用的各个文件
+- [原生组件](./native-components.md)：NSH 应用中宿主应用的视图
 
 ## 上传到 TestFlight
 

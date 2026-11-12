@@ -19,7 +19,18 @@ trusted: every limit and check is enforced in Rust, never in JS.
   rendering it causes, one list bind, one timer, one frame's callbacks, the microtask drain; nested calls share the
   outermost budget), and quotas for what the heap limit does not cover: changes at once (the op queue,
   `max_op_values`: ops are Rust memory), ops per canvas drawing, nodes in the core (`Core::set_max_nodes`; each may hold a native view) and dense
-  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`).
+  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Arrays the runtime
+  reads natively, where the time budget cannot interrupt (children, nested arrays counted together; `<Each>`; menus,
+  submenus counted together; a tray's title; `Animated.sequence` / `parallel` / `stagger`; `split`'s keys; a navigation
+  stack's routes; a native component's `props` and `events`; a pan's `touches`; a canvas call's arguments, counted
+  together), hold at most `dom::MAX_ARRAY_ITEMS` (2^20) items, each loop running over the length it checked: a sparse
+  array is as long as it says, and one nested in itself multiplies its length, so more is refused (a `RangeError`; a
+  menu's or the tray's error; a canvas argument is ignored with a warning) rather than read index by index. A
+  navigation stack does not grow past the bound either (`push` throws), so it can always be navigated. Two arrays read
+  together are looked up, never compared pairwise (`setRoutes`'s old and new routes, `split`'s keys and the props'
+  names). Children and submenus nested more than `dom::MAX_DEPTH` (64) levels deep are refused: they are read by
+  native recursion, which the interpreter's stack limit does not cover. A list's rows (`<List each>`) are not bounded:
+  a long list is what it is for.
 - An overrun call is cut off by the interrupt handler with an exception no `catch` swallows, reported with the budget it
   exceeded; the VM goes on. Running out of memory or going over a quota **stops the VM** (`Host::fatal`), also when the
   app catches the error: the heap's allocator (`HeapAllocator`) enforces the limit and records reaching it, since QuickJS
@@ -58,7 +69,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
   `nsh build` / `nsh package`; the dev protocol's `Bundle` message, so development enforces the same capabilities; a change
-  reloads instead of patching) into `Policy::declared`.
+  reloads instead of patching) into `Policy::declared`. A Rust root (`nsh.json` `"root"`) carries it compiled in
+  (`Root::capabilities`, set by `rust_app.rs`'s generated `app_root()`), so every host checks a Rust app as a TSX one;
+  without it the root reaches what an app without a declaration does.
 - Enforced in Rust: `fetch` in the engine (`access.rs`; refused requests never reach the network, and redirects are
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
   engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view

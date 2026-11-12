@@ -67,11 +67,8 @@ impl LinuxNative {
                 .then(|| crate::window::root_view(s, target))
                 .flatten();
             crate::input::set_event_root(s, root);
-            if press
-                && let Some(window) = crate::window::native_window(s, target)
-                && !window.is_active()
-            {
-                window.present();
+            if press {
+                crate::window::activate_for_press(s, target);
             }
             f(s)
         })
@@ -415,9 +412,14 @@ impl Native for LinuxNative {
             return Ok(());
         }
         // The app's shortcuts first, as GTK's shortcut controller (capture
-        // phase) runs before the focus.
+        // phase) runs before the focus; then Return and Space press the
+        // focused control, as the window's key controller has them do
+        // (`key_focus`).
         if self
-            .on_main(move |surface| crate::keymap::press(surface, stroke))
+            .on_main(move |surface| {
+                crate::keymap::press(surface, stroke)
+                    || crate::key_focus::press_key(surface, stroke)
+            })
             .unwrap_or(false)
         {
             return Ok(());

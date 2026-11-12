@@ -954,7 +954,25 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     if view.attached() && view.state().input.is_some() {
         return Some(view);
     }
-    if let Some(input) = input_of(&view) {
+    drop_quietly(surface, &view);
+    None
+}
+
+/// `view` was removed ([`crate::input::removed`]): a field in it loses the
+/// focus without a blur, its `FOCUSED` state cleared.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let field = FOCUS.with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()));
+    if let Some(field) = field
+        && crate::input::holds(view, &field)
+    {
+        drop_quietly(surface, &field);
+        crate::input::set_state(surface, &field, state::FOCUSED, false);
+    }
+}
+
+/// The focused `field` loses the focus without a word.
+fn drop_quietly(surface: &Surface, field: &NshView) {
+    if let Some(input) = input_of(field) {
         input.focused.set(false);
         if let Some(e) = &input.editor {
             e.set_focus(false);
@@ -967,7 +985,6 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     });
     update_ime(surface);
     blink::update();
-    None
 }
 
 fn window_active(surface: &Surface) -> bool {
@@ -981,6 +998,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     if old.as_ref() == view {
         return;
     }
+    surface.chrome.context_area.take();
     if let Some(old) = &old {
         if let Some(input) = input_of(old) {
             if input.composing.get().is_some() {
@@ -1708,14 +1726,14 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             }
         })
     };
-    let item = |role: Option<MenuRole>, label: &'static str, enabled: bool, action: Action| {
-        LocalItem::Item {
+    let delete = surface.chrome.labels.borrow().delete.clone();
+    let item =
+        |role: Option<MenuRole>, label: &str, enabled: bool, action: Action| LocalItem::Item {
             role,
-            label,
+            label: label.to_owned(),
             enabled,
             action,
-        }
-    };
+        };
     crate::chrome::popup_actions(
         surface,
         vec![
@@ -1749,7 +1767,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             ),
             item(
                 None,
-                "Delete",
+                delete.as_deref().unwrap_or("Delete"),
                 editable && selected,
                 command(WM_CLEAR, 0, 0),
             ),

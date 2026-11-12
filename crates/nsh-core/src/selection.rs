@@ -251,19 +251,38 @@ impl SelectionModel {
         self.bounds() != Some((start, end))
     }
 
+    /// Selects a range of UTF-16 positions, for assistive technologies and
+    /// programmatic selection. Offsets clamp to the text and character boundary;
+    /// a position naming a missing text clears the selection.
+    pub fn select_range(
+        &mut self,
+        texts: &impl SelectionTexts,
+        start: TextPosition,
+        end: TextPosition,
+    ) -> bool {
+        if start.text >= texts.len() || end.text >= texts.len() {
+            return self.clear();
+        }
+        let before = self.bounds();
+        self.anchor = Some(clamp_position(texts, start));
+        self.focus = Some(clamp_position(texts, end));
+        self.granularity = Granularity::Character;
+        self.anchor_unit = None;
+        self.remember(texts);
+        self.bounds() != before
+    }
+
     /// Selects every text of the area.
     pub fn select_all(&mut self, texts: &impl SelectionTexts) -> bool {
         if texts.is_empty() {
             return self.clear();
         }
-        let before = self.bounds();
         let last = texts.len() - 1;
-        self.anchor = Some(TextPosition::new(0, 0));
-        self.focus = Some(TextPosition::new(last, utf16_len(texts.content(last))));
-        self.granularity = Granularity::Character;
-        self.anchor_unit = None;
-        self.remember(texts);
-        self.bounds() != before
+        self.select_range(
+            texts,
+            TextPosition::new(0, 0),
+            TextPosition::new(last, utf16_len(texts.content(last))),
+        )
     }
 
     /// Clears the selection.
@@ -931,6 +950,20 @@ mod tests {
                 size(px(width), px((l1 - l0 + 1.0) * 20.0)),
             ))
         }
+    }
+
+    #[test]
+    fn explicit_ranges_snap_utf16_and_clear_missing_texts() {
+        let texts = Fake::new(&[("前😀日本", (0.0, 0.0, 100.0, 20.0))]);
+        let mut model = SelectionModel::new();
+        assert!(model.select_range(&texts, TextPosition::new(0, 2), TextPosition::new(0, 99)));
+        assert!(!model.select_range(&texts, TextPosition::new(0, 1), TextPosition::new(0, 5)));
+        assert_eq!(model.text(&texts), "😀日本");
+        assert_eq!(model.start_offset(&texts), 1);
+        model.select_range(&texts, TextPosition::new(0, 3), TextPosition::new(0, 1));
+        assert_eq!(model.text(&texts), "😀");
+        assert!(model.select_range(&texts, TextPosition::new(1, 0), TextPosition::new(0, 1)));
+        assert!(model.is_empty());
     }
 
     /// Three texts in a column: one line, two lines, one line, with gaps.

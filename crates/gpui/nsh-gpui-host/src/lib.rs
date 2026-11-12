@@ -11,6 +11,19 @@
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`Storage` of `nsh`)
 //!   is kept under the id its bundle carries, in the system's data
 //!   directory.
+//! - `--background` runs the app in the background: it never becomes the
+//!   active app and its window shows without taking the keyboard from the
+//!   app the user works in (`nsh test --target gpui` passes it; the test
+//!   agent's input goes to the window directly).
+//! - `--display <n>` centers the windows on display `n`: 1 is the primary
+//!   display (on macOS the one with the menu bar), 2 the next, and so on;
+//!   the primary one when there is no such display. `--display secondary`
+//!   (what `nsh test` passes unless told a display) centers them on the
+//!   first display besides the primary one that does not mirror it, the
+//!   primary one when there is no other.
+//! - `--keep-window-size` keeps the windows at their size on a display
+//!   they do not fit on (what `nsh test` passes: a test's window is the
+//!   size the test asks for).
 //!
 //! Without arguments it connects to the dev server on this machine.
 //!
@@ -23,7 +36,9 @@
 pub fn main() -> std::process::ExitCode {
     use std::{env, path::PathBuf};
 
-    use nsh_platform_gpui::{AppOptions, AppSource, AssetBase, Bundle, Limits, dev, run_app};
+    use nsh_platform_gpui::{
+        AppOptions, AppSource, AssetBase, Bundle, Limits, WindowDisplay, dev, run_app,
+    };
 
     dev::init_logging();
     let mut source = None;
@@ -60,6 +75,18 @@ pub fn main() -> std::process::ExitCode {
                 }
             }
             "--fps" => options.fps = true,
+            "--background" => options.background = true,
+            // A test's windows keep off the screen in use, at the size the
+            // test asks for.
+            "--display" => match args.next().as_deref() {
+                Some("secondary") => options.display = Some(WindowDisplay::Secondary),
+                Some(n) => match n.parse::<usize>() {
+                    Ok(n) if n > 0 => options.display = Some(WindowDisplay::Index(n - 1)),
+                    _ => log::warn!("--display takes a display's number, from 1, or `secondary`"),
+                },
+                None => log::warn!("--display takes a display's number, from 1, or `secondary`"),
+            },
+            "--keep-window-size" => options.keep_size = true,
             // Where apps keep their data (`nsh test --target` gives each app
             // a fresh one); the system's data directory otherwise.
             "--data-dir" => {
