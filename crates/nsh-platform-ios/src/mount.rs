@@ -940,8 +940,8 @@ impl Mounter {
         &self.target
     }
 
-    /// Node `id`'s view (`nsh test --target ios`).
-    #[cfg(feature = "dev")]
+    /// Node `id`'s view (the root's window for the orientations;
+    /// `nsh test --target ios`).
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
         Some(self.slot(id)?.native.view().retain())
     }
