@@ -19551,6 +19551,116 @@ mod views {
         assert_eq!(c.next_task_timer(), None);
     }
 
+    /// A timeout days away, cleared by a press.
+    #[component]
+    fn Reminder() -> impl IntoElement {
+        let pending = stored(Some(set_timeout(
+            std::time::Duration::from_secs(3 * 24 * 60 * 60),
+            || {},
+        )));
+        view().size_10().on_press(move |_: &()| {
+            if let Some(timeout) = pending.with(Option::take) {
+                timeout.cancel();
+            }
+        })
+    }
+
+    #[test]
+    fn a_cleared_timeout_leaves_the_cores_timers() {
+        // The engine would otherwise wake for it days later, and an app that
+        // keeps setting and clearing such timeouts would pile them up.
+        let mut c = core();
+        c.mount_root(&Root::new::<Reminder>(|| ()));
+        let host = root_host(&c.commit().unwrap());
+        c.run_component_tasks();
+        assert!(c.next_task_timer().is_some());
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        assert_eq!(c.next_task_timer(), None);
+    }
+
+    /// A waker that counts its wakes.
+    #[derive(Default)]
+    struct Probe(std::sync::atomic::AtomicU32);
+
+    impl Probe {
+        fn wakes(&self) -> u32 {
+            self.0.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl std::task::Wake for Probe {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn a_dropped_delay_lets_go_of_its_waker() {
+        use std::{future::Future, sync::Arc, task::Context};
+
+        let c = core();
+        let _entered = c.components.runtime.enter();
+        let first = Arc::new(Probe::default());
+        let second = Arc::new(Probe::default());
+        let mut delay = Box::pin(timer(std::time::Duration::from_secs(3 * 24 * 60 * 60)));
+        let waker = std::task::Waker::from(first.clone());
+        assert!(
+            delay
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        drop(waker);
+        let due = c.next_task_timer().expect("the delay waits");
+        assert_eq!(Arc::strong_count(&first), 2);
+        // Polled again by another waker (a `select`): that one is woken.
+        let waker = std::task::Waker::from(second.clone());
+        assert!(
+            delay
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        drop(waker);
+        assert_eq!(Arc::strong_count(&first), 1);
+        assert_eq!(Arc::strong_count(&second), 2);
+        assert_eq!(c.next_task_timer(), Some(due));
+        drop(delay);
+        assert_eq!(c.next_task_timer(), None);
+        assert_eq!(Arc::strong_count(&second), 1);
+        // Nothing is left to wake when its time comes.
+        c.components.executor.fire_timers(due);
+        assert_eq!((first.wakes(), second.wakes()), (0, 0));
+        // Still awaited in `background` too.
+        fn send<T: Send>() {}
+        send::<crate::element::Delay>();
+    }
+
+    #[test]
+    fn a_delay_wakes_the_last_waker_it_was_polled_with() {
+        use std::{future::Future, sync::Arc, task::Context};
+
+        let c = core();
+        let _entered = c.components.runtime.enter();
+        let first = Arc::new(Probe::default());
+        let second = Arc::new(Probe::default());
+        let mut delay = Box::pin(timer(std::time::Duration::from_secs(60)));
+        for probe in [&first, &second] {
+            let waker = std::task::Waker::from(probe.clone());
+            assert!(
+                delay
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_pending()
+            );
+        }
+        let due = c.next_task_timer().expect("the delay waits");
+        c.components.executor.fire_timers(due);
+        assert_eq!((first.wakes(), second.wakes()), (0, 1));
+        assert_eq!(c.next_task_timer(), None);
+    }
+
     /// A box bordered while a signal holds.
     #[component]
     fn Framed() -> impl IntoElement {
