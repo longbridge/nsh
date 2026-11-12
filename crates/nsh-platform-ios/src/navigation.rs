@@ -1652,7 +1652,12 @@ impl ScreenHost {
                 look(c.right_system_item, &c.right_symbol),
             )
             .or_else(|| custom(c.right));
-            nav_item.setRightBarButtonItem(right.as_deref());
+            // The whole list, not `setRightBarButtonItem:`: given nil, that
+            // clears only the first of the `headerRightItems` a page made
+            // again (a region's page, the same screen) had, and the others
+            // stay with their menus.
+            let right: Vec<Retained<UIBarButtonItem>> = right.into_iter().collect();
+            nav_item.setRightBarButtonItems(Some(&NSArray::from_retained_slice(&right)));
         }
         nav_item.setHidesBackButton(!c.back_visible);
         nav_item.setBackButtonTitle(c.back_title.as_deref().map(NSString::from_str).as_deref());
