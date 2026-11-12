@@ -366,7 +366,7 @@ effect(() => {
 });
 ```
 
-用 `background` 暂停工作，并在用户做出更改时就保存它：系统可能在应用进入后台几秒后就将其挂起，早于读取这一变化的副作用运行。显示在原生应用中的应用跟随该应用的状态；应用有多个窗口时（iPad、桌面），视图跟随它所在的窗口。在测试中，`nsh/test` 的 `app.setLifecycle("background")` 会把应用移到后台（[测试](./testing-and-trace.md#操作步骤)）。
+用 `background` 暂停工作，并在用户做出更改时就保存它：系统可能在应用进入后台几秒后就将其挂起，早于读取这一变化的副作用运行。显示在原生应用中的应用跟随该应用的状态；应用有多个窗口时（iPad、桌面），视图跟随它所在的窗口。在 Windows 上，用户注销、Windows 关机或重启、安装程序关闭应用时，应用会进入 `background`，它的处理函数在会话结束前运行；随后应用退出（[`Application.on("quit")`](../modules/nsh-desktop.md#退出)）。在测试中，`nsh/test` 的 `app.setLifecycle("background")` 会把应用移到后台（[测试](./testing-and-trace.md#操作步骤)）。
 
 ## 睡眠之后
 
@@ -501,6 +501,9 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 ## 应用数据目录
 
 Rust 中的 `data_dir()`，即 TSX 中的 `process.dataDir`，是应用存放自己文件（例如 SQLite 数据库）的目录：`<数据目录>/<应用 id>`，与 `storage.json` 同一目录，在所有原生平台上可用，包括 Android 和 iOS。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
+
+打包的桌面应用把日志写到其中的 `logs/app.log`：Rust 中是 `log_file()`，TSX 中是 `process.logFile`
+（[桌面上的日志文件和级别](./dev-server-and-debugging.md#log-files-and-levels-on-the-desktop)）。
 
 ```rust
 use nsh_core::prelude::*;

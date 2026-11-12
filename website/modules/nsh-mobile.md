@@ -105,7 +105,7 @@ mount(App);
 tap reports `onChange` with the tab's index (`{ index }`), the bar shows the choice at once, as the system's does, and the app shows
 that section and passes the index back as `selectedIndex`. Its height is the system's where the style leaves it open.
 In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected_index(..)`), a listener per event
-(`.on_change(..)`) and the typed style methods; `TabBarItem::new(title).icon(name)` makes a tab.
+(`.on_change(..)`) and the typed style methods; `TabBarItem::new(title).icon(name).badge(text)` makes a tab.
 
 ### Props
 
@@ -123,6 +123,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 |---|---|---|---|
 | `title` | `TabBarItem::new(title)` | `string` | The tab's title, which screen readers say. |
 | `icon` | `.icon(name)` | `string` | The tab's icon, by the platform's name for it: an [SF Symbol](https://developer.apple.com/sf-symbols/) on iOS (`"house"`), a drawable of the app on Android (`res/drawable/home.xml` is `"home"`, `"android:ic_menu_search"` the system's). `platform.select` picks one per platform. |
+| `badge` | `.badge(text)` | `string` | The tab's badge: a text such as `"3"` or `"New"`, or `""` for a badge with no text; left out (the default), none. In the system's badge look; screen readers say it with the tab's title: its text, or for `""` the system's words for a badge with no text (VoiceOver's; on Android the system's "New notification", in the device's language). |
 
 ### Events
 
@@ -134,12 +135,17 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 
 - **iOS and Mac Catalyst**: `UITabBar`, with the system's appearance for the iOS version: the floating Liquid Glass
   bar and its selection on iOS 26. Icons are SF Symbols. The theme's `primary` is the bar's `tintColor`, the selected
-  tab's color; the other tabs keep the system's.
+  tab's color; the other tabs keep the system's. A badge is the item's `badgeValue`: a text in full, `""` the
+  system's badge with no text, as large as a one-digit one.
 - **Android**: Material 3's navigation bar, made of the platform's views: an icon in its active indicator over each
   label, a ripple on press, the system's dynamic colors on Android 12 and later and Material's baseline colors before,
   light or dark as the app's appearance. At the bottom of the window it reaches under the navigation bar, taller by
   its inset, as Material's does. Icons are drawables of the app (tinted by the bar). The selected tab's icon and label
-  take the theme's `primary`, over an active indicator of it at 12% opacity; the other tabs keep the system's.
+  take the theme's `primary`, over an active indicator of it at 12% opacity; the other tabs keep the system's. A badge
+  is Material 3's: `""` the small badge (a dot) at the icon's corner, a text the large badge from the icon's middle,
+  in its error colors, ending in an ellipsis past the active indicator. The large badge holds a short text, a count
+  or a word of up to four characters, as Material's does: a longer one is cut (`"Updated"` shows as "Up…"), where iOS
+  shows it whole. TalkBack says `""` as the system's "New notification".
 - **Desktops (macOS, Windows, Linux, GPUI) and the web**: the sections show with [Tabs](../elements/tabs.md), in the app's
   look. `TabBar` takes no room there, so one layout holds both, picked by `platform.os`
   ([`nsh`'s device API](./nsh.md#device)).

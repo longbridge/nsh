@@ -310,6 +310,16 @@ pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
 }
 
+/// The platform's screen readers follow the active descendant a focused
+/// element names ([`super::Interactive::accessibility_active_descendant`],
+/// [`crate::platform::Environment::reads_active_descendants`]); it does
+/// not change.
+pub fn reads_active_descendants() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.reads_active_descendants)
+}
+
 /// Whether the platform draws shader views ([`super::shader`] and the
 /// other shader elements; TS: `shadersAvailable()`), reading subscribes.
 /// `false` where the platform was built without a renderer, on a grid
@@ -602,6 +612,20 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
 /// ```
 pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
+}
+
+/// The file the app's log lines are written to (TS: `process.logFile`): a
+/// packaged desktop app's rolling log, `logs/app.log` in the app's data
+/// directory, for a diagnostics report or an "Open logs folder" command
+/// (older files beside it are `app.1.log`, `app.2.log`, ...). `None` where
+/// the lines go to the platform's log only: development hosts, embedding
+/// apps, mobile, the web.
+///
+/// ```ignore
+/// let folder = log_file().and_then(|file| file.parent().map(Path::to_path_buf));
+/// ```
+pub fn log_file() -> Option<std::path::PathBuf> {
+    crate::log_file::path().map(std::path::Path::to_path_buf)
 }
 
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
