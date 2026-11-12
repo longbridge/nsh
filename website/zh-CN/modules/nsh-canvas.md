@@ -10,7 +10,7 @@ demo: mod-canvas
 `Canvas` 提供与 HTML Canvas 2D 风格一致的绘图上下文。你的 `draw` 函数**记录**绘图操作，平台随后以屏幕分辨率在原生侧回放（iOS 上是 Core Graphics，Android 上是 `android.graphics.Canvas`）。绘图中的数字和颜色可以是[动画值](./nsh.md#animation)：它们做动画时，平台会自行重绘，无需再次运行 `draw`。
 
 ```ts
-import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh";
+import { Canvas, CanvasGradient, CanvasRenderingContext2D, OffscreenCanvas, Path2D } from "nsh";
 ```
 
 教程见[画布](../docs/canvas.md)，属性见 [`<Canvas>`](../elements/canvas.md)。
@@ -257,6 +257,32 @@ cx.fillStyle = "#ef4444";
 cx.fill(heart);
 cx.restore();
 ```
+
+## OffscreenCanvas
+
+```ts
+class OffscreenCanvas {
+  constructor(width: number, height: number);
+  readonly width: number;
+  readonly height: number;
+  getContext(contextId: "2d"): CanvasRenderingContext2D;
+  convertToBlob(options?: { type?: string; quality?: number; scale?: number }): Promise<Blob>;
+}
+```
+
+一块有自己尺寸、不在屏幕上显示的画布，用来生成应用要保存、分享或放进剪贴板的图片：完整尺寸的整张图、图表、分享卡片。用它的 2D 上下文绘制（与 `<Canvas draw>` 拿到的 `CanvasRenderingContext2D` 相同，包括 `measureText`），再调用 `convertToBlob()`：平台以原生方式渲染绘制内容，与同样尺寸的 `<Canvas>` 在屏幕上绘制的一致，得到一个 PNG `Blob`。`scale` 设定每点的像素数（默认为屏幕的倍率）；动画值按初始值 0 绘制。
+
+```ts
+const canvas = new OffscreenCanvas(1200, 800);
+const cx = canvas.getContext("2d");
+cx.fillStyle = "#0f172a";
+cx.font = "600 24px sans-serif";
+cx.fillText("orders → customers", 40, 60);
+const png = await canvas.convertToBlob({ scale: 2 });
+url.set(URL.createObjectURL(png)); // <Image src={url()} />, or its bytes: await png.arrayBuffer()
+```
+
+图片单边最多 16384 像素、总共最多 6400 万像素；更大的图片以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。macOS 渲染离屏画布；其他平台上 `convertToBlob` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
 
 ## 不支持的功能
 

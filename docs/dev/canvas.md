@@ -37,6 +37,18 @@
   into the `drawRect:` context, keeping its own transform and path in view space; Android `CanvasBox.java` interprets an `int[]` (`encode.rs`). Not
   supported: `getImageData` / `putImageData`, filters.
 
+**Offscreen canvases** (`OffscreenCanvas` of `nsh`, `nsh-js` `canvas/offscreen.rs`; Rust:
+`Painter::render`, `element::ambient::render_canvas`). An object of a size of its own whose `getContext("2d")` is
+a context recording as `<Canvas draw>`'s does (`new_recording`, never closed); `convertToBlob` decodes what it
+recorded into a `Drawing` (the same `max_canvas_ops` limit) and pushes `Op::RenderCanvas` with a JS call number.
+The core (`core/canvas_render.rs`, `canvas::render`) checks the size against `MAX_SIDE` / `MAX_PIXELS`, takes the
+screen's pixel ratio when no `scale` is given, and sends `Command::RenderCanvas` on the root to platforms whose
+`Environment::canvas_render` is set (elsewhere it answers `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` at once); the
+platform's `EventKind::CanvasImage` (`EventPayload::CanvasImage`) settles the promise with a `Blob`
+(`JsHost::new_blob`). macOS (`nsh-platform-macos` `canvas/offscreen.rs`) loads the images the drawing names
+through the shared loader, then replays it with `CanvasState::paint` into a `CGBitmapContext` of its own on a
+global queue, y down at `scale`, animated slots at 0, and encodes it with ImageIO.
+
 **Partial redraws.** While animated values animate, iOS, macOS and Windows redraw only the area the changed values
 affect: `nsh_core::canvas::DamageScan` finds it from the recorded operations, falling back to a full redraw
 (`Damage::All`) when it cannot bound the change, and the platform replays the whole drawing clipped to it, so the

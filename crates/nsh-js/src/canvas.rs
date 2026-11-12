@@ -38,6 +38,8 @@ use crate::{
     reactive::{self, Native, arg},
 };
 
+mod offscreen;
+
 type JsValue = qjs::JSValue;
 type JsContext = qjs::JSContext;
 
@@ -178,6 +180,8 @@ pub(crate) struct Canvases {
     classes: Cell<Option<Classes>>,
     /// Prototypes (owned): context, path, gradient.
     protos: Cell<[JsValue; 3]>,
+    /// `OffscreenCanvas`'s class and prototype.
+    offscreen: offscreen::OffscreenClass,
 }
 
 impl Default for Canvases {
@@ -185,6 +189,7 @@ impl Default for Canvases {
         Canvases {
             classes: Cell::new(None),
             protos: Cell::new([UNDEFINED; 3]),
+            offscreen: Default::default(),
         }
     }
 }
@@ -192,6 +197,7 @@ impl Default for Canvases {
 impl Canvases {
     /// Frees the values held (the state is unregistered).
     pub(crate) fn free_all(&mut self, raw: *mut JsContext) {
+        self.offscreen.free_all(raw);
         for p in self.protos.replace([UNDEFINED; 3]) {
             // SAFETY: owned values; no JS runs from here on.
             unsafe { qjs::JS_FreeValue(raw, p) };
@@ -1488,6 +1494,40 @@ pub(crate) const EXPORTS: &[Item] = &[
   addPath(path: Path2D): void;
 }
 export interface Path2D extends CanvasPath {}"#,
+        ),
+    ),
+    (
+        "OffscreenCanvas",
+        Export::Value(offscreen::constructor_function),
+        Ts::class(
+            "A canvas of its own size with no view: draw with its 2D context (the same\nas `<Canvas draw>` gets), then `convertToBlob()` renders what it drew into\nan image natively, as a canvas of that size draws it on screen. Rejects\nwith `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform renders no\noffscreen canvases, and with `ERR_NSH_QUOTA_EXCEEDED` for an image over\n16384 pixels a side.",
+            r#" {
+  #private;
+  /** A canvas `width` × `height` points. */
+  constructor(width: number, height: number);
+  /** Its width in points. */
+  readonly width: number;
+  /** Its height in points. */
+  readonly height: number;
+  /** Its 2D context, the same object each time; `null` for other kinds. */
+  getContext(contextId: "2d"): CanvasRenderingContext2D;
+  getContext(contextId: string): CanvasRenderingContext2D | null;
+  /**
+   * Renders what the context drew into an image: PNG (any `type` it does not
+   * encode gives PNG, as in browsers), `scale` pixels per point (the screen's
+   * by default). Animated values draw at 0.
+   */
+  convertToBlob(options?: ImageEncodeOptions): Promise<Blob>;
+}
+/** How `OffscreenCanvas.convertToBlob` encodes. */
+export interface ImageEncodeOptions {
+  /** The MIME type: `"image/png"` (the default). */
+  type?: string;
+  /** For lossy types; PNG ignores it. */
+  quality?: number;
+  /** Pixels per point; the screen's by default. */
+  scale?: number;
+}"#,
         ),
     ),
     (

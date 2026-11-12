@@ -696,6 +696,20 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Renders `request`'s drawing offscreen into an image, as a canvas of that
+/// size draws it on screen (TS: `OffscreenCanvas`'s `convertToBlob`): the
+/// encoded bytes, or why not: `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where
+/// the platform renders none, `ERR_NSH_QUOTA_EXCEEDED` for an image past
+/// [`crate::canvas::render::MAX_SIDE`] or
+/// [`crate::canvas::render::MAX_PIXELS`]. To await in a task.
+pub fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
+    act(action);
+    answer
+}
+
 /// Whether the platform lets the user pick a color on the screen
 /// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
 pub fn can_pick_screen_color() -> bool {

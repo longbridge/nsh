@@ -10,7 +10,7 @@ demo: mod-canvas
 `Canvas` draws with an HTML Canvas 2D–style context. Your `draw` function **records** the drawing; the platform replays it natively (Core Graphics on iOS, `android.graphics.Canvas` on Android) at the screen's resolution. Numbers and colors in a drawing may be [animated values](./nsh.md#animation): when they animate, the platform redraws on its own, without running `draw` again.
 
 ```ts
-import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh";
+import { Canvas, CanvasGradient, CanvasRenderingContext2D, OffscreenCanvas, Path2D } from "nsh";
 ```
 
 See [Canvas](../docs/canvas.md) for the guide and [`<Canvas>`](../elements/canvas.md) for its props.
@@ -257,6 +257,32 @@ cx.fillStyle = "#ef4444";
 cx.fill(heart);
 cx.restore();
 ```
+
+## OffscreenCanvas
+
+```ts
+class OffscreenCanvas {
+  constructor(width: number, height: number);
+  readonly width: number;
+  readonly height: number;
+  getContext(contextId: "2d"): CanvasRenderingContext2D;
+  convertToBlob(options?: { type?: string; quality?: number; scale?: number }): Promise<Blob>;
+}
+```
+
+A canvas of its own size with no view on screen, for images the app saves, shares or puts on the clipboard: a whole diagram at full size, a chart, a share card. Draw with its 2D context (the same `CanvasRenderingContext2D` as `<Canvas draw>`, `measureText` included), then `convertToBlob()` renders what it drew natively, as a `<Canvas>` of that size draws it on screen, into a PNG `Blob`. `scale` sets the pixels per point (the screen's by default); animated values draw at their start, 0.
+
+```ts
+const canvas = new OffscreenCanvas(1200, 800);
+const cx = canvas.getContext("2d");
+cx.fillStyle = "#0f172a";
+cx.font = "600 24px sans-serif";
+cx.fillText("orders → customers", 40, 60);
+const png = await canvas.convertToBlob({ scale: 2 });
+url.set(URL.createObjectURL(png)); // <Image src={url()} />, or its bytes: await png.arrayBuffer()
+```
+
+The image is at most 16384 pixels a side and 64 million pixels in all; a larger one rejects with `ERR_NSH_QUOTA_EXCEEDED`. macOS renders offscreen canvases; on other platforms `convertToBlob` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
 
 ## Not supported
 

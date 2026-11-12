@@ -391,3 +391,101 @@ fn hit_tests_and_number_forms_are_native() {
         CanvasOp::FontVariantNumeric(v) if v.0 == nsh_core::FontVariant::TABULAR_NUMS
     )));
 }
+
+const OFFSCREEN: &str = r##"import { mount, OffscreenCanvas, signal, Text } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const canvas = new OffscreenCanvas(40, 20);
+  const cx = canvas.getContext("2d");
+  cx.fillStyle = "#ff0000";
+  cx.fillRect(0, 0, cx.canvas.width, cx.canvas.height);
+  const same = canvas.getContext("2d") === cx && canvas.getContext("webgl") === null;
+  const blob = await canvas.convertToBlob({ type: "image/webp", scale: 2 });
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let refused = "";
+  try {
+    await new OffscreenCanvas(9000, 10).convertToBlob({ scale: 2 });
+  } catch (e) {
+    refused = (e as { code: string }).code;
+  }
+  shown.set(`${same} ${canvas.width}x${canvas.height} ${blob instanceof Blob} ${blob.type} ${bytes.join(",")} ${refused}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"##;
+
+#[test]
+fn an_offscreen_canvas_renders_through_the_platform() {
+    use nsh_core::{Command, EventKind, EventPayload, MountItem, ROOT_ID};
+    let environment = nsh_engine::Environment {
+        canvas_render: true,
+        ..Default::default()
+    };
+    let (engine, rx) = crate::components::start_with(OFFSCREEN, environment, None, None);
+    let control = engine.control();
+    let mut renders = Vec::new();
+    crate::components::until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command:
+                    Command::RenderCanvas {
+                        id,
+                        drawing,
+                        width,
+                        height,
+                        scale,
+                        ..
+                    },
+            } = item
+            {
+                renders.push((*width, *height, *scale, drawing.ops.clone()));
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::CanvasImage,
+                    EventPayload::CanvasImage {
+                        id: *id,
+                        result: Ok(vec![1, 2, 3]),
+                    },
+                );
+            }
+        }
+        crate::components::shows(
+            batch,
+            "true 40x20 true image/png 1,2,3 ERR_NSH_QUOTA_EXCEEDED",
+        )
+    });
+    // Only the first reached the platform: the second was over the limit.
+    assert_eq!(renders.len(), 1, "{renders:?}");
+    let (width, height, scale, ops) = &renders[0];
+    assert_eq!((*width, *height, *scale), (80, 40, 2.0));
+    assert!(
+        ops.iter().any(|op| matches!(op, CanvasOp::FillRect { .. })),
+        "{ops:?}"
+    );
+}
+
+const OFFSCREEN_UNAVAILABLE: &str = r##"import { mount, OffscreenCanvas, signal, Text } from "nsh";
+
+const shown = signal("waiting");
+new OffscreenCanvas(10, 10)
+  .convertToBlob()
+  .then(() => shown.set("rendered"), (e) => shown.set(`refused ${e.code}`));
+
+mount(() => <Text>{shown()}</Text>);
+"##;
+
+#[test]
+fn an_offscreen_canvas_is_refused_where_the_platform_renders_none() {
+    let (_engine, rx) =
+        crate::components::start_with(OFFSCREEN_UNAVAILABLE, Default::default(), None, None);
+    let batches = crate::components::until(&rx, |batch| {
+        crate::components::shows(batch, "refused ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
+    });
+    assert!(
+        batches
+            .iter()
+            .any(|b| crate::components::shows(b, "refused ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"))
+    );
+}

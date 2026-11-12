@@ -94,6 +94,10 @@ canvas::damage::DamageScan::damage(value)                        # a generic num
 canvas::damage::DamageScan::painted_after(value)                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_path(slot)                                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_stroke(slot)                               # a generic number (a JS value, a recorded slot)
+canvas::render::RenderRequest.scale                              # pixels per point, a ratio
+canvas::render::pixel_size(scale)                                # pixels per point, a ratio
+element::host::Painter::render(scale)                            # pixels per point, a ratio
+ops::Command::RenderCanvas.scale                                 # pixels per point, a ratio
 core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)
 core::Core::set_font_scale(scale)                                # a font scale factor
 core::Core::set_zoom(scale)                                      # a zoom scale factor

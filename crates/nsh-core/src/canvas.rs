@@ -7,6 +7,7 @@
 
 mod damage;
 mod hit;
+pub mod render;
 
 use std::sync::Arc;
 

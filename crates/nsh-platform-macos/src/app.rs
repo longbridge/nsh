@@ -545,6 +545,7 @@ fn initial_environment() -> Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
         screen_color: true,
+        canvas_render: true,
         file_requests: true,
         speech: true,
         notifications: true,

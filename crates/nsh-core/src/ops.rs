@@ -263,6 +263,7 @@ events! {
 
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
     MouseUp = "onMouseUp": "A mouse button was released over the view or a view inside it (payload: [`EventPayload::Mouse`], its `button` naming the released one, with where and the modifiers). The primary button's release also reports `onPressUp`.",
+    CanvasImage = "onCanvasImage": "A [`Command::RenderCanvas`] request finished (root only; payload: [`EventPayload::CanvasImage`]).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -1082,6 +1083,14 @@ pub enum EventPayload {
         /// Why the request failed; `None` when it was carried out (or the
         /// dialog cancelled).
         error: Option<String>,
+    },
+    /// The image a [`Command::RenderCanvas`] made, or why it failed
+    /// ([`crate::canvas::render`]).
+    CanvasImage {
+        /// The request.
+        id: u32,
+        /// The encoded image, or the platform's message.
+        result: Result<Vec<u8>, String>,
     },
     /// An event of a registered native component: its name and data (any
     /// JSON value), handed to JS as `{ name, data }`.
@@ -2394,6 +2403,29 @@ pub enum Command {
         /// The request.
         id: u32,
     },
+    /// Render `drawing` offscreen into a `width` × `height` pixel image
+    /// (on the root; `OffscreenCanvas`'s `convertToBlob`,
+    /// [`crate::canvas::render`]): replay it as a canvas of `scale` pixels
+    /// per point draws it on screen, into a bitmap of its own that starts
+    /// transparent, its animated values at 0, and report the encoded image
+    /// as [`EventKind::CanvasImage`] `id` ([`EventPayload::CanvasImage`]).
+    /// Sent only on platforms whose
+    /// [`crate::platform::Environment::canvas_render`] is set, with a size
+    /// [`crate::canvas::render::pixel_size`] passed.
+    RenderCanvas {
+        /// The request.
+        id: u32,
+        /// What to draw, in points.
+        drawing: std::sync::Arc<crate::canvas::Drawing>,
+        /// The image's width in pixels.
+        width: u32,
+        /// The image's height in pixels.
+        height: u32,
+        /// Pixels per point.
+        scale: f32,
+        /// The encoding.
+        format: crate::canvas::render::ImageFormat,
+    },
     /// Carry out `request` on local paths (on the root;
     /// [`crate::file_dialog`]): show the open or save dialog, open a file
     /// in its app, show it in the file manager or move it to the trash.
@@ -3332,6 +3364,15 @@ pub enum Op {
         script: String,
         /// How long the script may take to answer.
         timeout: std::time::Duration,
+    },
+    /// `OffscreenCanvas`'s `convertToBlob`: render `drawing` into an image
+    /// ([`crate::canvas::render`]); JS promise `call` settles with its
+    /// bytes (a `Uint8Array`) or the failure.
+    RenderCanvas {
+        /// The JS promise's call number.
+        call: u32,
+        /// What to render.
+        request: Box<crate::canvas::render::RenderRequest>,
     },
     /// What a canvas draws (replaces the previous drawing).
     Draw {

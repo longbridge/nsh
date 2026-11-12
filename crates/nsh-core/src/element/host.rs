@@ -1872,6 +1872,23 @@ impl Painter {
         self.drawing
     }
 
+    /// Renders the drawing offscreen into a PNG of `size` points at `scale`
+    /// pixels per point (`None`: the screen's), as a canvas of that size
+    /// draws it on screen ([`crate::element::ambient::render_canvas`]). To
+    /// await in a task.
+    pub fn render(
+        self,
+        size: Size<Points>,
+        scale: Option<f32>,
+    ) -> crate::element::Answer<Result<Vec<u8>, crate::element::JsError>> {
+        crate::element::ambient::render_canvas(crate::canvas::render::RenderRequest {
+            drawing: self.drawing,
+            size,
+            scale,
+            format: crate::canvas::render::ImageFormat::Png,
+        })
+    }
+
     /// `value` as a number of this drawing, for an operation built by hand
     /// ([`Self::op`]): an animated value becomes a slot the canvas reads while
     /// it draws, kept alive with the drawing.

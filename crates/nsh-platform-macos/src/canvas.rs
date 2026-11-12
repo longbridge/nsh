@@ -62,6 +62,10 @@ use objc2_core_graphics::{
 use objc2_core_text::{CTLine, kCTFontAttributeName, kCTForegroundColorFromContextAttributeName};
 use rustc_hash::FxHashMap;
 
+mod offscreen;
+
+pub(crate) use offscreen::render as render_offscreen;
+
 use crate::{
     surface::Surface,
     view::{NshView, ViewState},
