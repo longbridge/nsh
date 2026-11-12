@@ -17274,6 +17274,114 @@ fn overflowing_children_mount_their_area() {
     assert_eq!(overflow(&batch, 2), Some(None));
 }
 
+/// A row (2) as tall as its 24pt button (4), whose hit slop of 10 reaches
+/// out of the row, in a card (5) with padding 20: the row's area takes in
+/// the slop, so a touch above the row, in the slop, reaches the button;
+/// the card holds it inside, and a clipping row keeps it.
+#[test]
+fn hit_slop_outside_the_parent_reaches_the_child() {
+    use crate::{geometry::size, input::hit_area};
+    let mut c = core();
+    let create = |id| Op::Create { id, tag: Tag::View };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let slop = |value: f32| Op::SetProp {
+        id: 4,
+        prop: Prop::HitSlop(EdgeInsets::all(Points(value))),
+    };
+    apply(
+        &mut c,
+        vec![
+            create(5),
+            create(2),
+            create(4),
+            style_op(5, &[("padding", StyleValue::Number(20.0))]),
+            style_op(
+                2,
+                &[
+                    ("flexDirection", StyleValue::Str("row")),
+                    ("height", StyleValue::Number(24.0)),
+                ],
+            ),
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(24.0)),
+                    ("height", StyleValue::Number(24.0)),
+                ],
+            ),
+            slop(10.0),
+            insert(2, 4),
+            insert(5, 2),
+            insert(ROOT_ID, 5),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let overflow = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Overflow { id: i, extent } if *i == id => Some(*extent),
+            _ => None,
+        })
+    };
+    // The row is 280 wide (the card's padding): the button's slop reaches
+    // 10 above, left of and below it.
+    let row = rect(-10.0, -10.0, 290.0, 44.0);
+    assert_eq!(overflow(&batch, 2), Some(Some(row)));
+    // At (20, 20) in the card, the slop stays inside it.
+    assert_eq!(overflow(&batch, 5), None);
+    let (row_size, button_size) = (
+        size(Points(280.0), Points(24.0)),
+        size(Points(24.0), Points(24.0)),
+    );
+    let none = EdgeInsets::default();
+    let ten = EdgeInsets::all(Points(10.0));
+    // 5pt above the row, over the button: the row looks into its children,
+    // and the button is hit in its slop.
+    let at = point(Points(12.0), Points(-5.0));
+    assert!(hit_area(at, row_size, none, Some(row), false, true).children);
+    let button = hit_area(at, button_size, ten, None, false, true);
+    assert!(!button.inside && button.in_slop);
+    // Past the slop, nothing is looked into.
+    let past = point(Points(12.0), Points(-12.0));
+    assert!(!hit_area(past, row_size, none, Some(row), false, true).children);
+
+    // The slop going away takes the area with it, without a new layout.
+    c.apply(slop(0.0)).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(overflow(&batch, 2), Some(None));
+    // Coming back, it reaches through the card too when it is larger
+    // than the card's padding.
+    c.apply(slop(30.0)).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        overflow(&batch, 2),
+        Some(Some(rect(-30.0, -30.0, 310.0, 84.0)))
+    );
+    assert_eq!(
+        overflow(&batch, 5),
+        Some(Some(rect(-10.0, -10.0, 330.0, 84.0)))
+    );
+
+    // A row that clips its overflow has no area: a touch outside it is
+    // not looked into, as what is outside does not show.
+    c.apply(style_op(
+        2,
+        &[
+            ("flexDirection", StyleValue::Str("row")),
+            ("height", StyleValue::Number(24.0)),
+            ("overflow", StyleValue::Str("hidden")),
+        ],
+    ))
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(overflow(&batch, 2), Some(None));
+    assert_eq!(overflow(&batch, 5), Some(None));
+    assert!(!hit_area(at, row_size, none, None, true, true).children);
+}
+
 /// A view that loses its only, absolutely placed child lays out again:
 /// taffy keeps the children it hoisted out of flow while the view has no
 /// children to lay out, so the freed child must not stay listed there.
