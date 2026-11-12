@@ -37,10 +37,11 @@ Most contributions we take improve what NSH already has. In order of preference:
 - **Performance**: faster rendering, layout, scrolling and start-up, less memory, fewer mount items.
 - **Refinements of existing behavior**: smoother animations and gestures, better input, focus and accessibility,
   details that make a platform feel right.
-- **Completing existing components** within their domain. `DiffView`, `Editor`, `DataTable` and the other components
-  of `nsh/base` are not finished, and an option or part they lack is welcome when it is common in that domain: the
-  design and API that comparable components (GPUI Kit's first, then well-known editors, diff viewers or data grids)
-  share. A `DiffView` option that diff viewers generally offer fits; one shaped by a single app's workflow does not,
+- **Completing existing components** within their domain. The components of `nsh/base` are not finished, and an
+  option or part they lack is welcome when it is common in that domain. `Editor`, `DiffView`, `DataTable` and
+  `RichEditor` especially are still far from what their domains offer, and contributions that fill those gaps are
+  the ones we most want. Common in the domain means the design and API that comparable components (GPUI Kit's
+  first, then well-known code editors, diff viewers, data grids and rich text editors) share. A `DiffView` option that diff viewers generally offer fits; one shaped by a single app's workflow does not,
   and belongs in the app, built on the component's parts and slots.
 - **Bringing an existing feature to every platform** where a backend lacks it.
 
