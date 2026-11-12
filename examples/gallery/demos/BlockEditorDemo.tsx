@@ -1208,7 +1208,7 @@ export function BlockEditorDemo() {
           bubbleMenu={bubble()}
           bubbleMenuPlacement={open() ? "bottom" : "top"}
           bubbleMenuOffset={6}
-          contentOverlay={layer()}
+          contentLayer={layer()}
         />
         <If when={!pointer}>
           <View testID="block-bar" role="toolbar" accessibilityLabel="Block" style={{ borderTopWidth: 1, borderColor: colors.line }}>
