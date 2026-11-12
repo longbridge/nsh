@@ -418,9 +418,11 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.host.calls()`、`app.host.posts()` | `open` 的 `host.handlers` 收到的应用调用和投递，按顺序排列：`name`、`data`。 |
 | `app.openedUrls()` | 应用打开的 URL（`openUrl`），按顺序排列：只记录，不打开。 |
 | `await app.openWithUrl(url)` | 系统把一个打开应用的链接交给应用，就像用户在应用运行时打开链接一样（`UrlScheme.on("open")`；应用未认领的 scheme 的链接会被丢弃，与设备上一致），然后等待应用安静下来。仅限 headless 运行。 |
+| `await app.failImages(url)` | 从此刻起，来源为 `url` 的图片都加载失败，正在加载的也包括在内：每张图片都像在设备上一样用 `onError` 报告失败，测试便可检查应用改为显示的内容（头像的首字母、占位图）。`url` 整体匹配，其中的 `*` 匹配任意内容（`"https://cdn.example.com/avatars/*"`），与 `network` 路由的写法相同；打包图片的来源是 `asset:/<path>`。然后等待应用安静下来。仅限 headless 运行。 |
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
+| `await app.wake()` | 让系统从睡眠中唤醒，就像用户打开笔记本的盖子：`wakeCount()` 加一，`lifecycle()` 保持不变。仅限 headless 运行。 |
 | `await app.setLocaleSettings(settings)` | 修改 `settings` 中列出的语言与地区设置（`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`；还有 `languages`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit`，与 `open` 的 `localeSettings` 相同），就像用户修改系统设置或出行时那样；其余不变（`localeSettings()`）。仅限 headless 运行。 |
 | `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回应用窗口的 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 | `app.window(id)` | 桌面上应用的一个窗口，按应用给它的 id 找（`"main"`：主窗口）。headless 运行模拟桌面的窗口：一块显示器，每个窗口在它要求的位置打开，除非是面板或要求不获得焦点，否则获得焦点。 |
@@ -472,7 +474,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
-- **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
+- **图片不会加载**：不会有 `onLoad`，也不会有 `onError`，除非测试让这张图片加载失败（`app.failImages`）；`Image.getSize` 和 `Image.prefetch` 会 reject，app 里和测试文件里都一样。`blob:` URL 的尺寸直接从它的数据读取，所以对它调用 `Image.getSize` 会 resolve。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
 
 ### 页面的宿主
