@@ -634,6 +634,35 @@ draw a panel.
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
+  Canvas animated argument batches (`canvas.rs`, 2026-11-12, Linux x86_64, Ryzen 9 7950X, against
+  `9fd11f83`): the before / after setters and unchanged `DamageScan`, extracted into an isolated harness.
+  Rust 1.99.1, opt-level 3, fat LTO, one codegen unit, pinned to CPU 2, no concurrent builds; four warmup
+  updates, three processes with seven alternating pairs each, medians of all 21 samples per implementation:
+
+  | Static path points | Changed slots | Argument update, before → after |
+  |---|---|---|
+  | 0 | 64 | 16.157 → 1.311 µs |
+  | 400 | 64 | 272.069 → 5.407 µs |
+  | 4,000 | 8 | 316.143 → 41.026 µs |
+  | 4,000 | 32 | 1,263.803 → 41.492 µs |
+  | 4,000 | 64 | 2,526.364 → 42.080 µs |
+  | 4,000 | 256 | 10,262.553 → 46.824 µs |
+
+  A canvas's animated values are applied together: at most two whole-drawing damage scans and one
+  `view.changed()`, instead of up to two scans and one call per changed slot. Changed-slot storage is reused;
+  one changed slot keeps a scalar predicate. Controls with one slot and 0 / 400 / 4,000 static points take
+  0.0566 / 4.048 / 39.514 → 0.0563 / 3.986 / 39.279 µs (medians within 1.6%). The harness includes input
+  preparation, state borrowing and slot writes, with a notification counter and supporting type shims. It
+  excludes the actual invalidation walk, rasterization, workers, uploads, GPU work and presentation.
+
+  Headless `nsh test <entry> --trace` (debug, three alternating runs per version): a canvas of 256 animated
+  rectangles after 4,000 static path points keeps 287 ops / 284 mount items / 10 nodes initially, then
+  0 ops / 6 items / 10 nodes and 0 ops / 5 items / 10 nodes when resized to 760×420 and 920×540. Commit
+  medians are 2448 / 185 / 127 → 2490 / 171 / 140 µs. The counter control keeps 57 ops / 51 items / 21 nodes
+  initially and 10 ops / 7 items / 24 nodes after `+1` (395 / 276 → 410 / 305 µs). Every mount item matches
+  between versions. These are smoke checks of unchanged engine work; the optimization is in GPUI's animated
+  argument writes. Native frame-time and process CPU/GPU changes have not been measured.
+
 The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO (the published distribution thin LTO over 16 codegen units: `docs/dev/tooling.md` "Releases").
 
 - Linux (GTK 4, release; a 1896×1030 window on a 120 Hz headless Hyprland output, NVIDIA; `--fps` readings and the

@@ -125,6 +125,8 @@ pub(crate) struct CanvasState {
     damage: std::cell::Cell<Option<Damage>>,
     /// Scratch space of the damage scans.
     scan: DamageScan,
+    /// Slots changed by the current animation frame, reused across frames.
+    changed: Vec<u16>,
     /// Counts the changes that need the whole drawing rasterized again
     /// (a new drawing, an image loaded, a value no area bounds).
     version: u64,
@@ -133,6 +135,58 @@ pub(crate) struct CanvasState {
 }
 
 impl CanvasState {
+    /// Updates a frame's animated values and bounds their combined damage.
+    /// Returns whether the view needs to draw again.
+    fn set_args(&mut self, values: &[(u16, AnimationValue)]) -> bool {
+        self.changed.clear();
+        for &(k, value) in values {
+            if self.args.get(k as usize).copied().flatten() != Some(value) {
+                self.changed.push(k);
+            }
+        }
+        if self.changed.is_empty() {
+            return false;
+        }
+        // Bound the all-old and all-new states, not intermediate states
+        // between updates of slots that the same operation reads.
+        let before = self.args_damage();
+        for &(k, value) in values {
+            let k = k as usize;
+            if self.args.len() <= k {
+                self.args.resize(k + 1, None);
+            }
+            self.args[k] = Some(value);
+        }
+        let damage = match before {
+            Damage::All => Damage::All,
+            _ => before.union(self.args_damage()),
+        };
+        match damage {
+            Damage::None => return false,
+            Damage::All => self.stale(),
+            Damage::Rect(_) => {
+                let pending = self.damage.get().map_or(damage, |d| d.union(damage));
+                self.damage.set(Some(pending));
+            }
+        }
+        true
+    }
+
+    /// What the changed slots paint at their current values.
+    fn args_damage(&mut self) -> Damage {
+        let Some(drawing) = self.drawing.as_ref() else {
+            return Damage::All;
+        };
+        let value = |k| Self::slot(&self.args, k);
+        match self.changed.as_slice() {
+            // Keep the single-slot scan's scalar predicate.
+            &[slot] => self.scan.damage(&drawing.ops, value, |k| k == slot),
+            changed => self
+                .scan
+                .damage(&drawing.ops, value, |k| changed.contains(&k)),
+        }
+    }
+
     /// Rasterizes the whole drawing again: on a worker while what was
     /// rasterized before shows, so the main thread never waits for it.
     fn stale(&mut self) {
@@ -302,51 +356,15 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     view.changed();
 }
 
-/// Animated value slot `k` changed: draws again if the value did.
-pub(crate) fn set_arg(view: &NshView, k: u16, value: AnimationValue) {
+/// Updates a frame's animated value slots, drawing again if they changed.
+pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
     {
         let mut state = view.state_mut();
         let Some(c) = state.canvas.as_mut() else {
             return;
         };
-        let k = k as usize;
-        if c.args.len() <= k {
-            c.args.resize(k + 1, None);
-        }
-        if c.args[k] == Some(value) {
+        if !c.set_args(values) {
             return;
-        }
-        // What the operations reading the slot paint, before and after:
-        // only that is rasterized again.
-        let slot = k as u16;
-        let damage = match c.drawing.clone() {
-            Some(drawing) => {
-                let changed = |s: u16| s == slot;
-                let before =
-                    c.scan
-                        .damage(&drawing.ops, |s| CanvasState::slot(&c.args, s), changed);
-                c.args[k] = Some(value);
-                match before {
-                    Damage::All => Damage::All,
-                    _ => before.union(c.scan.damage(
-                        &drawing.ops,
-                        |s| CanvasState::slot(&c.args, s),
-                        changed,
-                    )),
-                }
-            }
-            None => {
-                c.args[k] = Some(value);
-                Damage::All
-            }
-        };
-        match damage {
-            Damage::None => return,
-            Damage::All => c.stale(),
-            Damage::Rect(_) => {
-                let pending = c.damage.get().map_or(damage, |d| d.union(damage));
-                c.damage.set(Some(pending));
-            }
         }
     }
     view.changed();
@@ -3115,6 +3133,296 @@ mod tests {
 
     fn slot(k: u16) -> Num {
         Num::Slot(k)
+    }
+
+    fn batch_number(value: f32) -> AnimationValue {
+        AnimationValue::Number(value)
+    }
+
+    fn batch_drawing() -> Arc<Drawing> {
+        Arc::new(Drawing {
+            ops: vec![
+                CanvasOp::FillStyle(Paint::Color(Color(0x3040_50ff))),
+                CanvasOp::FillRect(rect(0.0, 0.0, 256.0, 128.0)),
+                CanvasOp::Save,
+                CanvasOp::BeginPath,
+                CanvasOp::Path(PathOp::Rect(rect(12.0, 12.0, 232.0, 104.0))),
+                CanvasOp::Clip(None, FillRule::NonZero),
+                CanvasOp::Transform([slot(8), c(0.0), c(0.0), c(1.0), slot(4), slot(5)]),
+                CanvasOp::FillStyle(Paint::Slot(6)),
+                CanvasOp::GlobalAlpha(slot(7)),
+                CanvasOp::FillRect([slot(0), slot(1), slot(2), slot(3)]),
+                CanvasOp::Restore,
+            ],
+            ..Drawing::default()
+        })
+    }
+
+    fn batch_initial_args() -> Vec<Option<AnimationValue>> {
+        vec![
+            Some(batch_number(12.0)),
+            Some(batch_number(14.0)),
+            Some(batch_number(16.0)),
+            Some(batch_number(12.0)),
+            Some(batch_number(10.0)),
+            Some(batch_number(4.0)),
+            Some(AnimationValue::Color(0xff00_00ff)),
+            Some(batch_number(0.5)),
+            Some(batch_number(1.0)),
+        ]
+    }
+
+    /// Compare a cached old frame, patched using the actual batch helper's
+    /// accumulated damage, with a complete replay at the final values.
+    fn assert_batch_pixels(batches: &[&[(u16, AnimationValue)]]) {
+        let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
+        let text = WindowTextSystem::new(system.clone());
+        let images = FxHashMap::default();
+        for scale in [1.0, 1.5, 2.0] {
+            let drawing = batch_drawing();
+            let mut canvas = CanvasState {
+                drawing: Some(drawing.clone()),
+                args: batch_initial_args(),
+                ..CanvasState::default()
+            };
+            let key = Key {
+                linear: [scale, 0.0, 0.0, scale],
+                scale,
+                size: (256.0, 128.0),
+            };
+            let frac = (0.25, 0.5);
+            let (region, _) = region(&key, frac, [0.0, 0.0, 256.0 * scale, 128.0 * scale]).unwrap();
+            let mut patched = record(
+                &drawing,
+                &canvas.args,
+                &images,
+                (&text, &system),
+                key,
+                region,
+                frac,
+            );
+            let old_pixels = pixels(&patched).data().to_vec();
+            for values in batches {
+                assert!(canvas.set_args(values));
+            }
+            assert_eq!(canvas.version, 0, "bounded changes must stay partial");
+            let Some(Damage::Rect(damage)) = canvas.damage.take() else {
+                panic!("batched geometry, color and alpha must damage their shapes");
+            };
+            assert!(patch(
+                &mut patched,
+                &drawing,
+                &canvas.args,
+                &images,
+                (&text, &system),
+                damage,
+            ));
+            let full = record(
+                &drawing,
+                &canvas.args,
+                &images,
+                (&text, &system),
+                key,
+                region,
+                frac,
+            );
+            assert_ne!(
+                old_pixels,
+                pixels(&full).data(),
+                "the fixture must move pixels"
+            );
+            assert_eq!(
+                pixels(&patched).data(),
+                pixels(&full).data(),
+                "partial replay differs from full replay at scale {scale}",
+            );
+        }
+    }
+
+    #[test]
+    fn batched_canvas_args_paint_correlated_values_together() {
+        // A batch of bindings with only one changed slot uses the scalar
+        // scan too; the unchanged values still reach the final frame.
+        assert_batch_pixels(&[&[
+            (0, batch_number(12.0)),
+            (1, batch_number(60.0)),
+            (2, batch_number(16.0)),
+            (3, batch_number(12.0)),
+            (4, batch_number(10.0)),
+            (5, batch_number(4.0)),
+            (6, AnimationValue::Color(0xff00_00ff)),
+            (7, batch_number(0.5)),
+            (8, batch_number(1.0)),
+        ]]);
+        assert_batch_pixels(&[&[
+            (0, batch_number(130.0)),
+            (1, batch_number(60.0)),
+            (2, batch_number(24.0)),
+            (3, batch_number(18.0)),
+            (4, batch_number(-20.0)),
+            (5, batch_number(-8.0)),
+            (6, AnimationValue::Color(0x00ff_00ff)),
+            (7, batch_number(0.75)),
+            (8, batch_number(1.25)),
+        ]]);
+    }
+
+    #[test]
+    fn batched_canvas_args_accumulate_until_painted() {
+        // Three writes can reach a canvas before its next paint. The last
+        // batch's rectangle alone would leave the initially painted dot behind.
+        assert_batch_pixels(&[
+            &[
+                (0, batch_number(70.0)),
+                (1, batch_number(26.0)),
+                (6, AnimationValue::Color(0x0000_ffff)),
+            ],
+            &[
+                (2, batch_number(23.0)),
+                (3, batch_number(9.0)),
+                (4, batch_number(25.0)),
+                (7, batch_number(0.4)),
+            ],
+            &[
+                (0, batch_number(145.0)),
+                (1, batch_number(81.0)),
+                (6, AnimationValue::Color(0xffff_00ff)),
+            ],
+        ]);
+    }
+
+    #[test]
+    fn unchanged_and_unused_canvas_args_leave_pending_damage_alone() {
+        let mut canvas = CanvasState {
+            drawing: Some(batch_drawing()),
+            args: batch_initial_args(),
+            ..CanvasState::default()
+        };
+        assert!(!canvas.set_args(&[]));
+        assert!(!canvas.set_args(&[(0, batch_number(12.0))]));
+        assert_eq!(canvas.damage.get(), None);
+        assert!(canvas.set_args(&[(0, batch_number(60.0)), (1, batch_number(50.0))]));
+        let pending = canvas.damage.get();
+        assert!(!canvas.set_args(&[(0, batch_number(60.0)), (1, batch_number(50.0))]));
+        assert!(!canvas.set_args(&[(30, batch_number(10.0))]));
+        assert_eq!(canvas.args[30], Some(batch_number(10.0)));
+        assert_eq!(canvas.damage.get(), pending);
+        assert_eq!(canvas.version, 0);
+    }
+
+    #[test]
+    fn repeated_canvas_args_keep_the_last_value() {
+        let mut canvas = CanvasState {
+            drawing: Some(batch_drawing()),
+            args: batch_initial_args(),
+            ..CanvasState::default()
+        };
+        // The last entry equals the original value. Filtering entries against
+        // the original values must not discard this last write.
+        canvas.set_args(&[(0, batch_number(90.0)), (0, batch_number(12.0))]);
+        assert_eq!(canvas.args[0], Some(batch_number(12.0)));
+        canvas.set_args(&[
+            (1, batch_number(14.0)),
+            (1, batch_number(80.0)),
+            (1, batch_number(14.0)),
+            (30, batch_number(5.0)),
+            (30, batch_number(7.0)),
+        ]);
+        assert_eq!(canvas.args[1], Some(batch_number(14.0)));
+        assert_eq!(canvas.args[30], Some(batch_number(7.0)));
+    }
+
+    #[test]
+    fn unbounded_canvas_batches_keep_one_job_in_flight() {
+        // An animated clip, and an animated shape under `copy`, must both
+        // request a full redraw. A batch invalidates the version once.
+        for ops in [
+            vec![
+                CanvasOp::BeginPath,
+                CanvasOp::Path(PathOp::Rect([slot(0), slot(1), c(40.0), c(40.0)])),
+                CanvasOp::Clip(None, FillRule::NonZero),
+                CanvasOp::FillRect(rect(0.0, 0.0, 256.0, 128.0)),
+            ],
+            vec![
+                CanvasOp::Composite(Composite::Copy),
+                CanvasOp::FillRect([slot(0), slot(1), c(40.0), c(40.0)]),
+            ],
+        ] {
+            let mut canvas = CanvasState {
+                drawing: Some(Arc::new(Drawing {
+                    ops,
+                    ..Drawing::default()
+                })),
+                args: vec![Some(batch_number(10.0)), Some(batch_number(10.0))],
+                ..CanvasState::default()
+            };
+            assert_eq!(canvas.ask(), Some(0));
+            assert!(canvas.set_args(&[(0, batch_number(20.0)), (1, batch_number(30.0))]));
+            assert_eq!(canvas.version, 1);
+            assert_eq!(canvas.damage.get(), None);
+            assert_eq!(canvas.ask(), None);
+            assert!(canvas.set_args(&[(0, batch_number(40.0)), (1, batch_number(50.0))]));
+            assert_eq!(canvas.version, 2);
+            assert_eq!(canvas.ask(), None);
+            canvas.landed(1);
+            assert_eq!(canvas.ask(), None, "an unrelated completion frees no job");
+            canvas.landed(0);
+            assert_eq!(canvas.ask(), Some(2));
+            canvas.landed(0);
+            assert_eq!(canvas.ask(), None, "an old completion frees no newer job");
+        }
+    }
+
+    #[test]
+    fn canvas_batches_keep_values_before_a_drawing_is_installed() {
+        let mut canvas = CanvasState::default();
+        assert!(canvas.set_args(&[(0, batch_number(10.0)), (40, batch_number(20.0))]));
+        assert_eq!(canvas.args[0], Some(batch_number(10.0)));
+        assert_eq!(canvas.args[40], Some(batch_number(20.0)));
+        assert_eq!(canvas.args[1], None);
+        assert_eq!(canvas.version, 1);
+        assert_eq!(canvas.damage.get(), None);
+        assert!(!canvas.set_args(&[(0, batch_number(10.0)), (40, batch_number(20.0))]));
+        assert_eq!(canvas.version, 1);
+    }
+
+    #[test]
+    fn empty_drawings_store_canvas_args_without_redrawing() {
+        let mut canvas = CanvasState {
+            drawing: Some(Arc::new(Drawing::default())),
+            ..CanvasState::default()
+        };
+        assert!(!canvas.set_args(&[(0, batch_number(10.0)), (40, batch_number(20.0))]));
+        assert_eq!(canvas.args[0], Some(batch_number(10.0)));
+        assert_eq!(canvas.args[40], Some(batch_number(20.0)));
+        assert_eq!(canvas.version, 0);
+        assert_eq!(canvas.damage.get(), None);
+    }
+
+    #[test]
+    fn unbounded_batches_clear_pending_damage_and_store_all_values() {
+        let mut canvas = CanvasState {
+            drawing: Some(batch_drawing()),
+            args: batch_initial_args(),
+            ..CanvasState::default()
+        };
+        assert!(canvas.set_args(&[(0, batch_number(60.0)), (1, batch_number(30.0))]));
+        assert!(matches!(canvas.damage.get(), Some(Damage::Rect(_))));
+        assert!(canvas.set_args(&[(0, batch_number(f32::NAN)), (1, batch_number(50.0))]));
+        assert_eq!(canvas.version, 1);
+        assert_eq!(canvas.damage.get(), None);
+        assert!(CanvasState::slot(&canvas.args, 0).is_nan());
+        assert_eq!(canvas.args[1], Some(batch_number(50.0)));
+        // NaN follows AnimationValue's PartialEq semantics: it changes again.
+        assert!(canvas.set_args(&[(0, batch_number(f32::NAN)), (1, batch_number(70.0))]));
+        assert_eq!(canvas.version, 2);
+        assert_eq!(canvas.args[1], Some(batch_number(70.0)));
+        // The old unbounded state still requests a full redraw when values
+        // become finite, and all new values are nevertheless installed.
+        assert!(canvas.set_args(&[(0, batch_number(30.0)), (1, batch_number(80.0))]));
+        assert_eq!(canvas.version, 3);
+        assert_eq!(canvas.args[0], Some(batch_number(30.0)));
+        assert_eq!(canvas.args[1], Some(batch_number(80.0)));
     }
 
     #[test]
