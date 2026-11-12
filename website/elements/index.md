@@ -367,7 +367,8 @@ touch's. In Rust `delta` is a `Percentage` and `phase` a `PinchPhase`.
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
-desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it (at
+once when the pointer comes from another element whose hint it showed, within 300 ms of leaving it), and on
 every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
 that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
 exactly as it does without it.

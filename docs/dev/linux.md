@@ -207,6 +207,13 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
   (`GtkWidgetPaintable`), whatever covers the window; the appearance is the portal's, simulated; the size is the
   window's default size.
 
+`nsh test --target linux` runs the host with `--background` unless `--foreground` (`AppOptions::background`) where
+someone may type on the display: the windows show without taking the focus, the window the app or a press activates
+acts as the active one for the app (its `focused` state, `closeOnBlur`, the window the agent's keys go to), and the
+agent's keys take the widgets' signals above. A test of keys only real key events reach (Tab, the arrows, an input
+method) runs with `--foreground` on such a display. On a virtual display nobody types on (Xvfb, as in CI) the app
+runs as in the foreground, with real key events. The code is in `window.rs` ("Running in the background").
+
 `dev.rs` hands the model to the surface on the server's test session (idle sources keep their order, so it comes
 before the first bundle). On a machine without a display, the tests run on a virtual one:
 
@@ -301,7 +308,7 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
   window can remain AT-activatable while a GTK window-group grab blocks its pointer and keyboard input. Hosts that
   require those background operations to be unavailable must set GTK sensitivity on the affected widget, container
   or window, or set the NSH accessibility disabled state on each affected action target.
-- **No desktop equivalent**: the status bar; `AccessibilityFocus` moves keyboard focus when the view can take it.
+- **No desktop equivalent**: the status bar. `AccessibilityFocus` moves the keyboard focus to a view that takes it (an input); any other view (a text, a heading) leaves the keyboard focus where it is: on GTK 4.18 and later it is reported focused to the screen reader alone (AT-SPI's `focused` state and event) until the keyboard focus moves, on earlier GTK it is read out (`access::focus`).
 - **Packaged apps** are a directory and a `.tar.gz` (`embedding.md`); GTK 4, Pango and (with the release runner's
   default `webview` feature) WebKitGTK 6.0 must be installed where they run.
 

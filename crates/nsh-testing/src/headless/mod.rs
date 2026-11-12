@@ -37,6 +37,7 @@
 
 mod animation;
 mod audio;
+mod browser;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
@@ -47,6 +48,7 @@ mod speech;
 mod windows;
 
 pub use audio::AudioCall;
+pub use browser::{Browser, HistoryEntry};
 mod stub;
 
 use std::{
@@ -154,25 +156,27 @@ struct Launched {
 
 /// Reports `url` as a link the system handed the app.
 fn send_url_scheme(control: &nsh_engine::EngineControl, url: &str) {
-    control.dispatch_event(
-        ROOT_ID,
-        EventKind::UrlScheme,
-        EventPayload::Map(vec![(
-            nsh_core::url_scheme::URL,
-            PayloadValue::Str(url.to_owned()),
-        )]),
-    );
+    control.dispatch_event(ROOT_ID, EventKind::UrlScheme, link_payload(url));
+}
+
+/// The root's `UrlScheme` payload of `url`, a link the system handed the
+/// app.
+fn link_payload(url: &str) -> EventPayload {
+    EventPayload::Map(vec![(
+        nsh_core::url_scheme::URL,
+        PayloadValue::Str(url.to_owned()),
+    )])
 }
 
 /// [`start`], the platform reporting `displays` before the app first
 /// renders, laying text out with the engine `text_engine` makes; `link`:
-/// the link that launched it, there before the app's code runs (as a
-/// platform sends it).
+/// the root's `UrlScheme` event that launched it (a link, a page's
+/// address), there before the app's code runs (as a platform sends it).
 fn launch<M, F>(
     mut config: EngineConfig,
     displays: Vec<nsh_core::desktop::Display>,
     text_engine: F,
-    link: Option<&str>,
+    link: Option<EventPayload>,
 ) -> std::io::Result<Launched>
 where
     M: TextEngine + 'static,
@@ -200,8 +204,8 @@ where
         if !displays.is_empty() {
             control.set_displays(displays);
         }
-        if let Some(url) = link {
-            send_url_scheme(control, url);
+        if let Some(payload) = link {
+            control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
         }
     })?;
     let _ = control.set(engine.control());
@@ -301,8 +305,10 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// It plays the platform's part the NSH protocol defines and nothing
 /// else: the native animation graph runs frame by frame (nsh-core's `animation`),
 /// a back pops screens and closes modals, dialogs are answered (by the
-/// test, else [`default_answer`]), the clipboard holds text, and `nsh
-/// test`'s web page host answers `nsh/host` calls. Images are
+/// test, else [`default_answer`]), the clipboard holds text, a page's
+/// browser history is kept as the web keeps it
+/// ([`Headless::start_at_page`], [`Headless::browser`]), and `nsh test`'s
+/// web page host answers `nsh/host` calls. Images are
 /// not loaded: no `onLoad` comes, nor an error unless the test fails the
 /// image ([`Headless::fail_images`]), and `Image.getSize` /
 /// `Image.prefetch` fail.
@@ -370,6 +376,9 @@ pub struct Headless {
     /// The app's windows, on a desktop ([`windows`]); `None` elsewhere, and
     /// when the config gives its own windows (`EngineConfig::windows`).
     windows: Option<windows::Windows>,
+    /// The page's history, for an app started at a page's address
+    /// ([`Headless::start_at_page`]).
+    history: Option<browser::History>,
 }
 
 impl Headless {
@@ -382,7 +391,7 @@ impl Headless {
     /// first `UrlScheme.url()` reads it, and its first `open` listener
     /// gets it.
     pub fn start_with_link(config: EngineConfig, url: &str) -> std::io::Result<Headless> {
-        Self::launched_with(config, || ApproxTextEngine, Some(url))
+        Self::launched_with(config, || ApproxTextEngine, Some(link_payload(url)))
     }
 
     /// Starts `config`'s app laying text out with the engine
@@ -402,7 +411,7 @@ impl Headless {
     fn launched_with<M, F>(
         mut config: EngineConfig,
         text_engine: F,
-        link: Option<&str>,
+        link: Option<EventPayload>,
     ) -> std::io::Result<Headless>
     where
         M: TextEngine + 'static,
@@ -488,6 +497,7 @@ impl Headless {
             #[cfg(feature = "js")]
             host_posts: None,
             windows,
+            history: None,
         })
     }
 
@@ -715,6 +725,12 @@ impl Headless {
         &self.screen
     }
 
+    /// Forgets the commands the app sent so far ([`Screen::clear_commands`]),
+    /// for a long test that checks only the commands of its later steps.
+    pub fn clear_commands(&mut self) {
+        self.screen.clear_commands();
+    }
+
     /// The engine and the batches not applied yet, for a model of the
     /// test's own.
     pub fn into_parts(self) -> (Engine, Receiver<MountBatch>) {
@@ -936,6 +952,9 @@ impl Headless {
         let focused = self.screen.focused();
         let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
+        for (id, states) in self.screen.take_restated() {
+            self.engine.control().set_states(id, states);
+        }
         self.focus_calls(batch, focused);
         self.modals_presented(before);
         self.modals_closed();
@@ -952,12 +971,20 @@ impl Headless {
             self.animator.apply(item);
         }
         for item in &batch.items {
-            if let MountItem::Command {
-                id,
-                command: Command::InsertText(text),
-            } = item
-            {
-                self.insert_text(*id, text);
+            match item {
+                MountItem::Command {
+                    id,
+                    command: Command::InsertText(text),
+                } => self.insert_text(*id, text),
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::SetAppUrl(url),
+                } => self.set_page_url(url, false),
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PushAppUrl(url),
+                } => self.set_page_url(url, true),
+                _ => {}
             }
         }
         if let Some(windows) = &mut self.windows {
@@ -1074,6 +1101,8 @@ impl Headless {
         if self.screen.take_back_asked() {
             self.go_back(false);
         }
+        // A page's history follows its pages, dialogs and address.
+        self.sync_history();
         self.report_windows();
         self.report_finished();
     }
@@ -2422,6 +2451,43 @@ mod tests {
                     .on_press(move || count.update(|c| *c += 1))
                     .child(text("Add")),
             )
+    }
+
+    /// A button that copies how many times it was pressed.
+    #[component]
+    fn Copier() -> impl IntoElement {
+        let count = signal(0_u32);
+        view()
+            .on_press(move || {
+                count.update(|c| *c += 1);
+                set_clipboard(format!("copied {}", count.get_untracked()));
+            })
+            .child(text("Copy"))
+    }
+
+    #[test]
+    fn cleared_commands_are_forgotten_but_their_effects_stay() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Copier>())).unwrap();
+        app.first_render().unwrap();
+        let copies = |app: &Headless| {
+            app.screen()
+                .commands()
+                .iter()
+                .filter(|(_, c)| matches!(c, Command::SetClipboard(_)))
+                .count()
+        };
+        for _ in 0..3 {
+            app.press("Copy").unwrap();
+        }
+        assert_eq!(copies(&app), 3);
+        app.clear_commands();
+        assert!(app.screen().commands().is_empty());
+        assert!(!app.screen().sent(&Command::SetClipboard("copied 3".into())));
+        // What the commands did stays on screen.
+        assert_eq!(app.screen().clipboard(), Some("copied 3"));
+        app.press("Copy").unwrap();
+        assert_eq!(copies(&app), 1);
+        assert!(app.screen().sent(&Command::SetClipboard("copied 4".into())));
     }
 
     /// A pad under a 10-point strip. A press reports where it was in the
