@@ -1488,14 +1488,25 @@ impl Screen {
         Ok(self.resolve(&Selector::parse(selector)?).len())
     }
 
-    /// The commands sent so far, in order, with the view each went to.
+    /// The commands sent so far, in order, with the view each went to
+    /// (since the last [`Screen::clear_commands`]).
     pub fn commands(&self) -> &[(NodeId, Command)] {
         &self.commands
     }
 
-    /// Whether the command `command` was sent.
+    /// Whether the command `command` was sent (since the last
+    /// [`Screen::clear_commands`]).
     pub fn sent(&self, command: &Command) -> bool {
         self.commands.iter().any(|(_, c)| c == command)
+    }
+
+    /// Forgets the commands sent so far: [`Screen::commands`] and
+    /// [`Screen::sent`] see only those sent afterwards. What the commands
+    /// did stays (the clipboard, the focus, scroll offsets). The record
+    /// otherwise grows with every command, for as long as the test runs.
+    pub fn clear_commands(&mut self) {
+        // A new vector, not `clear`: the old one's capacity goes too.
+        self.commands = Vec::new();
     }
 
     /// The view a press on `selector` goes to ([`Screen::matches`]'s

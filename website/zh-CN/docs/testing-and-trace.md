@@ -71,7 +71,7 @@ cargo test adds_a_todo        # 名称包含 "adds_a_todo" 的测试
 `scroll(selector, px(3000.0))`、`back`、`wait`、`wait_for`、`wait_for_gone`、`wait_until`、`run_for`、`fast_forward`、
 `set_system_time`、`set_viewport`、`set_clipboard` 和 `on_dialog`；`app.shows(text)` 和 `app.screen()`（`texts()`、
 `count(selector)`、`enabled(selector)`、`dialogs()`、`clipboard()`、`commands()`）读取屏幕上的内容。无法执行的步骤会返回一个错误，
-附带屏幕上的文字。
+附带屏幕上的文字。`app.clear_commands()` 让 `commands()` 从头记起，长测试只留下它要检查的那些步骤发出的命令。
 
 `nsh_testing::tsx(entry, sets)`（feature `bundle`）以同样的方式打开应用的 TSX 入口，基于 NSH 的和 crate 的 UI 集合构建
 （[用 Rust 开发](./rust.md#测试)）。`examples/gallery-rs` 就这样测试它的 Rust 根组件，每个演示一个模块；`examples/rust-exports`
