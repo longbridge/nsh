@@ -13,8 +13,9 @@
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
 #[cfg(target_os = "macos")]
-mod ime;
 mod embedded_scroll;
+#[cfg(target_os = "macos")]
+mod ime;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
