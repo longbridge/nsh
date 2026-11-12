@@ -35,6 +35,7 @@ pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
+pub mod log_file;
 pub mod main_thread;
 pub mod mobile;
 mod mount;

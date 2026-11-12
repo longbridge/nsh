@@ -667,6 +667,12 @@ the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
 ## Input
 
+An input's name (`label`, falling back to its text label) and description (`hint`, the encoded description and
+hint) belong to its focusable `<input>` or `<textarea>`. `fieldAria` clears those attributes from the wrapper,
+including when props arrived before the field was created. Prop and text updates refresh the field's attributes;
+empty names and descriptions remove their attributes. `web/nsh.test.mjs` checks both field kinds and mount orders
+with `node --test crates/nsh-platform-web/web/nsh.test.mjs`.
+
 `autoComplete` reaches both `<input>` and `<textarea>` as HTML's `autocomplete` attribute.
 `src/encode/input.rs` maps every `AutoFill` variant to its HTML token (`Password` to
 `current-password`, `Birthdate` to `bday`, `Off` to `off`). `Default` leaves the attribute unset;

@@ -265,6 +265,17 @@ middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's 
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
 
+`nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app runs in
+the background, its windows neither take the focus nor come to the front, and the keyboard stays with the app the
+user types in. The window that would have the keyboard is kept in `window.rs` ("Running in the background"): what the
+app sees of the focus (`WindowState.focused`, a focused field's caret, the title bar's controls) follows it, and the
+agent's input goes to it directly. `lifecycle()` stays `inactive`, as on macOS.
+
+`nsh test` also passes `--display` (the display `nsh test --display` names, else `secondary`) and
+`--keep-window-size` (`AppOptions::display`, `AppOptions::keep_size`), so a test run keeps off the screen in use and
+a test's window keeps the size the test asked for, as with the macOS host. `window.rs` ("Where windows open") places
+the main window and the app's own windows that name no display or position on that display.
+
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
 again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
 pixmap after requesting a fresh frame. The host runs under X11 or Xwayland (see "Looking at a change on Linux");
@@ -347,6 +358,11 @@ close, Escape and blur policies are answered on the main thread; states, close p
 reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
+
+Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
+top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
+reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks
+for them ends, as the system reports a move to GPUI while it makes it.
 
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
 workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it

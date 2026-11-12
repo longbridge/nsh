@@ -743,11 +743,13 @@ pub enum MountItem {
     },
     /// The area the view's descendants cover outside its bounds, in its
     /// own coordinates (it contains the bounds), while overflow is visible;
-    /// `None` when they stay inside. UIKit and Android only look for the
-    /// target of a touch inside a view's bounds: platforms look in the
-    /// descendants of views with an area too, so children placed outside
-    /// their parent (a dropdown under its field) can be touched. Sent only
-    /// when it changes; from layout frames (transforms are not included).
+    /// `None` when they stay inside. It takes in the descendants' hit
+    /// slop. UIKit and Android only look for the target of a touch inside a
+    /// view's bounds: platforms look in the descendants of views with an
+    /// area too, so children placed outside their parent (a dropdown under
+    /// its field) and the slop reaching out of it can be touched. Sent only
+    /// when it changes; from layout frames and hit slop (transforms are not
+    /// included).
     Overflow {
         /// View.
         id: NodeId,

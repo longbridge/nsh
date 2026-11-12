@@ -24,6 +24,14 @@
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
   Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
   font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
+- A text laid out gives Taffy its first line's baseline, below its top through its padding and border
+  (`TextEngine::first_baseline`: web, macOS; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
+  with `items-baseline` lines its texts up by their baselines, as CSS does. An engine that does not report one gives
+  `None` and the text is aligned by its bottom edge, Taffy's fallback for a box without a baseline: texts of different
+  sizes in a row then sit off each other's baseline by the difference of what is below their baselines. Only a text
+  aligned by baseline is asked (`layout_tree::Aligned`, from its `align-self` or its container's `align-items`), and
+  only when it is laid out, not measured (Taffy's baseline pass lays its items out); a text measured by an estimate has
+  none.
 - A text engine whose lines take all that fits and whose `measure` reports the widest line's width says so
   (`TextEngine::breaks_lines_greedily`: macOS, Linux). The core then reuses a measurement for every maximum width from
   that width to the one measured (`measure_text`, `SameLines`), and measures a growing width a little ahead to cover
@@ -165,3 +173,12 @@
 
 See also the text pitfalls in [pitfalls.md](pitfalls.md) and the engines in `crates/nsh-platform-ios/src/text.rs` /
 `crates/nsh-platform-android/src/text.rs`.
+
+On macOS, inline link accessibility elements interleave with the paragraph's
+static text. Headings and app-labelled text keep their name and expose only
+link children. Selectable text whose accessibility value is its drawn text,
+and its link elements, expose `AXSelectedTextRange` and `AXSelectedText`.
+Selecting a range in an element's displayed text uses the enclosing
+selectable view's selection, including its copy behavior and `onSelectionChange`.
+`SelectionModel::select_range` sets UTF-16 positions directly for this path and
+clamps offsets out of surrogate pairs.

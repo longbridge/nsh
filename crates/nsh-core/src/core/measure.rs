@@ -9,6 +9,7 @@ use crate::{
     geometry::{Bounds, Point, Points, point, rect},
     mount::MountItem,
     ops::{Command, NodeId, RevealOptions, ScrollAlignment},
+    props::EdgeInsets,
     text::TextEngine,
 };
 
@@ -455,11 +456,14 @@ impl<M: TextEngine> Core<M> {
 
     /// Updates the area `key`'s descendants cover outside its bounds (its
     /// children's frames and areas are current), and mounts it when it
-    /// changed. Clipping views have none: what is outside is not drawn.
-    pub(super) fn update_overflow(&mut self, key: Key) {
+    /// changed; whether it did. The area takes in the descendants' hit
+    /// slop, so a touch there reaches them through every view around.
+    /// Clipping views have none: what is outside is not drawn, and takes
+    /// no touches.
+    pub(super) fn update_overflow(&mut self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
         if !node.created || key == self.root {
-            return;
+            return false;
         }
         let clips = node.view_style.overflow_hidden
             || matches!(node.kind, Kind::Scroll | Kind::List | Kind::Stack);
@@ -474,11 +478,18 @@ impl<M: TextEngine> Core<M> {
                     continue;
                 }
                 let f = c.frame;
-                if f.size.width.0 > 0.0 && f.size.height.0 > 0.0 {
-                    x0 = x0.min(f.origin.x.0);
-                    y0 = y0.min(f.origin.y.0);
-                    x1 = x1.max(f.origin.x.0 + f.size.width.0);
-                    y1 = y1.max(f.origin.y.0 + f.size.height.0);
+                let slop = c
+                    .props
+                    .as_ref()
+                    .map_or(EdgeInsets::default(), |p| p.hit_slop);
+                let (sx0, sy0) = (f.origin.x.0 - slop.left.0, f.origin.y.0 - slop.top.0);
+                let sx1 = f.origin.x.0 + f.size.width.0 + slop.right.0;
+                let sy1 = f.origin.y.0 + f.size.height.0 + slop.bottom.0;
+                if sx1 > sx0 && sy1 > sy0 {
+                    x0 = x0.min(sx0);
+                    y0 = y0.min(sy0);
+                    x1 = x1.max(sx1);
+                    y1 = y1.max(sy1);
                 }
                 if let Some(e) = c.overflow {
                     x0 = x0.min(f.origin.x.0 + e.origin.x.0);
@@ -494,10 +505,31 @@ impl<M: TextEngine> Core<M> {
             out.then_some(rect(x0, y0, x1 - x0, y1 - y0))
         };
         let node = &mut self.nodes[key as usize];
-        if node.overflow != extent {
-            node.overflow = extent;
-            let id = node.id;
-            self.mount.push(MountItem::Overflow { id, extent });
+        if node.overflow == extent {
+            return false;
         }
+        node.overflow = extent;
+        let id = node.id;
+        self.mount.push(MountItem::Overflow { id, extent });
+        true
+    }
+
+    /// Works out again the areas of the views around those whose hit slop
+    /// changed, after the round's layout: up from each, while an area
+    /// changes.
+    pub(super) fn update_slop_overflow(&mut self) {
+        let mut moved = std::mem::take(&mut self.slop_moved);
+        for &key in &moved {
+            if !self.nodes.contains(key as usize) || !self.nodes[key as usize].created {
+                continue;
+            }
+            let mut parent = self.nodes[key as usize].parent;
+            while parent != NO_KEY && self.update_overflow(parent) {
+                parent = self.nodes[parent as usize].parent;
+            }
+        }
+        // The buffer, for the next round.
+        moved.clear();
+        self.slop_moved = moved;
     }
 }

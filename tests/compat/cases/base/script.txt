@@ -3583,6 +3583,7 @@ tap id:case-base-set-theme
 expect theme up #138a5aff
 expect theme radius-card 14
 style id:themed backgroundColor #138a5aff
+prop id:page headerStyle backgroundColor=#138a5aff
 # `token()` reads it at once and classes follow. nsh.json's theme is not
 # under it (`radius-card` is gone), the default is (`primary`).
 tap id:set
@@ -3591,10 +3592,12 @@ expect theme up #2563ebff
 expect theme radius-card undefined
 expect theme primary #171717ff
 style id:themed backgroundColor #2563ebff
+prop id:page headerStyle backgroundColor=#2563ebff
 # Its dark value in the dark appearance.
 tap id:dark
 expect theme up #93c5fdff
 style id:themed backgroundColor #93c5fdff
+prop id:page headerStyle backgroundColor=#93c5fdff
 tap id:system
 expect theme up #2563ebff
 # A theme with a value NSH cannot read (no color in the dark appearance):
@@ -4395,6 +4398,11 @@ expect Some text
 covers [events] onFileDragEnter
 covers [events] onFileDragLeave
 covers [events] onFileDrop
+# The app's layer over the document takes presses and `nodeRect` answers in its points.
+expect LayerMark
+tap text:LayerMark
+expect LayerBox true 0 0
+covers [props] RichEditor.contentLayer
 expect CellA
 expect CellD
 # An editor without a height is as tall as its two lines; one with a

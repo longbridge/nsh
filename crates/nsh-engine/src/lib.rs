@@ -18,6 +18,8 @@ mod cache;
 mod error;
 mod host_channel;
 mod local_storage;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod logging;
 #[cfg(feature = "net")]
 pub mod net;
 pub mod perf;
@@ -2745,7 +2747,7 @@ struct State<M: TextEngine> {
     /// When `mouse_moves` were last delivered.
     mouse_moved: Option<Instant>,
     /// [`keep_last_sets`]'s buffer, reused.
-    sets_seen: FxHashMap<(u8, NodeId), usize>,
+    sets_seen: FxHashMap<(u8, NodeId, u32), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
     /// A resize before this time continues a burst of them
@@ -3563,12 +3565,10 @@ fn drawn_shaders(env: &mut Environment, unavailable: bool) {
 fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment {
     nsh_core::tailwind::ClassEnvironment {
         dark: env.color_scheme == ColorScheme::Dark,
-        platform: if env.os == Os::Web {
-            nsh_core::tailwind::Platform::Web
-        } else if cfg!(target_os = "android") {
-            nsh_core::tailwind::Platform::Android
-        } else {
-            nsh_core::tailwind::Platform::Ios
+        platform: match env.os {
+            Os::Web => nsh_core::tailwind::Platform::Web,
+            Os::Android => nsh_core::tailwind::Platform::Android,
+            _ => nsh_core::tailwind::Platform::Ios,
         },
         reduce_motion: env.reduce_motion,
         pointer: if env.desktop() {
@@ -3955,37 +3955,47 @@ fn extend_frame(frame: &mut Vec<nsh_core::MountItem>, items: Vec<nsh_core::Mount
 /// Of the items of a frame merged from several commits that set one part
 /// of a view whole (its frame, style, text, ...), keeps the last: the
 /// platform would apply each in one pass, and a list's rounds (binds, then
-/// the paced ones) relay and restyle the same cells. Once per turn, with
-/// `last` the reused buffer.
-fn keep_last_sets(frame: &mut Vec<nsh_core::MountItem>, last: &mut FxHashMap<(u8, NodeId), usize>) {
+/// the paced ones) relay and restyle the same cells. Frames apart from
+/// each other by a layout animation are all kept: the platform animates
+/// each with the one before it (a list's rows set where they showed, then
+/// slide: `nsh_core`'s `list_motion.rs`). Once per turn, with `last` the
+/// reused buffer.
+fn keep_last_sets(
+    frame: &mut Vec<nsh_core::MountItem>,
+    last: &mut FxHashMap<(u8, NodeId, u32), usize>,
+) {
     last.clear();
     let mut repeated = false;
+    let mut run = 0;
     for (k, item) in frame.iter().enumerate() {
-        if let Some(key) = sets_whole(item) {
+        run += matches!(item, nsh_core::MountItem::LayoutAnimation(_)) as u32;
+        if let Some(key) = sets_whole(item, run) {
             repeated |= last.insert(key, k).is_some();
         }
     }
     if !repeated {
         return;
     }
-    let mut k = 0;
+    let (mut k, mut run) = (0, 0);
     frame.retain(|item| {
         k += 1;
-        sets_whole(item).is_none_or(|key| last[&key] == k - 1)
+        run += matches!(item, nsh_core::MountItem::LayoutAnimation(_)) as u32;
+        sets_whole(item, run).is_none_or(|key| last[&key] == k - 1)
     });
 }
 
 /// The part of a view an item sets whole, and the view: of two such items
-/// the later is all the view ends up with.
-fn sets_whole(item: &nsh_core::MountItem) -> Option<(u8, nsh_core::NodeId)> {
+/// the later is all the view ends up with. Frames also by the `run` of
+/// layout animation they are in.
+fn sets_whole(item: &nsh_core::MountItem, run: u32) -> Option<(u8, nsh_core::NodeId, u32)> {
     use nsh_core::MountItem;
     Some(match *item {
-        MountItem::Frame { id, .. } => (0, id),
-        MountItem::Overflow { id, .. } => (1, id),
-        MountItem::ViewStyle { id, .. } => (2, id),
-        MountItem::Text { id, .. } => (3, id),
-        MountItem::Events { id, .. } => (4, id),
-        MountItem::Image { id, .. } => (5, id),
+        MountItem::Frame { id, .. } => (0, id, run),
+        MountItem::Overflow { id, .. } => (1, id, 0),
+        MountItem::ViewStyle { id, .. } => (2, id, 0),
+        MountItem::Text { id, .. } => (3, id, 0),
+        MountItem::Events { id, .. } => (4, id, 0),
+        MountItem::Image { id, .. } => (5, id, 0),
         _ => return None,
     })
 }
@@ -4240,5 +4250,26 @@ mod tests {
             })
             .collect();
         assert_eq!(frames, [(6, 0.0), (4, 50.0)]);
+
+        // A view set where it showed, then animated to its new frame,
+        // keeps both: each applies with the layout animation before it.
+        let animation = |update| {
+            MountItem::LayoutAnimation(nsh_core::LayoutAnimation {
+                update,
+                ..Default::default()
+            })
+        };
+        let eased = nsh_core::LayoutAnimation::EASE_IN_EASE_OUT.update;
+        let mut frame = vec![animation(None), at(4, 50.0), animation(eased), at(4, 0.0)];
+        super::extend_frame(&mut frame, vec![at(4, 20.0)]);
+        super::keep_last_sets(&mut frame, &mut Default::default());
+        let frames: Vec<_> = frame
+            .iter()
+            .filter_map(|m| match m {
+                MountItem::Frame { frame, .. } => Some(frame.origin.y.0),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(frames, [50.0, 20.0]);
     }
 }

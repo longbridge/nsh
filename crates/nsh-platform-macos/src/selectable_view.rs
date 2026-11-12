@@ -28,7 +28,8 @@ use nsh_core::{
     AttributedText, Bounds, EventKind, EventPayload, NodeId, PayloadValue, Point, Points, ViewKind,
     geometry::{bounds, point, size},
     selection::{
-        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+        KeptRows, SelectionModel, SelectionTexts, TextPosition, autoscroll_step, reading_order,
+        reorder,
     },
 };
 use rustc_hash::FxHashSet;
@@ -49,8 +50,9 @@ const SLOP_PRESS: f32 = 10.0;
 struct Texts {
     views: Vec<NshView>,
     contents: Vec<Arc<AttributedText>>,
-    /// Each view's origin in the area's coordinates.
-    origins: Vec<(f32, f32)>,
+    /// Each view's origin in the area's coordinates, and the zoom it shows
+    /// at there (zoomable scroll views between them).
+    origins: Vec<((f32, f32), f32)>,
     /// Each text's content box in the area's coordinates.
     frames: Vec<Bounds<Points>>,
 }
@@ -73,8 +75,8 @@ impl SelectionTexts for Texts {
     }
 
     fn offset_at(&self, i: usize, p: Point<Points>) -> u32 {
-        let (x, y) = self.origins[i];
-        crate::text::caret_at(&self.views[i].state(), p.x.0 - x, p.y.0 - y)
+        let ((x, y), z) = self.origins[i];
+        crate::text::caret_at(&self.views[i].state(), (p.x.0 - x) / z, (p.y.0 - y) / z)
     }
 
     fn key(&self, i: usize) -> u64 {
@@ -86,13 +88,19 @@ impl SelectionTexts for Texts {
     }
 
     fn range_bounds(&self, i: usize, range: Range<u32>) -> Option<Bounds<Points>> {
-        let (x, y) = self.origins[i];
+        let ((x, y), z) = self.origins[i];
         crate::text::range_rects(&self.views[i].state(), range.start, range.end)
             .into_iter()
             .map(|r| {
                 bounds(
-                    point(Points(x + r.origin.x as f32), Points(y + r.origin.y as f32)),
-                    size(Points(r.size.width as f32), Points(r.size.height as f32)),
+                    point(
+                        Points(x + r.origin.x as f32 * z),
+                        Points(y + r.origin.y as f32 * z),
+                    ),
+                    size(
+                        Points(r.size.width as f32 * z),
+                        Points(r.size.height as f32 * z),
+                    ),
                 )
             })
             .reduce(|a, b| a.union(&b))
@@ -102,11 +110,13 @@ impl SelectionTexts for Texts {
 /// Lists the texts of `area`'s subtree.
 fn collect(area: &NshView) -> Texts {
     let mut texts = Texts::default();
-    walk(area, (0.0, 0.0), &mut texts);
+    walk(area, (0.0, 0.0), 1.0, &mut texts);
     texts
 }
 
-fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
+/// Lists the texts of `view`'s subtree, `view` at `origin` of the area,
+/// shown at `zoom`.
+fn walk(view: &NshView, origin: (f32, f32), zoom: f32, out: &mut Texts) {
     if view.ns().isHidden() {
         return;
     }
@@ -118,20 +128,21 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
             let content = drawn.content;
             out.views.push(view.clone());
             out.contents.push(drawn.text.clone());
-            out.origins.push(origin);
+            out.origins.push((origin, zoom));
             out.frames.push(bounds(
                 point(
-                    Points(origin.0 + content.origin.x.0),
-                    Points(origin.1 + content.origin.y.0),
+                    Points(origin.0 + content.origin.x.0 * zoom),
+                    Points(origin.1 + content.origin.y.0 * zoom),
                 ),
-                content.size,
+                content.size * zoom,
             ));
         }
     }
     // Children sit in the container's bounds, which scroll views move: by
     // their offset, which shows as a layer transform before the bounds
-    // have it.
+    // have it, and zoom.
     let offset = crate::scroll::bounds_origin(view);
+    let inner = zoom * crate::scroll::zoom(view);
     // In reading order: a virtual list's recycled cells are mounted in no
     // particular order.
     let start = out.len();
@@ -139,11 +150,11 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
     for child in view.child_views() {
         let frame = child.ns().frame();
         let at = (
-            origin.0 + frame.origin.x as f32 - offset.0,
-            origin.1 + frame.origin.y as f32 - offset.1,
+            origin.0 + (frame.origin.x as f32 - offset.0) * inner,
+            origin.1 + (frame.origin.y as f32 - offset.1) * inner,
         );
         let from = out.len();
-        walk(&child, at, out);
+        walk(&child, at, inner, out);
         runs.push((
             bounds(
                 point(Points(frame.origin.x as f32), Points(frame.origin.y as f32)),
@@ -230,6 +241,19 @@ struct Active {
 }
 
 impl Active {
+    fn new(area: &NshView) -> Self {
+        Self {
+            area: objc2::rc::Weak::from(&**area),
+            model: SelectionModel::new(),
+            shown: Vec::new(),
+            dragging: Cell::new(false),
+            over_press: false,
+            pointer: Cell::new(None),
+            kept: KeptRows::default(),
+            reported: Selected::default(),
+        }
+    }
+
     fn area(&self) -> Option<NshView> {
         let view = self.area.load()?;
         NshView::from_ns(&view)
@@ -395,6 +419,32 @@ impl AreaSelection {
     }
 }
 
+/// Sets a single text's range through its owning selectable area, so AX and
+/// pointer selections share copying, highlights and onSelectionChange.
+pub(crate) fn select_range(surface: &Surface, view: &NshView, range: Range<u32>) -> bool {
+    let Some(area) = target(view) else {
+        return false;
+    };
+    let texts = collect(&area);
+    let Some(index) = texts.views.iter().position(|v| v.id() == view.id()) else {
+        return false;
+    };
+    if !surface.selection.area.is(&area) {
+        crate::text::clear(surface);
+    }
+    let mut guard = surface.selection.area.active.borrow_mut();
+    let active = guard.get_or_insert_with(|| Active::new(&area));
+    active.model.select_range(
+        &texts,
+        TextPosition::new(index, range.start),
+        TextPosition::new(index, range.end),
+    );
+    active.show(surface, &texts);
+    drop(guard);
+    report(surface);
+    true
+}
+
 /// The primary button went down at `(x, y)` (root coordinates) in `area`,
 /// the `clicks`th click in a row; `over_press` if a press target is under
 /// it. Clears any other selection; one click puts the anchor (a drag past
@@ -416,16 +466,7 @@ pub(crate) fn down(
     let (lx, ly) = crate::input::local(surface, area, x, y);
     let texts = collect(area);
     let mut selection_slot = selection.area.active.borrow_mut();
-    let active = selection_slot.get_or_insert_with(|| Active {
-        area: objc2::rc::Weak::from(&**area),
-        model: SelectionModel::new(),
-        shown: Vec::new(),
-        dragging: Cell::new(false),
-        over_press: false,
-        pointer: Cell::new(None),
-        kept: KeptRows::default(),
-        reported: Selected::default(),
-    });
+    let active = selection_slot.get_or_insert_with(|| Active::new(area));
     let clicks = clicks.max(1) as u32;
     active.over_press = over_press;
     active.dragging.set(clicks > 1 || shift);

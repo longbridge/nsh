@@ -1545,6 +1545,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str("closeNotification")
                     .str(name)
                     .end(),
+                // The page's own: a browser gives a page none an earlier
+                // load showed.
+                N::CloseAll => out.item("cmd").num(id).str("closeAllNotifications").end(),
                 N::SetBadge(count) => out.item("cmd").num(id).str("setBadge").num(*count).end(),
                 // Presses are reported as they come: a browser starts no
                 // page from one.
@@ -1619,7 +1622,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         }
         // `nsh.js` `pickFiles`: the request, the limit, the extensions
         // offered as an input's `accept` (empty: any file), the largest file
-        // read.
+        // read (a larger one answers with its name and size only).
         Command::PickFiles {
             id: request,
             request: asked,
@@ -1635,7 +1638,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(*request)
                 .num(asked.limit)
                 .str(&accept)
-                .num(nsh_core::picker::MAX_PICKED_FILE_BYTES as f64)
+                .num(asked.size_limit() as f64)
                 .end();
         }
         // The id is written whole (`num` rounds); the page answers with

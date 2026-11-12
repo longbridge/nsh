@@ -614,6 +614,20 @@ pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
 }
 
+/// The file the app's log lines are written to (TS: `process.logFile`): a
+/// packaged desktop app's rolling log, `logs/app.log` in the app's data
+/// directory, for a diagnostics report or an "Open logs folder" command
+/// (older files beside it are `app.1.log`, `app.2.log`, ...). `None` where
+/// the lines go to the platform's log only: development hosts, embedding
+/// apps, mobile, the web.
+///
+/// ```ignore
+/// let folder = log_file().and_then(|file| file.parent().map(Path::to_path_buf));
+/// ```
+pub fn log_file() -> Option<std::path::PathBuf> {
+    crate::log_file::path().map(std::path::Path::to_path_buf)
+}
+
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
 /// in the browser, a `mailto:` or `tel:` link in its app, any scheme
 /// another app registered. The embedding app may take it first (its host
@@ -865,6 +879,13 @@ pub fn close_notification(id: impl Into<String>) {
     act(Action::Notification(super::NotificationAction::Close(
         id.into(),
     )));
+}
+
+/// Removes every notification of the app's, shown or waiting to show, those
+/// an earlier run of the app left included where the platform can reach
+/// them (TS: `Notifications.closeAll`): what signing out clears.
+pub fn close_all_notifications() {
+    act(Action::Notification(super::NotificationAction::CloseAll));
 }
 
 /// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
