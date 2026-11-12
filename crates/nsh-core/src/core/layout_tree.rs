@@ -359,6 +359,11 @@ impl<C> LayoutTree<C> {
         self.nodes[key(node)].parent
     }
 
+    /// How many children `node` has.
+    pub(crate) fn children_len(&self, node: NodeId) -> usize {
+        self.nodes[key(node)].children.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn children(&self, node: NodeId) -> &[NodeId] {
         &self.nodes[key(node)].children
