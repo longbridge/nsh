@@ -26,10 +26,16 @@
 //! while the overlay is in the view on a desktop; the pointer resting on it
 //! for the hint's delay shows the hint (a task of the components' executor
 //! wakes the engine then), the pointer leaving or pressing it hides it, as
-//! GPUI's tooltips do. In every idiom the keyboard focus shows it too,
-//! as WAI-ARIA's tooltips: the focus on its anchor (or in it, outside an
-//! overlay, the nearest hint's) shows it until the focus leaves
-//! ([`Core::focus_hints`]), and Escape hides a hint that is shown
+//! GPUI's tooltips do. In every idiom the focus the keyboard moved shows
+//! it too, as WAI-ARIA's tooltips: the focus that Tab, an arrow, a
+//! shortcut or the app's `focus()` after a key brought to its anchor (or
+//! into it, outside an overlay, the nearest hint's) shows it at once until
+//! the focus leaves ([`Core::focus_hints`]), by `focus-visible:`'s rule
+//! ([`Core::focus_shows`]) without its exception for an input that edits.
+//! A press, a tap or a click that brings the focus leaves the hint to the
+//! pointer, as Radix's tooltips do: the press hid it, and it shows again
+//! when the pointer comes back and rests, so nothing stays up once the
+//! pointer left. Escape hides a hint that is shown
 //! ([`Core::overlay_escape`]). The overlay hears what it asks for (`Show`,
 //! `Dismiss`, with the [`HintReason`]), so a component owning it
 //! (`nsh-base`'s `Tooltip`) can decide instead ([`OverlayConfig::open`]). An element's `tooltip` is a
@@ -113,10 +119,11 @@ pub(super) struct OverlayState {
     pub(super) hinted: bool,
     /// A hint: the pointer is on its anchor, resting until it shows.
     pub(super) waiting: Option<HintTimer>,
-    /// A hint: the keyboard focus is on its anchor.
+    /// A hint: the focus is on its anchor, whatever brought it there.
     pub(super) focus_on: bool,
-    /// A hint: the keyboard focus on its anchor shows it (not since
-    /// Escape or a press hid it).
+    /// A hint: the focus on its anchor shows it, the keyboard having
+    /// brought it there (`Core::focus_by_keyboard`), and no Escape or
+    /// press hid it since.
     pub(super) focus_shown: bool,
     /// A hint on a link of a text (a span, which has no frame of its own):
     /// where the pointer came over it, in its root view's coordinates,
@@ -139,7 +146,7 @@ pub(super) struct OverlayState {
 }
 
 impl OverlayState {
-    /// A hint the pointer or the keyboard focus shows.
+    /// A hint the pointer or the focus the keyboard moved shows.
     fn hint_shown(&self) -> bool {
         self.hinted || self.focus_shown
     }
@@ -822,10 +829,11 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The keyboard focus moved: the hints whose anchor it came to show,
-    /// those it left hide. The focus counts for the nearest hint's anchor
-    /// on its chain, up to the overlay it is in (a popup's focus is not on
-    /// its trigger's hint).
+    /// The focus moved: the hints whose anchor it came to show when the
+    /// keyboard brought it there (`Core::focus_by_keyboard`), those it left
+    /// hide; a move inside an anchor decides nothing again. The focus
+    /// counts for the nearest hint's anchor on its chain, up to the overlay
+    /// it is in (a popup's focus is not on its trigger's hint).
     pub(super) fn focus_hints(&mut self) {
         let mut target = None;
         for &(k, _) in &self.focus_chain {
@@ -846,6 +854,7 @@ impl<M: TextEngine> Core<M> {
             .copied()
             .filter(|&k| self.overlay(k).is_some_and(|s| s.config.hint.is_some()))
             .collect();
+        let keyboard = self.focus_by_keyboard;
         for key in hints {
             let on = target.is_some() && self.hint_anchor(key) == target;
             let Some(state) = self.overlay_mut(key) else {
@@ -856,7 +865,11 @@ impl<M: TextEngine> Core<M> {
             }
             state.focus_on = on;
             let was = state.hint_shown();
-            state.focus_shown = on;
+            // A press that brings the focus hid the pointer's hint: showing
+            // it for that focus would keep it up long after the pointer
+            // left (a toolbar's tooltip after every click). Only the
+            // keyboard's focus shows it, as `focus-visible:` shows a ring.
+            state.focus_shown = on && keyboard;
             let now = state.hint_shown();
             if was != now {
                 self.hint_changed(key, now, HintReason::Focus);

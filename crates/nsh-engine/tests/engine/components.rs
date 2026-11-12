@@ -2550,6 +2550,79 @@ fn app_quit_reaches_the_platform() {
     }
 }
 
+const QUIT_REQUEST: &str = r#"import { mount, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+const requests = signal(0);
+const stop = Application.on("quitRequest", () => {
+  requests.set(requests() + 1);
+  if (requests() === 2) {
+    stop();
+    Application.quit();
+  }
+});
+mount(() => <Text>{`requests ${requests()}`}</Text>);
+"#;
+
+/// While the app listens to `quitRequest`, the platform's quit requests go
+/// to it: the first one only reaches the listener and nothing quits; the
+/// app quits when it decides to, and once it stops listening quit
+/// requests quit again.
+#[test]
+fn quit_requests_reach_the_app_and_it_decides() {
+    use nsh_core::desktop::{DesktopCommand, WindowEvent};
+
+    let (engine, rx) = start_in(
+        QUIT_REQUEST,
+        Environment {
+            os: nsh_engine::Os::Linux,
+            ..Environment::default()
+        },
+    );
+    let app_commands = |batches: &[MountBatch]| -> Vec<DesktopCommand> {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some((**command).clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = until(&rx, |b| {
+        app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::SetQuitOnRequest(false))
+    });
+    assert!(
+        !app_commands(&first).contains(&DesktopCommand::Quit),
+        "{first:?}"
+    );
+    let request = || {
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+        );
+    };
+    request();
+    let heard = until(&rx, |b| shows(b, "requests 1"));
+    assert!(
+        !app_commands(&heard).contains(&DesktopCommand::Quit),
+        "the app decides: {heard:?}"
+    );
+    request();
+    let quit = until(&rx, |b| {
+        app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::Quit)
+    });
+    let commands = app_commands(&quit);
+    assert!(
+        commands.contains(&DesktopCommand::SetQuitOnRequest(true)),
+        "no listener left: {commands:?}"
+    );
+}
+
 /// German's data stands for what the bundle of an app listing it carries.
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
 import { fontScale, locale } from "nsh";
@@ -3005,7 +3078,7 @@ function App() {
   );
   return (
     <View>
-      <RadioGroup testID="plans" class="flex-row">
+      <RadioGroup testID="plans" class="flex-row" accessibilityLabel="Plan">
         {radio("a", "Basic")}
         {radio("b", "Pro")}
         {radio("c", "Team", true)}
@@ -3018,8 +3091,8 @@ function App() {
 mount(App);
 "##;
 
-/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role on the
-/// group, the radio role and its checked state on each radio alone, a
+/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role and the
+/// app's name on the group, the radio role and its checked state on each radio alone, a
 /// press on an unchecked radio asking for `true` while the app owns which
 /// one is checked, a checked or disabled radio reporting nothing, and the
 /// app's dot inside following the radio with `group-checked:`.
@@ -3089,10 +3162,11 @@ fn a_base_radio_asks_to_be_checked_and_its_group_holds_no_value() {
     let (dot_a, dot_b) = (dot(a), dot(b));
     let initial = std::slice::from_ref(&first);
 
-    // The group: a radio group for screen readers, laid out by the app.
+    // The group: a radio group for screen readers, named by the app
+    // (`accessibilityLabel`) and laid out by it.
     let group = view_props(&first, plans).unwrap();
     assert_eq!(group.accessibility.role, AccessibilityRole::Radiogroup);
-    assert_eq!(group.accessibility.label, None);
+    assert_eq!(group.accessibility.label.as_deref(), Some("Plan"));
 
     // The checked radio: checked and selected for screen readers, its
     // `checkedStyle`, and the app's dot `group-checked:`.
@@ -4514,6 +4588,62 @@ fn a_toggle_is_styled_while_pressed() {
     let off = style(&released).expect("restyled");
     assert_eq!(off.background_color.0, 0xffff_ffff);
     assert_eq!(off.opacity, 1.0);
+}
+
+const DESCRIBED: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+
+const hint = signal<string | undefined>("Letters and digits only");
+setTimeout(() => hint.set(undefined), 30);
+
+mount(() => (
+  <View>
+    <View testID="field" accessibilityLabel="Name" accessibilityDescription={hint()}>
+      <Text>{hint() ? "described" : "plain"}</Text>
+    </View>
+    <Dialog role="alertdialog" accessibilityLabel="Delete file?" accessibilityDescription="This can't be undone.">
+      <Text>Delete file?</Text>
+    </Dialog>
+  </View>
+));
+"##;
+
+/// `accessibilityDescription` reaches the platform on a view, follows the
+/// app's state, and names what a `Dialog` is about beside its title.
+#[test]
+fn a_description_reaches_the_platform() {
+    use nsh_core::{Accessibility, AccessibilityRole};
+    let (_engine, rx) = start(DESCRIBED);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let find = |batches: &[MountBatch], want: &dyn Fn(&Accessibility, Option<&str>) -> bool| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { props, .. }
+                    if want(&props.accessibility, props.test_id.as_deref()) =>
+                {
+                    Some(props.accessibility.clone())
+                }
+                _ => None,
+            })
+    };
+    let first = std::slice::from_ref(&first);
+    let field = find(first, &|_, id| id == Some("field")).expect("field");
+    assert_eq!(
+        field.description.as_deref(),
+        Some("Letters and digits only")
+    );
+    let dialog = find(first, &|a, _| a.role == AccessibilityRole::AlertDialog).expect("dialog");
+    assert_eq!(dialog.label.as_deref(), Some("Delete file?"));
+    assert_eq!(dialog.description.as_deref(), Some("This can't be undone."));
+    let later = until(&rx, |b| shows(b, "plain"));
+    let field = find(&later, &|_, id| id == Some("field")).expect("field again");
+    assert_eq!(field.description, None);
+    assert_eq!(field.label.as_deref(), Some("Name"));
 }
 
 /// A popup reports a change of its open state before its lifecycle

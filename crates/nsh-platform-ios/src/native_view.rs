@@ -82,13 +82,15 @@ define_class!(
             self.a11y_label()
         }
 
+        // The description, then the hint: UIKit has one place for what
+        // VoiceOver reads after the name and the value.
         #[unsafe(method_id(accessibilityHint))]
         fn accessibility_hint(&self) -> Option<Retained<NSString>> {
             self.ivars()
                 .props
                 .borrow()
                 .accessibility
-                .hint
+                .help_text(None)
                 .as_deref()
                 .map(NSString::from_str)
         }
@@ -472,6 +474,7 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Navigation
             | AccessibilityRole::Tree
             | AccessibilityRole::Toolbar
+            | AccessibilityRole::Radiogroup
             | AccessibilityRole::Dialog
             | AccessibilityRole::AlertDialog
     )
@@ -695,6 +698,10 @@ mod tests {
         ));
         assert!(is_container(
             &props(AccessibilityRole::Toolbar, &[]).accessibility
+        ));
+        // A labelled radio group names the set, its radios still reached.
+        assert!(is_container(
+            &props(AccessibilityRole::Radiogroup, &[]).accessibility
         ));
         // A labelled dialog names what VoiceOver enters, never hiding it.
         assert!(is_container(
