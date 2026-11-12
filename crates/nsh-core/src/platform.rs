@@ -3,6 +3,7 @@
 //! data both Rust components and JS read, with or without a JS runtime.
 
 pub mod clipboard;
+pub mod web_evaluation;
 
 use crate::geometry::{Edges, Points, Size};
 
@@ -50,6 +51,18 @@ impl Appearance {
             Appearance::Dark => ColorScheme::Dark,
         }
     }
+}
+
+/// What the user last gave a surface input with
+/// (`EngineControl::set_input_modality`): the core shows the keyboard focus
+/// (`focus-visible:`) by it, as browsers decide CSS's `:focus-visible`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputModality {
+    /// A key press (not a modifier alone): Tab, an arrow, a shortcut,
+    /// typing, from a hardware keyboard.
+    Keyboard,
+    /// A mouse button, a pen or a finger going down.
+    Pointer,
 }
 
 /// The operating system (`platform.os`).
@@ -226,6 +239,13 @@ pub struct Environment {
     pub pixel_ratio: f32,
     /// A screen reader runs (VoiceOver, TalkBack).
     pub screen_reader: bool,
+    /// The platform's screen readers follow the active descendant a
+    /// focused view names (`accessibilityActiveDescendant`): they read the
+    /// element named as it changes while the focus stays. `nsh-base`'s
+    /// lists then name their highlighted row and tell screen readers
+    /// nothing more; without it, they announce the row or move the screen
+    /// reader's focus to it.
+    pub reads_active_descendants: bool,
     /// The operating system.
     pub os: Os,
     /// The platform's name where it is not the OS's: a platform built
@@ -261,6 +281,13 @@ pub struct Environment {
     /// focus, or in the background. For an embedded surface, the embedding
     /// app's.
     pub lifecycle: Lifecycle,
+    /// How many times the system woke from sleep while the surface ran
+    /// (TS: `wakeCount()`): the platform adds one on each wake (macOS,
+    /// Windows, Linux), so what read it runs again then. A sleep may leave
+    /// the app's state as it was (a laptop's lid closed and opened with the
+    /// app in front), while its network connections and timers did not
+    /// live through it.
+    pub wake_count: u32,
     /// The platform picks a color from the screen
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
@@ -293,6 +320,9 @@ pub struct Environment {
     /// ([`crate::Command::SendInput`], macOS); without it, the command
     /// does nothing.
     pub web_input: bool,
+    /// The platform answers awaitable WebView evaluations
+    /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
+    pub web_evaluate: bool,
     /// The platform shows web views (TS: `WebView.available()`). `true` by
     /// default; a platform that knows from the start that it shows none
     /// (built without a web engine, the system's failed to load) sets
@@ -300,6 +330,14 @@ pub struct Environment {
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
     /// when a web view starts reports that error itself.
     pub web_views: bool,
+    /// The platform draws shader views (`Shader`, `ShaderEffect`,
+    /// `ShaderTransition`, the screen's; TS: `shadersAvailable()`). `true`
+    /// by default. A platform built without a renderer sets `false` from
+    /// the start; one that finds no GPU when the first shader mounts
+    /// reports it then (`nsh_engine::EngineControl::shaders_unavailable`),
+    /// so it can turn `false` while the app runs, never back. A grid
+    /// surface ([`Environment::cell`]) draws none.
+    pub shaders: bool,
 }
 
 impl Environment {
@@ -339,6 +377,7 @@ impl Default for Environment {
             reduce_motion: false,
             pixel_ratio: 1.0,
             screen_reader: false,
+            reads_active_descendants: false,
             os: Os::default(),
             platform: None,
             os_version: (0, 0),
@@ -349,6 +388,7 @@ impl Default for Environment {
             locale_settings: LocaleSettings::EN_US,
             host: false,
             lifecycle: Lifecycle::Active,
+            wake_count: 0,
             screen_color: false,
             file_requests: false,
             speech: false,
@@ -356,7 +396,9 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
+            web_evaluate: false,
             web_views: true,
+            shaders: true,
         }
     }
 }

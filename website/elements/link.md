@@ -23,7 +23,7 @@ fn docs() -> impl IntoElement {
         .text_color(move || theme().primary)
         .underline()
         .hover(|s| s.opacity(0.8))
-        .focus(|s| s.rounded_sm().outline(px(2.0)).outline_color(move || theme().ring))
+        .focus_visible(|s| s.rounded_sm().outline(px(2.0)).outline_color(move || theme().ring))
         .child(text("Read the docs"))
 }
 ```
@@ -36,7 +36,7 @@ function App() {
   return (
     <Link
       href="https://example.com/docs"
-      class="self-start text-primary underline hover:opacity-80 focus:rounded-sm focus:outline-2 focus:outline-ring"
+      class="self-start text-primary underline hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
     >
       <Text>Read the docs</Text>
     </Link>
@@ -79,8 +79,8 @@ Opening a URL outside the app takes the `openUrl` capability when the app declar
 
 On the desktops (macOS, Windows, Linux, GPUI) and the web in the desktop idiom, the pointer resting on a link for half a
 second shows where it goes, as a mail app or a browser's status bar does: a hint below the link with its destination,
-until the pointer leaves or presses it. The keyboard focus on a link shows it too. A user checks the destination before
-following it, whatever the link's text says.
+until the pointer leaves or presses it. The keyboard moving the focus to a link (Tab) shows it too. A user checks the
+destination before following it, whatever the link's text says.
 
 - The destination is one line, left to right in a right-to-left app too. A URL shows as it is parsed: an international host in its ASCII form
   (`https://xn--mnchen-3ya.de`), so a letter of another script passing for a Latin one shows as what it is, and the
@@ -135,7 +135,7 @@ The app styles each state with classes or style props:
 ```tsx
 <Link
   href="https://example.com/changelog"
-  class="self-start text-primary underline decoration-primary/40 transition-colors hover:decoration-primary active:opacity-70 focus:outline-2 focus:outline-ring disabled:text-muted-foreground disabled:no-underline"
+  class="self-start text-primary underline decoration-primary/40 transition-colors hover:decoration-primary active:opacity-70 focus-visible:outline-2 focus-visible:outline-ring disabled:text-muted-foreground disabled:no-underline"
 >
   <Text>Changelog</Text>
 </Link>
@@ -192,7 +192,7 @@ past each side, without changing its layout or its look: one number for every si
   `accessibilityLabel`. `href` stays data: screen readers say the label.
 - `current` is said as the current page (ARIA's `aria-current="page"`), and `disabled` as the platform says a dimmed
   element.
-- On macOS and the web a link is a stop of the keyboard focus: Tab reaches it, Return and Space open it, and `focus:`
+- On macOS and the web a link is a stop of the keyboard focus: Tab reaches it, Return and Space open it, and `focus-visible:`
   styles show where the focus is.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.

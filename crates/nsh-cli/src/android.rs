@@ -202,8 +202,16 @@ pub(crate) struct Apk<'a> {
     pub(crate) activity: &'a str,
     /// Development builds: debuggable, cleartext HTTP (the dev server).
     pub(crate) dev: bool,
+    /// Plain HTTP is allowed (`android:usesCleartextTraffic`): development
+    /// builds (the dev server's assets) and apps whose `nsh.json` sets
+    /// `android.usesCleartextTraffic`.
+    pub(crate) cleartext: bool,
     /// The app may show notifications: `POST_NOTIFICATIONS` is declared.
     pub(crate) notifications: bool,
+    /// Web pages may use the microphone and the camera
+    /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
+    pub(crate) microphone: bool,
+    pub(crate) camera: bool,
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
@@ -349,7 +357,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     } else {
         ""
     };
-    let cleartext = if apk.dev {
+    let cleartext = if apk.cleartext {
         r#" android:usesCleartextTraffic="true""#
     } else {
         ""
@@ -369,6 +377,13 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     } else {
         ""
     };
+    let media: String = [(apk.microphone, "RECORD_AUDIO"), (apk.camera, "CAMERA")]
+        .iter()
+        .filter(|(declared, _)| *declared)
+        .map(|(_, name)| {
+            format!("\n    <uses-permission android:name=\"android.permission.{name}\" />")
+        })
+        .collect();
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
     let launch_mode = if apk.schemes.is_empty() {
@@ -391,7 +406,15 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">
-    <uses-permission android:name="android.permission.INTERNET" />{post_notifications}
+    <uses-permission android:name="android.permission.INTERNET" />{post_notifications}{media}
+    <!-- Text actions (Translate and the like) the selection menu offers,
+        as TextView's: Android 11+ hides other apps' activities otherwise. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
     <application android:label="{label}"{icon}{cleartext}
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
@@ -808,7 +831,10 @@ mod tests {
             target_sdk: super::DEFAULT_TARGET_SDK,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            cleartext: false,
             notifications,
+            microphone: false,
+            camera: false,
             schemes: &[],
             rust,
             dark: false,
@@ -860,6 +886,31 @@ mod tests {
         let permission = "android.permission.POST_NOTIFICATIONS";
         assert!(super::manifest_xml(&apk(false, true)).contains(permission));
         assert!(!super::manifest_xml(&apk(false, false)).contains(permission));
+    }
+
+    #[test]
+    fn only_an_app_whose_pages_capture_media_declares_its_permissions() {
+        let manifest = super::manifest_xml(&super::Apk {
+            microphone: true,
+            ..apk(false, false)
+        });
+        assert!(manifest.contains("android.permission.RECORD_AUDIO"));
+        assert!(!manifest.contains("android.permission.CAMERA"));
+        assert!(!super::manifest_xml(&apk(false, false)).contains("RECORD_AUDIO"));
+    }
+
+    #[test]
+    fn only_an_app_that_asks_allows_cleartext_traffic() {
+        let attribute = r#"android:usesCleartextTraffic="true""#;
+        assert!(!super::manifest_xml(&apk(false, false)).contains(attribute));
+        let manifest = super::manifest_xml(&super::Apk {
+            cleartext: true,
+            ..apk(false, false)
+        });
+        let application = manifest.find("<application").unwrap();
+        let activity = manifest.find("<activity").unwrap();
+        let at = manifest.find(attribute).expect(&manifest);
+        assert!(application < at && at < activity, "{manifest}");
     }
 
     #[test]

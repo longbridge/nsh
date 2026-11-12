@@ -22,7 +22,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
+use gtk4::{self as gtk, gio, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
     Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextPosition, TextSpan,
@@ -1308,7 +1308,10 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
         let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
         let mut rects = drawn.selection_rects.borrow_mut();
         rects.clear();
-        layout.range_rects(range.0..range.1, &mut rects);
+        // Hidden characters show no highlight, as nothing of them shows.
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
+            layout.range_rects(shown, &mut rects);
+        }
         for r in rects.iter() {
             let (x, y) = (cx + r.origin.x.0, cy + r.origin.y.0);
             snapshot.append_color(
@@ -1395,6 +1398,13 @@ fn build(
             }
             let glyphs = &run.glyphs[i..j];
             let style = text.spans.get(span).map_or(&default, |s| &s.style);
+            if style.hidden {
+                // Nothing of a hidden run is drawn: not its color emoji,
+                // which keep their own colors, nor its shadow.
+                x += from_pango(glyphs.iter().map(|g| g.width).sum::<i32>());
+                i = j;
+                continue;
+            }
             let mut string = pango::GlyphString::new();
             string.set_size(glyphs.len() as i32);
             let mut width = 0;
@@ -1687,10 +1697,7 @@ impl Selection {
             let ctrl = modifiers.contains(ModifierType::CONTROL_MASK);
             match key {
                 Key::c | Key::C | Key::Insert if ctrl => copy(&view),
-                Key::a | Key::A if ctrl => {
-                    let len = view.state().text.as_ref().map_or(0, |t| t.text.len_utf16());
-                    select(&view, Some((0, len)));
-                }
+                Key::a | Key::A if ctrl => select_all(&view),
                 // Without a selection Escape goes on (to going back).
                 Key::Escape if view_selection(&view).is_some_and(|s| s.range.get().is_some()) => {
                     select(&view, None)
@@ -1704,14 +1711,34 @@ impl Selection {
             // The window going to the background keeps its focus widget,
             // and so the selection.
             if let Some(view) = weak.upgrade()
-                && view.root().and_then(|r| r.focus()).as_ref() != Some(view.upcast_ref())
+                && !view
+                    .root()
+                    .and_then(|r| r.focus())
+                    .is_none_or(|f| &f == view.upcast_ref::<gtk::Widget>() || f.is_ancestor(&view))
             {
+                // Its edit menu (a popover, which leaves the window with no
+                // focus widget) keeps it too.
                 select(&view, None);
             }
         });
         for c in &selection.controllers {
             view.add_controller(c.clone());
         }
+        // The window menu's and the context menu's Copy and Select All.
+        let action = |name: &str, f: fn(&NshView)| {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = view.downgrade();
+            action.connect_activate(move |_, _| {
+                if let Some(view) = weak.upgrade() {
+                    f(&view);
+                }
+            });
+            let group = gio::SimpleActionGroup::new();
+            group.add_action(&action);
+            group
+        };
+        view.insert_action_group("clipboard", Some(&action("copy", copy)));
+        view.insert_action_group("selection", Some(&action("select-all", select_all)));
         selection
     }
 
@@ -1723,6 +1750,8 @@ impl Selection {
         for c in &self.controllers {
             view.remove_controller(c);
         }
+        view.insert_action_group("clipboard", None::<&gio::ActionGroup>);
+        view.insert_action_group("selection", None::<&gio::ActionGroup>);
         view.set_focusable(false);
     }
 
@@ -1900,6 +1929,17 @@ fn dragged(view: &NshView, dx: f32, dy: f32, x: f32, y: f32) {
     select(view, Some(range));
 }
 
+/// Selects all of `view`'s text.
+fn select_all(view: &NshView) {
+    let len = view.state().text.as_ref().map_or(0, |t| t.text.len_utf16());
+    select(view, Some((0, len)));
+}
+
+/// Whether `view` (selectable text) has a selection to copy.
+pub(crate) fn has_selection(view: &NshView) -> bool {
+    selected_text(view).is_some()
+}
+
 /// Copies the selection to the clipboard.
 fn copy(view: &NshView) {
     if let Some(text) = selected_text(view) {
@@ -1911,7 +1951,7 @@ fn copy(view: &NshView) {
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
-    Some(state.text.as_ref()?.text.copied_text(a..b))
+    Some(state.text.as_ref()?.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.
@@ -2537,6 +2577,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Glyphs of the text nodes under `node`.
+    fn drawn_glyphs(node: &gsk::RenderNode) -> u32 {
+        match node.node_type() {
+            gsk::RenderNodeType::ContainerNode => {
+                let c = node.clone().downcast::<gsk::ContainerNode>().unwrap();
+                (0..c.n_children()).map(|i| drawn_glyphs(&c.child(i))).sum()
+            }
+            gsk::RenderNodeType::ShadowNode => {
+                drawn_glyphs(&node.clone().downcast::<gsk::ShadowNode>().unwrap().child())
+            }
+            gsk::RenderNodeType::TextNode => node
+                .clone()
+                .downcast::<gsk::TextNode>()
+                .unwrap()
+                .num_glyphs(),
+            _ => 0,
+        }
+    }
+
+    /// Nothing of a hidden run is drawn: not its color emoji, its
+    /// decorations or its shadow.
+    #[test]
+    fn hidden_runs_draw_nothing() {
+        crate::gtk_test::run(|| {
+            let engine = PangoTextEngine::new("sans-serif".into());
+            let plain = ResolvedTextStyle::default();
+            let underlined = ResolvedTextStyle {
+                decoration: nsh_core::TextDecoration {
+                    underline: true,
+                    line_through: false,
+                },
+                ..plain
+            };
+            let built = |hidden: bool| {
+                let mut t = text(&[("ab ", plain)]);
+                // As the core hides a span.
+                let style = ResolvedTextStyle {
+                    hidden,
+                    color: if hidden {
+                        Color::TRANSPARENT
+                    } else {
+                        plain.color
+                    },
+                    ..underlined
+                };
+                t.push("\u{1F389} cd", style);
+                t.shadow = Some(nsh_core::TextShadow {
+                    color: Color(0x0000_0080),
+                    offset_x: Points(1.0),
+                    offset_y: Points(1.0),
+                    radius: Points(0.0),
+                });
+                let prepared = engine.prepare(&t);
+                let size = engine.measure(&prepared, None);
+                let layout = engine.layout(&prepared, size);
+                let l = layout.downcast::<LinuxLayout>().unwrap();
+                let content =
+                    Bounds::new(nsh_core::geometry::point(Points(0.0), Points(0.0)), size);
+                let node = build(&t, l, content).expect("a node");
+                (drawn_glyphs(&node), node)
+            };
+            let (shown, _) = built(false);
+            let (hidden, node) = built(true);
+            // "ab " only, of "ab 🎉 cd".
+            assert!(hidden > 0 && hidden < shown, "{hidden} of {shown}");
+            assert_eq!(hidden, 3, "{node:?}");
+        });
     }
 
     #[test]

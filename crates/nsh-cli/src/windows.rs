@@ -40,8 +40,8 @@ const ICON_SIZES: [u32; 7] = [16, 20, 24, 32, 40, 48, 64];
 /// A directory `<out>/<name>`: the release runner as `<name>.exe` (the
 /// app's icon embedded), the bundle and assets in `nsh\` (where the runner
 /// looks, next to itself), `nsh\app.json` (the window's title, the app's
-/// id and appearance, which the window opens in); then the same as
-/// `<name>.zip`.
+/// id and appearance, which the window opens in, and the main window's
+/// options); then the same as `<name>.zip`.
 pub(crate) fn package(
     options: &PackageOptions<'_>,
     config: &AppConfig,
@@ -82,12 +82,9 @@ pub(crate) fn package(
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
     let version = config.version.as_deref().unwrap_or("1.0.0");
-    let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
-    if let Some(appearance) = &config.appearance {
-        info["appearance"] = appearance.as_str().into();
-    }
+    let info = crate::package::desktop_app_json(config, name, id, version);
     fs::write(resources.join("app.json"), info.to_string())?;
-    if let Some(icon) = &config.icon {
+    if let Some(icon) = config.icon(crate::package::PackageTarget::Windows) {
         let images = icon_images(icon)?;
         fs::write(resources.join("icon.ico"), icon_file(&images))?;
         set_icon(&exe, &images)
@@ -321,7 +318,7 @@ pub(crate) fn host_args(entry: &Path, work: &Path) -> Vec<OsString> {
     let config = crate::package::read_config(entry).unwrap_or_default();
     let (name, _) = crate::package::name_and_id(entry, &config);
     let mut args = vec!["--name".into(), name.into()];
-    if let Some(icon) = &config.icon {
+    if let Some(icon) = config.icon(crate::package::PackageTarget::Windows) {
         let ico = work.join("windows").join("icon.ico");
         match host_icon(icon, &ico) {
             Ok(()) => args.extend(["--icon".into(), ico.into_os_string()]),

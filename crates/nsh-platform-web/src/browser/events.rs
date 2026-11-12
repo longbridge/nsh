@@ -117,7 +117,32 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                     None => Value(1),
                 },
             ),
+            (
+                "button",
+                match m.button {
+                    Some(button) => Value::string(button.name())?,
+                    // `null`, as `PayloadValue::Null`.
+                    None => Value(1),
+                },
+            ),
         ])?,
+        EventPayload::Pinch(p) => object([
+            ("position", point(p.position)?),
+            ("pagePosition", point(p.page_position)?),
+            ("delta", number(p.delta.0)),
+            ("phase", Value::string(p.phase.name())?),
+            ("modifiers", modifiers(&p.modifiers)?),
+        ])?,
+        EventPayload::Wheel(w) => {
+            let (dx, dy) = w.delta.xy();
+            object([
+                ("position", point(w.position)?),
+                ("pagePosition", point(w.page_position)?),
+                ("delta", object([("x", number(dx)), ("y", number(dy))])?),
+                ("deltaMode", Value::string(w.delta.mode_name())?),
+                ("modifiers", modifiers(&w.modifiers)?),
+            ])?
+        }
         EventPayload::ContextMenu(p) => object([
             ("position", point(p.position)?),
             ("pagePosition", point(p.page_position)?),

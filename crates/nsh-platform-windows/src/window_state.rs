@@ -167,7 +167,9 @@ pub(crate) fn state(hwnd: HWND) -> Option<WindowState> {
         state.mode = mode;
         state.minimized = minimized;
         state.visible = shown && !minimized;
-        state.focused = foreground;
+        // A window hidden while it had the keyboard can stay the foreground
+        // one: the user sees nothing take keys there.
+        state.focused = foreground && shown;
         state.content_bounds = content_bounds(hwnd, &screen).unwrap_or(state.bounds);
         state.display = Some(screen.display.id);
         state.scale_factor = window::dpi(hwnd) as f32 / 96.0;

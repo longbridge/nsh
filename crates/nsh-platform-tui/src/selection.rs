@@ -430,7 +430,12 @@ impl Selection {
             if self.model.is_empty() {
                 return false;
             }
-            clipboard.set_text(Some(self.model.text(&texts)));
+            // A selection of hidden characters only leaves the clipboard
+            // as it is.
+            let text = self.model.text(&texts);
+            if !text.is_empty() {
+                clipboard.set_text(Some(text));
+            }
             return true;
         }
         if (modifiers.ctrl || modifiers.cmd) && key.eq_ignore_ascii_case("a") {

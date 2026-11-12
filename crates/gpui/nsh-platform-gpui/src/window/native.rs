@@ -183,6 +183,11 @@ mod mac {
         }
     }
 
+    /// Not hidden: on screen, or minimized.
+    pub(crate) fn visible(window: &Window) -> bool {
+        ns_window(window).is_none_or(|w| w.isVisible() || w.isMiniaturized())
+    }
+
     pub(crate) fn restore(window: &Window) {
         if let Some(w) = ns_window(window)
             && w.isMiniaturized()
@@ -408,6 +413,12 @@ mod win {
         hwnd(window).is_some_and(|hwnd| unsafe { IsIconic(hwnd) } != 0)
     }
 
+    /// Not hidden: on screen, or minimized.
+    pub(crate) fn visible(window: &Window) -> bool {
+        // SAFETY: a plain query on a live window.
+        hwnd(window).is_none_or(|hwnd| unsafe { IsWindowVisible(hwnd) } != 0)
+    }
+
     /// Moves the window's top left corner to `(x, y)` (points, screen
     /// coordinates).
     pub(crate) fn set_origin(window: &Window, x: f32, y: f32) {
@@ -508,6 +519,11 @@ mod linux {
 
     pub(crate) fn minimized(_window: &Window) -> bool {
         false
+    }
+
+    /// GPUI shows its windows as they open, and minimizes them for `hide`.
+    pub(crate) fn visible(_window: &Window) -> bool {
+        true
     }
 
     /// The window manager places windows.

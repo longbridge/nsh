@@ -16,12 +16,17 @@ use rolldown_common::{ChunkFilenamesOutputOption, CodeSplittingMode, Output};
 use crate::{compile, compile::strip_ansi, plugin};
 
 /// What to bundle and how.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BundleOptions {
     /// Entry module (usually `App.tsx`).
     pub entry: PathBuf,
     /// Minify the output (release builds).
     pub minify: bool,
+    /// A development build, as `appInfo()` reports it.
+    pub development: bool,
+    /// The app's id, name, version and build number in place of
+    /// `nsh.json`'s, as `appInfo()` reports them.
+    pub app: AppInfo,
     /// Split what `import()` loads into chunks of their own
     /// ([`Bundle::chunks`]), loaded on demand (published web apps);
     /// otherwise the bundle holds the whole app, dynamically imported
@@ -30,6 +35,29 @@ pub struct BundleOptions {
     /// The UI sets the hosts serve, described (`nsh_base::registry()`
     /// and an app's own, as `SetDescription`s): their modules stay imports.
     pub ui_sets: Vec<nsh_core::element::description::SetDescription>,
+    /// A file whose app's directory is the asset root
+    /// ([`Bundle::asset_root`]) in place of the entry's: the test file of
+    /// the entry `nsh test` makes for it, which may be written anywhere
+    /// (`nsh_testing::TestRun::work_dir`), so that the files the test file
+    /// imports are named from its app. The theme, capabilities and
+    /// resolution stay the entry's. `None`: the entry's.
+    pub asset_root_from: Option<PathBuf>,
+}
+
+/// The app's identity a build gives it in place of `nsh.json`'s (what a
+/// package is named and versioned as: `nsh package --id … --version 2.0.0
+/// --build 7`), as `appInfo()` reports it; `None`: `nsh.json`'s.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct AppInfo {
+    /// The id (`nsh.json` `"id"`).
+    pub id: Option<String>,
+    /// The display name (`nsh.json` `"name"`).
+    pub name: Option<String>,
+    /// The version (`nsh.json` `"version"`).
+    pub version: Option<String>,
+    /// The build number (`nsh.json` `"build"`).
+    pub build: Option<u64>,
 }
 
 /// A failed build, formatted for people.
@@ -87,9 +115,14 @@ pub struct Bundle {
     pub chunks: Vec<Chunk>,
     /// Static dependency closure needed before evaluating the entry.
     pub entry_imports: Vec<String>,
-    /// Asset files the app imports, relative to the entry directory
+    /// Asset files the app imports, relative to [`Bundle::asset_root`]
     /// (`asset:/<path>` URIs refer to them).
     pub assets: Vec<PathBuf>,
+    /// The directory [`Bundle::assets`] and `asset:/` URLs are relative to:
+    /// the app's directory (its `nsh.json`'s; without one, the entry's or
+    /// the nearest one up with an `App.tsx`), canonical. Every file the app
+    /// imports is inside it, else the build fails.
+    pub asset_root: PathBuf,
     /// Source and configuration files read by the build, as absolute paths.
     /// Development servers watch these even outside the entry directory.
     pub watch_files: Vec<PathBuf>,
@@ -113,6 +146,11 @@ pub struct Bundle {
     /// The URL schemes the app claims (`nsh.json` `schemes`,
     /// checked, in lower case).
     pub url_schemes: Vec<String>,
+    /// The main window's launch options (`nsh.json` `window`), as
+    /// `app.json` carries them: JSON, `None` without them or when they
+    /// are not valid ([`main_window`]).
+    #[doc(hidden)]
+    pub main_window: Option<String>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -177,10 +215,32 @@ pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
     // What it cannot claim is left out (the CLI's `read_config` warns of
     // it).
-    Ok(config
+    let mut schemes = config
         .get("schemes")
         .map(nsh_core::url_scheme::schemes_from_json)
-        .unwrap_or_default())
+        .unwrap_or_default();
+    // The files it opens come as `file:` URLs (`nsh_core::file_type`).
+    if nsh_core::file_type::declares_file_types(&config) {
+        schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
+    }
+    Ok(schemes)
+}
+
+/// The `"window"` of the `nsh.json` in `dir`, the main window's launch
+/// options, as JSON: `None` without it, and when it is not valid
+/// ([`nsh_core::desktop::MainWindowOptions::from_json`]; the CLI's
+/// `read_config` warns of it).
+#[doc(hidden)]
+pub fn main_window(dir: &std::path::Path) -> Result<Option<String>, BundleError> {
+    let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+        return Ok(None);
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    Ok(config
+        .get("window")
+        .filter(|window| nsh_core::desktop::MainWindowOptions::from_json(window).is_ok())
+        .map(serde_json::Value::to_string))
 }
 
 /// How bare imports resolve: the `"resolve"` of the `nsh.json` next to the
@@ -339,9 +399,14 @@ fn theme_json(
 }
 
 /// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// `nsh.json` in `dir` (the app's, [`app_dir`]), checked. `"theme"` is
+/// `nsh.json` in the app directory ([`app_dir`]), checked, and the app's information
+/// (`development`: a development build; [`app_json`]). `"theme"` is
 /// shadcn's `cssVars` ([`theme_json`]).
-fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
+fn tailwind_setup(
+    dir: &std::path::Path,
+    development: bool,
+    info: &AppInfo,
+) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let mut setup = plugin::ThemeSetup::default();
     // The theme's tokens are classes (`bg-primary`): the default's unless
     // the app sets its own.
@@ -350,10 +415,12 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
     let Ok(text) = std::fs::read_to_string(&path) else {
         setup.theme.set_tokens(&tokens);
         setup.i18n = i18n_json(dir, None)?;
+        setup.app = app_json(&serde_json::Value::Null, development, info);
         return Ok(Arc::new(setup));
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    setup.app = app_json(&config, development, info);
     if let Some(tailwind) = config.get("tailwind") {
         let json = tailwind.to_string();
         let ignored;
@@ -394,6 +461,21 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
     }
     setup.i18n = i18n_json(dir, Some(&config))?;
     Ok(Arc::new(setup))
+}
+
+/// What `appInfo()` reports, as JSON: `nsh.json`'s `"id"`, `"name"`,
+/// `"version"` and `"build"` (`info`'s where it gives them; `null` where
+/// neither does) and whether this is a development build.
+fn app_json(config: &serde_json::Value, development: bool, info: &AppInfo) -> String {
+    let text = |key: &str| config.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+    serde_json::json!({
+        "id": info.id.clone().or_else(|| text("id")),
+        "name": info.name.clone().or_else(|| text("name")),
+        "version": info.version.clone().or_else(|| text("version")),
+        "build": info.build.or_else(|| config.get("build").and_then(|v| v.as_u64())),
+        "development": development,
+    })
+    .to_string()
 }
 
 /// The app's translations (`locales/`) and the language data of the
@@ -447,27 +529,30 @@ fn warn_ignored(section: &str, ignored: &[String]) {
 
 /// The directory of the app whose entry is in `dir`, where its `nsh.json`
 /// is: `dir` itself, or, when `dir` has neither an `nsh.json` nor an
-/// `App.tsx`, the nearest directory up with an `nsh.json`. An entry a test
-/// opens (`tests/MenuApp.tsx`), or the one `nsh test` makes for a test file
+/// `App.tsx`, the nearest directory up with an `nsh.json`, else the nearest
+/// one up with an `App.tsx`, else `dir`. An entry a test opens
+/// (`tests/MenuApp.tsx`), or the one `nsh test` makes for a test file
 /// (`.nsh/test/<file>.run.js`), is built with its app's theme, translations
-/// and the rest of its `nsh.json`, as the app is.
+/// and the rest of its `nsh.json`, as the app is, and names its assets
+/// from the app's directory ([`Bundle::asset_root`]).
 fn app_dir(dir: &std::path::Path) -> PathBuf {
-    let is_app = |d: &std::path::Path| {
-        d.join("nsh.json").is_file()
-            || std::fs::read_dir(d).is_ok_and(|entries| {
-                entries.filter_map(Result::ok).any(|e| {
-                    e.file_name()
-                        .to_str()
-                        .is_some_and(|n| n.eq_ignore_ascii_case("App.tsx"))
-                })
+    let has_config = |d: &std::path::Path| d.join("nsh.json").is_file();
+    let has_entry = |d: &std::path::Path| {
+        std::fs::read_dir(d).is_ok_and(|entries| {
+            entries.filter_map(Result::ok).any(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("App.tsx"))
             })
+        })
     };
-    if is_app(dir) {
+    if has_config(dir) || has_entry(dir) {
         return dir.to_owned();
     }
     dir.ancestors()
         .skip(1)
-        .find(|d| d.join("nsh.json").is_file())
+        .find(|d| has_config(d))
+        .or_else(|| dir.ancestors().skip(1).find(|d| has_entry(d)))
         .unwrap_or(dir)
         .to_owned()
 }
@@ -492,11 +577,32 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         .to_path_buf();
     let cwd_for_errors = cwd.clone();
     let cwd_root = cwd.clone();
+    // Canonical: `cwd` is, and so is each directory above it.
     let app = app_dir(&cwd);
-    let tailwind = tailwind_setup(&app)?;
+    let tailwind = tailwind_setup(&app, options.development, &options.app)?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
+    // Beside the entry, as `app.json`, `nsh run` and `nsh test`'s
+    // real-window hosts read it (the CLI's `read_config`): an app a test
+    // opens below its app's root starts alike headless and in a window.
+    let main_window = main_window(&cwd)?;
     let resolve = ResolveSetup::read(&app)?;
+    let asset_root = match &options.asset_root_from {
+        Some(file) => {
+            let file = dunce::canonicalize(file).map_err(|e| {
+                BundleError::other(format!("asset root not found: {}: {e}", file.display()))
+            })?;
+            let dir = if file.is_dir() {
+                file
+            } else {
+                file.parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or(file)
+            };
+            app_dir(&dir)
+        }
+        None => app,
+    };
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let natives = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
@@ -532,6 +638,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         vec![Pluginable::new_shared(plugin::NshPlugin {
             split: options.split,
             root: cwd_for_errors,
+            asset_root: asset_root.clone(),
             error: plugin_error.clone(),
             assets: assets.clone(),
             hot: false,
@@ -577,9 +684,10 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         entry_chunk.ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?;
     chunks.sort_by(|a, b| a.id.cmp(&b.id));
     let entry_imports = entry_dependencies(imports, &chunks);
+    // Each one is inside: the plugin named it, or failed the build.
     let mut assets: Vec<PathBuf> = std::mem::take(&mut *assets.lock().expect("assets lock"))
         .into_iter()
-        .filter_map(|p| p.strip_prefix(&cwd_root).ok().map(PathBuf::from))
+        .filter_map(|p| p.strip_prefix(&asset_root).ok().map(PathBuf::from))
         .collect();
     assets.sort();
     assets.dedup();
@@ -605,6 +713,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         chunks,
         entry_imports,
         assets,
+        asset_root,
         watch_files: watch_files(&bundler, &cwd_root),
         natives: natives.into_iter().collect(),
         native_use,
@@ -612,6 +721,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         chunk_native_use,
         capabilities,
         url_schemes,
+        main_window,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
 }
@@ -722,6 +832,8 @@ pub struct HotBundle {
     preloads: Vec<String>,
     /// Asset files the app imports (as in [`Bundle::assets`]).
     pub assets: Vec<PathBuf>,
+    /// As in [`Bundle::asset_root`].
+    pub asset_root: PathBuf,
     /// Source and configuration files read by the build, as absolute paths.
     pub watch_files: Vec<PathBuf>,
     /// As in [`Bundle::capabilities`].
@@ -891,7 +1003,7 @@ pub async fn bundle_hot_async(
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let app = app_dir(&cwd);
-    let tailwind = tailwind_setup(&app)?;
+    let tailwind = tailwind_setup(&app, true, &AppInfo::default())?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
     let resolve = ResolveSetup::read(&app)?;
@@ -919,6 +1031,7 @@ pub async fn bundle_hot_async(
         bundler_options,
         vec![Pluginable::new_shared(plugin::NshPlugin {
             root: cwd.clone(),
+            asset_root: app.clone(),
             error: plugin_error.clone(),
             assets: assets.clone(),
             hot: true,
@@ -960,7 +1073,7 @@ pub async fn bundle_hot_async(
     }
     let mut assets: Vec<PathBuf> = std::mem::take(&mut *assets.lock().expect("assets lock"))
         .into_iter()
-        .filter_map(|p| p.strip_prefix(&cwd).ok().map(PathBuf::from))
+        .filter_map(|p| p.strip_prefix(&app).ok().map(PathBuf::from))
         .collect();
     assets.sort();
     assets.dedup();
@@ -979,6 +1092,7 @@ pub async fn bundle_hot_async(
             .collect(),
         entry: entry_id.ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?,
         assets,
+        asset_root: app,
         watch_files: watch_files(&bundler, &cwd),
         capabilities,
         url_schemes,
@@ -1065,6 +1179,7 @@ mod tests {
             minify: true,
             split,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap()
     }
@@ -1202,6 +1317,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
     }
 
@@ -1471,6 +1587,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap();
         assert!(bundle.code.contains("#123456"), "{}", bundle.code);
@@ -1479,7 +1596,8 @@ mod tests {
             assert_eq!(app_dir(&dir.join(sub)), dir, "{sub}");
         }
         // ... and the class check knows its tokens: the same setup.
-        let setup = tailwind_setup(&app_dir(&dir.join("tests"))).unwrap();
+        let setup =
+            tailwind_setup(&app_dir(&dir.join("tests")), false, &AppInfo::default()).unwrap();
         assert_eq!(
             crate::classes::check(code, oxc::span::SourceType::tsx(), &setup.theme),
             []
@@ -1489,6 +1607,314 @@ mod tests {
         std::fs::create_dir_all(&inner).unwrap();
         std::fs::write(inner.join("App.tsx"), code).unwrap();
         assert_eq!(app_dir(&inner), inner);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The header of a `w`×`h` PNG: all the image size reader looks at.
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        out.extend(w.to_be_bytes());
+        out.extend(h.to_be_bytes());
+        out.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        out
+    }
+
+    /// An app (with an `nsh.json` when `config`) with `assets/dot.png`, an
+    /// `App.tsx` and `files` (path, code) of its own, such as an entry a
+    /// test opens below it (`tests/SubApp.tsx`).
+    fn asset_app(name: &str, config: bool, files: &[(&str, &str)]) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-asset-root-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        if config {
+            std::fs::write(dir.join("nsh.json"), "{}").unwrap();
+        }
+        std::fs::write(dir.join("assets/dot.png"), png(4, 4)).unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, View } from \"nsh\";\nmount(() => <View />);\n",
+        )
+        .unwrap();
+        for (file, code) in files {
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, code).unwrap();
+        }
+        dunce::canonicalize(&dir).unwrap()
+    }
+
+    /// An entry showing the image `import`.
+    fn showing(import: &str) -> String {
+        format!(
+            "import {{ Image, mount }} from \"nsh\";\nimport dot from \"{import}\";\nmount(() => <Image src={{dot}} />);\n"
+        )
+    }
+
+    fn release(entry: &std::path::Path) -> Result<Bundle, BundleError> {
+        bundle(&BundleOptions {
+            entry: entry.to_path_buf(),
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+            ..Default::default()
+        })
+    }
+
+    /// A hot bundle's whole script.
+    fn hot_code(bundle: &HotBundle) -> String {
+        bundle.script().0
+    }
+
+    /// An entry below its app (`tests/SubApp.tsx`, which a test opens)
+    /// names the files it imports from the app's directory, as the app's
+    /// own entry does, and ships them, in both kinds of bundle (#1483).
+    #[test]
+    fn an_entry_below_the_app_names_assets_from_the_app() {
+        let sub = showing("../assets/dot.png");
+        let dir = asset_app("below", true, &[("tests/SubApp.tsx", &sub)]);
+        let entry = dir.join("tests/SubApp.tsx");
+        let built = release(&entry).unwrap();
+        assert!(
+            built.code.contains("\"asset:/assets/dot.png\""),
+            "{}",
+            built.code
+        );
+        assert_eq!(built.assets, [PathBuf::from("assets/dot.png")]);
+        assert_eq!(built.asset_root, dir);
+        let hot = bundle_hot(&entry, &[]).unwrap();
+        let code = hot_code(&hot);
+        assert!(code.contains("\"asset:/assets/dot.png\""), "{code}");
+        assert_eq!(hot.assets, [PathBuf::from("assets/dot.png")]);
+        assert_eq!(hot.asset_root, dir);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The app's own entry names its assets as it always did: its directory
+    /// is the app's.
+    #[test]
+    fn an_app_entry_keeps_its_asset_names() {
+        let dir = asset_app("app", true, &[]);
+        std::fs::write(dir.join("App.tsx"), showing("./assets/dot.png")).unwrap();
+        let built = release(&dir.join("App.tsx")).unwrap();
+        assert!(
+            built.code.contains("\"asset:/assets/dot.png\""),
+            "{}",
+            built.code
+        );
+        assert_eq!(built.assets, [PathBuf::from("assets/dot.png")]);
+        assert_eq!(built.asset_root, dir);
+        let hot = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        assert!(hot_code(&hot).contains("\"asset:/assets/dot.png\""));
+        assert_eq!(hot.asset_root, dir);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A file beside an entry below its app is named by its path in the
+    /// app, as a package of the app holds it.
+    #[test]
+    fn an_asset_beside_a_sub_entry_is_named_from_the_app() {
+        let sub = showing("./x.png");
+        let dir = asset_app("beside", true, &[("tests/SubApp.tsx", &sub)]);
+        std::fs::write(dir.join("tests/x.png"), png(2, 2)).unwrap();
+        std::fs::write(dir.join("tests/x@2x.png"), png(4, 4)).unwrap();
+        let built = release(&dir.join("tests/SubApp.tsx")).unwrap();
+        assert!(
+            built.code.contains("\"asset:/tests/x.png\""),
+            "{}",
+            built.code
+        );
+        // Its pixel-density variant too.
+        assert_eq!(
+            built.assets,
+            [
+                PathBuf::from("tests/x.png"),
+                PathBuf::from("tests/x@2x.png")
+            ]
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A file outside the app's directory fails the build, naming it: a
+    /// package holds only the app's directory, so it could not ship.
+    #[test]
+    fn an_asset_outside_the_app_is_refused() {
+        let dir = asset_app("outside", true, &[]);
+        let outside = dir.with_file_name(format!(
+            "{}.png",
+            dir.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::write(&outside, png(1, 1)).unwrap();
+        let name = outside.file_name().unwrap().to_string_lossy().into_owned();
+        for import in [format!("../{name}"), format!("../{name}?url")] {
+            std::fs::write(dir.join("App.tsx"), showing(&import)).unwrap();
+            let entry = dir.join("App.tsx");
+            for error in [
+                release(&entry).unwrap_err().plain,
+                bundle_hot(&entry, &[]).unwrap_err().plain,
+            ] {
+                assert!(error.contains(&format!("`../{name}`")), "{error}");
+                assert!(error.contains("is outside the app's directory"), "{error}");
+                assert!(error.contains(&dir.display().to_string()), "{error}");
+            }
+        }
+        let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Without an `nsh.json`, the app's directory is the nearest one up
+    /// with an `App.tsx`: an entry a test opens and the one `nsh test`
+    /// makes for a test file name their assets from it.
+    #[test]
+    fn an_app_without_nsh_json_roots_at_its_app_tsx() {
+        let sub = showing("../assets/dot.png");
+        let dir = asset_app("no-config", false, &[("tests/SubApp.tsx", &sub)]);
+        for below in ["tests", ".nsh/test"] {
+            std::fs::create_dir_all(dir.join(below)).unwrap();
+            assert_eq!(app_dir(&dir.join(below)), dir, "{below}");
+        }
+        let entry = dir.join("tests/SubApp.tsx");
+        let built = release(&entry).unwrap();
+        assert!(
+            built.code.contains("\"asset:/assets/dot.png\""),
+            "{}",
+            built.code
+        );
+        assert_eq!(built.asset_root, dir);
+        assert_eq!(bundle_hot(&entry, &[]).unwrap().asset_root, dir);
+        // A test file's entry, as `nsh test` writes it.
+        std::fs::write(
+            dir.join(".nsh/test/a.test.tsx.run.js"),
+            "import \"../../tests/SubApp.tsx\";\n",
+        )
+        .unwrap();
+        let built = release(&dir.join(".nsh/test/a.test.tsx.run.js")).unwrap();
+        assert!(
+            built.code.contains("\"asset:/assets/dot.png\""),
+            "{}",
+            built.code
+        );
+        assert_eq!(built.asset_root, dir);
+        // With neither above it, an entry's own directory is its root, and
+        // nothing above it ships.
+        let alone = dir.join("alone");
+        std::fs::create_dir_all(&alone).unwrap();
+        std::fs::write(alone.join("Main.tsx"), showing("../assets/dot.png")).unwrap();
+        std::fs::remove_file(dir.join("App.tsx")).unwrap();
+        assert_eq!(app_dir(&alone), alone);
+        let error = release(&alone.join("Main.tsx")).unwrap_err().plain;
+        assert!(error.contains("is outside the app's directory"), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The entry `nsh test` makes for a test file may be written outside
+    /// the app (`nsh_testing::TestRun::work_dir`): with the test file as
+    /// `asset_root_from`, what the test file imports is named from its app,
+    /// with or without an `nsh.json`; without it, from the entry's.
+    #[test]
+    fn a_test_entry_outside_the_app_names_assets_from_the_test_file() {
+        for config in [true, false] {
+            let test = showing("../assets/dot.png");
+            let dir = asset_app(
+                &format!("from-{config}"),
+                config,
+                &[("tests/a.test.tsx", &test)],
+            );
+            let work = dir.with_file_name(format!(
+                "{}-work",
+                dir.file_name().unwrap().to_string_lossy()
+            ));
+            std::fs::create_dir_all(&work).unwrap();
+            let file = dir.join("tests/a.test.tsx");
+            let entry = work.join("a.test.tsx.run.js");
+            std::fs::write(
+                &entry,
+                format!("import {:?};\n", file.to_string_lossy().replace('\\', "/")),
+            )
+            .unwrap();
+            let built = bundle(&BundleOptions {
+                entry: entry.clone(),
+                asset_root_from: Some(file.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+            assert!(
+                built.code.contains("\"asset:/assets/dot.png\""),
+                "{}",
+                built.code
+            );
+            assert_eq!(built.assets, [PathBuf::from("assets/dot.png")]);
+            assert_eq!(built.asset_root, dir);
+            // The entry's own directory roots it otherwise, and the file is
+            // outside.
+            let error = release(&entry).unwrap_err().plain;
+            assert!(error.contains("is outside the app's directory"), "{error}");
+            let _ = std::fs::remove_dir_all(work);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// A font an entry below its app imports is named from the app too
+    /// (fonts load by their `asset:/` URL, not through `?url`).
+    #[test]
+    fn a_font_below_the_app_is_named_from_the_app() {
+        let sub = "import { mount, Text } from \"nsh\";\n\
+                   import pacifico from \"../assets/Pacifico-Regular.ttf\";\n\
+                   mount(() => <Text style={{ fontFamily: pacifico }}>a</Text>);\n";
+        let dir = asset_app("font", true, &[("tests/SubApp.tsx", sub)]);
+        std::fs::write(
+            dir.join("assets/Pacifico-Regular.ttf"),
+            include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf"),
+        )
+        .unwrap();
+        let entry = dir.join("tests/SubApp.tsx");
+        let built = release(&entry).unwrap();
+        assert!(
+            built
+                .code
+                .contains("\"asset:/assets/Pacifico-Regular.ttf\""),
+            "{}",
+            built.code
+        );
+        assert_eq!(built.assets, [PathBuf::from("assets/Pacifico-Regular.ttf")]);
+        let hot = bundle_hot(&entry, &[]).unwrap();
+        assert!(hot_code(&hot).contains("\"asset:/assets/Pacifico-Regular.ttf\""));
+        assert_eq!(hot.assets, [PathBuf::from("assets/Pacifico-Regular.ttf")]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The main window's launch options are the `window` beside the entry,
+    /// as `app.json`, `nsh run` and `nsh test`'s real-window hosts read it:
+    /// an app a test opens below its app's root (`tests/MenuApp.tsx`) does
+    /// not start hidden because its app does, headless or in a window.
+    #[test]
+    fn an_entry_takes_the_window_beside_it() {
+        let dir = std::env::temp_dir().join(format!("nsh-window-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "window": { "defaultVisible": false } }"#,
+        )
+        .unwrap();
+        let code = "import { mount, View } from \"nsh\";\nmount(() => <View />);\n";
+        std::fs::write(dir.join("App.tsx"), code).unwrap();
+        std::fs::write(dir.join("tests/MenuApp.tsx"), code).unwrap();
+        let build = |entry: &str| {
+            bundle(&BundleOptions {
+                entry: dir.join(entry),
+                minify: false,
+                split: false,
+                ui_sets: Vec::new(),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            build("App.tsx").main_window.as_deref(),
+            Some(r#"{"defaultVisible":false}"#)
+        );
+        assert_eq!(build("tests/MenuApp.tsx").main_window, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1520,7 +1946,7 @@ mod tests {
         )
         .unwrap();
         assert!(ResolveSetup::read(&dir).is_ok());
-        let setup = tailwind_setup(&dir).unwrap();
+        let setup = tailwind_setup(&dir, false, &AppInfo::default()).unwrap();
         assert!(setup.theme.color("brand").is_some());
         assert_ne!(
             theme_tokens(&dir).unwrap().color("primary"),
@@ -1552,6 +1978,7 @@ mod tests {
             minify: false,
             split: false,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
     }
 
@@ -1576,6 +2003,7 @@ mod tests {
             minify: true,
             split: true,
             ui_sets: Vec::new(),
+            ..Default::default()
         })
         .unwrap();
         assert!(!bundle.chunks.is_empty());
@@ -1585,6 +2013,36 @@ mod tests {
             Some(&crate::Imported::Names(names.into_iter().collect()))
         );
         assert!(!bundle.native_use.global_crypto && !bundle.native_use.computed_import);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An app that reads an export off a namespace, so that shells without
+    /// it still run it, uses that export only: once bundled and minified.
+    #[test]
+    fn native_use_names_what_a_namespace_is_read_for() {
+        let dir = single(
+            "namespace",
+            "import * as base from \"nsh/base\";\n\
+             import { mount, Text } from \"nsh\";\n\
+             const EmojiPicker = (base as any).EmojiPicker;\n\
+             mount(() => (EmojiPicker ? <EmojiPicker /> : <Text>none</Text>));\n",
+        );
+        let bundle = bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: true,
+            split: false,
+            ui_sets: vec![nsh_base::registry().into()],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            bundle.native_use.imports.get("nsh/base"),
+            Some(&crate::Imported::Names(
+                ["EmojiPicker".to_owned()].into_iter().collect()
+            )),
+            "{}",
+            bundle.code
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

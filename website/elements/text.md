@@ -94,10 +94,11 @@ leave spans as they are; spaces inside the span give the box room on its sides.
 
 `visibility: "hidden"` on a span (`.invisible()` in Rust, the class `invisible`) hides its characters where they
 stand: they keep their place in the lines, so the text lays out exactly as when they show, and nothing of them is drawn
-(glyphs, decoration lines, background). Copying a selection and screen readers leave them out, and their characters
-take no presses. Spans inside a hidden span are hidden with it. Showing it again (`visibility: "visible"`) draws the
-characters without laying the text out again, which suits revealing words one by one at the end of a streamed
-paragraph:
+(glyphs, color emoji, decoration lines, background, shadow). Copying a selection and screen readers leave them out, and
+their characters take no presses. Spans inside a hidden span are hidden with it, and so are views and images inside
+it: they keep their place, are not drawn and take no presses. Showing it again (`visibility: "visible"`) draws the
+characters where they already stand, without measuring the text again or moving anything, which suits revealing words
+one by one at the end of a streamed paragraph:
 
 ```rust tabs
 text("The answer is ")

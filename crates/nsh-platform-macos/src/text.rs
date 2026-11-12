@@ -20,14 +20,15 @@ use objc2_core_foundation::{
 use objc2_core_graphics::{CGColor, CGContext, CGPath};
 use objc2_core_text::{
     CTFont, CTFontDescriptor, CTFontManagerRegisterFontsForURL, CTFontManagerScope,
-    CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineTruncationType, CTParagraphStyle,
-    CTParagraphStyleSetting, CTParagraphStyleSpecifier, CTRun, CTRunDelegate,
-    CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter, CTWritingDirection,
-    kCTFontAttributeName, kCTFontCascadeListAttribute, kCTFontFamilyNameAttribute,
-    kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue,
-    kCTFontTraitsAttribute, kCTFontWeightTrait, kCTForegroundColorFromContextAttributeName,
-    kCTKernAttributeName, kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName,
-    kCTRunDelegateCurrentVersion, kCTUnderlineStyleAttributeName,
+    CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineBoundsOptions,
+    CTLineTruncationType, CTParagraphStyle, CTParagraphStyleSetting, CTParagraphStyleSpecifier,
+    CTRun, CTRunDelegate, CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter,
+    CTWritingDirection, kCTFontAttributeName, kCTFontCascadeListAttribute,
+    kCTFontFamilyNameAttribute, kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag,
+    kCTFontOpenTypeFeatureValue, kCTFontTraitsAttribute, kCTFontWeightTrait,
+    kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
+    kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName, kCTRunDelegateCurrentVersion,
+    kCTUnderlineStyleAttributeName,
 };
 use rustc_hash::FxHashMap;
 
@@ -985,6 +986,16 @@ impl TextEngine for CoreTextEngine {
         Size::new(Points(size.width as f32), Points(size.height as f32))
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: its first line's origin is its baseline, from the box's
+        // bottom.
+        let layout = self.layout(prepared, self.measure(prepared, Some(width)));
+        let layout = layout.downcast::<CoreTextLayout>()?;
+        let first = layout.lines.first()?;
+        Some(Points((layout.height - first.origin.y) as f32))
+    }
+
     fn breaks_lines_greedily(&self) -> bool {
         true
     }
@@ -1369,6 +1380,145 @@ pub(crate) fn draws_the_same(
             .is_none_or(|s| s.range.get().is_none())
 }
 
+/// What of `view` draws otherwise with these ([`Damage`], view coordinates,
+/// y down): nothing when it already shows them ([`draws_the_same`]), the
+/// lines of the characters drawn otherwise when only colors or hidden runs
+/// changed in the same layout and box (the core's colors-only path: a
+/// word-by-word fade shows a word or two of a long paragraph per frame),
+/// else all of it.
+///
+/// A line's part reaches from the top to the bottom of its glyphs' ink and
+/// its typographic box, past them by what decorations and the text's shadow
+/// add, across the view's width: a glyph's ink, an ellipsis or a selection
+/// may stand anywhere along the line. What the rect cuts through is drawn
+/// again whole, as `draw` walks every line under the clip.
+pub(crate) fn damage(
+    view: &crate::view::NshView,
+    text: &std::sync::Arc<AttributedText>,
+    layout: &TextLayout,
+    content: nsh_core::Bounds<nsh_core::Points>,
+) -> nsh_core::canvas::Damage {
+    use nsh_core::canvas::Damage;
+    if draws_the_same(view, text, layout, content) {
+        return Damage::None;
+    }
+    let state = view.state();
+    let Some(drawn) = &state.text else {
+        return Damage::All;
+    };
+    let partial = std::sync::Arc::ptr_eq(&drawn.layout.0, &layout.0)
+        && drawn.content == content
+        && !drawn.cut.get()
+        && drawn.area_range.get().is_none()
+        && drawn
+            .selection
+            .as_ref()
+            .is_none_or(|s| s.range.get().is_none());
+    if !partial {
+        return Damage::All;
+    }
+    let Some(laid) = layout.downcast::<CoreTextLayout>() else {
+        return Damage::All;
+    };
+    recolored_damage(
+        &drawn.text,
+        text,
+        laid,
+        content,
+        view.ns().frame().size.width,
+    )
+}
+
+/// The lines `new` draws otherwise than `old` in `layout` ([`damage`]),
+/// `width` wide; all of it unless only colors or hidden runs changed.
+fn recolored_damage(
+    old: &AttributedText,
+    new: &AttributedText,
+    layout: &CoreTextLayout,
+    content: nsh_core::Bounds<nsh_core::Points>,
+    width: CGFloat,
+) -> nsh_core::canvas::Damage {
+    use nsh_core::canvas::Damage;
+    let Some(ranges) = old.recolored_ranges(new) else {
+        return Damage::All;
+    };
+    if ranges.is_empty() {
+        return Damage::None;
+    }
+    // Never drawn yet: nothing to keep, and no lines to look up.
+    let Some(lines) = layout.laid.get() else {
+        return Damage::All;
+    };
+    let (above, below) = ink_margins(old, new);
+    let height = content.size.height.0 as CGFloat;
+    let (mut top, mut bottom) = (CGFloat::INFINITY, CGFloat::NEG_INFINITY);
+    let last = lines.lines.len().saturating_sub(1);
+    for (i, line) in lines.lines.iter().enumerate() {
+        let start = line.range.location.max(0) as u32;
+        let end = line.hit_end.max(line.range.location) as u32;
+        // Characters past the last line shown lend their style to its
+        // ellipsis.
+        let end = if i == last { u32::MAX } else { end };
+        if !ranges.iter().any(|r| r.start < end && start < r.end) {
+            continue;
+        }
+        let (mut ascent, mut descent) = (0.0, 0.0);
+        // SAFETY: a valid line and out pointers; no options that need
+        // more.
+        let ink = unsafe {
+            line.line
+                .typographic_bounds(&mut ascent, &mut descent, std::ptr::null_mut());
+            line.line
+                .bounds_with_options(CTLineBoundsOptions::UseGlyphPathBounds)
+        };
+        let (mut high, mut low) = (ascent, -descent);
+        if !ink.is_empty() && ink.size.height.is_finite() {
+            high = high.max(ink.origin.y + ink.size.height);
+            low = low.min(ink.origin.y);
+        }
+        // Lines stand y up from the bottom of the box, as `draw` places
+        // them.
+        top = top.min(height - (line.origin.y + high) - above);
+        bottom = bottom.max(height - (line.origin.y + low) + below);
+    }
+    if top >= bottom {
+        return Damage::All;
+    }
+    let y = content.origin.y.0 as CGFloat;
+    let (top, bottom) = ((y + top).floor(), (y + bottom).ceil());
+    Damage::Rect(content_box(0.0, top, width, bottom - top))
+}
+
+/// How far past its lines' boxes and glyphs `old` or `new` text draws
+/// above and below a line: anti-aliasing, decorations off the glyphs and
+/// the text's shadow with its blur.
+fn ink_margins(old: &AttributedText, new: &AttributedText) -> (CGFloat, CGFloat) {
+    /// Anti-aliasing, with room for rounding at any scale.
+    const AA: f32 = 2.0;
+    let (mut above, mut below) = (AA, AA);
+    for span in old.spans.iter().chain(&new.spans) {
+        let style = &span.style;
+        if !style.decoration.underline && !style.decoration.line_through {
+            continue;
+        }
+        let thickness = style
+            .decoration_thickness
+            .map_or(style.font_size.0 * 0.1, |t| t.0)
+            .max(1.0);
+        // Double and wavy lines reach a thickness or two past their center;
+        // the font's own underline sits within its descent.
+        let reach = thickness * 3.0 + style.underline_offset.map_or(0.0, |o| o.0.abs());
+        below = below.max(AA + reach);
+        above = above.max(AA + thickness * 3.0);
+    }
+    if let Some(shadow) = new.shadow {
+        let blur = shadow.radius.0.max(0.0) * 2.0;
+        above += blur + (-shadow.offset_y.0).max(0.0);
+        below += blur + shadow.offset_y.0.max(0.0);
+    }
+    (above as CGFloat, below as CGFloat)
+}
+
 /// The view draws selectable text: mouse drags over it select rather
 /// than scroll, and its pointer is the I-beam.
 pub(crate) fn selectable(state: &crate::view::ViewState) -> bool {
@@ -1400,8 +1550,11 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
         let alpha = (tint.0 & 0xff) as f32 / 255.0 * 0.3;
         let tint = Color((tint.0 & !0xff) | (alpha * 255.0).round() as u32);
         CGContext::set_fill_color_with_color(c, Some(&cg_color(tint)));
-        for rect in selection_rects(text, content, range) {
-            CGContext::fill_rect(c, rect);
+        // Hidden characters show no highlight, as nothing of them shows.
+        for shown in drawn.text.visible_ranges(range.0..range.1) {
+            for rect in selection_rects(text, content, (shown.start, shown.end)) {
+                CGContext::fill_rect(c, rect);
+            }
         }
     }
     // CoreText draws in a y-up space with the origin at the bottom of the
@@ -1930,8 +2083,8 @@ pub(crate) fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
 }
 
 /// The rectangles (view coordinates) the characters `start..end` of the
-/// text view with `state` cover, one per line (the test agent's spans).
-#[cfg(feature = "dev")]
+/// text view with `state` cover, one per line (the box of a selectable
+/// view's selection, the test agent's spans).
 pub(crate) fn range_rects(state: &crate::view::ViewState, start: u32, end: u32) -> Vec<CGRect> {
     let Some(drawn) = state.text.as_ref() else {
         return Vec::new();
@@ -2216,20 +2369,151 @@ pub(crate) fn selection_key(
 /// Copies the selection to the general pasteboard (the Edit menu's Copy).
 /// False if there is none.
 pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
-    let Some(text) = surface.selection.area.text().or_else(|| {
-        surface
-            .selection
-            .with_range()
-            .and_then(|v| selected_text(&v))
-    }) else {
+    write_selection(surface, &objc2_app_kit::NSPasteboard::generalPasteboard())
+}
+
+/// Puts the selected text on `board` (Copy, the Services menu). False if
+/// there is none.
+pub(crate) fn write_selection(
+    surface: &crate::surface::Surface,
+    board: &objc2_app_kit::NSPasteboard,
+) -> bool {
+    let Some(text) = selection_text(surface) else {
         return false;
     };
-    let board = objc2_app_kit::NSPasteboard::generalPasteboard();
     board.clearContents();
     // SAFETY: an immutable AppKit constant.
     let kind = unsafe { objc2_app_kit::NSPasteboardTypeString };
     board.setString_forType(&objc2_foundation::NSString::from_str(&text), kind);
     true
+}
+
+/// The selected text of the surface, if any.
+pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String> {
+    surface.selection.area.text().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+    })
+}
+
+/// A secondary click on selectable text or in a selectable view: Copy
+/// (with a selection), Select All and, for selected text, Look Up, titled
+/// in AppKit's own words ([`appkit_title`]). The root view is a Services
+/// requestor for the selection (`validRequestorForSendType:returnType:`),
+/// available to AppKit Services. Context-menu plugins are enabled by
+/// default; their presentation depends on AppKit. Translate is not
+/// offered: `NSTextView`'s comes from a private framework, and the public
+/// translation UI is SwiftUI's only (`translationPresentation`). Returns
+/// once the menu closed.
+pub(crate) fn context_menu(surface: &crate::surface::Surface) {
+    use nsh_core::desktop::MenuRole;
+    use objc2::{MainThreadMarker, MainThreadOnly, sel};
+    use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem, NSPasteboardTypeString};
+    use objc2_foundation::{NSArray, NSString};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let Some(event) = app.currentEvent() else {
+        return;
+    };
+    // SAFETY: an immutable AppKit constant.
+    let kind = unsafe { NSPasteboardTypeString };
+    // What the Services in the menu may ask the root view for.
+    app.registerServicesMenuSendTypes_returnTypes(&NSArray::from_slice(&[kind]), &NSArray::new());
+    let root = crate::input::event_root(surface);
+    let menu = NSMenu::new(mtm);
+    menu.setAutoenablesItems(false);
+    for (role, action, enabled) in [
+        (MenuRole::Copy, sel!(copy:), can_copy(surface)),
+        (MenuRole::SelectAll, sel!(selectAll:), true),
+    ] {
+        let title = appkit_title(role.label(), role.label());
+        // SAFETY: a new item with a valid selector.
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(&title),
+                Some(action),
+                &NSString::new(),
+            )
+        };
+        // SAFETY: the root view answers both actions and outlives the menu.
+        unsafe { item.setTarget(Some(root.ns())) };
+        item.setEnabled(enabled);
+        menu.addItem(&item);
+    }
+    // Look Up (dictionary, Wikipedia, Siri Knowledge), the same panel as
+    // Force Click / Ctrl+Cmd+D.
+    if let Some(text) = selection_text(surface).filter(|t| !t.trim().is_empty()) {
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        // SAFETY: a new item with a selector the root view implements.
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(&look_up_title(&text, appkit_title)),
+                Some(sel!(nshLookUp:)),
+                &NSString::new(),
+            )
+        };
+        // SAFETY: the root view answers the action and outlives the menu.
+        unsafe { item.setTarget(Some(root.ns())) };
+        menu.addItem(&item);
+    }
+    NSMenu::popUpContextMenu_withEvent_forView(&menu, &event, root.ns());
+}
+
+/// The characters of a selection a Look Up title quotes, as many as
+/// `NSTextView`'s Look Up quotes.
+const LOOK_UP_QUOTED: usize = 30;
+
+/// The Look Up item's title for `text` (trimmed, its first
+/// [`LOOK_UP_QUOTED`] characters, then an ellipsis): AppKit's
+/// `Look Up “%@”` / `Look Up “%@…”`, which `localize` (key, English) turns
+/// into the app's language with the quote where that language puts it
+/// (Japanese: `“%@”を調べる`).
+fn look_up_title(text: &str, localize: impl Fn(&str, &str) -> String) -> String {
+    let text = text.trim();
+    let quoted: String = text.chars().take(LOOK_UP_QUOTED).collect();
+    // AppKit's keys spell the quotes and the ellipsis as `\U` escapes.
+    let (key, english) = if text.chars().count() > LOOK_UP_QUOTED {
+        (
+            "Look Up \\U201C%@\\U2026\\U201D",
+            "Look Up \u{201c}%@\u{2026}\u{201d}",
+        )
+    } else {
+        ("Look Up \\U201C%@\\U201D", "Look Up \u{201c}%@\u{201d}")
+    };
+    let template = localize(key, english);
+    let template = if template.contains("%@") {
+        template
+    } else {
+        english.to_owned()
+    };
+    template.replacen("%@", &quoted, 1)
+}
+
+/// An item title in AppKit's own words: its `MenuCommands` string for
+/// `key`, in the language AppKit shows the app's menus in (the app's
+/// localizations against the user's languages, as for `NSTextView`'s menu),
+/// or `english` where AppKit has none. Only the public `NSBundle` lookup.
+fn appkit_title(key: &str, english: &str) -> String {
+    use objc2_foundation::{NSBundle, NSString};
+    let english = NSString::from_str(english);
+    let Some(appkit) = NSBundle::bundleWithIdentifier(&NSString::from_str("com.apple.AppKit"))
+    else {
+        return english.to_string();
+    };
+    appkit
+        .localizedStringForKey_value_table(
+            &NSString::from_str(key),
+            Some(&english),
+            Some(&NSString::from_str("MenuCommands")),
+        )
+        .to_string()
 }
 
 /// Whether [`copy`] has a selection to copy.
@@ -2258,7 +2542,7 @@ fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();
     let drawn = state.text.as_ref()?;
     let (a, b) = drawn.selection.as_ref()?.range.get()?;
-    Some(drawn.text.copied_text(a..b))
+    Some(drawn.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
 /// The selection from `anchor` (a range) to `caret`, by `unit`.
@@ -2459,6 +2743,11 @@ fn draw_glyphs(cx: &CGContext, line: &LaidLine, stretches: &mut Stretches<'_>) {
                 .get(kCTUnderlineStyleAttributeName)
                 .is_some();
             stretches.each(run, |range, style| {
+                // Nothing of a hidden run is drawn: not its color emoji,
+                // which keep their own colors, nor its underline.
+                if style.hidden {
+                    return;
+                }
                 if underlined {
                     let n = range.length as usize;
                     positions.clear();
@@ -2585,6 +2874,9 @@ fn draw_decorations(cx: &CGContext, line: &LaidLine, stretches: &mut Stretches<'
             }
             let mut positions = Vec::new();
             stretches.each(run, |range, span| {
+                if span.hidden {
+                    return;
+                }
                 positions.clear();
                 positions.resize(range.length as usize, CGPoint::new(0.0, 0.0));
                 run.positions(
@@ -2723,6 +3015,124 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    /// Showing words of a long paragraph or recoloring them draws again
+    /// only their lines, across the box; anything else that changed draws
+    /// all of it.
+    #[test]
+    fn recolored_words_damage_only_their_lines() {
+        use nsh_core::{Bounds, Point, canvas::Damage};
+        let style = ResolvedTextStyle {
+            font_size: Points(16.0),
+            ..ResolvedTextStyle::default()
+        };
+        let red = ResolvedTextStyle {
+            color: nsh_core::Color(0xff00_00ff),
+            ..style
+        };
+        let hidden = ResolvedTextStyle {
+            color: nsh_core::Color::TRANSPARENT,
+            hidden: true,
+            ..style
+        };
+        // 60 words, those from `shown` on hidden; `red` recolors one.
+        let words = |shown: usize, recolored: Option<usize>| {
+            let mut text = AttributedText::default();
+            for i in 0..60 {
+                let s = if Some(i) == recolored {
+                    red
+                } else if i >= shown {
+                    hidden
+                } else {
+                    style
+                };
+                text.push(&format!("word{i:02} "), s);
+            }
+            text
+        };
+        let engine = CoreTextEngine::default();
+        let typeset = words(30, None);
+        let prepared = engine.prepare(&typeset);
+        let size = engine.measure(&prepared, Some(Points(200.0)));
+        let layout = engine.layout(&prepared, size);
+        let layout = layout
+            .downcast::<super::CoreTextLayout>()
+            .expect("CoreText");
+        assert!(layout.lines.len() >= 10, "{} lines", layout.lines.len());
+        let content = Bounds::new(Point::new(Points(4.0), Points(10.0)), size);
+        let damage = |old: &AttributedText, new: &AttributedText| {
+            super::recolored_damage(old, new, layout, content, 220.0)
+        };
+        // Where the line holding character `at` stands in the view.
+        let line_of = |at: u32| {
+            let line = layout
+                .lines
+                .iter()
+                .map(|l| super::LineBox::of(layout, l))
+                .find(|l| l.start as u32 <= at && at < l.end as u32)
+                .expect("a line");
+            (10.0 + line.top as f32, 10.0 + line.bottom as f32)
+        };
+        let char_of = |word: u32| word * 7;
+        let covers = |damage: Damage, word: u32| {
+            let Damage::Rect(r) = damage else {
+                panic!("{damage:?}")
+            };
+            let (top, bottom) = line_of(char_of(word));
+            r.origin.y.0 <= top && bottom <= r.origin.y.0 + r.size.height.0
+        };
+        let misses = |damage: Damage, word: u32| {
+            let Damage::Rect(r) = damage else {
+                panic!("{damage:?}")
+            };
+            let (top, bottom) = line_of(char_of(word));
+            bottom <= r.origin.y.0 || r.origin.y.0 + r.size.height.0 <= top
+        };
+        // The next word starts showing: its line, not the paragraph.
+        let started = words(31, None);
+        let next = damage(&typeset, &started);
+        assert!(
+            covers(next, 30) && misses(next, 0) && misses(next, 59),
+            "{next:?}"
+        );
+        let Damage::Rect(r) = next else {
+            unreachable!()
+        };
+        assert_eq!((r.origin.x.0, r.size.width.0), (0.0, 220.0));
+        assert!(r.size.height.0 < size.height.0 / 4.0, "{r:?} of {size:?}");
+        // One recolored at the top: the top line.
+        let top = damage(&typeset, &words(30, Some(0)));
+        assert!(covers(top, 0) && misses(top, 30), "{top:?}");
+        // Two apart: everything between them too, in one rect.
+        let both = damage(&typeset, &words(31, Some(0)));
+        assert!(
+            covers(both, 0) && covers(both, 15) && covers(both, 30),
+            "{both:?}"
+        );
+        // Nothing drawn otherwise; anything but colors changed.
+        assert_eq!(damage(&typeset, &typeset.clone()), Damage::None);
+        let mut bold = words(30, None);
+        bold.spans[0].style.font_weight = 700;
+        assert_eq!(damage(&typeset, &bold), Damage::All);
+        // An underline far below the glyphs reaches into the rect.
+        let underlined = |shown| {
+            let mut text = words(shown, None);
+            for span in &mut text.spans {
+                span.style.decoration.underline = true;
+                span.style.underline_offset = Some(Points(12.0));
+            }
+            text
+        };
+        let plain = next;
+        let lined = damage(&underlined(30), &underlined(31));
+        let (Damage::Rect(plain), Damage::Rect(lined)) = (plain, lined) else {
+            panic!("{lined:?}")
+        };
+        assert!(
+            lined.origin.y.0 + lined.size.height.0 >= plain.origin.y.0 + plain.size.height.0 + 12.0,
+            "{lined:?} {plain:?}"
+        );
     }
 
     /// A layout typeset for one text draws another that differs only in
@@ -2972,6 +3382,66 @@ mod tests {
             assert!(top >= lines[0].y.0 + lines[0].height.0 - 0.5, "{chip}");
             assert!(top + chip <= lines[2].y.0 + 0.5, "{chip}");
         }
+    }
+}
+
+#[cfg(test)]
+mod selection_menu {
+    use super::{appkit_title, look_up_title};
+
+    /// The selection menu's keys are AppKit's: each one is in its
+    /// `MenuCommands` strings (a missing key would answer the fallback),
+    /// here in English, the test binary's only localization.
+    #[test]
+    fn the_selection_menu_titles_are_appkits_own() {
+        for (key, english) in [
+            ("Copy", "Copy"),
+            ("Select All", "Select All"),
+            ("Look Up \\U201C%@\\U201D", "Look Up \u{201c}%@\u{201d}"),
+            (
+                "Look Up \\U201C%@\\U2026\\U201D",
+                "Look Up \u{201c}%@\u{2026}\u{201d}",
+            ),
+        ] {
+            assert_eq!(appkit_title(key, "<none>"), english, "{key}");
+        }
+        assert_eq!(appkit_title("No Such Menu Command", "Fallback"), "Fallback");
+        assert_eq!(
+            look_up_title("  hello  ", appkit_title),
+            "Look Up \u{201c}hello\u{201d}"
+        );
+    }
+
+    /// Look Up quotes the first 30 characters, then an ellipsis, in the
+    /// order the language's template puts the quote.
+    #[test]
+    fn look_up_quotes_the_start_of_the_selection_where_the_language_puts_it() {
+        let japanese = |key: &str, _: &str| {
+            if key.contains("U2026") {
+                "\u{201c}%@\u{2026}\u{201d}を調べる".to_owned()
+            } else {
+                "\u{201c}%@\u{201d}を調べる".to_owned()
+            }
+        };
+        assert_eq!(
+            look_up_title("辞書", japanese),
+            "\u{201c}辞書\u{201d}を調べる"
+        );
+        let long = "abcdefghijklmnopqrstuvwxyz0123456789";
+        assert_eq!(
+            look_up_title(long, japanese),
+            "\u{201c}abcdefghijklmnopqrstuvwxyz0123\u{2026}\u{201d}を調べる"
+        );
+        let english = |_: &str, english: &str| english.to_owned();
+        assert_eq!(
+            look_up_title(&"x".repeat(30), english),
+            format!("Look Up \u{201c}{}\u{201d}", "x".repeat(30))
+        );
+        // A template without its placeholder keeps the English one.
+        assert_eq!(
+            look_up_title("word", |_: &str, _: &str| "Look Up".to_owned()),
+            "Look Up \u{201c}word\u{201d}"
+        );
     }
 }
 
@@ -3241,5 +3711,41 @@ mod hit_regressions {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod first_baseline {
+    use super::*;
+
+    fn baseline(size: f32) -> (f32, nsh_core::TextLine) {
+        let engine = CoreTextEngine::default();
+        let mut text = AttributedText::default();
+        text.push(
+            "Chat",
+            ResolvedTextStyle {
+                font_size: Points(size),
+                ..Default::default()
+            },
+        );
+        let prepared = engine.prepare(&text);
+        let width = engine.measure(&prepared, None).width;
+        let baseline = engine
+            .first_baseline(&prepared, width)
+            .expect("a first line");
+        let laid = engine.layout(&prepared, engine.measure(&prepared, Some(width)));
+        (baseline.0, engine.lines(&laid).remove(0))
+    }
+
+    #[test]
+    fn is_where_the_first_line_is_drawn_and_grows_with_the_font() {
+        let (small, line) = baseline(12.0);
+        // The line is drawn its ascender above its baseline.
+        assert!(
+            (small - (line.y.0 + line.ascender.0)).abs() < 0.01,
+            "{small} {line:?}"
+        );
+        let (large, _) = baseline(24.0);
+        assert!(large > small * 1.5, "{small} {large}");
     }
 }

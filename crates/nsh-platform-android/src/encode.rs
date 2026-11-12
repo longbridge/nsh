@@ -124,7 +124,7 @@ impl Encoded {
     }
 }
 
-pub(crate) fn encode(batch: MountBatch) -> Encoded {
+pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
     let mut e = Encoded {
         bytes: Vec::with_capacity(batch.items.len() * 16),
         ..Encoded::default()
@@ -566,6 +566,19 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::GoBack => e.int(5),
                     Command::GoForward => e.int(6),
                     Command::StopLoading => e.int(7),
+                    Command::Evaluate { request, script } => {
+                        e.int(51);
+                        e.int(request as i32);
+                        e.string(web_generation.to_string());
+                        let key = format!("__nsh_evaluation_{id}_{request}");
+                        e.string(nsh_core::platform::web_evaluation::start_script(&script, &key));
+                        e.string(nsh_core::platform::web_evaluation::poll_script(&key));
+                        e.string(nsh_core::platform::web_evaluation::cleanup_script(&key));
+                    }
+                    Command::CancelEvaluate { request } => {
+                        e.int(52);
+                        e.int(request as i32);
+                    }
                     Command::InjectJavaScript(js) => {
                         e.int(8);
                         e.string(js);
@@ -726,28 +739,32 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     }
                     // `Picker.java`: the request, the limit, the extensions
                     // offered (comma-separated; empty: any file) and the
-                    // largest file read.
+                    // largest file read (at most 512 MiB: an `int`).
                     Command::PickFiles { id, request } => {
                         e.int(45);
                         e.int(id as i32);
                         e.int(request.limit as i32);
                         e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
-                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
+                        e.int(i32::try_from(request.size_limit()).unwrap_or(i32::MAX));
                     }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
                     | Command::CancelPress
                     | Command::ScrollToIndex { .. }
+                    | Command::Reveal(_)
                     | Command::Measure { .. }
+                    | Command::MeasureScrollPosition { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
                     // The web's history entries; the core sends it there only.
                     | Command::SetAppUrl(_)
+                    | Command::PushAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
+                    | Command::HostPost { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
@@ -1306,7 +1323,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(true) => 1,
     });
     e.opt_string(a.label.as_deref());
-    e.opt_string(a.hint.as_deref());
+    // The hint text: the description, then the hint (Android has no
+    // description of its own beside the label).
+    e.opt_string(a.help_text(None).as_deref());
     e.int(role_index(a.role));
     let s = a.state;
     let mut flags = 0;
@@ -1347,6 +1366,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(AccessibilityCurrent::Date) => 5,
         Some(AccessibilityCurrent::Time) => 6,
     } << 11;
+    if s.invalid {
+        flags |= 1 << 14;
+    }
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1445,8 +1467,13 @@ fn role_index(role: AccessibilityRole) -> i32 {
         TreeItem => 40,
         MenuItemCheckbox => 41,
         MenuItemRadio => 42,
+        Dialog => 43,
+        AlertDialog => 44,
     }
 }
+
+/// The intervals a physical spring's progress is sampled in for Java's interpolator.
+const SPRING_SAMPLES: usize = 64;
 
 fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
     let Some(t) = t else {
@@ -1458,16 +1485,29 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::EaseIn => (1, 0.0),
         LayoutCurve::EaseOut => (2, 0.0),
         LayoutCurve::EaseInEaseOut => (3, 0.0),
-        LayoutCurve::Spring { damping } => (4, damping),
+        LayoutCurve::FittedSpring { damping_ratio } => (4, damping_ratio),
         LayoutCurve::Keyboard => (5, 0.0),
+        LayoutCurve::Spring(_) => (6, 0.0),
     };
     e.int(curve);
     e.float(damping);
+    if let LayoutCurve::Spring(spring) = t.curve {
+        // The spring's progress, sampled evenly over the time it settles in: Java draws it
+        // piecewise linear (`Mounter.Transition`), so the physics stays in Rust.
+        e.int(SPRING_SAMPLES as i32 + 1);
+        for i in 0..=SPRING_SAMPLES {
+            e.float(if i == SPRING_SAMPLES {
+                1.0
+            } else {
+                spring.progress(spring.settle_ms() * i as f32 / SPRING_SAMPLES as f32)
+            });
+        }
+    }
     e.int(match t.property {
         LayoutProperty::Opacity => 0,
         LayoutProperty::Scale => 1,
     });
-    e.float(t.duration_ms);
+    e.float(t.run_ms());
     e.float(t.delay_ms);
 }
 
@@ -1912,7 +1952,7 @@ mod tests {
                 },
             }],
         };
-        encode(batch)
+        encode(batch, 0)
             .bytes
             .chunks_exact(4)
             .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
@@ -1940,5 +1980,27 @@ mod tests {
         ] {
             assert_eq!(ints(request), vec![COMMAND, 3, 30, 7]);
         }
+    }
+    #[test]
+    fn web_evaluations_carry_the_originating_engine_generation() {
+        let encoded = encode(
+            MountBatch {
+                items: vec![MountItem::Command {
+                    id: 3,
+                    command: Command::Evaluate {
+                        request: u32::MAX,
+                        script: "42".into(),
+                    },
+                }],
+            },
+            19,
+        );
+        let ints: Vec<_> = encoded
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        assert_eq!(ints, vec![COMMAND, 3, 51, -1, 0, 1, 2, 3]);
+        assert!(matches!(&encoded.objects[0], Obj::Str(generation) if generation == "19"));
     }
 }

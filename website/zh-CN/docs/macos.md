@@ -17,7 +17,7 @@ macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可�
 
 ## 环境要求
 
-- 运行应用的机器需要 **macOS 14** 及以上。
+- 运行应用的机器需要 **macOS 14** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)）。
 - Xcode 命令行工具（`xcode-select --install`），用于构建 Rust 应用的 runner、从源码构建 NSH 的 macOS 运行时以及打包应用
   （`codesign`、`sips`）。在 Mac 上用 `cargo xtask dist` 制作的发行版把 TSX 应用的运行时放在 `runtime/macos/` 中。
 
@@ -88,11 +88,16 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
   MacOS/<Name>               可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
   Resources/nsh/bundle.nshc  编译后的 TSX 应用
   Resources/nsh/assets/…     应用导入的资源（也包括 Rust crate 的 `assets!()`）
-  Resources/nsh/app.json     窗口标题、应用的外观和激活策略
+  Resources/nsh/app.json     窗口标题、应用的外观、激活策略和 nsh.json 中的窗口设置
   Resources/AppIcon.icns     图标（nsh.json 指定了图标时，用 sips 转换）
 ```
 
 `.app` 使用 ad hoc 签名，因此可以在构建它的 Mac 上运行。要分发它，请用 Developer ID 签名并进行公证。`--run` 会在打包后打开应用。
+
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：“控制台”应用会显示它们，
+`log stream --predicate 'subsystem == "com.example.notes"'` 也会。从终端启动时（`.nsh/out/<Name>.app/Contents/MacOS/<Name>`），
+它还会把日志打印在终端里；标准错误重定向到文件时（`2> app.log`、`open --stderr app.log`）也会写进文件
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 菜单栏应用
 
@@ -114,8 +119,16 @@ nsh.json 的 `macos.activationPolicy` 让应用成为菜单栏应用：
 写入包的 `Info.plist`（请设置 `macos.activationPolicy`，而不是在 [`macos.infoPlist`](./packaging.md#infoplist-键与-entitlements)
 中设置 `LSUIElement`），并把策略写入运行器读取的 `app.json`。`nsh run --target macos` 用 `--activation-policy accessory`
 启动开发宿主，自己启动宿主时也传这个参数；`nsh test --target macos --foreground` 同样如此，而在后台运行的测试（默认）
-和以前一样运行。`cargo run` 启动 Rust 应用自己的 `main`，由它在 `run_app` 的选项里设置：
-`AppOptions { activation_policy: ActivationPolicy::Accessory, ..Default::default() }`。
+和以前一样运行。`cargo run` 启动 Rust 应用自己的 `main`，由它在 `run_app` 的选项里设置。这个选项属于 macOS 后端，
+所以同时为 Windows 和 Linux 构建的 `main`（`nsh init --template rust` 生成的就是这样）只为 macOS 设置它：
+
+```rust
+platform::AppOptions {
+    #[cfg(target_os = "macos")]
+    activation_policy: platform::ActivationPolicy::Accessory,
+    ..Default::default()
+}
+```
 
 Dock 的功能跟着 Dock 图标走：`Notifications.setBadge` 的标记、`requestAttention()` 的弹跳以及从 Dock 重新打开隐藏的窗口
 属于普通应用。菜单栏应用用托盘展示自己的状态（`Tray.set` 的图标和提示），并从托盘打开窗口：

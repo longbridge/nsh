@@ -75,6 +75,18 @@ The `content` part is the box of the document inside the editor's scroll view: i
 is the room around the text, and the scroll bar runs along the editor's own edge. A drag that selects past the top
 or bottom of the editor scrolls the document along, faster the further the pointer goes.
 
+### Sizing
+
+An editor is sized as a block with `height: auto`: without a height it is as tall as its document laid out at its
+width, plus its padding, and it grows and shrinks with each edit. `maxHeight` (`max-h-*`) stops it there, and the
+document scrolls inside it from then on, keeping the caret in view, as a multiline `Input` does; `minHeight`
+(`min-h-*`) keeps it at least that tall. A height or flex sizing (`h-*`, `flex-1`) gives it a fixed box that the
+document scrolls in. A chat composer is an editor with a `maxHeight` and no height:
+
+```tsx
+<RichEditor editor={editor} class="max-h-40 px-3 py-2" />
+```
+
 ### Touch selection
 
 On iOS and Android the editor selects as the platform's own text views do. A long press selects the word under the
@@ -132,8 +144,8 @@ const schema = defineSchema({
 const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 ```
 
-A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, or JSON),
-`parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"json"`) and `check(doc)`, which
+A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, `"html"`, or JSON),
+`parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"html"`, `"json"`) and `check(doc)`, which
 returns the document with its attribute defaults filled in. `nodes`, `marks` and `topNode` name its types. Markdown
 maps to the starter schema's names (`paragraph`, `heading`, `blockquote`, `codeBlock`, `bulletList`,
 `orderedList`, `listItem`, `bold`, `italic`, `code`, `link`, `strike`).
@@ -175,7 +187,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `isEmpty`, `undoDepth`, `redoDepth`, `composing` | What a UI shows about the editor |
 | `setContent(content, format?)` | Replaces the document, as one undoable change |
 | `insertContent(content, format?)` | Inserts content over the selection |
-| `getJSON()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
+| `getJSON()`, `getHTML()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
 | `dispatch(tr)` | Applies a transaction given as JSON (its steps against the current document) |
 | `on(event, listener)` | Calls `listener` with the payload of every `event`, in JS's next turn: `revision` (`{ revision }`, after every change, from any source), `update`, `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`. Returns a function that stops it; a listener added while a component renders stops with the component |
 | `focus()`, `blur()` | Moves the keyboard focus to or from the views showing the editor |
@@ -382,6 +394,36 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 
 The popup is the app's: it reads the suggestion's state, places itself at `coordsAtPos(range.from)` and draws the
 items its own way.
+
+## A block editor
+
+A Notion-style editor is made of the pieces above, with the UI around the document the app's own. The gallery's Block editor demo (`examples/gallery/demos/BlockEditorDemo.tsx`) is one: a `/` menu of blocks, a handle on each block and a toolbar over a selection.
+
+```tsx
+import { Overlay } from "nsh";
+import { RichEditor, StarterKit, chain, command, createRichEditor, defineExtension, deleteRange, suggestion } from "nsh/base";
+
+// An extension ranks above the keymap, so Enter picks an item before it splits the paragraph.
+const slash = defineExtension({
+  name: "slashCommand",
+  priority: 1000,
+  addProseMirrorPlugins: () => [suggestion({ key: "slash", char: "/", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] })],
+});
+const editor = createRichEditor({ extensions: [StarterKit, slash] });
+
+// The menu goes in `bubbleMenu` while `editor.suggestion("slash")?.active`; a pick replaces the trigger and the query.
+const { range } = editor.suggestion("slash")!;
+editor.run(chain([deleteRange({ from: range.from, to: range.to }), command("toggleBulletList")]));
+
+// A handle: the block under the pointer, and where it is on the page for an `Overlay` anchored there.
+const start = editor.posAtPageCoords(event.pagePosition);
+const rect = editor.pageNodeRect(start!);
+editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // then dragTo(point) while moving, endDrag() on release
+```
+
+- The plugins of `createRichEditor`'s own `plugins` come after the extensions' and the keymap; a plugin whose keys must come first (a suggestion's Enter) is an extension with a high `priority`.
+- `pageNodeRect(pos)` and `posAtPageCoords(point)` answer in page points, the coordinates of `Overlay`'s `anchor` and of pointer events, so a handle sits in the editor's margin as an overlay that follows the block.
+- `dragBlock(pos, point)`, `dragTo(point)` and `endDrag()` move a block with the pointer: the drop line follows it and the drop is one undo step. A handle that also opens a menu on a tap claims the pointer only once it has moved (`onMoveShouldSetResponder`), so the tap keeps its `onPress`; a `Button` takes its own presses and passes the drag no responder.
 
 ## Tables
 

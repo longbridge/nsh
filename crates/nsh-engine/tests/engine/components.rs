@@ -75,6 +75,7 @@ fn app_config(
         minify: false,
         split: false,
         ui_sets: described.clone(),
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &described).unwrap();
@@ -1696,6 +1697,64 @@ fn picked_files_reach_js_with_their_names_and_bytes() {
     assert_eq!(asked.filters[0].extensions, ["pdf", "md"]);
 }
 
+const FILE_PICKER_LIMIT: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("");
+setTimeout(async () => {
+  const refused = await Picker.pickFiles({ maxSize: -1 }).catch((e) => e.name);
+  const files = await Picker.pickFiles({ multiple: true, maxSize: 4 });
+  shown.set(
+    `${refused} ` +
+      files.map((f) => `${f.name}:${f.type}:${f.size}:${f.status}:${f.file === null ? "none" : f.file.size}`).join(" "),
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_files_past_the_apps_limit_reach_js_unread() {
+    let (engine, rx) = start(FILE_PICKER_LIMIT);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickFiles { id, request },
+            } = item
+            {
+                asked = Some(request.clone());
+                let read = |name: &str, bytes: &[u8]| {
+                    let mut file = nsh_core::picker::PickedFile::default();
+                    file.name = name.into();
+                    file.data = nsh_core::ImageData::new(bytes.to_vec());
+                    file
+                };
+                // Read, read but past the limit (a platform that could not
+                // tell its size first), and not read.
+                let files = vec![
+                    read("a.txt", b"abcd"),
+                    read("b.txt", b"abcde"),
+                    nsh_core::picker::PickedFile::too_large("clip.mp4", "", 400_000_000),
+                ];
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id: *id, files },
+                );
+            }
+        }
+        shows(
+            batch,
+            "RangeError a.txt:text/plain:4:read:4 b.txt:text/plain:5:tooLarge:none \
+             clip.mp4:video/mp4:400000000:tooLarge:none",
+        )
+    });
+    assert_eq!(asked.expect("a pick").max_size, Some(4));
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
@@ -2425,6 +2484,93 @@ fn tray_clicks_report_the_icons_bounds() {
     assert_eq!(trays(&removed), [None]);
 }
 
+const TRAY_TITLE: &str = r##"import { mount, signal, Text } from "nsh";
+import { Tray } from "nsh/desktop";
+
+const log = signal([]);
+Tray.set({ tooltip: "Quotes", title: [{ text: "AAPL " }, { text: "228.00 +1.33%", color: "#d92d20" }], titlePlacement: "left", onClick: () => log.set([...log(), "click"]) });
+
+const errors = [];
+for (const title of ["AAPL", [{ color: "#d92d20" }], [{ text: 228 }], [{ text: "AAPL", color: "not a color" }]]) {
+  try {
+    Tray.set({ title, onClick: () => log.set([...log(), "wrong click"]) });
+  } catch (e) {
+    errors.push(e instanceof TypeError);
+  }
+}
+try {
+  Tray.set({ title: [{ text: "AAPL" }], titlePlacement: "top", onClick: () => log.set([...log(), "wrong click"]) });
+} catch (e) {
+  errors.push(e instanceof TypeError);
+}
+
+mount(() => <Text>{`errors ${errors.join(",")} ${log().join(",")}`}</Text>);
+"##;
+
+/// A tray's title reaches the platform as its runs, each with its color
+/// (`None` for the panel's text color), and the side it shows on; a title of another shape, a run
+/// without its text, a text that is not a string, a color that is not one or
+/// a `titlePlacement` other than `"right"` and `"left"` throws a `TypeError` and changes nothing: the tray shown keeps its click.
+#[test]
+fn tray_titles_reach_the_platform_with_their_colors() {
+    use nsh_core::{EventKind, EventPayload, PayloadValue, color::Hsla, desktop::DesktopCommand};
+
+    let (engine, rx) = start_in(
+        TRAY_TITLE,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| {
+        shows(batch, "errors true,true,true,true,true ")
+    });
+    let trays: Vec<_> = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter_map(|item| match item {
+            MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(command),
+            } => match &**command {
+                DesktopCommand::SetTray(tray) => Some(tray.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let [Some(tray)] = &trays[..] else {
+        panic!("only the valid tray is set: {trays:?}");
+    };
+    let runs: Vec<_> = tray
+        .title
+        .iter()
+        .map(|run| (run.text.as_str(), run.color))
+        .collect();
+    let red: Hsla = "#d92d20".parse().unwrap();
+    assert_eq!(runs, [("AAPL ", None), ("228.00 +1.33%", Some(red))]);
+    assert_eq!(
+        tray.title_placement,
+        nsh_core::desktop::TrayTitlePlacement::Left
+    );
+
+    // The failed sets left the first tray's click in place.
+    engine.control().dispatch_event(
+        ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(tray.click)))]),
+    );
+    let clicked = until(&rx, |batch| {
+        shows(batch, "errors true,true,true,true,true click")
+    });
+    assert!(
+        clicked
+            .iter()
+            .any(|b| shows(b, "errors true,true,true,true,true click")),
+        "{clicked:?}"
+    );
+}
+
 const QUIT: &str = r#"import { mount, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
@@ -2460,6 +2606,79 @@ fn app_quit_reaches_the_platform() {
             "{expected:?}: {batches:?}"
         );
     }
+}
+
+const QUIT_REQUEST: &str = r#"import { mount, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+const requests = signal(0);
+const stop = Application.on("quitRequest", () => {
+  requests.set(requests() + 1);
+  if (requests() === 2) {
+    stop();
+    Application.quit();
+  }
+});
+mount(() => <Text>{`requests ${requests()}`}</Text>);
+"#;
+
+/// While the app listens to `quitRequest`, the platform's quit requests go
+/// to it: the first one only reaches the listener and nothing quits; the
+/// app quits when it decides to, and once it stops listening quit
+/// requests quit again.
+#[test]
+fn quit_requests_reach_the_app_and_it_decides() {
+    use nsh_core::desktop::{DesktopCommand, WindowEvent};
+
+    let (engine, rx) = start_in(
+        QUIT_REQUEST,
+        Environment {
+            os: nsh_engine::Os::Linux,
+            ..Environment::default()
+        },
+    );
+    let app_commands = |batches: &[MountBatch]| -> Vec<DesktopCommand> {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some((**command).clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = until(&rx, |b| {
+        app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::SetQuitOnRequest(false))
+    });
+    assert!(
+        !app_commands(&first).contains(&DesktopCommand::Quit),
+        "{first:?}"
+    );
+    let request = || {
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+        );
+    };
+    request();
+    let heard = until(&rx, |b| shows(b, "requests 1"));
+    assert!(
+        !app_commands(&heard).contains(&DesktopCommand::Quit),
+        "the app decides: {heard:?}"
+    );
+    request();
+    let quit = until(&rx, |b| {
+        app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::Quit)
+    });
+    let commands = app_commands(&quit);
+    assert!(
+        commands.contains(&DesktopCommand::SetQuitOnRequest(true)),
+        "no listener left: {commands:?}"
+    );
 }
 
 /// German's data stands for what the bundle of an app listing it carries.
@@ -2917,7 +3136,7 @@ function App() {
   );
   return (
     <View>
-      <RadioGroup testID="plans" class="flex-row">
+      <RadioGroup testID="plans" class="flex-row" accessibilityLabel="Plan">
         {radio("a", "Basic")}
         {radio("b", "Pro")}
         {radio("c", "Team", true)}
@@ -2930,8 +3149,8 @@ function App() {
 mount(App);
 "##;
 
-/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role on the
-/// group, the radio role and its checked state on each radio alone, a
+/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role and the
+/// app's name on the group, the radio role and its checked state on each radio alone, a
 /// press on an unchecked radio asking for `true` while the app owns which
 /// one is checked, a checked or disabled radio reporting nothing, and the
 /// app's dot inside following the radio with `group-checked:`.
@@ -3001,10 +3220,11 @@ fn a_base_radio_asks_to_be_checked_and_its_group_holds_no_value() {
     let (dot_a, dot_b) = (dot(a), dot(b));
     let initial = std::slice::from_ref(&first);
 
-    // The group: a radio group for screen readers, laid out by the app.
+    // The group: a radio group for screen readers, named by the app
+    // (`accessibilityLabel`) and laid out by it.
     let group = view_props(&first, plans).unwrap();
     assert_eq!(group.accessibility.role, AccessibilityRole::Radiogroup);
-    assert_eq!(group.accessibility.label, None);
+    assert_eq!(group.accessibility.label.as_deref(), Some("Plan"));
 
     // The checked radio: checked and selected for screen readers, its
     // `checkedStyle`, and the app's dot `group-checked:`.
@@ -4428,6 +4648,62 @@ fn a_toggle_is_styled_while_pressed() {
     assert_eq!(off.opacity, 1.0);
 }
 
+const DESCRIBED: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+
+const hint = signal<string | undefined>("Letters and digits only");
+setTimeout(() => hint.set(undefined), 30);
+
+mount(() => (
+  <View>
+    <View testID="field" accessibilityLabel="Name" accessibilityDescription={hint()}>
+      <Text>{hint() ? "described" : "plain"}</Text>
+    </View>
+    <Dialog role="alertdialog" accessibilityLabel="Delete file?" accessibilityDescription="This can't be undone.">
+      <Text>Delete file?</Text>
+    </Dialog>
+  </View>
+));
+"##;
+
+/// `accessibilityDescription` reaches the platform on a view, follows the
+/// app's state, and names what a `Dialog` is about beside its title.
+#[test]
+fn a_description_reaches_the_platform() {
+    use nsh_core::{Accessibility, AccessibilityRole};
+    let (_engine, rx) = start(DESCRIBED);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let find = |batches: &[MountBatch], want: &dyn Fn(&Accessibility, Option<&str>) -> bool| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { props, .. }
+                    if want(&props.accessibility, props.test_id.as_deref()) =>
+                {
+                    Some(props.accessibility.clone())
+                }
+                _ => None,
+            })
+    };
+    let first = std::slice::from_ref(&first);
+    let field = find(first, &|_, id| id == Some("field")).expect("field");
+    assert_eq!(
+        field.description.as_deref(),
+        Some("Letters and digits only")
+    );
+    let dialog = find(first, &|a, _| a.role == AccessibilityRole::AlertDialog).expect("dialog");
+    assert_eq!(dialog.label.as_deref(), Some("Delete file?"));
+    assert_eq!(dialog.description.as_deref(), Some("This can't be undone."));
+    let later = until(&rx, |b| shows(b, "plain"));
+    let field = find(&later, &|_, id| id == Some("field")).expect("field again");
+    assert_eq!(field.description, None);
+    assert_eq!(field.label.as_deref(), Some("Name"));
+}
+
 /// A popup reports a change of its open state before its lifecycle
 /// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
 /// there or all gone, also where that is at once (no motion).
@@ -4982,6 +5258,7 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
                 page: nsh_core::geometry::point(px(150.0), px(10.0)),
                 location: nsh_core::geometry::point(px(150.0), px(10.0)),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     };
@@ -5100,6 +5377,7 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
                 page: at,
                 location: at,
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     };
@@ -5192,7 +5470,7 @@ function App() {
         items={items}
         defaultValue="rice"
         accessibilityLabel="Own"
-        trigger={<View><Text>Own</Text></View>}
+        trigger={<View accessibilityState={{ invalid: true }}><Text>Own</Text></View>}
       />
       <Text>{`Changes: ${changes().join(",")}`}</Text>
     </View>
@@ -5205,7 +5483,8 @@ mount(App);
 /// `nsh/base`'s `Select` through its JS face: `value={null}` is nothing
 /// chosen (the app's), a left-out `value` the select's own from
 /// `defaultValue`; the items' objects, the app's `renderItem` and
-/// `renderGroup`, and `onChange` with the chosen value.
+/// `renderGroup`, and `onChange` with the chosen value; the app's
+/// `invalid` on its trigger kept beside the select's own states.
 #[test]
 fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
     use nsh_core::{AccessibilityRole, ViewProps};
@@ -5249,6 +5528,13 @@ fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
         Some("Rice"),
         "its own, from defaultValue"
     );
+    let state = own.accessibility.state;
+    assert!(state.invalid, "the app's invalid state");
+    assert!(
+        state.has_popup && state.expanded == Some(false),
+        "{state:?}"
+    );
+    assert!(!trigger.accessibility.state.invalid);
 
     // The list, its rows drawn by the app.
     engine

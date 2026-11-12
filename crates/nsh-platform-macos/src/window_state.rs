@@ -8,7 +8,9 @@
 //! state again. The main window's goes into the environment (the engine
 //! holds a move back until the window stops); a window of the app's own
 //! reports it on its root ([`crate::window::state_changed`]), a move or a
-//! live resize once it settles. The displays are `NSScreen.screens`, sent
+//! live resize once it settles. Every notification but a move's or a
+//! resize's also moves the surface's display link to a window that shows
+//! ([`Surface::follow_windows`]). The displays are `NSScreen.screens`, sent
 //! to the engine before the app starts and again on
 //! `NSApplicationDidChangeScreenParametersNotification`
 //! ([`crate::system`]). Cocoa's screen coordinates go up from the primary
@@ -142,6 +144,9 @@ pub(crate) fn observe(surface: &Surface, target: Target, watch: &Watch, window: 
                 with_watch(&surface, target, |w| w.settle.set(w.settle.get() + 1));
             }
             report(&surface, target);
+            // Shown, hidden, minimized, covered, on another screen or the
+            // key one: the display link follows a window that shows.
+            surface.follow_windows();
         }
     });
     let settling_block = RcBlock::new(move |_: NonNull<NSNotification>| {

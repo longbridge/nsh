@@ -39,6 +39,8 @@ fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
         minify: release,
         split: false,
         ui_sets: ui_sets.clone(),
+        development: !release,
+        ..Default::default()
     })
     .map_err(|e| e.plain)?;
     let bytecode =
@@ -76,8 +78,9 @@ fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
         )?;
     }
     // Assets keep their paths: `asset:/img/a.png` -> `assets/img/a.png`;
-    // the UI sets' under `@<package>/`.
-    let root = entry.parent().unwrap();
+    // the UI sets' under `@<package>/`. Their paths are relative to the
+    // bundle's asset root, the app's directory.
+    let root = &bundle.asset_root;
     let imported = bundle.assets.iter().map(|rel| {
         let path = rel
             .components()

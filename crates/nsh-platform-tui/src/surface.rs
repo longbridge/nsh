@@ -8,7 +8,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{MountBatch, Points, Size};
-use nsh_engine::{AppError, Engine, MountSink};
+use nsh_engine::{AppError, Engine, MainThreadTask, MountSink};
 
 use crate::WakeCallback;
 
@@ -22,6 +22,10 @@ pub(crate) enum Message {
     Resized(Size<Points>),
     /// The engine caught up with the keyboard's focus change of this number.
     Focused(u64),
+    /// A function the app runs on the main thread, the one drawing the
+    /// terminal ([`MountSink::run_on_main_thread`]), after the batches
+    /// before it.
+    Run(MainThreadTask),
     #[cfg(feature = "dev")]
     Reload,
 }
@@ -95,6 +99,9 @@ impl MountSink for Sink {
     }
     fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
+    }
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
     }
 }
 

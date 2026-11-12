@@ -38,25 +38,16 @@ fn main_thread() -> MainThreadMarker {
 fn init_logging() {
     #[cfg(feature = "dev")]
     crate::dev::init_logging();
+    // Warnings, errors and the app's `js` lines go to the unified log, under
+    // the host app's bundle identifier, where Xcode's console, Console and
+    // `log stream` show them. A logger the host app installed keeps them
+    // instead.
     #[cfg(not(feature = "dev"))]
     {
-        struct Stderr;
-        impl log::Log for Stderr {
-            fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-                m.level() <= log::Level::Warn || m.target() == "js"
-            }
-            fn log(&self, r: &log::Record<'_>) {
-                if self.enabled(r.metadata()) {
-                    eprintln!("[nsh] {} {}: {}", r.level(), r.target(), r.args());
-                }
-            }
-            fn flush(&self) {}
-        }
-        static LOGGER: Stderr = Stderr;
-        // Keep the host app's logger if it installed one.
-        if log::set_logger(&LOGGER).is_ok() {
-            log::set_max_level(log::LevelFilter::Info);
-        }
+        let mut logging = nsh_platform_apple::unified_log::Options::default();
+        // Lines on a terminal's stderr share it with the host app's own.
+        logging.stderr_prefix = "[nsh] ";
+        nsh_platform_apple::unified_log::install(logging);
     }
 }
 

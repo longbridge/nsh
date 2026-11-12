@@ -67,9 +67,10 @@ use nsh_core::{
     geometry::point,
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
-        SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
-        laid_out, latch_holds, touchpad_wait, transforms,
+        SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE,
+        ZOOM_NOTCH, has_press, laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -278,6 +279,8 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The `onWheel` listener a scroll went to, which keeps the rest of it.
+    wheel_listener: RefCell<WheelLatch<NshView>>,
     /// Views that track `HOVERED`.
     hover_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views listening to mouse motion; other apps skip the extra hit test.
@@ -309,6 +312,9 @@ pub(crate) struct Input {
     next_id: Cell<u32>,
     /// Next press generation (invalidates callbacks of earlier ones).
     next_gen: Cell<u64>,
+    /// A press on a view that drags the window, held until it becomes a
+    /// click or the window's move ([`crate::chrome::WindowPress`]).
+    pub(crate) window_press: RefCell<Option<crate::chrome::WindowPress>>,
 }
 
 /// What a pointer is doing.
@@ -487,11 +493,13 @@ unsafe extern "system" fn on_timer(
 pub(crate) fn reset(surface: &Surface) {
     crate::file_drop::reset(surface);
     let input = &surface.input;
+    input.window_press.borrow_mut().take();
     input.pointers.borrow_mut().clear();
     input.two.borrow_mut().take();
     input.zoom.borrow_mut().take();
     input.wheel.borrow_mut().take();
     input.latch.borrow_mut().take();
+    input.wheel_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -670,6 +678,29 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
     })
 }
 
+/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
+/// view `view` that sets no cursor of its own: the pointer there wins over
+/// the I-beam of selectable text and the arrow of plain text, as on the
+/// other desktops (#759).
+fn over_link(view: &NshView, x: f32, y: f32) -> bool {
+    {
+        let s = view.state();
+        if css_cursor(s.style.cursor).is_some()
+            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
+        {
+            return false;
+        }
+    }
+    let (lx, ly) = local(view, x, y);
+    let s = view.state();
+    let Some(text) = s.text.as_ref() else {
+        return false;
+    };
+    crate::text::char_at(&s, lx, ly)
+        .and_then(|i| text.text.link_at(i))
+        .is_some_and(|link| has_press(link.events))
+}
+
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
 /// else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
@@ -684,6 +715,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         {
             return c;
         }
+    }
+    if over_link(&hit.view, x, y) {
+        return Cursor::Hand;
     }
     let mut view = Some(hit.view);
     while let Some(v) = view {
@@ -715,22 +749,33 @@ pub(crate) enum WindowPart {
 /// text field, a hosted item (editors, web views) or a view with press or
 /// touch handlers is nearer.
 pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPart> {
+    window_part_at(surface, x, y).map(|(_, part)| part)
+}
+
+/// The innermost view at `(x, y)` (the input root's coordinates) when
+/// pressing there drags the window ([`WindowPart::Drag`]).
+pub(crate) fn drag_view(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    let (view, part) = window_part_at(surface, x, y)?;
+    (part == WindowPart::Drag).then_some(view)
+}
+
+fn window_part_at(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowPart)> {
     let hit = pick(&surface.input_root(), x, y, true)?;
     if hit.item.is_some() {
         return None;
     }
-    let mut view = Some(hit.view);
+    let mut view = Some(hit.view.clone());
     while let Some(v) = view {
         {
             let s = v.state();
             if let Some(edge) = s.props.window_resize {
-                return Some(WindowPart::Resize(edge));
+                return Some((hit.view, WindowPart::Resize(edge)));
             }
             if let Some(control) = s.props.window_control {
-                return Some(WindowPart::Control(control));
+                return Some((hit.view, WindowPart::Control(control)));
             }
             if let Some(drag) = s.props.window_drag {
-                return drag.then_some(WindowPart::Drag);
+                return drag.then_some((hit.view, WindowPart::Drag));
             }
             if s.kind == ViewKind::Input
                 || has_press(s.events)
@@ -744,25 +789,54 @@ pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPar
     None
 }
 
+/// The selectable area whose text gives the app its context menu: a
+/// listener on the area or between it and the text replaces the native
+/// edit menu. A listener outside the area leaves that menu alone.
+fn menu_area(view: &NshView) -> Option<NshView> {
+    let area = crate::selectable_view::area_of(view)?;
+    let mut at = Some(view.clone());
+    while let Some(view) = at {
+        if view.state().kind == ViewKind::Input {
+            return None;
+        }
+        if view.state().events.contains(EventKind::ContextMenu) {
+            return Some(area);
+        }
+        if view == area {
+            break;
+        }
+        at = view.parent_view();
+    }
+    None
+}
+
 /// A context menu asked for on `view` without a pointer (UI Automation's
 /// `ShowContextMenu`): the view, or the nearest around it that listens to
 /// `onContextMenu`, hears it with no pointer at its bottom-start corner
 /// ([`nsh_core::input::context_menu_anchor`]), unless a text field or
-/// selectable text is nearer. True when a view heard it.
+/// selectable text is nearer (selectable text whose selectable view
+/// listens excepted: [`menu_area`]). True when a view
+/// heard it.
 pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
+    surface.chrome.context_area.take();
+    let menu_area = menu_area(view);
+    let app_menu = menu_area.is_some();
     let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
     let mut at = Some(view.clone());
     while let Some(v) = at {
-        let (id, listens, stop, size) = {
+        let (id, listens, field, selectable, size) = {
             let s = v.state();
             (
                 s.id,
                 s.events.contains(EventKind::ContextMenu),
-                s.kind == ViewKind::Input || crate::text::selectable(&s) || s.props.selectable_view,
+                s.kind == ViewKind::Input,
+                crate::text::selectable(&s) || s.props.selectable_view,
                 s.frame.size,
             )
         };
+        let stop = field || (selectable && !app_menu);
         if listens {
+            surface.chrome.context_area.replace(menu_area);
             let position = nsh_core::input::context_menu_anchor(size, rtl);
             let (page_x, page_y) = v
                 .to_root()
@@ -788,11 +862,15 @@ pub(crate) fn show_context_menu(surface: &Rc<Surface>, view: &NshView) -> bool {
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
-/// menu.
+/// menu, but where its selectable view, or a view between them, listens
+/// ([`menu_area`]).
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    let menu_area = menu_area(&hit.view);
+    let app_menu = menu_area.is_some();
+    surface.chrome.context_area.take();
     let mut view = Some(hit.view);
     while let Some(v) = view {
         let (id, listens, input, selectable, area) = {
@@ -806,6 +884,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             )
         };
         if listens {
+            surface.chrome.context_area.replace(menu_area);
             let (location_x, location_y) = local(&v, x, y);
             let event = nsh_core::ContextMenuEvent::new(
                 point(Points(location_x), Points(location_y)),
@@ -820,7 +899,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        if selectable || area {
+        if (selectable || area) && !app_menu {
             // Text in a selectable view has the area's menu.
             match crate::selectable_view::area_of(&v) {
                 Some(area) => crate::selectable_view::context_menu(surface, &area),
@@ -836,6 +915,12 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if event.kind == PointerKind::Down {
+        surface.chrome.context_area.take();
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -890,8 +975,14 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             motion(surface, key, x, y, time);
         }
         PointerKind::Up => {
-            if mouse && event.button != 0 {
-                return;
+            if mouse {
+                surface.input.last.set(Some((x, y)));
+                if let Some(released) = released_button(event.button) {
+                    mouse_up(surface, x, y, event.modifiers, released);
+                }
+                if event.button != 0 {
+                    return;
+                }
             }
             up(surface, key, Some((x, y)), time, false);
         }
@@ -1019,6 +1110,77 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     })
 }
 
+/// `onWheel` for a wheel from the window: the nearest view around the one
+/// under the pointer that listens hears it ([`input::wheel_listener`]),
+/// in lines of 16 points for notches (`WM_MOUSEWHEEL`'s default), in
+/// points for precise deltas, and one scroll stays where it went
+/// ([`WheelLatch`]: a view that took it keeps it while it keeps coming; a
+/// scroll going on in a scroll view is only observed). Returns whether
+/// that view takes the wheel, so nothing scrolls or zooms natively.
+fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
+    let (x, y) = (event.x, event.y);
+    if event.dx == 0.0 && event.dy == 0.0 {
+        return false;
+    }
+    let input = &surface.input;
+    let time = event.time * 1000.0;
+    // The axis the scroll views take it on: Shift turns a mouse's vertical
+    // notches horizontal (`wheel`), and the latch is kept on that axis.
+    let horizontal = if !event.precise && event.dx == 0.0 && event.modifiers.shift {
+        true
+    } else {
+        event.dx.abs() > event.dy.abs()
+    };
+    // Windows reports no gesture phases: every event is a step.
+    let step = WheelStep::Discrete {
+        horizontal,
+        precise: event.precise,
+        time,
+    };
+    let scrolling = input.wheel.borrow().is_some()
+        || input
+            .latch
+            .borrow()
+            .as_ref()
+            .is_some_and(|(view, h, last)| latch_holds(*h, *last, horizontal, time) && shown(view));
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        true,
+        scrolling,
+        |v| shown(v) && v.state().events.contains(EventKind::Wheel),
+        || {
+            let hit = pick(&surface.input_root(), x, y, true)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Wheel),
+                // A multiline field scrolls its own lines.
+                |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    let delta = if event.precise {
+        nsh_core::WheelDelta::Points(nsh_core::geometry::point(
+            Points(event.dx),
+            Points(event.dy),
+        ))
+    } else {
+        nsh_core::WheelDelta::Lines(nsh_core::geometry::point(event.dx / 16.0, event.dy / 16.0))
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let wheel = nsh_core::WheelEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        delta,
+        event.modifiers.core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    takes
+}
+
 /// A wheel event from the window.
 pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     let (x, y) = (event.x, event.y);
@@ -1026,6 +1188,9 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
         return;
     }
     surface.input.last.set(Some((x, y)));
+    if wheel_event(surface, &event) {
+        return;
+    }
     let (mut dx, mut dy) = (event.dx, event.dy);
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
     // (precision touchpads pinch this way too).
@@ -1049,11 +1214,17 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     let input = &surface.input;
     if MODIFIER_KEYS.contains(&event.vk) && !event.repeat {
         modifiers_changed(surface, event.modifiers);
+    } else if event.down {
+        // Before the key acts: the focus it moves shows (`focus-visible:`).
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
     }
     if !event.down {
         // `DefWindowProc` opens the window menu when Alt is released after
         // it saw no other key: swallow the release once Alt + key was ours.
         return event.vk == VK_MENU && input.alt_combo.replace(false);
+    }
+    if !MODIFIER_KEYS.contains(&event.vk) {
+        surface.chrome.context_area.take();
     }
     // The window's shortcuts (full screen, the dev host's reload) work
     // wherever the focus is.
@@ -1099,22 +1270,31 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 }
 
 /// The enabled text fields shown under `view`, in tree order (a scroll
-/// view's content as it is on screen).
+/// view's content as it is on screen; a shown overlay's content after the
+/// view it follows, [`input::tab_order`]).
 fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
-    {
+    let skipped = |view: &NshView| {
         let s = view.state();
-        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
-            return;
+        s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None
+    };
+    let order = input::tab_order(
+        view.clone(),
+        |view| {
+            if skipped(view) {
+                return Vec::new();
+            }
+            view.with_children_in_reading_order(<[NshView]>::to_vec)
+        },
+        NshView::id,
+        |view| view.state().props.tab_after,
+    );
+    out.extend(order.into_iter().filter(|view| {
+        if skipped(view) {
+            return false;
         }
-        if s.kind == ViewKind::Input && !s.props.accessibility.state.disabled {
-            out.push(view.clone());
-        }
-    }
-    view.with_children_in_reading_order(|children| {
-        for child in children {
-            collect_fields(child, out);
-        }
-    });
+        let s = view.state();
+        s.kind == ViewKind::Input && !s.props.accessibility.state.disabled
+    }));
 }
 
 // --- Hit testing --------------------------------------------------------------------
@@ -1650,6 +1830,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: point(Points(p.x), Points(p.y)),
                     location: point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()
@@ -2207,6 +2392,45 @@ fn mouse_moved(
     }
 }
 
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released. A real release only: a cancelled press is
+/// not one.
+fn mouse_up(surface: &Surface, x: f32, y: f32, modifiers: Modifiers, button: MouseButton) {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(&view, x, y);
+        let payload = EventPayload::Mouse(nsh_core::MouseEvent::released(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            modifiers.core(),
+            button,
+        ));
+        surface.event(id, EventKind::MouseUp, payload);
+    }
+}
+
+/// The `MouseButton` of [`PointerEvent::button`] (its index).
+fn released_button(button: u8) -> Option<MouseButton> {
+    match button {
+        0 => Some(MouseButton::Left),
+        1 => Some(MouseButton::Right),
+        2 => Some(MouseButton::Middle),
+        3 => Some(MouseButton::Back),
+        4 => Some(MouseButton::Forward),
+        _ => None,
+    }
+}
+
 /// The mouse at `(x, y)` (root coordinates) over `view`, as its
 /// `onMouseEnter` / `onMouseMove` / `onMouseLeave` hear it: the position
 /// in the view (its transforms undone) and in the root view.
@@ -2441,7 +2665,7 @@ mod tests {
     fn root() -> NshView {
         let root = NshView::new(ROOT_ID, ViewKind::View);
         root.state_mut().frame = crate::geom::rect(0.0, 0.0, 400.0, 400.0);
-        root.set_invalidate(Rc::new(|_| {}));
+        root.set_invalidate(Rc::new(|_, _| {}));
         root
     }
 
@@ -2450,6 +2674,82 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// Selectable text shows its edit menu, unless its selectable view, or
+    /// a view between them, listens to `onContextMenu`, which hears the
+    /// menu asked for instead; a listener around the selectable view does
+    /// not take it.
+    #[test]
+    fn a_selectable_views_listener_takes_its_texts_menu() {
+        let root = root();
+        let row = view(&root, 2, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        let area = view(&row, 4, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        area.state_mut().props.selectable_view = true;
+        let block = view(&area, 6, ViewKind::View, rect(0.0, 0.0, 200.0, 40.0));
+        let text = view(&block, 8, ViewKind::Text, rect(0.0, 0.0, 200.0, 20.0));
+        assert!(menu_area(&text).is_none());
+        row.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&text).is_none());
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&text).is_some());
+        // The app's menu is for that area: its edit roles act on it.
+        assert!(menu_area(&text).is_some_and(|a| a == area));
+        area.state_mut().events.set(EventKind::ContextMenu, false);
+        block.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&text).is_some());
+        // Selectable text in no selectable view keeps its own menu.
+        let alone = view(&row, 10, ViewKind::Text, rect(0.0, 50.0, 200.0, 20.0));
+        assert!(menu_area(&alone).is_none());
+        // A field's own menu edits the field, even inside a listening area.
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        let input = view(&area, 12, ViewKind::Input, rect(0.0, 60.0, 200.0, 20.0));
+        input.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(menu_area(&input).is_none());
+    }
+
+    #[test]
+    fn a_right_click_captures_only_the_selectable_areas_own_request() {
+        let surface = Surface::new(nsh_core::platform::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let outside = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 100.0),
+        );
+        outside.state_mut().events.set(EventKind::ContextMenu, true);
+        let area = view(&outside, 4, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        area.state_mut().props.selectable_view = true;
+        view(&area, 6, ViewKind::Text, rect(0.0, 0.0, 200.0, 20.0));
+        for listens in [true, false] {
+            area.state_mut().events.set(EventKind::ContextMenu, listens);
+            pointer(
+                &surface,
+                PointerEvent {
+                    kind: PointerKind::Down,
+                    x: 10.0,
+                    y: 10.0,
+                    button: 1,
+                    buttons: 2,
+                    pointer: 1,
+                    touch: false,
+                    pen: false,
+                    time: 0.0,
+                    clicks: 1,
+                    modifiers: Modifiers::default(),
+                },
+            );
+            assert_eq!(
+                surface
+                    .chrome
+                    .context_area
+                    .borrow()
+                    .as_ref()
+                    .map(NshView::id),
+                listens.then_some(area.id())
+            );
+        }
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {
@@ -2660,5 +2960,31 @@ mod tests {
     fn ctrl_wheel_zooms_by_notches() {
         assert!((zoom_factor(-ZOOM_NOTCH.0) - 1.1).abs() < 1e-5);
         assert!((zoom_factor(2.0 * ZOOM_NOTCH.0) - 1.0 / 1.21).abs() < 1e-5);
+    }
+
+    #[test]
+    fn drag_view_picks_the_innermost_view_in_a_drag_region() {
+        let surface = Surface::new(Default::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 200.0, 100.0);
+        let bar = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 40.0),
+        );
+        bar.state_mut().props.window_drag = Some(true);
+        let child = view(&bar, 4, ViewKind::View, rect(10.0, 5.0, 50.0, 30.0));
+        let excluded = view(&bar, 6, ViewKind::View, rect(70.0, 5.0, 50.0, 30.0));
+        excluded.state_mut().props.window_drag = Some(false);
+        let button = view(&bar, 8, ViewKind::View, rect(130.0, 5.0, 50.0, 30.0));
+        button.state_mut().events.set(EventKind::Press, true);
+
+        assert_eq!(window_part(&surface, 5.0, 5.0), Some(WindowPart::Drag));
+        assert_eq!(drag_view(&surface, 5.0, 5.0), Some(bar));
+        assert_eq!(drag_view(&surface, 20.0, 15.0), Some(child));
+        assert_eq!(window_part(&surface, 80.0, 15.0), None);
+        assert_eq!(drag_view(&surface, 80.0, 15.0), None);
+        assert_eq!(window_part(&surface, 140.0, 15.0), None);
+        assert_eq!(drag_view(&surface, 140.0, 15.0), None);
     }
 }

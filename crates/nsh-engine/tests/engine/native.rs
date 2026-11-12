@@ -72,6 +72,7 @@ fn start_in(
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let mut app = Bundle::source(bundle.code);
@@ -506,6 +507,65 @@ fn web_views_say_when_the_platform_shows_none() {
         shown.contains(&"error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM".to_owned()),
         "{shown:?}"
     );
+}
+
+const SHADERS_AVAILABLE_APP: &str = r#"import { mount, shadersAvailable, Text } from "nsh";
+
+function App() {
+  return <Text>{`shaders ${shadersAvailable()}`}</Text>;
+}
+
+mount(App);
+"#;
+
+/// The texts the app above shows within `time`.
+fn shown_within(rx: &Receiver<MountBatch>, time: Duration) -> Vec<String> {
+    let deadline = std::time::Instant::now() + time;
+    let mut shown = Vec::new();
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        shown.extend(texts(&batch));
+    }
+    shown
+}
+
+#[test]
+fn shaders_are_available_until_the_platform_finds_no_gpu() {
+    let (engine, rx) = start_in(SHADERS_AVAILABLE_APP, None, Default::default());
+    assert_eq!(
+        shown_within(&rx, Duration::from_secs(2)),
+        ["shaders true"],
+        "the default environment draws shaders"
+    );
+    let control = engine.control();
+    control.shaders_unavailable();
+    assert_eq!(shown_within(&rx, Duration::from_secs(2)), ["shaders false"]);
+    // Whatever the platform reports later, and however often it says so.
+    control.set_environment(nsh_core::platform::Environment {
+        color_scheme: nsh_core::platform::ColorScheme::Dark,
+        ..Default::default()
+    });
+    control.shaders_unavailable();
+    let later = shown_within(&rx, Duration::from_millis(500));
+    assert!(!later.iter().any(|t| t == "shaders true"), "{later:?}");
+}
+
+#[test]
+fn shaders_are_unavailable_where_the_platform_draws_none() {
+    for environment in [
+        // Built without a renderer.
+        nsh_core::platform::Environment {
+            shaders: false,
+            ..Default::default()
+        },
+        // A terminal's Cells.
+        nsh_core::platform::Environment {
+            cell: Some(Size::new(px(8.0), px(16.0))),
+            ..Default::default()
+        },
+    ] {
+        let (_engine, rx) = start_in(SHADERS_AVAILABLE_APP, None, environment);
+        assert_eq!(shown_within(&rx, Duration::from_secs(2)), ["shaders false"]);
+    }
 }
 
 const WEB_LOAD_APP: &str = r#"import { mount, View, WebView } from "nsh";
