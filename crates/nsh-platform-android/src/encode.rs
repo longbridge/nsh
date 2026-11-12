@@ -838,6 +838,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.int(4);
                                 e.int(count as i32);
                             }
+                            N::CloseAll => e.int(5),
                             _ => e.int(-1),
                         }
                     }

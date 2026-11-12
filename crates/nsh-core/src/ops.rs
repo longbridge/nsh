@@ -1554,7 +1554,8 @@ pub enum SnapAlignment {
 /// (`keyboardShouldPersistTaps`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KeyboardTaps {
-    /// The tap dismisses the keyboard and reaches nothing else (default).
+    /// A tap only dismisses the keyboard (default): nothing inside acts on
+    /// it; long presses and drags go on as with the keyboard down.
     #[default]
     Never,
     /// Taps never dismiss the keyboard.
@@ -1864,8 +1865,7 @@ pub enum ScreenProp {
     /// shown one with a setting decides; the core sends the result as
     /// [`Command::Orientations`].
     ///
-    /// [`crate::ModalConfig::PORTRAIT`] bits. `shared`: a dialog's
-    /// `supportedOrientations` is [`ModalProp::Orientations`].
+    /// [`crate::ModalConfig::PORTRAIT`] bits.
     #[prop(ios = "supportedOrientations", android = "supportedOrientations", with = crate::js::host_values::page_orientations, reset = ScreenProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = SCREEN, shared)]
     Orientations(u8),
 }
@@ -1915,7 +1915,7 @@ pub enum ModalProp {
     /// presenter's).
     ///
     /// [`crate::ModalConfig::PORTRAIT`] bits.
-    #[prop(ios = "supportedOrientations", with = crate::js::host_values::orientations, reset = ModalProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = MODAL)]
+    #[prop(ios = "supportedOrientations", with = crate::js::host_values::orientations, reset = ModalProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = MODAL, shared)]
     Orientations(u8),
     /// `closeOnEscape`: Escape and the Android back button close it natively
     /// (default true); either way they call `onCancel`.

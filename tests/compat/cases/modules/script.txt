@@ -122,10 +122,12 @@ covers [nsh] AudioPlayer
 # mod-notifications
 tap id:case-mod-notifications
 # nothing shows notifications there: the permission is unavailable and nothing
-# shows, the badge and close do nothing, and bad arguments reject.
+# shows, the badge, close and closeAll do nothing (closeAll resolves with
+# nothing), and bad arguments reject.
 expect Permission: unknown
 tap id:notify
 expect Permission: unavailable unavailable
+expect Closed: undefined
 expect Refused: RangeError RangeError
 expect Shown: false false
 covers [nsh] Notifications

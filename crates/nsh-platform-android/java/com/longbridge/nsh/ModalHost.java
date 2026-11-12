@@ -338,8 +338,11 @@ final class ModalHost {
 
         @Override
         public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-            boolean tracking = touches.onTouch(e);
-            return super.dispatchTouchEvent(e) || tracking;
+            android.view.MotionEvent t = mounter.keyboardTap(e);
+            boolean tracking = touches.onTouch(t);
+            boolean handled = super.dispatchTouchEvent(t) || tracking;
+            if (t != e) t.recycle();
+            return handled;
         }
 
         /** Holds the root where the content starts (below the status bar unless translucent). */

@@ -599,15 +599,22 @@ For each `open`, the CLI builds the entry, starts a dev server of its own in a t
 besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
 (`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
 unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
-taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. And
-it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. The
+GPUI host gets both as well (`test_host::opens_on_a_display`): its windows open centered on that display
+(`docs/dev/gpui.md` "Checking a change"). And the macOS host
+gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
 `Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
 without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
 the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
 "Checking a change"). It gets `--activation-policy` too when nsh.json's `macos.activationPolicy` is not the default
 (`MacosConfig::host_args`, as under `nsh run`): `--background` takes precedence, so the app runs with its policy under
-`--foreground` (`docs/dev/macos.md` "Activation policy"). A left button press into a web view of the inactive app goes
+`--foreground` (`docs/dev/macos.md` "Activation policy"). The Windows, GPUI and Linux hosts get `--background` too
+unless `--foreground` (`test_host::runs_in_background`): their windows neither take the focus nor come to the front,
+and the window that would have the keyboard reads as focused to the app. On Linux that holds where a user may type on
+the display, and the agent's keys go to the widgets; on a virtual display (Xvfb, CI) the app runs as in the
+foreground (`docs/dev/windows.md`, `gpui.md` and `linux.md`, "Checking a change"). Linux has no `--display`: Wayland
+does not let an app place its windows. A left button press into a web view of the inactive app goes
 to the `WKWebView` directly (`agent::mouse`), since AppKit gives an inactive window's first click only to views that
 accept the first mouse. A window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
@@ -746,7 +753,8 @@ GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s c
 offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
 feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (the one `--device` names, else a
-booted one, else the newest iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
+booted one, else the newest iPhone; the Simulator app opened behind the app in use, where `nsh run`
+brings it to the front: `run::SimulatorWindow`) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
 simulator shares the Mac's network and files). As `nsh run --target ios` and
 `nsh package --target ios-simulator --run` do, it passes the app the variables of its environment that the app's
 `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads them as on the desktops, whose

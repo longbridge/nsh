@@ -1911,6 +1911,14 @@ final class Mounter {
         updateBack();
     }
 
+    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    void reportAllScreenInsets() {
+        for (int i = 0; i < screenOptions.size(); i++) {
+            int id = screenOptions.keyAt(i);
+            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+        }
+    }
+
     /** A screen's insets below its header, for `safeAreaInsets()`. */
     private void reportScreenInsets(int id, ScreenOptions o) {
         float top = o.shown && !o.transparent ? 0 : host.safeTop();
@@ -2619,6 +2627,44 @@ final class Mounter {
 
     // --- Events --------------------------------------------------------------
 
+    /**
+     * The scroll view whose `keyboardShouldPersistTaps` "never" holds the current touch: if the touch is a tap, it
+     * only dismisses the keyboard; meanwhile it presses nothing.
+     */
+    private ScrollBox tapScroll;
+    /** A view of the touch reported a long press: it is no tap. */
+    private boolean longPressed;
+
+    void startTapOnly(ScrollBox s) {
+        tapScroll = s;
+    }
+
+    void endTapOnly(ScrollBox s) {
+        if (tapScroll == s) tapScroll = null;
+    }
+
+    /**
+     * At a root (the surface, a modal), before it dispatches {@code e}: a tap that only dismisses the keyboard
+     * reaches the views and JS responders as a cancel, so nothing inside (a responder, a web view) acts on it.
+     * Returns the event to dispatch, a new one to recycle when it is not {@code e}.
+     */
+    android.view.MotionEvent keyboardTap(android.view.MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == android.view.MotionEvent.ACTION_DOWN) {
+            // Set by the scroll view as the down goes through it; nothing of an earlier touch lingers.
+            tapScroll = null;
+            longPressed = false;
+            return e;
+        }
+        if (action != android.view.MotionEvent.ACTION_UP || tapScroll == null || longPressed || !tapScroll.stillTap(e)) return e;
+        ScrollBox s = tapScroll;
+        tapScroll = null;
+        s.hideKeyboard();
+        android.view.MotionEvent cancel = android.view.MotionEvent.obtain(e);
+        cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+        return cancel;
+    }
+
     boolean wants(int id, int kind) {
         if (kind >= 64) return (eventsHigh.get(id) & (1L << (kind - 64))) != 0;
         return (events.get(id) & (1L << kind)) != 0;
@@ -2638,6 +2684,7 @@ final class Mounter {
     private final android.util.SparseArray<float[]> panActivations = new android.util.SparseArray<>();
     /** Scroll views an activated pan gate blocks. */
     private final java.util.ArrayList<ScrollBox> gatedScrolls = new java.util.ArrayList<>();
+    private View activeGate;
 
     private void clearJsResponder() {
         for (ScrollBox s : blockedScrolls) s.jsBlocked = false;
@@ -2662,6 +2709,7 @@ final class Mounter {
     /** The pan gate of {@code v} activated: the scroll views around it stop taking the touches. */
     void gateBlock(View v) {
         gateRelease();
+        activeGate = v;
         for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
             if (p instanceof ScrollBox) {
                 ((ScrollBox) p).gateBlocked = true;
@@ -2673,8 +2721,14 @@ final class Mounter {
 
     /** The touches of an activated pan gate ended. */
     void gateRelease() {
+        activeGate = null;
         for (ScrollBox s : gatedScrolls) s.gateBlocked = false;
         gatedScrolls.clear();
+    }
+
+    /** The view whose pan gate activated for the touches down now, or null. */
+    View activeGate() {
+        return activeGate;
     }
 
     void event(int id, int kind) {
@@ -2701,6 +2755,8 @@ final class Mounter {
      * where the touch is in {@code v} and in its root view.
      */
     void press(int id, int kind, View v, PressAt at) {
+        if (kind == Native.LONG_PRESS) longPressed = true;
+        if (kind == Native.PRESS && tapScroll != null) return;
         // The surface, or the window of the modal the view is in.
         View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
         int[] rootAt = new int[2];

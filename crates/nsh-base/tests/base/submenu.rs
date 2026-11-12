@@ -213,3 +213,86 @@ fn a_sheet_submenu_reports_its_items_shown_and_the_back_row() {
         "share open TriggerPress, share close Cancel, share open TriggerPress, share close Select",
     );
 }
+
+#[derive(Clone, PartialEq, Props)]
+struct PaddedProps {
+    /// Where the menu's trigger is, down the window.
+    top: f32,
+    /// The submenu's items.
+    rows: usize,
+}
+
+/// A menu whose popups have padding and a border, as apps draw theirs,
+/// with its trigger `top` points down the window: a submenu, More, with
+/// `rows` items.
+#[component]
+fn Padded(props: PaddedProps) -> impl IntoElement {
+    let row = |id: String, label: String| view().test_id(&id).h(px(30.0)).child(text(label));
+    let rows = props.rows;
+    view().pt(px(props.top)).pl(px(40.0)).child(
+        menu()
+            .popup_style(|s| s.p(px(4.0)).border_1())
+            .trigger(row("file".into(), "File".into()).w(px(80.0)))
+            .child(menu_item().child(row("new".into(), "New".into())))
+            .child(
+                submenu()
+                    .trigger(row("more".into(), "More".into()))
+                    .children((0..rows).map(move |i| {
+                        menu_item().child(row(format!("item{i}"), format!("Item {i}")))
+                    })),
+            ),
+    )
+}
+
+/// [`Padded`] in a 390 × 600 desktop window, its submenu open.
+fn open_padded(top: f32, rows: usize) -> Headless {
+    let props = PaddedProps { top, rows };
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(600.0)),
+        ..EngineConfig::new(Root::new::<Padded>(move || props.clone()))
+    };
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.first_render().unwrap();
+    app.press("id:file").unwrap();
+    app.wait_for("More").unwrap();
+    app.hover("id:more").unwrap();
+    app.wait_for("Item 0").unwrap();
+    app
+}
+
+/// The bounds of the view with `test_id`, in the window.
+fn bounds_of(app: &Headless, test_id: &str) -> nsh_core::Bounds<Points> {
+    app.screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some(test_id))
+        .unwrap_or_else(|| panic!("a view {test_id}"))
+        .bounds
+}
+
+#[test]
+fn a_desktop_submenus_first_item_lines_up_with_its_trigger() {
+    let app = open_padded(100.0, 3);
+    let (trigger, first) = (bounds_of(&app, "more"), bounds_of(&app, "item0"));
+    assert_eq!(
+        first.origin.y, trigger.origin.y,
+        "{first:?} beside {trigger:?}"
+    );
+    // Beside the menu, outside its border.
+    assert!(
+        first.origin.x > trigger.right(),
+        "{first:?} beside {trigger:?}"
+    );
+}
+
+#[test]
+fn a_desktop_submenu_near_the_bottom_stays_in_the_window() {
+    let app = open_padded(440.0, 6);
+    let (trigger, last) = (bounds_of(&app, "more"), bounds_of(&app, "item5"));
+    // Six rows do not fit below the trigger: the popup moves up, its last
+    // row and the padding and border under it inside the window.
+    assert!(last.bottom() + px(5.0) <= px(600.0), "{last:?}");
+    assert!(bounds_of(&app, "item0").origin.y < trigger.origin.y);
+}

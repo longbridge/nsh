@@ -940,7 +940,8 @@ impl Mounter {
         &self.target
     }
 
-    /// Node `id`'s view, for orientation updates and native tests.
+    /// Node `id`'s view (the root's window for the orientations;
+    /// `nsh test --target ios`).
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
         Some(self.slot(id)?.native.view().retain())
     }
@@ -3568,10 +3569,24 @@ impl Mounter {
             );
             if screen.config.large_title {
                 // Large titles collapse as the content scrolls under them.
-                if let Some(scroll) = first_scroll_view(&screen.view) {
+                if let Some(scroll) = first_scroll_view(&screen.view)
+                    && scroll.contentInsetAdjustmentBehavior()
+                        != UIScrollViewContentInsetAdjustmentBehavior::Automatic
+                {
+                    // UIKit keeps a scroll view at its top when its safe area
+                    // changes, not when it starts to adjust for it. One
+                    // already on screen (new content, or a header that turned
+                    // large in place) would keep its offset: its content
+                    // under the header, read as scrolled, the title collapsed.
+                    let at_top = scroll.contentOffset().y <= -scroll.adjustedContentInset().top;
                     scroll.setContentInsetAdjustmentBehavior(
                         UIScrollViewContentInsetAdjustmentBehavior::Automatic,
                     );
+                    if at_top {
+                        let mut offset = scroll.contentOffset();
+                        offset.y = -scroll.adjustedContentInset().top;
+                        scroll.setContentOffset(offset);
+                    }
                 }
             }
         }
@@ -4654,7 +4669,7 @@ impl Drop for Mounter {
 }
 
 /// The first scroll view in `view`'s subtree (breadth first).
-fn first_scroll_view(view: &UIView) -> Option<Retained<UIScrollView>> {
+pub(crate) fn first_scroll_view(view: &UIView) -> Option<Retained<UIScrollView>> {
     let mut queue = vec![view.retain()];
     while !queue.is_empty() {
         let mut next = Vec::new();
@@ -5018,12 +5033,6 @@ fn disappear(
     );
 }
 
-/// The user asked for less motion: pages and dialogs come and go with
-/// UIKit's own motion, not through their `transitionShader`.
-fn reduce_motion() -> bool {
-    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5143,4 +5152,10 @@ mod tests {
         };
         assert!(!holds_refresh(Some(&custom), &new));
     }
+}
+
+/// The user asked for less motion: pages and dialogs come and go with
+/// UIKit's own motion, not through their `transitionShader`.
+fn reduce_motion() -> bool {
+    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
 }

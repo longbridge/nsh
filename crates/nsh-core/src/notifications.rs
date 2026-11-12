@@ -118,6 +118,10 @@ pub enum NotificationCommand {
     },
     /// Remove the notification called this, shown or waiting to show.
     Close(String),
+    /// Remove every notification of the app's, shown or waiting to show,
+    /// those an earlier run of the app left included where the platform
+    /// can reach them.
+    CloseAll,
     /// Report the notifications the user presses, those pressed before now
     /// (which started the app) first.
     Listen,

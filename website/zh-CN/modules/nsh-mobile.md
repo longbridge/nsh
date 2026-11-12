@@ -89,7 +89,7 @@ function App() {
 mount(App);
 ```
 
-`TabBar` 来自 `nsh/mobile`，在 Rust 中是 `nsh_core::mobile`。选中状态属于应用：一次点按通过 `onChange` 报告该标签的索引（`{ index }`），标签栏像系统的一样立即显示这次选择，应用显示那一部分并把索引作为 `selectedIndex` 传回。样式没有给定高度时，高度是系统的。在 Rust 中，`tab_bar()` 创建它，每个 prop 一个 setter（`.items(..)`、`.selected_index(..)`），每个事件一个监听方法（`.on_change(..)`），以及带类型的样式方法；`TabBarItem::new(title).icon(name)` 创建一个标签。
+`TabBar` 来自 `nsh/mobile`，在 Rust 中是 `nsh_core::mobile`。选中状态属于应用：一次点按通过 `onChange` 报告该标签的索引（`{ index }`），标签栏像系统的一样立即显示这次选择，应用显示那一部分并把索引作为 `selectedIndex` 传回。样式没有给定高度时，高度是系统的。在 Rust 中，`tab_bar()` 创建它，每个 prop 一个 setter（`.items(..)`、`.selected_index(..)`），每个事件一个监听方法（`.on_change(..)`），以及带类型的样式方法；`TabBarItem::new(title).icon(name).badge(text)` 创建一个标签。
 
 ### Props
 
@@ -107,6 +107,7 @@ mount(App);
 |---|---|---|---|
 | `title` | `TabBarItem::new(title)` | `string` | 标签的标题，屏幕阅读器会读出它。 |
 | `icon` | `.icon(name)` | `string` | 标签的图标，用平台对它的称呼：iOS 上是 [SF Symbol](https://developer.apple.com/sf-symbols/)（`"house"`），Android 上是应用的 drawable（`res/drawable/home.xml` 写作 `"home"`，`"android:ic_menu_search"` 是系统的）。用 `platform.select` 按平台选择。 |
+| `badge` | `.badge(text)` | `string` | 标签的角标：一段文字，例如 `"3"` 或 `"New"`，或者 `""` 表示没有文字的角标；不设置（默认）则不显示。采用系统的角标外观，屏幕阅读器会随标签的标题读出它：它的文字；`""` 则读出系统对没有文字的角标的说法（VoiceOver 的；在 Android 上是系统的“新通知”，使用设备的语言）。 |
 
 ### 事件
 
@@ -116,8 +117,8 @@ mount(App);
 
 ### 平台说明
 
-- **iOS 和 Mac Catalyst**：`UITabBar`，采用当前 iOS 版本的系统外观：iOS 26 上是悬浮的 Liquid Glass 标签栏及其选中效果。图标是 SF Symbols。主题的 `primary` 是标签栏的 `tintColor`，即选中标签的颜色；其他标签保持系统的颜色。
-- **Android**：Material 3 的导航栏，由平台的 View 组成：每个标签的文字上方是放在激活指示器中的图标，按压时有水波纹；Android 12 及以上使用系统的动态颜色，更早的版本使用 Material 的基准颜色；浅色或深色跟随应用的外观。位于窗口底部时，它延伸到导航栏下方，高度增加导航栏的 inset，与 Material 的一致。图标是应用的 drawable（由标签栏着色）。选中标签的图标和文字使用主题的 `primary`，激活指示器是这个颜色的 12% 不透明度；其他标签保持系统的颜色。
+- **iOS 和 Mac Catalyst**：`UITabBar`，采用当前 iOS 版本的系统外观：iOS 26 上是悬浮的 Liquid Glass 标签栏及其选中效果。图标是 SF Symbols。主题的 `primary` 是标签栏的 `tintColor`，即选中标签的颜色；其他标签保持系统的颜色。角标是标签项的 `badgeValue`：文字完整显示，`""` 是系统没有文字的角标，大小与一位数字的角标相同。
+- **Android**：Material 3 的导航栏，由平台的 View 组成：每个标签的文字上方是放在激活指示器中的图标，按压时有水波纹；Android 12 及以上使用系统的动态颜色，更早的版本使用 Material 的基准颜色；浅色或深色跟随应用的外观。位于窗口底部时，它延伸到导航栏下方，高度增加导航栏的 inset，与 Material 的一致。图标是应用的 drawable（由标签栏着色）。选中标签的图标和文字使用主题的 `primary`，激活指示器是这个颜色的 12% 不透明度；其他标签保持系统的颜色。角标采用 Material 3 的样式：`""` 是位于图标角上的小角标（圆点），文字是从图标中部开始的大角标，使用它的 error 颜色，超出激活指示器的部分以省略号结尾。大角标与 Material 的一样只容纳简短的文字，即一个数字或不超过四个字符的词：更长的文字会被截断（`"Updated"` 显示为“Up…”），而 iOS 会完整显示。TalkBack 把 `""` 读作系统的“新通知”。
 - **桌面（macOS、Windows、Linux、GPUI）和 Web**：各个部分用 [Tabs](../elements/tabs.md) 显示，外观由应用决定。`TabBar` 在这些平台上不占空间，所以一个布局可以同时包含两者，用 `platform.os`（[`nsh` 的设备 API](./nsh.md#device)）来选择。
 
 ## SegmentedControl

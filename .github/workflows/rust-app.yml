@@ -24,7 +24,6 @@ on:
       - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-platform-apple/**"
-      - "crates/nsh-platform-ios/**"
       - "crates/nsh-platform-macos/**"
       - "crates/nsh-platform-web/**"
       - "crates/nsh-platform-windows/**"
@@ -98,7 +97,7 @@ jobs:
         run: echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
       - name: Install GTK 4 and GStreamer
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -115,13 +114,6 @@ jobs:
       - name: Check macOS without optional features
         if: runner.os == 'macOS'
         run: cargo clippy -p nsh-macos-app --locked --no-default-features --features js -- -D warnings
-      # Compile the UIKit implementation and its regression tests: on a
-      # macOS host this crate is otherwise empty, so ordinary host CI misses it.
-      - name: Check UIKit and its tests
-        if: runner.os == 'macOS'
-        run: |
-          rustup target add aarch64-apple-ios-sim
-          cargo clippy -p nsh-platform-ios --all-targets --target aarch64-apple-ios-sim --locked -- -D warnings
       # The crate's unit tests; the app's tests are TypeScript (`nsh test`,
       # the web job). On macOS also nsh-platform-apple's (the code the macOS
       # and iOS backends share, empty elsewhere), which no other job runs:
@@ -160,7 +152,7 @@ jobs:
       # C code (zstd) clang and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
       - name: Install clang, LLVM, GTK 4 and GStreamer
-        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -185,15 +177,18 @@ jobs:
             echo "The Rust app's web runtime unexpectedly carries JS"
             exit 1
           fi
-      - name: Test the Rust app and check that it builds no JS engine or bundler
+      - name: Test the Rust app and check that it builds no JS engine, bundler or WebKitGTK
         run: |
-          # `nsh test` builds the app's programs in `.nsh/rust` and runs its
-          # TypeScript tests (`examples/gallery-rs/*.test.tsx`) in the test
-          # runner. `nsh` describes the app's crates with the generated
-          # `describe` program. With `nsh check` it links no JS engine or
-          # bundler. `nsh test` then shares build features with its runner,
-          # intentionally adding QuickJS to describe through workspace-hack.
-          # The test runner must still link no bundler or parser.
+          # `nsh` describes the app's crates with the generated `describe`
+          # program. Built for `nsh check`, it links no QuickJS, nsh-js,
+          # bundler, rolldown or Oxc. `nsh test` then builds the app's
+          # programs in `.nsh/rust` sharing their features with its runner
+          # (the hack), which adds QuickJS to `describe` on purpose, and runs
+          # the TypeScript tests (`examples/gallery-rs/*.test.tsx`) in the
+          # test runner (QuickJS, source maps) on entries `nsh` builds: no
+          # bundler or parser. Neither builds what only the hosts need: the
+          # app's crate uses `nsh-platform-linux`, whose web views (WebKitGTK,
+          # not installed here) the Linux host turns on.
           check() {
             cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
               -p "nsh-app-gallery-native-$1" -e normal --target all \
@@ -207,6 +202,9 @@ jobs:
           check describe '(rquickjs|quickjs-jit|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "a JS engine or the bundler"
           ./target/debug/nsh test examples/gallery-rs
           check test '(nsh-bundler|rolldown|oxc_parser)([ _-]|$)' "the bundler"
+          for program in describe test; do
+            check "$program" '(webkit6|soup3|javascriptcore6)([ _-]|$)' "WebKitGTK"
+          done
       - name: Run the examples' tests
         run: |
           for app in counter gallery post-editor rust-exports tasks tasks-rs; do
