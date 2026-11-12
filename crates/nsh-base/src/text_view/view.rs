@@ -1834,6 +1834,12 @@ impl Cx {
                     .role(role)
                     .label(SharedString::from(image.alt.clone()))
                     .on_press(press)
+                    // On its own, as wide as the text: the app's image
+                    // sizes against this view, so a `w_full()` of its own
+                    // fills the column and a `max_w(relative(1.0))` holds
+                    // it to the column, as the document's own images are
+                    // held (one of a fixed width keeps it, at the start).
+                    .when(matches!(flow, ImageFlow::Block), |v| v.w_full())
                     .child(el)
                     // The view taking the press is the image's anchor.
                     .when_some(hint, |v, hint| v.child(hint.0))

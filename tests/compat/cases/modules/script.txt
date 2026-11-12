@@ -90,6 +90,7 @@ expect Picked: pending
 expect Files: not picked
 tap id:pick-files
 expect Files refused: rejected RangeError
+expect Size refused: rejected RangeError
 expect Files: pending
 covers [nsh] Picker
 # mod-speech

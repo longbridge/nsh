@@ -283,6 +283,10 @@ define_class!(
             if !own.is_empty() {
                 return own;
             }
+            // The page's under it, as the root controller answers.
+            if let Some(page) = crate::system::page_orientations() {
+                return page;
+            }
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), supportedInterfaceOrientations] }
         }
@@ -514,6 +518,38 @@ fn clip_side_safe_area(nav: &UINavigationController) {
     }
 }
 
+/// Gives the bar of `nav` the height of the large title its top screen asks
+/// for, when UIKit left it lower and the screen's content rests at its top.
+///
+/// A stack laid out in the frame its first screen arrives shows that screen
+/// with the bar at the height of an inline title (`sizeThatFits` already
+/// gives the large title's): the screen's safe area and its scroll view's
+/// offset follow that height, and UIKit then reads the content as scrolled
+/// under a collapsed large title, which stays collapsed. Sized here, the
+/// bar grows the safe area, UIKit keeps the scroll view at its top, and the
+/// title shows large. Content the user scrolled keeps its collapsed title.
+fn fit_large_title(nav: &UINavigationController) {
+    let bar = nav.navigationBar();
+    if nav.isNavigationBarHidden() || !bar.prefersLargeTitles() {
+        return;
+    }
+    let Some(top) = nav.topViewController() else {
+        return;
+    };
+    if top.navigationItem().largeTitleDisplayMode() != UINavigationItemLargeTitleDisplayMode::Always
+    {
+        return;
+    }
+    let scrolled = top
+        .viewIfLoaded()
+        .and_then(|view| crate::mount::first_scroll_view(&view))
+        .is_some_and(|s| s.contentOffset().y > -s.adjustedContentInset().top);
+    let size = bar.frame().size;
+    if !scrolled && bar.sizeThatFits(size).height > size.height {
+        bar.sizeToFit();
+    }
+}
+
 define_class!(
     /// A stack's navigation controller: the back button asks it before
     /// popping (`navigationBar:shouldPopItem:`), answered from `preventBack`.
@@ -667,6 +703,7 @@ define_class!(
             // it brought in is only reachable here.
             size_screens(nav);
             defer_to_back_swipe(nav);
+            fit_large_title(nav);
             // Safety net: whatever the transition did, the bar ends where the
             // stack says it goes.
             slide_bottom_bar(nav, bottom_bar_hidden(nav));
@@ -1401,27 +1438,10 @@ impl ModalHost {
         }
         let c = self.config;
         let controller = &self.controller;
-        let mut mask = UIInterfaceOrientationMask::empty();
-        for (bit, m) in [
-            (ModalConfig::PORTRAIT, UIInterfaceOrientationMask::Portrait),
-            (
-                ModalConfig::PORTRAIT_UPSIDE_DOWN,
-                UIInterfaceOrientationMask::PortraitUpsideDown,
-            ),
-            (
-                ModalConfig::LANDSCAPE_LEFT,
-                UIInterfaceOrientationMask::LandscapeLeft,
-            ),
-            (
-                ModalConfig::LANDSCAPE_RIGHT,
-                UIInterfaceOrientationMask::LandscapeRight,
-            ),
-        ] {
-            if c.orientations & bit != 0 {
-                mask |= m;
-            }
-        }
-        controller.ivars().orientations.set(mask);
+        controller
+            .ivars()
+            .orientations
+            .set(crate::system::orientation_mask(c.orientations));
         controller.set_flags(&c);
         // Full screen, the modal has no look of its own: the app's popup
         // and backdrop show over what is behind. Sheets are the system's.

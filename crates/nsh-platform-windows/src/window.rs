@@ -835,8 +835,9 @@ fn hi(l: isize) -> i32 {
 }
 
 /// Has the embedding app's root window tell `child`, an embedded surface's
-/// window, what the app's state follows: `WM_ACTIVATEAPP` and
-/// `WM_POWERBROADCAST` (the system woke), which only top-level windows
+/// window, what the app's state follows: `WM_ACTIVATEAPP`,
+/// `WM_POWERBROADCAST` (the system woke) and the session's end
+/// (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), which only top-level windows
 /// get, and [`WM_NSH_ROOT`] when the root is shown, hidden, minimized or
 /// restored, which `child`'s own messages do not say.
 /// Returns the root it observes (`None` when `child` has none, or the root
@@ -885,6 +886,14 @@ unsafe extern "system" fn root_proc(
             }
             WM_WINDOWPOSCHANGED => {
                 SendMessageW(child, WM_NSH_ROOT, None, None);
+            }
+            // The session may end, unless the root refused it: the
+            // embedded app leaves too ([`crate::session`]).
+            WM_QUERYENDSESSION if result.0 != 0 => {
+                SendMessageW(child, msg, Some(wparam), Some(lparam));
+            }
+            WM_ENDSESSION => {
+                SendMessageW(child, msg, Some(wparam), Some(lparam));
             }
             WM_NCDESTROY => {
                 let _ = RemoveWindowSubclass(hwnd, Some(root_proc), id);
@@ -987,6 +996,13 @@ fn handle(
     if data.top_level && msg == crate::tray::taskbar_created() {
         crate::tray::readd(hwnd);
         return None;
+    }
+    // The session ends (signing out, shutting down, the Restart Manager):
+    // the surface's window, or an embedded one's root ([`observe_root`]).
+    if data.window.is_none()
+        && let Some(result) = crate::session::message(surface, data.top_level, msg, wparam)
+    {
+        return Some(LRESULT(result));
     }
     match msg {
         WM_NSH_WAKE => surface.drain(),

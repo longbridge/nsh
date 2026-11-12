@@ -61,7 +61,8 @@ belong to the app, which owns retention and its storage budget.
   container layer's `sublayerTransform`, so a scroll frame is one layer write; the container's bounds origin takes
   it, as `NSClipView` scrolls, once the view and the display link rest, as `setBoundsOrigin:` walks the subtree;
   a press and anything that asks AppKit where a view is commit first). Scroll views containing inputs update the
-  bounds origin on each move so AppKit draws newly visible fields at their current positions. `view.rs` tracks
+  bounds origin on each move so AppKit draws newly visible fields at their current positions; zoomable ones update
+  the bounds (their size is the frame's over the zoom scale) on each move and zoom. `view.rs` tracks
   inputs as subtrees are inserted and removed, without searching descendants on scroll frames. Views that clip
   their children and cast a shadow also use containers (clipping a layer clips its shadow). Hosted AppKit views
   (text fields, videos, web views) are `ViewState::natives`, above the children; hit testing follows the AppKit order
@@ -137,7 +138,8 @@ belong to the app, which owns retention and its storage budget.
   commit whether it shows or not.
   A text's content layer keeps its picture through another width of the same lines (`text::draws_the_same`,
   `kCAGravityTopLeft`); a picture drawn in a layer narrower than its box, a view still waiting to be placed
-  (`DrawnText::cut`), draws again once placed.
+  (`DrawnText::cut`), draws again once placed. A text that only changed colors or hidden runs in the same layout
+  redraws only the lines of what changed, across the view (`text::damage`, through `NshView::redraw_rect`).
   Where the app has not drawn yet, the surface's background shows: the app's top view's opaque background when it
   fills the root (`system.rs`), else white / neutral-950 by the scheme.
 - **Text is typeset on the engine thread** by CoreText (`text.rs`, the iOS engine with `NSFont`); the main thread
@@ -212,7 +214,7 @@ belong to the app, which owns retention and its storage budget.
 | Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`), `mixBlendMode` as the layer's compositing filter; a backdrop as a subview: an `NSVisualEffectView` with `macos={{ backdrop }}`'s material, blending and state or the blur's popover material, or glass with `glassTintColor`, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
 | Images | `image.rs`, `blur.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): ImageIO thumbnails at the view's size bucket, in the process's image budget, downloaded with `NSURLSession` (the core loader's transport hook, so the system's proxies, authentication and ATS apply), leased by the views showing them; blur and color filters baked into variants in the same budget; `asset:/`, http(s), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
-| Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container's bounds origin when it contains inputs, otherwise by its layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after; a mouse press anywhere stops the momentum), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view |
+| Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container's bounds origin when it contains inputs, otherwise by its layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after; a mouse press anywhere stops the momentum), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view; zoomable views (`maximumZoomScale` above `minimumZoomScale`) scroll both ways, zoom with trackpad pinches and Control + wheel around the pointer and with `zoomTo` (eased, as the web's), center content smaller than the viewport (`centerContent`) and show no indicator |
 | Input | `input.rs`, `nsh_core::input` | The root's `hitTest:` takes every mouse event inside it, and NSH picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where NSH's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what NSH draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onMouseEnter` / `onMouseLeave` / `onMouseMove`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back; the decisions over plain data (a press's events, `panActivation` gates, hover changes, hit areas, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
 | Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point; hidden while the input or its content box has no area, as in a `display: none` subtree, since it does not clip), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
 | Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; a page the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a dialog; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
@@ -234,6 +236,19 @@ belong to the app, which owns retention and its storage budget.
 | Networking | `net.rs` | `NSURLSession` (the iOS backend's) |
 | Dev | `dev.rs` | The dev server client on its own thread; a status line and the error overlay above the surface (opaque; code frames keep their lines and scroll sideways; a click that selects no text dismisses it, in an inactive window too; its Copy button copies the error); Cmd+R reloads the latest build |
 | Performance monitor | `fps.rs`, `gpu.rs` | `--fps` / `AppOptions::fps` / `NSH_FPS=1` / `AppView::set_fps_monitor` / the app's `setFpsEnabled` (`Command::PerfMonitor`, through `Surface::perf_toggle`): a panel above the surface that lets the mouse through, redrawn twice a second from the surface's `nsh_engine::perf::PerfMonitor` (see below); GPU time from the IO registry (`accumulatedGPUTime` of the process' accelerator clients) |
+
+Inline pressable text spans have native link elements (`access/text_spans.rs`),
+interleaved with static text in UTF-16 document order. Their names omit hidden
+runs and attachment placeholders; their bounds follow the current text layout
+and layer transforms. A retained element resolves its logical span against the
+current attributed text, so streaming and recoloring keep it usable; a removed
+link cannot be activated. `AXPress` uses the current event listeners and modal
+scope, as keyboard input does. Secondary clicks target the innermost inline
+span listening to `onContextMenu`, preserving selection and surrounding listeners.
+Clicking an input ends a drawn-text selection; programmatic focus keeps it. Headings and app-labelled text keep their name
+and expose only link children. Selectable drawn text whose accessibility value
+is its text, and its link elements, expose `AXSelectedTextRange` and
+`AXSelectedText` through the same enclosing selection.
 
 ## Keyboard
 
@@ -384,7 +399,6 @@ password required right after sleep) to run tests that way.
 
 ## Not implemented, or different
 
-- **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
 - **`brightness()` above 1** is not drawn. **Blend modes** are the layer's `compositingFilter`
   (`multiplyBlendMode` … `plusD` / `plusL`), set on the view's own layer — its content, fill and clipped-child layers
   are its sublayers — and cleared for `normal`; a change never moves it between layers (`visual.rs`).
@@ -461,9 +475,10 @@ shows its window itself (`focus()` from its tray).
 
 ## Packaged apps' logs
 
-An app opened from Finder or the Dock has its stderr on `/dev/null`, so `nsh-macos-app` (like `nsh-ios-app` and the
-iOS SDK's C ABI without `dev`) installs `nsh_platform_apple::unified_log`, a `log` logger that writes to the unified
-log. The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
+An app opened from Finder or the Dock has its stderr on `/dev/null`, so its lines go to the unified log through
+`nsh_platform_apple::unified_log`, a `log` logger: `nsh-ios-app` and the iOS SDK's C ABI without `dev` install it,
+and `nsh-macos-app` installs the desktop runners' logger (`nsh_engine::logging`: `RUST_LOG`, the rolling file in the
+app's data directory) with it as the output (`unified_log::logger`, `Options::filtered`). The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
 record's target, with each category's `os_log_t` made once. Errors are `OS_LOG_TYPE_ERROR`; warnings (their text
 after `WARN`) and info are `OS_LOG_TYPE_DEFAULT`, which the log stores and Console shows without "Include Info
 Messages"; debug and trace are `OS_LOG_TYPE_DEBUG`. The text is logged `%{public}s`, a NUL in it written `\0`, in
@@ -486,7 +501,13 @@ view loop alongside native text inputs (`input::is_key_stop`, from
 card). Disabled accessibility state, removed press listeners (of a view not
 `focusable={true}`), `focusable={false}` (a backdrop that closes an overlay),
 hidden views and views leaving the tree exclude a stop (a focused one gives
-the focus to the root).
+the focus to the root). Hidden includes what the core hides without hiding an
+NSView, which AppKit's key view loop would still stop at: a view with no area
+(each view of a `display: none` subtree gets an empty frame) or inside a
+`visibility: hidden` one (`NshView::seen_by_keys`, as the headless driver's
+stops are shown views). Inputs' fields and hosted views follow the view of
+ours holding them, and the focus leaves one a batch hid for the root
+(`input::release_hidden_focus`), so no key acts on what cannot be seen.
 Tab/Shift+Tab stay within the newest modal and advance from the currently
 focused stop. The root and passive layout views stay outside that loop. A
 modal remembers the input or Tab stop that had the focus when it was

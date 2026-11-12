@@ -89,6 +89,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | 显示在键盘上方的 `InputAccessoryView`。 |
 | `.auto_fill(..)` | `ios={{ textContentType }}` | `Input` | iOS 对自动填充类型的叫法（Rust 的 `AutoFill` 覆盖两个平台）。 |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}` | `Dialog` | 允许的方向。 |
+| `.supported_orientations(..)` | `ios={{ supportedOrientations }}`、`android={{ supportedOrientations }}` | `NavPage` | 页面显示时屏幕可以采用的方向（[NavPage](../elements/nav-stack.md#navpage-props)）。 |
 | `.back_forward_gestures(..)` | `ios={{ allowsBackForwardNavigationGestures }}` | `WebView` | 滑动在页面历史中前进后退。 |
 | `.header_right_system_item(..)` | `ios={{ headerRightSystemItem }}` | `NavPage` | 标题栏末尾显示 UIKit 自带的按钮，按下即按下 `headerRight`。 |
 | `.header_left_system_item(..)` | `ios={{ headerLeftSystemItem }}` | `NavPage` | 标题栏开头显示 UIKit 自带的按钮，按下即按下 `headerLeft`。 |

@@ -116,7 +116,7 @@ function Example() {
 
 | `ios` 键 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `supportedOrientations` | `.supported_orientations(..)` | `("portrait" \| "portrait-upside-down" \| "landscape" \| "landscape-left" \| "landscape-right")[]` | 与呈现者相同 | dialog 允许的方向。 |
+| `supportedOrientations` | `.supported_orientations(..)` | `("portrait" \| "portrait-upside-down" \| "landscape" \| "landscape-left" \| "landscape-right")[]` | 与呈现者相同 | dialog 允许的方向。`landscape-left` 是设备顺时针转动、主屏幕一侧在左边（UIKit 的 `landscapeLeft`）。 |
 
 | `android` 键 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|

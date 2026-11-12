@@ -478,9 +478,23 @@ fn rc_str(cx: *mut JsContext, v: JsValue) -> Rc<str> {
     }
 }
 
+/// What one call's arguments may hold in [`to_rec`]: arrays of
+/// [`crate::dom::MAX_ARRAY_ITEMS`] items in all.
+fn items_budget() -> i64 {
+    i64::from(crate::dom::MAX_ARRAY_ITEMS)
+}
+
 /// A JS value as a record (borrowed); the animated values it holds are added
-/// to `used` (owned dups).
-fn to_rec(cx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) -> Rec {
+/// to `used` (owned dups). `budget` is the array items left to read of
+/// [`crate::dom::MAX_ARRAY_ITEMS`] ([`items_budget`]), nested arrays counted
+/// together: an array nested in itself multiplies its length at each level.
+fn to_rec(
+    cx: *mut JsContext,
+    v: JsValue,
+    used: &mut Vec<JsValue>,
+    depth: u32,
+    budget: &mut i64,
+) -> Rec {
     // SAFETY: inline checks and reads of a live value; values got are freed.
     unsafe {
         let tag = qjs::JS_VALUE_GET_TAG(v);
@@ -514,11 +528,31 @@ fn to_rec(cx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) -
         qjs::JS_FreeValue(cx, nv);
         if qjs::JS_IsArray(v) {
             let mut len: i64 = 0;
-            qjs::JS_GetLength(cx, v, &mut len);
-            let mut items = Vec::with_capacity(len.clamp(0, 1 << 16) as usize);
-            for i in 0..len.max(0) {
+            if qjs::JS_GetLength(cx, v, &mut len) != 0 {
+                qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+                return Rec::Null;
+            }
+            // Read natively, where the time budget cannot interrupt: a
+            // sparse array is as long as it says.
+            let len = len.max(0);
+            if len > *budget {
+                // Once per call (-1: warned): the arrays after it read as
+                // nothing too.
+                if *budget >= 0 {
+                    log::warn!(
+                        target: "js",
+                        "canvas: an array of {len} items was ignored (more than {} in all)",
+                        crate::dom::MAX_ARRAY_ITEMS
+                    );
+                    *budget = -1;
+                }
+                return Rec::Null;
+            }
+            *budget -= len;
+            let mut items = Vec::with_capacity(len.min(1 << 16) as usize);
+            for i in 0..len {
                 let item = qjs::JS_GetPropertyInt64(cx, v, i);
-                items.push(to_rec(cx, item, used, depth + 1));
+                items.push(to_rec(cx, item, used, depth + 1, budget));
                 qjs::JS_FreeValue(cx, item);
             }
             return Rec::List(Rc::new(items));
@@ -547,8 +581,9 @@ fn record(cx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> JsV
         }
         r.out.push(Rec::Num(code as f64));
         let mut used = Vec::new();
+        let mut budget = items_budget();
         for &a in args {
-            let rec = to_rec(cx, a, &mut used, 0);
+            let rec = to_rec(cx, a, &mut used, 0, &mut budget);
             (*p).out.push(rec);
         }
         (*p).used.append(&mut used);
@@ -605,11 +640,12 @@ unsafe extern "C" fn record_method(
         r.out.reserve(m.params.len() + 1);
         r.out.push(Rec::Num(m.code as f64));
         let mut used = Vec::new();
+        let mut budget = items_budget();
         for (i, param) in m.params.iter().enumerate() {
             let a = arg(argc, argv, i);
             let rec = match param.default {
                 Some(default) if is_undefined(a) => literal(default),
-                _ => to_rec(cx, a, &mut used, 0),
+                _ => to_rec(cx, a, &mut used, 0, &mut budget),
             };
             (*p).out.push(rec);
         }
@@ -1034,7 +1070,7 @@ fn point_in(cx: *mut JsContext, this: JsValue, a: &[JsValue], stroke: bool) -> J
     };
     let path = path.and_then(|p| {
         let mut used = Vec::new();
-        let rec = to_rec(cx, p, &mut used, 0);
+        let rec = to_rec(cx, p, &mut used, 0, &mut items_budget());
         free_values(cx, used);
         let list = RecList(Rc::new(vec![Rec::Num(CV_STROKE as f64), rec]));
         match decode(&list, 0, 2).ok()?.ops.pop()? {

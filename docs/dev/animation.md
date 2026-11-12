@@ -106,6 +106,13 @@
   the core leads each run of frames with the layout animation it takes, an empty one for the rest
   (`core/layout_scope.rs`), as the platforms animate a frame with the last `MountItem::LayoutAnimation` before it.
   Insertions and removals are not scoped (their animations are decided per batch on iOS, Android and the web).
+  A list's rows under a turn's layout animation (`core/list_motion.rs`): the core's `ScrollBy` that keeps what shows
+  in place (an inverted list's distance from the end, the visible rows) applies at once on the platforms, and a
+  recycled cell's frame was another row's. So each list's commit leads a run of frames without animation (the rows
+  that stay where they showed when the turn began, moved by what the core scrolled the list since; the cells placed
+  for another row, with their content, at their new place) and, after the scroll, the turn's animation with the
+  rows' new frames, which they slide to. The engine keeps frames of one view apart in different runs
+  (`keep_last_sets`).
 - **A physical layout spring** (`LayoutCurve::Spring(Spring)`, `LayoutTransition::spring`): gpui-base's spring,
   `Spring::new(response_ms)` (critically damped, the undamped period `response_ms`) or `Spring::from_stiffness(k)`
   (a mass of 1, as Material 3 Expressive gives its springs), shaped by `.damping_ratio(ζ)`. It is the same `Spring`

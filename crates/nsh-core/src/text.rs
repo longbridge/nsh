@@ -824,6 +824,43 @@ impl AttributedText {
             && spans_same_but_colors(spans, &other.spans)
     }
 
+    /// The characters (UTF-16 offsets; ascending, apart) drawn otherwise in
+    /// `other`, when the two texts differ at most in colors, hidden runs
+    /// and test metadata, as the core's colors-only path allows; `None`
+    /// when they differ in anything else. A platform that draws colors from
+    /// the text and keeps the layout redraws only where these lie.
+    pub fn recolored_ranges(&self, other: &Self) -> Option<Vec<std::ops::Range<u32>>> {
+        if !self.same_but_colors(other) {
+            return None;
+        }
+        let mut out: Vec<std::ops::Range<u32>> = Vec::new();
+        // Both cover the string end to end (`same_but_colors`): walk the
+        // pieces where they overlap.
+        let (mut a, mut b) = (self.spans.iter().peekable(), other.spans.iter().peekable());
+        while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+            let (start, end) = (x.start.max(y.start), x.end.min(y.end));
+            if start < end && x.style != y.style {
+                match out.last_mut() {
+                    Some(last) if last.end >= start => last.end = last.end.max(end),
+                    _ => out.push(start..end),
+                }
+            }
+            match x.end.cmp(&y.end) {
+                std::cmp::Ordering::Less => {
+                    a.next();
+                }
+                std::cmp::Ordering::Greater => {
+                    b.next();
+                }
+                std::cmp::Ordering::Equal => {
+                    a.next();
+                    b.next();
+                }
+            }
+        }
+        Some(out)
+    }
+
     /// Equality of the content the platform draws, excluding test metadata.
     pub(crate) fn rendering_eq(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
@@ -945,6 +982,16 @@ pub trait TextEngine {
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
+    /// How far below the text's top its first line's baseline is, laid out
+    /// `width` wide: a flex container aligning by baseline
+    /// (`align-items: baseline`) lines its items up by it, as CSS does. An
+    /// engine that does not know gives `None`, and the text is aligned by
+    /// its bottom edge, Taffy's fallback for a box without a baseline.
+    fn first_baseline(&self, prepared: &Self::Prepared, width: Points) -> Option<Points> {
+        let _ = (prepared, width);
+        None
+    }
+
     /// Whether each line takes all that fits and [`TextEngine::measure`]'s
     /// width is the widest line's: a maximum width between that width and
     /// the one measured then breaks the lines at the same places, so the
@@ -1057,6 +1104,10 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
         (**self).measure(prepared, max_width)
+    }
+
+    fn first_baseline(&self, prepared: &Self::Prepared, width: Points) -> Option<Points> {
+        (**self).first_baseline(prepared, width)
     }
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
@@ -1248,7 +1299,8 @@ mod estimate {
 /// `1.2 × font size` tall; a text with line breaks measures as wide as its
 /// widest line and as tall as its lines (each wrapped on its own), their baseline at the bottom (the font's ascent
 /// is the line, its descent 0, its x height `0.5 × font size`), where
-/// attachments are placed by [`TextAttachment::ascent`] on the first line.
+/// attachments are placed by [`TextAttachment::ascent`] on the line their
+/// character wraps to (its lines, carets and hits are those of one line).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ApproxTextEngine;
 
@@ -1335,37 +1387,46 @@ impl TextEngine for ApproxTextEngine {
     }
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
-        // On one line, each character as wide as the others.
-        let (chars, font, _, attachments, astral, _) = prepared;
+        // Each character as wide as the others, reported as one line.
+        let (chars, font, max_lines, attachments, astral, breaks) = prepared;
         let line = *font * 1.2;
         let advance = *font * 0.55;
-        let attachments = attachments
-            .iter()
-            .map(|a| {
-                Some(point(
-                    Points(a.index as f32 * font.0 * 0.55),
-                    (line - a.height).max(Points::ZERO),
-                ))
-            })
-            .collect();
         // Baseline at the bottom of the line: the ascent is the line and
         // the descent is 0, the same extent attachments are placed against.
         let units = chars.saturating_add(astral.len());
-        let line = TextLine {
-            end: u32::try_from(units).unwrap_or(u32::MAX),
-            width: size.width,
-            height: line,
-            ascender: line,
-            x_height: *font * 0.5,
-            ..TextLine::default()
-        };
-        TextLayout(Arc::new(ApproxLayout {
-            attachments,
-            line,
+        let mut layout = ApproxLayout {
+            attachments: Vec::new(),
+            line: TextLine {
+                end: u32::try_from(units).unwrap_or(u32::MAX),
+                width: size.width,
+                height: line,
+                ascender: line,
+                x_height: *font * 0.5,
+                ..TextLine::default()
+            },
             advance,
             chars: u32::try_from(*chars).unwrap_or(u32::MAX),
             astral: astral.clone(),
-        }))
+        };
+        // An attachment sits on the line its character wraps to, as
+        // `measure` wraps the text in a box this wide.
+        layout.attachments = attachments
+            .iter()
+            .map(|a| {
+                let (row, x) = approx_place(
+                    layout.char_at(a.index) as usize,
+                    *chars,
+                    *font,
+                    breaks,
+                    size.width,
+                );
+                if *max_lines > 0 && row >= *max_lines as f32 {
+                    return None;
+                }
+                Some(point(x, line * row + (line - a.height).max(Points::ZERO)))
+            })
+            .collect();
+        TextLayout(Arc::new(layout))
     }
 
     fn lines(&self, layout: &TextLayout) -> Vec<TextLine> {
@@ -1420,7 +1481,46 @@ impl TextEngine for ApproxTextEngine {
     }
 }
 
-/// [`ApproxTextEngine`]'s final layout: one line.
+/// Where [`ApproxTextEngine`] puts character `k` of a text of `chars`
+/// characters in a box `width` wide (`breaks`: each line's character count
+/// when the text has line breaks): its line, counted from 0, and its x. A
+/// line wraps as `measure` wraps it: at the box's width, the characters
+/// running on.
+fn approx_place(
+    k: usize,
+    chars: usize,
+    font: Points,
+    breaks: &[usize],
+    width: Points,
+) -> (f32, Points) {
+    let whole = [chars];
+    let lines: &[usize] = if breaks.is_empty() { &whole } else { breaks };
+    // The order of the products is `measure`'s: it decides the last bit.
+    let wraps = |chars: usize| {
+        let w = Points(chars as f32 * font.0 * 0.55);
+        match w > width && width > Points::ZERO {
+            true => (w / width).ceil(),
+            false => 1.0,
+        }
+    };
+    let (mut row, mut start) = (0.0, 0);
+    for (i, &n) in lines.iter().enumerate() {
+        if k <= start + n || i + 1 == lines.len() {
+            let x = Points(k.saturating_sub(start) as f32 * font.0 * 0.55);
+            let n_wraps = wraps(n);
+            if n_wraps <= 1.0 {
+                return (row, x);
+            }
+            let wrapped = (x / width).floor().min(n_wraps - 1.0);
+            return (row + wrapped, x - width * wrapped);
+        }
+        row += wraps(n);
+        start += n + 1;
+    }
+    (row, Points::ZERO)
+}
+
+/// [`ApproxTextEngine`]'s final layout: reported as one line.
 struct ApproxLayout {
     attachments: Vec<Option<Point<Points>>>,
     line: TextLine,
@@ -1854,6 +1954,39 @@ mod tests {
         assert_eq!(y(VerticalAlign::TextTop), Some((px(11.0), px(0.0))));
         assert_eq!(y(VerticalAlign::TextBottom), Some((px(11.0), px(6.0))));
         assert_eq!(y(VerticalAlign::Middle), Some((px(11.0), px(6.5))));
+    }
+
+    #[test]
+    fn approx_engine_places_attachments_on_the_lines_they_wrap_to() {
+        let engine = ApproxTextEngine;
+        let style = ResolvedTextStyle {
+            font_size: px(10.0),
+            ..ResolvedTextStyle::default()
+        };
+        // Characters 5.5 wide, lines 12 tall; an 8×6 attachment sits 6
+        // below its line's top.
+        let place = |text: &str, width: f32, max_lines: u32| {
+            let mut t = AttributedText::default();
+            t.push(text, style);
+            t.push_attachment(size(px(8.0), px(6.0)), style);
+            t.push("z", style);
+            t.max_lines = max_lines;
+            let prepared = engine.prepare(&t);
+            let measured = engine.measure(&prepared, Some(px(width)));
+            let layout = engine.layout(&prepared, size(px(width), measured.height));
+            engine.attachments(&layout)[0].map(|p| (p.x, p.y))
+        };
+        // On one line where it fits.
+        assert_eq!(place("abcd", 100.0, 0), Some((px(22.0), px(6.0))));
+        // Ten characters before it in a box of 22: 55 points of text run
+        // on to a third line, 11 in.
+        assert_eq!(place("abcdefghij", 22.0, 0), Some((px(11.0), px(30.0))));
+        // After a line break, on the line after the wrapped first one.
+        assert_eq!(place("abcdefghij\nab", 22.0, 0), Some((px(11.0), px(42.0))));
+        // On a line past the limit: cut off.
+        assert_eq!(place("abcdefghij", 22.0, 2), None);
+        // A character two UTF-16 units long counts once.
+        assert_eq!(place("a😀b", 100.0, 0), Some((px(16.5), px(6.0))));
     }
 
     fn line(start: u32, end: u32, y: f32) -> TextLine {

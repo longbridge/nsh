@@ -268,7 +268,9 @@ module, which has everything.
 - Rows are made again only when their value changes (`Each` with the position and kind as the key, the block as the
   value), and render functions only when their value changes.
 - A disclosure makes its content only while open.
-- Images default to their natural size (one `image_size` read each), at most the width of the text.
+- Images default to their natural size (one `image_size` read each), at most the width of the text. An app's
+  `renderImage` element on its own (a paragraph or a cell of images) sits in a view as wide as the text, so its own
+  `w-full` fills the text's width and its `max-w-full` holds it there; in a line of text it keeps the size it asks for.
 
 ## From gpui-kit
 
