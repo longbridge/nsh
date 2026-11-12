@@ -6403,12 +6403,23 @@ class Player {
         break;
       }
       case "announce":
-        // Cleared first: the same text again is announced again.
-        this.live.textContent = "";
-        setTimeout(() => { this.live.textContent = args[0]; }, 50);
+        this.announce(args[0]);
         break;
       case "a11yFocus":
         if (!el) break;
+        // An input: its field, as `focus` gives it.
+        if (el._field) {
+          el._field.focus();
+          break;
+        }
+        // A page moves a screen reader only with the keyboard focus: a
+        // field the user is typing in keeps it, and the view is read out
+        // instead, as the screen reader would read it there.
+        if (this.typing(el)) {
+          const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
+          if (text) this.announce(text);
+          break;
+        }
         if (!el.hasAttribute("tabindex")) {
           el.tabIndex = -1;
           el._a11yFocus = true;
@@ -6420,6 +6431,23 @@ class Player {
   }
 
 
+
+  /** Has screen readers read `text` (`announce`), through the live region. */
+  announce(text) {
+    // Cleared first: the same text again is announced again.
+    this.live.textContent = "";
+    setTimeout(() => { this.live.textContent = text; }, 50);
+  }
+
+  /** Whether the keyboard focus is in a text field, other than `el`, that
+   * the user may be typing in (`setAccessibilityFocus` leaves it there). */
+  typing(el) {
+    const a = document.activeElement;
+    if (!a || a === el || !a.isConnected || a.closest?.("[inert]")) return false;
+    if (a.isContentEditable) return true;
+    if (a.tagName === "TEXTAREA") return true;
+    return a.tagName === "INPUT" && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/.test(a.type);
+  }
 
   /**
    * `Clipboard.writeText`. The async Clipboard API needs a secure context

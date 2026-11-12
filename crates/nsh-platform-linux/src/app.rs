@@ -172,6 +172,14 @@ pub struct AppOptions {
     /// and hands each file to the app (`Application.on("openFiles", ...)`),
     /// reported as a `file://` URL as for [`schemes`](Self::schemes).
     pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// [`run_app`] runs the app in the background where a user may type
+    /// on the display (the development host's `--background`, which `nsh
+    /// test --target linux` passes): its windows show without taking the
+    /// focus from the app the user works in, the window it activates only
+    /// acts as the active one, and the test agent's keys go to the widgets
+    /// rather than through the X server. On an X server with no keyboard
+    /// but its own virtual ones (Xvfb) it runs as in the foreground.
+    pub background: bool,
 }
 
 impl Default for AppOptions {
@@ -194,6 +202,7 @@ impl Default for AppOptions {
             schemes: Vec::new(),
             single_instance: false,
             file_types: Vec::new(),
+            background: false,
         }
     }
 }
@@ -569,11 +578,11 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             app.activate();
             return;
         }
-        if let Some((window, view)) = &*shown_open.borrow() {
+        if let Some((_, view)) = &*shown_open.borrow() {
             for file in files {
                 view.open_url(&file.uri());
             }
-            window.present();
+            crate::window::activate_main(&view.surface);
         }
     });
     let shown_line = shown.clone();
@@ -606,7 +615,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             app.activate();
             return gtk::glib::ExitCode::SUCCESS;
         }
-        if let Some((window, view)) = &*shown_line.borrow() {
+        if let Some((_, view)) = &*shown_line.borrow() {
             let cwd = cwd
                 .map(|cwd| cwd.to_string_lossy().into_owned())
                 .unwrap_or_default();
@@ -618,18 +627,23 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             for url in urls {
                 view.open_url(&url);
             }
-            window.present();
+            crate::window::activate_main(&view.surface);
         }
         gtk::glib::ExitCode::SUCCESS
     });
     let source = RefCell::new(Some(source));
     app.connect_activate(move |app| {
         let Some(source) = source.borrow_mut().take() else {
-            if let Some((window, _)) = &*shown.borrow() {
-                window.present();
+            if let Some((_, view)) = &*shown.borrow() {
+                crate::window::activate_main(&view.surface);
             }
             return;
         };
+        if options.background
+            && let Some(display) = gtk::gdk::Display::default()
+        {
+            crate::window::run_in_background(&display);
+        }
         // nsh.json `window`: known before the window is made, so its first
         // frame has it.
         // A JS bundle's or a Rust app's root's.
@@ -706,10 +720,11 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         }
         install_shortcuts(app, &window, &view.surface);
         *shown.borrow_mut() = Some((window.clone(), view.clone()));
+        let surface = view.surface.clone();
         // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
         if present {
-            window.present();
+            crate::window::activate_main(&surface);
         }
     });
     // GTK must not parse the host's own arguments: only the URL the app
