@@ -52,7 +52,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   `srcObject`: names of 1 to 256 bytes or prefixes ending in `*`, `true` for all; never granted without it, also in
   apps without a declaration (`Capabilities::all` leaves it empty); `HostStream.fromHost` throws `ERR_ACCESS_DENIED`
   (`permission` `"streams"`, `resource` the name) and the core turns a `srcObject` it does not grant, a Rust
-  component's too, into none, logged once per name; Rust apps, native code, are granted every stream (`nsh_engine`);
+  component's too, into none, logged once per name; a Rust root plays the streams its `nsh.json` grants, every stream when it declares no capabilities
+  (`nsh_engine::app_access`);
   names the web page registers with its player (`registerStream`) are checked the same way; a browser `MediaStream`
   an app on the web gives `srcObject` itself never reaches the engine and needs none), `openUrl`
   (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed). `nsh`'s `Storage`
