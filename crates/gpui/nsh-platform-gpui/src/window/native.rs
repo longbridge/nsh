@@ -279,24 +279,46 @@ mod mac {
     }
 
     /// Moves the window's top left corner to `(x, y)` (points, from the
-    /// primary display's top left corner, `y` down).
+    /// primary display's top left corner, `y` down), once the GPUI update
+    /// this runs in ends: AppKit tells GPUI of the move (and of a new
+    /// display) as it moves the window, which GPUI cannot take during one.
     pub(crate) fn set_origin(window: &Window, x: f32, y: f32) {
         if !x.is_finite() || !y.is_finite() {
             return;
         }
         let Some(w) = ns_window(window) else { return };
-        let Some(mtm) = MainThreadMarker::new() else {
-            return;
+        crate::rt::outside_app(move || {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            let screens = NSScreen::screens(mtm);
+            let Some(primary) = screens.firstObject() else {
+                return;
+            };
+            let height = primary.frame().size.height;
+            if !height.is_finite() {
+                return;
+            }
+            w.setFrameTopLeftPoint(NSPoint::new(x.into(), height - f64::from(y)));
+        });
+    }
+
+    /// Where the coordinates of `window`'s bounds start, in screen
+    /// coordinates: GPUI measures a window from the top left corner of
+    /// the screen it is on.
+    pub(crate) fn bounds_origin(window: &Window) -> gpui::Point<gpui::Pixels> {
+        let origin = || {
+            let screen = ns_window(window)?.screen()?;
+            let primary = NSScreen::screens(MainThreadMarker::new()?).firstObject()?;
+            let f = screen.frame();
+            Some(crate::window::screen::top_left_of_appkit_rect(
+                f.origin.x,
+                f.origin.y,
+                f.size.height,
+                primary.frame().size.height,
+            ))
         };
-        let screens = NSScreen::screens(mtm);
-        let Some(primary) = screens.firstObject() else {
-            return;
-        };
-        let height = primary.frame().size.height;
-        if !height.is_finite() {
-            return;
-        }
-        w.setFrameTopLeftPoint(NSPoint::new(x.into(), height - f64::from(y)));
+        origin().unwrap_or_default()
     }
 
     pub(crate) fn request_attention(window: &Window, critical: bool) {
@@ -510,25 +532,36 @@ mod win {
     }
 
     /// Moves the window's top left corner to `(x, y)` (points, screen
-    /// coordinates).
+    /// coordinates), once the GPUI update this runs in ends: Windows tells
+    /// GPUI of the move as it moves the window, which GPUI cannot take
+    /// during one.
     pub(crate) fn set_origin(window: &Window, x: f32, y: f32) {
         if !x.is_finite() || !y.is_finite() {
             return;
         }
         let Some(hwnd) = hwnd(window) else { return };
         let scale = window.scale_factor();
-        // SAFETY: a plain call on a live window.
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                std::ptr::null_mut(),
-                (x * scale).round() as i32,
-                (y * scale).round() as i32,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-        };
+        let (x, y) = ((x * scale).round() as i32, (y * scale).round() as i32);
+        crate::rt::outside_app(move || {
+            // SAFETY: a plain call; a window closed since fails it.
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    x,
+                    y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            };
+        });
+    }
+
+    /// Where the coordinates of `window`'s bounds start: GPUI's are screen
+    /// coordinates here.
+    pub(crate) fn bounds_origin(_window: &Window) -> gpui::Point<gpui::Pixels> {
+        gpui::Point::default()
     }
 
     pub(crate) fn request_attention(window: &Window, critical: bool) {
@@ -627,6 +660,12 @@ mod linux {
 
     /// The window manager places windows.
     pub(crate) fn set_origin(_window: &Window, _x: f32, _y: f32) {}
+
+    /// Where the coordinates of `window`'s bounds start: GPUI's are screen
+    /// coordinates here.
+    pub(crate) fn bounds_origin(_window: &Window) -> gpui::Point<gpui::Pixels> {
+        gpui::Point::default()
+    }
 
     pub(crate) fn request_attention(window: &Window, _critical: bool) {
         window.request_attention();
