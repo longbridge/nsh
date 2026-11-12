@@ -246,49 +246,65 @@ impl Geometry {
     /// The boxes covering `from..to`, one per line of each textblock it
     /// crosses (through a line's end where it goes on).
     pub(crate) fn range_rects(&self, from: usize, to: usize) -> Vec<Bounds<Points>> {
-        let mut out = Vec::new();
         let mut ids: Vec<(&u64, &TextGeo)> = self.texts.iter().collect();
         crate::sort::sort_by_key(&mut ids, |(_, g)| g.start);
-        for (id, geo) in ids {
-            let (start, end) = (geo.start, geo.start + geo.map.size);
-            if end < from || start > to {
-                continue;
-            }
+        let mut out = Vec::new();
+        for (id, _) in ids {
             let Some((origin, _)) = self.text_box(*id) else {
                 continue;
             };
-            let a = geo.map.to_text(from.max(start) - start);
-            let b = geo.map.to_text(to.min(end) - start);
-            for line in &geo.lines {
-                if line.end < a || line.start > b {
-                    continue;
-                }
-                let x0 = if a > line.start {
-                    self.x_in_line(line, a)
-                } else {
-                    px(0.0)
-                };
-                let through =
-                    to > end || b > line.end || (b == line.end && to > start + geo.map.to_doc(b));
-                let x1 = if b < line.end || (b == line.end && !through) {
-                    self.x_in_line(line, b)
-                } else {
-                    line.width + px(4.0)
-                };
-                if x1 <= x0 && !(through && a <= line.end) {
-                    continue;
-                }
-                out.push(Bounds::new(
-                    Point::new(origin.x + line.x + x0, origin.y + line.y),
-                    Size::new((x1 - x0).max(px(4.0)), line.height),
-                ));
+            out.extend(
+                self.text_range_rects(*id, from, to)
+                    .into_iter()
+                    .map(|b| Bounds::new(origin + b.origin, b.size)),
+            );
+        }
+        out
+    }
+
+    /// The boxes of `from..to` in textblock `id`, in its text's box: one
+    /// per line it crosses (through a line's end where it goes on), none
+    /// when the range misses the block.
+    pub(crate) fn text_range_rects(&self, id: u64, from: usize, to: usize) -> Vec<Bounds<Points>> {
+        let mut out = Vec::new();
+        let Some(geo) = self.texts.get(&id) else {
+            return out;
+        };
+        let (start, end) = (geo.start, geo.start + geo.map.size);
+        if end < from || start > to {
+            return out;
+        }
+        let a = geo.map.to_text(from.max(start) - start);
+        let b = geo.map.to_text(to.min(end) - start);
+        for line in &geo.lines {
+            if line.end < a || line.start > b {
+                continue;
             }
-            if geo.lines.is_empty() && from <= start && to > end {
-                out.push(Bounds::new(
-                    origin,
-                    Size::new(px(4.0), geo.frame.size.height),
-                ));
+            let x0 = if a > line.start {
+                self.x_in_line(line, a)
+            } else {
+                px(0.0)
+            };
+            let through =
+                to > end || b > line.end || (b == line.end && to > start + geo.map.to_doc(b));
+            let x1 = if b < line.end || (b == line.end && !through) {
+                self.x_in_line(line, b)
+            } else {
+                line.width + px(4.0)
+            };
+            if x1 <= x0 && !(through && a <= line.end) {
+                continue;
             }
+            out.push(Bounds::new(
+                Point::new(line.x + x0, line.y),
+                Size::new((x1 - x0).max(px(4.0)), line.height),
+            ));
+        }
+        if geo.lines.is_empty() && from <= start && to > end {
+            out.push(Bounds::new(
+                Point::default(),
+                Size::new(px(4.0), geo.frame.size.height),
+            ));
         }
         out
     }
