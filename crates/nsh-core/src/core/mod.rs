@@ -1313,6 +1313,10 @@ pub struct Core<M: TextEngine> {
     /// region's whole subtree was walked for each view inserted in it (an
     /// editor's highlighted rows: 1600 spans, 2500 views, 10 ms a commit).
     pointer_pending: Vec<Key>,
+    /// Views whose hit slop changed since the last round: the areas of the
+    /// views around them are worked out again after the layout
+    /// ([`Self::update_slop_overflow`]).
+    slop_moved: Vec<Key>,
     /// The view with the keyboard focus, by key and id (keys are reused),
     /// as the platform reports it (`classes::focus_reported`).
     focus: Option<(Key, NodeId)>,
@@ -1568,6 +1572,7 @@ impl<M: TextEngine> Core<M> {
             orientations_shown: 0,
             pointer_none_classes: 0,
             pointer_pending: Vec::new(),
+            slop_moved: Vec::new(),
             focus: None,
             focus_chain: Vec::new(),
             focus_scratch: Vec::new(),
@@ -3114,6 +3119,9 @@ impl<M: TextEngine> Core<M> {
             self.sync_culled();
         }
         self.update_lists(relayout);
+        if !self.slop_moved.is_empty() {
+            self.update_slop_overflow();
+        }
         // Views that waited for the budget, once lists placed their cells
         // (`pace.rs`).
         if !self.pace.waiting.is_empty() {
@@ -5063,6 +5071,7 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let mut flags = 0;
         let mut rebuild_span = false;
+        let mut slop_moved = false;
         match prop {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
@@ -5389,6 +5398,7 @@ impl<M: TextEngine> Core<M> {
                 if props.hit_slop != value {
                     props.hit_slop = value;
                     flags |= dirty::VIEW_PROPS;
+                    slop_moved = true;
                 }
             }
             Prop::Href(value) => {
@@ -6018,6 +6028,9 @@ impl<M: TextEngine> Core<M> {
         }
         if flags != 0 {
             self.mark(key, flags);
+        }
+        if slop_moved {
+            self.slop_moved.push(key);
         }
         if rebuild_span {
             self.mark_text_block(key);
