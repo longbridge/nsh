@@ -69,12 +69,13 @@ use nsh_core::{
         WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
     },
     platform::InputModality,
-    tailwind::state::{HOVERED, PRESSED},
+    tailwind::state::{FOCUSED, HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
 use objc2_app_kit::{
     NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent, NSEventMask,
-    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSWindow,
+    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSView,
+    NSWindow,
 };
 use objc2_foundation::{NSDate, NSSize};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -338,6 +339,57 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
         // matters again under the pointer.
         surface.input.hovered.borrow_mut().retain(|v| v != view);
     }
+}
+
+/// `view` leaves the tree (`Remove`, `Delete`): it and the views inside it
+/// leave the hover and the keyboard focus, their states cleared and
+/// reported, without a leave or blur, as a removed DOM element. A removed
+/// view can outlive its component (a JS cycle through its ref), whose
+/// handlers must not run.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let inside = |v: &NshView| v.ns().isDescendantOf(view.ns());
+    if !input.hovered.borrow().is_empty() {
+        let left: Vec<NshView> = input
+            .hovered
+            .borrow_mut()
+            .extract_if(.., |v| inside(v))
+            .collect();
+        for v in &left {
+            set_state(surface, v, HOVERED, false);
+        }
+    }
+    if input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| inside(v))
+    {
+        input.link_hovered.borrow_mut().take();
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    let Some(responder) = window.firstResponder() else {
+        return;
+    };
+    if !responder
+        .downcast_ref::<NSView>()
+        .is_some_and(|r| r.isDescendantOf(view.ns()))
+    {
+        return;
+    }
+    // AppKit gives the focus of a view leaving its window to the window
+    // without a resign, but ends a field's editing (its blur): the window
+    // takes it now, the focus reported gone first so the resign is silent.
+    match responder
+        .downcast_ref::<ViewObj>()
+        .and_then(|obj| NshView::from_ns(obj))
+    {
+        Some(focused) => set_state(surface, &focused, FOCUSED, false),
+        None => crate::text_input::taken_out(&window),
+    }
+    window.makeFirstResponder(None);
 }
 
 /// Sets or clears interaction state `bit` of `view` and reports the
