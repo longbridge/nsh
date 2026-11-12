@@ -27,11 +27,11 @@ mod mac {
     use objc2::{MainThreadMarker, rc::Retained};
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-        NSApplication, NSRequestUserAttentionType, NSScreen, NSView, NSWindow, NSWindowButton,
-        NSWindowCollectionBehavior, NSWindowLevel, NSWindowOrderingMode, NSWindowStyleMask,
-        NSWindowTitleVisibility,
+        NSApplication, NSApplicationActivationPolicy, NSRequestUserAttentionType, NSScreen, NSView,
+        NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowLevel, NSWindowOrderingMode,
+        NSWindowStyleMask, NSWindowTitleVisibility,
     };
-    use objc2_foundation::{NSPoint, NSSize};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     use super::*;
@@ -169,12 +169,90 @@ mod mac {
         }
     }
 
-    pub(crate) fn show(window: &Window, activate: bool) {
-        if let Some(w) = ns_window(window)
-            && !activate
-        {
-            w.orderFront(None);
+    /// Orders the window in unless it `activate`s (GPUI's activation shows
+    /// it then); one that `keep`s its size gets its frame back after AppKit
+    /// fitted it to its screen.
+    pub(crate) fn show(window: &Window, activate: bool, keep: bool) {
+        let Some(w) = ns_window(window).filter(|_| !activate) else {
+            return;
+        };
+        let frame = w.frame();
+        // On the next turn, outside GPUI's app: AppKit fits a window to its
+        // screen as it orders it in, and a frame set is reported to GPUI's
+        // resize callback at once, which cannot update the app while it is
+        // being updated (as it is here) and drops the resize. Out of it,
+        // GPUI follows both, and knows the size the window ends up at.
+        crate::rt::outside_app(move || {
+            // An inactive app's window ordered front stays behind the
+            // front app's: a background app's shows regardless.
+            if in_background() {
+                w.orderFrontRegardless();
+            } else {
+                w.orderFront(None);
+            }
+            if keep && w.frame() != frame {
+                w.setFrame_display(frame, true);
+            }
+        });
+    }
+
+    /// The displays with their frames in the desktop (CoreGraphics' global
+    /// coordinates, so a mirror's frame is its primary's), the main display
+    /// (the one with the menu bar) first, then the others in the system's
+    /// order; their ids are GPUI's (`CGDirectDisplayID`). GPUI's own frames
+    /// all start at the origin.
+    pub(crate) fn displays(_cx: &gpui::App) -> Vec<(gpui::DisplayId, gpui::Bounds<gpui::Pixels>)> {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        unsafe extern "C" {
+            fn CGMainDisplayID() -> u32;
+            fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
+            fn CGDisplayBounds(display: u32) -> NSRect;
         }
+        let mut ids = [0u32; 32];
+        let mut count = 0u32;
+        // SAFETY: `ids` has room for the entries asked for, and `count`
+        // reports how many were written.
+        if unsafe { CGGetActiveDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) } != 0 {
+            return Vec::new();
+        }
+        let ids = &ids[..(count as usize).min(ids.len())];
+        // SAFETY: a plain query.
+        let main = unsafe { CGMainDisplayID() };
+        let primary = ids.iter().filter(|&&id| id == main);
+        let others = ids.iter().filter(|&&id| id != main);
+        primary
+            .chain(others)
+            .map(|&id| {
+                // SAFETY: a plain query of an active display.
+                let r = unsafe { CGDisplayBounds(id) };
+                let bounds = gpui::Bounds::new(
+                    gpui::point(gpui::px(r.origin.x as f32), gpui::px(r.origin.y as f32)),
+                    gpui::size(
+                        gpui::px(r.size.width as f32),
+                        gpui::px(r.size.height as f32),
+                    ),
+                );
+                (gpui::DisplayId::new(u64::from(id)), bounds)
+            })
+            .collect()
+    }
+
+    /// The app runs in the background: it never becomes the active app
+    /// (`NSApplicationActivationPolicyProhibited`, which keeps it out of
+    /// the Dock too; an `Accessory` app is not guaranteed to stay inactive
+    /// as its window comes up).
+    pub(crate) fn run_in_background() {
+        if let Some(mtm) = MainThreadMarker::new() {
+            NSApplication::sharedApplication(mtm)
+                .setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
+        }
+    }
+
+    fn in_background() -> bool {
+        MainThreadMarker::new().is_some_and(|mtm| {
+            NSApplication::sharedApplication(mtm).activationPolicy()
+                == NSApplicationActivationPolicy::Prohibited
+        })
     }
 
     pub(crate) fn hide(window: &Window) {
@@ -383,12 +461,24 @@ mod win {
         }
     }
 
-    pub(crate) fn show(window: &Window, activate: bool) {
+    /// Windows does not fit a window to its screen as it shows it: one
+    /// that keeps its size needs nothing.
+    pub(crate) fn show(window: &Window, activate: bool, _keep: bool) {
         if let Some(hwnd) = hwnd(window) {
             // SAFETY: a plain call on a live window.
             unsafe { ShowWindow(hwnd, if activate { SW_SHOW } else { SW_SHOWNOACTIVATE }) };
         }
     }
+
+    /// GPUI's displays, the primary one first.
+    pub(crate) fn displays(cx: &gpui::App) -> Vec<(gpui::DisplayId, gpui::Bounds<gpui::Pixels>)> {
+        super::super::gpui_displays(cx)
+    }
+
+    /// Windows has no app activation: a background app's windows show
+    /// without activating ([`show`]) and nothing brings them to the
+    /// foreground.
+    pub(crate) fn run_in_background() {}
 
     pub(crate) fn hide(window: &Window) {
         if let Some(hwnd) = hwnd(window) {
@@ -506,7 +596,16 @@ mod linux {
     pub(crate) fn set_click_through(_window: &Window, _through: bool) {}
 
     /// GPUI shows its windows as they open.
-    pub(crate) fn show(_window: &Window, _activate: bool) {}
+    pub(crate) fn show(_window: &Window, _activate: bool, _keep: bool) {}
+
+    /// GPUI's displays, the primary one first.
+    pub(crate) fn displays(cx: &gpui::App) -> Vec<(gpui::DisplayId, gpui::Bounds<gpui::Pixels>)> {
+        super::super::gpui_displays(cx)
+    }
+
+    /// Nothing to set: a background app's windows open without the focus
+    /// and are never activated.
+    pub(crate) fn run_in_background() {}
 
     /// GPUI cannot hide a window: it minimizes.
     pub(crate) fn hide(window: &Window) {

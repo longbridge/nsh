@@ -367,7 +367,8 @@ touch's. In Rust `delta` is a `Percentage` and `phase` a `PinchPhase`.
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
-desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it (at
+once when the pointer comes from another element whose hint it showed, within 300 ms of leaving it), and on
 every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
 that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
 exactly as it does without it.
@@ -611,6 +612,8 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
+| `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | The item that is active inside the focused element: a combo box's highlighted option, a list's cursor row ([Accessibility](../docs/accessibility.md#the-active-item-of-a-focused-element)). |
+| `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | The element whose content this one controls: a combo box's list. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |

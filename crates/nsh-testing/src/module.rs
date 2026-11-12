@@ -945,6 +945,10 @@ pub struct PickRequest {
     pub format: String,
     /// The file types offered (`pickFiles`); empty: any.
     pub filters: Vec<PickFilter>,
+    /// The largest file read, in bytes (`pickFiles`' `maxSize`, at most
+    /// 512 MiB); `null` for images. A larger file the handler gives answers
+    /// with its name and size only.
+    pub max_size: Option<f64>,
 }
 
 /// A group of file types a pick offers, as a test reads it.
@@ -972,6 +976,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                 }
                 .into(),
                 filters: Vec::new(),
+                max_size: None,
             },
             Pick::Files(request) => PickRequest {
                 kind: "files".into(),
@@ -988,6 +993,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                         extensions: filter.extensions.clone(),
                     })
                     .collect(),
+                max_size: Some(request.size_limit() as f64),
             },
         }
     }
@@ -2412,6 +2418,17 @@ impl App {
     /// until the app is quiet. Headless only.
     pub async fn open_with_url(this: Instance<Self>, url: String) -> Result<(), JsError> {
         step(&this, move |app| app.open_with_url(&url)).await
+    }
+
+    /// The images whose source is `url` fail to load from now on, those
+    /// loading now included: each reports the failure as on a device
+    /// (`onError`), so a test checks what the app shows instead (an
+    /// avatar's initials, a placeholder). `url` is matched whole and `*`
+    /// in it matches anything (`"https://cdn.example.com/avatars/*"`), as
+    /// `open`'s `network` routes are; a bundled image's is
+    /// `asset:/<path>`. Then waits until the app is quiet. Headless only.
+    pub async fn fail_images(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.fail_images(&url)).await
     }
 
     /// Moves the app to `state`, as the system does when the user leaves it

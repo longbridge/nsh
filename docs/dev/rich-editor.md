@@ -188,6 +188,12 @@ content box so it scrolls with the text, anchors an `overlay()` holding the app'
 `bubbleMenuOffset`); the overlay flips and stays on screen as the core's overlays do. Whether it shows is the app's:
 it passes the slot while it wants the menu.
 
+The content layer (`contentLayer`, a slot): a box over the whole content box, after everything the editor
+draws (`render.rs` `content_layer`), so what the app places in it scrolls with the text in the same frame: a
+block's handle in the margin, a marker beside a node. The box takes no press (`pointer-events: box-none`); its
+children do. The app places them in the content box's points, which `nodeRect(pos)` (a block's box) and
+`coordsAtPos(pos)` answer in.
+
 Tables (`view/table.rs`): the tree walk flattens a table (a node whose spec's `extra.tableRole` is `"table"`): its
 cells, row after row, are the table's children; rows have no view. The table's block is a grid (`grid()`): a column
 per column of its `TableMap`, as wide as the cells' `colwidth` (at least `cellMinWidth`), else `minmax(cellMinWidth,

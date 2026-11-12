@@ -183,7 +183,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   button) to the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
   nothing here, restarting is the host's. `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
-  registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
+  registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode, `set_theme_overrides` only the tokens it names (over the host's theme if there is one: `Surface::host_tokens`); `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets), and gives the host's own sets, which apps reach by name (`nativeModule`,
   `embedding.md` "Native modules"); `AppOptions::context` gives a view's engine its own part of the host, which
@@ -264,6 +264,26 @@ the mouse's back button (it goes back from wherever the focus is), a dialog's an
 middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's bounds are its frame's corners through
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
+
+`nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app never
+activates (on macOS its activation policy is `Prohibited`), its windows open without the focus and show without
+activating, so the keyboard stays with the app the user types in. The window that would have the keyboard is kept
+in `window.rs` ("Running in the background"): what the app sees of the focus (`WindowState.focused`, a focused field's
+caret, the title bar's controls) follows it (`window::is_active`), and every place that would activate the app or a
+window (a press, `focus()`, a window shown) makes it that window instead (`window::focus_window`). The input goes to
+the handlers directly, so nothing else changes. `lifecycle()` stays `inactive`, as in a background app on macOS.
+A window covered by others draws no frames on macOS (GPUI stops its display link), so nothing a test reads waits for
+one: the main window's state goes to the app as the keyboard moves, not only as it renders, and the agent draws a
+window itself where it needs a frame (a screenshot, the buttons of an `AlertDialog`).
+
+`nsh test` also passes `--display` (the display `nsh test --display` names, else `secondary`) and
+`--keep-window-size` (`AppOptions::display`, `AppOptions::keep_size`), so a test run keeps off the screen in use, as
+the macOS host's does. `window.rs` ("Where windows open") resolves the display once, as the app starts, from the
+displays with the primary one first (`native::displays`: on macOS CoreGraphics' list with frames in the desktop, so
+a mirror's frame is the primary's; elsewhere GPUI's), and centers the main window and the app's own windows that
+name no display or position of their own on it. With `keep_size` a window larger than the display keeps its size,
+its top left corner on the display, and on macOS gets its frame back after AppKit fitted it to the screen as it
+showed it; both happen on the next turn of the main loop, outside GPUI's update, so GPUI hears both resizes.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
 again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing

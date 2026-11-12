@@ -309,7 +309,7 @@ const offset = signal({ x: 0, y: 0 });
 
 ### 工具提示
 
-`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏；在任何设备上，键盘把焦点移到元素上时也会显示，焦点离开或按下 Escape 时隐藏（点击或轻点带来的焦点把提示交给指针决定）。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
+`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏（指针从另一个显示过提示的元素移过来、离开那个元素不到 300 毫秒时立即显示）；在任何设备上，键盘把焦点移到元素上时也会显示，焦点离开或按下 Escape 时隐藏（点击或轻点带来的焦点把提示交给指针决定）。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -513,6 +513,8 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | 辅助技术报告的状态（`checked` 和 `pressed` 可以是 `"mixed"`；`current` 为 `true` 或 `"page"`、`"step"`、`"location"`、`"date"`、`"time"`）。 |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |
+| `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | 获得焦点的元素里当前活动的那一项：组合框高亮的选项、列表的光标行（[无障碍](../docs/accessibility.md#获得焦点的元素里的活动项)）。 |
+| `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | 内容由这个元素控制的元素：组合框的列表。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |

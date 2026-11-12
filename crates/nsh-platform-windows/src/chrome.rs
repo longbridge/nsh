@@ -46,8 +46,8 @@ use std::{
 use nsh_core::{
     Color, EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
     desktop::{
-        DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, WindowRequest,
-        menu_icon,
+        DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, WindowEvent,
+        WindowRequest, menu_icon,
     },
     geometry::{Edges, Points},
 };
@@ -174,6 +174,10 @@ pub(crate) struct Chrome {
     tracked_popup: RefCell<Option<Arc<[MenuItem]>>>,
     #[cfg(feature = "dev")]
     test_choice: Cell<Option<(u32, Option<MenuRole>)>>,
+    /// The app listens to quit requests
+    /// (`DesktopCommand::SetQuitOnRequest(false)`): the Quit item and its
+    /// Ctrl+Q ask it ([`ask_quit`]).
+    asks_quit: Cell<bool>,
 }
 
 impl Chrome {
@@ -413,6 +417,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // A window of the app's own's ([`crate::app_window`]).
         DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Quit => quit(surface),
+        DesktopCommand::SetQuitOnRequest(quit) => c.asks_quit.set(!quit),
         // Quits as above, then the runner starts the app again; an
         // embedding app's window is its own.
         DesktopCommand::Restart => {
@@ -563,6 +568,21 @@ pub(crate) fn popup_tray(surface: &Surface, items: Arc<[MenuItem]>, at: (f32, f3
             awaited: false,
         },
     );
+}
+
+/// The user asked to quit (the Quit item, its Ctrl+Q): while the app
+/// listens to quit requests, it hears this one ([`WindowEvent::QuitRequest`])
+/// and decides, and this is true; false when quitting goes on.
+fn ask_quit(surface: &Surface) -> bool {
+    if !surface.chrome.asks_quit.get() {
+        return false;
+    }
+    surface.event(
+        ROOT_ID,
+        EventKind::Window,
+        EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+    );
+    true
 }
 
 /// Quits the app, as its `quit` role: the windows close without asking
@@ -1628,7 +1648,11 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>, area: Option<&
     let hwnd = surface.hwnd();
     match role {
         // An embedding app's window is its own to close or keep.
-        Some(MenuRole::Quit) if top_level(hwnd) => quit(surface),
+        Some(MenuRole::Quit) if top_level(hwnd) => {
+            if !ask_quit(surface) {
+                quit(surface);
+            }
+        }
         Some(MenuRole::Quit | MenuRole::Close) => {
             // As the window menu's Close: the app hears a close press.
             if let Some(shell) = crate::window::shell(hwnd) {
@@ -1726,8 +1750,11 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         }
         theme_menus(crate::system::dark(surface));
         // The window must be in front for the menu to close when clicking
-        // elsewhere.
-        let _ = SetForegroundWindow(hwnd);
+        // elsewhere; a background app's stays behind (the test agent closes
+        // its menus itself).
+        if !crate::window::in_background() {
+            let _ = SetForegroundWindow(hwnd);
+        }
         #[cfg(feature = "dev")]
         if actions.is_empty() {
             *surface.chrome.tracked_popup.borrow_mut() = Some(items.clone());
@@ -2137,6 +2164,16 @@ mod tests {
 
     fn selection(text: &NshView) -> Option<(u32, u32)> {
         text.state().text.as_ref().unwrap().area_range.get()
+    }
+
+    #[test]
+    fn quit_requests_ask_the_app_only_while_it_listens() {
+        let surface = Surface::new(Environment::default());
+        assert!(!ask_quit(&surface), "quits as before");
+        surface.chrome.asks_quit.set(true);
+        assert!(ask_quit(&surface), "the app decides");
+        surface.chrome.asks_quit.set(false);
+        assert!(!ask_quit(&surface), "quits again");
     }
 
     #[test]

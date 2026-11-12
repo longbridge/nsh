@@ -127,7 +127,8 @@ A key goes through the window's controllers in GTK's order: capture from the win
 bubble back up. What NSH adds:
 
 - **Window shortcuts** (`app.rs`, standalone apps only, not an embedded `AppView`): Ctrl+Q quits (as the `quit`
-  role and `Application.quit()` do: the windows close, then the application's run ends; `Application.restart()` takes
+  role and `Application.quit()` do: the windows close, then the application's run ends; while the app listens to
+  `quitRequest`, Ctrl+Q and the `quit` role report a quit request to it instead (`chrome::ask_quit`); `Application.restart()` takes
   the same path, then `run_app` starts the program again once the process has exited, `nsh_core::restart`; a development host, feature `dev`, only quits), Ctrl+W closes the
   window (GtkWindow's `window.close`, a bubble-phase shortcut of the window rather than an application accelerator,
   which would run before everything: the app may bind Ctrl+W), F11 toggles full screen, as GNOME apps do; the dev host's Ctrl+R (`dev.rs`) is a
@@ -205,6 +206,17 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
 - a screenshot renders the window's content offscreen at its scale after the next frame is painted
   (`GtkWidgetPaintable`), whatever covers the window; the appearance is the portal's, simulated; the size is the
   window's default size.
+
+`nsh test --target linux` runs the host with `--background` unless `--foreground` (`AppOptions::background`,
+`window::run_in_background`), where someone may type on the display (a Wayland compositor, or an X server with a keyboard besides its own
+virtual ones, XTest's and Xvfb's): the
+windows show without activating (on X11 with a user time of 0, which tells the window manager not to focus them; a
+Wayland compositor decides itself whether a new window takes the focus), the agent never takes the X input focus
+(no XTest: its keys take the signals' path above), and the window the app or a press activates acts as the active
+one for the app (`window::is_focused`: its `focused` state, `closeOnBlur`, the window keys go to). A test of the keys
+only XTest's path has (Tab, arrows, the input method, GTK's own shortcut controllers) runs with `--foreground` on such
+a display. On an X server with no keyboard but its virtual ones (Xvfb, as in CI) nobody types, so the app runs as in
+the foreground there, with the real key events.
 
 `dev.rs` hands the model to the surface on the server's test session (idle sources keep their order, so it comes
 before the first bundle). On a machine without a display, the tests run on a virtual one:

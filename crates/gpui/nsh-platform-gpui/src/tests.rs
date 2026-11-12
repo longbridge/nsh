@@ -190,6 +190,7 @@ fn windows(cx: &mut TestAppContext) {
     files_dropped_from_outside_reach_the_view_under_them(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     mouse_events_carry_the_position_button_and_modifiers(cx);
+    a_view_removed_under_the_mouse_hears_no_leave(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
     text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx);
     a_popovers_field_follows_its_trigger_in_the_tab_order(cx);
@@ -200,6 +201,7 @@ fn windows(cx: &mut TestAppContext) {
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
+    the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx);
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
     set_bounds_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
@@ -1406,6 +1408,86 @@ fn asset_uris_resolve_in_the_first_directory_that_has_the_file(cx: &mut TestAppC
     assert_eq!(report, "app 2x3|cover 4x5");
 }
 
+/// A box drawn in the token `primary` and a focused field showing `LABEL`
+/// and the tokens `primary` and `secondary` of the app's own theme
+/// (`setTheme`) as the app reads them.
+const THEMED_FIELD: &str = r##"
+import { mount, setTheme, token, View } from "nsh";
+import { Input } from "nsh/base";
+
+setTheme({ cssVars: { light: { primary: "#111111", secondary: "#222222" } } });
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <View class="h-10 w-10 bg-primary" />
+    <Input autoFocus value={`LABEL ${token("primary")} ${token("secondary")}`} style={{ height: 30 }} />
+  </View>
+));
+"##;
+
+/// Runs the window, with no input, until its last drawn frame has a quad
+/// filled with `rgb` (`0xRRGGBB`).
+fn wait_until_painted(cx: &mut VisualTestContext, rgb: u32) {
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        let painted = cx.update(|window, _| {
+            window.painted_quads().iter().any(|quad| {
+                quad.background.as_solid().is_some_and(|color| {
+                    let c = gpui::Rgba::from(color);
+                    let channel = |v: f32, shift: u32| ((v * 255.0).round() as u32) << shift;
+                    channel(c.r, 16) | channel(c.g, 8) | channel(c.b, 0) == rgb && c.a == 1.0
+                })
+            })
+        });
+        if painted {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no quad of #{rgb:06x} drawn"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn the_host_s_theme_overrides_win_over_the_app_s_tokens_they_name(cx: &mut TestAppContext) {
+    let code = |label| {
+        nsh_bundler::compile_module("App.tsx", &THEMED_FIELD.replace("LABEL", label), &[]).unwrap()
+    };
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| {
+        view.load(App::Js(Bundle::source(code("first"))))
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "first #111111ff #222222ff");
+    wait_until_painted(cx, 0x111111);
+    // Given to the running app, they are drawn with no input.
+    view.update(cx, |view, cx| {
+        view.set_theme_overrides(
+            Some(r##"{ "cssVars": { "light": { "primary": "#ff0000" } } }"##),
+            cx,
+        )
+        .unwrap();
+    });
+    wait_until_painted(cx, 0xff0000);
+    wait_for(&view, cx, "first #ff0000ff #222222ff");
+    // A file that does not parse changes nothing.
+    view.update(cx, |view, cx| {
+        assert!(view.set_theme_overrides(Some("{"), cx).is_err());
+    });
+    // An app loaded again starts with them.
+    view.update(cx, |view, _| {
+        view.load(App::Js(Bundle::source(code("again"))))
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "again #ff0000ff #222222ff");
+    wait_until_painted(cx, 0xff0000);
+    view.update(cx, |view, cx| view.set_theme_overrides(None, cx).unwrap());
+    wait_until_painted(cx, 0x111111);
+    wait_for(&view, cx, "again #111111ff #222222ff");
+}
+
 fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut TestAppContext) {
     if !cfg!(target_os = "linux") && !cfg!(windows) {
         return;
@@ -1661,6 +1743,64 @@ fn mouse_events_carry_the_position_button_and_modifiers(cx: &mut TestAppContext)
         cx,
         "enter 20 15 in 30 25 null false | move 40 20 in 50 30 null false | leave 110 20 in 120 30 null false",
     );
+}
+
+/// Pad A at (10, 10), 100 × 40, replaced by pad B in the same place when
+/// the mouse enters it, over a focused field that logs the pads' enters
+/// and leaves. Each pad's handlers hold its view through its ref: a cycle,
+/// so a removed pad outlives its removal until a collection.
+const HOVER_REMOVED: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+
+function Pad(props: { name: string; note: (s: string) => void; onEnter?: () => void }) {
+  let view: unknown;
+  return (
+    <View
+      ref={(node) => (view = node)}
+      onMouseEnter={() => {
+        props.note(`enter ${props.name}`);
+        props.onEnter?.();
+      }}
+      onMouseLeave={() => view && props.note(`leave ${props.name}`)}
+      style={{ marginLeft: 10, marginTop: 10, width: 100, height: 40 }}
+    />
+  );
+}
+
+function App() {
+  const open = signal("a");
+  const log = signal("");
+  const note = (s: string) => log.set(`${log()}|${s}`);
+  return (
+    <View style={{ flex: 1 }}>
+      <If when={open() === "a"}>
+        <Pad name="a" note={note} onEnter={() => open.set("b")} />
+      </If>
+      <If when={open() === "b"}>
+        <Pad name="b" note={note} />
+      </If>
+      <Input autoFocus value={`${open()}:${log()}`} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_view_removed_under_the_mouse_hears_no_leave(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", HOVER_REMOVED, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "a:");
+    let none = gpui::Modifiers::default();
+    // Entering A removes it: B, now under the still mouse, is entered, and
+    // A, gone, hears no leave then or on the next move.
+    cx.simulate_mouse_move(gpui::point(gpui::px(30.0), gpui::px(25.0)), None, none);
+    wait_for(&view, cx, "b:|enter a|enter b");
+    cx.simulate_mouse_move(gpui::point(gpui::px(120.0), gpui::px(30.0)), None, none);
+    wait_for(&view, cx, "b:|enter a|enter b|leave b");
 }
 
 /// A left click at `position` that is click `count` of a series.
