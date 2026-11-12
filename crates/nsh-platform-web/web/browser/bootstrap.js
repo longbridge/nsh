@@ -5275,7 +5275,8 @@
 			lifecycle: () => fields.lifecycle(),
 			platform,
 			shadersAvailable: () => fields.shaders(),
-			fpsEnabled: () => false
+			fpsEnabled: () => false,
+			wakeCount: () => 0
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),
