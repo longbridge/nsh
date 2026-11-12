@@ -1973,7 +1973,7 @@ await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", s
 
 ### Notifications.closeAll
 
-`closeAll()` 移除应用的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留应用的通知，所以在这些平台上 `closeAll()` 也会移除应用上一次运行留下的通知。Android 和 Windows 上移除的是 NSH 显示的通知，嵌入方自己的通知保留；Apple 平台上清空应用的通知中心，嵌入方与 NSH 共用这个通知中心。Linux 和 Web 上它移除当前运行的应用显示的通知。
+`closeAll()` 移除应用显示的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留通知，`closeAll()` 在这些平台上移除 NSH 显示的通知，包括应用上一次运行留下的，嵌入方自己的通知保留。Linux 和 Web 上它移除当前运行的应用显示的通知。
 
 ```tsx
 async function signOut() {

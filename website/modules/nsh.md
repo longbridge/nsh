@@ -2045,12 +2045,10 @@ await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", s
 
 ### Notifications.closeAll
 
-`closeAll()` removes every notification of the app's, shown or waiting to show. Call it when the user signs out, so
-what the notifications said goes with the account. The system's notification center keeps the app's notifications
-across runs on Apple platforms, Windows and Android, so there `closeAll()` also removes those an earlier run of the app
-showed. On Android and Windows it removes the notifications NSH showed, and an embedding app's own stay; on Apple
-platforms it clears the app's notification center, which an embedding app shares with NSH. On Linux and the web it
-removes those the running app showed.
+`closeAll()` removes every notification the app showed, shown or waiting to show. Call it when the user signs out, so
+what the notifications said goes with the account. On Apple platforms, Windows and Android the system's notification
+center keeps notifications across runs, and `closeAll()` removes the ones NSH showed there, an earlier run's included,
+while an embedding app's own notifications stay. On Linux and the web it removes those the running app showed.
 
 ```tsx
 async function signOut() {
