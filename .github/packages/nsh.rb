@@ -32,6 +32,9 @@ class Nsh < Formula
     system bin/"nsh", "build", "hello", "-o", testpath/"out", "--release"
     assert_path_exists testpath/"out/bundle.nshc"
     # Other platforms' runtimes are components, added when first needed.
-    assert_match "android", shell_output("#{bin}/nsh component list")
+    # Releases before `nsh component` (0.4.0 and older) bundle them instead.
+    if shell_output("#{bin}/nsh --help").include?("component")
+      assert_match "android", shell_output("#{bin}/nsh component list")
+    end
   end
 end

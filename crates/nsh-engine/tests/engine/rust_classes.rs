@@ -520,6 +520,7 @@ pub(crate) fn start_with(
         minify: false,
         split: false,
         ui_sets: ui_sets.iter().map(Into::into).collect(),
+        ..Default::default()
     })
     .unwrap();
     let described: Vec<_> = ui_sets.iter().map(Into::into).collect();

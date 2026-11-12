@@ -1283,6 +1283,30 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 Some(button) => obj.set("pressedButton", button.name())?,
                 None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
             }
+            // The button that changed here (`onMouseUp`'s), or `null` on a
+            // move.
+            match e.button {
+                Some(button) => obj.set("button", button.name())?,
+                None => obj.set("button", Value::new_null(cx.clone()))?,
+            }
+        }
+        EventPayload::Wheel(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            let (x, y) = e.delta.xy();
+            let delta = rquickjs::Object::new(cx.clone())?;
+            delta.set("x", x)?;
+            delta.set("y", y)?;
+            obj.set("delta", delta)?;
+            obj.set("deltaMode", e.delta.mode_name())?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
+        }
+        EventPayload::Pinch(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            obj.set("delta", e.delta.0)?;
+            obj.set("phase", e.phase.name())?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
         }
         EventPayload::ContextMenu(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
@@ -1296,10 +1320,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         }
         EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
             let list = rquickjs::Array::new(cx.clone())?;
+            let types = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
                 list.set(index, uri.as_str())?;
+                types.set(index, nsh_core::platform::file_mime_type(uri))?;
             }
             obj.set("uris", list)?;
+            obj.set("mimeTypes", types)?;
             if let EventPayload::FileDropAt { page_position, .. } = payload {
                 obj.set("pagePosition", point_object(cx, *page_position)?)?;
             }
@@ -2178,6 +2205,69 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::Mouse(none)).unwrap();
             let pressed: Value = value.as_object().unwrap().get("pressedButton").unwrap();
             assert!(pressed.is_null());
+            let changed: Value = value.as_object().unwrap().get("button").unwrap();
+            assert!(changed.is_null());
+        });
+    }
+
+    #[test]
+    fn released_mouse_payload_has_its_button() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::MouseEvent::released(
+            point(px(5.0), px(6.5)),
+            point(px(50.0), px(60.5)),
+            nsh_core::keymap::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            nsh_core::MouseButton::Right,
+        );
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Mouse(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            let flag = |k: &str| {
+                let m: rquickjs::Object = obj.get("modifiers").unwrap();
+                m.get::<_, bool>(k).unwrap()
+            };
+            assert_eq!(
+                (
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
+                ),
+                (5.0, 6.5, 50.0, 60.5)
+            );
+            assert!(flag("shift"));
+            assert_eq!(obj.get::<_, String>("button").unwrap(), "right");
+            let pressed: Value = obj.get("pressedButton").unwrap();
+            assert!(pressed.is_null());
+        });
+    }
+
+    #[test]
+    fn pinch_payload_is_as_declared() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::PinchEvent::new(
+            point(px(1.0), px(2.0)),
+            point(px(11.0), px(22.0)),
+            nsh_core::geometry::Percentage(0.25),
+            nsh_core::PinchPhase::Start,
+            Default::default(),
+        );
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Pinch(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            assert_eq!(obj.get::<_, f64>("delta").unwrap(), 0.25);
+            assert_eq!(obj.get::<_, String>("phase").unwrap(), "start");
+            let page: rquickjs::Object = obj.get("pagePosition").unwrap();
+            assert_eq!(page.get::<_, f64>("y").unwrap(), 22.0);
+            let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
+            assert!(!modifiers.get::<_, bool>("shift").unwrap());
         });
     }
 
@@ -2233,7 +2323,7 @@ const report = (v) => text(String(v));
             import { element, prop } from "nsh:rt";
             globalThis.seen = [];
             const target = element("view");
-            prop(target, "onFileDragEnter", (e) => seen.push("enter " + e.uris.join(";")));
+            prop(target, "onFileDragEnter", (e) => seen.push("enter " + e.uris.join(";") + " " + e.mimeTypes.join(";")));
             prop(target, "onFileDragLeave", () => seen.push("leave"));
             prop(target, "onFileDrop", (e) => seen.push("drop " + e.uris.join(";")));
             const old = element("view");
@@ -2256,9 +2346,9 @@ const report = (v) => text(String(v));
             assert_eq!(
                 seen,
                 [
-                    "enter file:///tmp/a%20b.png;file:///tmp/%E4%B8%AD.txt",
+                    "enter file:///tmp/a%20b.png;file:///tmp/%E4%B8%AD.txt image/png;text/plain",
                     "leave",
-                    "enter file:///tmp/next.png",
+                    "enter file:///tmp/next.png image/png",
                     "drop file:///tmp/next.png",
                     "old"
                 ]
@@ -2277,6 +2367,8 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::FileDrop(uris.clone())).unwrap();
             let actual: Vec<String> = value.as_object().unwrap().get("uris").unwrap();
             assert_eq!(actual, uris);
+            let types: Vec<String> = value.as_object().unwrap().get("mimeTypes").unwrap();
+            assert_eq!(types, ["text/plain", ""]);
         });
     }
 

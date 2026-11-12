@@ -118,6 +118,20 @@ impl AssetBase {
             }
         }
     }
+
+    /// Whether `path` is one of its bundled files (by its text, `..`
+    /// resolved): those are the app's own, read whatever `fs.read` roots
+    /// it declares.
+    fn holds(&self, path: &std::path::Path) -> bool {
+        let path = crate::access::lexical(path);
+        let dirs = match self {
+            AssetBase::Http(_) => return false,
+            AssetBase::Directory(dir) => std::slice::from_ref(dir),
+            AssetBase::Directories(dirs) => dirs.as_slice(),
+        };
+        dirs.iter()
+            .any(|dir| path.starts_with(crate::access::lexical(dir)))
+    }
 }
 
 /// Reads an `asset:/…` URI (the engine's [`Context::read_asset`]): blocking.
@@ -132,6 +146,9 @@ pub struct Context {
     pub read_asset: Option<ReadAsset>,
     /// What the app may load, for the redirects.
     pub access: Arc<Access>,
+    /// The roots the app's local media files are read under (a sound's
+    /// load checks its source against them).
+    pub media_files: Arc<crate::access::MediaFiles>,
     /// The disk cache remote images go through.
     pub disk: Option<DiskCache>,
     /// How remote images download: `None`, the process's
@@ -164,8 +181,10 @@ pub trait Transport: Send + Sync {
     /// GETs `get.url` (blocking, on a loader thread). Every status is a
     /// response (the disk cache decides what a `304` or a `5xx` means). It
     /// follows at most [`MAX_REDIRECTS`] redirects, each one [`redirect`]
-    /// grants; reads at most [`MAX_BYTES`]; gives up after [`TIMEOUT`];
-    /// stops soon after `get.cancelled` is set.
+    /// grants, and ends at one it refuses with [`super::Fetched::refused`]
+    /// (the disk cache then drops its copy of the URL); reads at most
+    /// [`MAX_BYTES`]; gives up after [`TIMEOUT`]; stops soon after
+    /// `get.cancelled` is set.
     fn get(&self, get: Get<'_>) -> Result<super::Fetched, String>;
 }
 
@@ -880,7 +899,21 @@ fn read(
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<ImageData, String> {
     match location {
-        Location::File(path) => read_file(path).map_err(|e| format!("{}: {e}", path.display())),
+        Location::File(path) => {
+            // A bundled file is the app's own: not one of its `fs.read`
+            // reads.
+            let bundled = context
+                .asset_base
+                .as_ref()
+                .is_some_and(|base| base.holds(path));
+            let none = crate::access::MediaFiles::default();
+            let files = if bundled {
+                &none
+            } else {
+                &*context.media_files
+            };
+            read_file(path, files).map_err(|e| format!("{}: {e}", path.display()))
+        }
         Location::Data(uri) => super::decode_data_uri(uri).map(|(_, bytes)| bytes.into()),
         Location::Memory(_, data) => Ok(data.clone()),
         Location::Asset(uri, read) => read(uri).map(ImageData::from),
@@ -899,9 +932,19 @@ pub fn read_now(location: &Location, context: &Context) -> Result<ImageData, Str
     read(location, context, &AtomicBool::new(false), &mut |_, _| {})
 }
 
-fn read_file(path: &std::path::Path) -> Result<ImageData, String> {
+/// Reads the file at `path`: for an app with `fs.read` roots, through the
+/// root that holds it, so a link made after the check is not followed out
+/// of it ([`crate::access::MediaFiles::open`]).
+fn read_file(
+    path: &std::path::Path,
+    files: &crate::access::MediaFiles,
+) -> Result<ImageData, String> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let file = match files.open(path) {
+        Some(file) => file,
+        None => std::fs::File::open(path),
+    }
+    .map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)
@@ -924,9 +967,10 @@ fn fetch(
     };
     match &context.disk {
         Some(cache) => cache.load(url, get),
-        None => get(&[]).and_then(|response| match response.status {
-            200..=299 => Ok(response.body.into()),
-            status => Err(format!("HTTP {status}")),
+        None => get(&[]).and_then(|response| match (response.refusal, response.status) {
+            (Some(refusal), _) => Err(refusal),
+            (None, 200..=299) => Ok(response.body.into()),
+            (None, status) => Err(format!("HTTP {status}")),
         }),
     }
 }
@@ -1009,6 +1053,11 @@ mod http {
         (if direct { &DIRECT } else { &PROXIED }).get_or_init(|| {
             let config = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
+                .tls_config(
+                    ureq::tls::TlsConfig::builder()
+                        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                        .build(),
+                )
                 .http_status_as_error(false)
                 .max_redirects(0)
                 .max_redirects_will_error(false);
@@ -1030,12 +1079,14 @@ mod http {
         }
     }
 
-    /// GETs `url` with `headers`, following redirects one hop at a time.
+    /// GETs `url` with `headers`, following redirects one hop at a time:
+    /// the response that ends it, and why when that is a redirect the app
+    /// may not follow ([`redirect`]).
     fn get(
         url: &str,
         access: &Access,
         headers: &[(&'static str, String)],
-    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+    ) -> Result<(ureq::http::Response<ureq::Body>, Option<String>), String> {
         let mut url = url.to_owned();
         for _ in 0..=MAX_REDIRECTS {
             let mut request = agent(&url).get(&url);
@@ -1045,14 +1096,17 @@ mod http {
             let response = request.call().map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             if !matches!(status, 301 | 302 | 303 | 307 | 308) {
-                return Ok(response);
+                return Ok((response, None));
             }
             let location = response
                 .headers()
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .ok_or_else(|| format!("{url}: redirect without a Location"))?;
-            url = redirect(access, &url, location)?;
+            match redirect(access, &url, location) {
+                Ok(next) => url = next,
+                Err(refusal) => return Ok((response, Some(refusal))),
+            }
         }
         Err("too many redirects".to_owned())
     }
@@ -1067,8 +1121,11 @@ mod http {
         cancelled: &AtomicBool,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Fetched, String> {
-        let mut response = get(url, access, headers)?;
+        let (mut response, refusal) = get(url, access, headers)?;
         let status = response.status().as_u16();
+        if let Some(refusal) = refusal {
+            return Ok(Fetched::refused(status, refusal));
+        }
         let cache = CacheHeaders::from_lookup(|name| {
             let values: Vec<&str> = response
                 .headers()

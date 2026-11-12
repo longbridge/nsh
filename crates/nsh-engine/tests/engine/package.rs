@@ -18,6 +18,7 @@ fn counter(build_number: u64, bytecode_version: &str) -> Contents {
         minify: true,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, true).unwrap();

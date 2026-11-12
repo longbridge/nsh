@@ -117,6 +117,7 @@
 			post(name, data) {
 				nameOf(name);
 				if (initial[0]) invoke(432, [name, data]);
+				else if (environment.host()) platform.post(name, data);
 			}
 		};
 		dom.rootProp("onHost", (value) => {
@@ -2246,6 +2247,7 @@
 		"keyExtractor",
 		"stickyHeaderIndices",
 		"initialScrollIndex",
+		"initialScrollAtEnd",
 		"onViewableItemsChange",
 		"viewabilityConfig",
 		"refreshing",
@@ -2424,7 +2426,12 @@
 				if (delay > 0) state.timer = setTimeout(report, delay);
 				else report();
 			});
-			if (typeof props.initialScrollIndex === "number") invoke(314, [
+			if (props.initialScrollAtEnd) invoke(314, [
+				id,
+				"scrollToEnd",
+				{ animated: false }
+			]);
+			else if (typeof props.initialScrollIndex === "number") invoke(314, [
 				id,
 				"scrollToIndex",
 				{
@@ -2519,6 +2526,8 @@
 	const MAX_GENERATION = 4095;
 	const EXCEPTION = 4294967295;
 	const COLLECT_MS = 100;
+	const COLLECT_COST_RATIO = 20;
+	const NUMBER_KEY_GENERATIONS = 2 ** 21;
 	const { setTimeout: collectLater, clearTimeout: cancelCollect } = globalThis;
 	const pageNow = globalThis.performance.now.bind(globalThis.performance);
 	var Values = class {
@@ -2554,6 +2563,7 @@
 			this.weakened = false;
 			this.collectTimer = 0;
 			this.lastCollect = 0;
+			this.lastCollectCost = 0;
 		}
 		put(value) {
 			if (this.closed) throw new Error("the app was disposed");
@@ -2619,16 +2629,22 @@
 			this.weakened = false;
 			for (const slot of this.slots) if (slot?.refs > 0 && slot.weak) slot.value = slot.weak.deref();
 		}
+		collectDelay(now) {
+			return Math.max(0, this.lastCollect + Math.max(COLLECT_MS, COLLECT_COST_RATIO * this.lastCollectCost) - now);
+		}
 		schedule(trace) {
 			this.trace ??= trace;
 			if (this.collectTimer) return;
-			const wait = Math.max(0, this.lastCollect + COLLECT_MS - pageNow());
+			const wait = this.collectDelay(pageNow());
 			this.collectTimer = collectLater(() => {
 				this.collectTimer = 0;
 				if (this.closed) return;
 				if (this.depth > 0) return this.schedule(trace);
 				this.collect(trace);
 			}, wait);
+		}
+		accessorKey(owner, generation) {
+			return generation < NUMBER_KEY_GENERATIONS ? generation * 4294967296 + owner : `${owner}:${generation}`;
 		}
 		collect(trace) {
 			this.lastCollect = pageNow();
@@ -2639,7 +2655,7 @@
 				trace();
 				const mirrors = /* @__PURE__ */ new WeakMap(), counts = /* @__PURE__ */ new Map();
 				for (const [kind, owner, generation, id] of this.edges) {
-					const peer = (kind === 0 ? this.classPeers.get(owner) : kind === 2 ? this.nodes.get(owner) : this.accessors.get(`${owner}:${generation}`))?.deref();
+					const peer = (kind === 0 ? this.classPeers.get(owner) : kind === 2 ? this.nodes.get(owner) : this.accessors.get(this.accessorKey(owner, generation)))?.deref();
 					if (!peer) continue;
 					const slot = this.slot(id);
 					if (slot.refs === Infinity || slot.weak && slot.value === void 0) continue;
@@ -2664,6 +2680,7 @@
 				this.edges = null;
 			} finally {
 				this.depth--;
+				this.lastCollectCost = pageNow() - this.lastCollect;
 			}
 		}
 		reconcile() {
@@ -3026,13 +3043,13 @@
 		};
 		const guarded = (fn) => (...args) => protect(() => fn(...args));
 		const finalizers = new FinalizationRegistry((handle) => {
-			values?.accessors.delete(`${handle[0]}:${handle[1]}`);
+			values?.accessors.delete(values.accessorKey(handle[0], handle[1]));
 			if (live()) call(114, handle);
 		});
 		const accessor = (handle) => {
 			const read = () => call(101, handle);
 			finalizers.register(read, handle);
-			values?.accessors.set(`${handle[0]}:${handle[1]}`, new WeakRef(read));
+			values?.accessors.set(values.accessorKey(handle[0], handle[1]), new WeakRef(read));
 			values?.reconcile();
 			return read;
 		};
@@ -3309,8 +3326,9 @@
 			refresh() {
 				if (live()) apply(invoke(200, []));
 			},
-			measure(node) {
-				return call(315, [], node, [], true, false);
+			/** `ref.measure()`, or with `"scrollPosition"` a list's `ref.measureScrollPosition()`. */
+			measure(node, what) {
+				return call(315, [], node, what ? [what] : [], true, false);
 			},
 			reply(id, ok, value) {
 				const waiter = pending.get(id);
@@ -3351,12 +3369,14 @@
 			"zoomTo",
 			"scrollToIndex",
 			"scrollToEnd",
+			"reveal",
 			"reload",
 			"goBack",
 			"goForward",
 			"stopLoading",
 			"injectJavaScript",
 			"postMessage",
+			"insertText",
 			"sendInput",
 			"load",
 			"seek"
@@ -3368,6 +3388,14 @@
 				name,
 				argument
 			]);
+		};
+		prototype.evaluate = async function(script, options) {
+			if (typeof script !== "string") throw new TypeError("evaluate expects a script string");
+			if (options !== void 0 && (options === null || typeof options !== "object")) throw new TypeError("evaluate's options must be an object");
+			if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
+			const error = /* @__PURE__ */ new Error("web views evaluate no scripts here");
+			error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+			throw error;
 		};
 		prototype.setSelection = function(start, end = start) {
 			return call(314, [
@@ -3398,6 +3426,9 @@
 		};
 		prototype.measure = function() {
 			return measure(this);
+		};
+		prototype.measureScrollPosition = function() {
+			return measure(this, "scrollPosition");
 		};
 		const finalizers = new FinalizationRegistry((id) => {
 			if (live()) {
@@ -3687,6 +3718,7 @@
 			"hoverStyle",
 			"focusStyle",
 			"focusWithinStyle",
+			"focusVisibleStyle",
 			"disabledStyle",
 			"testID",
 			"tooltip",
@@ -5154,6 +5186,22 @@
 		const keys = Object.keys(a);
 		return keys.length === Object.keys(b).length && keys.every((key) => same(a[key], b[key], depth - 1));
 	}
+	/** `appInfo()`'s object from the build's JSON, its fields typed as
+	* nsh-js's `AppInfo` reads them. */
+	function readAppInfo(json) {
+		let info = {};
+		try {
+			info = JSON.parse(json) ?? {};
+		} catch {}
+		const text = (value) => typeof value === "string" ? value : null;
+		return {
+			id: text(info.id),
+			name: text(info.name),
+			version: text(info.version),
+			build: Number.isFinite(info.build) ? info.build : null,
+			development: info.development === true
+		};
+	}
 	function createEnvironment(reactive, invoke, dom) {
 		const fields = Object.fromEntries(Object.entries({
 			window: {
@@ -5183,6 +5231,8 @@
 			screenReader: false,
 			host: false,
 			lifecycle: "active",
+			shaders: true,
+			wakeCount: 0,
 			localeSettings: {
 				languages: ["en-US"],
 				timeZone: "UTC",
@@ -5225,16 +5275,20 @@
 			localeSettings: () => fields.localeSettings(),
 			lifecycle: () => fields.lifecycle(),
 			platform,
+			shadersAvailable: () => fields.shaders(),
+			wakeCount: () => fields.wakeCount(),
 			fpsEnabled: () => false
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),
 			screenReaderEnabled: () => fields.screenReader()
 		};
+		let appInfo = readAppInfo("{}");
 		return {
 			api: {
 				...device,
 				...accessibility,
+				appInfo: () => appInfo,
 				safeArea: () => fields.safeArea(),
 				safeAreaInsets: () => insets(),
 				keyboardFrame: () => fields.keyboard(),
@@ -5283,7 +5337,7 @@
 					fields.locale.set(tag);
 				});
 			},
-			setup(tailwind, theme, scheme, statusBar) {
+			setup(tailwind, theme, scheme, statusBar, app) {
 				if (typeof tailwind === "string") dom.rootProp("tailwindTheme", tailwind);
 				if (typeof theme === "string") {
 					dom.rootProp("uiTheme", theme);
@@ -5296,6 +5350,7 @@
 					"system"
 				].includes(scheme)) setColorScheme(scheme);
 				if (typeof statusBar === "string") invoke(405, [statusBar]);
+				if (typeof app === "string") appInfo = readAppInfo(app);
 			}
 		};
 	}
@@ -6045,11 +6100,12 @@
 	* `base()`, what `history.replaceState` resolves against (the page's
 	* `document.baseURI`); `origin`, the page's. `url()` reads the core's
 	* address as it is, which has the page's from before the app's code runs.
+	* The options (`{ history }`) go to the core as they are, which checks them.
 	*/
 	function configureAddress(urlScheme, page) {
 		const { setUrl } = urlScheme;
-		urlScheme.setUrl = (to) => {
-			if (typeof to !== "string" || NOT_IN_AN_ADDRESS.test(to) || new TextEncoder().encode(to).length > MAX_ADDRESS_BYTES) return setUrl(to);
+		urlScheme.setUrl = (to, ...options) => {
+			if (typeof to !== "string" || NOT_IN_AN_ADDRESS.test(to) || new TextEncoder().encode(to).length > MAX_ADDRESS_BYTES) return setUrl(to, ...options);
 			let resolved;
 			try {
 				resolved = new URL(to, page.base());
@@ -6057,7 +6113,7 @@
 				throw new TypeError(`UrlScheme.setUrl: not a URL: ${to}`);
 			}
 			if (resolved.origin !== page.origin) throw new TypeError(`UrlScheme.setUrl: ${resolved.href} is not of the page's origin`);
-			setUrl(resolved.href);
+			setUrl(resolved.href, ...options);
 		};
 	}
 

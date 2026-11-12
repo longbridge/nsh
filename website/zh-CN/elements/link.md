@@ -19,7 +19,7 @@ fn docs() -> impl IntoElement {
         .text_color(move || theme().primary)
         .underline()
         .hover(|s| s.opacity(0.8))
-        .focus(|s| s.rounded_sm().outline(px(2.0)).outline_color(move || theme().ring))
+        .focus_visible(|s| s.rounded_sm().outline(px(2.0)).outline_color(move || theme().ring))
         .child(text("Read the docs"))
 }
 ```
@@ -32,7 +32,7 @@ function App() {
   return (
     <Link
       href="https://example.com/docs"
-      class="self-start text-primary underline hover:opacity-80 focus:rounded-sm focus:outline-2 focus:outline-ring"
+      class="self-start text-primary underline hover:opacity-80 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
     >
       <Text>Read the docs</Text>
     </Link>
@@ -66,7 +66,7 @@ import { Link } from "nsh/base";
 
 ## 去往哪里
 
-在桌面平台（macOS、Windows、Linux、GPUI）和桌面形态的 Web 上，指针在链接上停留半秒，就会显示它去往哪里，就像邮件应用或浏览器状态栏那样：链接下方出现一个提示，写着它的目的地，直到指针离开或按下链接。键盘焦点落在链接上时也会显示。无论链接文字写的是什么，用户都能在点开之前核对目的地。
+在桌面平台（macOS、Windows、Linux、GPUI）和桌面形态的 Web 上，指针在链接上停留半秒，就会显示它去往哪里，就像邮件应用或浏览器状态栏那样：链接下方出现一个提示，写着它的目的地，直到指针离开或按下链接。用键盘把焦点移到链接上（Tab）时也会显示。无论链接文字写的是什么，用户都能在点开之前核对目的地。
 
 - 目的地显示为一行，在从右到左的应用里也按从左到右排列。URL 按解析后的样子显示：国际化域名显示为 ASCII 形式（`https://xn--mnchen-3ya.de`），冒充拉丁字母的其他文字字母会显示出本来面目；`user@` 之后的主机也照实显示，过长的 `user:password@` 会缩短，让主机始终可见。
 - 协议、主机和端口始终以完整宽度显示，IPv6 主机（`http://[2001:db8::1]:8080`）和很长的主机也一样。过长的路径和查询会把中间部分换成省略号，保留开头和结尾（`https://docs.example.com/guides/getting-…arch=arm64#verify`）；窗口窄到放不下这一行时，也只有路径和查询让位，同样省略中间。
@@ -108,7 +108,7 @@ import { Link } from "nsh/base";
 ```tsx
 <Link
   href="https://example.com/changelog"
-  class="self-start text-primary underline decoration-primary/40 transition-colors hover:decoration-primary active:opacity-70 focus:outline-2 focus:outline-ring disabled:text-muted-foreground disabled:no-underline"
+  class="self-start text-primary underline decoration-primary/40 transition-colors hover:decoration-primary active:opacity-70 focus-visible:outline-2 focus-visible:outline-ring disabled:text-muted-foreground disabled:no-underline"
 >
   <Text>Changelog</Text>
 </Link>
@@ -158,7 +158,7 @@ const visited = signal(new Set<string>());
 
 - 链接对屏幕阅读器是一个元素，角色为 `"link"`；它的标签是子元素的文字，或 `accessibilityLabel`。`href` 只是数据：屏幕阅读器读出的是标签。
 - `current` 读作当前页（ARIA 的 `aria-current="page"`），`disabled` 按平台读出不可用元素的方式读出。
-- 在 macOS 和 Web 上，链接是键盘焦点的一站：Tab 到达它，Return 和 Space 打开它，`focus:` 样式显示焦点所在。
+- 在 macOS 和 Web 上，链接是键盘焦点的一站：Tab 到达它，Return 和 Space 打开它，`focus-visible:` 样式显示焦点所在。
 
 标签、角色和播报的一般说明见[无障碍](../docs/accessibility.md)。
 

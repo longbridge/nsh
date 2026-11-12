@@ -12,6 +12,11 @@
 //! ([`crate::element::next_url_scheme_open`]), at most [`MAX_PENDING`]. Nothing
 //! navigates on its own: what a link opens is the app's.
 //!
+//! The core also keeps the app's address ([`AppUrlCell`]); the platform
+//! reports moves of it the app did not make (the web's back and forward,
+//! [`CHANGE`]) as [`AppUrlChange`]s
+//! ([`crate::element::next_app_url_change`]).
+//!
 //! [`Core::set_url_schemes`]: crate::Core::set_url_schemes
 
 /// The longest URL taken, in bytes (as [`crate::open_url::MAX_URL_LEN`]).
@@ -39,6 +44,70 @@ pub(crate) const QUIET: &str = "quiet";
 /// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
 /// with the page's base URL (the web: its `document.baseURI`).
 pub(crate) const BASE: &str = "base";
+
+/// The payload key of [`EventKind::UrlScheme`](crate::EventKind::UrlScheme)
+/// that makes the URL an address the app moved to without making the move
+/// itself, and says how ([`AppUrlChangeReason::parse`]: the web's back or
+/// forward to an entry, or an address the user typed): the app hears it as
+/// a change ([`crate::element::next_app_url_change`]), not as `open`.
+pub(crate) const CHANGE: &str = "change";
+
+/// How the app's address it sets meets the history (TS: `UrlScheme.setUrl`'s
+/// `history`, Rust: [`set_app_url_with`](crate::element::set_app_url_with)):
+/// only the web has one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HistoryBehavior {
+    /// The current entry's address (`history.replaceState`).
+    #[default]
+    Replace,
+    /// An entry of its own after the current one (`history.pushState`),
+    /// with the app's pages as they are, so the browser's back goes back to
+    /// the address before it. An entry the same turn pushes for a page
+    /// takes the address instead, and the address shown makes none.
+    Push,
+}
+
+/// An address the app moved to without making the move itself (TS:
+/// `UrlScheme.on("change", ...)`, Rust:
+/// [`next_app_url_change`](crate::element::next_app_url_change)): on the
+/// web, the browser's back or forward to an entry the app's pages do not
+/// account for, or an address the user typed. The app shows what it names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AppUrlChange {
+    /// The address now, as [`app_url`](crate::element::app_url) reads it.
+    pub url: String,
+    /// What moved it.
+    pub reason: AppUrlChangeReason,
+}
+
+/// What moved the app's address ([`AppUrlChange`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AppUrlChangeReason {
+    /// The browser's back (or a step back from its menu).
+    #[default]
+    Back,
+    /// The browser's forward.
+    Forward,
+    /// The user gave the page an address of the app's (a `#fragment`
+    /// typed in the address bar): a new entry after the current one.
+    Address,
+}
+
+impl AppUrlChangeReason {
+    /// The reason called `name` in [`CHANGE`] and in TS (`"back"`,
+    /// `"forward"`, `"address"`); `None` for another.
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        match name {
+            "back" => Some(Self::Back),
+            "forward" => Some(Self::Forward),
+            "address" => Some(Self::Address),
+            _ => None,
+        }
+    }
+}
 
 /// The app's address, kept once: the core writes it (links, the page's
 /// address, Rust's `set_app_url`) and every VM's `System` reads it
@@ -261,6 +330,25 @@ mod tests {
         assert!(!same_origin(page, "https://b.test/app/"));
         assert!(!same_origin(page, "/relative"));
         assert!(same_origin(None, "anything"));
+    }
+
+    #[test]
+    fn an_address_change_names_its_reason_as_ts_does() {
+        for (name, reason) in [
+            ("back", AppUrlChangeReason::Back),
+            ("forward", AppUrlChangeReason::Forward),
+            ("address", AppUrlChangeReason::Address),
+        ] {
+            assert_eq!(AppUrlChangeReason::parse(name), Some(reason));
+        }
+        assert_eq!(AppUrlChangeReason::parse("open"), None);
+        assert_eq!(AppUrlChangeReason::parse("Back"), None);
+        assert_eq!(AppUrlChange::default().reason, AppUrlChangeReason::Back);
+    }
+
+    #[test]
+    fn an_address_replaces_the_history_entrys_unless_it_asks_to_push() {
+        assert_eq!(HistoryBehavior::default(), HistoryBehavior::Replace);
     }
 
     #[test]

@@ -129,6 +129,7 @@ mount(() => <Text>{status()}</Text>);"#,
         minify: false,
         split: false,
         ui_sets: Vec::new(),
+        ..Default::default()
     })
     .unwrap();
     let mut paths = nsh_core::access::TrustedPaths::default();

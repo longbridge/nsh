@@ -53,6 +53,21 @@ use rustc_hash::FxHashMap;
 
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
+/// This build links the renderer: a platform reports
+/// `Environment::shaders` from it as it starts (`false` without the
+/// feature), and [`Renderer::new`] says whether a GPU answers.
+pub const LINKED: bool = true;
+
+/// [`Renderer::new`] found no GPU adapter or device in this process: the
+/// machine's answer, the same for every surface, so engines started after
+/// it report `Environment::shaders` `false` without asking again.
+static NO_GPU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether [`Renderer::new`] found no GPU in this process.
+pub(crate) fn no_gpu() -> bool {
+    NO_GPU.load(Ordering::Relaxed)
+}
+
 fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
     match format {
         PixelFormat::Rgba => wgpu::TextureFormat::Rgba8Unorm,
@@ -81,7 +96,8 @@ pub struct Renderer {
     pipelines: std::cell::RefCell<Pipelines>,
 }
 
-/// The backends to open a device on, in order (`WGPU_BACKEND` overrides).
+/// The backends to open a device on, in order: the renderer takes the
+/// first whose device opens, so no setting chooses one.
 ///
 /// Linux tries OpenGL first: frames come back to the CPU every display
 /// frame, and Vulkan drivers there (Mesa's ANV on Intel, among others) offer
@@ -90,9 +106,6 @@ pub struct Renderer {
 /// milliseconds of the main thread (a 2000×300 frame: 8–17 ms against
 /// 0.2 ms through OpenGL). Elsewhere the platform's own API first.
 fn backend_order() -> Vec<wgpu::Backends> {
-    if let Some(env) = wgpu::Backends::from_env() {
-        return vec![env];
-    }
     if cfg!(all(target_os = "linux", not(target_os = "android"))) {
         vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
     } else {
@@ -102,44 +115,56 @@ fn backend_order() -> Vec<wgpu::Backends> {
 
 impl Renderer {
     /// Opens a GPU device (blocking, once: adapters answer in milliseconds);
-    /// `None` when there is none, which the log says.
+    /// `None` when there is none, which the log says. The platform then
+    /// tells its engine ([`crate::EngineControl::shaders_unavailable`]).
     pub fn new(format: PixelFormat) -> Option<Renderer> {
-        let mut found = None;
+        // The first backend that gives a device: an adapter found may still
+        // refuse its device, and the next backend then gets its turn. On
+        // NVIDIA's driver OpenGL does (wgpu's validation of indirect calls
+        // needs compute shaders its GL context lacks), and Vulkan opens.
+        let mut opened = None;
         let mut last = None;
         for backends in backend_order() {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends,
                 ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
-            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                ..Default::default()
-            })) {
-                Ok(adapter) => {
-                    found = Some(adapter);
-                    break;
-                }
-                Err(e) => last = Some(e),
-            }
-        }
-        let Some(adapter) = found else {
-            let e = last.map_or_else(String::new, |e| e.to_string());
-            log::warn!("shaders: no GPU adapter ({e}); shader views draw nothing");
-            return None;
-        };
-        let (device, queue) =
+            let adapter =
+                match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    ..Default::default()
+                })) {
+                    Ok(adapter) => adapter,
+                    Err(e) => {
+                        last = Some(format!("no GPU adapter ({e})"));
+                        continue;
+                    }
+                };
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("nsh shaders"),
                 required_limits:
                     wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
                 ..Default::default()
             })) {
-                Ok(device) => device,
-                Err(e) => {
-                    log::warn!("shaders: no GPU device ({e}); shader views draw nothing");
-                    return None;
+                Ok((device, queue)) => {
+                    opened = Some((adapter, device, queue));
+                    break;
                 }
-            };
+                Err(e) => {
+                    let backend = adapter.get_info().backend;
+                    log::debug!(
+                        "shaders: no GPU device on {backend} ({e}); trying the next backend"
+                    );
+                    last = Some(format!("no GPU device on {backend} ({e})"));
+                }
+            }
+        }
+        let Some((adapter, device, queue)) = opened else {
+            let e = last.unwrap_or_default();
+            log::warn!("shaders: {e}; shader views draw nothing");
+            NO_GPU.store(true, Ordering::Relaxed);
+            return None;
+        };
         // What validation missed is a warning, never a panic of the app.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| {
             log::warn!("shaders: {e}");
@@ -219,6 +244,21 @@ impl Renderer {
     /// The format of its frames.
     pub fn format(&self) -> PixelFormat {
         self.format
+    }
+
+    /// Calls `f`, on a thread of the GPU driver's, once the GPU finished
+    /// the frames rendered so far ([`ShaderView::render`]): a backend
+    /// collects them then instead of polling on every display frame while
+    /// they are [`ShaderView::pending`]. `false` (and `f` dropped) where the
+    /// device cannot tell: the backend polls.
+    pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
+        #[cfg(target_vendor = "apple")]
+        return crate::shader_surfaces::when_done(&self.queue, f);
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            drop(f);
+            false
+        }
     }
 
     fn pipeline(
@@ -685,13 +725,24 @@ impl ShaderView {
     /// Whether a call to [`Self::render`] has something to do: a frame to
     /// render (something changed, or its time runs) or one to collect.
     pub fn wants_frame(&self) -> bool {
+        self.due() || (self.layer.is_some() && self.pending())
+    }
+
+    /// Whether [`Self::render`] renders a new frame: something changed, or
+    /// its time runs ([`Self::animates`]). One that is only
+    /// [`Self::pending`] waits for the GPU ([`Renderer::when_done`]).
+    pub fn due(&self) -> bool {
+        self.layer.is_some() && (self.dirty || self.animates())
+    }
+
+    /// Whether its frames change with time alone: it reads `nsh.time` and
+    /// is not paused, or a transition runs. Such a view renders on every
+    /// display frame; one that does not, only when something changed.
+    pub fn animates(&self) -> bool {
         let Some(layer) = &self.layer else {
             return false;
         };
-        self.dirty
-            || (layer.shader.animated() && !layer.paused)
-            || self.transition.is_some()
-            || self.pending()
+        (layer.shader.animated() && !layer.paused) || self.transition.is_some()
     }
 
     /// Whether a frame is on its way back from the GPU.
@@ -1509,6 +1560,36 @@ mod tests {
             "left of the box: progress 1"
         );
         assert_eq!(pixel(&f, 2, 2), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn a_changed_view_renders_once_and_the_gpu_says_when_it_is_done() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        view.set_layer(Some(layer(
+            "struct Uniforms { a: f32 }\n\
+             fn shade(uv: vec2f) -> vec4f { return vec4f(uniforms.a, 0.0, 0.0, 1.0); }",
+            &[("a", UniformValue::Number(1.0))],
+        )));
+        assert!(view.due() && !view.animates(), "a new layer: one frame");
+        let _ = view.render(&renderer, Instant::now());
+        assert!(!view.due(), "rendered: nothing new until something changes");
+        let (tx, rx) = std::sync::mpsc::channel();
+        if !renderer.when_done(move || {
+            let _ = tx.send(());
+        }) {
+            eprintln!("the device does not say when it is done: skipped");
+            return;
+        }
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("told without polling");
+        assert!(view.collect_frame(&renderer), "the frame is back");
+        assert!(!view.wants_frame(), "nothing left to render or collect");
+        assert_eq!(pixel(view.frame(), 0, 0), [255, 0, 0, 255]);
     }
 
     #[test]

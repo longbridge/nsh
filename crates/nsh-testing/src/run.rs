@@ -49,8 +49,18 @@ pub type Compile = Arc<dyn Fn(&Path, Entry) -> Result<Built, String> + Send + Sy
 /// What [`Compile`] built.
 #[derive(Clone)]
 pub enum Built {
-    /// A bundle: its bytecode (without its source map), and its source map.
-    Js(Box<Bundle>, Option<String>),
+    /// A bundle: its bytecode (without its source map), its source map, and
+    /// the directory its `asset:/` URLs are relative to
+    /// (`nsh_bundler::Bundle::asset_root`: the app's), which headless runs
+    /// read its assets from.
+    Js {
+        /// The bundle, without its source map.
+        bundle: Box<Bundle>,
+        /// Its source map.
+        source_map: Option<String>,
+        /// The directory its assets are named from.
+        asset_root: PathBuf,
+    },
     /// The root of an app of Rust only (`nsh.json` `"root"`): what `open`
     /// of the app starts.
     Rust(Box<Root>),
@@ -277,7 +287,7 @@ pub fn run_file(
     static RUNNING: Mutex<()> = Mutex::new(());
     let _running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
     let file = dunce::canonicalize(file).map_err(|e| format!("{}: {e}", file.display()))?;
-    let (bundle, source_map) = compile_test_file(run, &file)?;
+    let (bundle, source_map, asset_root) = compile_test_file(run, &file)?;
     let (events, results) = crossbeam_channel::unbounded();
     let session = Arc::new(Session {
         dir: file.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -290,6 +300,7 @@ pub fn run_file(
     let ended = drive(
         run,
         bundle,
+        &asset_root,
         &events,
         &results,
         source_map.as_deref(),
@@ -305,6 +316,7 @@ pub fn run_file(
 fn drive(
     run: &TestRun,
     bundle: Bundle,
+    asset_root: &Path,
     events: &Sender<Event>,
     results: &Receiver<Event>,
     source_map: Option<&str>,
@@ -313,9 +325,10 @@ fn drive(
     let mut ui_sets = run.ui_sets.clone();
     ui_sets.extend(crate::test_sets());
     let config = EngineConfig {
-        // The sets' fonts load as the engine starts.
+        // The sets' fonts load as the engine starts; what the test file
+        // imports is named from its app's directory.
         assets: Some(Arc::new(DirectoryAssets::new(
-            run.work_dir.clone(),
+            asset_root.to_path_buf(),
             set_files(&ui_sets),
         ))),
         ui_sets,
@@ -353,30 +366,84 @@ fn drive(
 }
 
 /// The test file bundled under the entry made for it, and compiled: the
-/// VM's app and its source map.
-fn compile_test_file(run: &TestRun, file: &Path) -> Result<(Bundle, Option<String>), String> {
+/// VM's app, its source map and the directory its assets are named from.
+fn compile_test_file(
+    run: &TestRun,
+    file: &Path,
+) -> Result<(Bundle, Option<String>, PathBuf), String> {
     let name = file
         .file_name()
         .map_or("test".into(), |n| n.to_string_lossy().into_owned());
     std::fs::create_dir_all(&run.work_dir)
         .map_err(|e| format!("{}: {e}", run.work_dir.display()))?;
-    let entry = run.work_dir.join(format!("{name}.run.js"));
+    // Canonical, as `file` is: their common directories are found.
+    let work_dir = dunce::canonicalize(&run.work_dir)
+        .map_err(|e| format!("{}: {e}", run.work_dir.display()))?;
+    let entry = entry_path(&work_dir, file);
+    let dir = entry.parent().unwrap_or(&work_dir);
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = serde_json::to_string(&file.to_string_lossy().replace('\\', "/"))
         .map_err(|e| e.to_string())?;
+    // The test file's import is the second line, which `test_file_of`
+    // reads back.
     let code = format!(
         "// Made by `nsh test`: runs the tests of {name}.\nimport {path};\nimport {{ run }} from \"{}\";\nrun();\n",
         crate::module::RUNNER
     );
     write_whole(&entry, &code).map_err(|e| format!("{}: {e}", entry.display()))?;
-    let Built::Js(bundle, map) = (run.compile)(&entry, Entry::TestFile)? else {
+    let Built::Js {
+        bundle,
+        source_map: map,
+        asset_root,
+    } = (run.compile)(&entry, Entry::TestFile)?
+    else {
         return Err(format!("{}: built as a Rust root", entry.display()));
     };
-    let map = map.map(|map| readable_sources(&map, &run.work_dir));
+    let map = map.map(|map| readable_sources(&map, dir));
     let bundle = match &map {
         Some(map) => bundle.with_source_map(map.clone()),
         None => *bundle,
     };
-    Ok((bundle, map))
+    Ok((bundle, map, asset_root))
+}
+
+/// Where the entry made for the test file `file` goes in `work_dir`: at
+/// the file's path below the nearest directory above `work_dir` that holds
+/// it (the app's for `<app>/.nsh/test`), so test files of one name in
+/// different directories never share an entry, which parallel runs of the
+/// app would write over each other's. With no such directory short of a
+/// filesystem root (`work_dir` elsewhere), in one named by a hash of the
+/// file's directory.
+fn entry_path(work_dir: &Path, file: &Path) -> PathBuf {
+    let relative = work_dir
+        .ancestors()
+        .filter(|dir| dir.parent().is_some())
+        .find_map(|dir| file.strip_prefix(dir).ok())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            let mut hasher = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(&file.parent(), &mut hasher);
+            let dir = format!("{:016x}", std::hash::Hasher::finish(&hasher));
+            Path::new(&dir).join(file.file_name().unwrap_or(std::ffi::OsStr::new("test")))
+        });
+    let mut name = work_dir.join(relative).into_os_string();
+    name.push(".run.js");
+    name.into()
+}
+
+/// The test file the entry `entry` made for it imports
+/// ([`compile_test_file`]); `None` when `entry` is not such an entry.
+#[cfg(feature = "bundle")]
+pub(crate) fn test_file_of(entry: &Path) -> Option<PathBuf> {
+    let code = std::fs::read_to_string(entry).ok()?;
+    let mut lines = code.lines();
+    if !lines.next()?.starts_with("// Made by `nsh test`") {
+        return None;
+    }
+    let import = lines.next()?.strip_prefix("import ")?.strip_suffix(';')?;
+    serde_json::from_str::<String>(import)
+        .ok()
+        .map(PathBuf::from)
 }
 
 /// Writes `contents` to `path` so that a reader sees it whole, never cut
@@ -541,10 +608,23 @@ impl Session {
         if let Some(start) = &self.run.host {
             return self.open_on_host(entry, &path, launch, start);
         }
-        let app = match self.build(&path)? {
-            Built::Js(bundle, Some(map)) => nsh_engine::App::Js(bundle.with_source_map(map)),
-            Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
-            Built::Rust(root) => nsh_engine::App::Rust(*root),
+        let entry_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        // A bundle's assets are named from its app's directory (an entry
+        // below it, `tests/SubApp.tsx`, too); a Rust root's files are its
+        // crates', by name.
+        let (app, dir) = match self.build(&path)? {
+            Built::Js {
+                bundle,
+                source_map,
+                asset_root,
+            } => {
+                let bundle = match source_map {
+                    Some(map) => bundle.with_source_map(map),
+                    None => *bundle,
+                };
+                (nsh_engine::App::Js(bundle), asset_root)
+            }
+            Built::Rust(root) => (nsh_engine::App::Rust(*root), entry_dir),
         };
         let clock = launch
             .clock
@@ -570,7 +650,6 @@ impl Session {
         let settings = launch.locale_settings.pins(&format!("open({entry:?})"))?;
         let storage = MemoryStorage::new(launch.storage.0);
         let files = set_files(&self.run.ui_sets);
-        let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let safe_area = launch.safe_area.unwrap_or_default();
         let platform = launch.platform.unwrap_or_default();
         // Loaded before the app starts, as the page's host is: what it
@@ -636,6 +715,8 @@ impl Session {
             started.map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
         if let Some(host) = page_host {
             host.attach(app.engine().control());
+            let poster = host.clone();
+            app.on_host_post(move |name, args| poster.post(name, args));
             app.on_host_call(move |id, name, args| host.call(id, name, args));
         }
         if let Some(out) = &self.run.trace {
@@ -850,6 +931,12 @@ fn check_launch(entry: &str, launch: &Launch, target: Option<&HostTarget>) -> Re
         return unsupported(
             "host.handlers",
             "the test plays the embedding app's handlers in headless runs: run the test without --target",
+        );
+    }
+    if launch.module_fakes {
+        return unsupported(
+            "modules",
+            "the test's stand-ins answer the app's calls in headless runs: run the test without --target",
         );
     }
     if launch.url_scheme.is_some() {
@@ -1232,6 +1319,7 @@ mod tests {
             clock: None,
             host: nsh_engine::HostChannel::new(),
             host_handlers: false,
+            module_fakes: false,
             url_scheme: None,
         }
     }
@@ -1307,6 +1395,16 @@ mod tests {
         handlers.host_handlers = true;
         let error = check_launch("./App.tsx", &handlers, None).unwrap_err();
         assert_eq!(code_of(&error), Some(UNSUPPORTED), "{error}");
+
+        // So do the stand-ins of native modules.
+        let mut fakes = launch();
+        fakes.module_fakes = true;
+        let error = check(&fakes, &macos).unwrap_err();
+        assert!(
+            error.contains("`modules` is unsupported on --target macos"),
+            "{error}"
+        );
+        assert_eq!(code_of(&error), Some(UNSUPPORTED));
     }
 
     #[test]
@@ -1328,6 +1426,40 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&environment).unwrap(),
             serde_json::json!({ "idiom": "desktop" })
+        );
+    }
+
+    #[test]
+    fn test_files_of_one_name_get_entries_by_their_paths() {
+        let app = Path::new("/home/me/app");
+        let work_dir = app.join(".nsh/test");
+        let core = entry_path(&work_dir, &app.join("src/core/typing.test.ts"));
+        assert_eq!(core, work_dir.join("src/core/typing.test.ts.run.js"));
+        // The steps of `nsh test <entry>`, written in the work directory.
+        assert_eq!(
+            entry_path(&work_dir, &work_dir.join("App.tsx.steps.test.ts")),
+            work_dir.join("App.tsx.steps.test.ts.run.js")
+        );
+        // A work directory beside the app.
+        assert_eq!(
+            entry_path(Path::new("/home/me/work"), &app.join("App.test.tsx")),
+            Path::new("/home/me/work/app/App.test.tsx.run.js")
+        );
+        // Sharing only the root with the work directory: by the directory's
+        // hash.
+        let elsewhere = Path::new("/srv/work");
+        let core = entry_path(elsewhere, &app.join("src/core/typing.test.ts"));
+        let state = entry_path(elsewhere, &app.join("src/state/typing.test.ts"));
+        assert_ne!(core, state);
+        assert_eq!(core.parent().unwrap().parent(), Some(elsewhere));
+        assert!(
+            core.ends_with("typing.test.ts.run.js"),
+            "{}",
+            core.display()
+        );
+        assert_eq!(
+            core,
+            entry_path(elsewhere, &app.join("src/core/typing.test.ts"))
         );
     }
 

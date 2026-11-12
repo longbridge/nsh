@@ -3,6 +3,7 @@ name = "nsh-platform-ios"
 description = "UIKit backend: native view mounting, text measurement, input, app hosting and the embedding API (C ABI under the NativeShell Swift module)."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true
@@ -58,6 +59,7 @@ nsh-testing = { workspace = true, features = ["agent"], optional = true }
 
 # UIKit exists on iOS, the iOS simulator and Mac Catalyst (all `target_os = "ios"`).
 [target.'cfg(target_os = "ios")'.dependencies]
+tokio.workspace = true
 nsh-platform-apple.workspace = true
 dispatch2.workspace = true
 objc2.workspace = true

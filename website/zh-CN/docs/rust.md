@@ -127,7 +127,9 @@ iOS 的 `AppView` 上用 `AppSource::Rust` 挂载 Rust 根组件。
 
 要在包括 Web 在内的所有平台上运行的代码，使用 NSH 提供的服务：HTTP 用 `fetch`（[网络](./networking.md#在-rust-组件中)），
 等待用 `timer`、`set_timeout` 和 `set_interval`，时钟用 `nsh_core::time::Instant` 和 `nsh_core::time::unix_ms()`。
-`background` 和 `blocking` 在原生目标的线程上运行任务。
+`background` 和 `blocking` 在原生目标的线程上运行任务。`run_on_main_thread(f)` 在平台的主线程上运行 `f`，用于只能在主线程调用的 API
+（AppKit 的状态栏项、UIKit）：它在本轮的视图挂载之后运行，结果是一个在引擎线程上 await 的 future。不是 `async` 的模块函数调用
+`cx.run_on_main_thread(f)`。在 Web 上和 headless 测试中，`f` 在提交结束时于引擎线程上运行；在原生平台上则稍后运行，引擎同时继续工作：以 await 到结果为准判断 `f` 已运行。`f` 返回一个值，由 await 它的代码用这个值写 signal、调用 NSH 的函数。
 
 ## 桌面标题栏
 

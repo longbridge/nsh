@@ -118,6 +118,15 @@ pub enum Reply {
         /// The URL schemes the app claims (`nsh.json` `schemes`).
         #[serde(default)]
         url_schemes: Vec<String>,
+        /// The main window's launch options (`nsh.json` `window`, JSON).
+        #[doc(hidden)]
+        #[serde(default)]
+        main_window: Option<String>,
+        /// The directory the bundle's `asset:/` URLs are relative to (the
+        /// app's, `nsh_bundler::Bundle::asset_root`); `None` from an nsh
+        /// that sends none: the entry's.
+        #[serde(default)]
+        asset_root: Option<PathBuf>,
     },
     /// The entry is the app's Rust root, which the runner makes.
     Root,
@@ -209,6 +218,8 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 source_map,
                 capabilities,
                 url_schemes,
+                main_window,
+                asset_root,
             } => {
                 let bytes = std::fs::read(&bytecode)
                     .map_err(|e| format!("read {}: {e}", bytecode.display()))?;
@@ -223,8 +234,21 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 // QuickJS build it links (the request's version, checked).
                 let bundle = unsafe { Bundle::bytecode(bytes) }
                     .with_capabilities_json(capabilities.as_deref())?
-                    .with_url_schemes(url_schemes);
-                Ok(Built::Js(Box::new(bundle), map))
+                    .with_url_schemes(url_schemes)
+                    .with_main_window(main_window.as_deref());
+                // An app's entry may be its directory.
+                let asset_root = asset_root.unwrap_or_else(|| {
+                    if entry.is_dir() {
+                        entry.to_owned()
+                    } else {
+                        entry.parent().unwrap_or(Path::new(".")).to_owned()
+                    }
+                });
+                Ok(Built::Js {
+                    bundle: Box::new(bundle),
+                    source_map: map,
+                    asset_root,
+                })
             }
             Reply::Root => root
                 .map(|root| Built::Rust(Box::new(root())))
@@ -307,6 +331,8 @@ mod tests {
             source_map: None,
             capabilities: Some(r#"{"network":{"hosts":["api.test"]}}"#.into()),
             url_schemes: vec!["myapp".into()],
+            main_window: Some(r#"{"defaultVisible":false}"#.into()),
+            asset_root: Some("/app".into()),
         };
         let line = serde_json::to_string(&reply).unwrap();
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);

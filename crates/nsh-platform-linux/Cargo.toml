@@ -3,6 +3,7 @@ name = "nsh-platform-linux"
 description = "Linux backend (GTK 4): native widget mounting, Pango text engine, input, standalone app."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true

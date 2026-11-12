@@ -132,6 +132,7 @@ fn start() -> (Engine, mpsc::Receiver<MountBatch>, std::path::PathBuf) {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();

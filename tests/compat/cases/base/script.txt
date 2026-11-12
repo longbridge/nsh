@@ -239,6 +239,10 @@ prop id:plain closeOnEscape true
 prop id:plain closeOnBackdropPress true
 prop id:plain closeOnSwipe true
 noprop id:plain supportedOrientations
+# A dialog for screen readers, with no name of its own.
+prop id:plain role dialog
+noprop id:plain accessibilityLabel
+noprop id:plain accessibilityDescription
 # Closed while `open` is false.
 absent Synced dialog
 absent Guarded dialog
@@ -288,6 +292,10 @@ expect Guarded dialog
 prop id:guarded closeOnEscape false
 prop id:guarded closeOnBackdropPress false
 prop id:guarded closeOnSwipe false
+# An alert dialog named by its label and described by its message.
+prop id:guarded role alertdialog
+prop id:guarded accessibilityLabel Guarded
+prop id:guarded accessibilityDescription Only the app closes it.
 event text:"Guarded dialog" onCancel reason=cancel
 expect Log: guarded cancel
 event text:"Guarded dialog" onCancel reason=swipe
@@ -312,6 +320,9 @@ covers [props] closeOnSwipe
 covers [props] closeOnBackdropPress
 covers [props] ios.supportedOrientations
 covers [props] Dialog.open
+covers [props] role
+covers [props] accessibilityLabel
+covers [props] accessibilityDescription
 covers [events] Dialog.onOpen
 covers [events] Dialog.onClose
 covers [events] Dialog.onCancel
@@ -750,11 +761,11 @@ tap text:MenuTrigger
 expect NewItem
 expect Log: menu true triggerPress
 expect Life: menu open
-style parent:parent:text:NewItem backgroundColor #00ff00ff
-frame parent:text:NewItem 4 4 382 17
-style below:parent:parent:text:NewItem backgroundColor #000000ff
-style below:parent:parent:text:NewItem opacity 0.5
-frame id:separator 4 55 382 1
+style parent:parent:parent:text:NewItem backgroundColor #00ff00ff
+frame parent:text:NewItem 0 0 382 17
+style below:parent:parent:parent:text:NewItem backgroundColor #000000ff
+style below:parent:parent:parent:text:NewItem opacity 0.5
+frame id:separator 0 51 382 1
 prop parent:text:OffItem accessibilityState disabled=true
 prop parent:text:KeepItem accessibilityLabel Keep the menu
 tap text:KeepItem
@@ -810,10 +821,10 @@ touch end
 expect CopyItem
 expect Log: context true longPress
 expect Life: context open
-style parent:parent:text:CopyItem backgroundColor #ff0000ff
-frame parent:text:CopyItem 2 2 386 17
-style below:parent:parent:text:CopyItem backgroundColor #0000ffff
-style below:parent:parent:text:CopyItem opacity 0.25
+style parent:parent:parent:text:CopyItem backgroundColor #ff0000ff
+frame parent:text:CopyItem 0 0 386 17
+style below:parent:parent:parent:text:CopyItem backgroundColor #0000ffff
+style below:parent:parent:parent:text:CopyItem opacity 0.25
 tap text:CopyItem
 expect Log: context false select
 absent CopyItem
@@ -1093,13 +1104,14 @@ covers [props] role
 covers [events] onChange
 # base-radio
 tap id:case-base-radio
-# The group is a radio group for screen readers; each radio is a radio
-# of its own, checked and selected while checked: `checkedStyle`, and
+# The group is a radio group for screen readers, named by the app; each
+# radio is a radio of its own, checked and selected while checked: `checkedStyle`, and
 # `group-checked:` of the app's dot (30 wide, a margin of 8) puts the
 # label at 38.
 expect Plan: basic
 expect Changes: 0
 prop id:plans role radiogroup
+prop id:plans accessibilityLabel Plan
 prop id:basic role radio
 prop id:basic accessibilityState selected=true checked=true
 style id:basic backgroundColor #00ff00ff
@@ -2032,7 +2044,7 @@ expect Confirmed: green
 absent TagFooter
 # Without `multiple`, typing in the input opens the list, and a choice
 # replaces the value and closes it.
-type label:One re
+type id:one-input re
 expect Red
 tap label:Red
 expect One: red
@@ -2048,6 +2060,7 @@ covers [props] Combobox.footer
 covers [props] Combobox.footerClass
 covers [props] Combobox.footerStyle
 covers [props] Combobox.triggerButton
+covers [props] Combobox.inputTestID
 covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Combobox.onConfirm
@@ -2569,6 +2582,7 @@ expect Find: true triggerPress
 expect Apple
 prop below:scroll:label:Apple placeholder Find food
 prop below:scroll:label:Apple accessibilityLabel FindField
+prop id:find-search placeholder Find food
 prop below:scroll:label:Apple autoFocus false
 style below:scroll:label:Apple backgroundColor #abcdefff
 style below:scroll:label:Apple borderRadius 4
@@ -2594,6 +2608,7 @@ absent Apple
 covers [props] Select.searchable
 covers [props] Select.searchPlaceholder
 covers [props] Select.searchAccessibilityLabel
+covers [props] Select.searchTestID
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
@@ -3568,6 +3583,7 @@ expect token primary #171717ff
 expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
+style id:faded color #138a5a80
 covers [nsh] token
 
 # base-set-theme
@@ -3595,6 +3611,23 @@ expect theme up #2563ebff
 # a TypeError, and the theme in force stays.
 tap id:bad
 expect theme result refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+# Malformed JSON shapes and colors leave the current theme in force.
+tap id:bad-structure
+expect theme result bad-structure refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-function
+expect theme result bad-function refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-length
+expect theme result bad-length refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-suffix
+expect theme result bad-suffix refused TypeError
 expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
 tap id:built
@@ -4170,6 +4203,7 @@ expect State: text string true false
 expect Attr: true
 expect Split: true 3
 expect Content: Plain line **b**
+expect Html: <h2>T</h2><p>a <em>b</em></p>
 expect Insert: xyb
 expect Dispatch: all xy
 expect Node: true node
@@ -4310,6 +4344,7 @@ expect Configure: false true unknown
 expect Extension: bold mark 100 true
 expect Extend: 200 underline true
 expect Define: HEY extension xHI
+expect Suggest: true true
 expect Named: text threw
 expect Editable: false
 expect Both: threw
@@ -4359,6 +4394,11 @@ expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
 expect CellA
 expect CellD
+# An editor without a height is as tall as its two lines; one with a
+# `maxHeight` stops there.
+expect AutoTwo
+frame id:rich-auto 20 329 370 34
+frame id:rich-capped 20 367 370 40
 # base-transition-shader
 tap id:case-base-transition-shader
 # Pages and a dialog with a `transitionShader` come and go as without one:

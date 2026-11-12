@@ -177,9 +177,10 @@ pub use crate::{
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
-        MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
-        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuEvent,
-        SubmenuProps, context_menu, menu, menu_item, menu_separator, submenu,
+        MenuItemElement, MenuItemEvent, MenuItemProps, MenuList, MenuListElement, MenuListEntry,
+        MenuListProps, MenuProps, MenuSeparator, MenuSeparatorElement, MenuSeparatorProps, Submenu,
+        SubmenuElement, SubmenuEvent, SubmenuProps, context_menu, menu, menu_item, menu_list,
+        menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
     number_input::{

@@ -183,7 +183,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   button) to the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
   nothing here, restarting is the host's. `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
-  registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
+  registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode, `set_theme_overrides` only the tokens it names (over the host's theme if there is one: `Surface::host_tokens`); `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets), and gives the host's own sets, which apps reach by name (`nativeModule`,
   `embedding.md` "Native modules"); `AppOptions::context` gives a view's engine its own part of the host, which
@@ -321,7 +321,19 @@ and Windows.
 The main window is the one the surface fills (`chrome.rs`): the window protocol's attributes and requests on the
 root node act on it when the surface is standalone (`open_app_window`, `run_app`, `AppView::own_window`); an
 embedded view leaves its host's window alone. Runners read the app's `window` options (`bundle.main_window`) before
-they open it, so its first frame has them, and open it where it was kept with `restoreBounds`.
+they open it, so its first frame has them, and open it where it was kept with `restoreBounds`. With `defaultVisible:
+false` they open it with GPUI's `show` and `focus` off, and `run_app` leaves the app inactive; GPUI applies a mode
+as it opens a window, which would show it, so a hidden window opens in the normal mode and takes the mode it opens in
+(`Chrome::opening_mode`) as the app first shows or focuses it, unless the app set a mode or placement of its own
+before. The main window's state
+reads its visibility from the native window (`native::visible`) and is reported after each request on it too, as a
+hidden window draws no frame. The development host opens its window hidden until the first app came (`dev.rs`,
+`DevSession::held`), then shows it unless the app's `defaultVisible` says hidden, at the host's size and in the
+normal mode, as every app's window (the other launch options apply where a runner opens the window); an error shows
+it while it is hidden (held, or hidden by the app: a tray app whose startup failed), so it is seen. GPUI shows a
+window as it opens on Linux, so there the main window shows. On macOS a window with a parent is AppKit's child window
+of it (`native::set_parent`), which AppKit orders in with it: a panel or dialog of a hidden main window shows the
+main window as it shows.
 
 Windows of the app's own (`<Window>`, `Window.open`) are GPUI windows the backend opens itself (`window.rs`): its
 built-in window backend, which a host replaces with `AppOptions::windows`. Each shows one root of the app's single
@@ -337,6 +349,7 @@ on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize
 buttons and the frame's edges.
 
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
-workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; hiding minimizes);
+workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it
+opens, and hiding minimizes);
 Windows keeps the title bar a window opened with and applies size limits when the window opens; progress shows
 nowhere; close presses from the taskbar, the system menu or Alt+F4 are reported as the close button's.

@@ -24,6 +24,7 @@ mod effects;
 pub mod element;
 mod fenwick;
 pub mod file_dialog;
+pub mod file_type;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
@@ -34,6 +35,7 @@ pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
+pub mod main_thread;
 pub mod mobile;
 mod mount;
 pub mod navigation;
@@ -55,6 +57,7 @@ pub mod scroll;
 pub mod selection;
 pub mod shader;
 pub mod shape;
+pub mod single_instance;
 pub mod speech;
 pub mod storage;
 mod style;
@@ -79,7 +82,7 @@ pub use serde_json::Value as JsonValue;
 
 pub use crate::{
     color::{Hsla, Rgba},
-    core::{ApplyError, Core, ListBind, Measurement},
+    core::{ApplyError, Core, ListBind, ListScrollPosition, Measurement},
     effects::{
         BackdropMaterial, BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, GlassEffect,
         Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes, MacOsBackdrop,
@@ -100,11 +103,12 @@ pub use crate::{
         IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
         KeyboardTaps, KeyboardType, ListAlignment, ListContentStyle, ListViewport, ModalAnimation,
         ModalPresentation, ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp,
-        PasteBehavior, PasteEvent, PastedFile, PayloadValue, PointerType, PressEvent, Prop,
-        ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp,
-        ScrollbarSetting, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
-        WebElement, WebInput, WebKey, WebLoad, WebSource,
+        PasteBehavior, PasteEvent, PastedFile, PayloadValue, PinchEvent, PinchPhase, PointerType,
+        PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation,
+        ScreenProp, ScrollAlignment, ScrollProp, ScrollbarSetting, SnapAlignment, StatusBarConfig,
+        StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        TransitionFallback, Viewability, WebElement, WebInput, WebKey, WebLoad, WebSource,
+        WheelDelta, WheelEvent,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

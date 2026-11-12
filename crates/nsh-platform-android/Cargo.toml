@@ -3,6 +3,7 @@ name = "nsh-platform-android"
 description = "Android backend: JNI glue, StaticLayout text engine, mount batch encoding, native animation driver."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 readme.workspace = true
@@ -51,6 +52,7 @@ crypto = ["js", "nsh-engine/crypto"]
 log.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
+tokio.workspace = true
 jni.workspace = true
 nsh-core = { workspace = true, features = ["svg"] }
 nsh-engine.workspace = true

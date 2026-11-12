@@ -1127,6 +1127,13 @@ pub trait Native: Send + Sync {
                 .into(),
         )
     }
+    /// An input method composes `text` in the focused input: marked text
+    /// at the caret, in place of what it composed; empty, the composition
+    /// ends with nothing committed.
+    fn compose(&self, text: &str) -> Result<(), String> {
+        let _ = text;
+        Err("`compose` runs headless and on macOS for now".into())
+    }
     /// Chooses the action of the open context menu (`Menu.popup`) at the
     /// end of `path`: the labels of the submenus on the way, then its own.
     fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
@@ -1181,6 +1188,11 @@ pub trait Native: Send + Sync {
     /// Goes back as the user does (a back gesture, the back button,
     /// Escape): an error when the platform has none.
     fn back(&self) -> Result<(), String>;
+    /// Goes forward in the browser's history: the web's; the other
+    /// platforms have no forward.
+    fn forward(&self) -> Result<(), String> {
+        Err(crate::failure::web_only("forward"))
+    }
     /// Answers the dialog the app shows now (the oldest): presses its
     /// button with the text `button`, or closes it without one.
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String>;
@@ -1495,6 +1507,7 @@ impl Agent {
             TestStep::OpenedUrls => self.scene.opened_urls().map(Value::from),
             TestStep::DragAndHold { selector, x, y } => done(self.drag_and_hold(&selector, x, y)),
             TestStep::Drop => done(self.drop_held()),
+            TestStep::Compose { selector, text } => done(self.compose(&selector, &text)),
             TestStep::DropFiles { selector, uris } => done(
                 self.find(&selector, "view", PickTarget::View)
                     .and_then(|(_, at)| self.native.drop_files(at, uris))
@@ -1509,6 +1522,7 @@ impl Agent {
                 done(self.native.press_keys(&keys).and_then(|()| self.settled()))
             }
             TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
+            TestStep::Forward => done(self.native.forward().and_then(|()| self.settled())),
             TestStep::Wait { ms } => {
                 std::thread::sleep(Duration::from_millis(ms));
                 done(self.check())
@@ -2053,6 +2067,16 @@ impl Agent {
         self.settled()
     }
 
+    fn compose(&self, selector: &str, text: &str) -> Result<(), String> {
+        // In the field the user is in: a press would commit what it composes.
+        let (id, _) = self.find(selector, "input", PickTarget::Input)?;
+        if self.native.focused() != Some(id) {
+            self.focus(selector)?;
+        }
+        self.native.compose(text)?;
+        self.settled()
+    }
+
     fn right_click(&self, selector: &str) -> Result<(), String> {
         if !self.native.mouse() {
             return Err(
@@ -2255,7 +2279,11 @@ impl Agent {
     }
 
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.scene.texts().unwrap_or_default())
+        let texts = self.scene.texts().unwrap_or_default();
+        format!(
+            "on screen: [{}]",
+            crate::failure::screen_texts(&texts, Some(crate::failure::SCREEN_TEXT_LIMIT))
+        )
     }
 }
 
@@ -2646,6 +2674,13 @@ mod tests {
             agent.take(TestStep::Back),
             StepOutcome::Failed {
                 message: "no back here".into()
+            }
+        );
+        // Only the web's native goes forward.
+        assert_eq!(
+            agent.take(TestStep::Forward),
+            StepOutcome::Failed {
+                message: crate::failure::web_only("forward")
             }
         );
         // No input to type into.

@@ -446,15 +446,19 @@ pub(crate) fn focused(surface: &Surface, cx: &App) -> Option<NodeId> {
 #[cfg(feature = "dev")]
 pub(crate) fn state_now(surface: &Surface, id: NodeId, cx: &mut App) -> Option<WindowState> {
     let visible = match id {
-        ROOT_ID => true,
+        // The main window's own (`native::visible`).
+        ROOT_ID => None,
         id => {
             let w = get(surface, id)?;
-            w.shown.get() && !w.hidden.get()
+            Some(w.shown.get() && !w.hidden.get())
         }
     };
     let handle = handle_of(surface, id)?;
     handle
-        .update(cx, |_, window, cx| read_state(window, visible, cx))
+        .update(cx, |_, window, cx| {
+            let visible = visible.unwrap_or_else(|| native::visible(window));
+            read_state(window, visible, cx)
+        })
         .ok()
 }
 
@@ -666,7 +670,11 @@ pub(crate) fn main_request(surface: &Rc<Surface>, r: &WindowRequest) {
             // As before the request existed: the embedding app's close
             // handler decides; `closeOnPress` does not hold it back.
             WindowRequest::Close => close_main(&surface, window, cx),
-            r => request(&surface, None, window, r, cx),
+            r => {
+                request(&surface, None, window, r, cx);
+                // A hidden window draws no frame to report it with.
+                observe_main(&surface, window, cx);
+            }
         }
     });
 }
@@ -728,17 +736,40 @@ fn request(
     r: WindowRequest,
     cx: &mut App,
 ) {
+    // The app's own mode replaces the one a hidden main window was to open
+    // in ([`main_opened`]).
+    if own.is_none()
+        && matches!(
+            r,
+            WindowRequest::SetMode(_) | WindowRequest::SetPlacement(_)
+        )
+    {
+        surface.chrome.opening_mode.take();
+    }
     match r {
         WindowRequest::Show => {
             native::restore(window);
             let activate = own.is_none_or(|w| w.flag(|a| a.activate, true));
             native::show(window, activate);
+            // As its first frame shows a window: `native::show` leaves one
+            // that activates to GPUI (on macOS, which draws it again as it
+            // shows), which also shows a window hidden since it opened.
+            if activate {
+                cx.activate(true);
+                window.activate_window();
+            }
+            if own.is_none() {
+                main_opened(surface, window);
+            }
         }
         WindowRequest::Hide => native::hide(window),
         WindowRequest::Focus => {
             native::restore(window);
             cx.activate(true);
             window.activate_window();
+            if own.is_none() {
+                main_opened(surface, window);
+            }
         }
         WindowRequest::Close => {}
         WindowRequest::Minimize => window.minimize_window(),
@@ -832,6 +863,29 @@ fn resize(window: &mut Window, width: Option<f32>, height: Option<f32>) {
         side(width, current.width),
         side(height, current.height),
     ));
+}
+
+/// The main window shows: one hidden since it opened takes the mode it
+/// opens in now ([`crate::open_app_window`]).
+fn main_opened(surface: &Surface, window: &mut Window) {
+    if let Some(mode) = surface.chrome.opening_mode.take() {
+        set_mode(window, mode);
+    }
+}
+
+/// A development host shows an error: the main window shows with it while
+/// it is hidden, so the error is seen (`crate::dev`).
+#[cfg(feature = "dev")]
+pub(crate) fn show_main_if_hidden(surface: &Rc<Surface>) {
+    let s = Rc::downgrade(surface);
+    with_main(surface, move |window, cx| {
+        let Some(surface) = s.upgrade() else { return };
+        if !native::visible(window) {
+            request(&surface, None, window, WindowRequest::Show, cx);
+            // A hidden window draws no frame to report it with.
+            observe_main(&surface, window, cx);
+        }
+    });
 }
 
 /// Puts the window in `mode`; doing it again changes nothing.
@@ -1126,7 +1180,7 @@ fn parent_bounds(
 }
 
 /// The GPUI window of the window whose root node is `id`.
-fn handle_of(surface: &Surface, id: NodeId) -> Option<AnyWindowHandle> {
+pub(crate) fn handle_of(surface: &Surface, id: NodeId) -> Option<AnyWindowHandle> {
     match id {
         ROOT_ID => surface.chrome.window(),
         id => get(surface, id)?.handle.get(),
@@ -1411,7 +1465,7 @@ pub(crate) fn observe_main(surface: &Rc<Surface>, window: &Window, cx: &App) {
     {
         return;
     }
-    let state = read_state(window, true, cx);
+    let state = read_state(window, native::visible(window), cx);
     let mut env = surface.environment.get();
     if env.window_state != Some(state) {
         env.window_state = Some(state);

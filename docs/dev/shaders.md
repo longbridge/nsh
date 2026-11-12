@@ -15,6 +15,14 @@ Rust apps and embedders; the prebuilt runners an app without Rust crates ships h
 by what the app imports (`docs/dev/browser-js-size.md`), and GPUI always has it. A crate with `default-features = false`
 names the feature to keep shaders: `features = ["shader"]`. The other optional parts are in [features.md](features.md).
 
+Apps learn whether shaders draw from `Environment::shaders` (TS `shadersAvailable()`, Rust `shaders_available()`),
+which `Shader::compile` cannot tell: it only says a source is valid. Each platform starts it at
+`nsh_engine::shader::LINKED` (`true` on the web, whose page reports `shaders: false` once its WebGL 2 context fails);
+when its `Renderer::new` finds no GPU it calls
+`EngineControl::shaders_unavailable`, and the engine keeps it `false` from then on, for later environments and for
+engines started after it in the same process. The engine also reports `false` on a grid surface. Headless runs keep the
+default, `true`.
+
 ## The contract
 
 An app writes one function and whatever helpers and constants it needs:
@@ -108,9 +116,10 @@ changes) or an animated value (`&AnimatedValue`, `&AnimatedNode`), whose node it
 `nsh_engine::shader::Renderer` holds a wgpu device and queue, two bind group layouts (built-ins alone; built-ins and
 uniforms) and the render pipelines by source hash (`None` for one the device refused, reported once with a `js`
 warning). A backend opens it the first time a shader is mounted on a surface (Android: on the `NshView`, kept across
-app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter on the primary
-backends and GL (`WGPU_BACKEND` overrides) with WebGL 2's downlevel limits; where no adapter or device is found it is
-`None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
+app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter with WebGL 2's
+downlevel limits backend by backend (Linux: GL, then the primary ones; elsewhere the primary ones and GL at once;
+no setting chooses one) and keeps the first whose device opens, so an adapter that refuses its device gives the
+next backend its turn; where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
 `nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
 clock of `nsh.time` (kept while paused), and its frames.
@@ -138,7 +147,7 @@ is. Views out of sight stop rendering until they show again.
 | Platform | Ticks on | Shows a frame as | Out of sight |
 |---|---|---|---|
 | Linux (GTK 4) | each view's tick callback | a `GdkMemoryTexture` appended in the view's snapshot, after the background, under text, images and children | `reveal` on the frame clock's layout, for views outside a clipping ancestor or the window |
-| macOS (AppKit) | one frame callback of the surface's display link, at the window's backing scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children (`decor.rs` shapes it); a `CGImage` without Metal | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
+| macOS (AppKit) | one frame callback of the surface's display link while frames change with time, pictures are due or anything else wants frames; a view that only changed renders after the batch and shows its frame when the GPU says it is done (`Renderer::when_done`), without the display link; at the window's backing scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children (`decor.rs` shapes it); a `CGImage` without Metal | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
 | iOS | a `CADisplayLink` of its own, at the screen's scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children; a `CGImage` without Metal | views outside any window render once back in one |
 | Android | the UI-thread animator's `Choreographer`, kept ticking by `UiAnimation::outputs` while a view wants a frame | a bitmap of `Box.java`, filled by `NshView.shaderFrame` | — |
 | Windows | the surface's frame ticker (`Surface::on_frame`), at the window's scale | a Direct2D bitmap drawn under the children (made again after a device loss) | `reveal`: hidden, concealed or detached views |
@@ -438,7 +447,12 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
 - **A first frame is not an end.** A run's first frame comes back one or two display frames after it starts, and
   `ShaderView::frame()` is empty until then: a page's or a dialog's run ends on its clock, never on an empty frame.
 - **Readback latency.** Native frames arrive one or two display frames after `render`; a backend must keep ticking
-  while `ShaderView::pending()` is true, or the last frame of a change never shows.
+  while `ShaderView::pending()` is true, or be told when they are back (`Renderer::when_done`, on Apple's GPUs), or
+  the last frame of a change never shows.
+- **A display frame for one shader frame on macOS.** Resuming the surface's display link for a frame or two wakes
+  the process about as often as keeping it running at the screen's rate. A view that only changed
+  (`ShaderView::animates` false, no pictures) renders after the batch and is collected when the GPU tells, so the
+  display link stays paused.
 - **A CGImage per frame on macOS and iOS.** Read back, a frame became a `CGImage` in sRGB; Core Animation converted each one to
   the display's colour space (Display P3) on the main thread at commit (`CA::Render::copy_image`, vImage), and with
   the copy out of the read-back buffer a window-sized animated shader took 70 % of a core at 120 Hz. macOS and iOS
