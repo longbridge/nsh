@@ -81,6 +81,9 @@ pub struct Environment {
     /// The platform plays sound
     /// ([`crate::platform::Environment::audio`]).
     pub audio: bool,
+    /// The platform shows the system's tab bar on iOS and Android
+    /// ([`crate::platform::Environment::tab_bar`]).
+    pub tab_bar: bool,
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
@@ -138,6 +141,7 @@ impl Default for Environment {
             speech: false,
             notifications: false,
             audio: false,
+            tab_bar: true,
             cell: None,
             web_input: false,
             web_evaluate: false,

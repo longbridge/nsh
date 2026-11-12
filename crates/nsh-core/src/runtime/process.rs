@@ -28,9 +28,10 @@ pub(crate) struct Process;
 impl Process {
     /// The native operating system's name, as Rust's `std::env::consts::OS`
     /// and gpui-shell's say it: `"macos"`, `"windows"`, `"linux"`, `"ios"`,
-    /// `"android"` (not Node's `"darwin"` / `"win32"`).
+    /// `"android"` (not Node's `"darwin"` / `"win32"`); `"harmonyos"` on
+    /// HarmonyOS, which Rust's target calls Linux.
     #[allow(non_upper_case_globals)]
-    pub(crate) const platform: &'static str = std::env::consts::OS;
+    pub(crate) const platform: &'static str = super::os::SYSTEM;
     /// The native CPU architecture's name, as Rust's
     /// `std::env::consts::ARCH` and gpui-shell's say it: `"aarch64"`,
     /// `"x86_64"` (not Node's `"arm64"` / `"x64"`).

@@ -414,6 +414,15 @@ pub fn platform_name() -> &'static str {
         .with_untracked(|e| e.platform_name())
 }
 
+/// The platform shows the system's tab bar: iOS and Android, unless a
+/// platform built outside NSH has none
+/// ([`crate::platform::Environment::tab_bar`]); it does not change.
+pub(crate) fn has_tab_bar() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| matches!(e.os, Os::Ios | Os::Android) && e.tab_bar)
+}
+
 /// [`os`] where an engine runs (its thread, while it runs Rust code),
 /// else `None`: for code that also runs outside an engine (a unit test of
 /// a component's model).

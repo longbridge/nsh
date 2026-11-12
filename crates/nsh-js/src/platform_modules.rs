@@ -462,8 +462,14 @@ pub(crate) const HOST_EXPORTS: &[Item] = &[(
 /// `TabBar`).
 pub(crate) const MOBILE_EXPORTS: &[Item] = &[(
     "isAvailable",
-    Export::Value(|cx| boolean(matches!(os(cx), Os::Ios | Os::Android))),
-    Ts::value("True on iOS (and Mac Catalyst) and Android.", "boolean"),
+    Export::Value(|cx| {
+        let env = crate::env::current(cx);
+        boolean(matches!(env.os, Os::Ios | Os::Android) && env.tab_bar)
+    }),
+    Ts::value(
+        "True on iOS (and Mac Catalyst) and Android, unless a platform built outside NSH\nshows no system tab bar there.",
+        "boolean",
+    ),
 )];
 
 /// `nsh/ios`.

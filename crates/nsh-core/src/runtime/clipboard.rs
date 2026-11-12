@@ -5,7 +5,9 @@
 //! `ERR_ACCESS_DENIED` (checked here, in the call; the core also refuses
 //! the commands, for Rust components' calls, which then get nothing).
 //! Images are checked here too: where the platform has no images on the
-//! clipboard (Android, whose backend reads and writes text only)
+//! clipboard (Android, whose backend reads and writes text only, and
+//! platforms built outside NSH without images:
+//! [`crate::platform::Environment::clipboard_images`])
 //! `writeImage` and `readImage` reject with
 //! `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `hasImage` answers `false`
 //! without asking the platform; an image over
@@ -14,7 +16,7 @@
 
 use crate::{
     element::{ClipboardImage, JsError, System, codes, module},
-    platform::{Os, clipboard::MAX_IMAGE_BYTES},
+    platform::clipboard::MAX_IMAGE_BYTES,
 };
 
 /// Whether the app may use the clipboard: why not when it may not.
@@ -30,9 +32,10 @@ fn granted(sys: &System) -> Result<(), JsError> {
 }
 
 /// Whether the platform puts images on the clipboard and reads them back:
-/// every backend but Android's.
+/// every backend but Android's, and a platform built outside NSH that says
+/// it does ([`crate::platform::Environment::clipboard_images`]).
 fn has_images(sys: &System) -> bool {
-    sys.os != Os::Android
+    sys.clipboard_images
 }
 
 /// Why `call` cannot run where the platform has no clipboard images.
