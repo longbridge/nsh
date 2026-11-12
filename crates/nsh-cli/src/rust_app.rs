@@ -135,6 +135,11 @@ pub(crate) struct RustApp {
     /// Its crates ask for another version of nsh: they build from manifests
     /// in the workspace ([`write_retargeted`]), its own left as they are.
     retargeted: bool,
+    /// The command builds programs for this machine besides the describing
+    /// one (the headless runner, a host or runner of its desktop): they
+    /// share one build of what they have in common
+    /// ([`RustApp::unify_features`]).
+    unify: bool,
 }
 
 /// A crate of the app (`nsh.json` `"rust"`).
@@ -510,6 +515,9 @@ pub(crate) struct RootConfig {
     url_schemes: Vec<String>,
     /// `"window"` (JSON, checked): the main window's launch options.
     window: Option<String>,
+    /// `"capabilities"` (JSON, as this NSH reads it: what it does not know
+    /// left out): what the app may reach.
+    capabilities: Option<String>,
     /// The app's translations (`locales/`) as JSON, written to the
     /// workspace and compiled into the runners.
     translations: Option<PathBuf>,
@@ -524,7 +532,9 @@ pub(crate) fn is_root(entry: &Path) -> bool {
 }
 
 /// The `"rust"` crates of the app whose entry is `entry`, if it has any.
-pub(crate) fn of(entry: &Path) -> anyhow::Result<Option<RustApp>> {
+/// `unify`: the command builds programs for this machine besides the
+/// describing one ([`RustApp::unify_features`]).
+pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     let entry = dunce::canonicalize(entry)
         .with_context(|| format!("entry not found: {}", entry.display()))?;
     let dir = entry.parent().context("entry has no directory")?;
@@ -552,6 +562,7 @@ pub(crate) fn of(entry: &Path) -> anyhow::Result<Option<RustApp>> {
         watched,
         root,
         retargeted,
+        unify,
     };
     app.write_workspace()?;
     Ok(Some(app))
@@ -802,6 +813,21 @@ fn root_config(
             Some(v.to_string())
         }
     };
+    // Read as a TSX app's are (`nsh_bundler::capabilities`): what this NSH
+    // does not know is not granted.
+    let capabilities = match config.get("capabilities") {
+        None => None,
+        Some(v) => {
+            let (capabilities, dropped) = nsh_core::access::Capabilities::from_json_lenient(v)
+                .map_err(|e| anyhow::anyhow!("nsh.json: {e}"))?;
+            for what in dropped {
+                crate::ui::warn(format_args!(
+                    "nsh.json: {what}, not granted (one of a newer NSH, or a typo)"
+                ));
+            }
+            Some(capabilities.to_json().to_string())
+        }
+    };
     let translations = nsh_i18n::read_translations(dir).map_err(|e| anyhow::anyhow!(e))?;
     let translations = if translations.is_empty() {
         None
@@ -818,6 +844,7 @@ fn root_config(
         status_bar,
         url_schemes,
         window,
+        capabilities,
         translations,
     })
 }
@@ -1551,8 +1578,20 @@ panic = \"abort\"
     /// "workspace"` will replace it once it is stable.
     ///
     /// Best effort: when Cargo cannot say, the hack stays empty and each
-    /// program builds as before.
+    /// program builds as before. It stays empty too when only the
+    /// describing program is built for this machine (`nsh build`, `nsh
+    /// check`, a package or a host for another target): it has nothing to
+    /// share, and the hack would give it the features of this machine's
+    /// hosts and runners, with the system libraries they need (WebKitGTK
+    /// for Linux's web views).
     fn unify_features(&self, ws: &Path) {
+        if !self.unify {
+            let current = fs::read_to_string(ws.join("hack/Cargo.toml")).unwrap_or_default();
+            if current.lines().nth(1) != Some("# key: ") {
+                let _ = self.write_hack(ws, "", "");
+            }
+            return;
+        }
         let Some(triple) = host_triple() else {
             return;
         };
@@ -2844,7 +2883,8 @@ fn set_fn(krate: &AppCrate) -> String {
 }
 
 /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-/// `"appearance"`, `"statusBar"`, `"id"`, `"schemes"`, `"window"`) in the crate the generated code links as `krate`, under
+/// `"appearance"`, `"statusBar"`, `"id"`, `"schemes"`, `"window"`,
+/// `"capabilities"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!(
@@ -2869,6 +2909,9 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     }
     if !root.url_schemes.is_empty() {
         make.push_str(&format!("\n        .url_schemes({:?})", root.url_schemes));
+    }
+    if let Some(capabilities) = &root.capabilities {
+        make.push_str(&format!("\n        .capabilities_json({capabilities:?})"));
     }
     if let Some(appearance) = &root.appearance {
         let variant = if appearance == "dark" {
@@ -3153,7 +3196,31 @@ mod tests {
             crates,
             root,
             retargeted: false,
+            unify: true,
         }
+    }
+
+    #[test]
+    fn describing_alone_builds_with_an_empty_hack() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-web-hack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let native = dir.join("native");
+        write_crate(&native, "app-native", "", "");
+        let mut app = app(&dir, &[("app-native", native)], None);
+        app.unify = false;
+        // A former session on this machine filled the hack.
+        let hack = dir.join(".nsh/rust/hack/Cargo.toml");
+        std::fs::create_dir_all(hack.parent().unwrap()).unwrap();
+        std::fs::write(
+            &hack,
+            "# Generated by nsh\n# key: abc\n[target.'x86_64-unknown-linux-gnu'.dependencies]\nwebkit6 = \"0.6\"\n",
+        )
+        .unwrap();
+        app.write_workspace().unwrap();
+        let written = std::fs::read_to_string(&hack).unwrap();
+        assert_eq!(written.lines().nth(1), Some("# key: "), "{written}");
+        assert!(!written.contains("dependencies"), "{written}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Writes the crate `package` in `dir` with `lib` as its `src/lib.rs`
@@ -3227,6 +3294,7 @@ mod tests {
                 status_bar: None,
                 url_schemes: Vec::new(),
                 window: None,
+                capabilities: None,
                 translations: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
@@ -3486,6 +3554,7 @@ mod tests {
                 window: Some(
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
+                capabilities: None,
                 translations: None,
             },
         );
@@ -3505,6 +3574,48 @@ mod tests {
     }
 
     #[test]
+    fn a_rust_app_declares_its_capabilities() {
+        let dir = std::env::temp_dir().join(format!("nsh-rust-caps-{}", std::process::id()));
+        let ws = dir.join(".nsh/rust");
+        std::fs::create_dir_all(&ws).unwrap();
+        let config = |json: &str| serde_json::from_str::<serde_json::Value>(json).unwrap();
+        let root = super::root_config(&dir, &config(r#"{ "root": "App" }"#), &ws).unwrap();
+        assert_eq!(root.capabilities, None);
+        // What this NSH does not know is not granted; the rest is kept.
+        let root = super::root_config(
+            &dir,
+            &config(
+                r#"{ "root": "App", "capabilities": { "openUrl": { "schemes": ["https"] }, "bluetooth": true } }"#,
+            ),
+            &ws,
+        )
+        .unwrap();
+        let json = root.capabilities.clone().unwrap();
+        let read = nsh_core::access::Capabilities::from_json(&config(&json)).unwrap();
+        let expected = nsh_core::access::Capabilities::from_json(&config(
+            r#"{ "openUrl": { "schemes": ["https"] } }"#,
+        ))
+        .unwrap();
+        assert_eq!(read, expected);
+        let code = super::root_fn("", "app_native", &root);
+        assert!(
+            code.contains(&format!(".capabilities_json({json:?})")),
+            "{code}"
+        );
+        // A declaration that is no object grants nothing.
+        let root = super::root_config(
+            &dir,
+            &config(r#"{ "root": "App", "capabilities": 1 }"#),
+            &ws,
+        )
+        .unwrap();
+        let read = nsh_core::access::Capabilities::from_json(&config(&root.capabilities.unwrap()))
+            .unwrap();
+        assert_eq!(read, nsh_core::access::Capabilities::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_rust_app_gets_runners_without_js() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-runners-{}", std::process::id()));
         let app = app(
@@ -3518,6 +3629,7 @@ mod tests {
                 status_bar: None,
                 url_schemes: Vec::new(),
                 window: None,
+                capabilities: None,
                 translations: None,
             }),
         );
@@ -4265,6 +4377,7 @@ panic = \"abort\"
                 status_bar: None,
                 url_schemes: Vec::new(),
                 window: None,
+                capabilities: None,
                 translations: None,
             }),
         );

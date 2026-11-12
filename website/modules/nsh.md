@@ -1071,6 +1071,28 @@ effect(() => {
 });
 ```
 
+### wakeCount
+
+```ts
+const wakeCount: Accessor<number>;
+```
+
+How many times the system woke from sleep while the app ran: 0 at the start, one more after each wake. A sleep may leave `lifecycle()` as it was (a laptop's lid closed and opened with the app in front), while network connections and timers did not live through it. Reactive: an effect that reads it runs again after each wake, where the app checks its connections or opens them again. macOS, Windows and Linux count wakes; on iOS and Android a sleeping device takes the app to the background, which `lifecycle()` reports. Rust: `wake_count() -> u32`.
+
+```rust tabs
+effect(move || {
+    if wake_count() > 0 {
+        feed.reconnect();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (wakeCount() > 0) feed.reconnect();
+});
+```
+
 ### setColorScheme
 
 ```ts
@@ -1773,10 +1795,15 @@ interface PickFilesOptions {
   multiple?: boolean; // let the user pick several (false: one)
   limit?: number; // at most this many when multiple (up to 100)
   filters?: { name: string; extensions: string[] }[]; // the types offered (none: any file)
+  maxSize?: number; // the largest file read, in bytes (512 MiB, also the most)
 }
 
 interface PickedFile {
-  file: File; // name, type, size in bytes and the bytes, as they are
+  file: File | null; // name, type, size in bytes and the bytes, as they are; null when not read
+  name: string;
+  type: string;
+  size: number; // in bytes, read or not
+  status: "read" | "tooLarge"; // "tooLarge": larger than maxSize, its bytes not read
 }
 
 interface PickImagesOptions {
@@ -1804,6 +1831,8 @@ interface PickedImage {
 | `image.size` | `file.size` (`Size<DevicePixels>`) |
 | `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
 | `filters` | `FilePickRequest::new(multiple, limit).filter(FileFilter::new("Documents", ["pdf"]))` |
+| `maxSize` | `.max_size(10 << 20)` |
+| `picked.status`, `.size` | `file.status` (`PickedStatus::TooLarge`), `file.len` |
 
 ### Picker.pickImages
 
@@ -1921,8 +1950,13 @@ It rejects as `pickImages` does: a `RangeError` for options out of range (`limit
 const picked = await Picker.pickFiles({
   multiple: true,
   filters: [{ name: "Documents", extensions: ["pdf", "md"] }],
+  maxSize: 10 * 1024 * 1024,
 });
-for (const { file } of picked) {
+for (const { file, name } of picked) {
+  if (!file) {
+    showError(`${name} is larger than 10 MB`);
+    continue;
+  }
   const form = new FormData();
   form.append("document", file);
   await fetch("https://api.example.com/documents", { method: "POST", body: form });
@@ -1940,8 +1974,9 @@ for (const { file } of picked) {
 | GPUI | GPUI's open dialog, which offers any file | Files that do not pass are left out afterwards |
 
 None needs a permission. Files come as they are: nothing is converted, and each keeps its name. A file's whole bytes are
-read into memory, so a file larger than 512 MiB is left out of the answer and logged. A filter is what the picker
-offers, not a promise: check what you get.
+read into memory, up to `maxSize` (512 MiB when not given, and never more): a larger file is not read and comes with its
+name, type and size only (`file` null, `status` `"tooLarge"`), so the app can tell the user. A filter is what the
+picker offers, not a promise: check what you get.
 
 ### Embedding apps
 
@@ -2813,13 +2848,14 @@ interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
+  forFocus?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2991,6 +3027,20 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 
 ```tsx tabs
 keymap.bind("tab", close, { passThrough: true });
+```
+
+With the keyboard focus on a view that takes presses (`onPress`), a plain Return or Space (Shift allowed) presses that view, and the app's other bindings of those keys give way to it: a dialog's Return for its main action does not act instead of the button the user moved the focus to. A view's own Return or Space binds with `forFocus: true`: bound while the view has the focus, it takes those keys before the press. A tile whose Space flips its switch and whose Return opens it:
+
+```rust tabs
+on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, move |_| flip());
+```
+
+```tsx tabs
+<View
+  onPress={open}
+  onFocus={() => (unbind = keymap.bind("space", flip, { forFocus: true }))}
+  onBlur={() => unbind?.()}
+/>
 ```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.
