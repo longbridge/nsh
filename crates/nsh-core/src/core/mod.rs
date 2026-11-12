@@ -9523,18 +9523,25 @@ fn rounded(
         y + layout.size.height,
         ry,
     );
-    out.padding.left = span(x, x + layout.padding.left, rx);
-    out.padding.right = span(
-        x + layout.size.width - layout.padding.right,
-        x + layout.size.width,
-        rx,
+    // Padding is rounded from the border's inner edge, not from the outer
+    // edge as the border is: rounded each from the outer edge, a border and
+    // a padding of 1.5 and 6 points at 1.1 pixels per point took 2 + 7
+    // pixels where their 8.25 pixels round to 8, and a text measured to fit
+    // its content box (a label as wide as its content) wrapped in the pixel
+    // or two its insets took from it. Rounded at its edges, the content box
+    // is as many pixels as the text was measured.
+    let (left, right) = (
+        x + layout.border.left,
+        x + layout.size.width - layout.border.right,
     );
-    out.padding.top = span(y, y + layout.padding.top, ry);
-    out.padding.bottom = span(
-        y + layout.size.height - layout.padding.bottom,
-        y + layout.size.height,
-        ry,
+    let (top, bottom) = (
+        y + layout.border.top,
+        y + layout.size.height - layout.border.bottom,
     );
+    out.padding.left = span(left, left + layout.padding.left, rx);
+    out.padding.right = span(right - layout.padding.right, right, rx);
+    out.padding.top = span(top, top + layout.padding.top, ry);
+    out.padding.bottom = span(bottom - layout.padding.bottom, bottom, ry);
     let o = layout.scrollable_overflow_rect;
     out.scrollable_overflow_rect.left = span(x, x + o.left, rx);
     out.scrollable_overflow_rect.right = span(x, x + o.right, rx);
