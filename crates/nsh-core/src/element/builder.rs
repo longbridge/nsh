@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
-    WheelEvent,
+    MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points, PressEvent, Prop, Size, Tag,
+    TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1352,6 +1352,48 @@ pub trait Accessible: Element {
         self
     }
 
+    /// The element that is the active one while it keeps the keyboard
+    /// focus, which screen readers read as it changes (TS:
+    /// `accessibilityActiveDescendant`; ARIA's `aria-activedescendant`):
+    /// a combo box field's highlighted option, the cursor row of a list
+    /// that is one stop of Tab. The element may be rendered after this
+    /// one (a virtualized list's row); `None`, or a ref no rendered
+    /// element carries, names none.
+    fn accessibility_active_descendant(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementRef>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+                super::host::set_in(
+                    &mut a.props,
+                    Prop::Accessibility(AccessibilityProp::ActiveDescendant(
+                        target.and_then(|t| t.element_target()),
+                    )),
+                )
+            });
+        self
+    }
+
+    /// The element whose content it controls, for assistive technologies
+    /// (TS: `accessibilityControls`; ARIA's `aria-controls`): a combo
+    /// box field's listbox. `None` names none.
+    fn accessibility_controls(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementRef>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+                super::host::set_in(
+                    &mut a.props,
+                    Prop::Accessibility(AccessibilityProp::Controls(
+                        target.and_then(|t| t.element_target()),
+                    )),
+                )
+            });
+        self
+    }
+
     /// Its value for screen readers, for a range (a progress bar, a
     /// slider: `min`, `max` and `now`) or as a text; `None` has none (an
     /// indeterminate progress bar keeps its range and leaves out `now`).
@@ -1510,6 +1552,23 @@ pub trait Interactive: Element {
         self.on(
             EventKind::Wheel,
             events::typed(listener.into_listener(), events::wheel),
+        )
+    }
+
+    /// A touchpad pinch over it (or an element inside it), as GPUI's
+    /// `on_pinch`: by how much the scale changed since the last event
+    /// ([`PinchEvent::delta`]), in which phase, where and with which
+    /// modifier keys (macOS, Linux, GPUI and Safari; Windows and the other
+    /// browsers report a touchpad pinch as Control + wheel, which
+    /// [`Self::on_wheel`] hears). The nearest element that listens hears
+    /// it; when it is nearer than any view that pinches natively it takes
+    /// the pinch and nothing zooms natively; a pinch stays on the element
+    /// its start went to. A pinch of fingers on a touchscreen is
+    /// [`Self::on_pinch_start`]'s.
+    fn on_pinch<M>(self, listener: impl IntoListener<PinchEvent, M>) -> Self {
+        self.on(
+            EventKind::Pinch,
+            events::typed(listener.into_listener(), events::touchpad_pinch),
         )
     }
 

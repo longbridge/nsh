@@ -824,6 +824,43 @@ impl AttributedText {
             && spans_same_but_colors(spans, &other.spans)
     }
 
+    /// The characters (UTF-16 offsets; ascending, apart) drawn otherwise in
+    /// `other`, when the two texts differ at most in colors, hidden runs
+    /// and test metadata, as the core's colors-only path allows; `None`
+    /// when they differ in anything else. A platform that draws colors from
+    /// the text and keeps the layout redraws only where these lie.
+    pub fn recolored_ranges(&self, other: &Self) -> Option<Vec<std::ops::Range<u32>>> {
+        if !self.same_but_colors(other) {
+            return None;
+        }
+        let mut out: Vec<std::ops::Range<u32>> = Vec::new();
+        // Both cover the string end to end (`same_but_colors`): walk the
+        // pieces where they overlap.
+        let (mut a, mut b) = (self.spans.iter().peekable(), other.spans.iter().peekable());
+        while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+            let (start, end) = (x.start.max(y.start), x.end.min(y.end));
+            if start < end && x.style != y.style {
+                match out.last_mut() {
+                    Some(last) if last.end >= start => last.end = last.end.max(end),
+                    _ => out.push(start..end),
+                }
+            }
+            match x.end.cmp(&y.end) {
+                std::cmp::Ordering::Less => {
+                    a.next();
+                }
+                std::cmp::Ordering::Greater => {
+                    b.next();
+                }
+                std::cmp::Ordering::Equal => {
+                    a.next();
+                    b.next();
+                }
+            }
+        }
+        Some(out)
+    }
+
     /// Equality of the content the platform draws, excluding test metadata.
     pub(crate) fn rendering_eq(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
