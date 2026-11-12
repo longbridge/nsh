@@ -601,7 +601,7 @@ Two props decide how scrolling and taps interact with the keyboard:
 
 `keyboardShouldPersistTaps`:
 
-- `"never"`: a tap outside the focused input only hides the keyboard, and buttons get the next tap. The user taps once to dismiss, again to press. Only taps are held back and hide it: long presses (`onLongPress`, context menus), drags and scrolling work as they do with the keyboard down.
+- `"never"`: a tap outside the focused input only hides the keyboard, and buttons get the next tap. The user taps once to dismiss, again to press. Nothing inside acts on that tap: no `onPress` (`onPressIn` / `onPressOut` and `active:` styles still show while the finger is down), a responder's touch ends with `onResponderTerminate` instead of `onResponderRelease`, and native views such as a web view get no click. Only taps are held back and hide it: long presses (`onLongPress`, context menus), drags and scrolling work as they do with the keyboard down.
 - `"handled"`: a tap on something that handles it (a button) goes through and the keyboard stays; a tap on empty space hides it. Usually the right choice for forms.
 - `"always"`: the keyboard stays up through every tap.
 

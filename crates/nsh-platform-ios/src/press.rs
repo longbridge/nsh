@@ -28,7 +28,7 @@ use crate::{target::EventTarget, text_view::TextView};
 /// not flash pressed states.
 const SCROLL_PRESS_DELAY: f64 = 0.13;
 /// How long a press must be held to become a long press (by default).
-const LONG_PRESS: f64 = 0.5;
+pub(crate) const LONG_PRESS: f64 = 0.5;
 /// How far outside the view the finger may wander before the press ends.
 const RETENTION: f64 = 20.0;
 
