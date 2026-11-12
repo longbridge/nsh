@@ -276,7 +276,8 @@ applied to a model of the native views (`headless::Screen`, `headless/screen.rs`
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
 
-Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide) unless the test starts the app
+Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide, wrapped at the box's width,
+an inline view or image on the line its character wraps to) unless the test starts the app
 with `Headless::start_with_text_engine`, which takes a function that makes a platform's engine on the engine's thread
 (`CoreTextEngine` on macOS, `DWriteTextEngine` on Windows) so text measures as it does on screen. `Screen::layout_nodes`
 returns the views that are on screen in tree order as layout placed them (`LayoutNode`: kind, `testID`, parent,
