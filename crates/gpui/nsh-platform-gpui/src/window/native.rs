@@ -30,6 +30,8 @@ fn valid_origin(x: Option<f32>, y: Option<f32>) -> bool {
 
 #[cfg(target_os = "macos")]
 mod mac {
+    use std::cell::{Cell, RefCell};
+
     use nsh_core::desktop::{WindowLevel, Workspaces};
     use objc2::{MainThreadMarker, rc::Retained};
     use objc2_app_kit::{
@@ -176,6 +178,25 @@ mod mac {
         }
     }
 
+    thread_local! {
+        /// The order-ins [`show`] left to the next turn, by window, each
+        /// with its own number: a hide, a removal or another show of the
+        /// window before it runs takes it out, and it does nothing.
+        static ORDER_INS: RefCell<Vec<(usize, u64)>> = const { RefCell::new(Vec::new()) };
+        static NEXT_ORDER_IN: Cell<u64> = const { Cell::new(0) };
+    }
+
+    fn key(w: &NSWindow) -> usize {
+        std::ptr::from_ref(w) as usize
+    }
+
+    /// The window's order-in left to the next turn, if one was, no longer
+    /// runs.
+    fn cancel_order_in(w: &NSWindow) {
+        let key = key(w);
+        ORDER_INS.with_borrow_mut(|o| o.retain(|&(k, _)| k != key));
+    }
+
     /// Orders the window in unless it `activate`s (GPUI's activation shows
     /// it then); one that `keep`s its size gets its frame back after AppKit
     /// fitted it to its screen.
@@ -183,24 +204,55 @@ mod mac {
         let Some(w) = ns_window(window).filter(|_| !activate) else {
             return;
         };
-        let frame = w.frame();
+        cancel_order_in(&w);
+        if !keep {
+            order_in(&w, false);
+            return;
+        }
         // On the next turn, outside GPUI's app: AppKit fits a window to its
         // screen as it orders it in, and a frame set is reported to GPUI's
         // resize callback at once, which cannot update the app while it is
         // being updated (as it is here) and drops the resize. Out of it,
         // GPUI follows both, and knows the size the window ends up at.
+        // Requests after this one in the same turn run before it: a hide
+        // or a removal takes it out ([`cancel_order_in`]), and the frame
+        // put back is the one the window has when it runs.
+        let number = NEXT_ORDER_IN.replace(NEXT_ORDER_IN.get() + 1);
+        let entry = (key(&w), number);
+        ORDER_INS.with_borrow_mut(|o| o.push(entry));
         crate::rt::outside_app(move || {
-            // An inactive app's window ordered front stays behind the
-            // front app's: a background app's shows regardless.
-            if in_background() {
-                w.orderFrontRegardless();
-            } else {
-                w.orderFront(None);
-            }
-            if keep && w.frame() != frame {
-                w.setFrame_display(frame, true);
+            let pending = ORDER_INS.with_borrow_mut(|o| {
+                let i = o.iter().position(|&e| e == entry);
+                i.map(|i| o.swap_remove(i)).is_some()
+            });
+            if pending {
+                order_in(&w, true);
             }
         });
+    }
+
+    /// Orders `w` in; with `keep`, at the frame it had before AppKit
+    /// fitted it to its screen.
+    fn order_in(w: &NSWindow, keep: bool) {
+        let frame = w.frame();
+        // An inactive app's window ordered front stays behind the front
+        // app's: a background app's shows regardless.
+        if in_background() {
+            w.orderFrontRegardless();
+        } else {
+            w.orderFront(None);
+        }
+        if keep && w.frame() != frame {
+            w.setFrame_display(frame, true);
+        }
+    }
+
+    /// The window is about to be removed: an order-in left to the next
+    /// turn does not bring it back.
+    pub(crate) fn removing(window: &Window) {
+        if let Some(w) = ns_window(window) {
+            cancel_order_in(&w);
+        }
     }
 
     /// The displays with their frames in the desktop (CoreGraphics' global
@@ -264,6 +316,7 @@ mod mac {
 
     pub(crate) fn hide(window: &Window) {
         if let Some(w) = ns_window(window) {
+            cancel_order_in(&w);
             w.orderOut(None);
         }
     }
@@ -510,6 +563,9 @@ mod win {
         }
     }
 
+    /// [`show`] leaves nothing to a later turn.
+    pub(crate) fn removing(_window: &Window) {}
+
     /// GPUI's displays, the primary one first.
     pub(crate) fn displays(cx: &gpui::App) -> Vec<(gpui::DisplayId, gpui::Bounds<gpui::Pixels>)> {
         super::super::gpui_displays(cx)
@@ -662,6 +718,9 @@ mod linux {
 
     /// GPUI shows its windows as they open.
     pub(crate) fn show(_window: &Window, _activate: bool, _keep: bool) {}
+
+    /// [`show`] leaves nothing to a later turn.
+    pub(crate) fn removing(_window: &Window) {}
 
     /// GPUI's displays, the primary one first.
     pub(crate) fn displays(cx: &gpui::App) -> Vec<(gpui::DisplayId, gpui::Bounds<gpui::Pixels>)> {
