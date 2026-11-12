@@ -1136,9 +1136,11 @@ jobs, so a run builds only what changed (the dependency caches are skipped there
 tests without windows; the checks that open windows (Linux's GTK and GPUI tests) stay on GitHub's runners, whose
 timing they are written for. The runner runs only the organization's own code: a pull request from a fork runs on
 GitHub's runners (`ubuntu-24.04`, the jobs' `runs-on` picks it), and the runner refuses a fork's pull request whatever
-its workflow names. Every other workflow runs on GitHub's runners: the other checks, the release (its builds, its
-`Plan`, `Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's
-build and deployment of the published site.
+its workflow names. The release's `Plan`, seconds of work with a read-only token, runs there too, so the release does
+not wait for a GitHub runner behind pull requests' jobs. Every other job runs on GitHub's runners: the other checks,
+the release (its builds, its `Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's update) and
+the Website workflow's build and deployment of the published site: the jobs that hold write tokens or build what users
+download run only on fresh runners.
 
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed

@@ -639,8 +639,8 @@ and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the re
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
 directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The Core and Examples
 workflows run on a self-hosted runner that keeps their builds between jobs (forks' pull requests run them on GitHub's
-runners); every other workflow, the release and the website's deployment included, runs on GitHub's runners
-(`docs/dev/tooling.md` "Runners").
+runners), and so does the release's `Plan`; every other job, the release's builds and publication and the website's
+deployment included, runs on GitHub's runners (`docs/dev/tooling.md` "Runners").
 
 ## Parallel agents
 
