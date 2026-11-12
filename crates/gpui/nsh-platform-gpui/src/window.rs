@@ -1028,10 +1028,10 @@ fn request(
                 }
             }
             if frame.x.is_some() || frame.y.is_some() {
-                let b = screen_bounds(window);
-                let x = frame.x.map_or(f32::from(b.origin.x), |v| v.0);
-                let y = frame.y.map_or(f32::from(b.origin.y), |v| v.0);
-                native::set_origin(window, x, y);
+                // A coordinate left out is read when the move runs, after
+                // the moves asked before it (`center()` then `setBounds`
+                // with only `y` keeps the centered `x`).
+                native::set_origin(window, frame.x.map(|v| v.0), frame.y.map(|v| v.0));
             }
         }
         WindowRequest::SetContentSize { width, height } => {
@@ -1055,7 +1055,7 @@ fn request(
                 None => crate::chrome::resize(surface, window, Some(size.0), Some(size.1)),
                 Some(_) => resize(window, Some(size.0), Some(size.1)),
             }
-            native::set_origin(window, b.origin.x.0, b.origin.y.0);
+            native::set_origin(window, Some(b.origin.x.0), Some(b.origin.y.0));
             // After the move, which waits for this update to end.
             if placement.mode != WindowMode::Normal {
                 let handle = window.window_handle();
@@ -1074,7 +1074,7 @@ fn request(
                 let x = f32::from(area.origin.x) + (f32::from(area.size.width - size.width)) / 2.0;
                 let y =
                     f32::from(area.origin.y) + (f32::from(area.size.height - size.height)) / 2.0;
-                native::set_origin(window, x, y);
+                native::set_origin(window, Some(x), Some(y));
             }
         }
         WindowRequest::RequestAttention { critical } => native::request_attention(window, critical),

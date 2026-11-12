@@ -103,6 +103,14 @@ pub(crate) fn top_left_of_appkit_rect(
     point(px(x as f32), px((primary_height - y - height) as f32))
 }
 
+/// Where a window whose top left corner is at `now` goes for a move to
+/// `x` / `y`: a coordinate left out stays. `now` is read as the move runs,
+/// so moves asked in a row each start where the one before ended.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) fn moved_to<T>(x: Option<T>, y: Option<T>, now: (T, T)) -> (T, T) {
+    (x.unwrap_or(now.0), y.unwrap_or(now.1))
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use gpui::{Pixels, Point, point, px};
@@ -203,6 +211,19 @@ mod tests {
         let b = rect(10.0, 20.0, 30.0, 40.0);
         assert_eq!(place(&[], b), (None, b));
         assert_eq!(screen_at(&[], point(px(0.0), px(0.0))), None);
+    }
+
+    #[test]
+    fn a_move_keeps_the_coordinate_left_out_from_where_the_window_is() {
+        // Two moves asked in a row run in order, each from where the one
+        // before left the window: centered (x 516), then to the top.
+        let start = (100.0_f32, 300.0);
+        let centered = moved_to(Some(516.0), Some(311.0), start);
+        assert_eq!(moved_to(None, Some(0.0), centered), (516.0, 0.0));
+        // Only `x`, from the window's `y`.
+        assert_eq!(moved_to(Some(40), None, (10, 20)), (40, 20));
+        // Nothing given: where it is.
+        assert_eq!(moved_to(None, None, (10, 20)), (10, 20));
     }
 
     #[test]
