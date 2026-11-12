@@ -121,7 +121,17 @@ let page: Arc<[u8]> = render_page(); // 1192 × 1684 像素
 image(ImageSrc::rgba(1192, 1684, page)).w_full()
 ```
 
-图片按 `width` × `height` 点布局，与 `data:` 图片相同；用样式设置它的尺寸。每个缓冲区都是一张独立的图片：新的一帧就给视图一个新来源，旧的一帧在没有视图显示后由缓存释放。Windows、macOS、Linux 和 GPUI 直接绘制这些像素；iOS、Android 和浏览器只能从编码后的字节加载图片，因此缓冲区在首次显示时会转成未压缩的 PNG（一次复制，不做压缩）。TSX 中持有的字节可使用 `Blob` URL。
+图片默认按 `width` × `height` 点布局，与 `data:` 图片相同。缓冲区以其他像素密度绘制时，用 `ImageSrc::size` 为来源指定以点为单位的自然尺寸：
+
+```rust
+let pixels = vec![7u8; 200 * 100 * 4]; // 以 2× 绘制的 200 × 100 像素
+let src = ImageSrc::rgba(200, 100, pixels).size(Size::new(px(100.0), px(50.0)));
+view().items_start().child(image(src)) // 100 × 50 点
+```
+
+元素样式未指定某一边时，自然尺寸决定其固有布局。只设置宽度或高度时按自然尺寸的宽高比计算另一边；同时设置两边时按样式确定框的尺寸。缓冲区保留原始像素尺寸和字节，`onLoad` 报告的也是像素尺寸。
+
+每个缓冲区都是一张独立的图片：新的一帧就给视图一个新来源，旧的一帧在没有视图显示后由缓存释放。Windows、macOS、Linux 和 GPUI 直接绘制这些像素；iOS、Android 和浏览器只能从编码后的字节加载图片，因此缓冲区在首次显示时会转成未压缩的 PNG（一次复制，不做压缩）。TSX 中持有的字节可使用 `Blob` URL。
 
 ## 远程图片
 
