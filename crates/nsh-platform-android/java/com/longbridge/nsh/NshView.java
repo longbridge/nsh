@@ -370,7 +370,8 @@ public class NshView extends FrameLayout {
      * view, such as a tab bar drawn over the content. They add to the parts
      * of the system bars the view sits under, and {@code safeAreaInsets()}
      * reads the sum, so content can scroll under that UI and still end
-     * clear of it.
+     * clear of it. Pages already shown follow a change. Call it on the UI
+     * thread.
      *
      * @param left   pixels added on the left
      * @param top    pixels added at the top
@@ -856,6 +857,7 @@ public class NshView extends FrameLayout {
         left += additional[3];
         Configuration c = getResources().getConfiguration();
         boolean dark = (c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        float[] previous = safe;
         safe = new float[] {top / density, right / density, bottom / density, left / density};
         java.util.Locale locale = hostLocale != null ? hostLocale : java.util.Locale.getDefault();
         float fontScale = hostFontScale > 0 && !Float.isInfinite(hostFontScale) ? hostFontScale : c.fontScale;
@@ -881,6 +883,9 @@ public class NshView extends FrameLayout {
                 // 14 keeps the first day of the week and the temperature unit
                 // in its extension.
                 java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
+        // Screens report their own insets only when their options change, so
+        // a page already shown would keep the old safe area.
+        if (!java.util.Arrays.equals(previous, safe)) mounter.reportAllScreenInsets();
     }
 
     /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
