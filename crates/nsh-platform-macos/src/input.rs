@@ -381,6 +381,46 @@ fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
     }
 }
 
+/// A batch is applied: the keyboard focus leaves a stop, or a field (an
+/// input's, a hosted view) in a view of ours, that it hid
+/// ([`NshView::seen_by_keys`]: `display: none` or `visibility: hidden`
+/// around it), for the root of its window, as it leaves a screen that
+/// hides. AppKit keeps a hidden view focused, and the keys would still act
+/// on what the user cannot see.
+pub(crate) fn release_hidden_focus(surface: &Surface) {
+    for root in std::iter::once(surface.root.clone()).chain(crate::window::roots(surface)) {
+        let Some(window) = root.ns().window() else {
+            continue;
+        };
+        let Some(mut at) = window
+            .firstResponder()
+            .and_then(|responder| responder.downcast::<objc2_app_kit::NSView>().ok())
+        else {
+            continue;
+        };
+        if !at.isDescendantOf(root.ns()) {
+            continue;
+        }
+        // The stop itself, or the view of ours holding the field (a field
+        // that edits has the window's field editor in it).
+        let view = loop {
+            if let Some(view) = NshView::from_ns(&at) {
+                break Some(view);
+            }
+            match crate::view::superview(&at) {
+                Some(up) => at = up,
+                None => break None,
+            }
+        };
+        if let Some(view) = view
+            && view != root
+            && !view.seen_by_keys()
+        {
+            window.makeFirstResponder(Some(root.ns()));
+        }
+    }
+}
+
 /// The view's style changed (cursor). The cursor follows on the next mouse
 /// move.
 pub(crate) fn style_changed(_view: &NshView) {}
@@ -978,7 +1018,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
 
 /// A mounted ordinary view the keyboard focus stops at (Tab): one that
 /// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
-/// shown and reachable by the pointer.
+/// shown ([`NshView::seen_by_keys`]) and reachable by the pointer.
 pub(crate) fn is_key_stop(view: &NshView) -> bool {
     {
         let state = view.state();
@@ -990,7 +1030,7 @@ pub(crate) fn is_key_stop(view: &NshView) -> bool {
             return false;
         }
     }
-    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor()
+    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor() && view.seen_by_keys()
 }
 
 /// A stop that Return and Space press ([`is_key_stop`] taking presses): a

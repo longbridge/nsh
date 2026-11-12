@@ -2219,6 +2219,26 @@ impl NshView {
             && !self.ns().isHidden()
     }
 
+    /// Whether the keyboard may reach it, as the headless driver's Tab
+    /// stops are views it shows: it has an area, and neither it nor a view
+    /// around it is `visibility: hidden`. Neither `display: none` (an empty
+    /// frame on each view it holds) nor `visibility: hidden` (hidden
+    /// layers) hides an NSView, so AppKit's key view loop still holds them.
+    pub(crate) fn seen_by_keys(&self) -> bool {
+        let size = self.state().frame.size;
+        if size.width <= Points(0.0) || size.height <= Points(0.0) {
+            return false;
+        }
+        let mut at = Some(self.clone());
+        while let Some(view) = at {
+            if view.state().style.hidden {
+                return false;
+            }
+            at = view.parent_view();
+        }
+        true
+    }
+
     /// An object for `msg_send!` calls AppKit's bindings lack.
     #[allow(dead_code)]
     pub(crate) fn as_object(&self) -> &AnyObject {

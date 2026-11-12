@@ -808,8 +808,11 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         // A text view's clip view comes right before it in the loop and
         // gives the focus back to it: skip the views around `from`.
         if next.isDescendantOf(&scope)
-            && (!crate::view::is_ours(&next)
-                || NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view)))
+            && (if crate::view::is_ours(&next) {
+                NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view))
+            } else {
+                held_seen(&next)
+            })
             && !from.isDescendantOf(&next)
         {
             return window.makeFirstResponder(Some(&next));
@@ -817,6 +820,20 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         at = next;
     }
     false
+}
+
+/// Whether a view of the key view loop that is not ours (an input's field,
+/// a hosted view) shows to the keyboard: the view of ours holding it does
+/// ([`NshView::seen_by_keys`]).
+fn held_seen(view: &NSView) -> bool {
+    let mut at = crate::view::superview(view);
+    while let Some(ns) = at {
+        if let Some(view) = NshView::from_ns(&ns) {
+            return view.seen_by_keys();
+        }
+        at = crate::view::superview(&ns);
+    }
+    true
 }
 
 /// Defines a field class: `NSTextField` or `NSSecureTextField` that tells
