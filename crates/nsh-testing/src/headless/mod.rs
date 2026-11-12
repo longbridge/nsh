@@ -309,8 +309,9 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// browser history is kept as the web keeps it
 /// ([`Headless::start_at_page`], [`Headless::browser`]), and `nsh test`'s
 /// web page host answers `nsh/host` calls. Images are
-/// not loaded: no `onLoad` comes, and `Image.getSize` / `Image.prefetch`
-/// fail.
+/// not loaded: no `onLoad` comes, nor an error unless the test fails the
+/// image ([`Headless::fail_images`]), and `Image.getSize` /
+/// `Image.prefetch` fail.
 pub struct Headless {
     engine: Engine,
     batches: Receiver<MountBatch>,
@@ -320,6 +321,11 @@ pub struct Headless {
     /// The modifier keys held down (`keyboard.down`), which presses,
     /// drags and hovers carry.
     held: nsh_core::keymap::Modifiers,
+    /// The modals presented on a desktop or the web, oldest first, each
+    /// with the input or Tab stop that had the keyboard focus under it
+    /// when it came, which gets it back when the modal goes
+    /// ([`Headless::modals_closed`]).
+    focus_before: Vec<(NodeId, Option<NodeId>)>,
     /// The finger a `dragAndHold` left down, until `drop()`.
     finger: Option<pointer::Finger>,
     screen: Screen,
@@ -335,6 +341,8 @@ pub struct Headless {
     /// The path the user chooses in the save dialog
     /// ([`Headless::on_pick_save_path`]).
     save_path: Option<std::path::PathBuf>,
+    /// The URLs whose images fail to load ([`Headless::fail_images`]).
+    failing_images: Vec<stub::Url>,
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
@@ -462,6 +470,7 @@ impl Headless {
             errors,
             seen: Vec::new(),
             held: nsh_core::keymap::Modifiers::default(),
+            focus_before: Vec::new(),
             finger: None,
             screen,
             animator: Animator::new(clock.clone()),
@@ -470,6 +479,7 @@ impl Headless {
             screen_color: None,
             picked_paths: Vec::new(),
             save_path: None,
+            failing_images: Vec::new(),
             speech,
             audio,
             step: "open".to_owned(),
@@ -637,6 +647,36 @@ impl Headless {
         self.step(format!("openWithUrl({url})"));
         self.send_url_scheme(url);
         self.done()
+    }
+
+    /// The images whose source is `url` fail to load from now on, those
+    /// loading now included: each image view reports the failure as a
+    /// platform does (`on_error` / `onError`). `url` is matched whole and
+    /// `*` in it matches anything (`"https://cdn.example.com/avatars/*"`),
+    /// as [`StubNetwork`]'s routes are; an asset's is `asset:/<path>`.
+    /// Other images go on loading forever, as headless runs load none.
+    /// Then waits until the app is quiet.
+    pub fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("failImages({url})"));
+        self.failing_images.push(stub::Url::of(url));
+        self.fail_matching_images();
+        self.done()
+    }
+
+    /// Fails the loads of the images [`Headless::fail_images`] named.
+    fn fail_matching_images(&mut self) {
+        if self.failing_images.is_empty() {
+            return;
+        }
+        let failing = &self.failing_images;
+        let failed = self
+            .screen
+            .fail_images(|uri| failing.iter().any(|url| url.matches(uri)));
+        let control = self.engine.control();
+        for (id, uri) in failed {
+            let message = format!("failed to load {uri}");
+            control.dispatch_event(id, EventKind::Error, EventPayload::Error { message });
+        }
     }
 
     /// Reports `url` as a link the system handed the app, without a step:
@@ -904,8 +944,11 @@ impl Headless {
 
     fn apply(&mut self, batch: &MountBatch) {
         let focused = self.screen.focused();
+        let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
         self.focus_calls(batch, focused);
+        self.modals_presented(before);
+        self.modals_closed();
         self.exited |= batch.items.iter().any(|item| {
             matches!(
                 item,
@@ -1015,6 +1058,7 @@ impl Headless {
             ];
             control.dispatch_event(ROOT_ID, EventKind::ImageInfo, EventPayload::Map(fields));
         }
+        self.fail_matching_images();
         // URLs are recorded (`Screen::opened_urls`) and reported opened, as
         // a device with an app for every scheme would.
         for id in self.screen.take_url_opens() {
@@ -1461,6 +1505,7 @@ impl Headless {
                 control.dispatch_event(modal, EventKind::RequestClose, reason);
                 if close_on_escape {
                     self.screen.close(modal);
+                    self.modals_closed();
                     control.dispatch_event(modal, EventKind::Dismiss, EventPayload::None);
                 }
             }
@@ -2608,6 +2653,55 @@ mod tests {
         assert!(took < QUIET * STEPS, "{took:?}");
     }
 
+    /// An avatar that falls back to initials when its picture fails, and a
+    /// logo whose `src` a press changes.
+    #[component]
+    fn Pictures() -> impl IntoElement {
+        let avatar_failed = signal(String::new());
+        let logo = signal("asset:/logo.png");
+        let logo_failed = signal(false);
+        view()
+            .child(
+                image("https://cdn.test/ada.png")
+                    .on_error(move |message: &str| avatar_failed.set(message.to_owned())),
+            )
+            .child(text(move || {
+                let message = avatar_failed.get();
+                if message.is_empty() {
+                    "avatar: picture".to_owned()
+                } else {
+                    format!("avatar: AL ({message})")
+                }
+            }))
+            .child(image(move || logo.get()).on_error(move |_: &str| logo_failed.set(true)))
+            .child(text(move || format!("logo failed: {}", logo_failed.get())))
+            .child(
+                view()
+                    .on_press(move || logo.set("https://cdn.test/logos/b.png"))
+                    .child(text("Switch")),
+            )
+    }
+
+    #[test]
+    fn a_test_fails_the_loads_of_the_images_it_names() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Pictures>())).unwrap();
+        app.first_render().unwrap();
+        app.wait(Duration::from_millis(50)).unwrap();
+        assert!(app.shows("avatar: picture"), "no failure unasked");
+
+        // An image already shown fails when the test names it.
+        app.fail_images("https://cdn.test/ada.png").unwrap();
+        app.wait_for("text:avatar: AL (failed to load https://cdn.test/ada.png)")
+            .unwrap();
+        assert!(app.shows("logo failed: false"), "only the URL named");
+
+        // One loaded later fails as it starts loading.
+        app.fail_images("https://cdn.test/logos/*").unwrap();
+        assert!(app.shows("logo failed: false"));
+        app.press("Switch").unwrap();
+        app.wait_for("text:logo failed: true").unwrap();
+    }
+
     #[test]
     fn steps_press_what_a_text_is_in_and_wait_for_what_it_shows() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
@@ -3233,6 +3327,78 @@ mod tests {
         assert_eq!(app.screen().key_focus(), Some(settings));
         app.press_key("tab").unwrap();
         assert_eq!(app.screen().key_focus(), Some(help));
+    }
+
+    /// A page with a button before the one that opens a dialog, which
+    /// closes on Escape or on its own `close` button.
+    #[component]
+    fn DialogFromButton() -> impl IntoElement {
+        let open = signal(false);
+        let button = move |id: &'static str| {
+            view()
+                .test_id(id)
+                .on_press(move || open.set(id == "open"))
+                .child(text(id))
+        };
+        view()
+            .flex_1()
+            .child(button("other"))
+            .child(button("open"))
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog()
+                        .close_on_escape(true)
+                        .on_close(move || open.set(false))
+                        .child(button("confirm"))
+                        .child(button("close"))
+                })
+            }))
+    }
+
+    #[test]
+    fn a_closed_dialog_gives_the_focus_back_as_on_the_desktops() {
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut config = EngineConfig::new(Root::of::<DialogFromButton>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap())
+            {
+                crate::screen::Pick::One(id) => id,
+                _ => panic!("{s} is shown"),
+            };
+            let opener = id(&app, "id:open");
+            app.press_key("tab").unwrap();
+            app.press_key("tab").unwrap();
+            for close in ["escape", "app"] {
+                assert_eq!(app.screen().key_focus(), Some(opener), "{os:?}");
+                app.press_key("return").unwrap();
+                app.wait_for("id:close").unwrap();
+                // The focus leaves the page under the dialog: Return
+                // presses nothing there.
+                assert_eq!(app.screen().key_focus(), None, "{os:?}");
+                let (confirm, closer) = (id(&app, "id:confirm"), id(&app, "id:close"));
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(confirm), "{os:?}");
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(closer), "{os:?}");
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(confirm), "{os:?}");
+                app.press_key("shift+tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(closer), "{os:?}");
+                if close == "escape" {
+                    app.press_key("escape").unwrap();
+                } else {
+                    app.press_key("return").unwrap();
+                }
+                app.wait_for_gone("id:close", Duration::from_secs(2))
+                    .unwrap();
+                // Back on the button that opened it, whichever way it
+                // closed.
+                assert_eq!(app.screen().key_focus(), Some(opener), "{os:?} {close}");
+            }
+        }
     }
 
     #[test]

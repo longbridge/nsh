@@ -95,6 +95,11 @@ pub(crate) trait Driver: Send {
         let _ = url;
         Err(headless_only("openWithUrl"))
     }
+    /// The images of `url` (a `*` glob) fail to load (`failImages`).
+    fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failImages"))
+    }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
     fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String>;
@@ -270,6 +275,9 @@ impl Driver for Headless {
         let pins = settings.pins("setLocaleSettings")?;
         let what = format!("setLocaleSettings({})", settings.label());
         self.set_environment(&what, |e| pins.apply(e))
+    }
+    fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_images(self, url)
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)

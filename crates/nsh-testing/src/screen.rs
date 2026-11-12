@@ -123,6 +123,9 @@ pub struct Screen {
     clipboard_reads: Vec<(u32, bool)>,
     /// The `Image.getSize` / `Image.prefetch` requests to answer.
     image_infos: Vec<u32>,
+    /// The source each image view is loading, until a test fails it
+    /// ([`Screen::fail_images`]): headless runs load none.
+    loading_images: HashMap<NodeId, Arc<str>>,
     /// The picks asked (`Picker.pickImages`), in order, and how many were
     /// answered.
     picks: Vec<(u32, nsh_core::picker::Pick)>,
@@ -464,10 +467,19 @@ impl Screen {
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
+                self.loading_images.remove(id);
                 if self.focused == Some(*id) {
                     self.focused = None;
                 }
             }
+            MountItem::Image { id, source, .. } => match source {
+                Some(source) => {
+                    self.loading_images.insert(*id, source.uri.clone());
+                }
+                None => {
+                    self.loading_images.remove(id);
+                }
+            },
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
             }
@@ -1229,6 +1241,31 @@ impl Screen {
         presented
     }
 
+    /// The modals presented since the last [`Screen::take_presented`],
+    /// which it leaves for that call.
+    pub(crate) fn presenting(&self) -> Vec<NodeId> {
+        let mut presented = self.presented.clone();
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether view `id` is still in the tree: attached up to the root,
+    /// with nothing on the way a back closed natively.
+    pub(crate) fn in_tree(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Whether `id` is the root of a window of the app's own.
     pub(crate) fn is_window(&self, id: NodeId) -> bool {
         self.windows.iter().any(|(root, _)| *root == id)
@@ -1338,6 +1375,21 @@ impl Screen {
     /// last call.
     pub(crate) fn take_image_infos(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.image_infos)
+    }
+
+    /// Ends the loads of the images whose source `fails` picks, as failed:
+    /// the views and their sources, in no particular order. A view's next
+    /// source loads again.
+    pub(crate) fn fail_images(&mut self, fails: impl Fn(&str) -> bool) -> Vec<(NodeId, Arc<str>)> {
+        let mut failed = Vec::new();
+        self.loading_images.retain(|id, uri| {
+            let fail = fails(uri);
+            if fail {
+                failed.push((*id, uri.clone()));
+            }
+            !fail
+        });
+        failed
     }
 
     /// The URLs the app had the system open (`openUrl`, a `TextView`'s
