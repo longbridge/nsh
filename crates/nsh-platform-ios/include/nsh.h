@@ -142,6 +142,11 @@ UIStatusBarStyle nsh_status_bar_style(void);
 bool nsh_status_bar_hidden(void);
 UIStatusBarAnimation nsh_status_bar_animation(void);
 
+/// The orientations the page shown asked for (its `supportedOrientations`),
+/// for a host view controller's `supportedInterfaceOrientations`; 0 when no
+/// page asks, and the controller keeps its own.
+UIInterfaceOrientationMask nsh_supported_orientations(void);
+
 /// The keys, revocations and accepted builds that signed packages are
 /// verified against.
 typedef struct NshTrust NshTrust;

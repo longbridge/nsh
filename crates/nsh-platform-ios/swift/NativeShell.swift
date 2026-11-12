@@ -340,6 +340,16 @@ public final class NshAppView: UIView {
     public static var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         nsh_status_bar_animation()
     }
+
+    /// The orientations the page shown asked for (its `supportedOrientations`):
+    /// return them from the host view controller's
+    /// `supportedInterfaceOrientations`, `nil` when no page asks (the
+    /// controller's own then). NSH asks the window's controllers to update
+    /// when they change.
+    public static var supportedInterfaceOrientations: UIInterfaceOrientationMask? {
+        let mask = nsh_supported_orientations()
+        return mask.isEmpty ? nil : mask
+    }
 }
 
 /// The root keys, revocations and accepted builds that signed packages are

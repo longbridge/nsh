@@ -191,6 +191,11 @@ final class EmbedController: UIViewController {
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         NshAppView.preferredStatusBarUpdateAnimation
     }
+
+    // Let the page shown decide the orientations (`supportedOrientations`).
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        NshAppView.supportedInterfaceOrientations ?? super.supportedInterfaceOrientations
+    }
 }
 ```
 
@@ -226,6 +231,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `handle(_ name: String, _ handler:)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the main thread: `{ data, reply in … }`, or an `async throws` function `{ data in … }` whose result answers the call. |
 | `removeHandler(_ name: String)` | Removes the handler of `name`: the app's calls of it fail at once. |
 | `static preferredStatusBarStyle`, `prefersStatusBarHidden`, `preferredStatusBarUpdateAnimation` | What the running apps asked for (their pages' and dialogs' `statusBar`, `nsh.json`'s default): return them from the hosting view controller's overrides. |
+| `static supportedInterfaceOrientations: UIInterfaceOrientationMask?` | The orientations the page shown asked for (`NavPage`'s `supportedOrientations`), `nil` when no page asks: return it from the hosting view controller's `supportedInterfaceOrientations`, its own when `nil`. NSH asks the window's controllers to update when it changes. |
 
 > [!IMPORTANT]
 > `bundle.nshc` (bytecode) loads only from inside the app bundle. QuickJS does not validate bytecode, so bytecode from
@@ -457,6 +463,8 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
   The JS engine runs on its own thread; the main thread never waits for it.
 - **Status bar.** The embedded app's pages and dialogs (`statusBar`) change what `NshAppView.preferredStatusBarStyle` and friends return;
   the hosting view controller must forward them, as in the example above.
+- **Orientations.** A page's `supportedOrientations` changes what `NshAppView.supportedInterfaceOrientations` returns;
+  the hosting view controller forwards it, as in the example above, and the screen turns as its controllers allow.
 - **Safe area.** Apps use `safe_area()` in Rust, and `env(safe-area-inset-*)` in padding or
   `safeAreaInsets()` from [`nsh`](../modules/nsh.md#safe-area-and-keyboard) in TSX, as usual. An `NshAppView` placed below your own header gets the insets that apply to it, not the window's.
 - **Mac Catalyst.** The same framework works in Catalyst apps.

@@ -557,6 +557,16 @@ pub extern "C" fn nsh_status_bar_animation() -> objc2_ui_kit::UIStatusBarAnimati
     crate::status_bar_animation()
 }
 
+/// The orientations the page shown asked for (`supportedOrientations`), for
+/// a host view controller's `supportedInterfaceOrientations`; empty when no
+/// page asks, and the controller keeps its own. NSH asks the window's
+/// controllers to update when it changes.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_supported_orientations() -> objc2_ui_kit::UIInterfaceOrientationMask {
+    main_thread();
+    crate::system::page_orientations().unwrap_or(objc2_ui_kit::UIInterfaceOrientationMask(0))
+}
+
 /// The keys, revocations and accepted builds that signed packages are
 /// verified against (opaque to C). Usable from any thread.
 pub struct NshTrust {
