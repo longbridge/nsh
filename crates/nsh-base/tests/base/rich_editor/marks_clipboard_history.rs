@@ -372,7 +372,9 @@ fn copy_writes_markdown() {
     ]}));
     focus(&mut app);
     keys(&mut app, &["mod+a", "mod+c"]);
-    app.wait(Duration::from_millis(50)).unwrap();
+    let _ = app.wait_until("the copy", Duration::from_secs(5), |s| {
+        s.clipboard().is_some()
+    });
     assert_eq!(
         app.screen().clipboard(),
         Some("## Head\n\nsome **bold** text")
