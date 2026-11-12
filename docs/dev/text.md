@@ -106,7 +106,8 @@
   are hidden keeps its typesetting, measurements and layout where the platform draws colors from the text it mounts
   (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI, which also read `hidden` there): only the new
   text is mounted with the layout, so a word fading in, or shown after waiting hidden, costs one draw, not a new layout
-  of its paragraph. The other backends typeset it again.
+  of its paragraph. macOS draws again only the lines of the characters drawn otherwise
+  (`AttributedText::recolored_ranges`, `text::damage`). The other backends typeset it again.
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.

@@ -395,6 +395,36 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 The popup is the app's: it reads the suggestion's state, places itself at `coordsAtPos(range.from)` and draws the
 items its own way.
 
+## A block editor
+
+A Notion-style editor is made of the pieces above, with the UI around the document the app's own. The gallery's Block editor demo (`examples/gallery/demos/BlockEditorDemo.tsx`) is one: a `/` menu of blocks, a handle on each block and a toolbar over a selection.
+
+```tsx
+import { Overlay } from "nsh";
+import { RichEditor, StarterKit, chain, command, createRichEditor, defineExtension, deleteRange, suggestion } from "nsh/base";
+
+// An extension ranks above the keymap, so Enter picks an item before it splits the paragraph.
+const slash = defineExtension({
+  name: "slashCommand",
+  priority: 1000,
+  addProseMirrorPlugins: () => [suggestion({ key: "slash", char: "/", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] })],
+});
+const editor = createRichEditor({ extensions: [StarterKit, slash] });
+
+// The menu goes in `bubbleMenu` while `editor.suggestion("slash")?.active`; a pick replaces the trigger and the query.
+const { range } = editor.suggestion("slash")!;
+editor.run(chain([deleteRange({ from: range.from, to: range.to }), command("toggleBulletList")]));
+
+// A handle: the block under the pointer, and where it is on the page for an `Overlay` anchored there.
+const start = editor.posAtPageCoords(event.pagePosition);
+const rect = editor.pageNodeRect(start!);
+editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // then dragTo(point) while moving, endDrag() on release
+```
+
+- The plugins of `createRichEditor`'s own `plugins` come after the extensions' and the keymap; a plugin whose keys must come first (a suggestion's Enter) is an extension with a high `priority`.
+- `pageNodeRect(pos)` and `posAtPageCoords(point)` answer in page points, the coordinates of `Overlay`'s `anchor` and of pointer events, so a handle sits in the editor's margin as an overlay that follows the block.
+- `dragBlock(pos, point)`, `dragTo(point)` and `endDrag()` move a block with the pointer: the drop line follows it and the drop is one undo step. A handle that also opens a menu on a tap claims the pointer only once it has moved (`onMoveShouldSetResponder`), so the tap keeps its `onPress`; a `Button` takes its own presses and passes the drag no responder.
+
 ## Tables
 
 `TableKit` brings Tiptap's tables: `RichTable` (Tiptap's `Table`), `RichTableRow`, `RichTableHeader` and
