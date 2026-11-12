@@ -177,7 +177,7 @@ jobs:
             echo "The Rust app's web runtime unexpectedly carries JS"
             exit 1
           fi
-      - name: Test the Rust app and check that it builds no JS engine or bundler
+      - name: Test the Rust app and check that it builds no JS engine, bundler or WebKitGTK
         run: |
           # `nsh test` builds the app's programs in `.nsh/rust` and runs its
           # TypeScript tests (`examples/gallery-rs/*.test.tsx`) in the test
@@ -185,6 +185,9 @@ jobs:
           # `describe` program: it links no QuickJS, nsh-js, bundler,
           # rolldown or Oxc. The test runner runs TypeScript tests (QuickJS,
           # source maps) on entries `nsh` builds: no bundler or parser.
+          # Neither builds what only the hosts need: the app's crate uses
+          # `nsh-platform-linux`, whose web views (WebKitGTK, not installed
+          # here) the Linux host turns on.
           check() {
             cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
               -p "nsh-app-gallery-native-$1" -e normal --target all \
@@ -197,6 +200,9 @@ jobs:
           ./target/debug/nsh test examples/gallery-rs
           check describe '(rquickjs|quickjs-jit|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "a JS engine or the bundler"
           check test '(nsh-bundler|rolldown|oxc_parser)([ _-]|$)' "the bundler"
+          for program in describe test; do
+            check "$program" '(webkit6|soup3|javascriptcore6)([ _-]|$)' "WebKitGTK"
+          done
       - name: Run the examples' tests
         run: |
           for app in counter gallery post-editor rust-exports tasks tasks-rs; do
