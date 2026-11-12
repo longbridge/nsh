@@ -4922,6 +4922,12 @@ fn disappear(
     );
 }
 
+/// The user asked for less motion: pages and dialogs come and go with
+/// UIKit's own motion, not through their `transitionShader`.
+fn reduce_motion() -> bool {
+    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5041,10 +5047,4 @@ mod tests {
         };
         assert!(!holds_refresh(Some(&custom), &new));
     }
-}
-
-/// The user asked for less motion: pages and dialogs come and go with
-/// UIKit's own motion, not through their `transitionShader`.
-fn reduce_motion() -> bool {
-    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
 }
