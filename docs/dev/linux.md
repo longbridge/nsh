@@ -312,7 +312,7 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
   window can remain AT-activatable while a GTK window-group grab blocks its pointer and keyboard input. Hosts that
   require those background operations to be unavailable must set GTK sensitivity on the affected widget, container
   or window, or set the NSH accessibility disabled state on each affected action target.
-- **No desktop equivalent**: the status bar; `AccessibilityFocus` moves keyboard focus when the view can take it.
+- **No desktop equivalent**: the status bar. `AccessibilityFocus` moves the keyboard focus to a view that takes it (an input); any other view (a text, a heading) leaves the keyboard focus where it is: on GTK 4.18 and later it is reported focused to the screen reader alone (AT-SPI's `focused` state and event) until the keyboard focus moves, on earlier GTK it is read out (`access::focus`).
 - **Packaged apps** are a directory and a `.tar.gz` (`embedding.md`); GTK 4, Pango and (with the release runner's
   default `webview` feature) WebKitGTK 6.0 must be installed where they run.
 
