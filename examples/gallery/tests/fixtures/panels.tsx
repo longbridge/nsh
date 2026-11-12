@@ -28,7 +28,7 @@ function App() {
         <Dialog open={dialog()} presentation="pageSheet" closeOnSwipe onOpenChange={({ open }) => dialog.set(open)} style={{ flex: 1 }}>
           <View style={{ flex: 1, paddingTop: 24 }}>
             <Input testID="search" placeholder="Search" autoCapitalize="none" value={query()} onChange={({ value }) => query.set(value)} style={{ height: 40, marginHorizontal: 24 }} />
-            <List testID="people" each={people.filter((p) => p.toLowerCase().startsWith(query().toLowerCase()) || p === "Alice")} estimatedItemSize={44} style={{ flex: 1 }}>
+            <List testID="people" keyboardShouldPersistTaps="handled" each={people.filter((p) => p.toLowerCase().startsWith(query().toLowerCase()) || p === "Alice")} estimatedItemSize={44} style={{ flex: 1 }}>
               {(name) => (
                 <View role="button" onPress={() => picked.set(name())} style={{ height: 44, justifyContent: "center", paddingHorizontal: 24 }}>
                   <Text>{name()}</Text>
