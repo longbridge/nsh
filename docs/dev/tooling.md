@@ -343,7 +343,10 @@ report it:
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
-  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down);
+  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down); a view
+  removed or deleted leaves the hover, the focus and the keyboard focus with its subtree, its states cleared without
+  a `MouseLeave` or `Blur` (`Screen::taken_out`), as a removed DOM element: JS may keep a removed view alive
+  (a cycle through its ref) after its component is gone;
 - `right_click`, `choose_menu_item`, `close_menu` (`headless/menus.rs`): on a desktop environment the match, or the
   nearest view around it listening, hears `ContextMenu`; the menu the app then shows (`Menu.popup`,
   `DesktopCommand::PopupMenu`) is the model's (`Screen::menu`, read through `menu.rs`: its actions by label, a

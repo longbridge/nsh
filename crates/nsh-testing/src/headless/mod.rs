@@ -936,6 +936,9 @@ impl Headless {
         let focused = self.screen.focused();
         let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
+        for (id, states) in self.screen.take_restated() {
+            self.engine.control().set_states(id, states);
+        }
         self.focus_calls(batch, focused);
         self.modals_presented(before);
         self.modals_closed();
