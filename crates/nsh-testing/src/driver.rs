@@ -100,6 +100,11 @@ pub(crate) trait Driver: Send {
         let _ = url;
         Err(headless_only("failImages"))
     }
+    /// The URLs matching `url` (a `*` glob) fail to open (`failOpenUrls`).
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failOpenUrls"))
+    }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
     fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String>;
@@ -278,6 +283,9 @@ impl Driver for Headless {
     }
     fn fail_images(&mut self, url: &str) -> Result<(), String> {
         Headless::fail_images(self, url)
+    }
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_open_urls(self, url)
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)

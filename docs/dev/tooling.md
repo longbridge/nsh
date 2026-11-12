@@ -461,7 +461,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   `forward`, `go` and `type_address` report the root's `UrlScheme` events the page reports (`quiet`, `change`,
   `open`); a change to the web's history in `nsh.js` changes it too;
 - URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
-  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`);
+  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`), but
+  `{ opened: false }` for those matching the globs of `Headless::fail_open_urls` (`app.failOpenUrls`);
 - the platform has no eyedropper (`Environment::screen_color` false) until a Rust test calls
   `Headless::on_screen_color(color)`: then `Command::PickScreenColor` is answered with `onScreenColor`, that color (or
   none, a cancel);

@@ -132,8 +132,8 @@ pub struct Screen {
     picks_answered: usize,
     /// The URLs the app had the system open (`openUrl`), in order.
     opened_urls: Vec<String>,
-    /// The `openUrl` requests to answer.
-    url_opens: Vec<u32>,
+    /// The `openUrl` requests to answer, with their URLs.
+    url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
     /// The requests on local paths that reached the platform
@@ -663,7 +663,7 @@ impl Screen {
             // Recorded, never opened: a test's machine opens nothing.
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
-                self.url_opens.push(*id);
+                self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
             // Recorded, never carried out: a test's machine opens, shows
@@ -1458,7 +1458,7 @@ impl Screen {
     }
 
     /// The `openUrl` requests to answer since the last call.
-    pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
+    pub(crate) fn take_url_opens(&mut self) -> Vec<(u32, String)> {
         std::mem::take(&mut self.url_opens)
     }
 
