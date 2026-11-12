@@ -69,12 +69,13 @@ use nsh_core::{
         WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
     },
     platform::InputModality,
-    tailwind::state::{HOVERED, PRESSED},
+    tailwind::state::{FOCUSED, HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
 use objc2_app_kit::{
     NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent, NSEventMask,
-    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSWindow,
+    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSView,
+    NSWindow,
 };
 use objc2_foundation::{NSDate, NSSize};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -340,6 +341,57 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
     }
 }
 
+/// `view` leaves the tree (`Remove`, `Delete`): it and the views inside it
+/// leave the hover and the keyboard focus, their states cleared and
+/// reported, without a leave or blur, as a removed DOM element. A removed
+/// view can outlive its component (a JS cycle through its ref), whose
+/// handlers must not run.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let inside = |v: &NshView| v.ns().isDescendantOf(view.ns());
+    if !input.hovered.borrow().is_empty() {
+        let left: Vec<NshView> = input
+            .hovered
+            .borrow_mut()
+            .extract_if(.., |v| inside(v))
+            .collect();
+        for v in &left {
+            set_state(surface, v, HOVERED, false);
+        }
+    }
+    if input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| inside(v))
+    {
+        input.link_hovered.borrow_mut().take();
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    let Some(responder) = window.firstResponder() else {
+        return;
+    };
+    if !responder
+        .downcast_ref::<NSView>()
+        .is_some_and(|r| r.isDescendantOf(view.ns()))
+    {
+        return;
+    }
+    // AppKit gives the focus of a view leaving its window to the window
+    // without a resign, but ends a field's editing (its blur): the window
+    // takes it now, the focus reported gone first so the resign is silent.
+    match responder
+        .downcast_ref::<ViewObj>()
+        .and_then(|obj| NshView::from_ns(obj))
+    {
+        Some(focused) => set_state(surface, &focused, FOCUSED, false),
+        None => crate::text_input::taken_out(&window),
+    }
+    window.makeFirstResponder(None);
+}
+
 /// Sets or clears interaction state `bit` of `view` and reports the
 /// states when they changed and the view tracks the bit.
 pub(crate) fn set_state(surface: &Surface, view: &NshView, bit: u16, on: bool) {
@@ -397,6 +449,46 @@ fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
     });
     if focused && view.id() != ROOT_ID {
         window.makeFirstResponder(Some(root_in(surface, &window).ns()));
+    }
+}
+
+/// A batch is applied: the keyboard focus leaves a stop, or a field (an
+/// input's, a hosted view) in a view of ours, that it hid
+/// ([`NshView::seen_by_keys`]: `display: none` or `visibility: hidden`
+/// around it), for the root of its window, as it leaves a screen that
+/// hides. AppKit keeps a hidden view focused, and the keys would still act
+/// on what the user cannot see.
+pub(crate) fn release_hidden_focus(surface: &Surface) {
+    for root in std::iter::once(surface.root.clone()).chain(crate::window::roots(surface)) {
+        let Some(window) = root.ns().window() else {
+            continue;
+        };
+        let Some(mut at) = window
+            .firstResponder()
+            .and_then(|responder| responder.downcast::<objc2_app_kit::NSView>().ok())
+        else {
+            continue;
+        };
+        if !at.isDescendantOf(root.ns()) {
+            continue;
+        }
+        // The stop itself, or the view of ours holding the field (a field
+        // that edits has the window's field editor in it).
+        let view = loop {
+            if let Some(view) = NshView::from_ns(&at) {
+                break Some(view);
+            }
+            match crate::view::superview(&at) {
+                Some(up) => at = up,
+                None => break None,
+            }
+        };
+        if let Some(view) = view
+            && view != root
+            && !view.seen_by_keys()
+        {
+            window.makeFirstResponder(Some(root.ns()));
+        }
     }
 }
 
@@ -1035,7 +1127,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
 
 /// A mounted ordinary view the keyboard focus stops at (Tab): one that
 /// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
-/// shown and reachable by the pointer.
+/// shown ([`NshView::seen_by_keys`]) and reachable by the pointer.
 pub(crate) fn is_key_stop(view: &NshView) -> bool {
     {
         let state = view.state();
@@ -1047,7 +1139,7 @@ pub(crate) fn is_key_stop(view: &NshView) -> bool {
             return false;
         }
     }
-    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor()
+    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor() && view.seen_by_keys()
 }
 
 /// A stop that Return and Space press ([`is_key_stop`] taking presses): a

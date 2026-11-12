@@ -549,6 +549,46 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
     }
 }
 
+/// `Remove` / `Delete` of `view`: it and the views inside it leave the
+/// hover, their `HOVERED` cleared without `onMouseLeave`, as a removed DOM
+/// element hears none. A removed view may outlive its component (a JS
+/// cycle keeps its node until a collection), whose handlers must not run.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let inside = |v: &NshView| {
+        let mut at = Some(v.clone());
+        while let Some(v) = at {
+            if v == *view {
+                return true;
+            }
+            at = v.parent_view();
+        }
+        false
+    };
+    if input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| inside(v))
+    {
+        input.link_hovered.borrow_mut().take();
+    }
+    if input.hovered.borrow().is_empty() {
+        return;
+    }
+    let mut gone = Vec::new();
+    input.hovered.borrow_mut().retain(|v| {
+        if inside(v) {
+            gone.push(v.clone());
+            return false;
+        }
+        true
+    });
+    for v in &gone {
+        set_state(surface, v, HOVERED, false);
+    }
+}
+
 /// Sets (or clears) interaction state `bit` of `view` (pressed, hovered,
 /// focused), reporting it when tracked and changed.
 pub(crate) fn set_state(surface: &Surface, view: &NshView, bit: u16, on: bool) {

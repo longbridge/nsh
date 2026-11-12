@@ -4382,6 +4382,11 @@ absent BubbleMenu
 tap text:ToggleMenu
 expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
+# The app's layer over the document takes presses and `nodeRect` answers in its points.
+expect LayerMark
+tap text:LayerMark
+expect LayerBox true 0 0
+covers [props] RichEditor.contentLayer
 expect CellA
 expect CellD
 # An editor without a height is as tall as its two lines; one with a

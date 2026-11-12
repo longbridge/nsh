@@ -683,9 +683,12 @@ define_class!(
             let accepted: bool = unsafe { msg_send![super(self), resignFirstResponder] };
             if accepted && let Some(surface) = self.keyboard_surface() {
                 let view = NshView(self.retain());
+                // Not when leaving the tree: its focus went unannounced
+                // (`input::removed`).
+                let focused = view.state().states & nsh_core::tailwind::state::FOCUSED != 0;
                 crate::input::set_state(&surface, &view, nsh_core::tailwind::state::FOCUSED, false);
                 // The stops Tab reaches report it, as inputs do.
-                if view.id() != ROOT_ID {
+                if focused && view.id() != ROOT_ID {
                     surface.event(view.id(), nsh_core::EventKind::Blur, nsh_core::EventPayload::None);
                 }
             }
@@ -1605,13 +1608,6 @@ fn setup(view: &NSView) {
 #[derive(Clone)]
 pub(crate) struct NshView(Retained<ViewObj>);
 
-impl NshView {
-    /// The surface owning this view, including child views with no root hooks.
-    pub(crate) fn surface(&self) -> Option<std::rc::Rc<Surface>> {
-        self.0.keyboard_surface()
-    }
-}
-
 impl std::fmt::Debug for NshView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.state();
@@ -2321,6 +2317,26 @@ impl NshView {
             && !s.live.as_ref().is_some_and(|l| l.dying())
             // A screen under the top one, a modal leaving.
             && !self.ns().isHidden()
+    }
+
+    /// Whether the keyboard may reach it, as the headless driver's Tab
+    /// stops are views it shows: it has an area, and neither it nor a view
+    /// around it is `visibility: hidden`. Neither `display: none` (an empty
+    /// frame on each view it holds) nor `visibility: hidden` (hidden
+    /// layers) hides an NSView, so AppKit's key view loop still holds them.
+    pub(crate) fn seen_by_keys(&self) -> bool {
+        let size = self.state().frame.size;
+        if size.width <= Points(0.0) || size.height <= Points(0.0) {
+            return false;
+        }
+        let mut at = Some(self.clone());
+        while let Some(view) = at {
+            if view.state().style.hidden {
+                return false;
+            }
+            at = view.parent_view();
+        }
+        true
     }
 
     /// An object for `msg_send!` calls AppKit's bindings lack.
