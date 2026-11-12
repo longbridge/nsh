@@ -1588,6 +1588,19 @@ impl WebView {
         )
     }
 
+    /// The page's web content process ended: it crashed, or the system
+    /// reclaimed its memory (the message; TS: `onError` with `code`
+    /// `"ERR_NSH_WEBVIEW_TERMINATED"`). The app keeps running and the web
+    /// view shows no page until [`reload`](crate::element::ElementRef::reload),
+    /// [`load`](crate::element::ElementRef::load) or a new source. [`on_error`](Self::on_error) hears it too.
+    pub fn on_process_terminated<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(
+            EventKind::Error,
+            listener.into_listener(),
+            events::terminated,
+        )
+    }
+
     /// The page called `window.nsh.postMessage(data)`.
     pub fn on_message<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::Message, listener.into_listener(), events::data)
