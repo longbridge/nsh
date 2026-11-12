@@ -591,7 +591,7 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 
 `keyboardShouldPersistTaps`：
 
-- `"never"`：点击输入框之外只会收起键盘，按钮接收下一次点击。用户要先点一次收起键盘，再点一次才能按下。
+- `"never"`：点击输入框之外只会收起键盘，按钮接收下一次点击。用户要先点一次收起键盘，再点一次才能按下。里面的视图都不会响应这次点击：不触发 `onPress`（手指按下时 `onPressIn` / `onPressOut` 和 `active:` 样式照常显示），responder 的触摸以 `onResponderTerminate` 而不是 `onResponderRelease` 结束，web view 等原生视图收不到点击。只有点击会被拦下并收起键盘：长按（`onLongPress`、上下文菜单）、拖动和滚动与键盘未弹出时一样。
 - `"handled"`：点在会处理它的东西（按钮）上时，点击照常传递，键盘保持；点在空白处则收起键盘。表单通常应选它。
 - `"always"`：键盘在每次点击后都保持显示。
 

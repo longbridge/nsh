@@ -255,17 +255,22 @@ impl ParentElement for Stack {}
 impl ParentElement for Screen {}
 impl ParentElement for Modal {}
 
-/// Android has no input accessories: there the bar keeps no content.
+/// Only iOS shows input accessories (`InputAccessoryView` in `nsh/ios`
+/// checks the same): elsewhere the bar keeps no content and takes no room.
+fn has_input_accessory() -> bool {
+    super::ambient::try_os().unwrap_or_default() == crate::platform::Os::Ios
+}
+
 impl ParentElement for InputAccessoryView {
     fn child<M>(mut self, child: impl super::IntoChild<M>) -> Self {
-        if !cfg!(target_os = "android") {
+        if has_input_accessory() {
             child.__push_into(&mut self.0.children);
         }
         self
     }
 
     fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self {
-        if !cfg!(target_os = "android") {
+        if has_input_accessory() {
             self.0
                 .children
                 .extend(children.into_iter().map(|c| c.into_element().0));
@@ -332,22 +337,23 @@ pub fn modal() -> Modal {
 /// A bar shown over the keyboard of the inputs whose
 /// [`Input::input_accessory`] is `native_id` (iOS's `inputAccessoryView`):
 /// as wide as the window and as tall as its content, moving with the
-/// keyboard natively. It takes no room where the view places it; on
-/// Android, which has no input accessories, it is an empty hidden view.
+/// keyboard natively. It takes no room where the view places it; off iOS,
+/// where there are no input accessories, it is an empty hidden view.
 pub fn input_accessory_view(native_id: &str) -> InputAccessoryView {
-    let tag = if cfg!(target_os = "android") {
-        Tag::View
-    } else {
+    let supported = has_input_accessory();
+    let tag = if supported {
         Tag::InputAccessory
+    } else {
+        Tag::View
     };
     let mut node = ElNode::new(tag);
-    if cfg!(target_os = "android") {
+    if supported {
+        set(&mut node, Prop::NativeId(Some(native_id.into())));
+    } else {
         node.style.value(
             crate::StyleKey::Display,
             crate::PropertyValue::Display(taffy::Display::None),
         );
-    } else {
-        set(&mut node, Prop::NativeId(Some(native_id.into())));
     }
     InputAccessoryView(node)
 }

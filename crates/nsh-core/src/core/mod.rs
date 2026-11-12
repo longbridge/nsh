@@ -5,6 +5,7 @@ mod follow;
 mod layout_scope;
 mod layout_tree;
 mod list;
+mod list_motion;
 mod measure;
 mod overlay;
 mod pace;
@@ -358,6 +359,9 @@ struct ScrollState {
     /// the offset before the content grows back). With the batch it is in
     /// ([`Core::batches`]).
     content_item: Option<(u64, usize)>,
+    /// Its content size laid out while it was culled
+    /// ([`Core::cull_frames_in`]): the first its native view gets.
+    culled_content: Option<Size<Points>>,
     behavior: ScrollBehavior,
     /// Minimum milliseconds between `onScroll` events.
     event_throttle_ms: f32,
@@ -404,6 +408,7 @@ impl Default for ScrollState {
             keyboard_dismiss: KeyboardDismissMode::None,
             content: None,
             content_item: None,
+            culled_content: None,
             behavior: ScrollBehavior::default(),
             event_throttle_ms: 0.0,
             zoom: 1.0,
@@ -1167,6 +1172,8 @@ pub struct Core<M: TextEngine> {
     cull_scratch: Vec<(Key, f32, f32)>,
     /// Views out of sight spread over turns (`pace.rs`).
     pace: pace::Pace,
+    /// Lists' rows under this turn's layout animation (`list_motion.rs`).
+    list_motion: list_motion::ListMotion,
     /// The placeholders of `<Each>` rows ([`Op::Placeholder`]), with their
     /// ids (a key may be another node's by now).
     placeholders: Vec<(Key, NodeId)>,
@@ -1505,6 +1512,7 @@ impl<M: TextEngine> Core<M> {
             cull_made: false,
             cull_scratch: Vec::new(),
             pace: pace::Pace::default(),
+            list_motion: list_motion::ListMotion::default(),
             placeholders: Vec::new(),
             asked_rows: Vec::new(),
             placeholders_resized: false,
@@ -3054,6 +3062,7 @@ impl<M: TextEngine> Core<M> {
         // in the batch; ops may already have queued some.
         self.sync_env();
         if let Some(animation) = self.layout_animation.take() {
+            self.note_list_motion(animation);
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
         self.flush_pointer_events();
@@ -6737,6 +6746,15 @@ impl<M: TextEngine> Core<M> {
         if let Some(frame) = culled_frame {
             self.nodes[key as usize].frame = frame;
             self.mount.push(MountItem::Frame { id, frame });
+            // And its content size, before any scroll it is made for: the
+            // platform clamps a scroll to the content it knows.
+            let content = self.nodes[key as usize]
+                .scroll
+                .as_mut()
+                .and_then(|s| s.culled_content.take());
+            if let Some(size) = content {
+                self.set_scroll_content(key, size);
+            }
             if kind == Kind::Canvas
                 && self.nodes[key as usize]
                     .drawing
@@ -6744,6 +6762,12 @@ impl<M: TextEngine> Core<M> {
                     .is_some_and(|d| d.fit().is_some())
             {
                 self.fitted_pending.push(key);
+            }
+            // Beside its frame, an input takes its content box from the
+            // layout and a scroll view its extent; made after it was laid
+            // out, nothing lays it out again to send them.
+            if matches!(kind, Kind::Input | Kind::Scroll) {
+                self.emit_frames(key);
             }
         }
         let projected = self.nodes[key as usize].projected;
@@ -6845,7 +6869,10 @@ impl<M: TextEngine> Core<M> {
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
         }
+        // What its classes and styles say of `pointer-events` was worked out
+        // before the view was there to hear it.
         if node.props.is_some()
+            || node.class_pointer != crate::props::PointerEvents::Auto
             || node.spare
             || node.hidden_in_text
             || node.list.as_ref().is_some_and(|l| l.parent)
@@ -8782,17 +8809,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         if kind == Kind::Scroll {
-            // Scrollable extent: the overflow rectangle is measured from the
-            // padding box origin and stops at the children's border boxes, so
-            // add the leading border and trailing padding.
-            let o = l.scrollable_overflow_rect;
-            let size = size_pt(
-                l.size.width.max(l.border.left + o.right + l.padding.right),
-                l.size
-                    .height
-                    .max(l.border.top + o.bottom + l.padding.bottom),
-            );
-            self.set_scroll_content(key, size);
+            self.set_scroll_content(key, scroll_extent(&l));
         }
         // List cells are positioned by `update_lists`, roots by
         // `layout_roots`.
@@ -9368,6 +9385,17 @@ impl<M: TextEngine> Core<M> {
         // rows out of the window, by frames rows measured since may have
         // passed ([`Core::set_left_behind`]).
         let (window_start, window_end) = list.render_window();
+        let motion = outer.is_none() && self.list_motion.active();
+        if motion {
+            let cells: Vec<Key> = list
+                .slots
+                .iter()
+                .map(|s| s.cell)
+                .chain(list.extras.iter().map(|e| e.cell))
+                .collect();
+            self.note_cell_starts(cells);
+        }
+        let list = self.nodes[key as usize].list.as_ref().expect("list");
         // In its parent's viewport, the cells start inside the list's
         // border and padding.
         let inset = outer.map_or((0.0, 0.0), |o| o.inset);
@@ -9418,6 +9446,11 @@ impl<M: TextEngine> Core<M> {
             };
             if frame != away {
                 self.set_frame(cell, away);
+                self.nodes[key as usize]
+                    .list
+                    .as_mut()
+                    .expect("list")
+                    .unplace(cell);
             }
         }
         let mut sticky_cells = Vec::new();
@@ -9468,6 +9501,7 @@ impl<M: TextEngine> Core<M> {
                 cross
             }
         };
+        let mut placed = list_motion::Placed::default();
         for &(index, cell) in &ready {
             let list = self.nodes[key as usize].list.as_ref().expect("list");
             let (at, row) = (list.item_at(index), list.row_extent(index));
@@ -9475,6 +9509,12 @@ impl<M: TextEngine> Core<M> {
             let Some(size) = place(self, cell, at, row, column) else {
                 continue;
             };
+            let list = self.nodes[key as usize].list.as_mut().expect("list");
+            if list.place(index) {
+                placed.new.push(cell);
+            } else {
+                placed.kept.push(cell);
+            }
             let list = self.nodes[key as usize].list.as_ref().expect("list");
             if sticky && list.sticky.binary_search(&index).is_ok() {
                 let range = list.sticky_range(index, self.nodes[cell as usize].id, size);
@@ -9490,8 +9530,8 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .zip([blocks.header, blocks.footer, blocks.body])
         {
-            if extra.cell != u32::MAX {
-                place(self, extra.cell, at, 0.0, full);
+            if extra.cell != u32::MAX && place(self, extra.cell, at, 0.0, full).is_some() {
+                placed.kept.push(extra.cell);
             }
         }
         self.cells_scratch = ready;
@@ -9588,6 +9628,9 @@ impl<M: TextEngine> Core<M> {
                 self.mount.extend(item);
             }
         }
+        if motion {
+            self.move_list_cells(key, id, horizontal, anchor, placed);
+        }
     }
 }
 
@@ -9637,6 +9680,20 @@ fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
     Points(if up < value.0 { up + 1.0 / ratio } else { up })
 }
 
+/// A scroll view's scrollable extent from its rounded layout: the overflow
+/// rectangle is measured from the padding box origin and stops at the
+/// children's border boxes, so the leading border and trailing padding are
+/// added.
+fn scroll_extent(l: &taffy::Layout) -> Size<Points> {
+    let o = l.scrollable_overflow_rect;
+    size_pt(
+        l.size.width.max(l.border.left + o.right + l.padding.right),
+        l.size
+            .height
+            .max(l.border.top + o.bottom + l.padding.bottom),
+    )
+}
+
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds
 /// it, to device pixels of `ratio` pixels per point on each axis
 /// ([`round`]; on a grid surface a Cell is a pixel: [`terminal_layout::Grid::ratio`]),
@@ -9673,18 +9730,25 @@ fn rounded(
         y + layout.size.height,
         ry,
     );
-    out.padding.left = span(x, x + layout.padding.left, rx);
-    out.padding.right = span(
-        x + layout.size.width - layout.padding.right,
-        x + layout.size.width,
-        rx,
+    // Padding is rounded from the border's inner edge, not from the outer
+    // edge as the border is: rounded each from the outer edge, a border and
+    // a padding of 1.5 and 6 points at 1.1 pixels per point took 2 + 7
+    // pixels where their 8.25 pixels round to 8, and a text measured to fit
+    // its content box (a label as wide as its content) wrapped in the pixel
+    // or two its insets took from it. Rounded at its edges, the content box
+    // is as many pixels as the text was measured.
+    let (left, right) = (
+        x + layout.border.left,
+        x + layout.size.width - layout.border.right,
     );
-    out.padding.top = span(y, y + layout.padding.top, ry);
-    out.padding.bottom = span(
-        y + layout.size.height - layout.padding.bottom,
-        y + layout.size.height,
-        ry,
+    let (top, bottom) = (
+        y + layout.border.top,
+        y + layout.size.height - layout.border.bottom,
     );
+    out.padding.left = span(left, left + layout.padding.left, rx);
+    out.padding.right = span(right - layout.padding.right, right, rx);
+    out.padding.top = span(top, top + layout.padding.top, ry);
+    out.padding.bottom = span(bottom - layout.padding.bottom, bottom, ry);
     let o = layout.scrollable_overflow_rect;
     out.scrollable_overflow_rect.left = span(x, x + o.left, rx);
     out.scrollable_overflow_rect.right = span(x, x + o.right, rx);

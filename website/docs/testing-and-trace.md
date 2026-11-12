@@ -76,7 +76,8 @@ options set below: `storage` (`MemoryStorage::new(entries)`), `network` (`StubNe
 `scroll(selector, px(3000.0))`, `back`, `wait`, `wait_for`, `wait_for_gone`, `wait_until`, `run_for`, `fast_forward`,
 `set_system_time`, `set_viewport`, `set_clipboard` and `on_dialog`; `app.shows(text)` and `app.screen()` (`texts()`,
 `count(selector)`, `enabled(selector)`, `dialogs()`, `clipboard()`, `commands()`) read what is on screen. A step
-returns an error with the texts on screen when it cannot be taken.
+returns an error with the texts on screen when it cannot be taken. `app.clear_commands()` starts the record of
+`commands()` afresh, so a long test keeps only the commands of the steps it checks.
 
 `nsh_testing::tsx(entry, sets)` (feature `bundle`) opens an app's TSX entry the same way, built against NSH's and the
 crate's UI sets ([Building with Rust](./rust.md#testing)). `examples/gallery-rs` tests its Rust root this way, one

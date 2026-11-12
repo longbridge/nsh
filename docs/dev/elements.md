@@ -556,7 +556,15 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
   for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
-  it. In every idiom the focus the keyboard moved shows it too (WAI-ARIA's tooltip pattern): `Core::focus_hints`,
+  it. Once the pointer showed a hint it moves on without waiting, so a toolbar's tools read in turn (`gpui-base`'s
+  `TooltipDefaults` grace period, Radix's `skipDelayDuration`): `onMouseLeave` of an anchor whose hint the pointer
+  showed, in the view, starts the grace period (`Overlays::grace_from`, on the engine's clock), and `onMouseEnter`
+  within the grace period (`HINT_GRACE_PERIOD`, 300 ms, fixed), or while another hint the pointer showed is
+  still in the view (an anchor inside another), shows it at once instead of starting the task (`Core::hint_skips_delay`).
+  A touch down on an anchor or Escape ends the period (acting on the anchor, as `gpui-component`'s press hides its
+  tooltip with none); hints the focus or the owner showed start none. A hint whose delay never ends (`HINT_ENDLESS`,
+  `Tooltip`'s `delay` of `Infinity`) takes no part and still waits. In every idiom the focus the keyboard moved shows it too (WAI-ARIA's tooltip
+  pattern): `Core::focus_hints`,
   after `update_focus_within`, shows the hint of the nearest anchor on the focus chain (up to the overlay the focus is
   in, so a popup's focus is not on its trigger's hint) at once when the keyboard brought the focus there, and hides it
   when the focus leaves. Which input moved the focus is decided as it is reported (`classes::focus_reported`:
