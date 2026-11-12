@@ -667,6 +667,12 @@ the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
 ## Input
 
+An input's name (`label`, falling back to its text label) and description (`hint`, the encoded description and
+hint) belong to its focusable `<input>` or `<textarea>`. `fieldAria` clears those attributes from the wrapper,
+including when props arrived before the field was created. Prop and text updates refresh the field's attributes;
+empty names and descriptions remove their attributes. `web/nsh.test.mjs` checks both field kinds and mount orders
+with `node --test crates/nsh-platform-web/web/nsh.test.mjs`.
+
 `autoComplete` reaches both `<input>` and `<textarea>` as HTML's `autocomplete` attribute.
 `src/encode/input.rs` maps every `AutoFill` variant to its HTML token (`Password` to
 `current-password`, `Birthdate` to `bday`, `Off` to `off`). `Default` leaves the attribute unset;
@@ -742,7 +748,9 @@ browsers' touches into what phones report:
   it lays the dialog out at the size `nsh_root_size` reports): only the app's popup and backdrop show, which the
   runtime renders in it. `slide` moves the dialog up from below the root's bottom edge (a fade with reduced motion),
   `fade` fades it; `onOpen` follows the transition. A dialog the app removes leaves the same way, then reports
-  `onClose`.
+  `onClose`. Out of the DOM subtree of the view it was inserted in, a dialog goes with that view, or a view around
+  it, when it is removed, without `onClose`, and comes back when it is inserted again (`hideHosted` /
+  `showHosted`): the browser's graph deletes a removed component's views only once they are collected.
 - **Dialogs over the window** (`createPlayer`'s `dialogs: "viewport"`, `viewportDialogs`): dialogs, sheets and alerts cover
   the whole window, as iOS and Android present them from an app that embeds NSH in part of its screen. Each stays
   where it is in the root, so its events, focus, `inert` and history are as above, and is a manual popover in the

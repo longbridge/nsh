@@ -43,7 +43,9 @@
 //! take it over, and its view reaching an edge does not hand the rest to
 //! an outer one. Trackpad pinches (`magnifyWithEvent:`) and rotations
 //! (`rotateWithEvent:`) drive the native pinch / rotation values; mice
-//! pinch with Control + wheel.
+//! pinch with Control + wheel. Over a zoomable scroll view nearer than a
+//! view that pinches, both zoom it around the pointer
+//! ([`crate::scroll::pinch`]).
 //!
 //! The decisions over plain data (what a pointer going down may start, a
 //! press's events, hover changes, hit areas, pinches, wheel latching) are
@@ -58,20 +60,22 @@ use std::{
 use dispatch2::{DispatchQueue, DispatchTime};
 use nsh_core::{
     Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, MouseEvent, NodeId,
-    PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    PayloadValue, PinchEvent, PinchPhase, PointerEvents, ROOT_ID, TouchEvent, TouchPhase,
+    TouchPoint, ViewKind,
     desktop::{ResizeEdge, WindowControl},
     geometry::{Points, point},
     input::{
-        self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, VelocityTracker, ZOOM_IDLE, has_press, laid_out,
-        latch_holds, transforms,
+        self, Gate, HitArea, PAN_SLOP, PRESS_SLOP, TOUCHPAD_IDLE, VelocityTracker, WheelLatch,
+        WheelStep, ZOOM_IDLE, has_press, laid_out, latch_holds, transforms,
     },
     platform::InputModality,
-    tailwind::state::{HOVERED, PRESSED},
+    tailwind::state::{FOCUSED, HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
 use objc2_app_kit::{
     NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent, NSEventMask,
-    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSWindow,
+    NSEventModifierFlags, NSEventPhase, NSEventTrackingRunLoopMode, NSEventType, NSImage, NSView,
+    NSWindow,
 };
 use objc2_foundation::{NSDate, NSSize};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -101,8 +105,13 @@ struct Transform {
     view: NshView,
     pinch: bool,
     rotation: bool,
+    /// It zooms `view`, a zoomable scroll view, rather than driving its
+    /// pinch values.
+    zoom: bool,
     scale: f32,
     degrees: f32,
+    /// Where the pointer is (root coordinates).
+    at: (f32, f32),
 }
 
 /// Pointer state of one surface.
@@ -130,9 +139,18 @@ pub(crate) struct Input {
     wheel: RefCell<Option<Wheel>>,
     /// The scroll view the system's momentum after a gesture goes to.
     momentum: RefCell<Option<NshView>>,
+    /// When the gesture that set [`Self::momentum`] ended or its last
+    /// momentum event came (ms). A gesture whose fingers stop before they
+    /// lift gets no momentum events, so `momentum` outlives it: only this
+    /// says whether a glide can still be going on.
+    momentum_last: Cell<f64>,
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The `onWheel` listener a scroll went to, which keeps the rest of it.
+    wheel_listener: RefCell<WheelLatch<NshView>>,
+    /// The `onPinch` listener a trackpad pinch went to, to its end.
+    pinch_listener: RefCell<WheelLatch<NshView>>,
     /// The scroll under way has no scroll view of this surface under it:
     /// it goes to the view the surface is in (an embedded app's host).
     forward_scroll: Cell<bool>,
@@ -278,6 +296,8 @@ pub(crate) fn reset(surface: &Surface) {
     input.wheel.borrow_mut().take();
     input.momentum.borrow_mut().take();
     input.latch.borrow_mut().take();
+    input.wheel_listener.borrow_mut().clear();
+    input.pinch_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
     input.link_hovered.borrow_mut().take();
@@ -319,6 +339,57 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
         // matters again under the pointer.
         surface.input.hovered.borrow_mut().retain(|v| v != view);
     }
+}
+
+/// `view` leaves the tree (`Remove`, `Delete`): it and the views inside it
+/// leave the hover and the keyboard focus, their states cleared and
+/// reported, without a leave or blur, as a removed DOM element. A removed
+/// view can outlive its component (a JS cycle through its ref), whose
+/// handlers must not run.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let inside = |v: &NshView| v.ns().isDescendantOf(view.ns());
+    if !input.hovered.borrow().is_empty() {
+        let left: Vec<NshView> = input
+            .hovered
+            .borrow_mut()
+            .extract_if(.., |v| inside(v))
+            .collect();
+        for v in &left {
+            set_state(surface, v, HOVERED, false);
+        }
+    }
+    if input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| inside(v))
+    {
+        input.link_hovered.borrow_mut().take();
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    let Some(responder) = window.firstResponder() else {
+        return;
+    };
+    if !responder
+        .downcast_ref::<NSView>()
+        .is_some_and(|r| r.isDescendantOf(view.ns()))
+    {
+        return;
+    }
+    // AppKit gives the focus of a view leaving its window to the window
+    // without a resign, but ends a field's editing (its blur): the window
+    // takes it now, the focus reported gone first so the resign is silent.
+    match responder
+        .downcast_ref::<ViewObj>()
+        .and_then(|obj| NshView::from_ns(obj))
+    {
+        Some(focused) => set_state(surface, &focused, FOCUSED, false),
+        None => crate::text_input::taken_out(&window),
+    }
+    window.makeFirstResponder(None);
 }
 
 /// Sets or clears interaction state `bit` of `view` and reports the
@@ -378,6 +449,46 @@ fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
     });
     if focused && view.id() != ROOT_ID {
         window.makeFirstResponder(Some(root_in(surface, &window).ns()));
+    }
+}
+
+/// A batch is applied: the keyboard focus leaves a stop, or a field (an
+/// input's, a hosted view) in a view of ours, that it hid
+/// ([`NshView::seen_by_keys`]: `display: none` or `visibility: hidden`
+/// around it), for the root of its window, as it leaves a screen that
+/// hides. AppKit keeps a hidden view focused, and the keys would still act
+/// on what the user cannot see.
+pub(crate) fn release_hidden_focus(surface: &Surface) {
+    for root in std::iter::once(surface.root.clone()).chain(crate::window::roots(surface)) {
+        let Some(window) = root.ns().window() else {
+            continue;
+        };
+        let Some(mut at) = window
+            .firstResponder()
+            .and_then(|responder| responder.downcast::<objc2_app_kit::NSView>().ok())
+        else {
+            continue;
+        };
+        if !at.isDescendantOf(root.ns()) {
+            continue;
+        }
+        // The stop itself, or the view of ours holding the field (a field
+        // that edits has the window's field editor in it).
+        let view = loop {
+            if let Some(view) = NshView::from_ns(&at) {
+                break Some(view);
+            }
+            match crate::view::superview(&at) {
+                Some(up) => at = up,
+                None => break None,
+            }
+        };
+        if let Some(view) = view
+            && view != root
+            && !view.seen_by_keys()
+        {
+            window.makeFirstResponder(Some(root.ns()));
+        }
     }
 }
 
@@ -855,6 +966,18 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     }
 }
 
+/// The innermost span hearing a context menu at this UTF-16 character.
+/// Hover-only inner spans leave the surrounding span's action reachable.
+fn context_link(links: &[nsh_core::TextLink], at: u32) -> Option<nsh_core::TextLink> {
+    links
+        .iter()
+        .filter(|link| {
+            link.start <= at && at < link.end && link.events.contains(EventKind::ContextMenu)
+        })
+        .min_by_key(|link| link.end - link.start)
+        .copied()
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it. Text
 /// fields are AppKit's views, which show their own menu.
@@ -862,6 +985,32 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return;
     };
+    if !hit.native {
+        let (lx, ly) = local(surface, &hit.view, x, y);
+        let span = {
+            let state = hit.view.state();
+            crate::text::char_at(&state, lx, ly).and_then(|at| {
+                state
+                    .text
+                    .as_ref()
+                    .and_then(|text| context_link(&text.text.links, at))
+            })
+        };
+        if let Some(link) = span {
+            let event = nsh_core::ContextMenuEvent::new(
+                point(Points(lx), Points(ly)),
+                point(Points(x), Points(y)),
+                modifiers(flags),
+                Some(nsh_core::PointerType::Mouse),
+            );
+            surface.event(
+                link.node,
+                EventKind::ContextMenu,
+                EventPayload::ContextMenu(event),
+            );
+            return;
+        }
+    }
     for v in chain(&hit.view) {
         let (id, listens, input) = {
             let s = v.state();
@@ -908,7 +1057,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     }
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
-            activate(surface, &view, "keyboard");
+            activate(surface, view.id(), view.state().events, "keyboard");
         }
         return true;
     }
@@ -978,7 +1127,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
 
 /// A mounted ordinary view the keyboard focus stops at (Tab): one that
 /// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
-/// shown and reachable by the pointer.
+/// shown ([`NshView::seen_by_keys`]) and reachable by the pointer.
 pub(crate) fn is_key_stop(view: &NshView) -> bool {
     {
         let state = view.state();
@@ -990,7 +1139,7 @@ pub(crate) fn is_key_stop(view: &NshView) -> bool {
             return false;
         }
     }
-    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor()
+    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor() && view.seen_by_keys()
 }
 
 /// A stop that Return and Space press ([`is_key_stop`] taking presses): a
@@ -1064,12 +1213,11 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
 /// Presses `view` with no pointer to report, as Return and Space press a
 /// focused control and `AXPress` presses any: its `onPressDown`,
 /// `onPressUp` and `onPress`. `from` names the source in the log.
-fn activate(surface: &Surface, view: &NshView, from: &str) {
-    let events = view.state().events;
+fn activate(surface: &Surface, node: nsh_core::NodeId, events: nsh_core::EventMask, from: &str) {
     for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
         if events.contains(kind) {
-            log::debug!(target: "nsh::input", "{} on {} ({from})", kind.prop_name(), view.id());
-            surface.event(view.id(), kind, EventPayload::None);
+            log::debug!(target: "nsh::input", "{} on {} ({from})", kind.prop_name(), node);
+            surface.event(node, kind, EventPayload::None);
         }
     }
 }
@@ -1110,7 +1258,47 @@ pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
         crate::window::control_window(&surface, &window, control, false);
         return true;
     }
-    activate(surface, view, "accessibility");
+    activate(surface, view.id(), view.state().events, "accessibility");
+    true
+}
+
+/// An accessible inline link uses the same node and events as a pointer
+/// press, while retaining the input's keyboard focus.
+pub(crate) fn accessibility_span_events(
+    surface: &Surface,
+    view: &NshView,
+    node: nsh_core::NodeId,
+) -> Option<nsh_core::EventMask> {
+    if !view.can_target()
+        || !view
+            .ns()
+            .isDescendantOf(&crate::navigation::focus_scope(surface))
+    {
+        return None;
+    }
+    let state = view.try_state()?;
+    if state.props.accessibility.state.disabled {
+        return None;
+    }
+    state
+        .text
+        .as_ref()?
+        .text
+        .links
+        .iter()
+        .find(|link| link.node == node && link.events.contains(EventKind::Press))
+        .map(|link| link.events)
+}
+
+pub(crate) fn accessibility_span_press(
+    surface: &Surface,
+    view: &NshView,
+    node: nsh_core::NodeId,
+) -> bool {
+    let Some(events) = accessibility_span_events(surface, view, node) else {
+        return false;
+    };
+    activate(surface, node, events, "accessibility");
     true
 }
 
@@ -1327,8 +1515,7 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
 /// The innermost view at `p` (`view`'s coordinates) among the children
 /// in `view`'s container.
 fn pick_children(view: &NshView, p: (f32, f32)) -> Option<Hit> {
-    let offset = container_offset(view);
-    let p = (p.0 + offset.0, p.1 + offset.1);
+    let p = into_container(view, p);
     view.child_views()
         .iter()
         .rev()
@@ -1350,14 +1537,24 @@ fn on_native(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> bool
     })
 }
 
-/// The origin of `view`'s container's bounds (its scroll offset): the
-/// scroll state, not the bounds — while scrolling the offset shows as a
-/// layer transform and the bounds catch up when it settles.
-fn container_offset(view: &NshView) -> (f32, f32) {
+/// The origin of `view`'s container's bounds (its scroll offset) and its
+/// zoom: the scroll state, not the bounds — while scrolling the offset
+/// shows as a layer transform and the bounds catch up when it settles.
+fn container_offset(view: &NshView) -> ((f32, f32), f32) {
     if view.container_view().is_none() {
-        return (0.0, 0.0);
+        return ((0.0, 0.0), 1.0);
     }
-    crate::scroll::bounds_origin(view)
+    (
+        crate::scroll::bounds_origin(view),
+        crate::scroll::zoom(view),
+    )
+}
+
+/// A point in `view`'s coordinates in its container's (its children's
+/// parent space).
+fn into_container(view: &NshView, p: (f32, f32)) -> (f32, f32) {
+    let (o, z) = container_offset(view);
+    (p.0 / z + o.0, p.1 / z + o.1)
 }
 
 /// A point in the coordinates of `child`'s parent's container in
@@ -1434,8 +1631,7 @@ pub(crate) fn local(_surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32,
     // From the outermost (the root) inwards.
     for pair in views.windows(2).rev() {
         let (child, parent) = (&pair[0], &pair[1]);
-        let o = container_offset(parent);
-        match into_child(child, (p.0 + o.0, p.1 + o.1)) {
+        match into_child(child, into_container(parent, p)) {
             Some(cp) => p = cp,
             None => return (x, y),
         }
@@ -1457,8 +1653,11 @@ pub(crate) fn to_top(view: &NshView, p: (f32, f32), transforms: bool) -> Option<
             p = project(&m, p)?;
         }
         let origin = child.ns().frame().origin;
-        let o = container_offset(parent);
-        p = (p.0 + origin.x as f32 - o.0, p.1 + origin.y as f32 - o.1);
+        let (o, z) = container_offset(parent);
+        p = (
+            (p.0 + origin.x as f32 - o.0) * z,
+            (p.1 + origin.y as f32 - o.1) * z,
+        );
     }
     Some(p)
 }
@@ -2257,27 +2456,34 @@ fn transform_payload(key: &'static str, amount: f32) -> EventPayload {
 }
 
 /// The innermost view at `(x, y)` that pinches (`rotation` false) or
-/// rotates, as a transform of that one kind.
+/// rotates, as a transform of that one kind; a pinch also zooms the
+/// innermost zoomable scroll view.
 fn transform_at(surface: &Surface, x: f32, y: f32, rotation: bool) -> Option<Transform> {
     let hit = pick(&event_root(surface), x, y)?;
     chain(&hit.view).into_iter().find_map(|v| {
+        let zoom = !rotation && crate::scroll::pinches(&v);
         let (id, events) = {
             let s = v.state();
             (s.id, s.events)
         };
         let (pinch, rotates) = transforms(&gesture_values(surface, &v, id), events);
-        let takes = if rotation { rotates } else { pinch };
+        let takes = zoom || if rotation { rotates } else { pinch };
         takes.then(|| Transform {
             view: v,
             pinch: !rotation,
             rotation,
+            zoom,
             scale: 1.0,
             degrees: 0.0,
+            at: (x, y),
         })
     })
 }
 
-fn transform_begin(surface: &Surface, t: &Transform) {
+fn transform_begin(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        return crate::scroll::pinch_begin(surface, &t.view);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2300,7 +2506,12 @@ fn transform_begin(surface: &Surface, t: &Transform) {
     }
 }
 
-fn transform_move(surface: &Rc<Surface>, t: &Transform) {
+/// `t` moved; a zoom past the limits rubber-bands when `rubber` (fingers).
+fn transform_move(surface: &Rc<Surface>, t: &Transform, rubber: bool) {
+    if t.zoom {
+        let at = local(surface, &t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch(surface, &t.view, t.scale, at, rubber);
+    }
     let id = t.view.state().id;
     {
         let mut anim = surface.anim.borrow_mut();
@@ -2315,7 +2526,11 @@ fn transform_move(surface: &Rc<Surface>, t: &Transform) {
     surface.ensure_ticking();
 }
 
-fn transform_end(surface: &Surface, t: &Transform) {
+fn transform_end(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let at = local(surface, &t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch_end(surface, &t.view, at);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2360,9 +2575,10 @@ fn trackpad_transform(
             let mut slot = slot.borrow_mut();
             let Some(t) = slot.as_mut() else { return };
             change(t);
+            t.at = (x, y);
             t.clone()
         };
-        transform_move(surface, &t);
+        transform_move(surface, &t, true);
     }
     if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled)
         && let Some(t) = slot.borrow_mut().take()
@@ -2373,10 +2589,67 @@ fn trackpad_transform(
 
 /// `magnifyWithEvent:`: a trackpad pinch.
 fn magnify(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) {
+    if pinch_event(surface, event, x, y) {
+        return;
+    }
     let m = event.magnification() as f32;
     trackpad_transform(surface, event, x, y, false, |t| {
         t.scale = (t.scale * (1.0 + m)).max(0.01);
     });
+}
+
+/// `onPinch` for a trackpad pinch step (`magnifyWithEvent:`) at `(x, y)`
+/// (root coordinates): the nearest view around the one under it that
+/// listens hears the pinch from its start to its end ([`WheelLatch`]).
+/// Returns whether that view takes it ([`input::wheel_listener`]: no view
+/// that pinches natively is nearer, nor is it one), so nothing pinches
+/// natively.
+fn pinch_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> bool {
+    let phase = event.phase();
+    let (step, pinch_phase) = if phase.contains(NSEventPhase::Began) {
+        (WheelStep::Begin, PinchPhase::Start)
+    } else if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
+        (WheelStep::End, PinchPhase::End)
+    } else if phase.contains(NSEventPhase::Changed) {
+        (WheelStep::Continue, PinchPhase::Move)
+    } else {
+        return false;
+    };
+    let routed = surface.input.pinch_listener.borrow_mut().route(
+        step,
+        true,
+        false,
+        |view| view.ns().window().is_some() && view.state().events.contains(EventKind::Pinch),
+        || {
+            let hit = pick(&event_root(surface), x, y)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Pinch),
+                |v| {
+                    let (id, events) = {
+                        let s = v.state();
+                        (s.id, s.events)
+                    };
+                    transforms(&gesture_values(surface, v, id), events).0
+                        || crate::scroll::pinches(v)
+                },
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    let (location_x, location_y) = local(surface, &view, x, y);
+    let pinch = PinchEvent::new(
+        point(Points(location_x), Points(location_y)),
+        point(Points(x), Points(y)),
+        nsh_core::geometry::Percentage(event.magnification() as f32),
+        pinch_phase,
+        modifiers(event.modifierFlags()),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Pinch, EventPayload::Pinch(pinch));
+    takes
 }
 
 /// `rotateWithEvent:`: a trackpad rotation (AppKit counts degrees
@@ -2405,7 +2678,8 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
         }
     };
     t.scale *= input::zoom_factor(dy);
-    transform_move(surface, &t);
+    t.at = (x, y);
+    transform_move(surface, &t, false);
     *input.zoom.borrow_mut() = Some((t, generation));
     let key = surface.key();
     later(ZOOM_IDLE, move || {
@@ -2662,11 +2936,12 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
     let hit = pick(&event_root(surface), x, y)?;
     let views = chain(&hit.view);
     let horizontal = dx.abs() > dy.abs();
+    // Zoomable views scroll along both axes.
     let along = |v: &NshView| {
         v.state()
             .scroll
             .as_ref()
-            .is_some_and(|s| s.horizontal == horizontal)
+            .is_some_and(|s| s.horizontal == horizontal || s.behavior.zooms())
     };
     let any_along = views.iter().any(along);
     views.into_iter().find(|v| {
@@ -2689,48 +2964,110 @@ fn gesture_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option
 }
 
 /// A wheel by `(dx, dy)` (`precise`: points, else lines) at `(x, y)`
-/// (root coordinates): the nearest view around the one under it that
-/// listens to `onWheel` hears it ([`input::wheel_listener`]). Returns
-/// whether that view takes the wheel, so nothing scrolls natively; a
-/// hosted AppKit view under the pointer (a web page, a text view) keeps
-/// it.
+/// (root coordinates), from `event` at `time` (ms): the nearest view around
+/// the one under it that listens to `onWheel` hears it
+/// ([`input::wheel_listener`]), and one scroll stays where it went
+/// ([`WheelLatch`]): a trackpad gesture and its momentum on the view its
+/// first move found, notches on theirs while they keep coming, and a
+/// scroll going on in a scroll view is only observed. Returns whether that
+/// view takes the wheel, so nothing scrolls natively; a hosted AppKit view
+/// under the pointer (a web page, a text view) keeps it.
+#[allow(clippy::too_many_arguments)]
 fn wheel_event(
-    surface: &Surface,
+    surface: &Rc<Surface>,
+    event: &NSEvent,
     x: f32,
     y: f32,
     precise: bool,
     dx: f32,
     dy: f32,
-    flags: NSEventModifierFlags,
+    time: f64,
 ) -> bool {
-    if dx == 0.0 && dy == 0.0 {
+    let input = &surface.input;
+    let phase = event.phase();
+    let momentum = event.momentumPhase();
+    let step = if !momentum.is_empty() {
+        if momentum.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
+            WheelStep::End
+        } else {
+            WheelStep::Continue
+        }
+    } else if phase.is_empty() {
+        WheelStep::Discrete {
+            horizontal: dx.abs() > dy.abs(),
+            precise,
+            time,
+        }
+    } else if phase.contains(NSEventPhase::MayBegin) {
+        // Fingers resting on the trackpad: a new touch, for which the
+        // scroll views stop their glides.
+        input.wheel_listener.borrow_mut().clear();
         return false;
-    }
-    let Some(hit) = pick(&event_root(surface), x, y) else {
-        return false;
-    };
-    let Some((view, takes)) = input::wheel_listener(
-        chain(&hit.view),
-        |v| v.state().events.contains(EventKind::Wheel),
-        |v| v.kind() == ViewKind::Scroll,
-    ) else {
-        return false;
-    };
-    let delta = if precise {
-        nsh_core::WheelDelta::Points(point(Points(dx), Points(dy)))
+    } else if phase.contains(NSEventPhase::Began) {
+        WheelStep::Begin
     } else {
-        nsh_core::WheelDelta::Lines(point(dx, dy))
+        WheelStep::Continue
     };
-    let (location_x, location_y) = local(surface, &view, x, y);
-    let event = nsh_core::WheelEvent::new(
-        point(Points(location_x), Points(location_y)),
-        point(Points(x), Points(y)),
-        delta,
-        modifiers(flags),
+    let moved = dx != 0.0 || dy != 0.0;
+    // A momentum view counts while its glide can still be going on: one
+    // left behind by fingers that stopped before lifting must not keep
+    // later mouse notches from reaching a listener.
+    let scrolling = input.wheel.borrow().is_some()
+        || (input.momentum.borrow().is_some() && time - input.momentum_last.get() < TOUCHPAD_IDLE)
+        || input
+            .latch
+            .borrow()
+            .as_ref()
+            .is_some_and(|(view, h, last)| {
+                latch_holds(*h, *last, dx.abs() > dy.abs(), time) && view.ns().window().is_some()
+            });
+    // Whether a listener had this scroll before (a new gesture has none
+    // yet, whatever the last one left).
+    let took = step != WheelStep::Begin && input.wheel_listener.borrow().taker().is_some();
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        moved,
+        scrolling,
+        |view| view.ns().window().is_some() && view.state().events.contains(EventKind::Wheel),
+        || {
+            let hit = pick(&event_root(surface), x, y)?;
+            let (view, takes) = input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Wheel),
+                |v| v.kind() == ViewKind::Scroll,
+            )?;
+            Some((view, takes && !hit.native))
+        },
     );
-    let id = view.state().id;
-    surface.event(id, EventKind::Wheel, EventPayload::Wheel(event));
-    takes && !hit.native
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    if takes && !took && !phase.is_empty() {
+        // The scroll views held this gesture for the resting fingers, or
+        // began it before it moved: they let go.
+        if let Some(w) = input.wheel.borrow_mut().take()
+            && let Some(held) = w.view
+        {
+            crate::scroll::wheel_end(surface, &held, 0.0, 0.0);
+        }
+    }
+    if moved {
+        let delta = if precise {
+            nsh_core::WheelDelta::Points(point(Points(dx), Points(dy)))
+        } else {
+            nsh_core::WheelDelta::Lines(point(dx, dy))
+        };
+        let (location_x, location_y) = local(surface, &view, x, y);
+        let wheel = nsh_core::WheelEvent::new(
+            point(Points(location_x), Points(location_y)),
+            point(Points(x), Points(y)),
+            delta,
+            modifiers(event.modifierFlags()),
+        );
+        let id = view.state().id;
+        surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    }
+    takes
 }
 
 /// Whether `event` belongs to a scroll this surface does not take, so its
@@ -2805,7 +3142,7 @@ fn scroll_event(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
     // A view listening to `onWheel` nearer than the scroll views under the
     // pointer takes the wheel, Control + wheel and momentum included (a
     // canvas zooming or panning); a gesture going on still ends.
-    if wheel_event(surface, x, y, precise, dx, dy, event.modifierFlags()) {
+    if wheel_event(surface, event, x, y, precise, dx, dy, time) {
         if phase.contains(NSEventPhase::Ended) || phase.contains(NSEventPhase::Cancelled) {
             gesture_event(surface, phase, x, y, 0.0, 0.0, time);
         }
@@ -2983,6 +3320,7 @@ fn gesture_event(
         let (vx, vy) = w.velocity.velocity();
         crate::scroll::wheel_end(surface, &view, vx, vy);
         *input.momentum.borrow_mut() = Some(view);
+        input.momentum_last.set(time);
     }
 }
 
@@ -2992,6 +3330,7 @@ fn momentum_event(surface: &Rc<Surface>, phase: NSEventPhase, dx: f32, dy: f32, 
     let Some(view) = input.momentum.borrow().clone() else {
         return;
     };
+    input.momentum_last.set(time);
     if phase.contains(NSEventPhase::Began) && !crate::scroll::momentum_begin(surface, &view) {
         // The view springs back or snaps instead.
         input.momentum.borrow_mut().take();
@@ -3089,6 +3428,33 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inline_context_menu_ignores_hover_only_nested_spans() {
+        let link = |start, end, node, kind| {
+            let mut events = nsh_core::EventMask::default();
+            events.set(kind, true);
+            nsh_core::TextLink {
+                start,
+                end,
+                node,
+                events,
+                focus_stop: false,
+            }
+        };
+        let outer = link(0, 10, 2, nsh_core::EventKind::ContextMenu);
+        let hover = link(2, 8, 3, nsh_core::EventKind::MouseEnter);
+        let inner = link(3, 7, 4, nsh_core::EventKind::ContextMenu);
+        assert_eq!(
+            super::context_link(&[outer, hover], 4).map(|l| l.node),
+            Some(2)
+        );
+        assert_eq!(
+            super::context_link(&[outer, hover, inner], 4).map(|l| l.node),
+            Some(4)
+        );
+        assert!(super::context_link(&[outer, hover], 10).is_none());
+    }
+
     use super::*;
 
     #[test]

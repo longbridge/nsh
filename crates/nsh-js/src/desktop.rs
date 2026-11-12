@@ -250,12 +250,34 @@ fn icon(cx: *mut JsContext, v: JsValue) -> Result<Option<ImageSource>, String> {
     Ok(Some(source.inline()))
 }
 
+/// [`dom::take_len`] with its error as the message: arrays read here are
+/// read natively, where the time budget cannot interrupt, and a sparse
+/// array is as long as it says.
+fn take_len(cx: *mut JsContext, list: JsValue, budget: &mut u32) -> Result<u32, String> {
+    dom::take_len(cx, list, budget).ok_or_else(|| {
+        // SAFETY: the pending exception (owned), freed after; its message
+        // says why.
+        unsafe {
+            let e = qjs::JS_GetException(cx);
+            let message = dom::string_arg(cx, e).unwrap_or_default();
+            qjs::JS_FreeValue(cx, e);
+            message
+        }
+    })
+}
+
 /// Decodes menus, keeping their functions.
 struct Decoder {
     cx: *mut JsContext,
     mac: bool,
     /// The items' functions (id, owned function).
     functions: Vec<(u32, JsValue)>,
+    /// The submenus the item being read is in.
+    depth: u32,
+    /// The items left to read of [`dom::MAX_ARRAY_ITEMS`], submenus counted
+    /// together: a menu that is its own submenu multiplies its length at
+    /// each level.
+    budget: u32,
 }
 
 impl Decoder {
@@ -266,19 +288,30 @@ impl Decoder {
         if !unsafe { qjs::JS_IsArray(list) } {
             return Err("a menu is an array of items".into());
         }
-        let mut len: i64 = 0;
-        // SAFETY: the length of a live array.
-        unsafe { qjs::JS_GetLength(cx, list, &mut len) };
-        let mut out = Vec::with_capacity(len.max(0) as usize);
-        for i in 0..len.max(0) {
+        // Read natively, where neither the time budget nor the interpreter's
+        // stack limit applies: a menu that is its own submenu would recurse
+        // until the thread's stack overflows.
+        if self.depth > dom::MAX_DEPTH {
+            return Err("submenus nested too deeply".into());
+        }
+        let len = take_len(cx, list, &mut self.budget)?;
+        let mut out = Vec::with_capacity(len.min(1 << 10) as usize);
+        self.depth += 1;
+        for i in 0..len {
             // SAFETY: an element of a live array (owned).
-            let v = unsafe { qjs::JS_GetPropertyInt64(cx, list, i) };
+            let v = unsafe { qjs::JS_GetPropertyUint32(cx, list, i) };
             let item = self.item(v);
             free(cx, v);
-            if let Some(item) = item? {
-                out.push(item);
+            match item {
+                Ok(Some(item)) => out.push(item),
+                Ok(None) => {}
+                Err(e) => {
+                    self.depth -= 1;
+                    return Err(e);
+                }
             }
         }
+        self.depth -= 1;
         Ok(out)
     }
 
@@ -369,6 +402,8 @@ fn decode(cx: *mut JsContext, list: JsValue) -> Result<(Arc<[MenuItem]>, Functio
         cx,
         mac: os(cx) == Os::MacOs,
         functions: Vec::new(),
+        depth: 0,
+        budget: dom::MAX_ARRAY_ITEMS,
     };
     match decoder.items(list) {
         Ok(items) => Ok((items.into(), std::mem::take(&mut decoder.functions))),
@@ -715,15 +750,13 @@ fn tray_title_runs(cx: *mut JsContext, list: JsValue) -> Result<Vec<TrayTitleRun
     if !unsafe { qjs::JS_IsArray(list) } {
         return Err(SHAPE.into());
     }
-    let mut len: i64 = 0;
-    // SAFETY: the length of a live array.
-    unsafe { qjs::JS_GetLength(cx, list, &mut len) };
+    let len = take_len(cx, list, &mut { dom::MAX_ARRAY_ITEMS })?;
     // Not sized by `len`: the app sets an array's length, holes and all; the
     // first hole ends the decoding with an error.
     let mut runs = Vec::new();
-    for i in 0..len.max(0) {
+    for i in 0..len {
         // SAFETY: an element of a live array (owned).
-        let v = unsafe { qjs::JS_GetPropertyInt64(cx, list, i) };
+        let v = unsafe { qjs::JS_GetPropertyUint32(cx, list, i) };
         let fields = is_object(v).then(|| (text_string(cx, v), string(cx, v, c"color")));
         free(cx, v);
         let Some((Some(text), color)) = fields else {
