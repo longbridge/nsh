@@ -101,12 +101,16 @@ pub struct TabsProps {
     /// The style of the indicator, over `indicatorClass`.
     #[prop(default)]
     pub indicator_style: Prop<Style>,
+    /// What screen readers call the list ("Sections", "Views"), said as
+    /// they enter it; its tabs stay elements of their own.
+    pub accessibility_label: Prop<Option<SharedString>>,
     /// The tabs of the list, and whatever the app lays out between them.
     pub children: Prop<Children>,
 }
 
 /// The tab list around a set of [`Tab`]s: screen readers hear the tabs
-/// inside it as one list, each still an element of its own. It holds no
+/// inside it as one list, named by its `accessibilityLabel`, each still an
+/// element of its own. It holds no
 /// value and no content: each tab is told whether it is selected and
 /// reports a press with `onPress`, and the app keeps which one is and shows
 /// that tab's content next to the list. Its layout and look are the app's
@@ -154,6 +158,7 @@ pub fn Tabs(props: TabsProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     };
     view()
         .role(AccessibilityRole::Tablist)
+        .optional_label(props.accessibility_label)
         // Tabs two Cells apart in a row: the terminal's tab bar.
         .when(terminal, |v| v.flex_row().gap_x(measure_text("", "00")))
         .child(when(styled, move || indicator(list.clone(), class, style)))
