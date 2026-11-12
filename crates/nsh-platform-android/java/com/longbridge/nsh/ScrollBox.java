@@ -79,12 +79,13 @@ final class ScrollBox extends FrameLayout implements Node {
     private int tapMode = -1;
     private boolean swallowing;
     /**
-     * A scroll command (`scrollToPx`, `scrollByPx`) is moving the content:
-     * set while one is applied, and while an animated one glides until the
-     * scroll settles or a finger goes down. Its scroll is not the user's
-     * drag, so it leaves the touches of the views inside to them.
+     * This view is dispatching a touch. The user's drag scrolls the content
+     * synchronously inside that call (a nested scroll view hands it the rest
+     * there too); commands, their glides, layout catching up (`payOwed`) and
+     * the host's handle scroll outside it. Only a scroll inside it is the
+     * user's drag, which takes the touches from the views inside.
      */
-    private boolean commanded, commandGliding;
+    private boolean dispatching;
     /**
      * Frames the platform scroll view drew. It draws again each frame while
      * its overscroll effect (Android 12's stretch) relaxes, which moves no
@@ -169,7 +170,7 @@ final class ScrollBox extends FrameLayout implements Node {
             // sizes. Report only after restoring the logical offset.
             if (rescaling) return;
             if (stickyCells.length > 0) pinSticky();
-            if (touching && !dragging && !swallowing && !commanded && !commandGliding) {
+            if (dispatching && touching && !dragging && !swallowing) {
                 dragging = true;
                 // The scroll view takes the touches from JS responders.
                 mounter.cancelTouches();
@@ -581,9 +582,7 @@ final class ScrollBox extends FrameLayout implements Node {
             return;
         }
         int x = scroller.getScrollX() + dx + owedX, y = scroller.getScrollY() + dy + owedY;
-        commanded = true;
         scroller.scrollTo(x, y);
-        commanded = false;
         owedX = x - scroller.getScrollX();
         owedY = y - scroller.getScrollY();
     }
@@ -604,8 +603,6 @@ final class ScrollBox extends FrameLayout implements Node {
             rescaledY = y;
             return;
         }
-        commanded = true;
-        if (animated) commandGliding = true;
         if (scroller instanceof ZScroll) {
             ((ZScroll) scroller).scrollToPx(x, y, animated);
         } else if (scroller instanceof ScrollView) {
@@ -615,7 +612,6 @@ final class ScrollBox extends FrameLayout implements Node {
             if (animated) ((HorizontalScrollView) scroller).smoothScrollTo(x, y);
             else scroller.scrollTo(x, y);
         }
-        commanded = false;
     }
 
     // --- The host's handle (`NshScrollHandle`) ---------------------------
@@ -686,7 +682,6 @@ final class ScrollBox extends FrameLayout implements Node {
     /** Scrolling came to rest (no API for it: no change for a moment). */
     private void settled() {
         hostAnimating = false;
-        commandGliding = false;
         if (touching) {
             postDelayed(settled, 120);
             return;
@@ -1107,7 +1102,6 @@ final class ScrollBox extends FrameLayout implements Node {
             // The user scrolls now: what was owed no longer applies.
             owedX = owedY = 0;
             dragging = false;
-            commandGliding = false;
             tapMode = tapMode(e);
             // "never": the tap reaches nothing but the scroll view.
             swallowing = tapMode == 0;
@@ -1118,14 +1112,19 @@ final class ScrollBox extends FrameLayout implements Node {
         }
         if (action == MotionEvent.ACTION_DOWN) startY = e.getY();
         boolean handled;
-        if (swallowing) {
-            MotionEvent local = MotionEvent.obtain(e);
-            local.offsetLocation(-scroller.getLeft() - scroller.getTranslationX(), -scroller.getTop() - scroller.getTranslationY());
-            scroller.onTouchEvent(local);
-            local.recycle();
-            handled = true;
-        } else {
-            handled = super.dispatchTouchEvent(e);
+        dispatching = true;
+        try {
+            if (swallowing) {
+                MotionEvent local = MotionEvent.obtain(e);
+                local.offsetLocation(-scroller.getLeft() - scroller.getTranslationX(), -scroller.getTop() - scroller.getTranslationY());
+                scroller.onTouchEvent(local);
+                local.recycle();
+                handled = true;
+            } else {
+                handled = super.dispatchTouchEvent(e);
+            }
+        } finally {
+            dispatching = false;
         }
         // For a pan around this view (Box.scrollTakes): a touch that a view
         // above took never comes here, and leaves the time of an older one.
