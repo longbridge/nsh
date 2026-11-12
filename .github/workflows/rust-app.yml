@@ -190,9 +190,10 @@ jobs:
           # `nsh test` builds the app's programs in `.nsh/rust` and runs its
           # TypeScript tests (`examples/gallery-rs/*.test.tsx`) in the test
           # runner. `nsh` describes the app's crates with the generated
-          # `describe` program: it links no QuickJS, nsh-js, bundler,
-          # rolldown or Oxc. The test runner runs TypeScript tests (QuickJS,
-          # source maps) on entries `nsh` builds: no bundler or parser.
+          # `describe` program. With `nsh check` it links no JS engine or
+          # bundler. `nsh test` then shares build features with its runner,
+          # intentionally adding QuickJS to describe through workspace-hack.
+          # The test runner must still link no bundler or parser.
           check() {
             cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
               -p "nsh-app-gallery-native-$1" -e normal --target all \
@@ -202,8 +203,9 @@ jobs:
               exit 1
             fi
           }
-          ./target/debug/nsh test examples/gallery-rs
+          ./target/debug/nsh check examples/gallery-rs
           check describe '(rquickjs|quickjs-jit|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "a JS engine or the bundler"
+          ./target/debug/nsh test examples/gallery-rs
           check test '(nsh-bundler|rolldown|oxc_parser)([ _-]|$)' "the bundler"
       - name: Run the examples' tests
         run: |
