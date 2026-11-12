@@ -5716,6 +5716,7 @@ name = "nsh-platform-gpui"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "crossbeam-channel",
  "fontdb",
  "futures-channel",
