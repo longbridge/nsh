@@ -2012,6 +2012,84 @@ mount(() => (
 ));
 "##;
 
+const ORIENTATIONS: &str = r##"import { signal, mount, View } from "nsh";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
+
+type Route = { name: string };
+const a = createNavStack<Route>([{ name: "home" }]);
+const b = createNavStack<Route>([{ name: "more" }]);
+const tab = signal<"a" | "b">("b");
+setTimeout(() => b.push({ name: "viewer" }), 30);
+setTimeout(() => tab.set("a"), 60);
+setTimeout(() => tab.set("b"), 90);
+setTimeout(() => b.pop(), 120);
+
+const page = (route: Route) => (
+  <NavPage
+    title={route.name}
+    android={{
+      supportedOrientations:
+        route.name === "home" ? ["portrait"] : route.name === "viewer" ? ["landscape"] : undefined,
+    }}
+  >
+    <View />
+  </NavPage>
+);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, display: tab() === "a" ? "flex" : "none" }}>
+      <NavStack state={a} style={{ flex: 1 }}>{page}</NavStack>
+    </View>
+    <View style={{ flex: 1, display: tab() === "b" ? "flex" : "none" }}>
+      <NavStack state={b} style={{ flex: 1 }}>{page}</NavStack>
+    </View>
+  </View>
+));
+"##;
+
+/// A page's `supportedOrientations` decide while it is the most recently
+/// shown one with a setting that is displayed: a page kept in a tab that
+/// is not shown (`display: none`) does not.
+#[test]
+fn the_page_shown_decides_the_orientations() {
+    use nsh_core::{ModalConfig as M, platform::Os};
+
+    let (_engine, rx) = start_in(
+        ORIENTATIONS,
+        Environment {
+            os: Os::Android,
+            ..Environment::default()
+        },
+    );
+    let mut sent = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Orientations(bits),
+            } = item
+            {
+                sent.push(*bits);
+            }
+        }
+        sent.len() >= 4
+    });
+    // Tab b shows a page with none (the home page with portrait is in the
+    // hidden tab): nothing sent. The viewer pushed: landscape. Tab a shown:
+    // its home page's portrait. Tab b again: the viewer's. Popped, with tab
+    // a hidden: the app's own.
+    assert_eq!(
+        sent,
+        [
+            M::LANDSCAPE_LEFT | M::LANDSCAPE_RIGHT,
+            M::PORTRAIT,
+            M::LANDSCAPE_LEFT | M::LANDSCAPE_RIGHT,
+            0,
+        ]
+    );
+}
+
 const BACK: &str = r#"import { mount, signal, Text } from "nsh";
 import { BackHandler } from "nsh/mobile";
 

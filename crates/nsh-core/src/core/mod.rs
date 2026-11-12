@@ -5,6 +5,7 @@ mod follow;
 mod layout_scope;
 mod layout_tree;
 mod list;
+mod list_motion;
 mod measure;
 mod overlay;
 mod pace;
@@ -1167,6 +1168,8 @@ pub struct Core<M: TextEngine> {
     cull_scratch: Vec<(Key, f32, f32)>,
     /// Views out of sight spread over turns (`pace.rs`).
     pace: pace::Pace,
+    /// Lists' rows under this turn's layout animation (`list_motion.rs`).
+    list_motion: list_motion::ListMotion,
     /// The placeholders of `<Each>` rows ([`Op::Placeholder`]), with their
     /// ids (a key may be another node's by now).
     placeholders: Vec<(Key, NodeId)>,
@@ -1291,6 +1294,11 @@ pub struct Core<M: TextEngine> {
     /// The tree changed with `status_bar_nodes` in it: the commit checks
     /// which are in the tree.
     status_bars_moved: bool,
+    /// The pages with a `supportedOrientations` (their
+    /// [`crate::ModalConfig::PORTRAIT`] bits), in the order they got it.
+    orientation_pages: Vec<(Key, u8)>,
+    /// What [`Command::Orientations`] last said (0: the app's own).
+    orientations_shown: u8,
     /// Nodes whose classes say `pointer-events-none`: without any, moving
     /// nodes skips what CSS's inherited `pointer-events` needs.
     pointer_none_classes: u32,
@@ -1500,6 +1508,7 @@ impl<M: TextEngine> Core<M> {
             cull_made: false,
             cull_scratch: Vec::new(),
             pace: pace::Pace::default(),
+            list_motion: list_motion::ListMotion::default(),
             placeholders: Vec::new(),
             asked_rows: Vec::new(),
             placeholders_resized: false,
@@ -1551,6 +1560,8 @@ impl<M: TextEngine> Core<M> {
             keyboard_moved: false,
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
+            orientation_pages: Vec::new(),
+            orientations_shown: 0,
             pointer_none_classes: 0,
             pointer_pending: Vec::new(),
             focus: None,
@@ -3047,6 +3058,7 @@ impl<M: TextEngine> Core<M> {
         // in the batch; ops may already have queued some.
         self.sync_env();
         if let Some(animation) = self.layout_animation.take() {
+            self.note_list_motion(animation);
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
         self.flush_pointer_events();
@@ -3121,6 +3133,7 @@ impl<M: TextEngine> Core<M> {
             self.commands
                 .push((crate::ROOT_ID, Command::StatusBar(config)));
         }
+        self.sync_orientations();
         // Each window's attributes, once per commit.
         self.flush_windows();
         // The components' measurements, with this commit's layout as JS's.
@@ -5002,6 +5015,10 @@ impl<M: TextEngine> Core<M> {
             self.set_status_bar(key, setting);
             return Ok(());
         }
+        if let Prop::Screen(ScreenProp::Orientations(bits)) = prop {
+            self.set_page_orientations(key, bits);
+            return Ok(());
+        }
         if let Prop::ListViewport(mode) = prop {
             self.set_list_viewport(key, mode);
             return Ok(());
@@ -5680,7 +5697,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::PopOnBack(v) => c.prevent_back = !v,
                         ScreenProp::Animation(v) => c.animation = v,
                         // Taken by `set_prop`.
-                        ScreenProp::StatusBar(_) => {}
+                        ScreenProp::StatusBar(_) | ScreenProp::Orientations(_) => {}
                     }
                     // Header changes move the content.
                     root.laid_out = None;
@@ -6444,6 +6461,7 @@ impl<M: TextEngine> Core<M> {
             }
             self.status_bar_nodes.retain(|&k| k != key);
         }
+        self.orientation_pages.retain(|&(k, _)| k != key);
         // Children are released by their own ops (the whole subtree became
         // unreachable in JS); orphan them so they never point at a dead key.
         for &c in &node.children {
@@ -6463,6 +6481,55 @@ impl<M: TextEngine> Core<M> {
             self.mount.push(MountItem::Delete { id });
         }
         Ok(())
+    }
+
+    /// A page's `supportedOrientations` (0: none): changed in place, so it
+    /// keeps its place among the others.
+    fn set_page_orientations(&mut self, key: Key, bits: u8) {
+        match self.orientation_pages.iter_mut().find(|(k, _)| *k == key) {
+            Some(page) if bits != 0 => page.1 = bits,
+            Some(_) => self.orientation_pages.retain(|&(k, _)| k != key),
+            None if bits != 0 => self.orientation_pages.push((key, bits)),
+            None => {}
+        }
+    }
+
+    /// Sends the orientations of the page that decides them when they
+    /// changed (once per commit): the last to get its setting of those in
+    /// the tree and displayed, so a page kept in a tab that is not shown
+    /// (`display: none`) does not decide while another tab is. Pages with a
+    /// setting are few, and the walk is up their ancestors only.
+    fn sync_orientations(&mut self) {
+        if self.orientation_pages.is_empty() && self.orientations_shown == 0 {
+            return;
+        }
+        let bits = self
+            .orientation_pages
+            .iter()
+            .rev()
+            .find(|&&(key, _)| self.displayed_in_tree(key))
+            .map_or(0, |&(_, bits)| bits);
+        if bits != self.orientations_shown {
+            self.orientations_shown = bits;
+            self.commands
+                .push((crate::ROOT_ID, Command::Orientations(bits)));
+        }
+    }
+
+    /// Whether `key` is in the tree with no `display: none` on it or on any
+    /// view above it, across layout roots (a page under a hidden tab).
+    fn displayed_in_tree(&self, mut key: Key) -> bool {
+        while key != NO_KEY {
+            if key == self.root {
+                return true;
+            }
+            let node = &self.nodes[key as usize];
+            if node.layout.is_some_and(|l| self.layout.displays_none(l)) {
+                return false;
+            }
+            key = node.parent;
+        }
+        false
     }
 
     fn is_ancestor(&self, ancestor: Key, mut key: Key) -> bool {
@@ -9329,6 +9396,17 @@ impl<M: TextEngine> Core<M> {
         // rows out of the window, by frames rows measured since may have
         // passed ([`Core::set_left_behind`]).
         let (window_start, window_end) = list.render_window();
+        let motion = outer.is_none() && self.list_motion.active();
+        if motion {
+            let cells: Vec<Key> = list
+                .slots
+                .iter()
+                .map(|s| s.cell)
+                .chain(list.extras.iter().map(|e| e.cell))
+                .collect();
+            self.note_cell_starts(cells);
+        }
+        let list = self.nodes[key as usize].list.as_ref().expect("list");
         // In its parent's viewport, the cells start inside the list's
         // border and padding.
         let inset = outer.map_or((0.0, 0.0), |o| o.inset);
@@ -9379,6 +9457,11 @@ impl<M: TextEngine> Core<M> {
             };
             if frame != away {
                 self.set_frame(cell, away);
+                self.nodes[key as usize]
+                    .list
+                    .as_mut()
+                    .expect("list")
+                    .unplace(cell);
             }
         }
         let mut sticky_cells = Vec::new();
@@ -9429,6 +9512,7 @@ impl<M: TextEngine> Core<M> {
                 cross
             }
         };
+        let mut placed = list_motion::Placed::default();
         for &(index, cell) in &ready {
             let list = self.nodes[key as usize].list.as_ref().expect("list");
             let (at, row) = (list.item_at(index), list.row_extent(index));
@@ -9436,6 +9520,12 @@ impl<M: TextEngine> Core<M> {
             let Some(size) = place(self, cell, at, row, column) else {
                 continue;
             };
+            let list = self.nodes[key as usize].list.as_mut().expect("list");
+            if list.place(index) {
+                placed.new.push(cell);
+            } else {
+                placed.kept.push(cell);
+            }
             let list = self.nodes[key as usize].list.as_ref().expect("list");
             if sticky && list.sticky.binary_search(&index).is_ok() {
                 let range = list.sticky_range(index, self.nodes[cell as usize].id, size);
@@ -9451,8 +9541,8 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .zip([blocks.header, blocks.footer, blocks.body])
         {
-            if extra.cell != u32::MAX {
-                place(self, extra.cell, at, 0.0, full);
+            if extra.cell != u32::MAX && place(self, extra.cell, at, 0.0, full).is_some() {
+                placed.kept.push(extra.cell);
             }
         }
         self.cells_scratch = ready;
@@ -9548,6 +9638,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_scroll_content(key, content);
                 self.mount.extend(item);
             }
+        }
+        if motion {
+            self.move_list_cells(key, id, horizontal, anchor, placed);
         }
     }
 }

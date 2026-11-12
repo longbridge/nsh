@@ -1857,6 +1857,16 @@ pub enum ScreenProp {
     /// and dialogs share it.
     #[prop(js = "statusBar", on = SCREEN | MODAL)]
     StatusBar(Option<StatusBarSetting>),
+    /// `ios={{ supportedOrientations }}` / `android={{ supportedOrientations }}`:
+    /// the orientations the screen may take while the page is shown
+    /// (default: the app's). Of the pages in the tree and displayed (not
+    /// under `display: none`, as a tab not shown is), the most recently
+    /// shown one with a setting decides; the core sends the result as
+    /// [`Command::Orientations`].
+    ///
+    /// [`crate::ModalConfig::PORTRAIT`] bits.
+    #[prop(ios = "supportedOrientations", android = "supportedOrientations", with = crate::js::host_values::page_orientations, reset = ScreenProp::Orientations(0), ts = "(\"portrait\" | \"portrait-upside-down\" | \"landscape\" | \"landscape-left\" | \"landscape-right\")[]", on = SCREEN)]
+    Orientations(u8),
 }
 
 /// How a modal appears (`animation`).
@@ -2412,6 +2422,11 @@ pub enum Command {
     /// Play a haptic (on the root; `Haptics` of `nsh/mobile`,
     /// [`crate::element::haptic`]). Platforms without haptics ignore it.
     Haptic(Haptic),
+    /// The orientations the screen may take (on the root; the
+    /// `supportedOrientations` of the page shown, [`ScreenProp::Orientations`]):
+    /// [`crate::ModalConfig::PORTRAIT`] bits, 0 for the app's own. iOS and
+    /// Android; the other platforms ignore it.
+    Orientations(u8),
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),

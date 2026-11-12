@@ -811,7 +811,9 @@ LayoutAnimation.configureNext({
 });
 ```
 
-A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it. In a Rust component, animate only what one element's change moves with `ElementRef::animate_layout(transition)`: the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen). The update's other frames change at once. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content.
+A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it.
+
+In a `List`, the rows already shown slide to their new places and a row that comes in appears in its own, as UIKit's batch updates do: a chat's new message at the bottom of an `inverted` list pushes the messages above it up, while the list keeps its distance from the end. A new row that takes a recycled cell shows at its place at once. In a Rust component, animate only what one element's change moves with `ElementRef::animate_layout(transition)`: the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen). The update's other frames change at once. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content.
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};

@@ -811,7 +811,9 @@ LayoutAnimation.configureNext({
 });
 ```
 
-布局动画覆盖这次更新改变的所有帧，无论它们在屏幕上的什么位置：同一次更新中刷新的列表或到达的实时数据也会随之动画。在 Rust 组件中，用 `ElementRef::animate_layout(transition)` 只为一个元素的变化所移动的内容做动画：元素自己和其内容的帧，以及被它的尺寸推动的视图（它的兄弟视图，以及各级祖先的兄弟视图）的帧。这次更新的其他帧立即变化。`nsh/base` 的 `Collapsible` 和 `AccordionPanel` 就是这样展开内容的。
+布局动画覆盖这次更新改变的所有帧，无论它们在屏幕上的什么位置：同一次更新中刷新的列表或到达的实时数据也会随之动画。
+
+在 `List` 中，已经显示的行滑到新位置，新来的行出现在它自己的位置，和 UIKit 的批量更新一样：`inverted` 列表底部来了一条新消息，它上面的消息被推上去，列表同时保持与末尾的距离。使用回收单元格的新行直接显示在它的位置。在 Rust 组件中，用 `ElementRef::animate_layout(transition)` 只为一个元素的变化所移动的内容做动画：元素自己和其内容的帧，以及被它的尺寸推动的视图（它的兄弟视图，以及各级祖先的兄弟视图）的帧。这次更新的其他帧立即变化。`nsh/base` 的 `Collapsible` 和 `AccordionPanel` 就是这样展开内容的。
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};
