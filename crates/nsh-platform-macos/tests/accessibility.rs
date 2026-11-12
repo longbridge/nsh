@@ -92,7 +92,8 @@ mod macos {
             .child(confirm())
     }
 
-    /// A dialog named by its title, opened once the test asks.
+    /// A dialog named by its title and described by its message, opened
+    /// once the test asks.
     #[component]
     fn Confirm() -> impl IntoElement {
         let open = signal(false);
@@ -105,6 +106,7 @@ mod macos {
             nsh_base::dialog()
                 .test_id("rename")
                 .label("Rename file")
+                .accessibility_description("Other apps see the new name too.")
                 .child(
                     view()
                         .child(text("Rename file"))
@@ -481,6 +483,12 @@ mod macos {
                 .map(|s| s.to_string())
                 .as_deref(),
             Some("Rename file")
+        );
+        // Its description is its help, which VoiceOver reads after the
+        // name.
+        assert_eq!(
+            dialog.accessibilityHelp().map(|s| s.to_string()).as_deref(),
+            Some("Other apps see the new name too.")
         );
         assert_eq!(read(&dialog, "save"), (Some("Save".into()), None, 0));
 

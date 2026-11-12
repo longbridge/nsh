@@ -199,6 +199,12 @@ pub struct AppOptions {
     /// forward and tells the app (`Application.on("secondInstance", ...)`),
     /// and exits before it opens a window.
     pub single_instance: bool,
+    /// The file types the app opens (nsh.json `fileTypes`, from the
+    /// package's `nsh\app.json`): [`run_app`] registers them for the
+    /// current user (Open With) and hands the files it is started with to
+    /// the app (`Application.on("openFiles", ...)`), a later
+    /// launch with files handing them to the running instance.
+    pub file_types: Vec<nsh_core::file_type::FileType>,
 }
 
 impl Default for AppOptions {
@@ -221,6 +227,7 @@ impl Default for AppOptions {
             storage: None,
             schemes: Vec::new(),
             single_instance: false,
+            file_types: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
         }
@@ -634,6 +641,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         &options.app_id,
         &options.title,
         &options.schemes,
+        &options.file_types,
         options.single_instance,
     ) {
         return std::process::ExitCode::SUCCESS;

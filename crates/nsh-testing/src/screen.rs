@@ -123,6 +123,9 @@ pub struct Screen {
     clipboard_reads: Vec<(u32, bool)>,
     /// The `Image.getSize` / `Image.prefetch` requests to answer.
     image_infos: Vec<u32>,
+    /// The source each image view is loading, until a test fails it
+    /// ([`Screen::fail_images`]): headless runs load none.
+    loading_images: HashMap<NodeId, Arc<str>>,
     /// The picks asked (`Picker.pickImages`), in order, and how many were
     /// answered.
     picks: Vec<(u32, nsh_core::picker::Pick)>,
@@ -215,6 +218,12 @@ struct View {
     accessibility_state: AccessibilityState,
     /// Its `accessibilityLevel`.
     level: Option<u32>,
+    /// Its `accessibilityDescription`.
+    description: Option<Arc<str>>,
+    /// The view its `accessibilityActiveDescendant` names.
+    active_descendant: Option<NodeId>,
+    /// The view its `accessibilityControls` names.
+    controls: Option<NodeId>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -384,6 +393,9 @@ pub(crate) struct Input {
     /// The edits reported so far ([`nsh_core::EventPayload::Text`]).
     pub(crate) count: u32,
     pub(crate) config: Box<InputConfig>,
+    /// What an input method composes in it (`app.compose`), at the end of
+    /// its text: marked, not in `text` until it commits.
+    pub(crate) composition: Option<String>,
     /// Where its text goes in the view (inside padding and border); the
     /// whole view until the core says.
     pub(crate) content: Option<Bounds<Points>>,
@@ -455,10 +467,19 @@ impl Screen {
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
+                self.loading_images.remove(id);
                 if self.focused == Some(*id) {
                     self.focused = None;
                 }
             }
+            MountItem::Image { id, source, .. } => match source {
+                Some(source) => {
+                    self.loading_images.insert(*id, source.uri.clone());
+                }
+                None => {
+                    self.loading_images.remove(id);
+                }
+            },
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
             }
@@ -492,6 +513,9 @@ impl Screen {
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
+                view.description = props.accessibility.description.clone();
+                view.active_descendant = props.accessibility.active_descendant;
+                view.controls = props.accessibility.controls;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -1195,6 +1219,31 @@ impl Screen {
         presented
     }
 
+    /// The modals presented since the last [`Screen::take_presented`],
+    /// which it leaves for that call.
+    pub(crate) fn presenting(&self) -> Vec<NodeId> {
+        let mut presented = self.presented.clone();
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether view `id` is still in the tree: attached up to the root,
+    /// with nothing on the way a back closed natively.
+    pub(crate) fn in_tree(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Whether `id` is the root of a window of the app's own.
     pub(crate) fn is_window(&self, id: NodeId) -> bool {
         self.windows.iter().any(|(root, _)| *root == id)
@@ -1304,6 +1353,21 @@ impl Screen {
     /// last call.
     pub(crate) fn take_image_infos(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.image_infos)
+    }
+
+    /// Ends the loads of the images whose source `fails` picks, as failed:
+    /// the views and their sources, in no particular order. A view's next
+    /// source loads again.
+    pub(crate) fn fail_images(&mut self, fails: impl Fn(&str) -> bool) -> Vec<(NodeId, Arc<str>)> {
+        let mut failed = Vec::new();
+        self.loading_images.retain(|id, uri| {
+            let fail = fails(uri);
+            if fail {
+                failed.push((*id, uri.clone()));
+            }
+            !fail
+        });
+        failed
     }
 
     /// The URLs the app had the system open (`openUrl`, a `TextView`'s
@@ -1547,6 +1611,50 @@ impl Screen {
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
+    }
+
+    /// The description of the view `selector` names (its
+    /// `accessibilityDescription`: a dialog's message), which screen
+    /// readers read after its name; an error when none or several match.
+    pub fn accessibility_description(&self, selector: &str) -> Result<Option<String>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .and_then(|v| v.description.as_deref().map(str::to_owned))),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The id of the one view `selector` names: what
+    /// [`Screen::active_descendant`] and [`Screen::accessibility_controls`]
+    /// give; an error when none or several match.
+    pub fn id(&self, selector: &str) -> Result<NodeId, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(id),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The view the view `selector` names has as its active descendant
+    /// (its `accessibilityActiveDescendant`: a combo box's highlighted
+    /// option), by its id ([`Screen::id`]); an error when none or several
+    /// match.
+    pub fn active_descendant(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.active_descendant))
+    }
+
+    /// The view whose content the view `selector` names controls (its
+    /// `accessibilityControls`: a combo box's listbox), by its id
+    /// ([`Screen::id`]); an error when none or several match.
+    pub fn accessibility_controls(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.controls))
     }
 
     /// The views on screen `selector` matches, in the order a user's eyes
@@ -2198,6 +2306,23 @@ impl Screen {
         self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
     }
 
+    /// The views that hear a mouse button released on `id`: it and every
+    /// view around it listening to `onMouseUp`, inside out, as the
+    /// platforms walk them.
+    pub(crate) fn mouse_up_targets(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut targets = Vec::new();
+        while let Some(view) = self.nodes.get(&id) {
+            if view.events.contains(EventKind::MouseUp) {
+                targets.push(id);
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        targets
+    }
+
     /// The app's keyboard shortcuts (`nsh/keymap`).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn keymap(&self) -> Option<&nsh_core::keymap::Keymap> {
@@ -2339,6 +2464,22 @@ impl Screen {
             props.focus_stop(v.events.contains(EventKind::Press)) && !self.disabled_from(id, None)
         })
         .collect()
+    }
+
+    /// The newest modal shown over `window` (the root of a window of the
+    /// app's own, else the main window's): the desktops and the web keep
+    /// Tab inside it, its views the only stops while it is shown.
+    pub(crate) fn focus_scope(&self, window: NodeId) -> Option<NodeId> {
+        self.shown().into_iter().rev().find(|&id| {
+            self.kind(id) == Some(ViewKind::Modal)
+                && !self.is_window(id)
+                && self.window_of(id) == window
+        })
+    }
+
+    /// Whether view `id` is `scope` or inside it.
+    pub(crate) fn within(&self, id: NodeId, scope: NodeId) -> bool {
+        id == scope || self.is_inside(id, scope)
     }
 
     /// The stop a press on `id` gives the focus to in a terminal: `id` or

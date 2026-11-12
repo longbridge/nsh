@@ -246,7 +246,8 @@ pub enum CloseRequest {
 ///   focus into it (and through its text fields), and on out of it after
 ///   the last one. A press on it focuses it.
 /// - [`AppView::set_theme`] / [`AppView::set_theme_json`] give the app the
-///   embedding app's theme (gpui-kit's theme format) and
+///   embedding app's theme (gpui-kit's theme format),
+///   [`AppView::set_theme_overrides`] only the tokens it names, and
 ///   [`AppView::set_appearance`] its light or dark mode.
 /// - What the app tells the embedding app goes through the native
 ///   components the latter registers ([`AppView::register_component`]):
@@ -491,9 +492,8 @@ impl AppView {
     /// at once to what runs and to every app loaded later, from its first
     /// frame on.
     pub fn set_theme(&self, theme: Option<Theme>, cx: &mut GpuiApp) {
-        *self.surface.host_theme.borrow_mut() = theme.clone();
-        self.surface
-            .control(|c| c.set_tokens(theme.map(Theme::into_tokens)));
+        *self.surface.host_theme.borrow_mut() = theme;
+        self.surface.host_tokens_changed();
         self.surface.invalidate();
         crate::rt::flush(cx);
     }
@@ -504,6 +504,28 @@ impl AppView {
     pub fn set_theme_json(&self, json: &str, cx: &mut GpuiApp) -> Result<(), ThemeError> {
         let theme = Theme::from_json(json)?;
         self.set_theme(Some(theme), cx);
+        Ok(())
+    }
+
+    /// The embedding app's theme overrides: a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them, as `nsh.json`'s `"theme"`), whose tokens
+    /// win over the app's of the same names, light and dark, while the
+    /// app's others stay (a brand's `primary` and `radius`). Classes naming
+    /// them (`bg-primary`) are resolved again at once, and every app loaded
+    /// later starts with them. With a theme of the embedding app's
+    /// ([`AppView::set_theme`]) they win over that one's tokens instead;
+    /// each stays when the other changes. `None` gives the app its own
+    /// theme back. Fails, changing nothing, on a file that does not parse.
+    pub fn set_theme_overrides(
+        &self,
+        json: Option<&str>,
+        cx: &mut GpuiApp,
+    ) -> Result<(), ThemeError> {
+        let tokens = json.map(nsh_base::theme_overrides).transpose()?;
+        *self.surface.host_overrides.borrow_mut() = tokens;
+        self.surface.host_tokens_changed();
+        crate::rt::flush(cx);
         Ok(())
     }
 

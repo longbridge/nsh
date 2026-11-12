@@ -162,7 +162,7 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - Asset names: `asset:/<path>` is a file's path in the app's directory, the bundle's asset root
   (`nsh_bundler::Bundle::asset_root`, `HotBundle::asset_root`; `bundle.rs` `app_dir`: the entry's directory when it
   holds an `nsh.json` or an `App.tsx`, else the nearest one up with an `nsh.json`, else the nearest one up with an
-  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<file>.run.js` name
+  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<path>.run.js` name
   `assets/dot.png` as `App.tsx` does. An import from outside it fails the build (`NshPlugin::ship`), as a package holds
   only the app's directory; so does a file that is inside by name but links out (checked on its real path), a
   pixel-density variant found beside an image too, while a link to elsewhere in the app keeps the name it has
@@ -365,9 +365,13 @@ report it:
   (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
   hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
-  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
+  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around; only the newest
+  dialog's while one is shown over the focus' window, `Screen::focus_scope`, as the platforms keep Tab inside it; on the
+  desktops and the web a dialog presented takes the focus off the view under it and gives it back when it goes,
+  `Headless::modals_closed`), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
-  presses (a press of the pointer takes it off), and on the web Shift+F10 raises `ContextMenu` with no pointer on
+  presses (a press of the pointer takes it off; on such a view they reach only the focus' own bindings in the keymap
+  above, `Keymap::find_at`, and the application menu not at all), and on the web Shift+F10 raises `ContextMenu` with no pointer on
   the nearest view around it that listens (`pointerType: null`, at its bottom-start corner); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
@@ -437,7 +441,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   its own thread: timers on the app's clock, woken by its alarms (`Clock::at`), `console` to the `js` log, no imports), `Environment::host` set, and the
   driver hands the root's `Command::HostCall`s to it as their batches are applied (`Headless::on_host_call`); it
   answers each with a `Host` `{ type: "reply" }` event as `nsh.js` `hostCall` does (`ok: false` with the message on a throw, a rejection or
-  a value that is not JSON), and `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
+  a value that is not JSON); the root's `Command::HostPost`s go to its `post`, or its `call` without one, as `nsh.js`
+  `hostPost` does (`Headless::on_host_post`, the result and failures dropped); `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
   `page_host::Target` until `attach`, so the app's top-level `host.on` hears it, and the host goes with the app
   (its thread ends when the driver drops its calls). A module that does not load, exports no `createHost` or whose
   `createHost` returns no `call` fails the `open`. A call's timeout (`runtime/host.rs`) is the core's timer, on the
@@ -488,9 +493,11 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
 `nsh_testing::run_file` runs one test file (`run.rs`):
 
 - It writes an entry for the file in `<app>/.nsh/test/` that imports it and then calls `run` of the internal set
-  `nsh/test/runner`, and builds it through `TestRun::compile` (`Entry::TestFile`: the app's sets plus
-  `nsh_testing::test_sets()`). The file's source map gets its sources relative to the current directory, so failures
-  name `App.test.tsx:12:5`.
+  `nsh/test/runner`, at the file's path in the app (`src/core/typing.test.ts` → `src/core/typing.test.ts.run.js`;
+  in a `TestRun::work_dir` outside the app, below the nearest directory holding both, or one named by a hash of the
+  file's directory: `run.rs` `entry_path`), so parallel runs of same-named files never share one; it builds it
+  through `TestRun::compile` (`Entry::TestFile`: the app's sets plus `nsh_testing::test_sets()`). The file's source
+  map gets its sources relative to the current directory, so failures name `App.test.tsx:12:5`.
 - The test file runs on an engine of its own (the VM). As it loads, `test`, `describe`, the hooks and the variants
   (`test.skip` / `only` / `todo`, `describe.skip` / `only`: modules named `test` and `describe`, whose functions are
   the functions' properties, `docs/dev/components.md`) declare a tree of `Suite`s in a thread-local of the VM's
@@ -1101,34 +1108,18 @@ How users get it (`website/docs/installation.md`):
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.
 - mise: its `github:` backend picks the archive by OS and architecture, strips `nsh/` and finds `bin/`.
 
-### Self-hosted runners
+### Runners
 
-The release (its builds, its `Plan`, `Release` and `Nightly` jobs, the crates' publication, the Homebrew formula's
-update) and the Website workflow's build and deployment of the published site run on the organization's self-hosted
-runners, the machines longbridge-pro releases on: `[self-hosted, macOS, ARM64]`, `[self-hosted, Linux, Packager]`
-and `[self-hosted, Windows]`. Their runner groups allow this public repository. They take no pull request: a pull
-request's code is anyone's, so pull requests and merge-queue runs build on GitHub's runners, and only maintainers'
-events (tags, the schedule, manual runs, pushes to `main`, the release's completion) reach these machines.
+Every workflow runs on GitHub's runners: the checks, the release (its builds, its `Plan`, `Release` and `Nightly`
+jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's build and deployment of the
+published site. This repository is public, so its jobs run on GitHub's fresh runners, never on machines shared with
+other projects.
 
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed
-them. The scheduled runs are on GitHub's runners, so it saves the dependencies' caches the pull requests restore. TUI's
+them. The scheduled runs save the dependencies' caches the pull requests restore. TUI's
 macOS check runs only in the scheduled runs. So do Rust application's tests in Chrome; the Website workflow builds the site on pull
 requests only when `website/`, the skills, the tasks examples or `nsh-platform-web` change.
-
-`.github/actions/cargo` installs huacnlee/cargo into the runner's tool cache rather than over the machine's
-`~/.cargo/bin/cargo`, and restores no cache there: the fork's build directory stays on the machine, so a run rebuilds
-only what changed. What the workflows install on GitHub's runners is installed on these machines beforehand:
-
-- every one: rustup, `git`, `curl`, `gh`, `jq`, `zip`;
-- macOS: Xcode (the iOS SDKs) and its command line tools;
-- Linux: Ubuntu 24.04 (the Linux runtime's glibc and GTK), the packages of `release.yml`'s "Install clang, GTK 4
-  and GPUI's libraries" step, `envsubst`, Java 17 and an Android SDK with an NDK (`ANDROID_HOME`), Node.js,
-  Python 3 with `venv`, and Playwright's system libraries for Chromium, Firefox and WebKit
-  (`playwright install-deps`), and what the CI workflows' `apt-get` steps install (`xvfb`, `xauth`,
-  `dbus`, `at-spi2-core`, `libxtst6`, GStreamer's good plug-ins, `libvulkan1`, `libasound2-dev`, `libssl-dev`);
-- Windows: the MSVC Build Tools, the Windows SDK, LLVM in `C:\Program Files\LLVM` and Git for Windows, whose
-  `bash` is the first on `PATH`.
 
 ### Homebrew publishing setup and recovery
 

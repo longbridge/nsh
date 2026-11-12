@@ -9,6 +9,7 @@ mod measure;
 mod overlay;
 mod pace;
 mod parent_viewport;
+mod relations;
 mod renders;
 mod resize_anchor;
 mod scrollbars;
@@ -426,6 +427,12 @@ struct InputState {
     value_set: bool,
     /// Edits reported by the platform.
     count: u32,
+    /// What the input shows while an input method composes in it: its
+    /// value with the composition at the caret, as the platform reports
+    /// it ([`Core::input_composing`]). Measured in place of the value, so
+    /// a composition that wraps a line grows the input as the text it
+    /// commits will; the value and `onChangeText` stay as they are.
+    composing: Option<String>,
     /// Everything but the text style, which comes from the node's style.
     config: InputConfig,
     /// Last content box sent to the platform.
@@ -699,6 +706,9 @@ struct Node {
     /// What the overlays have it listen to ([`overlay::watch`]): touches
     /// for an overlay's `onPressOutside`, the pointer for a hint's.
     overlay_watched: u8,
+    /// Whether a child of it was ever stacked apart (`zIndex`, sticky, a
+    /// bar): its native children are placed by rank, not just in order.
+    ranked_children: bool,
 }
 
 impl Node {
@@ -935,6 +945,7 @@ impl Node {
             overflow: None,
             attached: Vec::new(),
             overlay_watched: 0,
+            ranked_children: false,
             elevation: Points::ZERO,
             backdrop_material: crate::BackdropMaterial::default(),
             macos_backdrop: None,
@@ -1186,6 +1197,9 @@ pub struct Core<M: TextEngine> {
     sticky_changed: bool,
     /// Views whose frame follows an element's ([`Core::place_followers`]).
     followers: Vec<Key>,
+    /// Views naming other elements for assistive technologies
+    /// ([`Core::sync_relations`]).
+    relators: Vec<relations::Relator>,
     /// What they follow, or frames around them, changed since they were
     /// placed.
     follow_changed: bool,
@@ -1310,6 +1324,11 @@ pub struct Core<M: TextEngine> {
     /// The focus shows (`focus-visible:`), decided when it was reported
     /// (`classes::focus_shows`) and again when a key is typed.
     focus_visible: bool,
+    /// The keyboard moved the focus, decided when it was reported
+    /// (`classes::keyboard_moves_focus`) and kept until it moves again,
+    /// whatever is typed meanwhile: only such a focus shows the hint of
+    /// the anchor it comes to (`overlay::focus_hints`).
+    focus_by_keyboard: bool,
     /// The view in the `FOCUS_VISIBLE` state, by key and id
     /// (`classes::update_focus_visible`).
     focus_visible_on: Option<(Key, NodeId)>,
@@ -1490,6 +1509,7 @@ impl<M: TextEngine> Core<M> {
             decorated: Vec::new(),
             sticky_changed: false,
             followers: Vec::new(),
+            relators: Vec::new(),
             follow_changed: false,
             sticky_warned: false,
             inset_warned: false,
@@ -1537,6 +1557,7 @@ impl<M: TextEngine> Core<M> {
             focus_within_changed: false,
             modality: None,
             focus_visible: false,
+            focus_by_keyboard: false,
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
@@ -2288,6 +2309,23 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// An input method composes in input `id`: `shown` is what the input
+    /// shows meanwhile (its text with the composition at the caret), `None`
+    /// once the composition ends. The input is measured with it, so it
+    /// grows as the composition wraps; its value and edit count stay as
+    /// they are (the platform reports the committed text as an edit).
+    pub fn input_composing(&mut self, id: NodeId, shown: Option<&str>) {
+        let Ok(key) = self.key(id) else { return };
+        let Some(input) = self.nodes[key as usize].input.as_mut() else {
+            return;
+        };
+        if input.composing.as_deref() == shown {
+            return;
+        }
+        input.composing = shown.map(str::to_owned);
+        self.measure_input(key);
+    }
+
     /// Applies one op from JS.
     pub fn apply(&mut self, op: Op) -> Result<(), ApplyError> {
         let _entered = self.components.runtime.enter();
@@ -2859,6 +2897,7 @@ impl<M: TextEngine> Core<M> {
             self.run_answers();
         }
         self.pace_commit();
+        self.sync_quit_requests();
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -2883,6 +2922,10 @@ impl<M: TextEngine> Core<M> {
         }
         if !self.outer_asked.is_empty() {
             self.send_outer_scrolls();
+        }
+        // What mounted in the rounds listens already.
+        if self.sync_quit_requests() {
+            self.commit_round();
         }
         self.split_scoped_frames();
         self.mark_shader_inputs();
@@ -2980,6 +3023,8 @@ impl<M: TextEngine> Core<M> {
                 self.focus_hints();
             }
         } else if visible_moved {
+            // A key typed with the focus where it is shows its ring, and no
+            // hint: a hint shows only for a focus the keyboard moved.
             self.update_focus_visible();
         }
         self.sync_colors();
@@ -3000,6 +3045,9 @@ impl<M: TextEngine> Core<M> {
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
         self.flush_pointer_events();
+        if !self.relators.is_empty() {
+            self.sync_relations();
+        }
         self.flush_dirty();
         let relayout = self.needs_layout;
         if relayout {
@@ -3246,6 +3294,14 @@ impl<M: TextEngine> Core<M> {
                     let error = crate::host_channel::not_granted(name);
                     self.deny(error.message().to_owned());
                     self.answer_host(*call, Err(error));
+                    continue;
+                }
+                Command::HostPost { name, .. }
+                    if crate::host_channel::check_call(&self.access, name).is_err() =>
+                {
+                    let error = crate::host_channel::check_call(&self.access, name)
+                        .expect_err("a refused name");
+                    self.deny(error.message().to_owned());
                     continue;
                 }
                 Command::SendInput(_) if !self.access.allows_web_input() => {
@@ -3704,20 +3760,22 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
-    /// Rebuilds the text an input is measured with: its value, else its
-    /// placeholder, else an empty line.
+    /// Rebuilds the text an input is measured with: what it shows while an
+    /// input method composes, else its value, else its placeholder, else an
+    /// empty line.
     fn measure_input(&mut self, key: Key) {
         let node = &self.nodes[key as usize];
         let (Some(input), Some(layout)) = (&node.input, node.layout) else {
             return;
         };
-        let placeholder = input.value.is_empty() && !input.config.placeholder.is_empty();
+        let shown = input.composing.as_deref().unwrap_or(&input.value);
+        let placeholder = shown.is_empty() && !input.config.placeholder.is_empty();
         let text = self.input_text(
             key,
             if placeholder {
                 &input.config.placeholder
             } else {
-                &input.value
+                shown
             },
         );
         let field = self.input_text(key, FIELD_SAMPLE);
@@ -4907,6 +4965,14 @@ impl<M: TextEngine> Core<M> {
                 self.set_follow_transition(key, transition);
                 return Ok(());
             }
+            Prop::Accessibility(AccessibilityProp::ActiveDescendant(target)) => {
+                self.set_relation(key, relations::Relation::ActiveDescendant, target);
+                return Ok(());
+            }
+            Prop::Accessibility(AccessibilityProp::Controls(target)) => {
+                self.set_relation(key, relations::Relation::Controls, target);
+                return Ok(());
+            }
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
@@ -5539,6 +5605,7 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::Accessible(v) => a.accessible = v,
                     AccessibilityProp::Label(v) => a.label = v,
                     AccessibilityProp::Hint(v) => a.hint = v,
+                    AccessibilityProp::Description(v) => a.description = v,
                     AccessibilityProp::Role(v) => a.role = v,
                     AccessibilityProp::State(v) => a.state = v,
                     AccessibilityProp::Value(v) => a.value = v,
@@ -5550,6 +5617,8 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::LiveRegion(v) => a.live_region = v,
                     AccessibilityProp::Actions(v) => a.actions = v,
                     AccessibilityProp::Level(v) => a.level = v,
+                    // Set as relations, above.
+                    AccessibilityProp::ActiveDescendant(_) | AccessibilityProp::Controls(_) => {}
                 }
                 let states = classes::accessibility_states(&a.state);
                 let states_changed = states != classes::accessibility_states(&before.state);
@@ -6009,6 +6078,7 @@ impl<M: TextEngine> Core<M> {
         }
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
+        self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
         if self.nodes[child as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
@@ -6076,7 +6146,7 @@ impl<M: TextEngine> Core<M> {
             if self.nodes[parent as usize].list.is_none()
                 && !self.nodes[child as usize].is_layout_root()
             {
-                let index = self.render_index(parent, pos);
+                let index = self.render_index_at(parent, pos);
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
@@ -6106,7 +6176,7 @@ impl<M: TextEngine> Core<M> {
                     Some(list) if list.parent && !list.sent_sticky.is_empty() => {
                         self.below_sticky(parent, child)
                     }
-                    _ => self.native_before(parent, child),
+                    _ => self.native_before_at(parent, child, pos),
                 };
                 // By the nodes' own ids (the ops may name an alias).
                 self.mount.push(MountItem::Insert {
@@ -6312,6 +6382,9 @@ impl<M: TextEngine> Core<M> {
         if node.follow.is_some() {
             self.release_follower(key);
         }
+        if !self.relators.is_empty() {
+            self.release_relator(key);
+        }
         if let Some(scroll) = node.scroll.as_ref() {
             if !scroll.dependents.is_empty() {
                 self.outer_released(&scroll.dependents);
@@ -6376,9 +6449,29 @@ impl<M: TextEngine> Core<M> {
     /// The native sibling `child` goes below: native views are stacked by
     /// `zIndex`, then in tree order.
     fn native_before(&self, parent: Key, child: Key) -> Option<NodeId> {
+        let pos = self.nodes[parent as usize]
+            .children
+            .iter()
+            .position(|&c| c == child)?;
+        self.native_before_at(parent, child, pos)
+    }
+
+    /// [`Self::native_before`] for `child` at `pos` among its siblings.
+    /// When none of them was ever stacked apart, the next made sibling.
+    fn native_before_at(&self, parent: Key, child: Key, pos: usize) -> Option<NodeId> {
         let children = &self.nodes[parent as usize].children;
         let z = self.nodes[child as usize].stack_rank();
-        let pos = children.iter().position(|&c| c == child)?;
+        if !self.nodes[parent as usize].ranked_children && z == (0, false) {
+            let next = children[pos + 1..].iter().find_map(|&c| {
+                let n = &self.nodes[c as usize];
+                (n.created && n.layout.is_some() && !n.is_overlay()).then_some(n.id)
+            });
+            return match next {
+                Some(id) => Some(id),
+                None if !self.overlays.is_empty() => self.first_overlay_in(parent),
+                None => None,
+            };
+        }
         let mut best: Option<((i32, bool), usize, NodeId)> = None;
         for (i, &c) in children.iter().enumerate() {
             let n = &self.nodes[c as usize];
@@ -6401,8 +6494,19 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Notes on `key`'s parent that `key` is stacked apart from the
+    /// others, when it is ([`Node::ranked_children`]).
+    fn rank_noted(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        let parent = node.parent;
+        if parent != NO_KEY && node.stack_rank() != (0, false) {
+            self.nodes[parent as usize].ranked_children = true;
+        }
+    }
+
     /// `key`'s `zIndex` changed: moves its native view among its siblings.
     fn restack(&mut self, key: Key) {
+        self.rank_noted(key);
         let node = &self.nodes[key as usize];
         let (parent, id) = (node.parent, node.id);
         if parent == NO_KEY
@@ -6439,6 +6543,20 @@ impl<M: TextEngine> Core<M> {
 
     /// Index among rendering (layout-backed) children of `parent` for a
     /// child at `pos` in the full children list.
+    /// [`Self::render_index`], at once for the last child: after all the
+    /// rendering children its parent's layout node has.
+    fn render_index_at(&self, parent: Key, pos: usize) -> u32 {
+        let node = &self.nodes[parent as usize];
+        if pos + 1 == node.children.len()
+            && let Some(layout) = node.layout
+        {
+            let index = self.layout.children_len(layout) as u32;
+            debug_assert_eq!(index, self.render_index(parent, pos));
+            return index;
+        }
+        self.render_index(parent, pos)
+    }
+
     fn render_index(&self, parent: Key, pos: usize) -> u32 {
         self.nodes[parent as usize].children[..pos]
             .iter()
@@ -8737,16 +8855,32 @@ impl<M: TextEngine> Core<M> {
                     )?;
                     Some(i + at)
                 });
-            if let Some(j) = queued {
+            // A shrink after a scroll must keep the earlier extent until
+            // that scroll has applied. Growth can replace the extent once.
+            let shrunk = old.is_some_and(|old| {
+                if scroll.horizontal {
+                    size.width < old.width
+                } else {
+                    size.height < old.height
+                }
+            });
+            let keep_earlier = shrunk
+                && queued.is_some_and(|j| {
+                    self.mount[j + 1..].iter().any(|item| match item {
+                        MountItem::ScrollBy { id: scrolled, .. } => *scrolled == id,
+                        MountItem::Command {
+                            id: scrolled,
+                            command: Command::ScrollTo { .. },
+                        } => *scrolled == id,
+                        _ => false,
+                    })
+                });
+            if let Some(j) = queued
+                && !keep_earlier
+            {
                 self.mount[j] = MountItem::ScrollContent { id, size };
             }
-            // A scroll queued after it must still come before the new size.
-            let scrolled_since = queued.is_some_and(|j| {
-                self.mount[j + 1..]
-                    .iter()
-                    .any(|m| matches!(m, MountItem::ScrollBy { id: s, .. } if *s == id))
-            });
-            if queued.is_none() || scrolled_since {
+            if queued.is_none() || keep_earlier {
                 scroll.content_item = Some((batch, self.mount.len()));
                 self.mount.push(MountItem::ScrollContent { id, size });
             }
@@ -10222,7 +10356,8 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::Audio { .. }
                 | C::Notification { .. }
                 | C::Desktop { .. }
-                | C::HostCall { .. } => Shown::Nothing,
+                | C::HostCall { .. }
+                | C::HostPost { .. } => Shown::Nothing,
                 // The design tokens: every view's colors.
                 C::Tokens { .. } => Shown::Everywhere,
                 _ => Shown::View(*id),

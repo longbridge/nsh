@@ -242,6 +242,7 @@ noprop id:plain supportedOrientations
 # A dialog for screen readers, with no name of its own.
 prop id:plain role dialog
 noprop id:plain accessibilityLabel
+noprop id:plain accessibilityDescription
 # Closed while `open` is false.
 absent Synced dialog
 absent Guarded dialog
@@ -291,9 +292,10 @@ expect Guarded dialog
 prop id:guarded closeOnEscape false
 prop id:guarded closeOnBackdropPress false
 prop id:guarded closeOnSwipe false
-# An alert dialog named by its label.
+# An alert dialog named by its label and described by its message.
 prop id:guarded role alertdialog
 prop id:guarded accessibilityLabel Guarded
+prop id:guarded accessibilityDescription Only the app closes it.
 event text:"Guarded dialog" onCancel reason=cancel
 expect Log: guarded cancel
 event text:"Guarded dialog" onCancel reason=swipe
@@ -320,6 +322,7 @@ covers [props] ios.supportedOrientations
 covers [props] Dialog.open
 covers [props] role
 covers [props] accessibilityLabel
+covers [props] accessibilityDescription
 covers [events] Dialog.onOpen
 covers [events] Dialog.onClose
 covers [events] Dialog.onCancel
@@ -1091,13 +1094,14 @@ covers [props] role
 covers [events] onChange
 # base-radio
 tap id:case-base-radio
-# The group is a radio group for screen readers; each radio is a radio
-# of its own, checked and selected while checked: `checkedStyle`, and
+# The group is a radio group for screen readers, named by the app; each
+# radio is a radio of its own, checked and selected while checked: `checkedStyle`, and
 # `group-checked:` of the app's dot (30 wide, a margin of 8) puts the
 # label at 38.
 expect Plan: basic
 expect Changes: 0
 prop id:plans role radiogroup
+prop id:plans accessibilityLabel Plan
 prop id:basic role radio
 prop id:basic accessibilityState selected=true checked=true
 style id:basic backgroundColor #00ff00ff
@@ -3569,6 +3573,7 @@ expect token primary #171717ff
 expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
+style id:faded color #138a5a80
 covers [nsh] token
 
 # base-set-theme
@@ -3609,6 +3614,10 @@ expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
 tap id:bad-length
 expect theme result bad-length refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-suffix
+expect theme result bad-suffix refused TypeError
 expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
 tap id:built
@@ -4325,6 +4334,7 @@ expect Configure: false true unknown
 expect Extension: bold mark 100 true
 expect Extend: 200 underline true
 expect Define: HEY extension xHI
+expect Suggest: true true
 expect Named: text threw
 expect Editable: false
 expect Both: threw
@@ -4374,6 +4384,11 @@ expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
 expect CellA
 expect CellD
+# An editor without a height is as tall as its two lines; one with a
+# `maxHeight` stops there.
+expect AutoTwo
+frame id:rich-auto 20 329 370 34
+frame id:rich-capped 20 367 370 40
 # base-transition-shader
 tap id:case-base-transition-shader
 # Pages and a dialog with a `transitionShader` come and go as without one:

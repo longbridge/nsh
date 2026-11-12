@@ -33,8 +33,9 @@
 //! elements.
 //!
 //! Each element gets a role ([`role_for`]), its name (AccessKit reads a
-//! `Label`'s name from its value), its `accessibilityHint` (and a value text
-//! that is not a range's) as description, its `testID` as author id (UIA's
+//! `Label`'s name from its value), its `accessibilityDescription` and
+//! `accessibilityHint` (and a value text that is not a range's) as
+//! description, its `testID` as author id (UIA's
 //! `AutomationId`, `AXIdentifier`, AT-SPI's accessible id), its states
 //! (disabled, selected, checked as toggled, expanded, busy), a range's
 //! numeric value, a field's value ([`crate::text_input::accessible_value`]),
@@ -386,18 +387,15 @@ fn content_name(view: &NshView, out: &mut String) {
     });
 }
 
-/// The description: a value that is not a range's, and the hint.
+/// The description: a value that is not a range's, the description and
+/// the hint.
 pub(crate) fn help_of(a: &Accessibility, role: Role) -> Option<String> {
     let value_text = a
         .value
         .as_ref()
         .and_then(|v| v.text.as_deref())
         .filter(|_| !is_range(role));
-    match (value_text, a.hint.as_deref()) {
-        (Some(v), Some(h)) => Some(format!("{v}. {h}")),
-        (Some(t), None) | (None, Some(t)) => Some(t.to_owned()),
-        (None, None) => None,
-    }
+    a.help_text(value_text)
 }
 
 /// A range's minimum, maximum and current value, or `None` when the
@@ -1839,6 +1837,15 @@ mod tests {
         assert_eq!(
             help_of(&button, Role::Button).as_deref(),
             Some("3 of 10. Plays")
+        );
+        // The app's description goes between the value and the hint.
+        let described = Accessibility {
+            description: Some("The whole album".into()),
+            ..button.clone()
+        };
+        assert_eq!(
+            help_of(&described, Role::Button).as_deref(),
+            Some("3 of 10. The whole album. Plays")
         );
         let progress = Accessibility {
             value: Some(AccessibilityValue {
