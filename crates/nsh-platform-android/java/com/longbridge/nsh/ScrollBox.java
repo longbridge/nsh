@@ -77,7 +77,9 @@ final class ScrollBox extends FrameLayout implements Node {
     private boolean flung, momentum;
     /** This touch only dismisses the keyboard (`keyboardShouldPersistTaps`); -1: it does not. */
     private int tapMode = -1;
-    private boolean swallowing;
+    /** Where this touch went down, and whether it moved past the slop since (a drag at an edge scrolls nothing). */
+    private float tapX, tapY;
+    private boolean tapMoved;
     /**
      * Frames the platform scroll view drew. It draws again each frame while
      * its overscroll effect (Android 12's stretch) relaxes, which moves no
@@ -162,7 +164,7 @@ final class ScrollBox extends FrameLayout implements Node {
             // sizes. Report only after restoring the logical offset.
             if (rescaling) return;
             if (stickyCells.length > 0) pinSticky();
-            if (touching && !dragging && !swallowing) {
+            if (touching && !dragging) {
                 dragging = true;
                 // The scroll view takes the touches from JS responders.
                 mounter.cancelTouches();
@@ -170,8 +172,6 @@ final class ScrollBox extends FrameLayout implements Node {
                 if (momentum) emit(Native.MOMENTUM_END);
                 momentum = false;
                 emit(Native.SCROLL_DRAG_START);
-            } else if (swallowing) {
-                dragging = true;
             }
             float d = mounter.density;
             mounter.scroll(id, x / d, y / d, applied);
@@ -1095,33 +1095,31 @@ final class ScrollBox extends FrameLayout implements Node {
             owedX = owedY = 0;
             dragging = false;
             tapMode = tapMode(e);
-            // "never": the tap reaches nothing but the scroll view.
-            swallowing = tapMode == 0;
+            // "never": the touch goes on as usual, only its tap presses nothing (Mounter.press).
+            if (tapMode == 0) mounter.startTapOnly();
+            tapX = e.getX();
+            tapY = e.getY();
+            tapMoved = false;
+        }
+        if (action == MotionEvent.ACTION_MOVE && tapMode >= 0 && !tapMoved) {
+            float slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+            tapMoved = Math.hypot(e.getX() - tapX, e.getY() - tapY) > slop;
         }
         if (action == MotionEvent.ACTION_MOVE && dismissMode != 0) {
             float slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
             if (Math.abs(e.getY() - startY) > slop) hideKeyboard();
         }
         if (action == MotionEvent.ACTION_DOWN) startY = e.getY();
-        boolean handled;
-        if (swallowing) {
-            MotionEvent local = MotionEvent.obtain(e);
-            local.offsetLocation(-scroller.getLeft() - scroller.getTranslationX(), -scroller.getTop() - scroller.getTranslationY());
-            scroller.onTouchEvent(local);
-            local.recycle();
-            handled = true;
-        } else {
-            handled = super.dispatchTouchEvent(e);
-        }
+        boolean handled = super.dispatchTouchEvent(e);
         // For a pan around this view (Box.scrollTakes): a touch that a view
         // above took never comes here, and leaves the time of an older one.
         if (action == MotionEvent.ACTION_DOWN) downTime = handled ? e.getDownTime() : -1;
-        if (action == MotionEvent.ACTION_UP && tapMode >= 0 && !dragging
-                && (tapMode == 0 || !handlesTap(this, e.getX(), e.getY()))) {
+        if (action == MotionEvent.ACTION_UP && tapMode >= 0 && !dragging && !tapMoved
+                && (tapMode == 0 ? !mounter.longPressed : !handlesTap(this, e.getX(), e.getY()))) {
             hideKeyboard();
         }
         if (!touching) {
-            swallowing = false;
+            if (tapMode == 0) mounter.endTapOnly();
             tapMode = -1;
         }
         return handled;

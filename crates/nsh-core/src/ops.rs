@@ -1452,7 +1452,8 @@ pub enum SnapAlignment {
 /// (`keyboardShouldPersistTaps`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KeyboardTaps {
-    /// The tap dismisses the keyboard and reaches nothing else (default).
+    /// A tap dismisses the keyboard and presses nothing (default); long
+    /// presses, drags and touches go on as with the keyboard down.
     #[default]
     Never,
     /// Taps never dismiss the keyboard.

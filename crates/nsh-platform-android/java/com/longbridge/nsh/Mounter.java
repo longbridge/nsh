@@ -2569,6 +2569,20 @@ final class Mounter {
 
     // --- Events --------------------------------------------------------------
 
+    /** The touch only dismisses the keyboard if it is a tap (`keyboardShouldPersistTaps` "never"): it presses nothing. */
+    private boolean tapOnly;
+    /** A view of the touch reported a long press: it was no tap. */
+    boolean longPressed;
+
+    void startTapOnly() {
+        tapOnly = true;
+        longPressed = false;
+    }
+
+    void endTapOnly() {
+        tapOnly = false;
+    }
+
     boolean wants(int id, int kind) {
         if (kind >= 64) return (eventsHigh.get(id) & (1L << (kind - 64))) != 0;
         return (events.get(id) & (1L << kind)) != 0;
@@ -2651,6 +2665,8 @@ final class Mounter {
      * where the touch is in {@code v} and in its root view.
      */
     void press(int id, int kind, View v, PressAt at) {
+        if (kind == Native.LONG_PRESS) longPressed = true;
+        if (kind == Native.PRESS && tapOnly) return;
         // The surface, or the window of the modal the view is in.
         View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
         int[] rootAt = new int[2];
