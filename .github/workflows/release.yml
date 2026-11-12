@@ -82,11 +82,7 @@ jobs:
   # the nightly already has it), or the branch the run was started on.
   plan:
     name: Plan
-    # Seconds of work with a read-only token: on the self-hosted runner it
-    # does not wait for a GitHub runner behind pull requests' jobs
-    # (docs/dev/tooling.md "Runners"). The release's other jobs stay on
-    # GitHub's runners.
-    runs-on: [public, Linux, X64]
+    runs-on: ubuntu-latest
     # A published prerelease (the nightly itself) is not a stable release.
     if: github.event_name != 'release' || !github.event.release.prerelease
     outputs:

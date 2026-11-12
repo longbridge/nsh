@@ -94,12 +94,25 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
 
       - name: Setup Rust
+        if: runner.environment == 'github-hosted'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      # huacnlee/cargo, and the dependencies' builds: main's runs save
-      # them, pull requests restore them.
+      # The self-hosted runner is shared: install the toolchain without
+      # making it the machine's default (RUSTUP_TOOLCHAIN picks it).
+      - name: Setup Rust (self-hosted)
+        if: runner.environment == 'self-hosted'
+        run: |
+          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          export PATH="$bin:$PATH"
+          command -v rustup || curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+          rustup toolchain install stable --profile minimal -c clippy
+          echo "$bin" >> "$GITHUB_PATH"
+
+      # huacnlee/cargo, and the dependencies' builds: on GitHub's runners
+      # main's runs save them and pull requests restore them; the
+      # self-hosted runner keeps its own and skips the caches.
       - name: Cargo
         uses: ./.github/actions/cargo
         with:
