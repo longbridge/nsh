@@ -207,16 +207,12 @@ implements `nsh_testing::agent::Native`, each call on the GTK main thread (`Main
   (`GtkWidgetPaintable`), whatever covers the window; the appearance is the portal's, simulated; the size is the
   window's default size.
 
-`nsh test --target linux` runs the host with `--background` unless `--foreground` (`AppOptions::background`,
-`window::run_in_background`), where someone may type on the display (a Wayland compositor, or an X server with a keyboard besides its own
-virtual ones, XTest's and Xvfb's): the
-windows show without activating (on X11 with a user time of 0, which tells the window manager not to focus them; a
-Wayland compositor decides itself whether a new window takes the focus), the agent never takes the X input focus
-(no XTest: its keys take the signals' path above), and the window the app or a press activates acts as the active
-one for the app (`window::is_focused`: its `focused` state, `closeOnBlur`, the window keys go to). A test of the keys
-only XTest's path has (Tab, arrows, the input method, GTK's own shortcut controllers) runs with `--foreground` on such
-a display. On an X server with no keyboard but its virtual ones (Xvfb, as in CI) nobody types, so the app runs as in
-the foreground there, with the real key events.
+`nsh test --target linux` runs the host with `--background` unless `--foreground` (`AppOptions::background`) where
+someone may type on the display: the windows show without taking the focus, the window the app or a press activates
+acts as the active one for the app (its `focused` state, `closeOnBlur`, the window the agent's keys go to), and the
+agent's keys take the widgets' signals above. A test of keys only real key events reach (Tab, the arrows, an input
+method) runs with `--foreground` on such a display. On a virtual display nobody types on (Xvfb, as in CI) the app
+runs as in the foreground, with real key events. The code is in `window.rs` ("Running in the background").
 
 `dev.rs` hands the model to the surface on the server's test session (idle sources keep their order, so it comes
 before the first bundle). On a machine without a display, the tests run on a virtual one:
