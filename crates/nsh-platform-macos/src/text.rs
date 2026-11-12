@@ -1527,8 +1527,10 @@ pub(crate) fn selectable(state: &crate::view::ViewState) -> bool {
 }
 
 /// Draws a text view's text (in its content layer's `drawLayer:inContext:`;
-/// the context is y down).
-pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
+/// the context is y down). `layer` is that layer's size, which says whether
+/// the picture holds all of the text; the context's clip does not, as a
+/// redraw of a few recolored lines ([`damage`]) clips to them.
+pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState, layer: CGSize) {
     use objc2_core_foundation::CGAffineTransform;
     let Some(drawn) = &state.text else { return };
     let Some(text) = drawn.layout.downcast::<CoreTextLayout>() else {
@@ -1536,10 +1538,12 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
     };
     let content = drawn.content;
     let c = Some(cx);
-    let drawn_size = CGContext::clip_bounding_box(c).size;
+    // A layer on its way to the box's size (a `LayoutAnimation`'s frames)
+    // counts as smaller even where its picture, in whole pixels, reaches
+    // the box: the text is drawn again at the size it stays at.
     drawn.cut.set(
-        drawn_size.width < (content.origin.x.0 + content.size.width.0) as CGFloat
-            || drawn_size.height < (content.origin.y.0 + content.size.height.0) as CGFloat,
+        layer.width < (content.origin.x.0 + content.size.width.0) as CGFloat
+            || layer.height < (content.origin.y.0 + content.size.height.0) as CGFloat,
     );
     CGContext::save_g_state(c);
     if drawn.text.has_backgrounds() {
@@ -3405,8 +3409,8 @@ mod tests {
     fn drawing_in_a_shorter_or_narrower_layer_marks_the_text_cut() {
         use std::{cell::Cell, sync::Arc};
 
-        use nsh_core::{Bounds, NodeId, Point, ViewKind};
-        use objc2_core_foundation::CGFloat;
+        use nsh_core::{Bounds, Point, ViewKind};
+        use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
         use objc2_core_graphics::{
             CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo,
             kCGColorSpaceSRGB,
@@ -3426,7 +3430,7 @@ mod tests {
         let prepared = engine.prepare(&text);
         let size = engine.measure(&prepared, Some(Points(200.0)));
         let layout = engine.layout(&prepared, size);
-        let mut state = crate::view::ViewState::new(NodeId(1), ViewKind::Text);
+        let mut state = crate::view::ViewState::new(1, ViewKind::Text);
         state.text = Some(super::DrawnText {
             text,
             layout,
@@ -3436,7 +3440,9 @@ mod tests {
             area_range: Cell::new(None),
         });
 
-        let draw_at = |w: usize, h: usize, state: &crate::view::ViewState| {
+        // Draws in a layer of `w` by `h`; `dirty` is the height a partial
+        // redraw (`setNeedsDisplayInRect`) clips to.
+        let draw_at = |w: usize, h: usize, dirty: Option<CGFloat>| {
             // SAFETY: CoreGraphics allocates and owns the backing buffer.
             let cx = unsafe {
                 let space = CGColorSpace::with_name(Some(kCGColorSpaceSRGB)).expect("sRGB");
@@ -3453,23 +3459,33 @@ mod tests {
             .expect("a bitmap context");
             CGContext::translate_ctm(Some(&cx), 0.0, h as CGFloat);
             CGContext::scale_ctm(Some(&cx), 1.0, -1.0);
-            super::draw(&cx, state);
+            if let Some(dirty) = dirty {
+                let part = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w as CGFloat, dirty));
+                CGContext::clip_to_rect(Some(&cx), part);
+            }
+            super::draw(&cx, &state, CGSize::new(w as CGFloat, h as CGFloat));
             state.text.as_ref().unwrap().cut.get()
         };
 
         let full_w = size.width.0.ceil() as usize;
         let full_h = size.height.0.ceil() as usize;
         assert!(
-            draw_at(full_w, full_h / 2, &state),
+            draw_at(full_w, full_h / 2, None),
             "shorter layer cuts the text"
         );
         assert!(
-            draw_at(full_w / 2, full_h, &state),
+            draw_at(full_w / 2, full_h, None),
             "narrower layer cuts the text"
         );
         assert!(
-            !draw_at(full_w, full_h, &state),
+            !draw_at(full_w, full_h, None),
             "full layer clears the cut mark"
+        );
+        // One recolored line drawn again in a layer that holds all of the
+        // text: the picture still covers it (`damage` stays partial).
+        assert!(
+            !draw_at(full_w, full_h, Some(22.0)),
+            "a partial redraw of a whole picture cuts nothing"
         );
     }
 }
