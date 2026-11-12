@@ -233,9 +233,9 @@ final class Mounter {
             }
 
             @Override
-            public byte[] complete(String url, int status, String[] headers, byte[] body) {
+            public byte[] complete(String url, int status, String[] headers, byte[] body, String[] redirects) {
                 long handle = handle();
-                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body);
+                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body, redirects);
             }
         };
         root = new Box(context, this, 1);

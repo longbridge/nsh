@@ -801,7 +801,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_setCache(
 /// What the running app's disk cache holds for `url`: its bytes (`byte[]`)
 /// when they are fresh, the conditional request headers to revalidate a
 /// stale copy with (`String[]`, names and values; empty: none), or null (a
-/// miss, or no disk cache). Called on the image threads.
+/// miss, or no disk cache). A copy that came through a redirect the app may
+/// no longer follow is dropped, and a miss. Called on the image threads.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     mut env: JNIEnv<'local>,
@@ -818,7 +819,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     let Ok(url) = env.get_string(&url).map(String::from) else {
         return JObject::null();
     };
-    match cache.lookup(&url) {
+    let access = host.access.lock().expect("access").clone();
+    match cache.lookup(&url, &access) {
         Lookup::Fresh(bytes) => env
             .byte_array_from_slice(&bytes)
             .map(JObject::from)
@@ -835,6 +837,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     }
 }
 
+/// The strings of a Java `String[]` (null: none; a null element: empty).
+fn read_strings(env: &mut JNIEnv<'_>, array: &JObjectArray<'_>) -> Vec<String> {
+    if array.is_null() {
+        return Vec::new();
+    }
+    let len = env.get_array_length(array).unwrap_or(0);
+    (0..len)
+        .map(|i| {
+            env.get_object_array_element(array, i)
+                .ok()
+                .filter(|o| !o.is_null())
+                .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 /// `strings` as a Java `String[]`.
 fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JObject<'local>> {
     let array = env
@@ -849,7 +868,8 @@ fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JO
 
 /// Ends the download of `url` that `imageCacheLookup` started: `status` 0
 /// when the request failed, else the response's status, `headers` (names
-/// and values) and body (null without one). Stores, updates or drops the
+/// and values), body (null without one) and `redirects`, the URLs the
+/// download was redirected to (null: none). Stores, updates or drops the
 /// cached copy, and returns the cached bytes when they are what to show
 /// (a `304`; a stale copy when the request failed or the server erred), or
 /// null: the response's own body (a `2xx`), or an error. Called on the
@@ -863,6 +883,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
     status: jint,
     headers: JObjectArray<'local>,
     body: JByteArray<'local>,
+    redirects: JObjectArray<'local>,
 ) -> JByteArray<'local> {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -875,18 +896,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
     let response = if status <= 0 {
         Err("the request failed".to_owned())
     } else {
-        let mut strings = Vec::new();
-        if !headers.is_null() {
-            let len = env.get_array_length(&headers).unwrap_or(0);
-            for i in 0..len {
-                let value = env
-                    .get_object_array_element(&headers, i)
-                    .ok()
-                    .filter(|o| !o.is_null())
-                    .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from));
-                strings.push(value.unwrap_or_default());
-            }
-        }
+        let strings = read_strings(&mut env, &headers);
         let pairs = strings
             .as_chunks::<2>()
             .0
@@ -897,15 +907,17 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
         } else {
             env.convert_byte_array(&body).unwrap_or_default()
         };
-        Ok(nsh_core::image::Fetched::new(
+        let fetched = nsh_core::image::Fetched::new(
             status as u16,
             nsh_core::image::CacheHeaders::from_pairs(pairs),
             body,
-        ))
+        );
+        Ok(fetched.redirected(read_strings(&mut env, &redirects)))
     };
     // A 2xx's bytes are the body Java has.
     let own = (200..300).contains(&status);
-    match cache.complete(&url, response) {
+    let access = host.access.lock().expect("access").clone();
+    match cache.complete(&url, &access, response) {
         Ok(bytes) if !own => env
             .byte_array_from_slice(&bytes)
             .unwrap_or_else(|_| JByteArray::default()),
