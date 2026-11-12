@@ -125,7 +125,7 @@ pub struct RichEditorProps {
     /// content box and takes no press itself; the app places its children
     /// in the content box's points, where `nodeRect` and `coordsAtPos`
     /// answer.
-    pub content_overlay: Prop<Option<Slot>>,
+    pub content_layer: Prop<Option<Slot>>,
 }
 
 /// A change of a `RichEditor`'s document. The document itself is read on
