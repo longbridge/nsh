@@ -6697,6 +6697,17 @@ impl<M: TextEngine> Core<M> {
         if node.kind == Kind::Text {
             self.measure_for_real(key);
         }
+        // A follower made after layout (it waited, culled or paced) took the
+        // frame layout gave it, and no walk of `emit_frames_in` told
+        // `laid_follower` of it, so `place_follower` has nothing to place:
+        // lay it out again, which does.
+        if culled_frame.is_some()
+            && self.nodes[key as usize].follow.is_some()
+            && let Some(layout) = self.nodes[key as usize].layout
+        {
+            self.layout.mark_dirty(layout);
+            self.needs_layout = true;
+        }
         let node = &mut self.nodes[key as usize];
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.content = None;

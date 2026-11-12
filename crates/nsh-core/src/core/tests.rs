@@ -32786,6 +32786,87 @@ fn a_follower_spans_its_target_along_its_parents_row() {
 }
 
 #[test]
+fn a_follower_made_after_layout_is_placed_on_its_target() {
+    // A turn that makes more than `PACE_AFTER` views makes the rest after
+    // the layout that gave them their frames (`pace.rs`). A follower made so
+    // has no frame of its own for `place_follower` until a layout walks it,
+    // and its target is not made when the followers are first placed.
+    use StyleValue::{Number, Str};
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", Number(400.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Views enough to spend the turn's budget before the row.
+    for i in 0..80 {
+        ops.extend(child_view(100 + 2 * i, 2, 1.0, &[]));
+    }
+    let views: [(crate::NodeId, crate::NodeId, Vec<(&str, StyleValue<'_>)>); 5] = [
+        (20, 2, vec![]),
+        (
+            22,
+            20,
+            vec![
+                ("flexDirection", Str("row")),
+                ("paddingLeft", Number(10.0)),
+                ("height", Number(30.0)),
+            ],
+        ),
+        (
+            28,
+            22,
+            vec![
+                ("position", Str("absolute")),
+                ("bottom", Number(0.0)),
+                ("height", Number(2.0)),
+            ],
+        ),
+        (
+            24,
+            22,
+            vec![("width", Number(50.0)), ("height", Number(30.0))],
+        ),
+        (
+            26,
+            22,
+            vec![("width", Number(70.0)), ("height", Number(30.0))],
+        ),
+    ];
+    for (id, parent, style) in views {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &style));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(Op::SetProp {
+        id: 28,
+        prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(26))),
+    });
+    apply(&mut c, ops);
+    let mut batch = c.commit().unwrap();
+    // The views that wait show, and are made in the commits that follow.
+    for _ in 0..4 {
+        if created_in(&batch).contains(&28) && created_in(&batch).contains(&26) {
+            break;
+        }
+        batch = c.commit().unwrap();
+    }
+    // After the padding (10) and the first tab (50), as long as the second.
+    assert_eq!(frame_of(&batch, 28), Some(rect(60.0, 28.0, 70.0, 2.0)));
+}
+
+#[test]
 fn following_another_view_moves_its_frame_alone_with_its_transition() {
     let mut c = core();
     follow_row(&mut c, false);
