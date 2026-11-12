@@ -30618,6 +30618,69 @@ fn a_culled_view_reports_its_layout_and_is_made_for_a_command() {
 }
 
 #[test]
+fn a_culled_scroll_view_made_for_a_scroll_gets_its_content_size_first() {
+    // A scroll view below the viewport of the one it is in is culled; a
+    // scroll to it (a `contentOffset` as it comes in a pager) makes it.
+    // Its platform view must know its content before it scrolls, or it
+    // clamps the offset to an empty content and stays at the top.
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    ops.extend(child_view(4, 2, 1000.0, &[]));
+    ops.extend([
+        Op::Create {
+            id: 6,
+            tag: Tag::Scroll,
+        },
+        style_op(6, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: 2,
+            child: 6,
+            before: None,
+        },
+    ]);
+    ops.extend(child_view(8, 6, 300.0, &[]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(!created_in(&batch).contains(&6));
+    c.apply(Op::Command {
+        id: 6,
+        command: Command::ScrollTo {
+            x: Points::ZERO,
+            y: Points(100.0),
+            animated: false,
+        },
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert!(created_in(&batch).contains(&6));
+    let at = |wanted: fn(&MountItem) -> bool| batch.items.iter().position(wanted);
+    let content = at(|i| matches!(i, MountItem::ScrollContent { id: 6, .. }))
+        .expect("the content size of the scroll view made");
+    let scroll = at(|i| {
+        matches!(
+            i,
+            MountItem::Command {
+                id: 6,
+                command: Command::ScrollTo { .. }
+            }
+        )
+    })
+    .expect("its scroll, in the same batch");
+    assert!(content < scroll, "{:?}", batch.items);
+}
+
+#[test]
 fn a_dialog_in_a_scroll_view_s_content_is_made_wherever_it_opens() {
     // A dialog's modal shows over everything, not at its place in the
     // content: it is made beside a row in view, and in a row far down
