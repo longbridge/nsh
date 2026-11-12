@@ -67,7 +67,6 @@ fn main() {
                 window_dialog::run();
                 menu_labels::run();
                 window_frames::run();
-                window_alert::run();
                 ime::run();
                 input_hidden::run();
                 mount::run();

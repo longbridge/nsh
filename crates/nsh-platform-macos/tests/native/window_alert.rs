@@ -18,7 +18,10 @@
 //! Needs a desktop session with the screen unlocked: a locked screen shows
 //! no window and activates no app. Nobody may work in another app while it
 //! runs either: macOS (14 and later) may then decline to activate this one,
-//! and step 1 fails on "the app is not active".
+//! and step 1 fails on "the app is not active". So it is left out of the
+//! full run, whose other checks would not run after it on a machine in
+//! use, and runs on its own:
+//! `NSH_WINDOW_ALERT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored`.
 
 use std::{
     cell::{Cell, RefCell},

@@ -811,8 +811,10 @@ impl DialogAnswer {
 /// of the window the user is in while they see that window; else it shows
 /// on its own, in front, the app activated first
 /// ([`crate::window::panel_window`]), after any alert shown on its own now
-/// ([`run_alone`]). Answers the button's index; -1 when it closes without
-/// one.
+/// ([`run_alone`]). A surface in no window (an embedded `AppView` out of
+/// its window) shows its alert on its own too, app-modal in the app that
+/// embeds it, as the open and save panels do. Answers the button's index;
+/// -1 when it closes without one.
 fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     let mtm = surface.mtm;
     let answer = Rc::new(DialogAnswer {
