@@ -1020,6 +1020,14 @@ impl Mounter {
         self.views.get(id as usize).and_then(Option::as_ref)
     }
 
+    /// The root view takes the hardware keyboard's keys for the app's
+    /// shortcuts while nothing else has the focus (`keymap::hold`).
+    fn hold_keys(&self) {
+        if let Some(root) = self.slot(nsh_core::ROOT_ID) {
+            crate::keymap::hold(root.native.view(), &self.target);
+        }
+    }
+
     #[inline]
     fn slot_mut(&mut self, id: NodeId) -> Option<&mut Slot> {
         self.views.get_mut(id as usize).and_then(Option::as_mut)
@@ -1706,8 +1714,10 @@ impl Mounter {
                 }
             }
             MountItem::Command { id, command } => self.command(id, command),
-            // Hardware keyboards' shortcuts are not matched yet.
-            MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
+            MountItem::Keymap(keymap) => {
+                self.target.keymap().set(keymap);
+                self.hold_keys();
+            }
             MountItem::TreeOrder(_) | MountItem::ProjectStates { .. } => {}
         }
         false
@@ -1758,6 +1768,7 @@ impl Mounter {
                         modal.view.endEditing(true);
                     }
                 }
+                self.hold_keys();
             }
             (Command::ScrollTo { x, y, animated }, Native::Scroll(scroll)) => {
                 let inset = scroll.adjustedContentInset();
@@ -1998,6 +2009,9 @@ impl Mounter {
         };
         if s.events.contains(event) {
             self.control.dispatch_event(id, event, EventPayload::None);
+        }
+        if !focused {
+            self.hold_keys();
         }
         if focused {
             self.focused = Some(id);
@@ -2789,6 +2803,7 @@ impl Mounter {
     /// take the pictures they missed.
     pub(crate) fn window_changed(&mut self) {
         self.shaders.revisit();
+        self.hold_keys();
     }
 
     /// The surface's traits changed: on a screen of another scale (an

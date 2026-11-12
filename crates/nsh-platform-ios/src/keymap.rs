@@ -14,6 +14,13 @@
 //! focus is on none of the app's inputs: a press from a hosted view (a web
 //! view, a native component) counts as in text.
 //!
+//! With no first responder UIKit hands a press to the window, past every
+//! view. So while the table has bindings and nothing in the window is the
+//! first responder, the root view is ([`hold`]): when the table is
+//! mounted, when the surface enters a window and when an input gives the
+//! focus up. It takes it from nothing (an embedding app's focused view
+//! keeps it) and shows no keyboard.
+//!
 //! A key that fires a binding is consumed until it is released (its
 //! release is consumed too) and reported to JS with the root's
 //! `KeyCommand` event; JS runs the handler afterwards. Keys are named by
@@ -70,9 +77,47 @@ impl KeymapState {
     }
 
     /// Whether the table has bindings: presses need no look otherwise.
-    fn active(&self) -> bool {
+    pub(crate) fn active(&self) -> bool {
         self.table.borrow().is_some() || !self.held.borrow().is_empty()
     }
+}
+
+/// Makes `root` (the surface's root view) the first responder on the next
+/// turn of the main queue, while the table has bindings and nothing in its
+/// window is: hardware keys reach the table through it. On the next turn,
+/// as a view giving the focus up still has it while it says so. A table
+/// left without bindings gives the root's focus up.
+pub(crate) fn hold(root: &UIView, target: &EventTarget) {
+    let mtm = MainThreadMarker::from(target);
+    if !target.keymap().active() && !root.isFirstResponder() {
+        return;
+    }
+    let views = dispatch2::MainThreadBound::new(
+        (objc2::rc::Weak::from(root), objc2::rc::Weak::from(target)),
+        mtm,
+    );
+    dispatch2::DispatchQueue::main().exec_async(move || {
+        let mtm = MainThreadMarker::new().expect("main queue");
+        let (root, target) = views.into_inner(mtm);
+        let (Some(root), Some(target)) = (root.load(), target.load()) else {
+            return;
+        };
+        if !target.keymap().active() {
+            if root.isFirstResponder() {
+                root.resignFirstResponder();
+            }
+            return;
+        }
+        let Some(window) = root.window() else { return };
+        if !focused(&window) {
+            root.becomeFirstResponder();
+        }
+    });
+}
+
+/// Whether `view` or a view inside it is the first responder.
+fn focused(view: &UIView) -> bool {
+    view.isFirstResponder() || view.subviews().iter().any(|v| focused(&v))
 }
 
 /// The presses of a `UIPress` set, with their keys (`UIKey`); presses of

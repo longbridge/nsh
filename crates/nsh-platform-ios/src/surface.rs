@@ -260,6 +260,14 @@ define_class!(
             });
         }
 
+        /// While the app has shortcuts (`nsh/keymap`): with nothing else
+        /// focused, the root takes the hardware keyboard's keys
+        /// (`keymap::hold`).
+        #[unsafe(method(canBecomeFirstResponder))]
+        fn can_become_first_responder(&self) -> bool {
+            self.target().is_some_and(|target| target.keymap().active())
+        }
+
         /// Hardware keys no responder inside handled: the app's shortcuts
         /// (`nsh/keymap`) take those they bind.
         #[unsafe(method(pressesBegan:withEvent:))]
