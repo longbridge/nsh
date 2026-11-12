@@ -10,7 +10,8 @@
 //!   answers, `unavailable` otherwise.
 //! - Presses reach only the running process: a notification left after the
 //!   app exits does nothing when pressed, and the daemon's ids die with the
-//!   process, so a restarted app cannot replace or close those it left.
+//!   process, so a restarted app cannot replace or close those it left
+//!   (`CloseAll` closes those of this run).
 //! - The badge is the Unity launcher API's signal
 //!   (`com.canonical.Unity.LauncherEntry`), the one standard docks share
 //!   (Plasma, Ubuntu's and Dash to Dock). No one listening means no badge.
@@ -51,6 +52,9 @@ enum Call {
         root: glib::WeakRef<gtk::Widget>,
     },
     Close(String),
+    /// Every notification this process shows, once those before it have
+    /// their ids.
+    CloseAll,
 }
 
 /// A notification the daemon shows.
@@ -128,6 +132,7 @@ pub(crate) fn command(control: &EngineControl, root: &gtk::Widget, command: &Not
             root: root.downgrade(),
         },
         NotificationCommand::Close(id) => Call::Close(id.clone()),
+        NotificationCommand::CloseAll => Call::CloseAll,
         _ => return,
     };
     STATE.with(|s| s.borrow_mut().calls.push_back(call));
@@ -291,6 +296,17 @@ fn run(bus: Option<gio::DBusConnection>, call: Call) {
                 Some(&(number,).to_variant()),
                 |_| finished(),
             );
+        }
+        Call::CloseAll => {
+            // One `Close` each, next in line.
+            STATE.with(|s| {
+                let mut s = s.borrow_mut();
+                let names: Vec<String> = s.shown.keys().cloned().collect();
+                for name in names {
+                    s.calls.push_front(Call::Close(name));
+                }
+            });
+            finished();
         }
     }
 }

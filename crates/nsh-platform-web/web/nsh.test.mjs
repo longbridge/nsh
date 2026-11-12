@@ -836,6 +836,39 @@ test("a key a field's own handler took is not the page's shortcut as well", () =
   }
 });
 
+test("Return a shortcut takes does not submit the field as well", () => {
+  const { player, sent } = fakePlayer();
+  player.modifiersChanged = () => {};
+  // The app binds Return in text fields (binding 3, an autocomplete list's)
+  // while `bound` says so; otherwise nothing takes it.
+  let bound = true;
+  player.wasm.nsh_key = (code, _mods, focus) => (bound && code === 256 && focus & 1 ? 3 : -1);
+  const listeners = {};
+  const field = {
+    tagName: "TEXTAREA",
+    value: "/rev",
+    _count: 4,
+    addEventListener: (type, listener) => (listeners[type] = listener),
+    blur() {},
+  };
+  const el = { _id: 9, _events: new Set(["onSubmitEditing"]), _config: { submit: "submit" } };
+  player.wireInput(el, field);
+  const press = (key, extra = {}) => {
+    let prevented = false;
+    listeners.keydown({ key, keyCode: 13, isComposing: false, shiftKey: false, altKey: false, preventDefault: () => (prevented = true), ...extra });
+    return prevented;
+  };
+  const submits = () => sent.filter(([name]) => name === "onSubmitEditing").length;
+  // Taken: the shortcut's alone (`keyDown` fires it), as on the native platforms.
+  assert.equal(press("Enter"), false);
+  assert.equal(submits(), 0);
+  // Not taken: the field submits as before.
+  bound = false;
+  assert.equal(press("Enter"), true);
+  assert.equal(submits(), 1);
+  assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
+});
+
 /**
  * Runs `f` in a page with a window of 1280 × 720 whose system UI covers 44
  * points at the top and 34 at the bottom; `f` gets the `ResizeObserver`s

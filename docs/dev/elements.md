@@ -266,8 +266,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   pressable view responds. Children placed outside their parent (`position: "absolute"`, `overflow` visible: a
   dropdown under its field) can be touched where they are drawn: UIKit and Android only look for a touch's target
   inside a view's bounds, so the core mounts, for each view whose descendants reach outside it, the area they cover
-  (`MountItem::Overflow`, in the view's coordinates, from the layout frames, only when it changes; clipping views,
-  scroll views, lists and stacks have none). `NshView`'s `hitTest` looks in its subviews when the point is outside its
+  (`MountItem::Overflow`, in the view's coordinates, from the layout frames and the descendants' `hitSlop`, only
+  when it changes; clipping views, scroll views, lists and stacks have none). A child's slop reaching out of its parent
+  so takes touches through every view around it that does not clip; siblings keep their order (the topmost first). `NshView`'s `hitTest` looks in its subviews when the point is outside its
   bounds (and hit slop) but in that area, and never returns the view itself there; Android's `Box` delivers the touch
   (and the rest of the gesture) to the child whose area holds it, which passes it on to its children only, and the touch
   tracker's hit test (`TouchTracker.deepest`) descends the same way. `pointerEvents` keeps its meaning (`box-only` and
@@ -524,7 +525,8 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
   moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
+  (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
+  its side, so a submenu's first item is level with its trigger, and places it outside the menu
   around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
   `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
   what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`

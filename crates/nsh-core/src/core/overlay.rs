@@ -1474,14 +1474,40 @@ impl<M: TextEngine> Core<M> {
                     Some(grid) if self.framed_box(key).is_some() => grid.height,
                     _ => ring.height.0,
                 };
+                // Elsewhere the overlay's own padding and border are the
+                // rows around it: its content, not its edge, lines up with
+                // the row beside it, as a submenu's first item is level
+                // with its trigger.
+                let own = match (resolved_anchor, self.layout.grid()) {
+                    (OverlayAnchor::Beside { .. }, None) => self.nodes[key as usize]
+                        .layout
+                        .map(|l| self.rounded_layout(l)),
+                    _ => None,
+                };
+                let (lead, trail) = match (own, config.placement.is_horizontal()) {
+                    (Some(l), true) => (
+                        l.padding.top + l.border.top,
+                        l.padding.bottom + l.border.bottom,
+                    ),
+                    (Some(l), false) => (
+                        l.padding.left + l.border.left,
+                        l.padding.right + l.border.right,
+                    ),
+                    (None, _) => (0.0, 0.0),
+                };
                 let anchor = match config.placement.is_horizontal() {
                     true => rect(
                         anchor.origin.x.0,
-                        anchor.origin.y.0 - line,
+                        anchor.origin.y.0 - line - lead,
                         anchor.size.width.0,
-                        anchor.size.height.0 + line * 2.0,
+                        anchor.size.height.0 + line * 2.0 + lead + trail,
                     ),
-                    false => anchor,
+                    false => rect(
+                        anchor.origin.x.0 - lead,
+                        anchor.origin.y.0,
+                        anchor.size.width.0 + lead + trail,
+                        anchor.size.height.0,
+                    ),
                 };
                 // A terminal's frame is the gap: it starts on the row (or
                 // the column) after the trigger's, as rounding an offset

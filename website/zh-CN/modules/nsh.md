@@ -1949,7 +1949,7 @@ async function notifyMe() {
 }
 ```
 
-Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`show_notification`、`close_notification`、`set_badge` 和 `next_notification_press`。
+Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`show_notification`、`close_notification`、`close_all_notifications`、`set_badge` 和 `next_notification_press`。
 
 | 平台 | 通知 | 角标 |
 | --- | --- | --- |
@@ -1969,6 +1969,17 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 ```tsx
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.closeAll
+
+`closeAll()` 移除应用显示的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留通知，`closeAll()` 在这些平台上移除 NSH 显示的通知，包括应用上一次运行留下的，嵌入方自己的通知保留。Linux 和 Web 上它移除当前运行的应用显示的通知。
+
+```tsx
+async function signOut() {
+  await Notifications.closeAll();
+  Notifications.setBadge(0);
+}
 ```
 
 ### Notifications.on

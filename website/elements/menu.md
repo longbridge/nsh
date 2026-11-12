@@ -10,7 +10,8 @@ demo: el-menu
 A menu is a list of actions its trigger opens. One structure serves every device, presented as each expects:
 
 - On the desktops and in desktop browsers, a popup at the trigger; a `Submenu` cascades beside its item as the
-  pointer comes over it or presses it.
+  pointer comes over it or presses it, its first item level with that item (inside the padding and border of your
+  `popupClass`).
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the
   sheet in place of the menu's, with a row of yours leading back.
 

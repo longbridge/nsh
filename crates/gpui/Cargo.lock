@@ -5774,6 +5774,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

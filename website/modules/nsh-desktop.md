@@ -274,7 +274,7 @@ The Rust column names the methods of `WindowRef`.
 | `state()` | `state()` | What the platform reports of it (reactive; [below](#the-windows-state-and-the-displays)). `null` off desktops, before it shows and once it closed. |
 | `titleBar()` | `title_bar()` | Its hidden title bar's area ([below](#titlebar)). |
 | `set(attributes)` | `set(WindowAttributes)` | Changes the [attributes](#attributes) it names; the others keep their values. An attribute the app's capabilities do not grant is left as it is, with a warning. |
-| `show()`, `hide()` | `show()`, `hide()` | Shows it (restoring it when minimized), or hides it. |
+| `show()`, `hide()` | `show()`, `hide()` | Shows it (restoring it when minimized), or hides it. On macOS a full screen window leaves full screen before it hides, as macOS apps' windows do, and shows again as a window. |
 | `focus()` | `focus()` | Shows it, brings it to the front of its level and gives it the keyboard focus; the app activates. The window keeps its level. |
 | `close()` | `close()` | Closes it, whatever `closeOnPress` says. A window of the app's own unmounts its content (`<Window>`: `onOpenChange` with `reason: "close"`); the main window closes as when the user closes it, and the app ends with its last window. |
 | `minimize()`, `restore()` | `minimize()`, `restore()` | Minimizes it, or brings it back in the mode it had: a maximized window minimized comes back maximized. |
