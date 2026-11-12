@@ -222,7 +222,6 @@ fn content(rv: Rv) -> impl IntoElement {
         true => end.release(),
         false => end.end_sweep(),
     })
-    .child(selection_rects(rv.clone()))
     .child(blocks(rv.clone(), DOC))
     .child(table::controls(rv.clone()))
     .child(gap_cursor(rv.clone()))
@@ -1015,9 +1014,9 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
         let it = item.get();
         placeholder_text(&ph_rv, &it)
     });
-    let (frame_rv, lines_rv, spans_rv) = (rv.clone(), rv.clone(), rv);
-    text("")
-        .on_layout(move |b: &Bounds<Points>| frame_rv.set_text_frame(id, owner, *b))
+    let (frame_rv, lines_rv, spans_rv, sel_rv) = (rv.clone(), rv.clone(), rv.clone(), rv);
+    // The text's box: its selection boxes, then the text over them.
+    let text = text("")
         .on(EventKind::TextLayout, move |p: &EventPayload| {
             if let EventPayload::TextLayout(lines) = p {
                 lines_rv.set_lines(id, lines.clone());
@@ -1040,7 +1039,12 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
                 );
             }
             list
-        }))
+        }));
+    view()
+        .relative()
+        .on_layout(move |b: &Bounds<Points>| frame_rv.set_text_frame(id, owner, *b))
+        .child(selection_rects(sel_rv, id))
+        .child(text)
 }
 
 /// The placeholder of an empty textblock that shows one (Tiptap's
@@ -1346,8 +1350,11 @@ fn slot(rv: Rv, item: ReadSignal<BlockItem>, id: u64, node: &Node) -> AnyElement
         .into_element()
 }
 
-/// The selection's boxes.
-fn selection_rects(rv: Rv) -> impl IntoElement {
+/// The selection's boxes in textblock `id`, in its text's box. Drawn in
+/// the block, under its text and over its background: a block with a
+/// background of its own (a code block) would hide boxes drawn under all
+/// the blocks.
+fn selection_rects(rv: Rv, id: u64) -> impl IntoElement {
     dynamic(move || {
         rv.sel_rev.get();
         rv.layout_rev.get();
@@ -1362,7 +1369,7 @@ fn selection_rects(rv: Rv) -> impl IntoElement {
         if from == to || !text {
             return Vec::new();
         }
-        let rects = rv.geo.borrow().range_rects(from, to);
+        let rects = rv.geo.borrow().text_range_rects(id, from, to);
         rects
             .into_iter()
             .map(|b| {
