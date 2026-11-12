@@ -54,6 +54,13 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 不再运行任何 JS，视图保持原样。之所以有节点和操作配额，是因为原生视图和排队的变更位于原生内存中，不受 JS 堆限制约束：
 如果没有这些配额，应用就可能通过 UI 耗尽设备内存。
 
+**NSH 在原生代码中读取的数组最多 2^20（1 048 576）项，所有应用都是如此。** 子节点（嵌套的数组合计）、`<Each>` 的
+项、菜单（子菜单合计）、托盘的标题、`Animated.sequence` / `parallel` / `stagger`、`split` 的键、导航栈的路由、原生组件的
+`props` 和 `events`、平移手势的 `touches` 以及画布调用的参数（合计）都在原生代码中读取，调用预算管不到那里；而数组的长度
+就是它声称的长度，不论是否为空（`new Array(2 ** 32 - 1)`）。更长的数组会抛出应用可以捕获的错误：`RangeError`，菜单和托盘
+则是 `TypeError`；画布调用会忽略它并给出警告。导航栈最多容纳同样多的页面：超出后 `push` 会抛出 `RangeError`。子节点和
+子菜单嵌套超过 64 层会抛出 `TypeError`。`<List>` 的 `each` 行数不受此限。
+
 > [!TIP]
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
@@ -323,7 +330,9 @@ fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to c
 
 - `nsh build` 和 `nsh package` 把它作为 `capabilities.json` 写在 bundle 旁边；
 - `nsh publish` 把它放进[签名包](./signed-packages.md)的头部，受签名保护；
-- `nsh dev` 每次构建都会发送它，因此开发时执行的是同样的规则。修改 `capabilities` 会重新加载应用，而不是热更新。
+- `nsh dev` 每次构建都会发送它，因此开发时执行的是同样的规则。修改 `capabilities` 会重新加载应用，而不是热更新；
+- 以 Rust 组件为根的应用（`nsh.json` 的 `"root"`）把它和根一起编译进去，所以每个运行器（包括 Web 和 `nsh test`）都按它
+  检查应用的调用，和 TSX 应用一样。没有 `"capabilities"` 时，它能访问的和任何没有声明的应用相同。
 
 ## 授权：宿主应用允许什么
 

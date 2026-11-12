@@ -97,6 +97,23 @@ pub(crate) fn after_ms(ms: u64, f: impl FnOnce() + 'static) {
     .detach();
 }
 
+/// Runs `f` on this (main) thread, soon, outside GPUI's app (not in an
+/// update): for system calls that report back to GPUI at once (a window's
+/// frame changed or it moved: GPUI's resize, move and display callbacks
+/// update the app), which GPUI drops while the app is being updated. Calls
+/// run in order, after the update under way and with GPUI's own deferred
+/// resizes and zooms. Before `init` there is no window to act on, so `f` is
+/// dropped with a warning, as the other helpers here do.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn outside_app(f: impl FnOnce() + 'static) {
+    let app = APP.with(|a| a.borrow().clone());
+    let Some(app) = app else {
+        log::warn!("nsh-platform-gpui: app call before init");
+        return;
+    };
+    app.spawn(async move |_| f()).detach();
+}
+
 /// Runs `f` with the app on this (main) thread, soon: for what needs GPUI's
 /// app where only a surface is at hand (the clipboard, closing a window).
 pub(crate) fn on_app(f: impl FnOnce(&mut App) + 'static) {

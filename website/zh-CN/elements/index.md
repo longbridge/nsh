@@ -211,10 +211,11 @@ view()
 | `onMouseEnter` | `.on_mouse_enter(..)` | `(e: MouseEvent) => void` | 鼠标移到视图或其内部的视图上（DOM 的 `mouseenter`）。 |
 | `onMouseMove` | `.on_mouse_move(..)` | `(e: MouseEvent) => void` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键（DOM 的 `mousemove`）。 |
 | `onMouseLeave` | `.on_mouse_leave(..)` | `(e: MouseEvent) => void` | 鼠标离开视图及其内部的视图，或离开窗口；`e` 是鼠标最后所在的位置（DOM 的 `mouseleave`）。 |
+| `onMouseUp` | `.on_mouse_up(..)` | `(e: MouseEvent) => void` | 鼠标按键在视图或其内部的视图上松开（DOM 的 `mouseup`）：`button` 是松开的按键（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"`），另有 `position`、`pagePosition` 和 `modifiers`。指针下视图外围所有监听的视图由内向外都会收到。主按键松开时同时报告 `onPressUp`。视图外松开不会报告（没有指针捕获）。桌面平台（Windows、macOS、Linux、GPUI）、终端和 Web 支持；iOS 和 Android 不报告。 |
 
 与 CSS 的 `:hover` 和 DOM 的 `mouseenter` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onMouseEnter`（由外向内；`onMouseLeave` 由内向外）。事件在发生之后才通知应用，触摸从不触发。从鼠标下方移除的视图会收到 `onMouseLeave`，在 Linux 和 Windows 上要等到鼠标下一次移动。
 
-`MouseEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键），以及 `pressedButton`：按下的按键（`"left"`、`"right"`、`"middle"`、`"back"` 或 `"forward"`，即 GPUI 的 `MouseButton`），没有按键时为 `null`；Rust 中为 `position`、`page_position`、`modifiers` 和 `pressed_button`。在桌面平台和 Web 上，拖动同时也是触摸（`onTouchMove`、响应者系统），它的移动带着 `pressedButton` 到达 `onMouseMove`：只跟随悬停的反馈跳过这些移动即可；iOS 和 Android 的悬停报告的是没有按键按下的指针。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onMouseLeave` 之前到达，因此处理函数可以在每次移动时重绘：
+`MouseEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键），`pressedButton`：按下的按键（`"left"`、`"right"`、`"middle"`、`"back"` 或 `"forward"`，即 GPUI 的 `MouseButton`），没有按键或松开时为 `null`，以及 `button`：本次事件中变化的按键，即 `onMouseUp` 上松开的按键，移动时为 `null`；Rust 中为 `position`、`page_position`、`modifiers`、`pressed_button` 和 `button`。在桌面平台和 Web 上，拖动同时也是触摸（`onTouchMove`、响应者系统），它的移动带着 `pressedButton` 到达 `onMouseMove`：只跟随悬停的反馈跳过这些移动即可；iOS 和 Android 的悬停报告的是没有按键按下的指针。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onMouseLeave` 之前到达，因此处理函数可以在每次移动时重绘：
 
 ```rust tabs
 // 图表上的十字线。
@@ -248,7 +249,7 @@ const at = signal<number | null>(null);
 
 ### 滚轮
 
-`onWheel` 在鼠标滚轮或触控板在视图上滚动时触发：macOS、Windows、Linux、GPUI 后端和 Web 都支持（DOM 的 `wheel`、GPUI 的 `ScrollWheelEvent`）。指针下方视图及其外层中，最近的监听者收到它。若该视图比指针下方所有滚动视图都更近，它就接管这次滚轮：系统不再滚动、缩放或捏合，因此页面里的画布可以在 Control + 滚轮时缩放、其他时候平移。监听的滚动视图，或包着滚动视图的外层视图，只是旁观：滚动视图照常滚动。JS 无法事后取消原生滚动（主线程不等待 JS），所以是否接管由挂载的内容决定，与 `onContextMenu` 相同。
+`onWheel` 在鼠标滚轮或触控板在视图上滚动时触发：macOS、Windows、Linux、GPUI 后端和 Web 都支持（DOM 的 `wheel`、GPUI 的 `ScrollWheelEvent`）。指针下方视图及其外层中，最近的监听者收到它。若该视图比指针下方所有滚动视图都更近，它就接管这次滚轮：系统不再滚动、缩放或捏合，因此页面里的画布可以在 Control + 滚轮时缩放、其他时候平移。监听的滚动视图，或包着滚动视图的外层视图，只是旁观：滚动视图照常滚动。一次滚动始终留在它去的地方，与滚动视图相同：接管了它的视图会收到这次滚动剩下的部分（触控板手势及其惯性、连续滚动的滚轮），即使指针离开了它；滚动视图已经开始的滚动，也不会被中途移到指针下的监听者抢走，那个监听者只是旁观。JS 无法事后取消原生滚动（主线程不等待 JS），所以是否接管由挂载的内容决定，与 `onContextMenu` 相同。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -288,11 +289,27 @@ const offset = signal({ x: 0, y: 0 });
 />
 ```
 
+`onPinch` 在触控板于视图上捏合时触发，与 GPUI 的 `on_pinch` 相同：macOS、Linux、GPUI 后端和 Safari 都支持。Windows 和其他浏览器把触控板捏合报告为 Control + 滚轮，由 `onWheel` 收到，所以需要缩放的视图要同时监听两者。指针下方视图及其外层中，最近的监听者从捏合开始到结束一直收到它；若该视图比所有原生捏合的视图（`pinch` 值、`onPinchStart`）都更近，它就接管这次捏合，系统不再原生缩放。在捏合中途才开始监听的视图收到其余部分，没有开始事件。触摸屏上的手指捏合属于原生手势（`onPinchStart`，见[触摸与手势](../docs/touch-and-gestures.md)）。
+
+| 属性 | Rust | 类型 | 说明 |
+|---|---|---|---|
+| `onPinch` | `.on_pinch(..)` | `(e: PinchEvent) => void` | 触控板在视图或其内部的视图上捏合。 |
+
+`PinchEvent` 与 `MouseEvent` 一样带有 `position`、`pagePosition` 和 `modifiers`，以及 `delta`（相对上一次事件的缩放变化，0.1 即放大 10%，负数为缩小）和 `phase`：`"start"`、`"move"` 或 `"end"`，与触摸的阶段相同。Rust 中 `delta` 是 `Percentage`，`phase` 是 `PinchPhase`。
+
+```tsx
+<View
+  style={{ flex: 1 }}
+  onPinch={(e) => zoom.update((z) => z * (1 + e.delta))}
+  onWheel={(e) => e.modifiers.control && zoom.update((z) => z * (1 - (e.delta.y * (e.deltaMode === "lines" ? 16 : 1)) / 200))}
+/>
+```
+
 <a id="tooltips"></a>
 
 ### 工具提示
 
-`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏；在任何设备上，键盘焦点停在元素上时也会显示，焦点离开或按下 Escape 时隐藏。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
+`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏（指针从另一个显示过提示的元素移过来、离开那个元素不到 300 毫秒时立即显示）；在任何设备上，键盘把焦点移到元素上时也会显示，焦点离开或按下 Escape 时隐藏（点击或轻点带来的焦点把提示交给指针决定）。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -492,9 +509,12 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessible` | `.accessible(..)` | `boolean` | 视图对辅助技术而言是一个整体元素，子元素不再单独暴露。 |
 | `accessibilityLabel` | `.label(..)` | `string` | 屏幕阅读器朗读的内容。没有标签的视图会朗读其中的文本。 |
 | `accessibilityHint` | `.hint(..)` | `string` | 激活该元素会发生什么。 |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | 名字之外对元素的说明，在名字之后朗读（对话框的说明文字）。 |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | 辅助技术报告的状态（`checked` 和 `pressed` 可以是 `"mixed"`；`current` 为 `true` 或 `"page"`、`"step"`、`"location"`、`"date"`、`"time"`）。 |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |
+| `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | 获得焦点的元素里当前活动的那一项：组合框高亮的选项、列表的光标行（[无障碍](../docs/accessibility.md#获得焦点的元素里的活动项)）。 |
+| `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | 内容由这个元素控制的元素：组合框的列表。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |

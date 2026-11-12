@@ -79,8 +79,8 @@ Opening a URL outside the app takes the `openUrl` capability when the app declar
 
 On the desktops (macOS, Windows, Linux, GPUI) and the web in the desktop idiom, the pointer resting on a link for half a
 second shows where it goes, as a mail app or a browser's status bar does: a hint below the link with its destination,
-until the pointer leaves or presses it. The keyboard focus on a link shows it too. A user checks the destination before
-following it, whatever the link's text says.
+until the pointer leaves or presses it. The keyboard moving the focus to a link (Tab) shows it too. A user checks the
+destination before following it, whatever the link's text says.
 
 - The destination is one line, left to right in a right-to-left app too. A URL shows as it is parsed: an international host in its ASCII form
   (`https://xn--mnchen-3ya.de`), so a letter of another script passing for a Latin one shows as what it is, and the

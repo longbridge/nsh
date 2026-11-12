@@ -101,22 +101,32 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
         &rv,
         Part::Root,
     );
+    // An unpadded box around the scroll view and the sink, so padding on
+    // the root insets both together and the sink stays in the viewport's
+    // coordinates. Both use `flex_auto` so an editor without a height is as
+    // tall as its document, and past its `max-height` it scrolls.
     root.child(
-        scroll()
-            .element_ref(&rv.scroll)
-            .flex_1()
-            // The editor's own taps keep its keyboard (Android's scroll
-            // views dismiss it on a tap otherwise).
-            .keyboard_taps(KeyboardTaps::Always)
-            .on_scroll(move |e: &ScrollEvent| {
-                scroll_rv.scroll_y.set(e.offset.y);
-                scroll_rv.scrolled.set(e.offset.y);
-                scroll_rv.viewport.set(e.size);
-            })
-            .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
-            .child(content(rv.clone())),
+        view()
+            .relative()
+            .flex_auto()
+            .overflow_hidden()
+            .child(
+                scroll()
+                    .element_ref(&rv.scroll)
+                    .flex_auto()
+                    // The editor's own taps keep its keyboard (Android's scroll
+                    // views dismiss it on a tap otherwise).
+                    .keyboard_taps(KeyboardTaps::Always)
+                    .on_scroll(move |e: &ScrollEvent| {
+                        scroll_rv.scroll_y.set(e.offset.y);
+                        scroll_rv.scrolled.set(e.offset.y);
+                        scroll_rv.viewport.set(e.size);
+                    })
+                    .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
+                    .child(content(rv.clone())),
+            )
+            .child(sink(rv)),
     )
-    .child(sink(rv))
 }
 
 /// The content box: what presses and drags select in.
@@ -125,6 +135,7 @@ fn content(rv: Rv) -> impl IntoElement {
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let (long, lift, armed, sweep) = (rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let over = rv.clone();
+    let claim = rv.clone();
     let placed = rv.clone();
     let height = rv.content_height;
     part(
@@ -135,13 +146,15 @@ fn content(rv: Rv) -> impl IntoElement {
                 placed.place();
             })
             .relative()
+            .min_h(relative(1.0))
             .cursor(Cursor::Text),
         &rv,
         Part::Content,
     )
     .on(EventKind::PressDown, move |p: &EventPayload| {
         match (desktop, p) {
-            (true, EventPayload::Press(e)) => {
+            // A checkbox's press is its own: the caret stays where it is.
+            (true, EventPayload::Press(e)) if !down.on_checkbox(e.position) => {
                 down.press(e.position, e.page_position, e.modifiers, e.clicks.max(1))
             }
             (false, _) => down.touch_down(),
@@ -174,8 +187,15 @@ fn content(rv: Rv) -> impl IntoElement {
     })
     // The mouse selects as it drags; a finger scrolls, unless a long press
     // armed its sweep, which selects by words.
+    // Not from a task's checkbox: a responder granted after the pointer
+    // moved takes the press from the view under it, and a hand moves as it
+    // clicks, so the checkbox would miss presses.
     .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
-        if desktop {
+        let page = request.event.page;
+        let on_checkbox = claim
+            .page_shift()
+            .is_some_and(|shift| claim.on_checkbox(Point::new(page.x + shift.x, page.y + shift.y)));
+        if desktop && !on_checkbox {
             request.claim();
         }
     }))
@@ -210,7 +230,25 @@ fn content(rv: Rv) -> impl IntoElement {
     .child(caret(rv.clone()))
     // The touch selection's handles take touches of their own.
     .child(super::touch::handles(rv.clone()))
+    .child(content_layer(rv.clone()))
     .children(bubble_menu(rv))
+}
+
+/// The app's layer over the document (`contentLayer`): a box over the
+/// whole content box, after everything the editor draws, so it scrolls
+/// with the text. The box takes no press; what the app puts in it does.
+fn content_layer(rv: Rv) -> impl IntoElement {
+    let props = rv.props;
+    when(
+        move || props.content_layer.get().is_some(),
+        move || {
+            view()
+                .absolute()
+                .inset(px(0.0))
+                .pointer_events(PointerEvents::BoxNone)
+                .child(props.content_layer.place(|slot| slot))
+        },
+    )
 }
 
 /// The app's bubble menu: an overlay against an empty box over the
@@ -378,17 +416,25 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     // A task item is a row: its checkbox, then its content (Tiptap's
     // `<label><input></label><div>`), so the checkbox is inside the item
     // and takes presses.
+    // The content's holder is not the item's origin: the blocks in it are
+    // framed in the holder, so its offset is noted (`Geometry::insets`).
+    let inset_rv = rv.clone();
+    let holder = move |content: Option<AnyElement>| {
+        view()
+            .flex_1()
+            .min_w(px(0.0))
+            .on_layout(move |b: &Bounds<Points>| inset_rv.set_inset(id, b.origin))
+            .children(content)
+    };
     if task {
         return wrapper
             .flex_row()
             .child(task_checkbox(rv, item))
-            .child(view().flex_1().min_w(px(0.0)).children(content))
+            .child(holder(content))
             .into_element();
     }
     if marked && terminal {
-        return wrapper
-            .child(view().flex_1().min_w(px(0.0)).children(content))
-            .into_element();
+        return wrapper.child(holder(content)).into_element();
     }
     wrapper.children(content).into_element()
 }
@@ -1567,6 +1613,18 @@ impl Rv {
             return;
         }
         geo.frames.insert(id, (parent, frame));
+        drop(geo);
+        self.layout_rev.update(|r| *r += 1);
+    }
+
+    /// Where block `id`'s children start in its box (see
+    /// `Geometry::insets`).
+    fn set_inset(&self, id: u64, origin: Point<Points>) {
+        let mut geo = self.geo.borrow_mut();
+        if geo.insets.get(&id) == Some(&origin) {
+            return;
+        }
+        geo.insets.insert(id, origin);
         drop(geo);
         self.layout_rev.update(|r| *r += 1);
     }
