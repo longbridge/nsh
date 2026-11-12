@@ -36,7 +36,10 @@ use nsh_core::{
 };
 
 use crate::{
-    popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
+    popup::{
+        OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks,
+        bottom_panel_max_height, keyboard_lift, lifecycle,
+    },
     roving::{bar_trigger, leave_bar, popup_bar},
     terminal::{MENU_CHECK, MENU_RADIO, MENU_UNCHECKED, SUBMENU_ARROW, is_terminal, line, rule},
 };
@@ -1249,9 +1252,10 @@ fn surface(
                 let panel = overlay()
                     .left_0()
                     .right_0()
-                    .bottom_0()
-                    // Below the status bar, whatever the items.
-                    .max_h(move || Length::from(window().height - safe_area().top))
+                    // Above the keyboard, below the status bar, whatever
+                    // the items.
+                    .bottom(move || Length::from(keyboard_lift()))
+                    .max_h(bottom_panel_max_height)
                     .role(AccessibilityRole::Menu)
                     .app_class(parts.popup_class)
                     .inline_style(parts.popup_style)

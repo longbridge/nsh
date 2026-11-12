@@ -89,6 +89,16 @@ inner scrolls keep their platform's normal gesture arbitration. When the panel s
 ends: the focused input inside blurs and the software keyboard goes down; scrolling an inner list keeps it. Setting `closeOnSwipe` to false keeps the panel
 stationary and preserves the mounted content and scroll position. Other sides retain their existing behavior.
 
+## The software keyboard
+
+While the software keyboard is up, a panel that reaches the bottom of the screen (a bottom sheet, a drawer at the left
+or right) ends at the keyboard's top instead of the screen's bottom, and moves with the keyboard as it comes and goes,
+on the keyboard's own curve. Pad the panel's bottom by the safe area (`pb-[env(safe-area-inset-bottom)]`, Rust
+`.pb_safe_area()`), as without a keyboard: that padding then sits behind the keyboard, so the panel's content ends
+right above it, the larger of the safe area and the keyboard. Lifted by the keyboard, a bottom sheet stays below the
+status bar, however tall its content; style a lower limit with `popupStyle`. Menus, selects and date pickers that a phone shows as sheets
+do the same.
+
 ## Native sheets
 
 A sheet is drawn by NSH in the app's window, styled by the app. For the platform's own presented sheet (a page sheet
