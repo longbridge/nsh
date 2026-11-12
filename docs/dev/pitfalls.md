@@ -657,6 +657,11 @@ Things that were found the hard way. Read the section of the area you change bef
   for `accessibilityElementsHidden`. `setAccessibilityChildren:` cannot be undone: `nil` leaves the view without
   children instead of AppKit's again, so a subtree shown again stayed out of reach; `NshView` answers
   `accessibilityChildren` itself (none while hidden or grouped, else `NSView`'s).
+- An `NSTextField` or `NSSecureTextField` subclass that overrides `accessibilityRole` and forwards to `super`
+  exposes `AXUnknown` to an external accessibility client (checked on macOS 27). Return `AXTextField` explicitly
+  for ordinary inputs; editable combo boxes keep `AXComboBox`. The secure field still supplies its
+  `AXSecureTextField` subrole and masked value. A direct getter call is not the same as an external AX query:
+  even a plain `NSTextField` returns `AXUnknown` directly while exposing `AXTextField` externally.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no backdrop blur, sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:` shows them: WebKit draws them for it). Pages

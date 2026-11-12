@@ -888,8 +888,9 @@ macro_rules! define_field {
                 fn accessibility_role(&self) -> Option<Retained<NSString>> {
                     match self.combobox() {
                         Some(_) => Some(NSString::from_str("AXComboBox")),
-                        // SAFETY: NSTextField's own role.
-                        None => unsafe { msg_send![super(self), accessibilityRole] },
+                        // Forwarding this override to AppKit exposes AXUnknown,
+                        // for secure fields too. Both have the text-field role.
+                        None => Some(NSString::from_str("AXTextField")),
                     }
                 }
 
