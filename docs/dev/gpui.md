@@ -359,6 +359,11 @@ reported per window, moves and resizes once they settle. A hidden title bar gets
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
 
+Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
+top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
+reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks
+for them ends, as the system reports a move to GPUI while it makes it.
+
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
 workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it
 opens, and hiding minimizes);
