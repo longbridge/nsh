@@ -4386,7 +4386,7 @@ covers [props] RichEditor.bubbleMenu
 expect LayerMark
 tap text:LayerMark
 expect LayerBox true 0 0
-covers [props] RichEditor.contentOverlay
+covers [props] RichEditor.contentLayer
 expect CellA
 expect CellD
 # An editor without a height is as tall as its two lines; one with a

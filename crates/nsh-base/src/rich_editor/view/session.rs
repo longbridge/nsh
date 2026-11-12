@@ -566,7 +566,7 @@ impl EditorSession {
     }
 
     /// The box of the block starting at `pos`, in points of the content box
-    /// of the view showing the session (where `contentOverlay` places its
+    /// of the view showing the session (where `contentLayer` places its
     /// children), or `None` when no view does.
     pub fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
         self.geometry()?.node_rect(pos)

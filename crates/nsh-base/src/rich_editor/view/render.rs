@@ -221,23 +221,23 @@ fn content(rv: Rv) -> impl IntoElement {
     .child(caret(rv.clone()))
     // The touch selection's handles take touches of their own.
     .child(super::touch::handles(rv.clone()))
-    .child(content_overlay(rv.clone()))
+    .child(content_layer(rv.clone()))
     .children(bubble_menu(rv))
 }
 
-/// The app's layer over the document (`contentOverlay`): a box over the
+/// The app's layer over the document (`contentLayer`): a box over the
 /// whole content box, after everything the editor draws, so it scrolls
 /// with the text. The box takes no press; what the app puts in it does.
-fn content_overlay(rv: Rv) -> impl IntoElement {
+fn content_layer(rv: Rv) -> impl IntoElement {
     let props = rv.props;
     when(
-        move || props.content_overlay.get().is_some(),
+        move || props.content_layer.get().is_some(),
         move || {
             view()
                 .absolute()
                 .inset(px(0.0))
                 .pointer_events(PointerEvents::BoxNone)
-                .child(props.content_overlay.place(|slot| slot))
+                .child(props.content_layer.place(|slot| slot))
         },
     )
 }

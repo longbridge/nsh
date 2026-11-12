@@ -681,7 +681,7 @@ impl RichEditorSession {
 
     /// The box `{ x, y, width, height }` of the block starting at `pos`, in
     /// points of the content box of the view showing the editor (where
-    /// `contentOverlay` places its children, scrolling with the text), or
+    /// `contentLayer` places its children, scrolling with the text), or
     /// `null` when none does. Throws a `RangeError` for a position outside
     /// the document.
     pub(crate) fn node_rect(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {

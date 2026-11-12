@@ -120,7 +120,7 @@ const inLink = () => (revision(), editor.isActive("link"));
 A link menu edits the link under the caret with `chain([extendMarkRange("link"), command("setLink", { href })])`
 and removes it with `command("unsetLink")` after the same `extendMarkRange`.
 
-`contentOverlay` is the app's own layer over the document, inside the box that scrolls: what it holds moves with
+`contentLayer` is the app's own layer over the document, inside the box that scrolls: what it holds moves with
 the text in the same frame. Place its children in the content box's points, where `editor.nodeRect(pos)` (the box
 of the block starting at `pos`) and `editor.coordsAtPos(pos)` answer: a handle in a block's margin, a marker beside
 a node. The layer itself takes no press; its children do.
@@ -130,7 +130,7 @@ const box = editor.nodeRect(blockStart);
 
 <RichEditor
   editor={editor}
-  contentOverlay={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
 />
 ```
 

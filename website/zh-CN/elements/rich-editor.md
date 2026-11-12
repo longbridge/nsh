@@ -86,14 +86,14 @@ const inLink = () => (revision(), editor.isActive("link"));
 
 链接菜单用 `chain([extendMarkRange("link"), command("setLink", { href })])` 编辑光标所在的链接，用同样的 `extendMarkRange` 之后的 `command("unsetLink")` 移除它。
 
-`contentOverlay` 是应用自己铺在文档上的一层，位于滚动的内容框之内：它里面的内容与文字在同一帧一起移动。它的子元素按内容框的点来摆放，`editor.nodeRect(pos)`（从 `pos` 开始的块的框）和 `editor.coordsAtPos(pos)` 用的就是这套坐标：块边距里的手柄、节点旁的标记。这一层本身不接收按压，它的子元素接收。
+`contentLayer` 是应用自己铺在文档上的一层，位于滚动的内容框之内：它里面的内容与文字在同一帧一起移动。它的子元素按内容框的点来摆放，`editor.nodeRect(pos)`（从 `pos` 开始的块的框）和 `editor.coordsAtPos(pos)` 用的就是这套坐标：块边距里的手柄、节点旁的标记。这一层本身不接收按压，它的子元素接收。
 
 ```tsx
 const box = editor.nodeRect(blockStart);
 
 <RichEditor
   editor={editor}
-  contentOverlay={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
 />
 ```
 
