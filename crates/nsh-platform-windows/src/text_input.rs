@@ -697,11 +697,10 @@ impl InputState {
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
                 dc.BeginDraw();
-                // RichEdit draws in the window's client pixels.
-                dc.SetTransform(
-                    &(Matrix3x2::translation(-ox as f32, -oy as f32)
-                        * Matrix3x2::scale(1.0 / s, 1.0 / s)),
-                );
+                // RichEdit maps its client rectangle through the target's
+                // DPI and draws in DIPs: only the origin comes back to the
+                // view's points (the scale is the DPI's already).
+                dc.SetTransform(&Matrix3x2::translation(-ox as f32 / s, -oy as f32 / s));
                 let drawn = e.draw(dc.as_raw(), bounds);
                 let ended = dc.EndDraw(None, None);
                 dc.SetTarget(None);
