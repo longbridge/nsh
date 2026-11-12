@@ -39985,3 +39985,74 @@ mod part_class_tokens {
         assert_eq!(padding(&c), (px(20.0), px(8.0)));
     }
 }
+#[test]
+fn multiline_inputs_stop_at_their_max_height_and_so_do_their_parents() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("width", StyleValue::Number(200.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 3,
+                before: None,
+            },
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Multiline(true),
+            },
+            style_op(
+                2,
+                &[
+                    ("padding", StyleValue::Number(6.0)),
+                    ("maxHeight", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 3,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let height = |batch: &MountBatch, id| frame_of(batch, id).map(|f| f.size.height.0);
+    // Two lines: under the maximum, the parent around it as tall.
+    c.input_changed(2, &"x".repeat(30), 1);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        (height(&batch, 2), height(&batch, 3)),
+        (Some(44.0), Some(44.0))
+    );
+    // Far more than fits: the input stops at its maximum (its text scrolls
+    // in it), and so does the column around it, sized from its content.
+    c.input_changed(2, &"x".repeat(1000), 2);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        (height(&batch, 2), height(&batch, 3)),
+        (Some(100.0), Some(100.0))
+    );
+    let content = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::InputContent { id: 2, content } => Some(content.size.height.0),
+        _ => None,
+    });
+    assert_eq!(content, Some(88.0));
+}
+
