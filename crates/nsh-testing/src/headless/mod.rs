@@ -715,6 +715,12 @@ impl Headless {
         &self.screen
     }
 
+    /// Forgets the commands the app sent so far ([`Screen::clear_commands`]),
+    /// for a long test that checks only the commands of its later steps.
+    pub fn clear_commands(&mut self) {
+        self.screen.clear_commands();
+    }
+
     /// The engine and the batches not applied yet, for a model of the
     /// test's own.
     pub fn into_parts(self) -> (Engine, Receiver<MountBatch>) {
@@ -2425,6 +2431,43 @@ mod tests {
                     .on_press(move || count.update(|c| *c += 1))
                     .child(text("Add")),
             )
+    }
+
+    /// A button that copies how many times it was pressed.
+    #[component]
+    fn Copier() -> impl IntoElement {
+        let count = signal(0_u32);
+        view()
+            .on_press(move || {
+                count.update(|c| *c += 1);
+                set_clipboard(format!("copied {}", count.get_untracked()));
+            })
+            .child(text("Copy"))
+    }
+
+    #[test]
+    fn cleared_commands_are_forgotten_but_their_effects_stay() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Copier>())).unwrap();
+        app.first_render().unwrap();
+        let copies = |app: &Headless| {
+            app.screen()
+                .commands()
+                .iter()
+                .filter(|(_, c)| matches!(c, Command::SetClipboard(_)))
+                .count()
+        };
+        for _ in 0..3 {
+            app.press("Copy").unwrap();
+        }
+        assert_eq!(copies(&app), 3);
+        app.clear_commands();
+        assert!(app.screen().commands().is_empty());
+        assert!(!app.screen().sent(&Command::SetClipboard("copied 3".into())));
+        // What the commands did stays on screen.
+        assert_eq!(app.screen().clipboard(), Some("copied 3"));
+        app.press("Copy").unwrap();
+        assert_eq!(copies(&app), 1);
+        assert!(app.screen().sent(&Command::SetClipboard("copied 4".into())));
     }
 
     /// A pad under a 10-point strip. A press reports where it was in the

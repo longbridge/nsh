@@ -481,7 +481,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
 Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
-`Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.
+`Screen` (texts in tree order, the commands sent since the last `clear_commands`, `press_target`, `matches`,
+`input_text`) and `Headless`.
 `EngineConfig::new(app)` is the phone-sized config the tests start from. The features add the rest in layers, so a
 Rust app's tests link neither the bundler nor QuickJS: `js` is `nsh test`'s side (below), `bundle` builds a TSX entry
 against given sets in process (`compile_tsx`, `tsx`, `compiler`).
