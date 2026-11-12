@@ -229,12 +229,10 @@ through NSH's hit testing to web views, as real input does):
 before the first bundle).
 
 `nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app's windows
-show without activating (`SW_SHOWNOACTIVATE`) and nothing calls `SetForegroundWindow` (a press, `focus()`, a context
-menu), so the keyboard stays with the app the user types in. The window that would have the keyboard is kept in
-`window.rs` ("Running in the background", `window::foreground`, `window::set_foreground`) without any call that
-activates (no `SetFocus` either): its fields act as on `WM_SETFOCUS` and show their caret, the agent's keys go to it,
-and `WindowState.focused` and `closeOnBlur` follow it. `lifecycle()` stays `inactive` (`WM_ACTIVATEAPP` never comes).
-Mode changes the app asks for (maximize, restore) still go through `ShowWindow` commands that activate.
+show without activating and nothing brings them to the foreground, so the keyboard stays with the app the user types
+in. The window that would have the keyboard is kept in `window.rs` ("Running in the background"): its fields show
+their caret, the agent's keys go to it, and `WindowState.focused` and `closeOnBlur` follow it. `lifecycle()` stays
+`inactive`.
 
 ```sh
 target\debug\nsh test examples\gallery --target windows
