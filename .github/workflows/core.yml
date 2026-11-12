@@ -82,7 +82,9 @@ jobs:
     environment:
       name: ci-debounce
       deployment: false
-    runs-on: ubuntu-24.04
+    # Pull requests from forks run on GitHub's runners, everything else on
+    # the self-hosted ones (docs/dev/tooling.md "Runners").
+    runs-on: ${{ (github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-24.04' || fromJSON('["public", "Linux", "X64"]') }}
     steps:
       - uses: actions/checkout@v4
 
