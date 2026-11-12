@@ -133,7 +133,7 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
     }
     // The focused field's caret shows while the surface has the window's
     // focus; text and input methods come through the input handler.
-    let has_focus = window.is_window_active() && focus.is_focused(window);
+    let has_focus = crate::window::is_active(window, cx) && focus.is_focused(window);
     if crate::text_input::window_focus(surface, has_focus) {
         window.refresh();
     }
