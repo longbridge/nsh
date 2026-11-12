@@ -2087,7 +2087,9 @@ pub enum SubmenuEvent {
 }
 
 /// A menu inside a menu: on the desktops its items are a popup beside its
-/// trigger, opened as the pointer comes over the trigger or presses it; on
+/// trigger, its first item level with the trigger (inside the popup's
+/// padding and border), opened as the pointer comes over the trigger or
+/// presses it; on
 /// touch screens pressing the trigger shows its items in the sheet instead
 /// of the ones around it, with its `back` row first. Its popups take the
 /// menu's `popupClass` / `popupStyle` and its states' looks
