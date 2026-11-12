@@ -1697,6 +1697,64 @@ fn picked_files_reach_js_with_their_names_and_bytes() {
     assert_eq!(asked.filters[0].extensions, ["pdf", "md"]);
 }
 
+const FILE_PICKER_LIMIT: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("");
+setTimeout(async () => {
+  const refused = await Picker.pickFiles({ maxSize: -1 }).catch((e) => e.name);
+  const files = await Picker.pickFiles({ multiple: true, maxSize: 4 });
+  shown.set(
+    `${refused} ` +
+      files.map((f) => `${f.name}:${f.type}:${f.size}:${f.status}:${f.file === null ? "none" : f.file.size}`).join(" "),
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_files_past_the_apps_limit_reach_js_unread() {
+    let (engine, rx) = start(FILE_PICKER_LIMIT);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickFiles { id, request },
+            } = item
+            {
+                asked = Some(request.clone());
+                let read = |name: &str, bytes: &[u8]| {
+                    let mut file = nsh_core::picker::PickedFile::default();
+                    file.name = name.into();
+                    file.data = nsh_core::ImageData::new(bytes.to_vec());
+                    file
+                };
+                // Read, read but past the limit (a platform that could not
+                // tell its size first), and not read.
+                let files = vec![
+                    read("a.txt", b"abcd"),
+                    read("b.txt", b"abcde"),
+                    nsh_core::picker::PickedFile::too_large("clip.mp4", "", 400_000_000),
+                ];
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id: *id, files },
+                );
+            }
+        }
+        shows(
+            batch,
+            "RangeError a.txt:text/plain:4:read:4 b.txt:text/plain:5:tooLarge:none \
+             clip.mp4:video/mp4:400000000:tooLarge:none",
+        )
+    });
+    assert_eq!(asked.expect("a pick").max_size, Some(4));
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
@@ -1953,6 +2011,84 @@ mount(() => (
   </View>
 ));
 "##;
+
+const ORIENTATIONS: &str = r##"import { signal, mount, View } from "nsh";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
+
+type Route = { name: string };
+const a = createNavStack<Route>([{ name: "home" }]);
+const b = createNavStack<Route>([{ name: "more" }]);
+const tab = signal<"a" | "b">("b");
+setTimeout(() => b.push({ name: "viewer" }), 30);
+setTimeout(() => tab.set("a"), 60);
+setTimeout(() => tab.set("b"), 90);
+setTimeout(() => b.pop(), 120);
+
+const page = (route: Route) => (
+  <NavPage
+    title={route.name}
+    android={{
+      supportedOrientations:
+        route.name === "home" ? ["portrait"] : route.name === "viewer" ? ["landscape"] : undefined,
+    }}
+  >
+    <View />
+  </NavPage>
+);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, display: tab() === "a" ? "flex" : "none" }}>
+      <NavStack state={a} style={{ flex: 1 }}>{page}</NavStack>
+    </View>
+    <View style={{ flex: 1, display: tab() === "b" ? "flex" : "none" }}>
+      <NavStack state={b} style={{ flex: 1 }}>{page}</NavStack>
+    </View>
+  </View>
+));
+"##;
+
+/// A page's `supportedOrientations` decide while it is the most recently
+/// shown one with a setting that is displayed: a page kept in a tab that
+/// is not shown (`display: none`) does not.
+#[test]
+fn the_page_shown_decides_the_orientations() {
+    use nsh_core::{ModalConfig as M, platform::Os};
+
+    let (_engine, rx) = start_in(
+        ORIENTATIONS,
+        Environment {
+            os: Os::Android,
+            ..Environment::default()
+        },
+    );
+    let mut sent = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Orientations(bits),
+            } = item
+            {
+                sent.push(*bits);
+            }
+        }
+        sent.len() >= 4
+    });
+    // Tab b shows a page with none (the home page with portrait is in the
+    // hidden tab): nothing sent. The viewer pushed: landscape. Tab a shown:
+    // its home page's portrait. Tab b again: the viewer's. Popped, with tab
+    // a hidden: the app's own.
+    assert_eq!(
+        sent,
+        [
+            M::LANDSCAPE_LEFT | M::LANDSCAPE_RIGHT,
+            M::PORTRAIT,
+            M::LANDSCAPE_LEFT | M::LANDSCAPE_RIGHT,
+            0,
+        ]
+    );
+}
 
 const BACK: &str = r#"import { mount, signal, Text } from "nsh";
 import { BackHandler } from "nsh/mobile";

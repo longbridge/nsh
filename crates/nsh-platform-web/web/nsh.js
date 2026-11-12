@@ -6929,8 +6929,9 @@ class Player {
 
   /**
    * `Picker.pickFiles`: a file input offering `accept` (empty: any file). The
-   * bytes and names stay as they are; a file larger than `maxBytes` is left
-   * out. A cancelled input sends none.
+   * bytes and names stay as they are; a file larger than `maxBytes` is not
+   * read (its `size` tells first): it answers with its name and size only.
+   * A cancelled input sends none.
    */
   pickFiles(request, limit, accept, maxBytes) {
     const app = this.app;
@@ -6947,7 +6948,8 @@ class Player {
       const picked = [];
       for (const file of files.slice(0, limit)) {
         if (file.size > maxBytes) {
-          console.warn(`nsh: the picked ${file.name} is left out: larger than ${maxBytes} bytes`);
+          console.warn(`nsh: the picked ${file.name} is not read: larger than ${maxBytes} bytes`);
+          picked.push({ name: file.name, type: file.type, bytes: null, size: file.size, lastModified: file.lastModified });
           continue;
         }
         try {
@@ -6964,6 +6966,11 @@ class Player {
       if (app !== this.app) return;
       this.call((w) => {
         for (const p of picked) {
+          if (p.bytes === null) {
+            this.withStrings([p.name, p.type], (np, nl, tp, tl) =>
+              w.nsh_picked_too_large(np, nl, tp, tl, p.size, p.lastModified));
+            continue;
+          }
           this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
             w.nsh_picked_file(np, nl, tp, tl, bp, bl, 0, 0, p.lastModified));
         }

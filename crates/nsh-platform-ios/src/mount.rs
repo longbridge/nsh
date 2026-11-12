@@ -636,6 +636,12 @@ pub(crate) struct Mounter {
     /// catch up when it ends (UIKit breaks transitions that start while
     /// another one is running).
     deferred_stacks: Vec<NodeId>,
+    /// The orientations the root was last given, until they are applied:
+    /// after the batch's pushes and pops, and after any transition under
+    /// way (a turn started during a push can make UIKit cancel the push).
+    orientations: Option<u8>,
+    /// Whether applying them waits for a transition to end.
+    orientations_waiting: bool,
     /// Screens whose header changed in the current batch.
     dirty_headers: Vec<NodeId>,
     /// Modals to present or dismiss at the end of the current batch.
@@ -757,6 +763,8 @@ impl Mounter {
             dirty_stacks: Vec::new(),
             bottom_bar_dirty: false,
             deferred_stacks: Vec::new(),
+            orientations: None,
+            orientations_waiting: false,
             dirty_headers: Vec::new(),
             dirty_modals: Vec::new(),
             asset_base: asset_base.clone(),
@@ -813,6 +821,7 @@ impl Mounter {
         }
         self.created.clear();
         self.finish_navigation();
+        self.apply_orientations();
         if animation_changed {
             self.apply_animations();
         }
@@ -944,6 +953,34 @@ impl Mounter {
             Native::Text(text) => Some(text.clone()),
             _ => None,
         }
+    }
+
+    /// How far scroll view `id` can still scroll back towards its start
+    /// and on towards its end along its axis (`None`: it is no scroll
+    /// view).
+    #[cfg(feature = "dev")]
+    pub(crate) fn scroll_room(&self, id: NodeId, horizontal: bool) -> Option<(CGFloat, CGFloat)> {
+        let Native::Scroll(scroll) = &self.slot(id)?.native else {
+            return None;
+        };
+        let inset = scroll.adjustedContentInset();
+        let (offset, content, size) = (
+            scroll.contentOffset(),
+            scroll.contentSize(),
+            scroll.bounds().size,
+        );
+        let (start, end) = if horizontal {
+            (
+                offset.x + inset.left,
+                content.width + inset.right - size.width - offset.x,
+            )
+        } else {
+            (
+                offset.y + inset.top,
+                content.height + inset.bottom - size.height - offset.y,
+            )
+        };
+        Some((start.max(0.0), end.max(0.0)))
     }
 
     /// The text input `id` holds (`None`: it is no input).
@@ -1817,6 +1854,9 @@ impl Mounter {
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
+            (Command::Orientations(bits), _) if id == nsh_core::ROOT_ID => {
+                self.orientations = Some(bits);
+            }
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
@@ -3608,6 +3648,63 @@ impl Mounter {
         if self.deferred_stacks.contains(&id) {
             Self::finish_deferred(&self.shared, id);
         }
+    }
+
+    /// Applies the orientations the root was last given, once no stack is
+    /// pushing or popping and nothing is being presented: UIKit can cancel
+    /// a push the screen starts turning during, which reads as the user
+    /// going back.
+    fn apply_orientations(&mut self) {
+        let Some(bits) = self.orientations else {
+            return;
+        };
+        if self.orientations_waiting {
+            return;
+        }
+        let Some(root) = self.ui_view(nsh_core::ROOT_ID) else {
+            return;
+        };
+        let presenting = root
+            .window()
+            .and_then(|w| w.rootViewController())
+            .and_then(|c| c.transitionCoordinator());
+        let moving = presenting.or_else(|| {
+            self.views
+                .iter()
+                .flatten()
+                .find_map(|slot| match &slot.native {
+                    Native::Stack(stack) => stack.nav.transitionCoordinator(),
+                    _ => None,
+                })
+        });
+        if let Some(coordinator) = moving {
+            self.orientations_waiting = true;
+            let shared = self.shared.clone();
+            let done = RcBlock::new(
+                move |_: NonNull<
+                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                >| {
+                    // On the next turn, as the stacks catch up
+                    // (`finish_deferred`): the coordinator outlives this
+                    // callback, and a push they make waits its turn too.
+                    let shared = shared.clone();
+                    DispatchQueue::main().exec_async(move || {
+                        let mtm = MainThreadMarker::new().expect("main queue");
+                        if let Some(m) = shared.get(mtm).borrow_mut().as_mut() {
+                            m.orientations_waiting = false;
+                            m.apply_orientations();
+                        }
+                    });
+                },
+            );
+            // Refused when the transition is already ending.
+            if coordinator.animateAlongsideTransition_completion(None, Some(&done)) {
+                return;
+            }
+            self.orientations_waiting = false;
+        }
+        self.orientations = None;
+        crate::system::set_orientations(bits, &root);
     }
 
     /// Applies the changes stack `id` deferred during a transition, on the

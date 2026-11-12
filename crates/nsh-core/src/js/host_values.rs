@@ -7,8 +7,8 @@ use crate::{
     AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
     CellSlot, EdgeInsets, HeaderItem, HeaderItemContent, HeaderSystemItem, ImageScales,
     ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop, MacOsBackdropBlending,
-    MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, RevealOptions, ScrollAlignment,
-    ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
+    MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop, RevealOptions, ScreenProp,
+    ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
     element::{ElementTarget, TsTypes},
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
@@ -884,8 +884,19 @@ pub(crate) fn keyboard_taps<I: HostInput>(input: &I, _: &mut HostCx) -> Option<S
     }))
 }
 
-/// `supportedOrientations`: the orientation names.
+/// A dialog's `supportedOrientations`: the orientation names.
 pub(crate) fn orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ModalProp> {
+    Some(ModalProp::Orientations(orientation_bits(input)))
+}
+
+/// A page's `supportedOrientations`: the orientation names.
+pub(crate) fn page_orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ScreenProp> {
+    Some(ScreenProp::Orientations(orientation_bits(input)))
+}
+
+/// The [`ModalConfig::PORTRAIT`] bits of a list of orientation names; a
+/// name it does not know adds none.
+fn orientation_bits<I: HostInput>(input: &I) -> u8 {
     let mut bits = 0;
     for name in input.items() {
         bits |= match name.as_string().as_deref() {
@@ -897,7 +908,7 @@ pub(crate) fn orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Mo
             _ => 0,
         };
     }
-    Some(ModalProp::Orientations(bits))
+    bits
 }
 
 /// A shader's `uniforms`: `{ name: value }`, a value a number, a CSS color,

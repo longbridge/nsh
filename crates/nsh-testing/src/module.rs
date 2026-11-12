@@ -945,6 +945,10 @@ pub struct PickRequest {
     pub format: String,
     /// The file types offered (`pickFiles`); empty: any.
     pub filters: Vec<PickFilter>,
+    /// The largest file read, in bytes (`pickFiles`' `maxSize`, at most
+    /// 512 MiB); `null` for images. A larger file the handler gives answers
+    /// with its name and size only.
+    pub max_size: Option<f64>,
 }
 
 /// A group of file types a pick offers, as a test reads it.
@@ -972,6 +976,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                 }
                 .into(),
                 filters: Vec::new(),
+                max_size: None,
             },
             Pick::Files(request) => PickRequest {
                 kind: "files".into(),
@@ -988,6 +993,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                         extensions: filter.extensions.clone(),
                     })
                     .collect(),
+                max_size: Some(request.size_limit() as f64),
             },
         }
     }

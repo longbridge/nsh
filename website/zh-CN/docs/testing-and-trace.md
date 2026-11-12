@@ -405,7 +405,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.forward()` | 像浏览器的前进按钮那样在浏览器历史中前进。仅限 `--target web`；其他情况下以 `ERR_NSH_TEST_UNSUPPORTED` reject。 |
 | `app.onDialog(handler)` | 回答应用之后弹出的对话框（`Alert.alert`、操作表）：`handler` 接收对话框（`title`、`message`、`buttons`、`cancelable`、`sheet`），返回要按的按钮文字，返回 `null` 则不按按钮直接关闭。 |
 | `app.dialogs()` | 应用弹出过的对话框，按顺序排列。 |
-| `app.onPick(handler)` | 回答应用之后发起的选取（`Picker.pickImages`、`Picker.pickFiles`）：`handler` 接收这次选取的要求（`kind`：`"images"` 或 `"files"`，`multiple`、`limit`、`maxDimension`、`quality`、`format`、`filters`），返回用户选中的文件（`{ name, type?, data: Uint8Array }`，原样交给应用），返回 `null` 则取消。没有 handler 时选取都会被取消。仅限无界面运行。 |
+| `app.onPick(handler)` | 回答应用之后发起的选取（`Picker.pickImages`、`Picker.pickFiles`）：`handler` 接收这次选取的要求（`kind`：`"images"` 或 `"files"`，`multiple`、`limit`、`maxDimension`、`quality`、`format`、`filters`、`maxSize`），返回用户选中的文件（`{ name, type?, data: Uint8Array }`，原样交给应用；超过 `maxSize` 的文件到应用时不带内容，`status` 为 `"tooLarge"`），返回 `null` 则取消。没有 handler 时选取都会被取消。仅限无界面运行。 |
 | `app.picks()` | 应用发起过的选取，按顺序排列。 |
 | `app.hear(text)` | 用户对正在运行的语音会话（`Speech.start`）说出 `text`：它的 `result` 把 `text` 报告为到目前为止的完整转写。仅限无界面运行。 |
 | `app.endSpeech(error?)` | 结束正在运行的语音会话：带 `error`（`"no-speech"`、`"network"` 等）时会话失败，否则先到达最后一个最终结果再到达 `end`，什么都没听到时为 `no-speech`。仅限无界面运行。 |
@@ -538,7 +538,7 @@ test("calls reach the page's host", async () => {
 数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
 - 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是把 sheet 往下滑，菜单、弹出框或 `Sheet` 打开时是 VoiceOver 的退出手势，否则点标题栏的返回按钮，Android 上是返回键）；
-- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；
+- 不在屏幕上的视图会先被滚动到可见，每次一个手势；在触摸屏上，手指像用户那样落在页面本身接收拖动的地方，避开跟随拖动的视图（滑块、绘图区域）；滚动视图已经到头时，贴在它边缘的视图就地操作，不会把滚动视图拖过头（那样会触发下拉刷新或关掉页面 sheet）；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
 - `app.screenshot(path)` 截取窗口，`app.window(id).screenshot(path)` 截取应用的其他窗口。

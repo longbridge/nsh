@@ -286,6 +286,10 @@ define_class!(
             if !own.is_empty() {
                 return own;
             }
+            // The page's under it, as the root controller answers.
+            if let Some(page) = crate::system::page_orientations() {
+                return page;
+            }
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), supportedInterfaceOrientations] }
         }
@@ -1821,27 +1825,10 @@ impl ModalHost {
         }
         let c = self.config;
         let controller = &self.controller;
-        let mut mask = UIInterfaceOrientationMask::empty();
-        for (bit, m) in [
-            (ModalConfig::PORTRAIT, UIInterfaceOrientationMask::Portrait),
-            (
-                ModalConfig::PORTRAIT_UPSIDE_DOWN,
-                UIInterfaceOrientationMask::PortraitUpsideDown,
-            ),
-            (
-                ModalConfig::LANDSCAPE_LEFT,
-                UIInterfaceOrientationMask::LandscapeLeft,
-            ),
-            (
-                ModalConfig::LANDSCAPE_RIGHT,
-                UIInterfaceOrientationMask::LandscapeRight,
-            ),
-        ] {
-            if c.orientations & bit != 0 {
-                mask |= m;
-            }
-        }
-        controller.ivars().orientations.set(mask);
+        controller
+            .ivars()
+            .orientations
+            .set(crate::system::orientation_mask(c.orientations));
         controller.set_flags(&c);
         // Full screen, the modal has no look of its own: the app's popup
         // and backdrop show over what is behind. Sheets are the system's.

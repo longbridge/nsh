@@ -157,6 +157,9 @@ pub struct Screen {
     /// The views under the mouse that care (`input::hoverable`), innermost
     /// first.
     hovered: Vec<NodeId>,
+    /// Views a removal took out of the hover or the keyboard focus, with
+    /// their states since, for the engine ([`Screen::take_restated`]).
+    restated: Vec<(NodeId, u16)>,
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
@@ -453,12 +456,14 @@ impl Screen {
                 }
             }
             MountItem::Remove { id } => {
+                self.taken_out(*id);
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
             }
             MountItem::Delete { id } => {
+                self.taken_out(*id);
                 self.drop_spans(*id);
                 self.canvas(*id, &[]);
                 self.detach(*id);
@@ -468,9 +473,6 @@ impl Screen {
                 self.closed.remove(id);
                 self.forget_window(*id);
                 self.loading_images.remove(id);
-                if self.focused == Some(*id) {
-                    self.focused = None;
-                }
             }
             MountItem::Image { id, source, .. } => match source {
                 Some(source) => {
@@ -869,6 +871,44 @@ impl Screen {
             .and_then(|text| text.span_at(start))
             .map(|span| span.style)
             .ok_or_else(|| crate::failure::not_found("span", selector))
+    }
+
+    /// View `id` leaves the tree with what it holds: none of it is under
+    /// the mouse or has the focus any more, and it hears no leave or blur
+    /// for that, as a removed DOM element does not. A removed view may live
+    /// on (a JS cycle keeps it until a collection) while its component is
+    /// gone, whose handlers must not run.
+    fn taken_out(&mut self, id: NodeId) {
+        let mut hovered = std::mem::take(&mut self.hovered);
+        hovered.retain(|&v| {
+            let inside = self.within(v, id);
+            if inside {
+                self.clear_state(v, nsh_core::tailwind::state::HOVERED);
+            }
+            !inside
+        });
+        self.hovered = hovered;
+        if self.focused.is_some_and(|v| self.within(v, id)) {
+            self.focused = None;
+        }
+        if let Some(key) = self.key_focus.filter(|&v| self.within(v, id)) {
+            self.key_focus = None;
+            self.clear_state(key, nsh_core::tailwind::state::FOCUSED);
+        }
+    }
+
+    fn clear_state(&mut self, id: NodeId, bit: u16) {
+        if let Some(states) = self.set_state(id, bit, false) {
+            self.restated.push((id, states));
+        }
+    }
+
+    /// The views a removal took out of the hover or the keyboard focus
+    /// since the last call, still alive, with their states now.
+    pub(crate) fn take_restated(&mut self) -> Vec<(NodeId, u16)> {
+        let mut restated = std::mem::take(&mut self.restated);
+        restated.retain(|(id, _)| self.nodes.contains_key(id));
+        restated
     }
 
     fn detach(&mut self, id: NodeId) {
@@ -2033,8 +2073,8 @@ impl Screen {
     }
 
     /// `id`, or its nearest ancestor, that `test` accepts.
-    /// The scroll views around `id` (not it), innermost first, with whether
-    /// each scrolls horizontally.
+    /// The scroll views around `id` (not it) up to the modal it is in,
+    /// innermost first, with whether each scrolls horizontally.
     #[cfg(feature = "agent")]
     pub(crate) fn scroll_ancestors(&self, id: NodeId) -> Vec<(NodeId, bool)> {
         let mut out = Vec::new();
@@ -2045,6 +2085,11 @@ impl Screen {
             };
             if let Some(scroll) = &view.scroll {
                 out.push((id, scroll.horizontal));
+            }
+            // A modal shows over the window wherever it is in the tree:
+            // the scroll views around it there do not move it.
+            if view.kind == Some(ViewKind::Modal) {
+                break;
             }
             at = view.parent;
         }
@@ -2259,7 +2304,6 @@ impl Screen {
 
     /// View `id`'s interaction states with `bit` set (or cleared), when it
     /// tracks it and they change.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_state(&mut self, id: NodeId, bit: u16, on: bool) -> Option<u16> {
         let view = self.nodes.get_mut(&id)?;
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
@@ -2895,6 +2939,44 @@ mod tests {
         // Popped: the screen under it is the one laid out.
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(ids(&screen), [2, 4, 6]);
+    }
+
+    #[test]
+    fn a_removed_subtree_leaves_the_hover_and_the_focus_without_a_word() {
+        use nsh_core::tailwind::state::{FOCUSED, HOVERED};
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::View),
+            create(6, ViewKind::Input),
+            create(8, ViewKind::View),
+            MountItem::TrackStates {
+                id: 4,
+                states: HOVERED,
+            },
+            insert(1, 2),
+            insert(2, 4),
+            insert(4, 6),
+            insert(4, 8),
+        ]));
+        screen.set_hovered(vec![4, 2]);
+        screen.set_state(4, HOVERED, true);
+        screen.set_focused(Some(6));
+        screen.set_key_focus(Some(8));
+        screen.set_state(8, FOCUSED, true);
+        // Removed, kept alive (a JS cycle holds it): it and what it holds
+        // leave the hover and the focus, their states cleared.
+        screen.apply(&batch(vec![MountItem::Remove { id: 4 }]));
+        assert_eq!(screen.set_hovered(vec![2]), [2]);
+        assert_eq!(screen.focused(), None);
+        assert_eq!(screen.key_focus(), None);
+        assert_eq!(screen.take_restated(), [(4, 0), (8, 0)]);
+        assert!(!screen.in_tree(6));
+        assert!(screen.in_tree(2));
+        // Deleted: nothing left to report on.
+        screen.apply(&batch(vec![MountItem::Delete { id: 2 }]));
+        assert_eq!(screen.set_hovered(Vec::new()), Vec::<NodeId>::new());
+        assert_eq!(screen.take_restated(), []);
     }
 
     #[test]

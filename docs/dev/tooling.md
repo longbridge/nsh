@@ -343,7 +343,10 @@ report it:
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
-  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down);
+  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down); a view
+  removed or deleted leaves the hover, the focus and the keyboard focus with its subtree, its states cleared without
+  a `MouseLeave` or `Blur` (`Screen::taken_out`), as a removed DOM element: JS may keep a removed view alive
+  (a cycle through its ref) after its component is gone;
 - `right_click`, `choose_menu_item`, `close_menu` (`headless/menus.rs`): on a desktop environment the match, or the
   nearest view around it listening, hears `ContextMenu`; the menu the app then shows (`Menu.popup`,
   `DesktopCommand::PopupMenu`) is the model's (`Screen::menu`, read through `menu.rs`: its actions by label, a
@@ -622,8 +625,9 @@ makes their window point the agent's), so the tests run the same on any display.
 The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network; the dev hosts link it). Its
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
-selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+selector on the model, scrolls the view into view when it is not (the innermost scroll view around it, inside the modal it is in, that
+hides it and can still move it, a gesture at a time: one already at the end a gesture would move it towards,
+`Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
 the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
