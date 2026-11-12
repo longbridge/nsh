@@ -857,13 +857,20 @@ pub(crate) fn close_main_window(key: u64) -> bool {
             .borrow()
             .as_ref()
             .filter(|running| running.view.surface().key() == key)
-            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+            .map(|running| {
+                (
+                    running.window.clone(),
+                    running.keep_alive_on_close,
+                    running.view.surface().clone(),
+                )
+            })
     });
-    let Some((window, keep_alive)) = target else {
+    let Some((window, keep_alive, surface)) = target else {
         return false;
     };
     if keep_alive {
-        window.orderOut(None);
+        // Hidden, in full screen once it has left full screen.
+        crate::window::hide(&surface, nsh_core::ROOT_ID, &window);
     } else {
         window.close();
     }
