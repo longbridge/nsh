@@ -1994,6 +1994,21 @@ impl App {
         step(&this, move |app| app.right_click(&selector)).await
     }
 
+    /// An input method composes `text` in the input `selector` names (or
+    /// the first input in it), as a user typing pinyin or kana sees it: the
+    /// input takes the focus and `text` shows marked at the caret, in
+    /// place of what it composed, without changing its value
+    /// (`onCompositionChange`); the input is laid out with it. An empty
+    /// `text` ends the composition with nothing committed: end it so before
+    /// the next step on the input. Headless and on macOS for now.
+    pub async fn compose(
+        this: Instance<Self>,
+        selector: String,
+        text: String,
+    ) -> Result<(), JsError> {
+        step(&this, move |app| app.compose(&selector, &text)).await
+    }
+
     /// Pastes `content` into the input `selector` names (or the first input
     /// in it), as the user's paste does with it on the clipboard: the input
     /// takes the focus and hears `onPaste` (`files` are paths whose bytes
@@ -2399,11 +2414,29 @@ impl App {
         step(&this, move |app| app.open_with_url(&url)).await
     }
 
+    /// The images whose source is `url` fail to load from now on, those
+    /// loading now included: each reports the failure as on a device
+    /// (`onError`), so a test checks what the app shows instead (an
+    /// avatar's initials, a placeholder). `url` is matched whole and `*`
+    /// in it matches anything (`"https://cdn.example.com/avatars/*"`), as
+    /// `open`'s `network` routes are; a bundled image's is
+    /// `asset:/<path>`. Then waits until the app is quiet. Headless only.
+    pub async fn fail_images(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.fail_images(&url)).await
+    }
+
     /// Moves the app to `state`, as the system does when the user leaves it
     /// (`"background"`), switches to another app or window (`"inactive"`)
     /// and comes back (`"active"`); `lifecycle()` follows. Headless only.
     pub async fn set_lifecycle(this: Instance<Self>, state: Lifecycle) -> Result<(), JsError> {
         step(&this, move |app| app.set_lifecycle(state.into())).await
+    }
+
+    /// Wakes the system from sleep, as when the user opens a laptop's lid:
+    /// `wakeCount()` counts one more, and `lifecycle()` stays as it was.
+    /// Headless only.
+    pub async fn wake(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.wake()).await
     }
 
     /// Gives the user the locale settings `settings` names
