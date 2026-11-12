@@ -339,6 +339,7 @@ impl Rv {
                     KeyOptions {
                         when: When::Always,
                         repeat: spec.repeat,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| rv.key(&event),

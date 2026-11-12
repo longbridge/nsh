@@ -120,7 +120,9 @@ crates/
                        the test agent's platform part (`agent.rs`: `nsh test --target linux`) (docs/dev/linux.md)
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
-  nsh-platform-apple/  Shared by the macOS and iOS backends: the Speech recognizer and the notification center
+  nsh-platform-apple/  Shared by the macOS and iOS backends: the Speech recognizer, the notification center, and
+                       `unified_log`, the logger of the release runners and the iOS SDK (the unified log; stderr too
+                       wherever it goes but /dev/null)
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
                        (typeset on the engine thread), desktop input and scroll views as on Linux, navigation, video, web views,
                        native components, AppView, standalone app; feature `dev` as above (docs/dev/macos.md)
@@ -394,7 +396,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change until the first release recorded, which is not chosen yet (0.3.0 and 0.4.0 are not recorded). A new API lands with its test, a case in
+  change until the first release recorded, which is not chosen yet (0.3.0, 0.4.0 and 0.5.0 are not recorded). A new API lands with its test, a case in
   `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **Native views and interaction, app-owned design.** Common controls have one cross-platform home in `nsh/base`.
   A system-styled version of a common control does not justify another public component in a platform module.
@@ -449,7 +451,9 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   - Mouse events are the DOM's and GPUI's: `onMouseEnter` / `onMouseMove` / `onMouseLeave`, each with a
     `MouseEvent { position, pagePosition, modifiers, pressedButton }`; `onMouseMove` fires with or without a button
     down. `onWheel` passes `WheelEvent { position, pagePosition, delta, deltaMode, modifiers }` (GPUI's
-    `ScrollWheelEvent`, the DOM's sign); a listener nearer than the scroll views under the pointer takes the wheel.
+    `ScrollWheelEvent`, the DOM's sign); a listener nearer than the scroll views under the pointer takes the wheel,
+    and one scroll stays where it went (`input::WheelLatch`). `onPinch` passes a touchpad pinch's
+    `PinchEvent { position, pagePosition, delta, phase, modifiers }` (GPUI's `on_pinch`), routed the same way.
     State styles keep CSS's names (`hover:`, `hoverStyle`).
   - Returns: an object, never a bare value that may need a second field (`AlertDialog.show` → `{ action }`,
     animations → `{ finished }`); yes / no questions (`hasText()`, `canUndo()`) return booleans.
@@ -581,6 +585,13 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
   (`.github/pull_request_template.md`).
 - A PR review presents, in order: the PR's purpose (the problem and the scope of the changes), whether the requirement
   and approach are reasonable, then concrete findings, the validation performed and its limits.
+- **Scope comes first.** NSH stays a lightweight GUI framework, not an all-in-one platform. Fixes, performance,
+  refinements of existing behavior and options of an existing component that are common in its domain are welcome;
+  a new feature an app can build in Rust (its own crate, native components, platform APIs) or with existing APIs,
+  that one app needs, or that does not work the same on every platform is not accepted, and one that would need a new
+  section or page of the website's documentation opens a new direction, the hardest to accept (`CONTRIBUTING.md`
+  "Scope: what NSH accepts"). A PR adding a new feature without a maintainer's agreement on an issue is flagged before its
+  code is reviewed, and its review recommends closing it rather than polishing it.
 
 ## Performance rules (the project's first priority)
 
@@ -626,9 +637,8 @@ CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` install
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
 `main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
-directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The release and the
-website's deployment run on the organization's self-hosted runners, never pull requests (`docs/dev/tooling.md`
-"Self-hosted runners").
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. Every workflow,
+the release and the website's deployment included, runs on GitHub's runners (`docs/dev/tooling.md` "Runners").
 
 ## Parallel agents
 

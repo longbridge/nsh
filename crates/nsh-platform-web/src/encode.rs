@@ -768,8 +768,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = &a.label {
         let _ = write!(s, ",\"label\":{}", json_str(l));
     }
-    if let Some(h) = &a.hint {
-        let _ = write!(s, ",\"hint\":{}", json_str(h));
+    // `aria-description`: the description, then the hint.
+    if let Some(h) = a.help_text(None) {
+        let _ = write!(s, ",\"hint\":{}", json_str(&h));
     }
     // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
     let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
@@ -802,6 +803,13 @@ fn props_json(p: &ViewProps) -> String {
     }
     if let Some(l) = a.level {
         let _ = write!(s, ",\"level\":{l}");
+    }
+    // The views it names (`aria-activedescendant`, `aria-controls`).
+    if let Some(id) = a.active_descendant {
+        let _ = write!(s, ",\"activeDescendant\":{id}");
+    }
+    if let Some(id) = a.controls {
+        let _ = write!(s, ",\"controls\":{id}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
@@ -1611,7 +1619,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         }
         // `nsh.js` `pickFiles`: the request, the limit, the extensions
         // offered as an input's `accept` (empty: any file), the largest file
-        // read.
+        // read (a larger one answers with its name and size only).
         Command::PickFiles {
             id: request,
             request: asked,
@@ -1627,7 +1635,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(*request)
                 .num(asked.limit)
                 .str(&accept)
-                .num(nsh_core::picker::MAX_PICKED_FILE_BYTES as f64)
+                .num(asked.size_limit() as f64)
                 .end();
         }
         // The id is written whole (`num` rounds); the page answers with
@@ -1641,6 +1649,15 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(id)
                 .str("hostCall")
                 .raw(&request.to_string())
+                .str(name)
+                .raw(&args.to_string())
+                .end();
+        }
+        // `nsh.js` `hostPost`: nothing comes back.
+        Command::HostPost { name, args } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostPost")
                 .str(name)
                 .raw(&args.to_string())
                 .end();

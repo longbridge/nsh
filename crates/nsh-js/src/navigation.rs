@@ -179,6 +179,7 @@ export interface NavPageProps extends NavPageHostProps {
   /** Finds the page in tests and `nsh test --trace`. */
   testID?: string;
   ios?: IOSNavPageHostProps;
+  android?: AndroidNavPageHostProps;
   /** The app's header on the desktops and the web, which have no system
    * header: placed at the top of the page, as wide as the page and as tall
    * as it lays out, with the content below it. NSH draws nothing else
@@ -221,6 +222,9 @@ export interface DialogProps extends DialogHostProps {
   animation?: "slide" | "fade" | "none";
   /** What screen readers call it as the focus enters it: its title. */
   accessibilityLabel?: string;
+  /** What screen readers read after its name: its message (an alert
+   * dialog's "This can't be undone."). */
+  accessibilityDescription?: string;
   /** What it is for screen readers (default `"dialog"`): `"alertdialog"`
    * for one that asks the user to confirm something or tells them
    * something urgent. */

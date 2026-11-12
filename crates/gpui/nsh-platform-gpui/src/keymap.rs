@@ -81,7 +81,10 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent, editing: bool) -> boo
     }
     // Only the bindings of the window the key is in (and JS's) take it.
     let window = surface.input_root().id();
-    let found = table.find_in(window, keystroke, editing, repeat);
+    // Return and Space on a focused control fire only the focus' own
+    // bindings; else the control takes them (`key_focus::key`).
+    let control = !editing && crate::key_focus::on_control(surface);
+    let found = table.find_at(window, keystroke, editing, control, repeat);
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,

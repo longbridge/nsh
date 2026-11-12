@@ -9,7 +9,8 @@
 // `open` goes from false to true. Dialogs carry a `testID` (spread, as
 // `Dialog` declares none) for the script to find them. A dialog is a
 // `"dialog"` for screen readers unless its `role` says otherwise
-// (`"alertdialog"`), named by its `accessibilityLabel`. Its script checks
+// (`"alertdialog"`), named by its `accessibilityLabel` and described by its
+// `accessibilityDescription`. Its script checks
 // each.
 import { Text, View, signal } from "nsh";
 import { Button, Dialog } from "nsh/base";
@@ -81,6 +82,7 @@ function App() {
         open={guarded()}
         role="alertdialog"
         accessibilityLabel="Guarded"
+        accessibilityDescription="Only the app closes it."
         closeOnEscape={false}
         closeOnBackdropPress={false}
         closeOnSwipe={false}

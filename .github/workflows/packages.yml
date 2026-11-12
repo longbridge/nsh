@@ -102,10 +102,7 @@ jobs:
     name: Update Homebrew tap
     needs: check
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    # Main's runs take the organization's self-hosted runners (docs/dev/tooling.md
-    # "Self-hosted runners"); pull requests and merge-queue runs, whose code is
-    # anyone's, stay on GitHub's.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux", "Packager"]') }}
+    runs-on: ubuntu-latest
     # Serialize writers, including manual reruns, then check the tap's current
     # version so an older run cannot overwrite a newer published formula.
     concurrency:

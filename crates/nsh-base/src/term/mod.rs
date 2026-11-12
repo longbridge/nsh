@@ -205,6 +205,7 @@ impl Term {
                     KeyOptions {
                         when: nsh_core::keymap::When::Always,
                         repeat: true,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| {
