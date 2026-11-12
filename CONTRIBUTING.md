@@ -9,6 +9,44 @@ Please submit **one PR that does one thing**. It makes your change easier to rev
 Before writing code, read [AGENTS.md](AGENTS.md) (the project rules, commands and conventions) and the page of
 [docs/dev](docs/dev/README.md) for the area you change.
 
+## Scope: what NSH accepts
+
+NSH is a lightweight, cross-platform GUI framework: native views, layout, text, input, animation, the reactive
+runtime, unstyled base components, and the toolchain that builds, tests, packages and delivers the apps made with
+them. It is not an all-in-one application platform in the manner of Electron. Small binaries, fast builds and fast
+start-up are part of its design, and every feature added to NSH costs all of them for every app, including the
+apps that never use it.
+
+Apps extend NSH in Rust. An app's own crate can export Rust components, modules and classes to its TSX, register
+native components, and call any platform API directly ([Building with Rust](website/docs/rust.md),
+[Native components](website/docs/native-components.md), [Platform extensions](website/docs/platform-extensions.md)).
+What one app or a few apps need belongs there, or in a community crate, not in NSH. The tools NSH already ships for
+delivering apps (packaging, signing, updates) exist because every app needs to be delivered; they are not precedent
+for adding other features.
+
+A new feature is accepted only when all of these hold:
+
+- **Apps cannot build it themselves**, with NSH's existing APIs or through the Rust extension points above. A
+  WebView's page and the app already talk through `postMessage` / `onMessage` and `evaluate`, for example, so a flow
+  that can go through that bridge needs no new API.
+- **Many apps need it**, not one app's scenario.
+- **It works the same on every platform NSH supports**, with a complete design. An API whose operations fail or do
+  nothing on some platforms, or that covers a few cases of a larger problem, is not accepted, even with documented
+  "unsupported" errors.
+- **Its cost is measured and justified**: dependencies, binary size, build time and start-up time.
+
+Not accepted, unless a complete design meets every point above: wrappers of individual platform APIs for specific
+scenarios (WebView cookies, downloads, page capture, developer tools and similar controls), features only some
+platforms can support, and options that serve one app.
+
+Before writing a new feature, open an issue that answers these points and wait for a maintainer to agree. A pull
+request that adds a feature without that agreement may be closed without a review of its code, however well it is
+written. Bug fixes, performance work, documentation and completing what NSH already has on every platform need no
+prior issue.
+
+Reviewers, people and AI agents alike, judge scope first: a pull request that adds public API or a dependency is
+checked against this section before its implementation is reviewed.
+
 ## Component design standards
 
 Native Shell provides native views, rendering, animation and interaction. Its goal is not to reproduce the default
@@ -106,7 +144,7 @@ contributor is always responsible for the final result.
 
 Before opening a pull request, please make sure that:
 
-- The problem is real and the change is necessary.
+- The problem is real and the change is necessary, and a new feature is within [NSH's scope](#scope-what-nsh-accepts).
 - The API and implementation follow the existing patterns of NSH, and the rules in [AGENTS.md](AGENTS.md).
 - The code has been reviewed by you and properly tested: tests at the layer that owns the behavior, `nsh test --trace` for
   the JS runtime, engine and core, and a run on a simulator, emulator or device for platform code (screenshots or
