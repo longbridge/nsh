@@ -18,7 +18,10 @@
 //! leaves, so nothing visible is late. The rest come in later turns,
 //! nearest the viewport first, at most [`PACE_VIEWS`] views or
 //! [`PACE_TIME`] a turn; the core asks for a display frame while some
-//! wait ([`Core::has_paced_mounts`]).
+//! wait ([`Core::has_paced_mounts`]). A list's cell that waits has made
+//! none of its views: the list places them with the cell (`update_lists`),
+//! so they are ranked by where they are when the cell is made, not last
+//! as views without a frame are.
 //!
 //! Content culling's own window ([`Core::sync_culled`]) keeps the same
 //! budget: the overscan it makes past [`PACE_AFTER`] waits for later turns
