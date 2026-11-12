@@ -6762,6 +6762,12 @@ impl<M: TextEngine> Core<M> {
             {
                 self.fitted_pending.push(key);
             }
+            // Beside its frame, an input takes its content box from the
+            // layout and a scroll view its extent; made after it was laid
+            // out, nothing lays it out again to send them.
+            if matches!(kind, Kind::Input | Kind::Scroll) {
+                self.emit_frames(key);
+            }
         }
         let projected = self.nodes[key as usize].projected;
         if self.mount_projected && projected != 0 {
