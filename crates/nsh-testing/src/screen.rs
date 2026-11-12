@@ -1198,6 +1198,31 @@ impl Screen {
         presented
     }
 
+    /// The modals presented since the last [`Screen::take_presented`],
+    /// which it leaves for that call.
+    pub(crate) fn presenting(&self) -> Vec<NodeId> {
+        let mut presented = self.presented.clone();
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether view `id` is still in the tree: attached up to the root,
+    /// with nothing on the way a back closed natively.
+    pub(crate) fn in_tree(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Whether `id` is the root of a window of the app's own.
     pub(crate) fn is_window(&self, id: NodeId) -> bool {
         self.windows.iter().any(|(root, _)| *root == id)
