@@ -685,6 +685,12 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             _ => -1,
                         });
                     }
+                    // `Mounter.orientations` reads the `ModalConfig`
+                    // bits (0: the app's own).
+                    Command::Orientations(bits) => {
+                        e.int(54);
+                        e.int(i32::from(bits));
+                    }
                     Command::ImageInfo { id, uri } => {
                         e.int(19);
                         e.int(id as i32);
