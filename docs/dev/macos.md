@@ -501,7 +501,13 @@ view loop alongside native text inputs (`input::is_key_stop`, from
 card). Disabled accessibility state, removed press listeners (of a view not
 `focusable={true}`), `focusable={false}` (a backdrop that closes an overlay),
 hidden views and views leaving the tree exclude a stop (a focused one gives
-the focus to the root).
+the focus to the root). Hidden includes what the core hides without hiding an
+NSView, which AppKit's key view loop would still stop at: a view with no area
+(each view of a `display: none` subtree gets an empty frame) or inside a
+`visibility: hidden` one (`NshView::seen_by_keys`, as the headless driver's
+stops are shown views). Inputs' fields and hosted views follow the view of
+ours holding them, and the focus leaves one a batch hid for the root
+(`input::release_hidden_focus`), so no key acts on what cannot be seen.
 Tab/Shift+Tab stay within the newest modal and advance from the currently
 focused stop. The root and passive layout views stay outside that loop. A
 modal remembers the input or Tab stop that had the focus when it was
