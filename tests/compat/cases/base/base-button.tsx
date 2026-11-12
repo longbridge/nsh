@@ -18,6 +18,7 @@ function App() {
   const disabled = signal(true);
   const blocked = signal(0);
   const wide = signal(false);
+  const mouse = signal("none");
   return (
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <Button
@@ -65,6 +66,19 @@ function App() {
       <Button testID="sides" hitSlop={wide() ? { top: 4, left: 2 } : 0} onPress={() => wide.set(!wide())}>
         <Text>Widen</Text>
       </Button>
+      <Button
+        testID="hover"
+        onMouseEnter={(e) => mouse.set(`in ${e.position.x},${e.position.y}`)}
+        onMouseMove={(e) =>
+          mouse.set(
+            `move ${e.position.x},${e.position.y} page ${e.pagePosition.y}${e.modifiers.shift ? " shift" : ""}${e.pressedButton ? ` ${e.pressedButton} down` : ""}`,
+          )
+        }
+        onMouseLeave={(e) => mouse.set(`${mouse()} out ${e.position.x},${e.position.y}`)}
+      >
+        <Text>Hover me</Text>
+      </Button>
+      <Text>{`Mouse: ${mouse()}`}</Text>
     </View>
   );
 }

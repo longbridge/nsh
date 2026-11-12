@@ -562,6 +562,18 @@ impl MouseButton {
             MouseButton::Forward => "forward",
         }
     }
+
+    /// The button named `name` (its TS name).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "left" => MouseButton::Left,
+            "right" => MouseButton::Right,
+            "middle" => MouseButton::Middle,
+            "back" => MouseButton::Back,
+            "forward" => MouseButton::Forward,
+            _ => return None,
+        })
+    }
 }
 
 /// Where the pointer was at a press ([`EventKind::Press`],

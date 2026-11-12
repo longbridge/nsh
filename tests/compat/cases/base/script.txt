@@ -170,7 +170,24 @@ prop id:sides hitSlop {}
 tap text:Widen
 prop id:sides hitSlop top=4 left=2
 prop id:plain hitSlop {}
+# The mouse comes over, moves with Shift held, drags with the left button
+# down, and leaves from where it was: the view's `MouseEvent`.
+listens id:hover onMouseEnter
+listens id:hover onMouseMove
+listens id:hover onMouseLeave
+expect Mouse: none
+event id:hover onMouseEnter position.x=4 position.y=3
+expect Mouse: in 4,3
+event id:hover onMouseMove position.x=5 position.y=7 modifiers.shift=true
+expect Mouse: move 5,7 page 294 shift
+event id:hover onMouseMove position.x=6.5 position.y=1 pressedButton=left
+expect Mouse: move 6.5,1 page 288 left down
+event id:hover onMouseLeave position.x=-2 position.y=0
+expect Mouse: move 6.5,1 page 288 left down out -2,0
 covers [nsh/base] Button
+covers [events] onMouseEnter
+covers [events] onMouseMove
+covers [events] onMouseLeave
 covers [props] hitSlop
 covers [props] role
 covers [props] accessibilityLabel

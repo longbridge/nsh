@@ -44,6 +44,18 @@ pub enum ButtonEvent {
     PressDown,
     /// The press ended: released, moved away or cancelled.
     PressUp,
+    /// The mouse came over it or its content (never on touches): where,
+    /// as a view's `onMouseEnter`.
+    #[args(event)]
+    MouseEnter(MouseEvent),
+    /// The mouse moved over it, with or without a button down, at most
+    /// once per frame: where, as a view's `onMouseMove`.
+    #[args(event)]
+    MouseMove(MouseEvent),
+    /// The mouse left it, or the window: where it was last, as a view's
+    /// `onMouseLeave`.
+    #[args(event)]
+    MouseLeave(MouseEvent),
 }
 
 /// A press target that owns its behavior (presses, the disabled and
@@ -54,6 +66,8 @@ pub enum ButtonEvent {
 /// `hoverStyle`, `focusVisibleStyle`, `selectedStyle` and `disabledStyle`,
 /// and its children are its content.
 /// `hitSlop` widens where presses count past its bounds, as a view's does.
+/// `onMouseEnter`, `onMouseMove` and `onMouseLeave` report the mouse over
+/// it, as a view's do.
 /// In a `Toolbar` (or a `ToggleGroup`), it is one of the toolbar's items:
 /// a stop of the keyboard focus only while it is the item Tab enters the
 /// toolbar at, disabled with the toolbar too.
@@ -72,5 +86,8 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .on_press_down(move |_: &()| cx.emit(ButtonEvent::PressDown))
         .on_press_up(move |_: &()| cx.emit(ButtonEvent::PressUp))
+        .on_mouse_enter(move |e: &MouseEvent| cx.emit(ButtonEvent::MouseEnter(*e)))
+        .on_mouse_move(move |e: &MouseEvent| cx.emit(ButtonEvent::MouseMove(*e)))
+        .on_mouse_leave(move |e: &MouseEvent| cx.emit(ButtonEvent::MouseLeave(*e)))
         .child(props.children)
 }
