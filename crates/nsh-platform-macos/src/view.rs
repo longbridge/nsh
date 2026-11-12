@@ -63,15 +63,19 @@ use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLe
 use crate::surface::{Surface, quiet};
 
 /// Scroll position and extent of a [`ViewKind::Scroll`] view.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ScrollState {
     /// Current offset (points; content coordinates of the viewport's top
     /// left).
     pub(crate) x: f32,
     /// Vertical offset.
     pub(crate) y: f32,
-    /// Size of the scrollable content.
+    /// Size of the scrollable content (unzoomed).
     pub(crate) content: (f32, f32),
+    /// How far a zoomable scroll view is zoomed (1 for the others): its
+    /// container's bounds are its size over it, so AppKit draws, hit tests
+    /// and converts the children zoomed.
+    pub(crate) zoom: f32,
     /// Scrolls horizontally.
     pub(crate) horizontal: bool,
     /// Shows the scroll indicator.
@@ -90,13 +94,32 @@ pub(crate) struct ScrollState {
     pub(crate) live: crate::scroll::Live,
 }
 
+impl Default for ScrollState {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            content: (0.0, 0.0),
+            // Unzoomed: a zoom of 0 would scale the content away.
+            zoom: 1.0,
+            horizontal: false,
+            indicator: false,
+            behavior: Default::default(),
+            applied: 0,
+            sticky: Vec::new(),
+            mirrored: false,
+            live: Default::default(),
+        }
+    }
+}
+
 impl ScrollState {
-    /// The largest offsets.
+    /// The largest offsets (of the zoomed content).
     pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
         let inset = self.behavior.content_inset.map(|v| v.0);
         (
-            (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
-            (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
+            (self.content.0 * self.zoom + inset.left + inset.right - viewport.0).max(0.0),
+            (self.content.1 * self.zoom + inset.top + inset.bottom - viewport.1).max(0.0),
         )
     }
 }
@@ -1752,8 +1775,13 @@ impl NshView {
         if let Some(c) = &*self.ivars().container.borrow() {
             let f = self.state().frame;
             let origin = crate::scroll::bounds_origin(self);
-            c.setFrame(ns_rect(0.0, 0.0, f.size.width.0, f.size.height.0));
-            c.setBoundsOrigin(NSPoint::new(origin.0 as CGFloat, origin.1 as CGFloat));
+            let zoom = CGFloat::from(crate::scroll::zoom(self));
+            let frame = ns_rect(0.0, 0.0, f.size.width.0, f.size.height.0);
+            c.setFrame(frame);
+            c.setBounds(NSRect::new(
+                NSPoint::new(origin.0 as CGFloat, origin.1 as CGFloat),
+                CGSize::new(frame.size.width / zoom, frame.size.height / zoom),
+            ));
             if let Some(layer) = c.layer() {
                 layer.setSublayerTransform(IDENTITY);
             }
@@ -1775,7 +1803,7 @@ impl NshView {
     /// changing, so AppKit walks no descendant geometry (`setBoundsOrigin`
     /// invalidates every descendant's window geometry — focus, tracking
     /// areas, cursor rects — each scroll step, which is the scroll jank).
-    /// [`NshView::commit_bounds_origin`] syncs the views once it settles.
+    /// [`NshView::commit_bounds`] syncs the views once it settles.
     pub(crate) fn set_layer_scroll(&self, dx: f32, dy: f32) {
         let Some(layer) = self.container_view().and_then(|c| c.layer()) else {
             return;
@@ -1786,15 +1814,22 @@ impl NshView {
         layer.setSublayerTransform(t);
     }
 
-    /// Commits the scroll offset to the container's bounds origin and
-    /// drops the layer transform: a no-op visually (the transform carried
-    /// exactly the committed-to-live difference), one subtree walk for
-    /// AppKit to learn where things are; none when they are there.
-    pub(crate) fn commit_bounds_origin(&self, x: f32, y: f32) {
+    /// Commits the scroll offset to the container's bounds origin (and the
+    /// zoom to its size) and drops the layer transform: a no-op visually
+    /// (the transform carried exactly the committed-to-live difference),
+    /// one subtree walk for AppKit to learn where things are; none when
+    /// they are there.
+    pub(crate) fn commit_bounds(&self, x: f32, y: f32) {
         let c = self.ensure_container();
-        let origin = NSPoint::new(x as CGFloat, y as CGFloat);
-        if c.bounds().origin != origin {
-            c.setBoundsOrigin(origin);
+        // In AppKit's floats: unzoomed, the bounds' size is the frame's.
+        let zoom = CGFloat::from(crate::scroll::zoom(self));
+        let size = c.frame().size;
+        let bounds = NSRect::new(
+            NSPoint::new(x as CGFloat, y as CGFloat),
+            CGSize::new(size.width / zoom, size.height / zoom),
+        );
+        if c.bounds() != bounds {
+            c.setBounds(bounds);
         }
         if let Some(layer) = c.layer() {
             layer.setSublayerTransform(IDENTITY);
@@ -1988,11 +2023,20 @@ impl NshView {
     /// Its window or screen changed: the content layer draws at the new
     /// scale.
     fn rescale(&self) {
+        self.draw_zoomed(self.backing_scale(), 1.0);
+    }
+
+    /// Draws its content at `zoom` times the window's backing `scale` (in
+    /// a zoomable scroll view zoomed in), never below it and at most 4096
+    /// pixels a side.
+    pub(crate) fn draw_zoomed(&self, scale: CGFloat, zoom: CGFloat) {
         for surface in [&self.ivars().content, &self.ivars().overlay] {
             if let Some((layer, _)) = &*surface.borrow() {
-                let scale = self.backing_scale();
-                if layer.contentsScale() != scale {
-                    layer.setContentsScale(scale);
+                let size = layer.bounds().size;
+                let side = size.width.max(size.height).max(1.0);
+                let factor = (scale * zoom).min(4096.0 / side).max(scale);
+                if layer.contentsScale() != factor {
+                    layer.setContentsScale(factor);
                     layer.setNeedsDisplay();
                 }
             }
@@ -2330,12 +2374,16 @@ impl crate::sight::Tree for Views {
         node.state().transform()
     }
 
-    fn content(&self, node: &NshView) -> ((f32, f32), bool) {
+    fn content(&self, node: &NshView) -> ((f32, f32), f32, bool) {
         let clips = {
             let s = node.state();
             s.clips() || s.id == ROOT_ID
         };
-        (crate::scroll::bounds_origin(node), clips)
+        (
+            crate::scroll::bounds_origin(node),
+            crate::scroll::zoom(node),
+            clips,
+        )
     }
 }
 
@@ -2374,7 +2422,7 @@ impl crate::sight::Tree for Planned {
         Views.transform(node)
     }
 
-    fn content(&self, node: &NshView) -> ((f32, f32), bool) {
+    fn content(&self, node: &NshView) -> ((f32, f32), f32, bool) {
         Views.content(node)
     }
 }
@@ -2393,5 +2441,14 @@ mod tests {
         let inside = scripted(&wheel, scripted_type);
         assert_eq!(inside, Some(NSEventType::ScrollWheel));
         assert_eq!(scripted_type(), None);
+    }
+
+    #[test]
+    fn a_default_scroll_state_is_unzoomed() {
+        let s = ScrollState {
+            content: (200.0, 300.0),
+            ..Default::default()
+        };
+        assert_eq!(s.max((100.0, 100.0)), (100.0, 200.0));
     }
 }
