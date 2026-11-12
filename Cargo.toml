@@ -63,6 +63,9 @@ log = "0.4"
 ordered-float = { version = "5", default-features = false }
 env_logger = "0.11"
 libc = "0.2"
+# `RUST_LOG` filters of the desktop release runners' logger (`nsh_engine::logging`):
+# env_logger's filter alone, without regular expressions.
+env_filter = { version = "2", default-features = false }
 # C functions over macros Rust cannot call (`nsh-platform-apple`'s `os_log_with_type`).
 cc = "1.8"
 imagesize = "0.15"
@@ -385,6 +388,9 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UIViewController",
   "UIWindow",
   "UIWindowScene",
+  "UIWindowSceneGeometry",
+  "UIWindowSceneGeometryPreferences",
+  "UIWindowSceneGeometryPreferencesIOS",
   "UIBlurEffect",
   "UIHoverGestureRecognizer",
   "UIHoverStyle",

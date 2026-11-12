@@ -2047,6 +2047,38 @@ class Player {
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
     if (this.readingHosts?.size) this.orderReading();
+    if (this.relating?.size) this.linkRelations();
+  }
+
+  /** The DOM id of view `id`: unique on the page, beside other players. */
+  domId(id) {
+    return `${this.classPrefix}v${id}`;
+  }
+
+  /** The views that name others (`aria-activedescendant`,
+   * `aria-controls`) point at them by DOM id, after the batch made them:
+   * a row may be made after the field naming it. A view named that is
+   * not there yet is looked for again after the next batch. */
+  linkRelations() {
+    const pending = this.relating;
+    this.relating = null;
+    for (const el of pending) {
+      if (el.isConnected === false) continue;
+      const p = el._props ?? {};
+      // The element that keeps the focus: an input's field.
+      const focused = el._field ?? el;
+      for (const [name, id] of [["aria-activedescendant", p.activeDescendant], ["aria-controls", p.controls]]) {
+        if (focused !== el) el.removeAttribute(name);
+        const target = id == null ? null : this.view(id);
+        if (!target) {
+          focused.removeAttribute(name);
+          if (id != null) (this.relating ??= new Set()).add(el);
+          continue;
+        }
+        if (!target.id) target.id = this.domId(id);
+        focused.setAttribute(name, target.id);
+      }
+    }
   }
 
   /** `el` was placed or added in `parent`: when that is a scroll view's
@@ -2745,14 +2777,17 @@ class Player {
     const p = el._props ?? {};
     const set = (name, value) => (value == null || value === false ? el.removeAttribute(name) : el.setAttribute(name, String(value)));
     const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
-    set("role", role);
+    // A combo box that is an input is its field, which keeps the focus
+    // (`fieldAria`).
+    set("role", el._field && p.role === "combobox" ? null : role);
     set("aria-label", p.label ?? el._textLabel);
     set("aria-description", p.hint);
     set("aria-disabled", p.disabled && "true");
     set("aria-selected", p.selected && "true");
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
-    set("aria-expanded", p.expanded);
+    // `false` too: a collapsed combo box or disclosure says so.
+    set("aria-expanded", p.expanded == null ? null : String(p.expanded));
     set("aria-haspopup", p.hasPopup && "true");
     set("aria-pressed", p.pressed);
     set("aria-current", p.current);
@@ -2766,6 +2801,11 @@ class Player {
     set("aria-valuetext", text);
     set("aria-live", p.live);
     set("aria-hidden", p.hidden && "true");
+    if (p.activeDescendant != null || p.controls != null || el._related) {
+      // Linked once the batch is applied (`linkRelations`).
+      el._related = p.activeDescendant != null || p.controls != null;
+      (this.relating ??= new Set()).add(el);
+    }
   }
 
   /** The stops of the keyboard focus (Tab), as `ViewProps::focus_stop`
@@ -2804,8 +2844,18 @@ class Player {
   /** The states of input view `el` that belong on its `field` too: the
    * field is the element screen readers read as the input. */
   fieldAria(el, field) {
-    if (el._props?.invalid) field.setAttribute("aria-invalid", "true");
-    else field.removeAttribute("aria-invalid");
+    const p = el._props ?? {};
+    const set = (name, value) => (value == null || value === false ? field.removeAttribute(name) : field.setAttribute(name, String(value)));
+    set("aria-invalid", p.invalid && "true");
+    // A combo box's field is the combo box: the focus stays in it while
+    // its list is open, and its active descendant is the highlighted row.
+    const combobox = p.role === "combobox";
+    set("role", combobox && "combobox");
+    set("aria-label", combobox && (p.label ?? null));
+    set("aria-expanded", combobox && p.expanded != null ? String(p.expanded) : null);
+    set("aria-haspopup", combobox && p.hasPopup && "listbox");
+    // A field made after the relations takes them (`linkRelations`).
+    if (el._related) (this.relating ??= new Set()).add(el);
   }
 
   /** The keyboard focus reached pressable `el`: `focus:` and `onFocus`. */
@@ -6879,8 +6929,9 @@ class Player {
 
   /**
    * `Picker.pickFiles`: a file input offering `accept` (empty: any file). The
-   * bytes and names stay as they are; a file larger than `maxBytes` is left
-   * out. A cancelled input sends none.
+   * bytes and names stay as they are; a file larger than `maxBytes` is not
+   * read (its `size` tells first): it answers with its name and size only.
+   * A cancelled input sends none.
    */
   pickFiles(request, limit, accept, maxBytes) {
     const app = this.app;
@@ -6897,7 +6948,8 @@ class Player {
       const picked = [];
       for (const file of files.slice(0, limit)) {
         if (file.size > maxBytes) {
-          console.warn(`nsh: the picked ${file.name} is left out: larger than ${maxBytes} bytes`);
+          console.warn(`nsh: the picked ${file.name} is not read: larger than ${maxBytes} bytes`);
+          picked.push({ name: file.name, type: file.type, bytes: null, size: file.size, lastModified: file.lastModified });
           continue;
         }
         try {
@@ -6914,6 +6966,11 @@ class Player {
       if (app !== this.app) return;
       this.call((w) => {
         for (const p of picked) {
+          if (p.bytes === null) {
+            this.withStrings([p.name, p.type], (np, nl, tp, tl) =>
+              w.nsh_picked_too_large(np, nl, tp, tl, p.size, p.lastModified));
+            continue;
+          }
           this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
             w.nsh_picked_file(np, nl, tp, tl, bp, bl, 0, 0, p.lastModified));
         }

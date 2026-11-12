@@ -77,8 +77,8 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{
-    NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRange,
-    NSRect, NSString, NSUndoManager,
+    NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
+    NSRange, NSRect, NSString, NSUndoManager,
 };
 
 use crate::{
@@ -573,6 +573,11 @@ impl Ctx {
         }
         set_focused(&surface, &view, focused);
         if focused {
+            // AppKit receives input clicks outside the drawn-text pointer path.
+            // Programmatic focus (Find, dialogs) preserves the selection.
+            if crate::view::pressing(view.ns().mtm()) {
+                crate::text::clear(&surface);
+            }
             // The scroll views around show the field, as on phones.
             crate::scroll::reveal(&surface, &view);
         }
@@ -857,6 +862,56 @@ macro_rules! define_field {
             impl $name {
                 $($extra)*
 
+                // A combo box's field is the combo box, as WebKit's is: the
+                // element VoiceOver is on while the list is open, named and
+                // expanded as the input, its selected child the input's
+                // active descendant, its linked element the list
+                // ([`crate::access::combobox_field`]).
+                #[unsafe(method_id(accessibilityRole))]
+                fn accessibility_role(&self) -> Option<Retained<NSString>> {
+                    match self.combobox() {
+                        Some(_) => Some(NSString::from_str("AXComboBox")),
+                        // SAFETY: NSTextField's own role.
+                        None => unsafe { msg_send![super(self), accessibilityRole] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLabel))]
+                fn accessibility_label(&self) -> Option<Retained<NSString>> {
+                    match self.combobox() {
+                        Some(field) => field.label.map(|l| NSString::from_str(&l)),
+                        // SAFETY: NSTextField's own label.
+                        None => unsafe { msg_send![super(self), accessibilityLabel] },
+                    }
+                }
+
+                #[unsafe(method(isAccessibilityExpanded))]
+                fn is_accessibility_expanded(&self) -> bool {
+                    match self.combobox() {
+                        Some(field) => field.expanded,
+                        // SAFETY: NSTextField's own state.
+                        None => unsafe { msg_send![super(self), isAccessibilityExpanded] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilitySelectedChildren))]
+                fn accessibility_selected_children(&self) -> Option<Retained<NSArray>> {
+                    match self.combobox().and_then(|f| f.active) {
+                        Some(active) => Some(NSArray::from_retained_slice(&[active])),
+                        // SAFETY: NSTextField's own answer.
+                        None => unsafe { msg_send![super(self), accessibilitySelectedChildren] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLinkedUIElements))]
+                fn accessibility_linked_ui_elements(&self) -> Option<Retained<NSArray>> {
+                    match self.combobox().and_then(|f| f.controls) {
+                        Some(list) => Some(NSArray::from_retained_slice(&[list])),
+                        // SAFETY: NSTextField's own answer.
+                        None => unsafe { msg_send![super(self), accessibilityLinkedUIElements] },
+                    }
+                }
+
                 #[unsafe(method(becomeFirstResponder))]
                 fn become_first_responder(&self) -> bool {
                     // AppKit selects the whole text as the field takes the
@@ -954,6 +1009,19 @@ macro_rules! define_field {
             }
         }
     };
+}
+
+/// What a field of an input answers for its view.
+trait FieldOf {
+    /// The input view's combo box, when the field is one.
+    fn combobox(&self) -> Option<crate::access::ComboboxField>;
+}
+
+impl<T: objc2::DefinedClass<Ivars = OnceCell<Ctx>>> FieldOf for T {
+    fn combobox(&self) -> Option<crate::access::ComboboxField> {
+        let (_, view, _) = self.ivars().get()?.get()?;
+        crate::access::combobox_field(&view)
+    }
 }
 
 define_field!(
@@ -2392,6 +2460,21 @@ pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
 /// keyboard to show it over on the desktop, so it stays unmounted.
 pub(crate) fn accessory(_surface: &Rc<Surface>, _parent: &NshView, child: &NshView) {
     log::debug!("input accessory {} is not shown on macOS", child.id());
+}
+
+/// The element VoiceOver is on while `view` has the keyboard focus: an
+/// input's editor (its field, or its text view), else the view.
+pub(crate) fn accessibility_element(view: &NshView) -> Retained<NSView> {
+    let editor = view
+        .state()
+        .input
+        .as_ref()
+        .map(|i| i.editor.borrow().clone());
+    match editor {
+        Some(Editor::Line { field, .. }) => Retained::into_super(Retained::into_super(field)),
+        Some(Editor::Area { view, .. }) => Retained::into_super(Retained::into_super(view)),
+        None => objc2::Message::retain(view.ns()),
+    }
 }
 
 /// `focus()`.

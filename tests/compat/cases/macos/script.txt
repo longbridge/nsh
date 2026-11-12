@@ -41,6 +41,7 @@ expect os.home=true
 expect process.identity=true
 expect process.environment=true
 expect process.dataDir=true
+expect process.logFile=true
 expect process.runDenied=true
 expect process.spawnDenied=true
 expect process.exitDenied=true
