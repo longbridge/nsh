@@ -24,6 +24,13 @@ What one app or a few apps need belongs there, or in a community crate, not in N
 delivering apps (packaging, signing, updates) exist because every app needs to be delivered; they are not precedent
 for adding other features.
 
+NSH's directions are set, and each has its pages in the [documentation](website/docs/): layout, styling and text;
+lists and scrolling; touch, gestures, forms and the keyboard; animation; navigation; accessibility; i18n; images,
+media and web views; native components and platform integration; the sandbox, capabilities and signed packages; app
+and OTA updates; and the toolchain that develops, tests and packages apps. Contributions work within these
+directions. A feature that would need a new section or page of its own in that documentation opens a new direction:
+it is the change to question hardest, it needs a maintainer's agreement on an issue first, and it is rarely accepted.
+
 Most contributions we take improve what NSH already has. In order of preference:
 
 - **Bug fixes**, on any platform.
