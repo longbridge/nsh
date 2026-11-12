@@ -7331,6 +7331,41 @@ fn pointer_events_classes_inherit_as_in_css() {
     assert_eq!(pointer(&batch, 2), Some(P::BoxOnly));
 }
 
+/// A view made in a later round than its `pointer-events` was worked out
+/// (one styled before it joins the tree) still mounts it: a layer that
+/// lets touches through would otherwise take them all.
+#[test]
+fn pointer_events_reach_a_view_made_after_they_were_worked_out() {
+    use crate::props::PointerEvents as P;
+    let mut c = core();
+    view_with_classes(&mut c, 2, "p-1");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("pointerEvents", StyleValue::Str("box-none"))]),
+        ],
+    );
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    let pointer = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewProps { id: 4, props } => Some(props.pointer_events),
+        _ => None,
+    });
+    assert_eq!(pointer, Some(P::BoxNone));
+}
+
 #[test]
 fn pointer_events_regions_are_worked_out_once_a_round_with_the_tree_it_left() {
     use crate::props::PointerEvents as P;
