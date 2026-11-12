@@ -6363,6 +6363,10 @@ class Player {
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
       case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "closeAllNotifications":
+        for (const notification of this.notifications?.values() ?? []) notification.close();
+        this.notifications?.clear();
+        break;
       case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
       case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
       case "audioPlay": this.audioPlay(args[0], args[1], args[2]); break;

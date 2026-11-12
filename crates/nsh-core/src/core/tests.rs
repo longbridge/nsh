@@ -15523,6 +15523,7 @@ mod components {
             .child(view().h(px(10.0)).on_press(move |_: &()| {
                 set_badge(3);
                 close_notification("a");
+                close_all_notifications();
                 spawn(async move {
                     let permission = request_notification_permission().await;
                     add(permission.as_str().to_owned());
@@ -15595,6 +15596,7 @@ mod components {
             [
                 N::SetBadge(3),
                 N::Close("a".into()),
+                N::CloseAll,
                 N::Listen,
                 N::Permission { id: 0, ask: true }
             ]
