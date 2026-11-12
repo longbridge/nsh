@@ -1474,8 +1474,10 @@ pub enum HeaderItemContent {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct HeaderItem {
-    /// Optional key for keeping a `UIBarButtonItem` across updates; without
-    /// it, the position in the list is the identity.
+    /// Optional key for keeping a `UIBarButtonItem` across updates: a kept
+    /// button takes the new title, symbol, label, menu and state in place.
+    /// Without a key, a button is kept only while its position and its
+    /// content are unchanged; any other change makes a new one.
     pub key: Option<Arc<str>>,
     /// What the button shows.
     pub content: HeaderItemContent,

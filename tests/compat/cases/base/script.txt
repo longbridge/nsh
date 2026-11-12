@@ -437,8 +437,9 @@ covers [events] NavPage.onDismiss
 # base-nav-header-items
 tap id:case-base-nav-header-items
 # Trailing iOS bar buttons (`ios.headerRightItems`) with a menu; other
-# platforms keep showing `headerRight`. The steps check the static labels
-# of those buttons (and the fallback `headerRight`) reach the page.
+# platforms keep showing `headerRight`. The steps check the page's own texts
+# and the fallback `headerRight`; pressing the bar buttons and choosing menu
+# items is not covered here (the core and engine tests cover their handlers).
 expect Log: none
 expect Filter: all
 expect Fallback right
