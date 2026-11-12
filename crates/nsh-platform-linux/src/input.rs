@@ -2987,7 +2987,10 @@ mod tests {
             // Kept alive (a JS cycle holds it): it and what it holds leave
             // the hover, their states cleared.
             apply(&surface, &[MountItem::Remove { id: 4 }]);
-            assert_eq!(*surface.input.hovered.borrow(), [outer.clone()]);
+            assert_eq!(
+                *surface.input.hovered.borrow(),
+                std::slice::from_ref(&outer)
+            );
             for v in [&removed, &inner] {
                 assert_eq!(v.state().states & HOVERED, 0);
             }
