@@ -2525,7 +2525,10 @@ class Player {
     // Its `--nsh-selection`.
     swapClass(el, "_selection", this.styleClass(selection));
     el._textLabel = runs.map((r) => r[2] + (r[6] ?? "")).join("").trimEnd();
-    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
+    if (el._props?.label == null) {
+      if (el._field) this.fieldAria(el, el._field);
+      else el.setAttribute("aria-label", el._textLabel);
+    }
   }
 
   /**
@@ -2793,8 +2796,8 @@ class Player {
     // A combo box that is an input is its field, which keeps the focus
     // (`fieldAria`).
     set("role", el._field && p.role === "combobox" ? null : role);
-    set("aria-label", p.label ?? el._textLabel);
-    set("aria-description", p.hint);
+    set("aria-label", el._field ? null : p.label ?? el._textLabel);
+    set("aria-description", el._field ? null : p.hint);
     set("aria-disabled", p.disabled && "true");
     set("aria-selected", p.selected && "true");
     set("aria-checked", p.checked);
@@ -2854,17 +2857,21 @@ class Player {
     this.updateAria(el);
   }
 
-  /** The states of input view `el` that belong on its `field` too: the
-   * field is the element screen readers read as the input. */
+  /** The name, description and states of input view `el` go on its `field`:
+   * the field is the element screen readers read as the input. */
   fieldAria(el, field) {
     const p = el._props ?? {};
     const set = (name, value) => (value == null || value === false ? field.removeAttribute(name) : field.setAttribute(name, String(value)));
+    set("aria-label", (p.label ?? el._textLabel) || null);
+    set("aria-description", p.hint || null);
+    // Props may arrive before the field exists; its wrapper then held the name.
+    el.removeAttribute("aria-label");
+    el.removeAttribute("aria-description");
     set("aria-invalid", p.invalid && "true");
     // A combo box's field is the combo box: the focus stays in it while
     // its list is open, and its active descendant is the highlighted row.
     const combobox = p.role === "combobox";
     set("role", combobox && "combobox");
-    set("aria-label", combobox && (p.label ?? null));
     set("aria-expanded", combobox && p.expanded != null ? String(p.expanded) : null);
     set("aria-haspopup", combobox && p.hasPopup && "listbox");
     // A field made after the relations takes them (`linkRelations`).
@@ -5081,8 +5088,10 @@ class Player {
     field.addEventListener("keydown", (e) => {
       // A key a shortcut takes (`keyDown`, after this) is the shortcut's
       // alone, as on the native platforms, where the field never sees it: a
-      // RichEditor would delete twice on Backspace.
-      if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
+      // RichEditor would delete twice on Backspace, and a Return an
+      // autocomplete list binds would submit the field as well.
+      const taken = consumedShortcut(this.shortcut(e, true));
+      if (el._events.has("onKeyPress") && !taken) {
         const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" || e.key?.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
@@ -5091,7 +5100,7 @@ class Player {
       // commits an input method's composition never submits.
       const submit = el._config?.submit ?? "blurAndSubmit";
       const lineBreak = field.tagName === "TEXTAREA" && (submit === "newline" || e.shiftKey || e.altKey);
-      if (e.key === "Enter" && !lineBreak && !e.isComposing && e.keyCode !== 229) {
+      if (e.key === "Enter" && !lineBreak && !e.isComposing && e.keyCode !== 229 && !taken) {
         e.preventDefault();
         this.event(el._id, "onSubmitEditing", { text: field.value, count: field._count });
         if (submit === "blurAndSubmit") field.blur();
@@ -6369,6 +6378,10 @@ class Player {
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
       case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "closeAllNotifications":
+        for (const notification of this.notifications?.values() ?? []) notification.close();
+        this.notifications?.clear();
+        break;
       case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
       case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
       case "audioPlay": this.audioPlay(args[0], args[1], args[2]); break;
@@ -6405,12 +6418,23 @@ class Player {
         break;
       }
       case "announce":
-        // Cleared first: the same text again is announced again.
-        this.live.textContent = "";
-        setTimeout(() => { this.live.textContent = args[0]; }, 50);
+        this.announce(args[0]);
         break;
       case "a11yFocus":
         if (!el) break;
+        // An input: its field, as `focus` gives it.
+        if (el._field) {
+          el._field.focus();
+          break;
+        }
+        // A page moves a screen reader only with the keyboard focus: a
+        // field the user is typing in keeps it, and the view is read out
+        // instead, as the screen reader would read it there.
+        if (this.typing(el)) {
+          const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
+          if (text) this.announce(text);
+          break;
+        }
         if (!el.hasAttribute("tabindex")) {
           el.tabIndex = -1;
           el._a11yFocus = true;
@@ -6422,6 +6446,23 @@ class Player {
   }
 
 
+
+  /** Has screen readers read `text` (`announce`), through the live region. */
+  announce(text) {
+    // Cleared first: the same text again is announced again.
+    this.live.textContent = "";
+    setTimeout(() => { this.live.textContent = text; }, 50);
+  }
+
+  /** Whether the keyboard focus is in a text field, other than `el`, that
+   * the user may be typing in (`setAccessibilityFocus` leaves it there). */
+  typing(el) {
+    const a = document.activeElement;
+    if (!a || a === el || !a.isConnected || a.closest?.("[inert]")) return false;
+    if (a.isContentEditable) return true;
+    if (a.tagName === "TEXTAREA") return true;
+    return a.tagName === "INPUT" && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/.test(a.type);
+  }
 
   /**
    * `Clipboard.writeText`. The async Clipboard API needs a secure context
@@ -7850,8 +7891,13 @@ class Player {
   keyDown(e) {
     if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
-    const focus = document.activeElement;
-    const inRoot = focus && this.root.contains(focus);
+    // Where the key was pressed, not where the focus is by now: a field's
+    // own handler (its submit, its Escape) may have closed the field, and
+    // the focus with it, before the key reached the window. The path was
+    // fixed when the key was dispatched.
+    const path = e.composedPath();
+    const focus = path.includes(this.root) ? path[0] : document.activeElement;
+    const inRoot = path.includes(this.root) || (focus && this.root.contains(focus));
     const editing = inRoot && !!focus.closest(".nsh-field, iframe");
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     // The control the focus is on, which Return and Space press (a stop

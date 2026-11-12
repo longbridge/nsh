@@ -487,6 +487,32 @@ fn a_long_text_makes_only_the_rows_in_view() {
     );
 }
 
+/// The top of the row reading `text`, as laid out.
+fn row_top(app: &Headless, text: &str) -> f32 {
+    app.screen()
+        .layout_nodes()
+        .iter()
+        .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == text))
+        .map(|n| n.bounds.origin.y.0)
+        .unwrap_or_else(|| panic!("no row reads {text:?}"))
+}
+
+/// The rows grow with the user's text size, as the texts drawn in them do:
+/// measured in the app's font alone, a row drawn larger would run over the
+/// next one.
+#[test]
+fn rows_follow_the_user_s_text_size() {
+    let mut app = start(props("alpha\nbeta\ngamma"));
+    see(&mut app, "gamma");
+    let pitch = row_top(&app, "beta") - row_top(&app, "alpha");
+    assert_eq!(pitch, 20.0);
+    app.set_environment("fontScale", |env| env.font_scale = 1.25)
+        .unwrap();
+    app.wait(std::time::Duration::from_millis(200)).unwrap();
+    let pitch = row_top(&app, "beta") - row_top(&app, "alpha");
+    assert_eq!(pitch, 25.0);
+}
+
 #[test]
 fn the_rows_text_lets_the_pointer_through_to_the_scroll_views() {
     // The rows are drawn over the scroll views: a finger or a wheel on a

@@ -76,7 +76,8 @@ options set below: `storage` (`MemoryStorage::new(entries)`), `network` (`StubNe
 `scroll(selector, px(3000.0))`, `back`, `wait`, `wait_for`, `wait_for_gone`, `wait_until`, `run_for`, `fast_forward`,
 `set_system_time`, `set_viewport`, `set_clipboard` and `on_dialog`; `app.shows(text)` and `app.screen()` (`texts()`,
 `count(selector)`, `enabled(selector)`, `dialogs()`, `clipboard()`, `commands()`) read what is on screen. A step
-returns an error with the texts on screen when it cannot be taken.
+returns an error with the texts on screen when it cannot be taken. `app.clear_commands()` starts the record of
+`commands()` afresh, so a long test keeps only the commands of the steps it checks.
 
 `nsh_testing::tsx(entry, sets)` (feature `bundle`) opens an app's TSX entry the same way, built against NSH's and the
 crate's UI sets ([Building with Rust](./rust.md#testing)). `examples/gallery-rs` tests its Rust root this way, one
@@ -613,7 +614,9 @@ nsh test tests/form.test.tsx --target macos   # one file
 
 The window opens at the viewport's size (390 × 844 unless `open` says), within the screen (on macOS, `setViewport`
 keeps it there, its top left corner when it is larger); on iOS and Android the app fills the device's screen, at the
-device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
+device's size. On macOS, Windows, GPUI and Linux the apps run in the background: their windows show, the keyboard stays with
+the app you type in, and the steps' clicks, keys and shortcuts go to the windows directly (`--foreground` lets them
+become the active app). The app runs as the target's platform (`platform.os`). A manual `clock` works as
 it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the app's time at once (timers,
 `requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)`, `waitFor` and `waitUntil` move it too, and each frame
 the platform shows moves it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
@@ -649,7 +652,8 @@ when it finds none). One browser serves the run, and each `open` gets a page wit
 the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
 
 On iOS, the apps run in the development host in an iOS simulator: the one `--device` names (by name or UDID), else
-the booted one, else the newest iPhone, which `nsh test` boots. The steps are a finger's touches and the software
+the booted one, else the newest iPhone, which `nsh test` boots. The Simulator app opens behind the app you type in,
+and the steps reach the app in the simulator directly. The steps are a finger's touches and the software
 keyboard's typing, as UIKit gets them from the device. `setColorScheme` switches the simulator's appearance, which
 `nsh test` sets back after the app, and the screen has the simulated device's size. The variables of `nsh test`'s
 environment that the app declares in `capabilities.process.env` reach the app in the simulator, as on the desktops

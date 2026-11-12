@@ -153,6 +153,30 @@ impl GpuiNative {
         rx.recv_timeout(MAIN).ok().flatten()
     }
 
+    /// Draws the surface's window at once when its newest dialog has not
+    /// been drawn: the dialog is laid out as it draws, and a window covered
+    /// by others (a background app's, under the app the user works in)
+    /// draws no frames of its own.
+    fn draw_dialog(&self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let key = self.key;
+        crate::rt::invoke(move || {
+            crate::rt::on_app(move |cx| {
+                if let Some(handle) = window_of(key, cx)
+                    && handle
+                        .read_with(cx, |view, _| !crate::system::dialog_drawn(view.surface()))
+                        .unwrap_or(false)
+                {
+                    // The window's, not the view's: drawing renders the view.
+                    let window: gpui::AnyWindowHandle = handle.into();
+                    let _ = window.update(cx, |_, window, cx| window.draw(cx).clear(cx));
+                }
+                let _ = tx.send(());
+            });
+        });
+        let _ = rx.recv_timeout(MAIN);
+    }
+
     /// `f` with the surface, on the main thread.
     fn with_surface<R: Send + 'static>(
         &self,
@@ -188,10 +212,11 @@ impl GpuiNative {
                         if crate::window::blocked(surface, Some(target), cx) {
                             return;
                         }
-                        // A press activates the window it is in.
-                        if !window.is_window_active() {
-                            cx.activate(true);
-                            window.activate_window();
+                        // A press activates the window it is in (in a
+                        // background app: it gets the keyboard, the app
+                        // stays inactive).
+                        if !crate::window::is_active(window, cx) {
+                            crate::window::focus_window(window, cx);
                         }
                     }
                     crate::input::pointer(surface, event(surface));
@@ -205,10 +230,11 @@ impl GpuiNative {
                 if crate::window::blocked(&surface, None, cx) {
                     return;
                 }
-                // A press activates the window it is in, as a real one does.
-                if !window.is_window_active() {
-                    cx.activate(true);
-                    window.activate_window();
+                // A press activates the window it is in, as a real one does
+                // (in a background app: it gets the keyboard, the app stays
+                // inactive).
+                if !crate::window::is_active(window, cx) {
+                    crate::window::focus_window(window, cx);
                 }
                 let focus = gpui::Focusable::focus_handle(view, cx);
                 if !focus.is_focused(window) {
@@ -425,6 +451,7 @@ impl Native for GpuiNative {
     }
 
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String> {
+        self.draw_dialog();
         let button = button.map(str::to_owned);
         let (x, y) = self
             .with_surface(move |surface| crate::system::dialog_point(surface, button.as_deref()))

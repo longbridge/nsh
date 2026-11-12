@@ -64,6 +64,11 @@ At rest the invisible hit layer recenters to where its scrollbar represents the 
 room near the top and bottom edges so a reverse gesture does not accelerate into the end. On the desktops dragging
 the bar reaches the whole content.
 
+For a scaled vertical axis on web desktop, the visible bar belongs to a separate bounded scroll view whose offset
+is proportional to the logical content position. Recentering the hit layer therefore leaves the visible thumb
+unchanged. Dragging that bar maps back to the logical position; wheel input over its band still moves by the input's
+distance. The hit layer's own vertical indicator is hidden in this case.
+
 In a terminal a body row is one Cell, whatever `rowHeight` is (`terminal::row_height`): rows on another step
 would land on the Cell grid unevenly. So is a title row, whatever `headerHeight` is: the titles stand apart by their
 band and type, right over the first row (a face is its fill or its line, so a row for their rule would be blank). A

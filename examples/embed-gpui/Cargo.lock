@@ -6153,6 +6153,7 @@ version = "0.5.0"
 dependencies = [
  "block2 0.6.2",
  "crossbeam-channel",
+ "env_filter",
  "libc",
  "log",
  "nsh-core",

@@ -628,8 +628,10 @@ pub(crate) fn escape(surface: &Surface, event: &KeyEvent) -> bool {
 /// popup of its own) or nowhere of the system's (a menu of its own).
 fn blur(surface: &Surface, window: &AppWindow) {
     let hwnd = window.hwnd;
-    // SAFETY: plain queries.
-    let (visible, mut active) = unsafe { (IsWindowVisible(hwnd).as_bool(), GetForegroundWindow()) };
+    // SAFETY: a plain query.
+    let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
+    // In a background app: the window that would have the keyboard.
+    let mut active = crate::window::foreground();
     if !visible || window.closed.get() {
         return;
     }

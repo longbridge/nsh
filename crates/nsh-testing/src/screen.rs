@@ -1241,6 +1241,28 @@ impl Screen {
         }
     }
 
+    /// How many backs the screen holds, as the web counts its history
+    /// entries: a presented modal each, and each shown stack's screens over
+    /// its bottom one.
+    pub(crate) fn back_depth(&self) -> usize {
+        self.attached()
+            .into_iter()
+            .map(|id| match self.kind(id) {
+                Some(ViewKind::Modal) if !self.is_window(id) => 1,
+                Some(ViewKind::Stack)
+                    if nsh_core::navigation::shown_in_layout(
+                        std::iter::successors(Some(id), |id| self.nodes.get(id)?.parent)
+                            .filter(|id| *id != ROOT)
+                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
+                    ) =>
+                {
+                    self.screens(id).len().saturating_sub(1)
+                }
+                _ => 0,
+            })
+            .sum()
+    }
+
     /// A back popped `screen` natively: it is gone until the app removes it.
     pub(crate) fn pop(&mut self, screen: NodeId) {
         self.popped.insert(screen);
@@ -1528,14 +1550,25 @@ impl Screen {
         Ok(self.resolve(&Selector::parse(selector)?).len())
     }
 
-    /// The commands sent so far, in order, with the view each went to.
+    /// The commands sent so far, in order, with the view each went to
+    /// (since the last [`Screen::clear_commands`]).
     pub fn commands(&self) -> &[(NodeId, Command)] {
         &self.commands
     }
 
-    /// Whether the command `command` was sent.
+    /// Whether the command `command` was sent (since the last
+    /// [`Screen::clear_commands`]).
     pub fn sent(&self, command: &Command) -> bool {
         self.commands.iter().any(|(_, c)| c == command)
+    }
+
+    /// Forgets the commands sent so far: [`Screen::commands`] and
+    /// [`Screen::sent`] see only those sent afterwards. What the commands
+    /// did stays (the clipboard, the focus, scroll offsets). The record
+    /// otherwise grows with every command, for as long as the test runs.
+    pub fn clear_commands(&mut self) {
+        // A new vector, not `clear`: the old one's capacity goes too.
+        self.commands = Vec::new();
     }
 
     /// The view a press on `selector` goes to ([`Screen::matches`]'s
