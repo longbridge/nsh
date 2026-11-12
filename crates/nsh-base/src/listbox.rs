@@ -1031,6 +1031,9 @@ pub(crate) struct Hooks {
     pub(crate) dismiss: Rc<dyn Fn(OpenChangeReason)>,
     /// It is all there (`true`) or all gone (`false`).
     pub(crate) shown: Rc<dyn Fn(bool)>,
+    /// The desktops: it closed and starts to go; where the keyboard focus
+    /// goes ([`Presence::back`]).
+    pub(crate) back: Rc<dyn Fn()>,
 }
 
 /// The list while it is open, in its component's dropdown
@@ -1047,6 +1050,7 @@ pub(crate) fn present(
         open: hooks.open.clone(),
         dismiss: hooks.dismiss.clone(),
         shown: hooks.shown.clone(),
+        back: hooks.back.clone(),
     };
     popup::dropdown(
         anchor,
