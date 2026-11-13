@@ -266,7 +266,7 @@ class OffscreenCanvas {
   readonly width: number;
   readonly height: number;
   getContext(contextId: "2d"): CanvasRenderingContext2D;
-  convertToBlob(options?: { type?: string; quality?: number; scale?: number }): Promise<Blob>;
+  convertToBlob(options?: { type?: string; scale?: number }): Promise<Blob>;
 }
 ```
 
@@ -282,7 +282,7 @@ const png = await canvas.convertToBlob({ scale: 2 });
 url.set(URL.createObjectURL(png)); // <Image src={url()} />, or its bytes: await png.arrayBuffer()
 ```
 
-图片单边最多 16384 像素、总共最多 6400 万像素；更大的图片以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。iOS、Android、macOS、Windows、Linux、GPUI 后端和 Web 都渲染离屏画布，画法与各自屏上的画布相同；其他平台上 `convertToBlob` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
+图片单边最多 16384 像素、总共最多 6400 万像素，一个应用同时最多渲染 16 张；超出任一限制时 `convertToBlob` 以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。平台 30 秒内没有完成的渲染以 `ETIMEDOUT` 拒绝。iOS、Android、macOS、Windows、Linux、GPUI 后端和 Web 都渲染离屏画布，画法与各自屏上的画布相同；其他平台上（包括 `nsh test` 的 headless 运行），`convertToBlob` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝（`nsh test --target` 在它指定的平台上渲染）。
 
 ## 不支持的功能
 

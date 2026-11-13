@@ -38,15 +38,19 @@
   supported: `getImageData` / `putImageData`, filters.
 
 **Offscreen canvases** (`OffscreenCanvas` of `nsh`, `nsh-js` `canvas/offscreen.rs`; Rust:
-`Painter::render`, `element::ambient::render_canvas`). An object of a size of its own whose `getContext("2d")` is
+`Painter::render` with `canvas::render::RenderOptions`). An object of a size of its own whose `getContext("2d")` is
 a context recording as `<Canvas draw>`'s does (`new_recording`, never closed); `convertToBlob` decodes what it
 recorded into a `Drawing` (the same `max_canvas_ops` limit) and pushes `Op::RenderCanvas` with a JS call number.
 The core (`core/canvas_render.rs`, `canvas::render`) checks the size against `MAX_SIDE` / `MAX_PIXELS`, takes the
 screen's pixel ratio when no `scale` is given, and sends `Command::RenderCanvas` on the root to platforms whose
 `Environment::canvas_render` is set (elsewhere it answers `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` at once); the
 platform's `EventKind::CanvasImage` (`EventPayload::CanvasImage`) settles the promise with a `Blob`
-(`JsHost::new_blob`). macOS (`nsh-platform-macos` `canvas/offscreen.rs`) loads the images the drawing names
-through the shared loader, then replays it with `CanvasState::paint` into a `CGBitmapContext` of its own on a
+(`JsHost::new_blob`). Request ids are unique in the process (an `AtomicU32`), not per core: after a hot reload the
+platform may still answer the replaced core's render, which must not settle the new core's request of that number.
+Each request has a deadline (`render::TIMEOUT`, 30 s) that rejects it with `ETIMEDOUT` and frees its slot of
+`MAX_PENDING`; an answer after it is dropped. macOS (`nsh-platform-macos` `canvas/offscreen.rs`) loads the images the drawing names
+through the shared loader, then replays it with `CanvasState::paint` into an sRGB `CGBitmapContext` of its own
+(`nsh-platform-apple` `canvas_image.rs`, shared with iOS, as the ImageIO encoding is) on a
 global queue, y down at `scale`, animated slots at 0, and encodes it with ImageIO. Every platform loads the
 images first through its shared loader (one that fails is skipped with a warning) and replays the drawing with its
 on-screen painter, so the image matches the canvas:
@@ -58,8 +62,9 @@ on-screen painter, so the image matches the canvas:
   device (the painter's resources are that thread's), read back, encoded with WIC's PNG encoder on a thread.
 - Linux (`canvas/offscreen.rs`): the Cairo `Replay` into an `ImageSurface` on the main thread (Pango text needs it),
   encoded by GDK (`save_to_png_bytes`) on a thread.
-- GPUI (`canvas/offscreen.rs`): the tiny-skia `record` on a thread, its layers composited; text without outlines
-  (emoji, GPUI's own `Layer::Text`) is not in the image.
+- GPUI (`canvas/offscreen.rs`): the tiny-skia `Replay` on a thread into one pixmap the size of the image (scratch
+  pixmaps only for shadows and composites, sized to what they touch); text without outlines (emoji, color glyphs) is
+  not in the image (`docs/dev/gpui.md`).
 - Web (`web/nsh.js` `renderCanvas`): the on-screen `replayCanvas` onto an `OffscreenCanvas` (or a `<canvas>`),
   images loaded CORS-clean, `convertToBlob`, back through `nsh_canvas_image`; the browser runtime's `nsh` exports its
   own `OffscreenCanvas` (`web/browser/canvas.js`, op 604), apart from the browser's global one.

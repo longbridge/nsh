@@ -1,8 +1,16 @@
 //! Offscreen canvas renders in the core ([`crate::canvas::render`]): each
 //! request is checked, sent to the platform ([`Command::RenderCanvas`]) and
-//! answered once by its reply ([`crate::EventKind::CanvasImage`]).
+//! answered once by its reply ([`crate::EventKind::CanvasImage`]) or its
+//! deadline ([`render::TIMEOUT`]).
+//!
+//! Request ids are unique in the process, not per core: a platform may
+//! still answer a render a replaced core (a hot reload's) asked for, and
+//! that answer must not settle a new core's request of the same number.
 
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use rustc_hash::FxHashMap;
 
@@ -12,7 +20,7 @@ use crate::{
     canvas::render::{self, RenderRequest},
     element::{
         JsError, codes,
-        task::{self, Action, AnswerSlot},
+        task::{self, Action, AnswerSlot, Task},
     },
 };
 
@@ -37,10 +45,32 @@ impl crate::element::Ret for ImageBlob {
     }
 }
 
+struct Pending {
+    answer: Slot,
+    _deadline: Task<()>,
+}
+
 #[derive(Default)]
 pub(super) struct Renders {
-    next: u32,
-    pending: FxHashMap<u32, Slot>,
+    pending: FxHashMap<u32, Pending>,
+}
+
+impl Renders {
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+}
+
+/// The next request id, never 0.
+fn next_id() -> u32 {
+    static NEXT: AtomicU32 = AtomicU32::new(1);
+    loop {
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        if id != 0 {
+            return id;
+        }
+    }
 }
 
 impl<M: crate::TextEngine> Core<M> {
@@ -88,17 +118,27 @@ impl<M: crate::TextEngine> Core<M> {
                 return;
             }
         };
-        let renders = &mut self.components.canvas_renders;
-        if renders.pending.len() >= render::MAX_PENDING {
+        if self.components.canvas_renders.pending.len() >= render::MAX_PENDING {
             answer.borrow_mut().deliver(Err(render::error(
                 codes::QUOTA_EXCEEDED,
                 "too many offscreen canvas renders at once",
             )));
             return;
         }
-        renders.next = renders.next.wrapping_add(1).max(1);
-        let id = renders.next;
-        renders.pending.insert(id, answer);
+        let id = next_id();
+        let deadline = task::act_after(
+            &self.components.executor,
+            crate::ROOT_ID,
+            render::TIMEOUT,
+            Action::CanvasRenderTimeout(id),
+        );
+        self.components.canvas_renders.pending.insert(
+            id,
+            Pending {
+                answer,
+                _deadline: deadline,
+            },
+        );
         self.commands.push((
             crate::ROOT_ID,
             Command::RenderCanvas {
@@ -117,11 +157,23 @@ impl<M: crate::TextEngine> Core<M> {
         let EventPayload::CanvasImage { id, result } = payload else {
             return false;
         };
-        if let Some(answer) = self.components.canvas_renders.pending.remove(id) {
-            answer
+        if let Some(pending) = self.components.canvas_renders.pending.remove(id) {
+            pending
+                .answer
                 .borrow_mut()
                 .deliver(result.clone().map_err(JsError::Error));
         }
         true
+    }
+
+    /// A render the platform has not answered in time fails; its answer,
+    /// if it ever comes, is dropped.
+    pub(super) fn timeout_canvas_render(&mut self, id: u32) {
+        if let Some(pending) = self.components.canvas_renders.pending.remove(&id) {
+            pending.answer.borrow_mut().deliver(Err(render::error(
+                codes::TIMED_OUT,
+                "the platform did not render the offscreen canvas in time",
+            )));
+        }
     }
 }

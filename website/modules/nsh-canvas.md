@@ -266,7 +266,7 @@ class OffscreenCanvas {
   readonly width: number;
   readonly height: number;
   getContext(contextId: "2d"): CanvasRenderingContext2D;
-  convertToBlob(options?: { type?: string; quality?: number; scale?: number }): Promise<Blob>;
+  convertToBlob(options?: { type?: string; scale?: number }): Promise<Blob>;
 }
 ```
 
@@ -282,7 +282,7 @@ const png = await canvas.convertToBlob({ scale: 2 });
 url.set(URL.createObjectURL(png)); // <Image src={url()} />, or its bytes: await png.arrayBuffer()
 ```
 
-The image is at most 16384 pixels a side and 64 million pixels in all; a larger one rejects with `ERR_NSH_QUOTA_EXCEEDED`. iOS, Android, macOS, Windows, Linux, the GPUI backend and the web render offscreen canvases, each as its canvases draw on screen; on any other platform `convertToBlob` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+The image is at most 16384 pixels a side and 64 million pixels in all, and an app renders up to 16 images at once; past either limit `convertToBlob` rejects with `ERR_NSH_QUOTA_EXCEEDED`. A render the platform has not finished in 30 seconds rejects with `ETIMEDOUT`. iOS, Android, macOS, Windows, Linux, the GPUI backend and the web render offscreen canvases, each as its canvases draw on screen; on any other platform, `nsh test`'s headless runs among them, `convertToBlob` rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (`nsh test --target` renders on the platform it names).
 
 ## Not supported
 

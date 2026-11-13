@@ -1515,7 +1515,11 @@ export interface Path2D extends CanvasPath {}"#,
   /**
    * Renders what the context drew into an image: PNG (any `type` it does not
    * encode gives PNG, as in browsers), `scale` pixels per point (the screen's
-   * by default). Animated values draw at 0.
+   * by default). Animated values draw at 0. Rejects with
+   * `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform renders none
+   * (`nsh test`'s headless runs among them), `ERR_NSH_QUOTA_EXCEEDED` for an
+   * image over 16384 pixels a side or 64 megapixels or past 16 renders at
+   * once, `ETIMEDOUT` when the platform has not answered in 30 seconds.
    */
   convertToBlob(options?: ImageEncodeOptions): Promise<Blob>;
 }
@@ -1523,8 +1527,6 @@ export interface Path2D extends CanvasPath {}"#,
 export interface ImageEncodeOptions {
   /** The MIME type: `"image/png"` (the default). */
   type?: string;
-  /** For lossy types; PNG ignores it. */
-  quality?: number;
   /** Pixels per point; the screen's by default. */
   scale?: number;
 }"#,
