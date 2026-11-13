@@ -1209,10 +1209,11 @@ interface PlatformSelectSpec<T> {
   desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers, terminals
   native?: T;   // every platform but the web
   default?: T;
+  [platform: string]: T | undefined; // a platform built outside NSH, by its platform.name
 }
 ```
 
-Returns the value for the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (and `is_desktop()` for `mobile` / `desktop`).
+Returns the value for `platform.name` (on a platform built outside NSH), else the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (with `platform_name()` and `is_desktop()`).
 
 ```rust tabs
 use nsh_core::platform::Os;
