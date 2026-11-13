@@ -29,7 +29,7 @@ use objc2_ui_kit::{
     NSFontAttributeName, NSForegroundColorAttributeName, NSTextAlignment, UIColor, UIControl,
     UIControlEvents, UIEdgeInsets, UIKeyboardAppearance, UIKeyboardType, UILabel, UIResponder,
     UIReturnKeyType, UITextAutocapitalizationType, UITextAutocorrectionType, UITextField,
-    UITextView, UIView, UIViewAutoresizing,
+    UITextSmartDashesType, UITextSmartQuotesType, UITextView, UIView, UIViewAutoresizing,
 };
 
 use crate::{target::EventTarget, text};
@@ -1354,6 +1354,15 @@ fn traits(view: &AnyObject, config: &InputConfig) {
     } else {
         UITextAutocorrectionType::No
     };
+    // Smart quotes and dashes are corrections too: off with `autoCorrect`.
+    let smart = if config.auto_correct {
+        (
+            UITextSmartQuotesType::Default.0,
+            UITextSmartDashesType::Default.0,
+        )
+    } else {
+        (UITextSmartQuotesType::No.0, UITextSmartDashesType::No.0)
+    };
     // SAFETY: UITextField and UITextView adopt UITextInputTraits; each
     // setter takes the NSInteger-backed enum (BOOL, or string) passed here.
     unsafe {
@@ -1363,6 +1372,8 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         send(view, sel!(setReturnKeyType:), return_key.0);
         send(view, sel!(setAutocapitalizationType:), capitalize.0);
         send(view, sel!(setAutocorrectionType:), correct.0);
+        send(view, sel!(setSmartQuotesType:), smart.0);
+        send(view, sel!(setSmartDashesType:), smart.1);
         let content_type =
             content_type(config.auto_fill).map_or(std::ptr::null(), |t| t as *const NSString);
         send(view, sel!(setTextContentType:), content_type);
