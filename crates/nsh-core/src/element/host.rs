@@ -747,7 +747,8 @@ impl Input {
         self.bind_prop(mode, |mode: AutoCapitalize| Prop::AutoCapitalize(mode))
     }
 
-    /// Spelling correction (default on).
+    /// The system's corrections (default on): spelling and, on iOS and
+    /// macOS, smart quotes, dashes and text replacement.
     pub fn auto_correct(self, on: impl IntoReactive<bool>) -> Self {
         self.bind_prop(on, |on: bool| Prop::AutoCorrect(on))
     }

@@ -182,7 +182,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `keyboardType` | `KeyboardType` | `"default"` | The keyboard layout. |
 | `returnKeyType` | `ReturnKeyType` | `"default"` | The return key's label. |
 | `autoCapitalize` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | Automatic capitalization. |
-| `autoCorrect` | `boolean` | `true` | The system's corrections. |
+| `autoCorrect` | `boolean` | `true` | The system's corrections: spelling and, on iOS and macOS, smart quotes, dashes and text replacement. Turn it off for code and identifiers. |
 | `autoComplete` | `AutoComplete` | | What the input holds, for autofill. |
 | `multiline` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. |
 | `maxLength` | `number` | | The most characters the user can enter. A longer paste goes in cut to what fits, as in a browser. |
