@@ -257,12 +257,22 @@ export function createBrowserHost(player) {
         dom.setMeasure((node, what) => modules.measure(node, what));
         animation = createAnimation(call, active, requestPump, env);
         const nsh = modules.exports.get("nsh") ?? {};
-        const canvas = createCanvas(call, reactive, dom, active, requestPump);
+        const canvas = createCanvas(call, reactive, dom, active, requestPump, (op, receiver, args) => modules.request(op, receiver, args));
         Object.assign(nsh, animation.api, canvas, { PanResponder: gestures.PanResponder });
         Object.assign(nsh, reactive, env.api, { List: lists.render, mount: dom.mount, resource: createResource(call, reactive, active, requestPump), keymap: createKeymap(call, reactive, dom, env.api.platform, requestPump, hot) });
         host = createHost(call, reactive, dom, env, active, nsh.host);
         nsh.host = host.host;
-        configureAPIs(nsh, modules, dom, active, env);
+        configureAPIs(nsh, modules, dom, active, env, {
+          // The pump is woken first, so the batch of this turn, with the
+          // history entries it pushes, lands before the title is written
+          // and the entry left keeps its own, as a Rust app's title in the
+          // batch does.
+          setWindowTitle: title => {
+            if (!active()) return;
+            requestPump();
+            player.setWindowTitle?.(title);
+          },
+        });
         const page = createWebPage(reactive, player);
         // Where the app is the page, `setUrl` takes a URL of the page's
         // origin, resolved once as `history.replaceState` resolves it

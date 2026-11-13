@@ -31,6 +31,8 @@
 //!   active app, `inactive` otherwise; live, from `NSApplication`'s
 //!   activation, hiding and occlusion notifications. An embedded surface
 //!   follows the embedding app's, which is the application;
+//! - the wake count (`wakeCount()`): one more on every
+//!   `NSWorkspaceDidWakeNotification`, for every surface;
 //! - the pixel ratio: the window's backing scale factor;
 //! - the window's bounds, mode and display ([`crate::window_state`]), and
 //!   the displays, sent again when they change;
@@ -86,7 +88,7 @@ use objc2_app_kit::{
     NSDocumentTypeDocumentAttribute, NSExcludedElementsDocumentAttribute, NSHTMLTextDocumentType,
     NSModalResponse, NSPasteboard, NSPasteboardTypeRTF, NSPasteboardTypeRTFD,
     NSPasteboardTypeString, NSScreen, NSWorkspace,
-    NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
+    NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification, NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSCalendar, NSCurrentLocaleDidChangeNotification, NSData,
@@ -193,11 +195,22 @@ fn install(mtm: MainThreadMarker) {
     }
     let workspace = NSWorkspace::sharedWorkspace();
     let block = RcBlock::new(|_: NonNull<NSNotification>| system_changed());
+    let wake = RcBlock::new(|_: NonNull<NSNotification>| woke());
     let queue = NSOperationQueue::mainQueue();
     // SAFETY: immutable constants; the block is called on the main queue,
     // and the observers are kept (and never removed) while the thread runs.
     let observers = unsafe {
         vec![
+            // The system woke from sleep (`wakeCount()`): posted to the
+            // workspace's center only.
+            workspace
+                .notificationCenter()
+                .addObserverForName_object_queue_usingBlock(
+                    Some(NSWorkspaceDidWakeNotification),
+                    None,
+                    Some(&queue),
+                    &wake,
+                ),
             workspace
                 .notificationCenter()
                 .addObserverForName_object_queue_usingBlock(
@@ -287,27 +300,35 @@ fn install(mtm: MainThreadMarker) {
     });
 }
 
-/// A system setting changed: tells every surface.
-fn system_changed() {
-    let surfaces: Vec<Rc<Surface>> = SYSTEM.with(|s| {
+/// This thread's surfaces.
+fn surfaces() -> Vec<Rc<Surface>> {
+    SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
         s.surfaces.retain(|w| w.strong_count() > 0);
         s.surfaces.iter().filter_map(Weak::upgrade).collect()
-    });
-    for surface in surfaces {
+    })
+}
+
+/// A system setting changed: tells every surface.
+fn system_changed() {
+    for surface in surfaces() {
         update(&surface);
+    }
+}
+
+/// The system woke from sleep: every surface counts it (`wakeCount()`).
+fn woke() {
+    for surface in surfaces() {
+        let mut env: Environment = surface.environment.get();
+        env.wake_count = env.wake_count.wrapping_add(1);
+        surface.set_environment(env);
     }
 }
 
 /// The displays changed: every surface's engine gets them, and its
 /// window's state (its display's visible bounds) is read again.
 fn screens_changed() {
-    let surfaces: Vec<Rc<Surface>> = SYSTEM.with(|s| {
-        let mut s = s.borrow_mut();
-        s.surfaces.retain(|w| w.strong_count() > 0);
-        s.surfaces.iter().filter_map(Weak::upgrade).collect()
-    });
-    for surface in surfaces {
+    for surface in surfaces() {
         let displays = crate::window_state::displays(surface.mtm);
         surface.control(|c| c.set_displays(displays));
         crate::window_state::changed(&surface);
@@ -572,6 +593,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 toggle(*show);
             }
         }
+        Command::PerfMonitorMode(mode) => {
+            if let Some(set) = &*surface.perf_mode.borrow() {
+                set(*mode);
+            }
+        }
         Command::Announce(text) => crate::access::announce(
             crate::window::key_root(surface).ns(),
             text,
@@ -595,6 +621,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             crate::file_requests::pick_files(surface, *id, request);
         }
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::Speech(command) => surface.control(|c| crate::speech::command(c, command)),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();

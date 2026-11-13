@@ -65,17 +65,17 @@ function Inline() {
       <Text style={{ ...body(), fontSize: 16, lineHeight: 28 }}>
         {"Made with "}
         <If when={!terminal}>
-          <Image src={logo} style={{ width: 18, height: 18, borderRadius: 5 }} />
+          <Image src={logo} style={{ width: 18, height: 18, borderRadius: 5, verticalAlign: "middle" }} />
         </If>
         {terminal ? "nsh. Status " : " nsh. Status "}
-        <View style={{ backgroundColor: tints.up, borderRadius: 9, paddingHorizontal: 8, height: terminal ? TERMINAL_ROW : 18, flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <View style={{ verticalAlign: "middle", backgroundColor: tints.up, borderRadius: 9, paddingHorizontal: 8, height: terminal ? TERMINAL_ROW : 18, flexDirection: "row", alignItems: "center", gap: 4 }}>
           <If when={!terminal}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.up }} />
           </If>
           <Text style={{ color: colors.up, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 }}>LIVE</Text>
         </View>
         {" and a button inside the sentence "}
-        <Press onPress={() => likes.set(likes() + 1)} scale={0.9} accessibilityLabel="Like" hitSlop={10}>
+        <Press onPress={() => likes.set(likes() + 1)} style={{ verticalAlign: "middle" }} scale={0.9} accessibilityLabel="Like" hitSlop={10}>
           <View
             style={{
               backgroundColor: colors.raised,

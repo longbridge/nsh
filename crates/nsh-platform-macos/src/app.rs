@@ -14,7 +14,9 @@ use nsh_core::{
 };
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use objc2::{
-    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
+    MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyClass, AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
@@ -198,6 +200,12 @@ pub struct AppOptions {
     /// notification center delegate of its own keeps it. Without it the
     /// permission is `unavailable` and nothing shows. [`run_app`] sets it.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes the app bundle's login
+    /// item (`Application.loginItem()`: `SMAppService.mainApp`, which System
+    /// Settings lists under Login Items). False by default, and read by
+    /// [`run_app`]'s view only: a view embedded in another app has no login
+    /// item. The release runner sets it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -243,6 +251,7 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
         }
@@ -321,6 +330,9 @@ pub struct AppView {
     options: RefCell<AppOptions>,
     /// The performance monitor's HUD, while it shows.
     fps: RefCell<Option<Rc<crate::fps::Hud>>>,
+    /// How the performance monitor shows ([`AppView::set_fps_mode`]): kept
+    /// while it is hidden, and switched by a click on its panel.
+    fps_mode: Rc<Cell<nsh_core::FpsMode>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -358,6 +370,9 @@ impl AppView {
             container,
             options: RefCell::new(options),
             fps: RefCell::new(None),
+            fps_mode: Rc::new(Cell::new(
+                nsh_engine::perf::mode_by_env().unwrap_or_default(),
+            )),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -366,6 +381,12 @@ impl AppView {
         *view.surface.perf_toggle.borrow_mut() = Some(Box::new(move |show| {
             if let Some(view) = weak.upgrade() {
                 view.set_fps_monitor(show);
+            }
+        }));
+        let weak = Rc::downgrade(&view);
+        *view.surface.perf_mode.borrow_mut() = Some(Box::new(move |mode| {
+            if let Some(view) = weak.upgrade() {
+                view.set_fps_mode(mode);
             }
         }));
         if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
@@ -436,6 +457,11 @@ impl AppView {
             audio: None,
             // The app's windows of its own are this backend's.
             windows: None,
+            // The standalone app's alone (`run_app`), when its runner says.
+            login_item: (options.login_item && self.surface.standalone.get()).then(|| {
+                Arc::new(crate::login_item::LoginItem)
+                    as Arc<dyn nsh_core::desktop::LoginItemBackend>
+            }),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -468,9 +494,23 @@ impl AppView {
     pub fn set_fps_monitor(&self, show: bool) {
         let mut hud = self.fps.borrow_mut();
         match (show, hud.is_some()) {
-            (true, false) => *hud = Some(crate::fps::Hud::show(self)),
+            (true, false) => *hud = Some(crate::fps::Hud::show(self, self.fps_mode.clone())),
             (false, true) => *hud = None,
             _ => {}
+        }
+    }
+
+    /// How the performance monitor shows, now and whenever it shows later
+    /// (`setFpsMode`): its whole panel ([`nsh_core::FpsMode::Expanded`],
+    /// the default; `NSH_FPS=collapsed` or `hidden` start it otherwise),
+    /// a pill with the frame rate alone, colored by the frame budget
+    /// ([`nsh_core::FpsMode::Collapsed`]), or nothing while it still
+    /// measures and logs ([`nsh_core::FpsMode::Hidden`]). A click on the
+    /// panel switches between the first two.
+    pub fn set_fps_mode(&self, mode: nsh_core::FpsMode) {
+        self.fps_mode.set(mode);
+        if let Some(hud) = &*self.fps.borrow() {
+            hud.update();
         }
     }
 
@@ -543,12 +583,14 @@ fn initial_environment() -> Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
         screen_color: true,
+        canvas_render: true,
         file_requests: true,
         speech: true,
         notifications: true,
         audio: true,
         web_input: true,
         web_evaluate: true,
+        reads_active_descendants: true,
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
@@ -768,6 +810,11 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, app: &NSApplication) -> NSApplicationTerminateReply {
+            // The user asked while the app listens to quit requests: it
+            // decides, and quits with `quit()` ([`quit_app`]).
+            if !system_quit() && ask_quit() {
+                return NSApplicationTerminateReply::TerminateCancel;
+            }
             finish_running(app);
             // The caller owns process termination after run_app returns.
             NSApplicationTerminateReply::TerminateCancel
@@ -855,13 +902,20 @@ pub(crate) fn close_main_window(key: u64) -> bool {
             .borrow()
             .as_ref()
             .filter(|running| running.view.surface().key() == key)
-            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+            .map(|running| {
+                (
+                    running.window.clone(),
+                    running.keep_alive_on_close,
+                    running.view.surface().clone(),
+                )
+            })
     });
-    let Some((window, keep_alive)) = target else {
+    let Some((window, keep_alive, surface)) = target else {
         return false;
     };
     if keep_alive {
-        window.orderOut(None);
+        // Hidden, in full screen once it has left full screen.
+        crate::window::hide(&surface, nsh_core::ROOT_ID, &window);
     } else {
         window.close();
     }
@@ -894,6 +948,46 @@ pub(crate) fn restart_app() {
             finish_running(&NSApplication::sharedApplication(mtm));
         }
     });
+}
+
+/// The standalone app's quit request goes to the app, when it listens
+/// ([`crate::chrome::ask_quit`]).
+fn ask_quit() -> bool {
+    let surface = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .map(|running| running.view.surface().clone())
+    });
+    surface.is_some_and(|surface| crate::chrome::ask_quit(&surface))
+}
+
+/// Whether the quit AppKit asks about is the system's: logging out,
+/// restarting or shutting down send the app a quit Apple event with a
+/// reason (`keyAEQuitReason`); the Quit item, Command-Q and the Dock's
+/// Quit carry none.
+fn system_quit() -> bool {
+    /// `keyAEQuitReason`, `'why?'`.
+    const QUIT_REASON: u32 = u32::from_be_bytes(*b"why?");
+    let Some(class) = AnyClass::get(c"NSAppleEventManager") else {
+        return false;
+    };
+    // SAFETY: Foundation's shared Apple event manager and the event it
+    // handles now (nil outside one), on the main thread.
+    let event: Option<Retained<AnyObject>> = unsafe {
+        let manager: Option<Retained<AnyObject>> = msg_send![class, sharedAppleEventManager];
+        match manager {
+            Some(manager) => msg_send![&manager, currentAppleEvent],
+            None => None,
+        }
+    };
+    let Some(event) = event else {
+        return false;
+    };
+    // SAFETY: an `NSAppleEventDescriptor`'s attribute, nil when absent.
+    let reason: Option<Retained<AnyObject>> =
+        unsafe { msg_send![&event, attributeDescriptorForKeyword: QUIT_REASON] };
+    reason.is_some()
 }
 
 /// Ends the standalone event loop, returning process ownership to its caller.

@@ -1493,6 +1493,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
         Command::PickFiles { id, request } => pick_files(surface, *id, request.clone()),
         Command::FileRequest { id, request } => file_request(surface, *id, request),
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
             // the surface). An embedded surface closes the window it is in,
@@ -2855,6 +2870,22 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         labels: buttons.iter().map(|b| b.text.clone()).collect(),
     });
     add_overlay(surface, serial, OverlayKind::Dialog(item));
+}
+
+/// Whether the newest dialog on `surface` was drawn (laid out), or there
+/// is none.
+#[cfg(feature = "dev")]
+pub(crate) fn dialog_drawn(surface: &Surface) -> bool {
+    OVERLAYS
+        .with(|o| {
+            o.borrow().iter().rev().find_map(|o| match &o.kind {
+                OverlayKind::Dialog(d) if o.key == surface.key() && !d.closing.get() => {
+                    Some(d.layout.borrow().is_some())
+                }
+                _ => None,
+            })
+        })
+        .unwrap_or(true)
 }
 
 /// Where a user presses to answer the newest dialog on `surface` (root

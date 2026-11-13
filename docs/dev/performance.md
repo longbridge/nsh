@@ -328,6 +328,9 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   it replaced did (0.57ms).
   The native context records into a Rust list (`nsh-js` `canvas.rs`): the same 17 500 calls take ~1.0–1.1ms
   (~1.7ms in the former JS runtime, measured A/B), and 12 of them plus decoding one commit 21–22ms (61ms).
+- `OffscreenCanvas` on Windows: the UI thread records, submits the drawing and its copy, and maps the read-back
+  bitmap once a Direct3D event query polled every timer tick says the GPU is done, so a large image costs it the
+  recording and one copy of its rows, never a wait for the GPU; unpremultiplying and PNG encoding run on a thread.
 
 - Where JS time went in the former JS runtime (release `nsh trace`, which logs `event js` per dispatched event;
   2026-10-16, before the runtime went native): with Solid in JS, the empty app's eval was ~250µs (all of it the
@@ -633,6 +636,35 @@ draw a panel.
   Before: GPUI's 30 fps cap of unfocused windows (frames 40–42 ms apart) and, in Stocks, canvases rasterized in full
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
+
+  Canvas animated argument batches (`canvas.rs`, 2026-11-12, Linux x86_64, Ryzen 9 7950X, against
+  `9fd11f83`): the before / after setters and unchanged `DamageScan`, extracted into an isolated harness.
+  Rust 1.99.1, opt-level 3, fat LTO, one codegen unit, pinned to CPU 2, no concurrent builds; four warmup
+  updates, three processes with seven alternating pairs each, medians of all 21 samples per implementation:
+
+  | Static path points | Changed slots | Argument update, before → after |
+  |---|---|---|
+  | 0 | 64 | 16.157 → 1.311 µs |
+  | 400 | 64 | 272.069 → 5.407 µs |
+  | 4,000 | 8 | 316.143 → 41.026 µs |
+  | 4,000 | 32 | 1,263.803 → 41.492 µs |
+  | 4,000 | 64 | 2,526.364 → 42.080 µs |
+  | 4,000 | 256 | 10,262.553 → 46.824 µs |
+
+  A canvas's animated values are applied together: at most two whole-drawing damage scans and one
+  `view.changed()`, instead of up to two scans and one call per changed slot. Changed-slot storage is reused;
+  one changed slot keeps a scalar predicate. Controls with one slot and 0 / 400 / 4,000 static points take
+  0.0566 / 4.048 / 39.514 → 0.0563 / 3.986 / 39.279 µs (medians within 1.6%). The harness includes input
+  preparation, state borrowing and slot writes, with a notification counter and supporting type shims. It
+  excludes the actual invalidation walk, rasterization, workers, uploads, GPU work and presentation.
+
+  Headless `nsh test <entry> --trace` (debug, three alternating runs per version): a canvas of 256 animated
+  rectangles after 4,000 static path points keeps 287 ops / 284 mount items / 10 nodes initially, then
+  0 ops / 6 items / 10 nodes and 0 ops / 5 items / 10 nodes when resized to 760×420 and 920×540. Commit
+  medians are 2448 / 185 / 127 → 2490 / 171 / 140 µs. The counter control keeps 57 ops / 51 items / 21 nodes
+  initially and 10 ops / 7 items / 24 nodes after `+1` (395 / 276 → 410 / 305 µs). Every mount item matches
+  between versions. These are smoke checks of unchanged engine work; the optimization is in GPUI's animated
+  argument writes. Native frame-time and process CPU/GPU changes have not been measured.
 
 The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO (the published distribution thin LTO over 16 codegen units: `docs/dev/tooling.md` "Releases").
 

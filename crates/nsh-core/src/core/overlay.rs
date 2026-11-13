@@ -26,8 +26,14 @@
 //! while the overlay is in the view on a desktop; the pointer resting on it
 //! for the hint's delay shows the hint (a task of the components' executor
 //! wakes the engine then), the pointer leaving or pressing it hides it, as
-//! GPUI's tooltips do. In every idiom the focus the keyboard moved shows
-//! it too, as WAI-ARIA's tooltips: the focus that Tab, an arrow, a
+//! GPUI's tooltips do. Once the pointer showed one, it moves on without
+//! waiting: the pointer coming to an anchor within the hint's grace period
+//! after it left one whose hint it showed, or while one it showed is still
+//! in the view, shows it at once ([`Core::hint_skips_delay`],
+//! `gpui-base`'s `TooltipDefaults` grace period, Radix's
+//! `skipDelayDuration`); a press on an anchor or Escape ends the period,
+//! and the focus starts none. In every idiom the focus the keyboard moved
+//! shows it too, as WAI-ARIA's tooltips: the focus that Tab, an arrow, a
 //! shortcut or the app's `focus()` after a key brought to its anchor (or
 //! into it, outside an overlay, the nearest hint's) shows it at once until
 //! the focus leaves ([`Core::focus_hints`]), by `focus-visible:`'s rule
@@ -57,8 +63,8 @@ use crate::{
     mount::MountItem,
     ops::{Op, OverlayProp},
     overlay::{
-        HINT_DELAY, OverlayAnchor, OverlayConfig, Placed, Placement, TooltipContent, inset, place,
-        place_fitted,
+        HINT_DELAY, HINT_ENDLESS, HINT_GRACE_PERIOD, OverlayAnchor, OverlayConfig, Placed,
+        Placement, TooltipContent, inset, place, place_fitted,
     },
     props::PointerEvents,
 };
@@ -168,6 +174,10 @@ pub(super) struct Overlays {
     /// The anchors of the hints in the view listening to the pointer
     /// (desktops), checked by id.
     pub(super) hinting: Vec<(Key, NodeId)>,
+    /// When the hints' grace period started: the pointer left an anchor
+    /// whose hint it showed, in the view. `None`: none runs (a press on an
+    /// anchor or Escape ended it).
+    pub(super) grace_from: Option<crate::time::Instant>,
     /// The elements with a `tooltip`, by id: the nodes made for it.
     pub(super) tooltips: FxHashMap<NodeId, CoreTooltip>,
 }
@@ -640,7 +650,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Whether `key` is a nested span of a text, with no frame of its own.
-    fn is_text_span(&self, key: Key) -> bool {
+    pub(super) fn is_text_span(&self, key: Key) -> bool {
         let n = &self.nodes[key as usize];
         n.kind == Kind::Text && n.inline && n.layout.is_none()
     }
@@ -725,24 +735,68 @@ impl<M: TextEngine> Core<M> {
                     }
                     self.hint_wait(key)
                 }
-                _ => self.unhint(key),
+                _ => {
+                    // Moving on from a hint it showed: the next anchor the
+                    // pointer comes to within its grace period shows its
+                    // hint at once.
+                    if self
+                        .overlay(key)
+                        .is_some_and(|s| s.hinted && s.host.is_some())
+                    {
+                        self.overlay_state.grace_from = Some(crate::time::now());
+                    }
+                    self.unhint(key)
+                }
             }
         }
     }
 
     /// The pointer is on hint `key`'s anchor: it shows once the pointer
-    /// rested there for its delay ([`Self::hint_due`]).
+    /// rested there for its delay ([`Self::hint_due`]), or at once within
+    /// its grace period ([`Self::hint_skips_delay`]).
     fn hint_wait(&mut self, key: Key) {
         let executor = self.components.executor.clone();
         let id = self.nodes[key as usize].id;
+        let skips = self.hint_skips_delay(key);
         let Some(state) = self.overlay_mut(key) else {
             return;
         };
         if state.hinted || state.waiting.is_some() {
             return;
         }
+        if skips {
+            self.hint_for_pointer(key);
+            return;
+        }
         let delay = state.config.hint.unwrap_or(HINT_DELAY);
         state.waiting = Some(HintTimer(act_after(&executor, id, delay, Action::Hint(id))));
+    }
+
+    /// Whether hint `key` shows at once as the pointer comes to its anchor,
+    /// without waiting its delay: the pointer left an anchor whose hint it
+    /// showed less than the grace period ago ([`HINT_GRACE_PERIOD`]), or a hint it showed is still
+    /// in the view (an anchor inside another). Hints the focus or the app
+    /// showed count for nothing: the pointer has not paid its rest. A hint
+    /// whose delay never ends ([`HINT_ENDLESS`]) waits it still.
+    fn hint_skips_delay(&self, key: Key) -> bool {
+        let Some(state) = self.overlay(key) else {
+            return false;
+        };
+        if state.config.hint.is_some_and(|d| d >= HINT_ENDLESS) {
+            return false;
+        }
+        let grace = HINT_GRACE_PERIOD;
+        let recent = self
+            .overlay_state
+            .grace_from
+            .is_some_and(|from| crate::time::now().saturating_duration_since(from) < grace);
+        recent
+            || self.overlays.iter().any(|&k| {
+                k != key
+                    && self
+                        .overlay(k)
+                        .is_some_and(|s| s.config.hint.is_some() && s.hinted && s.host.is_some())
+            })
     }
 
     /// Hint overlay `id`'s delay is over with the pointer on its anchor: it
@@ -757,6 +811,15 @@ impl<M: TextEngine> Core<M> {
         if state.waiting.take().is_none() || state.config.hint.is_none() {
             return;
         }
+        self.hint_for_pointer(key);
+    }
+
+    /// The pointer shows hint `key` (in the commit): it asks to show unless
+    /// the focus showed it already.
+    fn hint_for_pointer(&mut self, key: Key) {
+        let Some(state) = self.overlay_mut(key) else {
+            return;
+        };
         let was = state.hint_shown();
         state.hinted = true;
         if !was {
@@ -926,6 +989,10 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .any(|p| p.changed && p.path.contains(&anchor));
             if pressed {
+                // Acting on the anchor, not reading hints: the next anchor
+                // waits its delay, as `gpui-component`'s press hides its
+                // tooltip with no grace period.
+                self.overlay_state.grace_from = None;
                 self.hide_hint(key, true, HintReason::Pointer);
             }
         }
@@ -1113,6 +1180,8 @@ impl<M: TextEngine> Core<M> {
         state.waiting = None;
         state.hinted = false;
         state.focus_shown = false;
+        // Dismissed: the next anchor waits its delay.
+        self.overlay_state.grace_from = None;
         // Shown by the app (`open`) or the pointer and focus: it asks to
         // hide either way.
         self.hint_changed(key, false, HintReason::Escape);
@@ -1405,14 +1474,40 @@ impl<M: TextEngine> Core<M> {
                     Some(grid) if self.framed_box(key).is_some() => grid.height,
                     _ => ring.height.0,
                 };
+                // Elsewhere the overlay's own padding and border are the
+                // rows around it: its content, not its edge, lines up with
+                // the row beside it, as a submenu's first item is level
+                // with its trigger.
+                let own = match (resolved_anchor, self.layout.grid()) {
+                    (OverlayAnchor::Beside { .. }, None) => self.nodes[key as usize]
+                        .layout
+                        .map(|l| self.rounded_layout(l)),
+                    _ => None,
+                };
+                let (lead, trail) = match (own, config.placement.is_horizontal()) {
+                    (Some(l), true) => (
+                        l.padding.top + l.border.top,
+                        l.padding.bottom + l.border.bottom,
+                    ),
+                    (Some(l), false) => (
+                        l.padding.left + l.border.left,
+                        l.padding.right + l.border.right,
+                    ),
+                    (None, _) => (0.0, 0.0),
+                };
                 let anchor = match config.placement.is_horizontal() {
                     true => rect(
                         anchor.origin.x.0,
-                        anchor.origin.y.0 - line,
+                        anchor.origin.y.0 - line - lead,
                         anchor.size.width.0,
-                        anchor.size.height.0 + line * 2.0,
+                        anchor.size.height.0 + line * 2.0 + lead + trail,
                     ),
-                    false => anchor,
+                    false => rect(
+                        anchor.origin.x.0 - lead,
+                        anchor.origin.y.0,
+                        anchor.size.width.0 + lead + trail,
+                        anchor.size.height.0,
+                    ),
                 };
                 // A terminal's frame is the gap: it starts on the row (or
                 // the column) after the trigger's, as rounding an offset

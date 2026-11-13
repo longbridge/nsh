@@ -123,14 +123,17 @@ pub struct Screen {
     clipboard_reads: Vec<(u32, bool)>,
     /// The `Image.getSize` / `Image.prefetch` requests to answer.
     image_infos: Vec<u32>,
+    /// The source each image view is loading, until a test fails it
+    /// ([`Screen::fail_images`]): headless runs load none.
+    loading_images: HashMap<NodeId, Arc<str>>,
     /// The picks asked (`Picker.pickImages`), in order, and how many were
     /// answered.
     picks: Vec<(u32, nsh_core::picker::Pick)>,
     picks_answered: usize,
     /// The URLs the app had the system open (`openUrl`), in order.
     opened_urls: Vec<String>,
-    /// The `openUrl` requests to answer.
-    url_opens: Vec<u32>,
+    /// The `openUrl` requests to answer, with their URLs.
+    url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
     /// The requests on local paths that reached the platform
@@ -154,6 +157,9 @@ pub struct Screen {
     /// The views under the mouse that care (`input::hoverable`), innermost
     /// first.
     hovered: Vec<NodeId>,
+    /// Views a removal took out of the hover or the keyboard focus, with
+    /// their states since, for the engine ([`Screen::take_restated`]).
+    restated: Vec<(NodeId, u16)>,
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
@@ -217,6 +223,10 @@ struct View {
     level: Option<u32>,
     /// Its `accessibilityDescription`.
     description: Option<Arc<str>>,
+    /// The view its `accessibilityActiveDescendant` names.
+    active_descendant: Option<NodeId>,
+    /// The view its `accessibilityControls` names.
+    controls: Option<NodeId>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -446,12 +456,14 @@ impl Screen {
                 }
             }
             MountItem::Remove { id } => {
+                self.taken_out(*id);
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
             }
             MountItem::Delete { id } => {
+                self.taken_out(*id);
                 self.drop_spans(*id);
                 self.canvas(*id, &[]);
                 self.detach(*id);
@@ -460,10 +472,16 @@ impl Screen {
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
-                if self.focused == Some(*id) {
-                    self.focused = None;
-                }
+                self.loading_images.remove(id);
             }
+            MountItem::Image { id, source, .. } => match source {
+                Some(source) => {
+                    self.loading_images.insert(*id, source.uri.clone());
+                }
+                None => {
+                    self.loading_images.remove(id);
+                }
+            },
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
             }
@@ -498,6 +516,8 @@ impl Screen {
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
                 view.description = props.accessibility.description.clone();
+                view.active_descendant = props.accessibility.active_descendant;
+                view.controls = props.accessibility.controls;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -643,7 +663,7 @@ impl Screen {
             // Recorded, never opened: a test's machine opens nothing.
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
-                self.url_opens.push(*id);
+                self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
             // Recorded, never carried out: a test's machine opens, shows
@@ -851,6 +871,44 @@ impl Screen {
             .and_then(|text| text.span_at(start))
             .map(|span| span.style)
             .ok_or_else(|| crate::failure::not_found("span", selector))
+    }
+
+    /// View `id` leaves the tree with what it holds: none of it is under
+    /// the mouse or has the focus any more, and it hears no leave or blur
+    /// for that, as a removed DOM element does not. A removed view may live
+    /// on (a JS cycle keeps it until a collection) while its component is
+    /// gone, whose handlers must not run.
+    fn taken_out(&mut self, id: NodeId) {
+        let mut hovered = std::mem::take(&mut self.hovered);
+        hovered.retain(|&v| {
+            let inside = self.within(v, id);
+            if inside {
+                self.clear_state(v, nsh_core::tailwind::state::HOVERED);
+            }
+            !inside
+        });
+        self.hovered = hovered;
+        if self.focused.is_some_and(|v| self.within(v, id)) {
+            self.focused = None;
+        }
+        if let Some(key) = self.key_focus.filter(|&v| self.within(v, id)) {
+            self.key_focus = None;
+            self.clear_state(key, nsh_core::tailwind::state::FOCUSED);
+        }
+    }
+
+    fn clear_state(&mut self, id: NodeId, bit: u16) {
+        if let Some(states) = self.set_state(id, bit, false) {
+            self.restated.push((id, states));
+        }
+    }
+
+    /// The views a removal took out of the hover or the keyboard focus
+    /// since the last call, still alive, with their states now.
+    pub(crate) fn take_restated(&mut self) -> Vec<(NodeId, u16)> {
+        let mut restated = std::mem::take(&mut self.restated);
+        restated.retain(|(id, _)| self.nodes.contains_key(id));
+        restated
     }
 
     fn detach(&mut self, id: NodeId) {
@@ -1183,6 +1241,28 @@ impl Screen {
         }
     }
 
+    /// How many backs the screen holds, as the web counts its history
+    /// entries: a presented modal each, and each shown stack's screens over
+    /// its bottom one.
+    pub(crate) fn back_depth(&self) -> usize {
+        self.attached()
+            .into_iter()
+            .map(|id| match self.kind(id) {
+                Some(ViewKind::Modal) if !self.is_window(id) => 1,
+                Some(ViewKind::Stack)
+                    if nsh_core::navigation::shown_in_layout(
+                        std::iter::successors(Some(id), |id| self.nodes.get(id)?.parent)
+                            .filter(|id| *id != ROOT)
+                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
+                    ) =>
+                {
+                    self.screens(id).len().saturating_sub(1)
+                }
+                _ => 0,
+            })
+            .sum()
+    }
+
     /// A back popped `screen` natively: it is gone until the app removes it.
     pub(crate) fn pop(&mut self, screen: NodeId) {
         self.popped.insert(screen);
@@ -1199,6 +1279,31 @@ impl Screen {
         let mut presented = std::mem::take(&mut self.presented);
         presented.retain(|id| !self.is_window(*id));
         presented
+    }
+
+    /// The modals presented since the last [`Screen::take_presented`],
+    /// which it leaves for that call.
+    pub(crate) fn presenting(&self) -> Vec<NodeId> {
+        let mut presented = self.presented.clone();
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether view `id` is still in the tree: attached up to the root,
+    /// with nothing on the way a back closed natively.
+    pub(crate) fn in_tree(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
     }
 
     /// Whether `id` is the root of a window of the app's own.
@@ -1312,6 +1417,21 @@ impl Screen {
         std::mem::take(&mut self.image_infos)
     }
 
+    /// Ends the loads of the images whose source `fails` picks, as failed:
+    /// the views and their sources, in no particular order. A view's next
+    /// source loads again.
+    pub(crate) fn fail_images(&mut self, fails: impl Fn(&str) -> bool) -> Vec<(NodeId, Arc<str>)> {
+        let mut failed = Vec::new();
+        self.loading_images.retain(|id, uri| {
+            let fail = fails(uri);
+            if fail {
+                failed.push((*id, uri.clone()));
+            }
+            !fail
+        });
+        failed
+    }
+
     /// The URLs the app had the system open (`openUrl`, a `TextView`'s
     /// links), in order: what reached the platform, past the URL check,
     /// the `openUrl` capability and the embedding app's URL handler.
@@ -1338,7 +1458,7 @@ impl Screen {
     }
 
     /// The `openUrl` requests to answer since the last call.
-    pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
+    pub(crate) fn take_url_opens(&mut self) -> Vec<(u32, String)> {
         std::mem::take(&mut self.url_opens)
     }
 
@@ -1430,14 +1550,25 @@ impl Screen {
         Ok(self.resolve(&Selector::parse(selector)?).len())
     }
 
-    /// The commands sent so far, in order, with the view each went to.
+    /// The commands sent so far, in order, with the view each went to
+    /// (since the last [`Screen::clear_commands`]).
     pub fn commands(&self) -> &[(NodeId, Command)] {
         &self.commands
     }
 
-    /// Whether the command `command` was sent.
+    /// Whether the command `command` was sent (since the last
+    /// [`Screen::clear_commands`]).
     pub fn sent(&self, command: &Command) -> bool {
         self.commands.iter().any(|(_, c)| c == command)
+    }
+
+    /// Forgets the commands sent so far: [`Screen::commands`] and
+    /// [`Screen::sent`] see only those sent afterwards. What the commands
+    /// did stays (the clipboard, the focus, scroll offsets). The record
+    /// otherwise grows with every command, for as long as the test runs.
+    pub fn clear_commands(&mut self) {
+        // A new vector, not `clear`: the old one's capacity goes too.
+        self.commands = Vec::new();
     }
 
     /// The view a press on `selector` goes to ([`Screen::matches`]'s
@@ -1568,6 +1699,35 @@ impl Screen {
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
+    }
+
+    /// The id of the one view `selector` names: what
+    /// [`Screen::active_descendant`] and [`Screen::accessibility_controls`]
+    /// give; an error when none or several match.
+    pub fn id(&self, selector: &str) -> Result<NodeId, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(id),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The view the view `selector` names has as its active descendant
+    /// (its `accessibilityActiveDescendant`: a combo box's highlighted
+    /// option), by its id ([`Screen::id`]); an error when none or several
+    /// match.
+    pub fn active_descendant(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.active_descendant))
+    }
+
+    /// The view whose content the view `selector` names controls (its
+    /// `accessibilityControls`: a combo box's listbox), by its id
+    /// ([`Screen::id`]); an error when none or several match.
+    pub fn accessibility_controls(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.controls))
     }
 
     /// The views on screen `selector` matches, in the order a user's eyes
@@ -1815,7 +1975,13 @@ impl Screen {
                 .filter(|c| placed(c))
                 .chain(children.iter().rev().filter(|c| !placed(c)));
             for &child in order {
-                let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
+                // A span has its text's bounds here, not its characters':
+                // the pointer reaches the text, or the last span would
+                // cover its siblings.
+                let node = self
+                    .nodes
+                    .get(&child)
+                    .is_some_and(|v| v.canvas_node || v.span.is_some());
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
                 if node || !attached.contains(&child) || self.kind(child) == Some(ViewKind::Modal) {
@@ -1946,8 +2112,8 @@ impl Screen {
     }
 
     /// `id`, or its nearest ancestor, that `test` accepts.
-    /// The scroll views around `id` (not it), innermost first, with whether
-    /// each scrolls horizontally.
+    /// The scroll views around `id` (not it) up to the modal it is in,
+    /// innermost first, with whether each scrolls horizontally.
     #[cfg(feature = "agent")]
     pub(crate) fn scroll_ancestors(&self, id: NodeId) -> Vec<(NodeId, bool)> {
         let mut out = Vec::new();
@@ -1958,6 +2124,11 @@ impl Screen {
             };
             if let Some(scroll) = &view.scroll {
                 out.push((id, scroll.horizontal));
+            }
+            // A modal shows over the window wherever it is in the tree:
+            // the scroll views around it there do not move it.
+            if view.kind == Some(ViewKind::Modal) {
+                break;
             }
             at = view.parent;
         }
@@ -2172,7 +2343,6 @@ impl Screen {
 
     /// View `id`'s interaction states with `bit` set (or cleared), when it
     /// tracks it and they change.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_state(&mut self, id: NodeId, bit: u16, on: bool) -> Option<u16> {
         let view = self.nodes.get_mut(&id)?;
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
@@ -2272,7 +2442,9 @@ impl Screen {
     /// [`nsh_core::ApproxTextEngine`] lays the text out: characters `0.55 ×`
     /// the font size wide, lines `1.2 ×` it tall, wrapped at the content
     /// box's width when multiline; a single line is centered in the box and
-    /// keeps the caret inside it.
+    /// keeps the caret inside it. A multiline input taller in text than its
+    /// box scrolls it to keep the caret's line in view, as the platforms'
+    /// do while the user edits: the line at the bottom of the box.
     pub(crate) fn input_caret(&self, id: NodeId) -> Option<Bounds<Points>> {
         let view = self.nodes.get(&id)?;
         let input = view.input.as_ref()?;
@@ -2299,7 +2471,9 @@ impl Screen {
         };
         let mut x = content.origin.x.0 + column as f32 * advance;
         let y = if input.config.multiline {
-            content.origin.y.0 + row as f32 * line
+            let at = row as f32 * line;
+            let scrolled = (at + line - content.size.height.0).max(0.0);
+            content.origin.y.0 + at - scrolled
         } else {
             x = x.min(content.origin.x.0 + (content.size.width.0 - 1.0).max(0.0));
             content.origin.y.0 + (content.size.height.0 - line) / 2.0
@@ -2653,6 +2827,40 @@ mod tests {
     }
 
     #[test]
+    fn a_multiline_input_taller_in_text_than_its_box_keeps_its_caret_in_view() {
+        let mut screen = Screen::default();
+        let mut config = nsh_core::InputConfig::default();
+        config.style.font_size = Points(10.0);
+        config.multiline = true;
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            frame(2, 0.0, 0.0, 60.0, 40.0),
+            MountItem::Input {
+                id: 2,
+                config: Box::new(config),
+            },
+            MountItem::InputContent {
+                id: 2,
+                content: Bounds::new(
+                    Point::new(Points(4.0), Points(6.0)),
+                    Size::new(Points(55.0), Points(28.0)),
+                ),
+            },
+            insert(1, 2),
+        ]));
+        // Five lines of 12 in a box of 28: the last line at its bottom.
+        screen.input_mut(2).unwrap().text = "a\nb\nc\nd\ne".into();
+        let caret = screen.input_caret(2).unwrap();
+        assert_eq!(
+            (caret.origin.y.0, caret.size.height.0),
+            (6.0 + 28.0 - 12.0, 12.0)
+        );
+        // One line: where it is.
+        screen.input_mut(2).unwrap().text = "a".into();
+        assert_eq!(screen.input_caret(2).unwrap().origin.y.0, 6.0);
+    }
+
+    #[test]
     fn an_input_caret_follows_its_text_as_the_approximate_engine_lays_it_out() {
         let mut screen = Screen::default();
         let mut config = nsh_core::InputConfig::default();
@@ -2808,6 +3016,44 @@ mod tests {
         // Popped: the screen under it is the one laid out.
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(ids(&screen), [2, 4, 6]);
+    }
+
+    #[test]
+    fn a_removed_subtree_leaves_the_hover_and_the_focus_without_a_word() {
+        use nsh_core::tailwind::state::{FOCUSED, HOVERED};
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::View),
+            create(6, ViewKind::Input),
+            create(8, ViewKind::View),
+            MountItem::TrackStates {
+                id: 4,
+                states: HOVERED,
+            },
+            insert(1, 2),
+            insert(2, 4),
+            insert(4, 6),
+            insert(4, 8),
+        ]));
+        screen.set_hovered(vec![4, 2]);
+        screen.set_state(4, HOVERED, true);
+        screen.set_focused(Some(6));
+        screen.set_key_focus(Some(8));
+        screen.set_state(8, FOCUSED, true);
+        // Removed, kept alive (a JS cycle holds it): it and what it holds
+        // leave the hover and the focus, their states cleared.
+        screen.apply(&batch(vec![MountItem::Remove { id: 4 }]));
+        assert_eq!(screen.set_hovered(vec![2]), [2]);
+        assert_eq!(screen.focused(), None);
+        assert_eq!(screen.key_focus(), None);
+        assert_eq!(screen.take_restated(), [(4, 0), (8, 0)]);
+        assert!(!screen.in_tree(6));
+        assert!(screen.in_tree(2));
+        // Deleted: nothing left to report on.
+        screen.apply(&batch(vec![MountItem::Delete { id: 2 }]));
+        assert_eq!(screen.set_hovered(Vec::new()), Vec::<NodeId>::new());
+        assert_eq!(screen.take_restated(), []);
     }
 
     #[test]
@@ -2998,6 +3244,23 @@ mod tests {
         assert_eq!(pick(&screen, "Privacy"), Pick::One(102));
         assert_eq!(pick(&screen, "text:Terms 🙂"), Pick::One(100));
         assert_eq!(screen.span(102), Some((4, 26, 33)));
+        // A span after it that only hears the pointer (its `hover:`
+        // styles) covers no press on it.
+        let mut hovers = EventMask::default();
+        hovers.set(EventKind::MouseEnter, true);
+        hovers.set(EventKind::MouseLeave, true);
+        screen.apply(&batch(vec![linked(vec![
+            link(13, 21, 100),
+            nsh_core::TextLink {
+                events: hovers,
+                focus_stop: false,
+                ..link(26, 33, 102)
+            },
+        ])]));
+        assert_eq!(
+            screen.covering(100, Point::new(Points(150.0), Points(20.0))),
+            None
+        );
         // They are not texts of their own.
         assert_eq!(screen.texts(), ["Agree to the Terms 🙂 and Privacy"]);
         screen.apply(&batch(vec![linked(Vec::new())]));

@@ -127,6 +127,9 @@ struct WindowData {
     /// The dialog root a window of the app's own shows
     /// ([`crate::app_window`]); none for the surface's window.
     window: Option<NodeId>,
+    /// What the surface's window registered for to follow whether the user
+    /// can see it ([`crate::presence`]); none for the app's other windows.
+    presence: Cell<Option<crate::presence::Watch>>,
 }
 
 thread_local! {
@@ -220,6 +223,7 @@ pub(crate) fn create(
         shell: crate::shell::Shell::new(nsh_core::desktop::WindowKind::Normal),
         root: Cell::new(None),
         window: None,
+        presence: Cell::new(None),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -251,10 +255,11 @@ pub(crate) fn create(
         )?
     };
     surface.set_hwnd(hwnd);
-    if parent.is_some()
-        && let Some(window) = self::data(hwnd)
-    {
-        window.root.set(observe_root(hwnd));
+    if let Some(window) = self::data(hwnd) {
+        if parent.is_some() {
+            window.root.set(observe_root(hwnd));
+        }
+        window.presence.set(Some(crate::presence::watch(hwnd)));
     }
     if parent.is_none() {
         OPEN.with(|o| o.set(o.get() + 1));
@@ -319,6 +324,7 @@ pub(crate) fn create_app_window(
         shell,
         root: Cell::new(None),
         window: Some(id),
+        presence: Cell::new(None),
     });
     let title = attributes.title.clone().unwrap_or_default();
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
@@ -527,18 +533,112 @@ fn toggle_full_screen_inner(hwnd: HWND) {
 }
 
 /// Shows a top-level window (without activating it when its attributes
-/// say so), and keeps it out of the taskbar if it is.
+/// say so), and keeps it out of the taskbar if it is. A background app's
+/// shows without activating, the window that would have the keyboard.
 pub(crate) fn show(hwnd: HWND) {
     let activate = shell(hwnd).is_none_or(|s| {
         let a = s.attrs();
         a.activate && a.focusable
     });
+    let background = in_background();
     // SAFETY: plain calls on a live window.
     unsafe {
-        let _ = ShowWindow(hwnd, if activate { SW_SHOW } else { SW_SHOWNOACTIVATE });
+        let _ = ShowWindow(
+            hwnd,
+            if activate && !background {
+                SW_SHOW
+            } else {
+                SW_SHOWNOACTIVATE
+            },
+        );
         let _ = UpdateWindow(hwnd);
     }
     crate::shell::shown(hwnd);
+    if activate && background {
+        set_foreground(hwnd);
+    }
+}
+
+// --- Running in the background ------------------------------------------------------------
+
+thread_local! {
+    /// The standalone app runs in the background ([`run_in_background`]).
+    static BACKGROUND: Cell<bool> = const { Cell::new(false) };
+    /// The window that would have the keyboard in a background app.
+    static BACKGROUND_KEY: Cell<Option<HWND>> = const { Cell::new(None) };
+}
+
+/// The standalone app runs in the background from now on
+/// ([`crate::AppOptions::background`], `nsh test`'s apps): its windows show
+/// without activating and nothing activates them (no `SetForegroundWindow`,
+/// no `SetFocus`, which activates the window it focuses), so the keyboard
+/// stays with the app the user works in. The window that would have the
+/// keyboard is kept here: the app sees it as focused (its state, its
+/// focused field's caret), and the test agent's keys go to it.
+pub(crate) fn run_in_background() {
+    BACKGROUND.set(true);
+}
+
+/// Whether the app runs in the background ([`run_in_background`]).
+pub(crate) fn in_background() -> bool {
+    BACKGROUND.get()
+}
+
+/// The window with the keyboard: the foreground window, or in a background
+/// app the one that would be (none while it is hidden or gone).
+pub(crate) fn foreground() -> HWND {
+    if !in_background() {
+        // SAFETY: a plain query.
+        return unsafe { GetForegroundWindow() };
+    }
+    BACKGROUND_KEY
+        .get()
+        // SAFETY: plain queries; a handle that is no window answers false.
+        .filter(|&h| unsafe { IsWindow(Some(h)).as_bool() && IsWindowVisible(h).as_bool() })
+        .unwrap_or_default()
+}
+
+/// Brings top-level `hwnd` to the foreground (a press in it, its
+/// `focus()`); in a background app it only becomes the window that would
+/// have the keyboard: the surface's fields act as in a focused window (as
+/// on `WM_SETFOCUS`), and it and the window that had it report their state.
+pub(crate) fn set_foreground(hwnd: HWND) {
+    if !in_background() {
+        // SAFETY: a plain call on a live window.
+        let _ = unsafe { SetForegroundWindow(hwnd) };
+        return;
+    }
+    let old = BACKGROUND_KEY.replace(Some(hwnd));
+    if old == Some(hwnd) {
+        return;
+    }
+    if let Some(surface) = surface_of(hwnd) {
+        crate::text_input::window_focus(&surface, true);
+    }
+    for h in old.into_iter().chain([hwnd]) {
+        let Some(surface) = surface_of(h) else {
+            continue;
+        };
+        match app_window_root(h) {
+            Some(id) => crate::app_window::state_changed(&surface, id),
+            None => crate::window_state::report_main(&surface),
+        }
+    }
+}
+
+/// Window `hwnd` hides or goes: in a background app, when it was the
+/// window that would have the keyboard, the main window `main` becomes it
+/// while it shows, as the system gives the keyboard to the next window.
+fn lost_key(hwnd: HWND, main: HWND) {
+    if !in_background() || BACKGROUND_KEY.get() != Some(hwnd) {
+        return;
+    }
+    BACKGROUND_KEY.set(None);
+    // SAFETY: plain queries; a handle that is no window answers false.
+    if main != hwnd && unsafe { IsWindow(Some(main)).as_bool() && IsWindowVisible(main).as_bool() }
+    {
+        set_foreground(main);
+    }
 }
 
 /// True when the executable has an icon of its own (resource 1, which
@@ -835,9 +935,11 @@ fn hi(l: isize) -> i32 {
 }
 
 /// Has the embedding app's root window tell `child`, an embedded surface's
-/// window, what the app's state follows: `WM_ACTIVATEAPP`, which only
-/// top-level windows get, and [`WM_NSH_ROOT`] when the root is shown,
-/// hidden, minimized or restored, which `child`'s own messages do not say.
+/// window, what the app's state follows: `WM_ACTIVATEAPP`,
+/// `WM_POWERBROADCAST` (the system woke) and the session's end
+/// (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), which only top-level windows
+/// get, and [`WM_NSH_ROOT`] when the root is shown, hidden, minimized or
+/// restored, which `child`'s own messages do not say.
 /// Returns the root it observes (`None` when `child` has none, or the root
 /// is another thread's, which cannot be subclassed).
 fn observe_root(child: HWND) -> Option<HWND> {
@@ -879,11 +981,19 @@ unsafe extern "system" fn root_proc(
         let result = DefSubclassProc(hwnd, msg, wparam, lparam);
         let child = HWND(child as *mut _);
         match msg {
-            WM_ACTIVATEAPP => {
-                SendMessageW(child, WM_ACTIVATEAPP, Some(wparam), Some(lparam));
+            WM_ACTIVATEAPP | WM_POWERBROADCAST => {
+                SendMessageW(child, msg, Some(wparam), Some(lparam));
             }
             WM_WINDOWPOSCHANGED => {
                 SendMessageW(child, WM_NSH_ROOT, None, None);
+            }
+            // The session may end, unless the root refused it: the
+            // embedded app leaves too ([`crate::session`]).
+            WM_QUERYENDSESSION if result.0 != 0 => {
+                SendMessageW(child, msg, Some(wparam), Some(lparam));
+            }
+            WM_ENDSESSION => {
+                SendMessageW(child, msg, Some(wparam), Some(lparam));
             }
             WM_NCDESTROY => {
                 let _ = RemoveWindowSubclass(hwnd, Some(root_proc), id);
@@ -921,6 +1031,14 @@ unsafe extern "system" fn window_proc(
         }
     }
     let surface = data.surface.upgrade();
+    // A window of the app's own hides or goes: in a background app the
+    // main window gets the keyboard if this one would have had it.
+    if data.window.is_some()
+        && (msg == WM_DESTROY || (msg == WM_SHOWWINDOW && wparam.0 == 0))
+        && let Some(surface) = &surface
+    {
+        lost_key(hwnd, surface.hwnd());
+    }
     if let Some(surface) = surface
         && let Some(result) = handle(&surface, data, hwnd, msg, wparam, lparam)
     {
@@ -930,6 +1048,11 @@ unsafe extern "system" fn window_proc(
         && let Some(root) = data.root.take()
     {
         unobserve_root(root, hwnd);
+    }
+    if msg == WM_DESTROY
+        && let Some(watch) = data.presence.take()
+    {
+        crate::presence::unwatch(hwnd, watch);
     }
     if msg == WM_DESTROY && data.top_level {
         let left = OPEN.with(|o| {
@@ -986,6 +1109,13 @@ fn handle(
     if data.top_level && msg == crate::tray::taskbar_created() {
         crate::tray::readd(hwnd);
         return None;
+    }
+    // The session ends (signing out, shutting down, the Restart Manager):
+    // the surface's window, or an embedded one's root ([`observe_root`]).
+    if data.window.is_none()
+        && let Some(result) = crate::session::message(surface, data.top_level, msg, wparam)
+    {
+        return Some(LRESULT(result));
     }
     match msg {
         WM_NSH_WAKE => surface.drain(),
@@ -1306,11 +1436,34 @@ fn handle(
         }
         // An embedded surface's: its root window's ([`observe_root`]).
         WM_NSH_ROOT => crate::system::lifecycle_changed(surface),
+        // The system woke from sleep (`wakeCount()`): top-level windows
+        // hear it, an embedded surface's from its root ([`observe_root`]);
+        // the app's other windows ([`crate::app_window`]) show the same
+        // surface, which counts it once, from its own window. Every resume
+        // sends `PBT_APMRESUMEAUTOMATIC`; one the user woke sends
+        // `PBT_APMRESUMESUSPEND` after it too, which is not counted.
+        WM_POWERBROADCAST
+            if data.window.is_none() && wparam.0 == PBT_APMRESUMEAUTOMATIC as usize =>
+        {
+            crate::system::woke(surface);
+        }
+        // The display turned off or on (the surface's window registered
+        // for it: [`crate::presence`]).
+        WM_POWERBROADCAST
+            if data.window.is_none() && wparam.0 == PBT_POWERSETTINGCHANGE as usize =>
+        {
+            crate::presence::power_setting_changed(surface, lparam);
+        }
+        // The session was locked, unlocked, switched away from or back to.
+        WM_WTSSESSION_CHANGE if data.window.is_none() => {
+            crate::presence::session_changed(surface, wparam.0 as u32);
+        }
         WM_DESTROY => {
             crate::window_close::destroyed(surface);
             crate::tray::destroyed(hwnd);
             crate::global_shortcut::destroyed(hwnd);
             surface.stop();
+            crate::text_input::destroyed(surface);
             surface.set_hwnd(HWND::default());
         }
         _ => {}
@@ -1828,7 +1981,7 @@ mod tests {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        if matches!(msg, WM_ACTIVATEAPP | WM_NSH_ROOT) {
+        if matches!(msg, WM_ACTIVATEAPP | WM_NSH_ROOT | WM_POWERBROADCAST) {
             HEARD.with(|h| {
                 h.borrow_mut()
                     .push((hwnd.0 as isize, msg, wparam.0, lparam.0))
@@ -1903,6 +2056,20 @@ mod tests {
             SendMessageW(root, WM_ACTIVATEAPP, Some(WPARAM(0)), Some(LPARAM(MARK)));
             let heard = HEARD.with(|h| h.take());
             assert_eq!(ours(&heard), [1, 0], "{heard:?}");
+            // The system woke from sleep.
+            SendMessageW(
+                root,
+                WM_POWERBROADCAST,
+                Some(WPARAM(PBT_APMRESUMEAUTOMATIC as usize)),
+                Some(LPARAM(0)),
+            );
+            let heard = HEARD.with(|h| h.take());
+            assert!(
+                heard.iter().any(|h| h.0 == id
+                    && h.1 == WM_POWERBROADCAST
+                    && h.2 == PBT_APMRESUMEAUTOMATIC as usize),
+                "{heard:?}"
+            );
             // Its position changed, as when it is minimized, hidden or
             // restored.
             resize(200, 150);

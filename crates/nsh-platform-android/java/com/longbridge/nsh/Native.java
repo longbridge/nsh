@@ -91,6 +91,7 @@ final class Native {
     static final int PINCH = 79;
     static final int WEB_EVALUATION = 80;
     static final int MOUSE_UP = 81;
+    static final int CANVAS_IMAGE = 82;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -199,8 +200,12 @@ final class Native {
 
     static native void packageFree(long pkg);
 
-    /** The images picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height in pixels. */
-    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes);
+    /**
+     * The images or files picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height
+     * in pixels; a file not read (larger than the pick reads) has {@code null} data and its size in bytes in
+     * {@code lengths}.
+     */
+    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes, long[] lengths);
 
     /** A native component emitted {@code name} with {@code json} data (null: none). */
     static native void componentEvent(long handle, int id, String name, String json);
@@ -282,6 +287,13 @@ final class Native {
 
     /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
     static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
+
+    /**
+     * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image
+     * {@code bytes}, or when they are null why not: {@code failure} ({@link CanvasRender#RENDER_FAILED},
+     * {@link CanvasRender#RENDER_TOO_LARGE}) and the message {@code error}.
+     */
+    static native void canvasImage(long handle, int request, byte[] bytes, int failure, String error);
 
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);

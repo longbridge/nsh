@@ -136,6 +136,47 @@ const ENTER_LATE_MS = 250;
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
 
+/** The status of an offscreen render's answer (`nsh_canvas_image`, `src/lib.rs`
+ * `CanvasImageStatus`): the image's bytes, or a message why there are none. */
+const CANVAS_IMAGE = { FAILED: 0, OK: 1, TOO_LARGE: 2 };
+
+/** An offscreen render over the browser's canvas size limit
+ * (`CANVAS_IMAGE.TOO_LARGE`). */
+class CanvasTooLarge extends Error {}
+
+function tooLarge(width, height) {
+  return `this browser cannot make a ${width} × ${height} pixel canvas (${width * height} pixels): it is over the browser's canvas size limit`;
+}
+
+/** Whether `src` is on the page's origin. */
+function sameOrigin(src) {
+  try {
+    return new URL(src, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** `logo@2x.png` → 2: the pixel density a file name declares, 1 without
+ * (`nsh_core::image::loader::density`). */
+function imageDensity(uri) {
+  const name = String(uri).split(/[/\\]/).pop();
+  const dot = name.lastIndexOf(".");
+  const stem = dot < 0 ? name : name.slice(0, dot);
+  const at = stem.lastIndexOf("@");
+  if (at < 0 || !stem.endsWith("x")) return 1;
+  const n = Number(stem.slice(at + 1, -1));
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function originOf(src) {
+  try {
+    return new URL(src, location.href).origin;
+  } catch {
+    return src;
+  }
+}
+
 const KEYFRAMES = `
 @property --nsh-ko { syntax: "<number>"; inherits: false; initial-value: 1; }
 @keyframes nsh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -1232,7 +1273,8 @@ class Player {
    * the main module was published without) in parallel, each after the
    * side modules it imports from, and calls each gate once. `table` is the
    * page's `sides`: by name, `{ url, gate?, needs, onDemand? }` (`onDemand`:
-   * only `loadData` asks for it, nothing fetches it ahead). A page awaits it
+   * only a load that needs it, a chunk's or `loadData`'s, fetches it;
+   * `nsh package` marks every side module it writes so). A page awaits it
    * before a chunk that needs them runs (its `prepareChunk`).
    */
   loadSides(names, table) {
@@ -1250,7 +1292,9 @@ class Player {
     for (const name of names) {
       if (this.sideModules.has(name) || this.sideLoads.has(name)) continue;
       const compiled = this.compileSide(table[name].url, { priority: "low" });
-      compiled.catch(() => this.sideModules.delete(name));
+      compiled.catch(() => {
+        if (this.sideModules.get(name) === compiled) this.sideModules.delete(name);
+      });
       this.sideModules.set(name, compiled);
     }
   }
@@ -1279,14 +1323,24 @@ class Player {
     }
   }
 
-  /** The exports of side module `name`, once it and what it needs loaded. */
+  /**
+   * The exports of side module `name`, once it and what it needs loaded.
+   * Callers share one load; a failed one (the network, a server error) is
+   * forgotten, so the next load that needs the module tries again, while
+   * the side modules it needs that did load stay loaded.
+   */
   loadSide(name, table) {
-    if (!this.sideLoads.has(name)) {
+    let load = this.sideLoads.get(name);
+    if (!load) {
       const side = table?.[name];
       if (!side) return Promise.reject(new Error(`no side module ${name}`));
-      this.sideLoads.set(name, this.instantiateSide(name, side, table));
+      load = this.instantiateSide(name, side, table);
+      this.sideLoads.set(name, load);
+      load.catch(() => {
+        if (this.sideLoads.get(name) === load) this.sideLoads.delete(name);
+      });
     }
-    return this.sideLoads.get(name);
+    return load;
   }
 
   async instantiateSide(name, { url, gate, needs }, table) {
@@ -1579,6 +1633,11 @@ class Player {
     this.stop();
     this.audioDispose();
     this.resetHistory();
+    // The next app sets its own (its first commit comes before the write).
+    if (this.windowTitle) {
+      this.windowTitle = null;
+      this.syncTitleSoon();
+    }
     this.app = (this.app ?? 0) + 1;
     const root = this.root;
     root.textContent = "";
@@ -2047,6 +2106,38 @@ class Player {
     if (this.changedStacks.size) this.reconcileStacks();
     if (this.removals.length) this.finishRemovals();
     if (this.readingHosts?.size) this.orderReading();
+    if (this.relating?.size) this.linkRelations();
+  }
+
+  /** The DOM id of view `id`: unique on the page, beside other players. */
+  domId(id) {
+    return `${this.classPrefix}v${id}`;
+  }
+
+  /** The views that name others (`aria-activedescendant`,
+   * `aria-controls`) point at them by DOM id, after the batch made them:
+   * a row may be made after the field naming it. A view named that is
+   * not there yet is looked for again after the next batch. */
+  linkRelations() {
+    const pending = this.relating;
+    this.relating = null;
+    for (const el of pending) {
+      if (el.isConnected === false) continue;
+      const p = el._props ?? {};
+      // The element that keeps the focus: an input's field.
+      const focused = el._field ?? el;
+      for (const [name, id] of [["aria-activedescendant", p.activeDescendant], ["aria-controls", p.controls]]) {
+        if (focused !== el) el.removeAttribute(name);
+        const target = id == null ? null : this.view(id);
+        if (!target) {
+          focused.removeAttribute(name);
+          if (id != null) (this.relating ??= new Set()).add(el);
+          continue;
+        }
+        if (!target.id) target.id = this.domId(id);
+        focused.setAttribute(name, target.id);
+      }
+    }
   }
 
   /** `el` was placed or added in `parent`: when that is a scroll view's
@@ -2480,7 +2571,10 @@ class Player {
     // Its `--nsh-selection`.
     swapClass(el, "_selection", this.styleClass(selection));
     el._textLabel = runs.map((r) => r[2] + (r[6] ?? "")).join("").trimEnd();
-    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
+    if (el._props?.label == null) {
+      if (el._field) this.fieldAria(el, el._field);
+      else el.setAttribute("aria-label", el._textLabel);
+    }
   }
 
   /**
@@ -2745,14 +2839,17 @@ class Player {
     const p = el._props ?? {};
     const set = (name, value) => (value == null || value === false ? el.removeAttribute(name) : el.setAttribute(name, String(value)));
     const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
-    set("role", role);
-    set("aria-label", p.label ?? el._textLabel);
-    set("aria-description", p.hint);
+    // A combo box that is an input is its field, which keeps the focus
+    // (`fieldAria`).
+    set("role", el._field && p.role === "combobox" ? null : role);
+    set("aria-label", el._field ? null : p.label ?? el._textLabel);
+    set("aria-description", el._field ? null : p.hint);
     set("aria-disabled", p.disabled && "true");
     set("aria-selected", p.selected && "true");
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
-    set("aria-expanded", p.expanded);
+    // `false` too: a collapsed combo box or disclosure says so.
+    set("aria-expanded", p.expanded == null ? null : String(p.expanded));
     set("aria-haspopup", p.hasPopup && "true");
     set("aria-pressed", p.pressed);
     set("aria-current", p.current);
@@ -2766,6 +2863,11 @@ class Player {
     set("aria-valuetext", text);
     set("aria-live", p.live);
     set("aria-hidden", p.hidden && "true");
+    if (p.activeDescendant != null || p.controls != null || el._related) {
+      // Linked once the batch is applied (`linkRelations`).
+      el._related = p.activeDescendant != null || p.controls != null;
+      (this.relating ??= new Set()).add(el);
+    }
   }
 
   /** The stops of the keyboard focus (Tab), as `ViewProps::focus_stop`
@@ -2801,11 +2903,25 @@ class Player {
     this.updateAria(el);
   }
 
-  /** The states of input view `el` that belong on its `field` too: the
-   * field is the element screen readers read as the input. */
+  /** The name, description and states of input view `el` go on its `field`:
+   * the field is the element screen readers read as the input. */
   fieldAria(el, field) {
-    if (el._props?.invalid) field.setAttribute("aria-invalid", "true");
-    else field.removeAttribute("aria-invalid");
+    const p = el._props ?? {};
+    const set = (name, value) => (value == null || value === false ? field.removeAttribute(name) : field.setAttribute(name, String(value)));
+    set("aria-label", (p.label ?? el._textLabel) || null);
+    set("aria-description", p.hint || null);
+    // Props may arrive before the field exists; its wrapper then held the name.
+    el.removeAttribute("aria-label");
+    el.removeAttribute("aria-description");
+    set("aria-invalid", p.invalid && "true");
+    // A combo box's field is the combo box: the focus stays in it while
+    // its list is open, and its active descendant is the highlighted row.
+    const combobox = p.role === "combobox";
+    set("role", combobox && "combobox");
+    set("aria-expanded", combobox && p.expanded != null ? String(p.expanded) : null);
+    set("aria-haspopup", combobox && p.hasPopup && "listbox");
+    // A field made after the relations takes them (`linkRelations`).
+    if (el._related) (this.relating ??= new Set()).add(el);
   }
 
   /** The keyboard focus reached pressable `el`: `focus:` and `onFocus`. */
@@ -4844,11 +4960,27 @@ class Player {
     const cx = canvas.getContext("2d");
     cx.setTransform(ratio, 0, 0, ratio, 0, 0);
     cx.clearRect(0, 0, w, h);
+    this.replayCanvas(cx, el._ops, el._slots, (uri) => {
+      const img = this.canvasImage(uri, el);
+      // A cross-origin image without CORS taints the canvas for good
+      // (the browser never clears the flag): shaders' pictures leave
+      // it out (`paintTree`).
+      if (img && !this.paintable(img)) canvas._tainted = true;
+      return img;
+    });
+  }
+
+  /**
+   * Replays a drawing (`cv`'s operations, `src/canvas.rs`) onto 2D context
+   * `cx`, whose transform maps points: `slots` are its animated values
+   * (missing ones read 0), `image(uri)` the loaded image a `drawImage`
+   * names, or none (it draws nothing).
+   */
+  replayCanvas(cx, ops, slots, image) {
     cx.save();
-    const slots = el._slots;
-    const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots[n[1]] ?? 0) : n);
+    const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots?.[n[1]] ?? 0) : n);
     const paint = (p) => {
-      if (Array.isArray(p) && p[0] === "$") return slots[p[1]] ?? "transparent";
+      if (Array.isArray(p) && p[0] === "$") return slots?.[p[1]] ?? "transparent";
       if (p && typeof p === "object" && p.g) {
         const a = p.args;
         const g = p.g === "linear" ? cx.createLinearGradient(a[0], a[1], a[2], a[3])
@@ -4867,7 +4999,7 @@ class Player {
       }
       return p;
     };
-    for (const [name, ...args] of el._ops) {
+    for (const [name, ...args] of ops) {
       try {
         if (name.startsWith("=")) {
           const prop = name.slice(1);
@@ -4884,15 +5016,19 @@ class Player {
         } else if (name === "roundRect") {
           cx.roundRect(...args.slice(0, 4).map(v), args[4].map(v));
         } else if (name === "drawImage") {
-          const img = this.canvasImage(args[0], el);
+          const img = image(args[0]);
           if (!img) continue;
-          // A cross-origin image without CORS taints the canvas for good
-          // (the browser never clears the flag): shaders' pictures leave
-          // it out (`paintTree`).
-          if (!this.paintable(img)) canvas._tainted = true;
-          const dest = args.slice(2).map(v);
-          if (args[1]) cx.drawImage(img, ...args[1], ...dest);
-          else cx.drawImage(img, ...dest);
+          // The source in the image's pixels; a missing destination size
+          // is the source's over the file name's density (`@3x`), as an
+          // `Image`'s, never the screen's (`CanvasImage::density`).
+          const [sx, sy, sw, sh] = args[1] ?? [0, 0, img.naturalWidth || img.width, img.naturalHeight || img.height];
+          const [dx, dy, dw, dh] = args.slice(2).map(v);
+          const density = imageDensity(args[0]);
+          cx.drawImage(
+            img, sx, sy, sw, sh, dx, dy,
+            Number.isFinite(dw) ? dw : sw / density,
+            Number.isFinite(dh) ? dh : sh / density,
+          );
         } else if (name === "fillText" || name === "strokeText") {
           cx[name](args[0], ...args.slice(1).map(v));
         } else if (name === "setLineDash") {
@@ -4905,6 +5041,123 @@ class Player {
       }
     }
     cx.restore();
+  }
+
+  /**
+   * `OffscreenCanvas.convertToBlob` (`Command::RenderCanvas`): the drawing
+   * replayed as `draw` replays a canvas view's, into a transparent
+   * `width` × `height` pixel canvas of its own at `scale` pixels per point,
+   * its animated values at 0, once the images it names have loaded (a
+   * failed one draws nothing), and encoded as `type`. The bytes, or why
+   * there are none, go to the engine (`nsh_canvas_image`, with a
+   * `CANVAS_IMAGE` status): a canvas over the browser's size limit
+   * (`offscreenCanvas`) answers `TOO_LARGE`, which the app gets as
+   * `ERR_NSH_QUOTA_EXCEEDED`.
+   */
+  async renderCanvas(request, ops, width, height, scale, type) {
+    const app = this.app;
+    let status = CANVAS_IMAGE.OK;
+    let bytes;
+    try {
+      const uris = [...new Set(ops.filter(([name]) => name === "drawImage").map(([, uri]) => uri))];
+      const images = new Map(await Promise.all(uris.map(async (uri) => [uri, await this.offscreenImage(uri)])));
+      const { canvas, cx } = this.offscreenCanvas(width, height);
+      cx.setTransform(scale, 0, 0, scale, 0, 0);
+      this.replayCanvas(cx, ops, null, (uri) => images.get(uri));
+      let blob;
+      try {
+        blob = canvas.convertToBlob
+          ? await canvas.convertToBlob({ type })
+          : await new Promise((resolve) => canvas.toBlob(resolve, type));
+      } catch (err) {
+        // A size the canvas took but the encoder has no memory for.
+        if (err?.name === "RangeError" || err?.name === "IndexSizeError") throw new CanvasTooLarge(tooLarge(width, height));
+        throw err;
+      }
+      // `toBlob` hands no error, only nothing, when the bitmap is too large to encode.
+      if (!blob) throw new CanvasTooLarge(tooLarge(width, height));
+      bytes = new Uint8Array(await blob.arrayBuffer());
+    } catch (err) {
+      status = err instanceof CanvasTooLarge ? CANVAS_IMAGE.TOO_LARGE : CANVAS_IMAGE.FAILED;
+      bytes = String(err?.message ?? err);
+    }
+    if (app !== this.app) return;
+    this.call((w) => this.withStrings([bytes], (p, l) => w.nsh_canvas_image(request, status, p, l)));
+  }
+
+  /**
+   * A `width` × `height` pixel canvas and its 2D context for an offscreen
+   * render, or a `CanvasTooLarge` when the browser cannot make one that size.
+   * Past their limits (iOS WebKit's is 16777216 pixels in all; Chromium's and
+   * Firefox's are larger than the core's own) browsers make no context,
+   * throw, or make a canvas that silently draws nothing, so one opaque pixel
+   * is drawn in the far corner and read back before the drawing: a canvas
+   * that kept it holds every pixel. Sizes that failed are remembered
+   * (`tooLargeCanvases`): any size at least as large in both sides fails
+   * again without allocating.
+   */
+  offscreenCanvas(width, height) {
+    const known = (this.tooLargeCanvases ??= []);
+    if (known.some(([w, h]) => width >= w && height >= h)) throw new CanvasTooLarge(tooLarge(width, height));
+    const fail = () => {
+      known.push([width, height]);
+      if (known.length > 8) known.shift();
+      return new CanvasTooLarge(tooLarge(width, height));
+    };
+    let canvas;
+    let cx;
+    try {
+      canvas = typeof OffscreenCanvas !== "undefined"
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement("canvas"), { width, height });
+      cx = canvas.getContext("2d");
+    } catch {
+      throw fail();
+    }
+    if (!cx) throw fail();
+    const x = width - 1;
+    const y = height - 1;
+    let kept;
+    try {
+      cx.fillRect(x, y, 1, 1);
+      kept = cx.getImageData(x, y, 1, 1).data[3] === 255;
+      cx.clearRect(x, y, 1, 1);
+    } catch {
+      kept = false;
+    }
+    if (!kept) throw fail();
+    return { canvas, cx };
+  }
+
+  /**
+   * The image at `uri` for an offscreen render, loaded (null when it fails):
+   * one that would taint the canvas (another origin's without CORS) is
+   * asked for again with CORS, so the image can still be read back. One that
+   * fails is skipped with a warning, as every platform skips it; when it
+   * loads without CORS but not with it, the warning says that its server
+   * sends no CORS headers.
+   */
+  offscreenImage(uri) {
+    const src = this.asset(uri);
+    const cached = this.images.get(src);
+    if (cached?.ready && this.paintable(cached.img)) return Promise.resolve(cached.img);
+    const load = (cors) => new Promise((resolve) => {
+      const img = new Image();
+      if (cors) img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+    const cors = !/^(data|blob):/.test(src) && !sameOrigin(src);
+    return load(cors).then(async (img) => {
+      if (img) return img;
+      if (cors && await load(false)) {
+        console.warn(`[nsh] offscreen canvas: ${uri} is skipped: its server (${originOf(src)}) sends no CORS headers (Access-Control-Allow-Origin), so the page cannot read it back; on the web, images come from the page's origin or servers that allow CORS`);
+      } else {
+        console.warn(`[nsh] offscreen canvas: ${uri} could not be loaded and is skipped`);
+      }
+      return null;
+    });
   }
 
   canvasImage(uri, el) {
@@ -4975,6 +5228,9 @@ class Player {
     field.readOnly = !config.editable;
     field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
     field.spellcheck = config.autoCorrect;
+    // `spellcheck` alone only stops suggestions: Chrome on Android still asks
+    // the keyboard to autocorrect unless this attribute is off.
+    field.setAttribute("autocorrect", config.autoCorrect ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
@@ -5018,8 +5274,10 @@ class Player {
     field.addEventListener("keydown", (e) => {
       // A key a shortcut takes (`keyDown`, after this) is the shortcut's
       // alone, as on the native platforms, where the field never sees it: a
-      // RichEditor would delete twice on Backspace.
-      if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
+      // RichEditor would delete twice on Backspace, and a Return an
+      // autocomplete list binds would submit the field as well.
+      const taken = consumedShortcut(this.shortcut(e, true));
+      if (el._events.has("onKeyPress") && !taken) {
         const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" || e.key?.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
@@ -5028,7 +5286,7 @@ class Player {
       // commits an input method's composition never submits.
       const submit = el._config?.submit ?? "blurAndSubmit";
       const lineBreak = field.tagName === "TEXTAREA" && (submit === "newline" || e.shiftKey || e.altKey);
-      if (e.key === "Enter" && !lineBreak && !e.isComposing && e.keyCode !== 229) {
+      if (e.key === "Enter" && !lineBreak && !e.isComposing && e.keyCode !== 229 && !taken) {
         e.preventDefault();
         this.event(el._id, "onSubmitEditing", { text: field.value, count: field._count });
         if (submit === "blurAndSubmit") field.blur();
@@ -5528,6 +5786,42 @@ class Player {
     this.syncHistorySoon();
   }
 
+  // The document's title: a mounted `Head`'s (`nsh/web`), else the main
+  // window's (`WindowRef.set({ title })`, where the app is the page), else
+  // the page's own. A browser gives an entry the document's title while it
+  // is current, so the title is written once the turn's entries exist: a
+  // page pushed with it takes it, the entry left keeps its own, and on a
+  // page popped it waits for the traversal to land.
+
+  /** The title of `nsh/web`'s heads, merged (`null`: none sets one). */
+  setHeadTitle(title) {
+    this.headTitle = title ?? null;
+    this.syncTitleSoon();
+  }
+
+  /** The main window's title; an empty one gives the page its own back. */
+  setWindowTitle(title) {
+    if (!this.history) return;
+    this.windowTitle = title || null;
+    this.syncTitleSoon();
+  }
+
+  syncTitleSoon() {
+    if (this.pageTitle === undefined) this.pageTitle = document.title;
+    if (this.titleSync) return;
+    this.titleSync = setTimeout(() => {
+      this.titleSync = 0;
+      // `syncHistory` and a traversal's landing write it after theirs.
+      if (!this.historySync && !this.ignoredPops) this.syncTitle();
+    }, 0);
+  }
+
+  syncTitle() {
+    if (this.pageTitle === undefined) return;
+    const title = this.headTitle ?? this.windowTitle ?? this.pageTitle;
+    if (document.title !== title) document.title = title;
+  }
+
   backDepth() {
     let depth = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving).length;
     for (const el of this.views.values()) {
@@ -5584,6 +5878,7 @@ class Player {
         this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
       }
     }
+    if (!this.ignoredPops) this.syncTitle();
   }
 
   popState(e) {
@@ -5595,6 +5890,7 @@ class Player {
       if (this.historyDepth < this.backDepth()) this.syncHistorySoon();
       if (this.pageUrl != null) this.syncHistorySoon();
       else this.tellAddress(false);
+      if (!this.historySync) this.syncTitle();
       return;
     }
     // A move of the user's: an answer the app owed for the one before is
@@ -6306,6 +6602,10 @@ class Player {
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
       case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "closeAllNotifications":
+        for (const notification of this.notifications?.values() ?? []) notification.close();
+        this.notifications?.clear();
+        break;
       case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
       case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
       case "audioPlay": this.audioPlay(args[0], args[1], args[2]); break;
@@ -6327,6 +6627,7 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
+      case "renderCanvas": this.renderCanvas(...args); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
@@ -6335,6 +6636,7 @@ class Player {
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
       case "pushAppUrl": this.setPageUrl(args[0], true); break;
+      case "setTitle": this.setWindowTitle(args[0]); break;
       case "exitApp": {
         const app = this.app;
         // Finish the current engine call before releasing its surface.
@@ -6342,12 +6644,23 @@ class Player {
         break;
       }
       case "announce":
-        // Cleared first: the same text again is announced again.
-        this.live.textContent = "";
-        setTimeout(() => { this.live.textContent = args[0]; }, 50);
+        this.announce(args[0]);
         break;
       case "a11yFocus":
         if (!el) break;
+        // An input: its field, as `focus` gives it.
+        if (el._field) {
+          el._field.focus();
+          break;
+        }
+        // A page moves a screen reader only with the keyboard focus: a
+        // field the user is typing in keeps it, and the view is read out
+        // instead, as the screen reader would read it there.
+        if (this.typing(el)) {
+          const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
+          if (text) this.announce(text);
+          break;
+        }
         if (!el.hasAttribute("tabindex")) {
           el.tabIndex = -1;
           el._a11yFocus = true;
@@ -6359,6 +6672,23 @@ class Player {
   }
 
 
+
+  /** Has screen readers read `text` (`announce`), through the live region. */
+  announce(text) {
+    // Cleared first: the same text again is announced again.
+    this.live.textContent = "";
+    setTimeout(() => { this.live.textContent = text; }, 50);
+  }
+
+  /** Whether the keyboard focus is in a text field, other than `el`, that
+   * the user may be typing in (`setAccessibilityFocus` leaves it there). */
+  typing(el) {
+    const a = document.activeElement;
+    if (!a || a === el || !a.isConnected || a.closest?.("[inert]")) return false;
+    if (a.isContentEditable) return true;
+    if (a.tagName === "TEXTAREA") return true;
+    return a.tagName === "INPUT" && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/.test(a.type);
+  }
 
   /**
    * `Clipboard.writeText`. The async Clipboard API needs a secure context
@@ -6879,8 +7209,9 @@ class Player {
 
   /**
    * `Picker.pickFiles`: a file input offering `accept` (empty: any file). The
-   * bytes and names stay as they are; a file larger than `maxBytes` is left
-   * out. A cancelled input sends none.
+   * bytes and names stay as they are; a file larger than `maxBytes` is not
+   * read (its `size` tells first): it answers with its name and size only.
+   * A cancelled input sends none.
    */
   pickFiles(request, limit, accept, maxBytes) {
     const app = this.app;
@@ -6897,7 +7228,8 @@ class Player {
       const picked = [];
       for (const file of files.slice(0, limit)) {
         if (file.size > maxBytes) {
-          console.warn(`nsh: the picked ${file.name} is left out: larger than ${maxBytes} bytes`);
+          console.warn(`nsh: the picked ${file.name} is not read: larger than ${maxBytes} bytes`);
+          picked.push({ name: file.name, type: file.type, bytes: null, size: file.size, lastModified: file.lastModified });
           continue;
         }
         try {
@@ -6914,6 +7246,11 @@ class Player {
       if (app !== this.app) return;
       this.call((w) => {
         for (const p of picked) {
+          if (p.bytes === null) {
+            this.withStrings([p.name, p.type], (np, nl, tp, tl) =>
+              w.nsh_picked_too_large(np, nl, tp, tl, p.size, p.lastModified));
+            continue;
+          }
           this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
             w.nsh_picked_file(np, nl, tp, tl, bp, bl, 0, 0, p.lastModified));
         }
@@ -7780,8 +8117,13 @@ class Player {
   keyDown(e) {
     if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
-    const focus = document.activeElement;
-    const inRoot = focus && this.root.contains(focus);
+    // Where the key was pressed, not where the focus is by now: a field's
+    // own handler (its submit, its Escape) may have closed the field, and
+    // the focus with it, before the key reached the window. The path was
+    // fixed when the key was dispatched.
+    const path = e.composedPath();
+    const focus = path.includes(this.root) ? path[0] : document.activeElement;
+    const inRoot = path.includes(this.root) || (focus && this.root.contains(focus));
     const editing = inRoot && !!focus.closest(".nsh-field, iframe");
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     // The control the focus is on, which Return and Space press (a stop
@@ -8570,7 +8912,9 @@ class Player {
         this.call((w) => w.nsh_pan(p.pan._id, 0, 0, 0, 0, 0));
       } else if (p.scroll && !gated) {
         p.mode = "scroll";
-        p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop];
+        p.at = [p.scroll.scrollLeft, p.scroll.scrollTop];
+        p.dragged = [0, 0];
+        p.handoff = [null, null];
         cancelAnimationFrame(p.scroll._zoomAnimation);
         this.drive(p.scroll, 1);
         this.scrollEvent(p.scroll, "onScrollDragStart");
@@ -8586,11 +8930,90 @@ class Player {
       this.call((w) => w.nsh_pan(p.pan._id, 1, tx, ty, vx, vy));
     } else if (p.mode === "scroll") {
       e.preventDefault();
-      const s = p.scroll;
-      s.scrollLeft = p.scrollStart[0] - tx;
-      s.scrollTop = p.scrollStart[1] - ty;
+      const d = [p.dragged[0] - tx, p.dragged[1] - ty];
+      p.dragged = [tx, ty];
+      for (const axis of [0, 1]) this.chainDrag(p, axis, d[axis]);
     }
     void dx;
+  }
+
+  /**
+   * Moves the zoomable view pointer `p` pans by `d` along `axis` (0: x),
+   * and what it cannot take the nearest scroll view around it that can
+   * move that way, as UIKit's nested scroll views do: a pager pages from
+   * an image not zoomed in, or panned to its edge. Turning back, that view
+   * goes back to where it was before the image pans again.
+   */
+  chainDrag(p, axis, d) {
+    if (!d) return;
+    const pos = (el) => (axis ? el.scrollTop : el.scrollLeft);
+    const max = (el) => Math.max(0, axis ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth);
+    const set = (el, v) => (axis ? (el.scrollTop = v) : (el.scrollLeft = v));
+    let h = p.handoff[axis];
+    if (h && (h.at - h.start) * d < 0) {
+      const back = Math.abs(d) < Math.abs(h.at - h.start) ? d : h.start - h.at;
+      h.at += back;
+      set(h.el, h.at);
+      d -= back;
+    }
+    const s = p.scroll;
+    const at = Math.min(Math.max(p.at[axis] + d, 0), max(s));
+    d -= at - p.at[axis];
+    p.at[axis] = at;
+    set(s, at);
+    if (Math.abs(d) < 0.01) return;
+    if (!h) {
+      const el = this.ancestors(s).slice(1).find((v) => v._kind === "scroll" && v._behavior?.enabled !== false
+        && (this.zooms(v) || !!v._horizontal === !axis) && (d < 0 ? pos(v) > 0.5 : pos(v) < max(v) - 0.5));
+      if (!el) return;
+      h = p.handoff[axis] = { el, start: pos(el), at: pos(el) };
+      // It snaps once released (`releaseHandoff`), not under the finger.
+      el.style.scrollSnapType = "none";
+      if (el._momentum) {
+        el._momentum = false;
+        this.scrollEvent(el, "onMomentumEnd");
+      }
+      this.drive(el, 1);
+      this.scrollEvent(el, "onScrollDragStart");
+    }
+    h.at = Math.min(Math.max(h.at + d, 0), max(h.el));
+    set(h.el, h.at);
+  }
+
+  /** Ends the part of a drag scroll view `el` took along `axis`
+   * (`chainDrag`), released at `v` points per second: a snapping view
+   * settles on a snap point, another glides. */
+  releaseHandoff(el, axis, v) {
+    this.scrollEvent(el, "onScrollDragEnd");
+    if (el._snapPoints) {
+      this.drive(el, -1);
+      el._restoreSnap = true;
+      if (!this.snapTo(el, this.releaseSnap(el, v / 1000))) {
+        el._restoreSnap = false;
+        el.style.scrollSnapType = "";
+        this.ownEnd(el);
+      }
+    } else {
+      el.style.scrollSnapType = "";
+      // Its end undoes `drive`.
+      this.glide(el, axis ? 0 : v, axis ? v : 0);
+    }
+  }
+
+  /** The snap point a snapping view released at `v` (points per ms)
+   * settles on, as the core's `snap_target` picks it: faster than 0.3,
+   * pages and snap intervals (one stop per scroll here) move one point,
+   * other snap points round where the glide would go that way; slower,
+   * the nearest. */
+  releaseSnap(el, v) {
+    const b = el._behavior;
+    const dir = v > 0.3 ? 1 : v < -0.3 ? -1 : 0;
+    if (!dir || b.paging || b.snapInterval > 0) return this.snapPoint(el, dir);
+    // Snapping glides decelerate by 0.99 per ms (`scroll::rate`).
+    const projected = (el._horizontal ? el.scrollLeft : el.scrollTop) - v / Math.log(0.99);
+    const points = el._snapPoints;
+    return (dir > 0 ? points.find((q) => q >= projected - 0.5) : [...points].reverse().find((q) => q <= projected + 0.5))
+      ?? this.snapPoint(el, dir);
   }
 
   /** The gate's node id when its pan activates with this move (else undefined). */
@@ -8638,7 +9061,16 @@ class Player {
       this.call((w) => w.nsh_pan(p.pan._id, cancelled ? 3 : 2, p.x - p.startX, p.y - p.startY, vx, vy));
     } else if (p.mode === "scroll") {
       this.scrollEvent(p.scroll, "onScrollDragEnd");
-      this.glide(p.scroll, -p.vx, -p.vy);
+      this.track(p, performance.now());
+      const [vx, vy] = cancelled ? [0, 0] : this.velocity(p);
+      const glide = [-p.vx, -p.vy];
+      for (const axis of [0, 1]) {
+        if (!p.handoff[axis]) continue;
+        // The image stays at its edge; the view around goes on.
+        glide[axis] = 0;
+        this.releaseHandoff(p.handoff[axis].el, axis, axis ? -vy : -vx);
+      }
+      this.glide(p.scroll, glide[0], glide[1]);
     } else if (p.press) {
       if (!cancelled) [p.x, p.y] = this.point(e, p.layer);
       const rect = p.press.getBoundingClientRect();
@@ -8707,6 +9139,12 @@ class Player {
 
   startTwoFinger() {
     const [a, b] = [...this.pointers.values()];
+    // A pinch takes over from a pan that moved a scroll view around.
+    for (const p of [a, b]) {
+      if (!p.handoff) continue;
+      for (const axis of [0, 1]) if (p.handoff[axis]) this.releaseHandoff(p.handoff[axis].el, axis, 0);
+      p.handoff = [null, null];
+    }
     const el = a.pinch ?? b.pinch;
     if (!el) {
       const zoom = a.zoom ?? b.zoom;

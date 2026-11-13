@@ -139,7 +139,9 @@ pub use self::{
         MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
         ScrollbarSource, declarations,
     },
-    element_ref::{ComponentRef, ElementRef, EvaluateOptions, Evaluation, FollowTarget},
+    element_ref::{
+        ComponentRef, ElementRef, ElementTarget, EvaluateOptions, Evaluation, FollowTarget,
+    },
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
@@ -208,7 +210,7 @@ pub use crate::geometry::{
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
-    EllipsizeMode, EventKind, EventPayload, Haptic, HapticImpact, HapticNotification,
+    EllipsizeMode, EventKind, EventPayload, FpsMode, Haptic, HapticImpact, HapticNotification,
     HeaderSystemItem, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
     KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     ListAlignment, ListScrollPosition, ListViewport, MacOsBackdrop, MacOsBackdropBlending,

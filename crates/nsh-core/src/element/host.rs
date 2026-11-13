@@ -251,17 +251,22 @@ impl ParentElement for Stack {}
 impl ParentElement for Screen {}
 impl ParentElement for Modal {}
 
-/// Android has no input accessories: there the bar keeps no content.
+/// Only iOS shows input accessories (`InputAccessoryView` in `nsh/ios`
+/// checks the same): elsewhere the bar keeps no content and takes no room.
+fn has_input_accessory() -> bool {
+    super::ambient::try_os().unwrap_or_default() == crate::platform::Os::Ios
+}
+
 impl ParentElement for InputAccessoryView {
     fn child<M>(mut self, child: impl super::IntoChild<M>) -> Self {
-        if !cfg!(target_os = "android") {
+        if has_input_accessory() {
             child.__push_into(&mut self.0.children);
         }
         self
     }
 
     fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self {
-        if !cfg!(target_os = "android") {
+        if has_input_accessory() {
             self.0
                 .children
                 .extend(children.into_iter().map(|c| c.into_element().0));
@@ -328,22 +333,23 @@ pub fn modal() -> Modal {
 /// A bar shown over the keyboard of the inputs whose
 /// [`Input::input_accessory`] is `native_id` (iOS's `inputAccessoryView`):
 /// as wide as the window and as tall as its content, moving with the
-/// keyboard natively. It takes no room where the view places it; on
-/// Android, which has no input accessories, it is an empty hidden view.
+/// keyboard natively. It takes no room where the view places it; off iOS,
+/// where there are no input accessories, it is an empty hidden view.
 pub fn input_accessory_view(native_id: &str) -> InputAccessoryView {
-    let tag = if cfg!(target_os = "android") {
-        Tag::View
-    } else {
+    let supported = has_input_accessory();
+    let tag = if supported {
         Tag::InputAccessory
+    } else {
+        Tag::View
     };
     let mut node = ElNode::new(tag);
-    if cfg!(target_os = "android") {
+    if supported {
+        set(&mut node, Prop::NativeId(Some(native_id.into())));
+    } else {
         node.style.value(
             crate::StyleKey::Display,
             crate::PropertyValue::Display(taffy::Display::None),
         );
-    } else {
-        set(&mut node, Prop::NativeId(Some(native_id.into())));
     }
     InputAccessoryView(node)
 }
@@ -958,6 +964,17 @@ impl Screen {
         })
     }
 
+    /// The orientations the screen may take while the page is shown (iOS
+    /// and Android; default: the app's). Of the pages displayed, the one
+    /// shown most recently with a setting decides.
+    pub fn supported_orientations(
+        self,
+        orientations: impl IntoIterator<Item = Orientation>,
+    ) -> Self {
+        let bits = orientations.into_iter().fold(0, |bits, o| bits | o.bits());
+        self.set(Prop::Screen(ScreenProp::Orientations(bits)))
+    }
+
     /// A large title (iOS); the content scrolls under the header.
     pub fn header_large_title(self, large: impl IntoReactive<bool>) -> Self {
         self.bind_prop(large, |v| Prop::Screen(ScreenProp::HeaderLargeTitle(v)))
@@ -1215,6 +1232,13 @@ impl Overlay {
         })
     }
 
+    /// Places it against `anchor`, which may change from one kind to
+    /// another while it is shown: a context menu opened below its trigger
+    /// and then, by a secondary click, at the pointer.
+    pub fn anchor_to(self, anchor: impl IntoReactive<OverlayAnchor>) -> Self {
+        self.bind_prop(anchor, |a| Prop::Overlay(OverlayProp::Anchor(a)))
+    }
+
     /// The side of the anchor it goes on (default below).
     pub fn placement(self, placement: impl IntoReactive<Placement>) -> Self {
         self.bind_prop(placement, |p| Prop::Overlay(OverlayProp::Placement(p)))
@@ -1407,9 +1431,13 @@ pub enum Orientation {
     PortraitUpsideDown,
     /// Either landscape.
     Landscape,
-    /// Landscape, the top on the left.
+    /// Landscape with the device turned clockwise from upright, its home
+    /// side on the left: UIKit's `landscapeLeft`, Android's reverse
+    /// landscape.
     LandscapeLeft,
-    /// Landscape, the top on the right.
+    /// Landscape with the device turned counterclockwise from upright, its
+    /// home side on the right: UIKit's `landscapeRight`, Android's
+    /// landscape.
     LandscapeRight,
 }
 
@@ -1563,6 +1591,19 @@ impl WebView {
             EventKind::Error,
             listener.into_listener(),
             events::unavailable,
+        )
+    }
+
+    /// The page's web content process ended: it crashed, or the system
+    /// reclaimed its memory (the message; TS: `onError` with `code`
+    /// `"ERR_NSH_WEBVIEW_TERMINATED"`). The app keeps running and the web
+    /// view shows no page until [`reload`](crate::element::ElementRef::reload),
+    /// [`load`](crate::element::ElementRef::load) or a new source. [`on_error`](Self::on_error) hears it too.
+    pub fn on_process_terminated<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(
+            EventKind::Error,
+            listener.into_listener(),
+            events::terminated,
         )
     }
 
@@ -1829,6 +1870,29 @@ impl Painter {
     /// The drawing.
     pub fn finish(self) -> Drawing {
         self.drawing
+    }
+
+    /// Renders the drawing offscreen into an image of `size` points, as a
+    /// canvas of that size draws it on screen (TS: `OffscreenCanvas`'s
+    /// `convertToBlob`), with `options`' scale (default: the screen's) and
+    /// format (default: PNG). To await in a task: the encoded bytes, or why
+    /// not: `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform renders
+    /// none (`nsh test`'s headless runs among them), a `RangeError` for a
+    /// size or scale that is not a positive number, `ERR_NSH_QUOTA_EXCEEDED`
+    /// for an image over 16384 pixels a side or 64 megapixels or past 16
+    /// renders at once, `ETIMEDOUT` when the platform has not answered in
+    /// 30 seconds.
+    pub fn render(
+        self,
+        size: Size<Points>,
+        options: crate::canvas::render::RenderOptions,
+    ) -> crate::element::Answer<Result<Vec<u8>, crate::element::JsError>> {
+        crate::element::ambient::render_canvas(crate::canvas::render::RenderRequest {
+            drawing: self.drawing,
+            size,
+            scale: options.scale,
+            format: options.format,
+        })
     }
 
     /// `value` as a number of this drawing, for an operation built by hand
