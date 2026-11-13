@@ -239,6 +239,10 @@ RUST_LOG=warn,notes=debug,js=info ./notes              # 应用自己的 crate �
 
 在 Windows 上，可以在 PowerShell 中为一次运行设置（`$env:RUST_LOG="info"; .\Notes.exe`），或者在系统的环境变量中为当前用户设置。
 
+Rust 代码 panic 时，无论级别怎么设，文件里都会记下它：一行 `ERROR panic:`，后面是 Rust 打印的同一段话（线程、位置和消息），
+`RUST_BACKTRACE=1` 时还附上调用栈。打包应用的标准错误常常无处可看（Windows 的 GUI 程序、从 Finder 打开的 Mac 应用），
+应用崩溃的原因就在这个文件里。
+
 ## 错误浮层
 
 以下错误会在宿主上的应用上方显示红色浮层，包含错误信息和调用栈：

@@ -576,6 +576,9 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) run: bool,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
+    /// A development build for `nsh run`. Android: the APK is debuggable,
+    /// so `AppActivity` takes the environment `nsh run` passes it.
+    pub(crate) development: bool,
 }
 
 /// `nsh.json` `"icon"`: one PNG for every target, or one per platform
@@ -1068,7 +1071,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             codesign(&app, "-", path.as_deref())?;
             ui::done(format!("packaged {}", ui::path(&app)));
             if options.run {
-                let udid = crate::run::simulator(None)?;
+                let udid = crate::run::simulator(None, crate::run::SimulatorWindow::Front)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
                 crate::run::simctl_with_env(
@@ -1228,7 +1231,7 @@ fn package_android(
             version_code: config.build.unwrap_or(1),
             target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
-            dev: false,
+            dev: options.development,
             cleartext: config.android.uses_cleartext_traffic,
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
@@ -2078,6 +2081,7 @@ mod tests {
                 arch: Some(Arch::X86_64),
                 run: false,
                 asset_url: None,
+                development: false,
             })
             .unwrap_err();
             assert_eq!(

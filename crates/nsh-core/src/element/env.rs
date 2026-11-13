@@ -69,6 +69,9 @@ pub struct Environment {
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
+    /// The platform renders canvas drawings offscreen into images
+    /// ([`crate::platform::Environment::canvas_render`]).
+    pub canvas_render: bool,
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
@@ -93,6 +96,9 @@ pub struct Environment {
     /// The platform shows web views
     /// ([`crate::platform::Environment::web_views`]).
     pub web_views: bool,
+    /// The platform carries out web view requests
+    /// ([`crate::platform::Environment::webview_requests`]).
+    pub webview_requests: bool,
     /// The platform draws shader views
     /// ([`crate::platform::Environment::shaders`]).
     pub shaders: bool,
@@ -134,6 +140,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            canvas_render: false,
             file_requests: false,
             speech: false,
             notifications: false,
@@ -142,6 +149,7 @@ impl Default for Environment {
             web_input: false,
             web_evaluate: false,
             web_views: true,
+            webview_requests: false,
             shaders: true,
         }
     }

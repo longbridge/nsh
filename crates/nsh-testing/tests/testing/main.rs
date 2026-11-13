@@ -116,6 +116,34 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
 }
 
 #[test]
+fn a_test_sees_the_notifications_an_app_closes() {
+    use std::time::Duration;
+
+    use nsh_core::{Command, notifications::NotificationCommand};
+    use nsh_engine::{Bundle, EngineConfig};
+    use nsh_testing::Headless;
+
+    let bundle = Bundle::source(
+        "import { Notifications } from 'nsh';\n\
+         Notifications.close('a').then(() => Notifications.closeAll());"
+            .to_owned(),
+    );
+    let mut config = EngineConfig::new(bundle);
+    // A platform that shows notifications: the core sends them its way.
+    config.environment.notifications = true;
+    let mut app = Headless::start(config).unwrap();
+    let all = Command::Notification(NotificationCommand::CloseAll);
+    app.wait_until("closeAll", Duration::from_secs(10), |s| s.sent(&all))
+        .unwrap();
+    assert!(
+        app.screen()
+            .sent(&Command::Notification(NotificationCommand::Close(
+                "a".into()
+            )))
+    );
+}
+
+#[test]
 fn headless_runs_play_the_platform_s_part() {
     let run = TestRun {
         ui_sets: vec![nsh_base::registry()],
@@ -382,7 +410,7 @@ fn a_press_reaches_a_view_across_a_scroll_view_s_fold() {
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.len(), 3);
 }
 
 #[test]
@@ -513,7 +541,7 @@ fn a_test_plays_the_embedding_app() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 4);
+    assert_eq!(results.len(), 5);
 }
 
 #[test]

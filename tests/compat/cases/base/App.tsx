@@ -22,6 +22,7 @@ import BaseEditor from "./base-editor";
 import BaseHoverCard from "./base-hover-card";
 import BaseLink from "./base-link";
 import BaseNavPage from "./base-nav-page";
+import BaseNavHeaderItems from "./base-nav-header-items";
 import BaseNavStack from "./base-nav-stack";
 import BaseNavStackChange from "./base-nav-stack-change";
 import BaseNumberInput from "./base-number-input";
@@ -29,6 +30,7 @@ import BaseOtpInput from "./base-otp-input";
 import BasePagination from "./base-pagination";
 import BasePopups from "./base-popups";
 import BaseMenuChecked from "./base-menu-checked";
+import BaseMenuButton from "./base-menu-button";
 import BasePlot from "./base-plot";
 import BaseProgress from "./base-progress";
 import BaseTerminal from "./base-terminal";
@@ -76,6 +78,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-hover-card": BaseHoverCard,
   "base-link": BaseLink,
   "base-nav-page": BaseNavPage,
+  "base-nav-header-items": BaseNavHeaderItems,
   "base-nav-stack": BaseNavStack,
   "base-nav-stack-change": BaseNavStackChange,
   "base-number-input": BaseNumberInput,
@@ -83,6 +86,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-pagination": BasePagination,
   "base-popups": BasePopups,
   "base-menu-checked": BaseMenuChecked,
+  "base-menu-button": BaseMenuButton,
   "base-safe-area-keyboard": BaseSafeAreaKeyboard,
   "base-text-view": BaseTextView,
   "base-selectable-view": BaseSelectableView,

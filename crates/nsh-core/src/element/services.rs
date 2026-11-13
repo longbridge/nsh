@@ -12,7 +12,7 @@ use std::{
 
 use super::{
     Answer, ImageSize,
-    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead, FileAnswer},
+    task::{Action, AnswerSlot, ClipboardImage, ClipboardItem, ClipboardRead, FileAnswer},
 };
 use crate::{
     Command, ROOT_ID,
@@ -137,9 +137,19 @@ pub(crate) fn perf_monitor(enabled: bool) -> Action {
     Action::Command(ROOT_ID, Command::PerfMonitor(enabled))
 }
 
+/// How the performance monitor shows.
+pub(crate) fn perf_monitor_mode(mode: crate::FpsMode) -> Action {
+    Action::Command(ROOT_ID, Command::PerfMonitorMode(mode))
+}
+
 /// Puts `text` on the system clipboard.
 pub(crate) fn set_clipboard(text: String) -> Action {
     Action::Command(ROOT_ID, Command::SetClipboard(text))
+}
+
+/// Puts `item` on the system clipboard, each of its formats in one write.
+pub(crate) fn set_clipboard_item(item: ClipboardItem) -> Action {
+    Action::Command(ROOT_ID, Command::SetClipboardItem(item))
 }
 
 /// The text on the system clipboard (`""` when it holds none).
@@ -239,6 +249,14 @@ pub(crate) fn file_request<T>(
 ) -> (Answer<T>, Action) {
     let (result, slot) = Answer::new();
     (result, Action::FileRequest(request, answer(slot)))
+}
+
+/// Renders `request` offscreen into an image ([`crate::canvas::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> (Answer<Result<Vec<u8>, super::JsError>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::RenderCanvas(Box::new(request), slot))
 }
 
 /// The color the user picks on the screen (none when cancelled).

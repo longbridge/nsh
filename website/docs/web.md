@@ -44,7 +44,7 @@ Published apps behave as desktop apps in desktop browsers and as phone apps in p
 - **Going back**: Escape, Alt+Left (Cmd+[ on a Mac) and the mouse's back button close the newest dialog or pop the innermost shown stack (a stack in a tab that is not selected keeps its pages), as the Android back button does; `popOnBack` and `onBackPress` work as there. When the app is the whole page, every page pushed on a shown stack and every open dialog is a browser history entry, so the browser's back button goes back in the app. `nsh.json` `web.history` decides it for the packaged page and the dev server's: `false` keeps the browser's history to the page's own entries, `true` adds the app's in an iframe too.
 - **Addresses**: when the app is the whole page, [`UrlScheme.setUrl(url)`](../modules/nsh.md#urlscheme) sets the address of the current history entry, resolved against the page's address (and its `<base href>`), and `UrlScheme.url()` reads it. The browser's back button goes back in the app: the stack's pages go back and the address becomes the entry's. An address the user types (a `#fragment`) is an entry of the app's at the pages shown, and a back or forward to an entry of the same pages tells the app the entry's address with [`UrlScheme.on("change")`](../modules/nsh.md#urlschemeonchange). `setUrl(url, { history: "push" })` makes such an entry for an address of the app's own, a tab or a filter.
 - **Touch**: only scroll views pan; the page itself never scrolls, zooms or pulls to refresh under the app, and taps have no delay. In an iframe, swipes the app does not take scroll the embedding page. Drags on views with native pans, pinches and the responder system are the app's.
-- **Accessibility**: `role`, `accessibilityLabel`, `accessibilityHint`, `accessibilityDescription`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `announce` speaks through a live region and `setAccessibilityFocus` moves the focus. Views under a dialog or alert are inert.
+- **Accessibility**: `role`, `accessibilityLabel`, `accessibilityHint`, `accessibilityDescription`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `announce` speaks through a live region and `setAccessibilityFocus` moves the focus there (an input's into its field), or, while the user types in a field, reads the view out and leaves the focus in the field. Views under a dialog or alert are inert.
 - **Selection and menus**: in desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers: buttons, pressable rows, tabs) and text with `userSelect: "none"` or `select-none`; dragging the mouse over it selects it, Ctrl/Cmd+C copies it line by line and Ctrl/Cmd+A selects all of the text the selection is in. In phone and tablet browsers only text with `userSelect: "text"` is selectable, as in native apps. The browser's context menu appears only in selectable text and inputs.
 
 
@@ -242,6 +242,23 @@ Content-Security-Policy `connect-src` with the declared hosts (and the page's ow
 refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
 later errors go to the browser's console.
 
+#### Under a strict script policy
+
+The page runs no inline code: its scripts are files of the site, so a server that sends a strict policy such as
+`script-src 'self' 'wasm-unsafe-eval'` serves it as it is. The app itself runs in a frame of the page whose import map
+is the one inline script left; `nsh package` prints its hash, which the policy adds:
+
+```text
+✓ packaged .nsh/out/Sports, 5.1 MB
+  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval' 'sha256-…'
+```
+
+The map names the app's files by their digests, so the hash changes when the app's code does: take it from each
+package. `base-uri` may be `'none'`. A TSX app that loads a native module whole (`import * as base from "nsh/base"`
+passed on as a value, `import(name)`) has the map made as it starts, which needs `'unsafe-inline' blob:`; `nsh package`
+says so. A web view's bridge (`window.nsh.postMessage`) is a file too; scripts in the web view's own `html` and its
+`injectedJavaScript*` are inline, the app's to allow, and `injectJavaScript` needs `'unsafe-eval'`.
+
 ### Embed it with an iframe
 
 There is no embedding API on the web: embed the published app with an `<iframe>`. Its size is the app's window:
@@ -324,6 +341,12 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 `player.runSource(code, { name, sourceMap, capabilities, appId })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
+
+The app's lifecycle is the page's. An app that listens to quit requests (`Application.on("quitRequest")`,
+[Quitting](../modules/nsh-desktop.md#quitting)) is asked as the user leaves the page it is embedded in, and the browser
+may ask the user whether to leave; its `quit` listeners run as the page goes. A page that keeps leaving to itself runs
+the app under capabilities without `"application": true` (`runModule(url, { capabilities })`): the user then leaves
+without the app being asked, and its `quit` listeners still run as the page goes.
 
 Dialogs and alerts cover the container. With `dialogs: "viewport"` they cover the whole browser window, as a page's own modal dialogs do, while the app keeps the container as its window: a `Dialog` lays out at the window's size and safe area and slides in from its bottom edge, its backdrop covers the whole page, and the mouse wheel over it leaves the page in place. The dialog shows in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later), so it is above the rest of the page wherever the container is; in earlier browsers it covers the container.
 
@@ -519,6 +542,22 @@ import { Head } from "nsh/web";
   />
   …
 </NavPage>
+```
+
+The main window's title is the page's title too, which is how an app written in Rust titles its tab: set it as the
+desktops do (`currentWindow().set({ title })` in TSX), and a mounted `Head`'s title wins over it. An empty title brings
+back the page's own `<title>`. A Rust app's nsh.json `window.title` titles its tab from launch, as it titles its window
+on the desktops. Each entry of the browser's history keeps the title its page had, so set the title in the same turn as
+the page or address it belongs to.
+
+```rust
+use nsh_core::{desktop::WindowAttributes, element::desktop::main_window};
+
+fn show_title(title: &str) {
+    let mut attributes = WindowAttributes::default();
+    attributes.title = Some(format!("{title} · Market Notes"));
+    main_window().set(attributes);
+}
 ```
 
 ## Limits

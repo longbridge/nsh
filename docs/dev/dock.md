@@ -158,6 +158,8 @@ Docking has a mobile counterpart, so the dock runs on every platform and adapts 
     a dismissed one stays placed out of view (`display: none` around its overlays, which also keeps it from taking
     Escape), so its panels keep their content;
   - the bottom dock is a bottom sheet, the same way;
+  - while the software keyboard is up, the drawers and the bottom sheet ride above it as `Sheet`'s panels do
+    (`popup.rs`), and the bottom sheet stays below the status bar however large its dock's size;
   - a tab drag reorders within the strip and creates no splits.
   The compact presentation keeps its own presented dock: at most one, none on entering it, whatever the layout's
   `open` says. `toggleDock` / `setDockOpen` present one (dismissing the other) or dismiss it, and a press on its

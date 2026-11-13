@@ -72,6 +72,7 @@ fn pushed_demo() -> Option<&'static Demo> {
         GROUPS
             .iter()
             .flat_map(|g| g.demos)
+            .filter(|demo| demos::shown(demo))
             .find(|demo| routes.0.iter().any(|r| *r.key == *demo.key()))
     })
 }
@@ -84,6 +85,7 @@ pub(crate) fn restore() {
         GROUPS
             .iter()
             .flat_map(|g| g.demos)
+            .filter(|demo| demos::shown(demo))
             .find(|demo| demo.name == name)
     });
     if let Some(demo) = last {
@@ -287,7 +289,13 @@ fn sidebar() -> AnyElement {
                     .pt_4()
                     .pb(px(6.0)),
             )
-            .children(group.demos.iter().map(sidebar_row))
+            .children(
+                group
+                    .demos
+                    .iter()
+                    .filter(|demo| demos::shown(demo))
+                    .map(sidebar_row),
+            )
     });
     view()
         .w(px(sidebar_width()))
@@ -363,7 +371,13 @@ fn terminal_sidebar() -> AnyElement {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors::FAINT),
             )
-            .children(group.demos.iter().map(sidebar_row))
+            .children(
+                group
+                    .demos
+                    .iter()
+                    .filter(|demo| demos::shown(demo))
+                    .map(sidebar_row),
+            )
     });
     view()
         .w(px(sidebar_width()))

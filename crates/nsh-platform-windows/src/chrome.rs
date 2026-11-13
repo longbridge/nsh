@@ -538,6 +538,8 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
                     role: None,
                     when: nsh_core::keymap::When::Always,
                     icon: None,
+                    symbol: None,
+                    destructive: false,
                 })
             }
         })
@@ -1566,6 +1568,7 @@ fn append(
                     enabled,
                     items,
                     icon,
+                    ..
                 } => {
                     let Ok(sub) = CreatePopupMenu() else { continue };
                     append(sub, items, labels, entries, icons, true);
@@ -1691,6 +1694,10 @@ fn choose(surface: &Rc<Surface>, id: u32, role: Option<MenuRole>, area: Option<&
                         shift,
                         ..Default::default()
                     },
+                    scan: 0,
+                    extended: false,
+                    sys: false,
+                    translated: false,
                 },
             );
         }
@@ -1750,8 +1757,11 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         }
         theme_menus(crate::system::dark(surface));
         // The window must be in front for the menu to close when clicking
-        // elsewhere.
-        let _ = SetForegroundWindow(hwnd);
+        // elsewhere; a background app's stays behind (the test agent closes
+        // its menus itself).
+        if !crate::window::in_background() {
+            let _ = SetForegroundWindow(hwnd);
+        }
         #[cfg(feature = "dev")]
         if actions.is_empty() {
             *surface.chrome.tracked_popup.borrow_mut() = Some(items.clone());
@@ -2131,6 +2141,8 @@ mod tests {
             role: Some(MenuRole::Copy),
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         };
         let text = |labels: &MenuLabels| String::from_utf16(&item_text(&action, labels)).unwrap();
         assert_eq!(text(&MenuLabels::default()), "Copy\tCtrl+C\0");
@@ -2218,6 +2230,10 @@ mod tests {
                         shift: true,
                         ..Default::default()
                     },
+                    scan: 0,
+                    extended: false,
+                    sys: false,
+                    translated: false,
                 },
             );
             let popup = surface.chrome.app_popup(Arc::from([]), None);

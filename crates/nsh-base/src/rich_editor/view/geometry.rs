@@ -103,6 +103,11 @@ pub(crate) struct TextGeo {
     /// The box the frame is in (the block's own, else a node view's
     /// content slot).
     pub(crate) owner: Option<u64>,
+    /// The width of each inline view and image in its text, by its offset
+    /// in the textblock's content: what its attachment character stands
+    /// for on a line. Relative to the block, so an edit in another block
+    /// leaves them in place.
+    pub(crate) widths: HashMap<usize, Points>,
 }
 
 /// Measures a text in a font (the platform's measurer, captured).
@@ -148,6 +153,20 @@ impl Geometry {
             || measure_text(&self.font, text),
             |measure| measure(&self.font, text),
         )
+    }
+
+    /// Whether the content point `at` is in a block's box before where its
+    /// children start: on a task item's checkbox, or under it.
+    pub(crate) fn before_holder(&self, at: Point<Points>) -> bool {
+        self.insets.iter().any(|(id, inset)| {
+            let (Some(origin), Some((_, frame))) = (self.origin(*id), self.frames.get(id)) else {
+                return false;
+            };
+            at.x >= origin.x
+                && at.x < origin.x + inset.x
+                && at.y >= origin.y
+                && at.y < origin.y + frame.size.height
+        })
     }
 
     /// Block `id`'s top left in the content box.
@@ -206,7 +225,7 @@ impl Geometry {
         let (x, y, h) = match line_of(&geo.lines, t, affinity) {
             Some(i) => {
                 let line = &geo.lines[i];
-                (line.x + self.x_in_line(line, t), line.y, line.height)
+                (line.x + self.x_in_line(geo, line, t), line.y, line.height)
             }
             None => (px(0.0), px(0.0), geo.frame.size.height.max(px(1.0))),
         };
@@ -246,81 +265,87 @@ impl Geometry {
     /// The boxes covering `from..to`, one per line of each textblock it
     /// crosses (through a line's end where it goes on).
     pub(crate) fn range_rects(&self, from: usize, to: usize) -> Vec<Bounds<Points>> {
-        let mut out = Vec::new();
         let mut ids: Vec<(&u64, &TextGeo)> = self.texts.iter().collect();
         crate::sort::sort_by_key(&mut ids, |(_, g)| g.start);
-        for (id, geo) in ids {
-            let (start, end) = (geo.start, geo.start + geo.map.size);
-            if end < from || start > to {
-                continue;
-            }
+        let mut out = Vec::new();
+        for (id, _) in ids {
             let Some((origin, _)) = self.text_box(*id) else {
                 continue;
             };
-            let a = geo.map.to_text(from.max(start) - start);
-            let b = geo.map.to_text(to.min(end) - start);
-            for line in &geo.lines {
-                if line.end < a || line.start > b {
-                    continue;
-                }
-                let x0 = if a > line.start {
-                    self.x_in_line(line, a)
-                } else {
-                    px(0.0)
-                };
-                let through =
-                    to > end || b > line.end || (b == line.end && to > start + geo.map.to_doc(b));
-                let x1 = if b < line.end || (b == line.end && !through) {
-                    self.x_in_line(line, b)
-                } else {
-                    line.width + px(4.0)
-                };
-                if x1 <= x0 && !(through && a <= line.end) {
-                    continue;
-                }
-                out.push(Bounds::new(
-                    Point::new(origin.x + line.x + x0, origin.y + line.y),
-                    Size::new((x1 - x0).max(px(4.0)), line.height),
-                ));
+            out.extend(
+                self.text_range_rects(*id, from, to)
+                    .into_iter()
+                    .map(|b| Bounds::new(origin + b.origin, b.size)),
+            );
+        }
+        out
+    }
+
+    /// The boxes of `from..to` in textblock `id`, in its text's box: one
+    /// per line it crosses (through a line's end where it goes on), none
+    /// when the range misses the block.
+    pub(crate) fn text_range_rects(&self, id: u64, from: usize, to: usize) -> Vec<Bounds<Points>> {
+        let mut out = Vec::new();
+        let Some(geo) = self.texts.get(&id) else {
+            return out;
+        };
+        let (start, end) = (geo.start, geo.start + geo.map.size);
+        if end < from || start > to {
+            return out;
+        }
+        let a = geo.map.to_text(from.max(start) - start);
+        let b = geo.map.to_text(to.min(end) - start);
+        for line in &geo.lines {
+            if line.end < a || line.start > b {
+                continue;
             }
-            if geo.lines.is_empty() && from <= start && to > end {
-                out.push(Bounds::new(
-                    origin,
-                    Size::new(px(4.0), geo.frame.size.height),
-                ));
+            let x0 = if a > line.start {
+                self.x_in_line(geo, line, a)
+            } else {
+                px(0.0)
+            };
+            let through =
+                to > end || b > line.end || (b == line.end && to > start + geo.map.to_doc(b));
+            let x1 = if b < line.end || (b == line.end && !through) {
+                self.x_in_line(geo, line, b)
+            } else {
+                line.width + px(4.0)
+            };
+            if x1 <= x0 && !(through && a <= line.end) {
+                continue;
             }
+            out.push(Bounds::new(
+                Point::new(line.x + x0, line.y),
+                Size::new((x1 - x0).max(px(4.0)), line.height),
+            ));
+        }
+        if geo.lines.is_empty() && from <= start && to > end {
+            out.push(Bounds::new(
+                Point::default(),
+                Size::new(px(4.0), geo.frame.size.height),
+            ));
         }
         out
     }
 
     /// Where `x` of a line falls: the nearest boundary between graphemes.
-    fn offset_in_line(&self, line: &TextLine, x: Points) -> u32 {
+    fn offset_in_line(&self, geo: &TextGeo, line: &TextLine, x: Points) -> u32 {
         if x <= px(0.0) || line.text.is_empty() {
             return line.start;
         }
         if x >= line.width {
             return line.end;
         }
-        let full = self.measure_text(&line.text).max(px(1.0));
+        let widths = self.line_attachments(geo, line);
         let mut best = (line.start, Points(f32::MAX));
         let mut units = 0u32;
-        let mut boundaries = vec![(0u32, 0usize)];
+        let mut boundaries = vec![0u32];
         for g in line.text.graphemes(true) {
             units += g.encode_utf16().count() as u32;
-            boundaries.push((units, 0));
+            boundaries.push(units);
         }
-        let mut byte = 0usize;
-        for (i, g) in line.text.graphemes(true).enumerate() {
-            byte += g.len();
-            boundaries[i + 1].1 = byte;
-        }
-        for (u, b) in boundaries {
-            let w = if b == 0 {
-                px(0.0)
-            } else {
-                line.width * (self.measure_text(&line.text[..b]).0 / full.0)
-            };
-            let d = Points((w - x).0.abs());
+        for u in boundaries {
+            let d = Points((self.x_at(line, &widths, u) - x).0.abs());
             if d < best.1 {
                 best = (line.start + u, d);
             }
@@ -329,18 +354,69 @@ impl Geometry {
     }
 
     /// The x of text offset `t` in a line (from the line's left).
-    fn x_in_line(&self, line: &TextLine, t: u32) -> Points {
+    fn x_in_line(&self, geo: &TextGeo, line: &TextLine, t: u32) -> Points {
         if t <= line.start || line.text.is_empty() {
             return px(0.0);
         }
         if t >= line.end {
             return line.width;
         }
+        let widths = self.line_attachments(geo, line);
+        self.x_at(line, &widths, t - line.start)
+    }
+
+    /// The attachments of a line (its inline views and images) whose width
+    /// is known: their offset in the line's text and their width.
+    fn line_attachments(&self, geo: &TextGeo, line: &TextLine) -> Vec<(u32, Points)> {
+        if geo.widths.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut k = 0u32;
+        for c in line.text.chars() {
+            if c == nsh_core::ATTACHMENT_CHAR
+                && let Some(w) = geo.widths.get(&geo.map.to_doc(line.start + k))
+            {
+                out.push((k, *w));
+            }
+            k += c.len_utf16() as u32;
+        }
+        out
+    }
+
+    /// The x of `k` units into a line. The font only gives relative widths
+    /// (`Self::measure`), so the line's text is scaled to the line's
+    /// width; an attachment is as wide as its view, not as its character,
+    /// so the known ones are measured apart: the text scales to what they
+    /// leave of the line.
+    fn x_at(&self, line: &TextLine, attachments: &[(u32, Points)], k: u32) -> Points {
         let units: Vec<u16> = line.text.encode_utf16().collect();
-        let k = ((t - line.start) as usize).min(units.len());
-        let prefix = String::from_utf16_lossy(&units[..k]);
-        let full = self.measure_text(&line.text).max(px(1.0));
-        line.width * (self.measure_text(&prefix).0 / full.0)
+        let k = (k as usize).min(units.len());
+        if attachments.is_empty() {
+            let full = self.measure_text(&line.text).max(px(1.0));
+            let prefix = String::from_utf16_lossy(&units[..k]);
+            return line.width * (self.measure_text(&prefix).0 / full.0);
+        }
+        // The text without the attachments' characters, whole and before `k`.
+        let without = |end: usize| {
+            let mut kept: Vec<u16> = Vec::with_capacity(end);
+            for (i, u) in units[..end].iter().enumerate() {
+                if !attachments.iter().any(|(at, _)| *at as usize == i) {
+                    kept.push(*u);
+                }
+            }
+            String::from_utf16_lossy(&kept)
+        };
+        let views: f32 = attachments.iter().map(|(_, w)| w.0).sum();
+        let views_before: f32 = attachments
+            .iter()
+            .filter(|(at, _)| (*at as usize) < k)
+            .map(|(_, w)| w.0)
+            .sum();
+        let text = self.measure_text(&without(units.len()));
+        let rest = (line.width.0 - views).max(0.0);
+        let scale = if text.0 > 0.0 { rest / text.0 } else { 0.0 };
+        Points(self.measure_text(&without(k)).0 * scale + views_before)
     }
 
     /// The place at `p` (content box): an atom it is on, else the nearest
@@ -412,7 +488,7 @@ impl Geometry {
             .position(|l| local.y < l.y + l.height)
             .unwrap_or(geo.lines.len() - 1);
         let line = &geo.lines[index];
-        let t = self.offset_in_line(line, local.x - line.x);
+        let t = self.offset_in_line(geo, line, local.x - line.x);
         // The end of a wrapped line shows on that line.
         let affinity = if t == line.end && index + 1 < geo.lines.len() {
             Affinity::Upstream
@@ -494,6 +570,88 @@ mod tests {
         assert_eq!(geo.origin(2), Some(Point::new(px(24.0), px(40.0))));
         // The item itself is in its own parent's box: no inset of its own.
         assert_eq!(geo.origin(1), Some(Point::new(px(0.0), px(40.0))));
+    }
+
+    /// The checkbox is in the item's box before its content: a press there
+    /// is the checkbox's, wherever the item is in the document.
+    #[test]
+    fn a_point_before_a_holder_is_on_the_items_checkbox() {
+        let mut geo = Geometry::default();
+        let at =
+            |x: f32, y: f32| Bounds::new(Point::new(px(x), px(y)), Size::new(px(100.0), px(20.0)));
+        geo.frames.insert(1, (Some(DOC), at(10.0, 40.0)));
+        geo.frames.insert(2, (Some(DOC), at(10.0, 60.0)));
+        geo.insets.insert(1, Point::new(px(24.0), px(0.0)));
+        let on = |x: f32, y: f32| geo.before_holder(Point::new(px(x), px(y)));
+        assert!(on(10.0, 40.0) && on(33.0, 59.0));
+        // The item's text, the margin beside it, and a block without a
+        // holder are not.
+        assert!(!on(34.0, 50.0) && !on(9.0, 50.0) && !on(20.0, 70.0));
+    }
+
+    /// "ab", an inline view 80 wide, "cd", in a font of 10 a character:
+    /// the view's character stands for its width, not a character's.
+    #[test]
+    fn an_inline_view_is_as_wide_as_its_view_on_its_line() {
+        let mut geo = Geometry {
+            measure: Some(Rc::new(|_: &str, t: &str| {
+                px(10.0 * t.chars().count() as f32)
+            })),
+            ..Geometry::default()
+        };
+        geo.frames.insert(
+            7,
+            (
+                Some(DOC),
+                Bounds::new(Point::default(), Size::new(px(400.0), px(20.0))),
+            ),
+        );
+        let run = |doc, doc_len, text, text_len| Run {
+            doc,
+            doc_len,
+            text,
+            text_len,
+            side: 0,
+        };
+        geo.texts.insert(
+            7,
+            TextGeo {
+                start: 1,
+                map: InlineMap {
+                    runs: vec![run(0, 2, 0, 2), run(2, 1, 2, 1), run(3, 2, 3, 2)],
+                    size: 5,
+                    len: 5,
+                },
+                lines: vec![TextLine {
+                    text: "ab\u{FFFC}cd".into(),
+                    start: 0,
+                    end: 5,
+                    width: px(120.0),
+                    height: px(20.0),
+                    ..TextLine::default()
+                }],
+                frame: Bounds::new(Point::default(), Size::new(px(400.0), px(20.0))),
+                owner: None,
+                // The view is at position 3 (content offset 2).
+                widths: HashMap::from([(2, px(80.0))]),
+            },
+        );
+        let x = |pos| {
+            geo.caret_rect(pos, Affinity::Downstream)
+                .map(|b| b.origin.x.0)
+        };
+        assert_eq!(x(1), Some(0.0));
+        assert_eq!(x(2), Some(10.0));
+        assert_eq!(x(3), Some(20.0), "before the view");
+        assert_eq!(x(4), Some(100.0), "after the view");
+        assert_eq!(x(5), Some(110.0));
+        let at = |x: f32| match geo.hit(Point::new(px(x), px(5.0))) {
+            Some(Hit::Text(pos, _)) => pos,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(at(19.0), 3);
+        assert_eq!(at(101.0), 4);
+        assert_eq!(at(108.0), 5);
     }
 
     fn map() -> InlineMap {

@@ -12,6 +12,15 @@ use crate::geometry::{Edges, Points, Size};
 /// the same name).
 pub const TAB_BAR_COMPONENT: &str = "nsh/tab-bar";
 
+/// The native component of `nsh/mobile`'s `SegmentedControl`, which the iOS
+/// backend registers itself (`UISegmentedControl`).
+pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
+
+/// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
+/// registers itself (a `UIButton` showing its `UIMenu` as its primary
+/// action).
+pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
+
 /// Whether native component `name` is NSH's own: names under `nsh/` are, and
 /// an embedding app's registration of one is refused, so it can never
 /// replace what NSH's exports render.
@@ -292,6 +301,10 @@ pub struct Environment {
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
     pub screen_color: bool,
+    /// The platform renders canvas drawings offscreen into images
+    /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
+    /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    pub canvas_render: bool,
     /// The platform shows the system's open and save dialogs and opens,
     /// reveals and trashes local paths ([`crate::Command::FileRequest`],
     /// the desktops); without it, those requests answer at once with an
@@ -330,6 +343,12 @@ pub struct Environment {
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
     /// when a web view starts reports that error itself.
     pub web_views: bool,
+    /// The platform carries out a web view's requests
+    /// ([`crate::Command::WebViewRequest`]: a pending download's
+    /// destination or cancellation; the desktops); without it, they answer
+    /// at once with an error and no web view downloads behind the app's
+    /// back.
+    pub webview_requests: bool,
     /// The platform draws shader views (`Shader`, `ShaderEffect`,
     /// `ShaderTransition`, the screen's; TS: `shadersAvailable()`). `true`
     /// by default. A platform built without a renderer sets `false` from
@@ -390,6 +409,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            canvas_render: false,
             file_requests: false,
             speech: false,
             notifications: false,
@@ -398,6 +418,7 @@ impl Default for Environment {
             web_input: false,
             web_evaluate: false,
             web_views: true,
+            webview_requests: false,
             shaders: true,
         }
     }
@@ -762,6 +783,36 @@ impl std::fmt::Debug for TimeZone {
 impl std::fmt::Display for TimeZone {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// What the performance monitor measured over the last second
+/// ([`crate::element::perf_stats`]; TS `perfStats()`), read once a second
+/// while it measures. More of what the monitor measures can join it.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default, crate::element::JsObject)]
+pub struct PerfStats {
+    /// Frames shown per second: display refreshes in which the app changed
+    /// something. An idle app reads low, which is not slowness.
+    pub fps: f32,
+    /// The rate the display refreshes at (Hz), once the monitor saw it
+    /// refresh.
+    pub refresh_rate: Option<f32>,
+    /// The share of recent frames that took longer than one refresh, from 0
+    /// to 1 (`0.05` is 5%), as TS's `dropped` reads it.
+    pub dropped: crate::geometry::Percentage,
+}
+
+impl PerfStats {
+    /// Stats of `fps` frames a second, the rest unknown: the engine's way
+    /// to make them (the type is non-exhaustive). Apps read them
+    /// ([`crate::element::perf_stats`]) and never make one.
+    #[doc(hidden)]
+    pub fn new(fps: f32) -> PerfStats {
+        PerfStats {
+            fps,
+            ..PerfStats::default()
+        }
     }
 }
 
