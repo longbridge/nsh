@@ -132,8 +132,8 @@ pub struct Screen {
     picks_answered: usize,
     /// The URLs the app had the system open (`openUrl`), in order.
     opened_urls: Vec<String>,
-    /// The `openUrl` requests to answer.
-    url_opens: Vec<u32>,
+    /// The `openUrl` requests to answer, with their URLs.
+    url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
     /// The requests on local paths that reached the platform
@@ -663,7 +663,7 @@ impl Screen {
             // Recorded, never opened: a test's machine opens nothing.
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
-                self.url_opens.push(*id);
+                self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
             // Recorded, never carried out: a test's machine opens, shows
@@ -1458,7 +1458,7 @@ impl Screen {
     }
 
     /// The `openUrl` requests to answer since the last call.
-    pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
+    pub(crate) fn take_url_opens(&mut self) -> Vec<(u32, String)> {
         std::mem::take(&mut self.url_opens)
     }
 
@@ -1975,7 +1975,13 @@ impl Screen {
                 .filter(|c| placed(c))
                 .chain(children.iter().rev().filter(|c| !placed(c)));
             for &child in order {
-                let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
+                // A span has its text's bounds here, not its characters':
+                // the pointer reaches the text, or the last span would
+                // cover its siblings.
+                let node = self
+                    .nodes
+                    .get(&child)
+                    .is_some_and(|v| v.canvas_node || v.span.is_some());
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
                 if node || !attached.contains(&child) || self.kind(child) == Some(ViewKind::Modal) {
@@ -3200,6 +3206,23 @@ mod tests {
         assert_eq!(pick(&screen, "Privacy"), Pick::One(102));
         assert_eq!(pick(&screen, "text:Terms 🙂"), Pick::One(100));
         assert_eq!(screen.span(102), Some((4, 26, 33)));
+        // A span after it that only hears the pointer (its `hover:`
+        // styles) covers no press on it.
+        let mut hovers = EventMask::default();
+        hovers.set(EventKind::MouseEnter, true);
+        hovers.set(EventKind::MouseLeave, true);
+        screen.apply(&batch(vec![linked(vec![
+            link(13, 21, 100),
+            nsh_core::TextLink {
+                events: hovers,
+                focus_stop: false,
+                ..link(26, 33, 102)
+            },
+        ])]));
+        assert_eq!(
+            screen.covering(100, Point::new(Points(150.0), Points(20.0))),
+            None
+        );
         // They are not texts of their own.
         assert_eq!(screen.texts(), ["Agree to the Terms 🙂 and Privacy"]);
         screen.apply(&batch(vec![linked(Vec::new())]));

@@ -34,7 +34,7 @@ pub(crate) trait Driver: Send {
     /// Drops local files (`file:` URLs) on what `selector` names.
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         let _ = (selector, uris);
-        Err("`dropFiles` runs headless and on Linux for now".into())
+        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
     }
     /// Drags without lifting, until [`Driver::drop_held`].
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
@@ -99,6 +99,11 @@ pub(crate) trait Driver: Send {
     fn fail_images(&mut self, url: &str) -> Result<(), String> {
         let _ = url;
         Err(headless_only("failImages"))
+    }
+    /// The URLs matching `url` (a `*` glob) fail to open (`failOpenUrls`).
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failOpenUrls"))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
@@ -278,6 +283,9 @@ impl Driver for Headless {
     }
     fn fail_images(&mut self, url: &str) -> Result<(), String> {
         Headless::fail_images(self, url)
+    }
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_open_urls(self, url)
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)

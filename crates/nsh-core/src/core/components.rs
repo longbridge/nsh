@@ -5031,6 +5031,9 @@ impl<M: TextEngine> Core<M> {
     }
 
     fn dispatch_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
+        // Before a cancelled press's release is dropped: it still ends the
+        // span's press.
+        self.span_state(id, kind);
         // A cancelled press's release reaches no one, JS included.
         if self.drop_cancelled_press(id, kind, payload) {
             return true;
