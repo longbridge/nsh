@@ -2946,6 +2946,9 @@ impl<M: TextEngine> Core<M> {
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
+        // The downloads' file work and deadlines: their events and
+        // commands go out with this commit.
+        self.poll_downloads();
         // JS has handled the events taken before this commit and its ops
         // are applied: what waited for that sees the app's props, and what
         // it changes renders with them.
@@ -3227,6 +3230,10 @@ impl<M: TextEngine> Core<M> {
             }
             answer.borrow_mut().deliver(target.is_some());
         }
+        // The downloads' listeners as this round's final masks leave them:
+        // a web view left with neither of them cancels what it holds, and
+        // the cancel commands go out with this batch.
+        self.sync_download_listeners();
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
         for (id, mut command) in std::mem::take(&mut self.commands) {
@@ -3240,23 +3247,14 @@ impl<M: TextEngine> Core<M> {
                 self.answer_scroll_position(id, call);
                 continue;
             }
-            // A web view request whose node is gone or never showed
-            // answers its failure (the view's handle names nothing).
-            let webview = match &command {
-                Command::WebViewRequest(request) => Some(request.id),
-                _ => None,
-            };
             let Ok(key) = self.key(id) else {
-                if let Some(request) = webview {
-                    self.webview_failed(request, crate::webview::NOT_MOUNTED);
-                }
+                // A download command to a node that is gone is dropped; its
+                // reply timeout settles the session without ever treating
+                // silence as the writer having stopped.
                 continue;
             };
             // A culled view is made for it.
             if !self.nodes[key as usize].created && !self.uncull(key) {
-                if let Some(request) = webview {
-                    self.webview_failed(request, crate::webview::NOT_MOUNTED);
-                }
                 continue;
             }
             let node = &self.nodes[key as usize];
@@ -3419,9 +3417,6 @@ impl<M: TextEngine> Core<M> {
                 }
                 _ => {}
             }
-            if self.web_navigation_refused(key, &command) {
-                continue;
-            }
             let node = &self.nodes[key as usize];
             let id = node.id;
             match command {
@@ -3558,97 +3553,6 @@ impl<M: TextEngine> Core<M> {
             self.web_view_unavailable(id);
         }
         Ok(())
-    }
-
-    /// Whether this platform cannot carry out a web view's manual
-    /// downloads (`WebProps::defer_downloads`). Such a view keeps an inert
-    /// page: it must not download automatically behind the app's back.
-    fn web_view_policy_blocked(&self, props: &crate::WebProps) -> bool {
-        !self.components.environment.webview_requests && props.defer_downloads
-    }
-
-    /// Whether node `key` is a web view whose manual downloads this
-    /// platform cannot carry out.
-    fn web_view_key_blocked(&self, key: Key) -> bool {
-        self.nodes[key as usize].kind == Kind::WebView
-            && self.nodes[key as usize]
-                .control
-                .as_deref()
-                .is_some_and(|control| match control {
-                    crate::NativeProps::WebView(props) => self.web_view_policy_blocked(props),
-                    _ => false,
-                })
-    }
-
-    /// A web view policy this platform cannot carry out
-    /// ([`NativeProp::DeferDownloads`]) fails as `onError` on the web view.
-    /// The prop stays what the app asked for, and
-    /// [`Self::web_view_policy_blocked`] keeps the page inert: a refused
-    /// manual download must not run automatically.
-    fn check_web_policy(&mut self, key: Key, prop: &NativeProp) {
-        let (id, web) = {
-            let node = &self.nodes[key as usize];
-            (node.id, node.kind == Kind::WebView)
-        };
-        if !web
-            || !self.components.environment.web_views
-            || self.components.environment.webview_requests
-            || !matches!(prop, NativeProp::DeferDownloads(true))
-        {
-            return;
-        }
-        let message = format!(
-            "manual downloads are not supported by this platform's web view ({}): the page is not loaded",
-            self.components.environment.platform_name()
-        );
-        self.events.push(crate::element::JsEvent::Event(
-            id,
-            EventKind::Error,
-            EventPayload::Map(vec![
-                ("message", PayloadValue::Str(message.clone())),
-                (
-                    "code",
-                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
-                ),
-            ]),
-        ));
-        self.deny(message);
-    }
-
-    /// A navigation command (`load`, `reload`, `goBack`, `goForward`) or
-    /// `injectJavaScript` on a web view whose manual downloads this
-    /// platform cannot carry out is refused and reported as `onError`, not
-    /// sent. Injecting a script would let it navigate or fetch past the
-    /// refused policy (the native setting only disables the page's own
-    /// scripts). Once the handler is removed and downloads are automatic
-    /// again, the same commands go through.
-    fn web_navigation_refused(&mut self, key: Key, command: &Command) -> bool {
-        if !matches!(
-            command,
-            Command::Load(_)
-                | Command::Reload
-                | Command::GoBack
-                | Command::GoForward
-                | Command::InjectJavaScript(_)
-        ) || !self.web_view_key_blocked(key)
-        {
-            return false;
-        }
-        let id = self.nodes[key as usize].id;
-        let message = "the web view does not navigate or run injected scripts while manual downloads are not supported by this platform: remove the on_download_pending handler to load the page";
-        self.events.push(crate::element::JsEvent::Event(
-            id,
-            EventKind::Error,
-            EventPayload::Map(vec![
-                ("message", PayloadValue::Str(message.into())),
-                (
-                    "code",
-                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
-                ),
-            ]),
-        ));
-        self.deny(message.to_owned());
-        true
     }
 
     /// A web view on a platform that shows none fails at once (`onError`
@@ -6058,7 +5962,6 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Native(prop) => {
-                self.check_web_policy(key, &prop);
                 if let NativeProp::Disabled(d) = prop {
                     // `disabled:` classes, on any element.
                     self.set_disabled(key, d);
@@ -7388,16 +7291,10 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::NATIVE != 0
                 && let Some(control) = &node.control
             {
-                let mut props = (**control).clone();
-                // A manual-download policy this platform cannot carry out
-                // replaces the page with an inert one; the app's props stay
-                // on the node and load again once the handler is removed.
-                if let crate::NativeProps::WebView(web) = &mut props
-                    && self.web_view_policy_blocked(web)
-                {
-                    block_web_page(web);
-                }
-                self.mount.push(MountItem::NativeProps { id, props });
+                self.mount.push(MountItem::NativeProps {
+                    id,
+                    props: (**control).clone(),
+                });
             }
             if flags & dirty::MODAL != 0
                 && let Some(root) = &node.root
@@ -10538,28 +10435,6 @@ fn media_not_granted(what: &str, uri: &str, base: Option<&str>) -> String {
 }
 
 /// A page with nothing to load and no scripts: what a web view whose manual
-/// downloads this platform cannot carry out shows instead of the app's
-/// page, so nothing can download automatically.
-const BLOCKED_WEB_PAGE: &str =
-    "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
-
-/// Replaces what a blocked web view would load with [`BLOCKED_WEB_PAGE`]
-/// and disables what runs in it (`src`, `baseUrl`, injected scripts,
-/// JavaScript, back/forward gestures). The node keeps the app's own props,
-/// which the next emit restores once the handler is removed.
-fn block_web_page(web: &mut crate::WebProps) {
-    web.source = crate::WebSource::Html {
-        html: BLOCKED_WEB_PAGE.into(),
-        base_url: None,
-    };
-    web.src = None;
-    web.base_url = None;
-    web.javascript_enabled = false;
-    web.injected_js = None;
-    web.injected_js_before = None;
-    web.back_forward_gestures = false;
-}
-
 /// Applies one property to a control.
 fn apply_native(control: &mut NativeProps, prop: NativeProp) {
     use NativeProp as P;

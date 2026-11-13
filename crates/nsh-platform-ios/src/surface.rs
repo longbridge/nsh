@@ -404,6 +404,9 @@ impl RootView {
             // AVAudioEngine and AVPlayer.
             audio: true,
             web_evaluate: true,
+            // Download decisions and cancellations reach the web view
+            // (`nsh_platform_apple::web_download`).
+            webview_requests: true,
             // wgpu on Metal, in builds with it, until it finds no GPU.
             shaders: nsh_engine::shader::LINKED,
             // No file dialogs, file manager or trash (Catalyst included):

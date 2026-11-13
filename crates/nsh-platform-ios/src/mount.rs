@@ -1747,6 +1747,7 @@ impl Mounter {
                 | Command::Load(_)),
                 Native::Web(web),
             ) => web.command(&c),
+            (Command::WebViewRequest(request), Native::Web(web)) => web.web_request(&request),
             (Command::Seek(seconds), Native::Video(video)) => video.seek(seconds),
             (Command::Focus, Native::Input(input)) => {
                 input.editor_view().becomeFirstResponder();
@@ -3140,6 +3141,9 @@ impl Mounter {
             return;
         };
         slot.events = events;
+        if let Native::Web(web) = &slot.native {
+            web.set_events(events);
+        }
         if let Native::Input(input) = &mut slot.native {
             input.set_paste_listens(events.contains(EventKind::Paste));
         }
