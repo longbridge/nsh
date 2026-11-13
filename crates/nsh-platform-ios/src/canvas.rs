@@ -8,6 +8,9 @@
 //! by clipping to the shape. Animated value slots are read from
 //! [`CanvasViewIvars::values`], which the mounter updates on animation
 //! frames.
+//!
+//! `OffscreenCanvas` renders replay the same way into a bitmap of their own
+//! ([`offscreen`]).
 
 use std::{cell::RefCell, f64::consts::TAU, sync::Arc};
 
@@ -37,13 +40,17 @@ use rustc_hash::FxHashMap;
 
 use crate::native_view::NshView;
 
+mod offscreen;
+
+pub(crate) use offscreen::{Offscreen, RenderRequest};
+
 #[derive(Default)]
 pub(crate) struct CanvasViewIvars {
     drawing: RefCell<Option<Arc<Drawing>>>,
     /// Current values of the drawing's animated value slots.
     values: RefCell<Vec<AnimationValue>>,
     /// Images it draws, by URI, once loaded.
-    images: RefCell<FxHashMap<Arc<str>, Retained<UIImage>>>,
+    images: RefCell<Images>,
     /// Finds what a change of slots redraws ([`CanvasView::set_values`]).
     scan: RefCell<DamageScan>,
     /// This frame's slot values (scratch space of
@@ -68,22 +75,33 @@ define_class!(
             let Some(cx) = UIGraphicsGetCurrentContext() else { return };
             let values = self.ivars().values.borrow();
             let images = self.ivars().images.borrow();
-            let mut replay = Replay {
-                c: &cx,
-                values: &values,
-                images: &images,
-                state: State::default(),
-                stack: Vec::new(),
-                path: CGMutablePath::new(),
-            };
-            CGContext::save_g_state(Some(&cx));
-            for op in &drawing.ops {
-                replay.op(op);
-            }
-            CGContext::restore_g_state(Some(&cx));
+            paint(&cx, drawing, &values, &images);
         }
     }
 );
+
+/// The images a drawing draws, by URI.
+type Images = FxHashMap<Arc<str>, Retained<UIImage>>;
+
+/// Replays `drawing` into `cx`, whose space is the canvas's (points, y
+/// down), its animated slots read from `values` (0 when missing): what a
+/// canvas view draws, and an offscreen render ([`offscreen`]) too. Any
+/// thread: Core Graphics, Core Text and `UIImage` are thread-safe.
+fn paint(cx: &CGContext, drawing: &Drawing, values: &[AnimationValue], images: &Images) {
+    let mut replay = Replay {
+        c: cx,
+        values,
+        images,
+        state: State::default(),
+        stack: Vec::new(),
+        path: CGMutablePath::new(),
+    };
+    CGContext::save_g_state(Some(cx));
+    for op in &drawing.ops {
+        replay.op(op);
+    }
+    CGContext::restore_g_state(Some(cx));
+}
 
 impl CanvasView {
     pub(crate) fn new(mtm: MainThreadMarker) -> Retained<Self> {
@@ -258,7 +276,7 @@ impl Default for State {
 struct Replay<'a> {
     c: &'a CGContext,
     values: &'a [AnimationValue],
-    images: &'a FxHashMap<Arc<str>, Retained<UIImage>>,
+    images: &'a Images,
     state: State,
     stack: Vec<State>,
     /// The current path, in the view's space.
