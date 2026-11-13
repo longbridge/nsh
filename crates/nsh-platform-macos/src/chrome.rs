@@ -1175,7 +1175,10 @@ pub(crate) fn menu(
                 enabled,
                 items,
                 icon,
+                ..
             } => {
+                // Inline sections are expanded in the core / nsh-js before
+                // any menu reaches the desktops.
                 let ns = holder(surface, label, *enabled, items, loads);
                 set_icon(surface, &ns, icon.as_ref(), loads);
                 menu.addItem(&ns);
@@ -1423,6 +1426,8 @@ mod tests {
             role: Some(MenuRole::Copy),
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         };
         assert_eq!(title(&action, &labels), "コピー");
         assert_eq!(title(&action, &english), "Copy");

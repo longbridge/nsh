@@ -942,8 +942,10 @@ impl super::Component for OpenedWindowsHost {
 /// that owns the window is asked first and quits when it is ready. For a
 /// menu item or a button of
 /// the app's own that quits, and for restarting after an update. A view
-/// embedded in another app leaves the app's lifecycle to that app. On
-/// platforms without desktop windows this has no effect.
+/// embedded in another app leaves the app's lifecycle to that app. On the
+/// web, called while a quit request listener runs, it lets the page leave
+/// without a question ([`on_quit_request`]); the app ends as the page goes.
+/// On platforms without desktop windows this has no effect.
 pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
@@ -956,7 +958,10 @@ pub use super::quit::QUIT_TIMEOUT;
 /// listens to quit requests ([`on_quit_request`]). It runs when the app
 /// stops: its Quit
 /// item and [`quit`], its last window closing, the system ending it
-/// (logging out), a host app removing its view. The engine waits for the
+/// (logging out), a host app removing its view, on the web the page going
+/// (its tab closed, a reload, another site), once, however the user left
+/// it; a page the browser keeps to come back to keeps the app running.
+/// The engine waits for the
 /// futures it returns [`QUIT_TIMEOUT`] at most, together, and while it
 /// waits the platform does: keep it short. Removed with the current owner.
 ///
@@ -988,7 +993,11 @@ where
 /// then calls [`quit`]. Without one they quit as before. The system ending
 /// the app (logging out, shutting down) never asks: [`on_app_quit`] runs
 /// then. Standalone apps on macOS, Windows and Linux; a view embedded in
-/// another app leaves the app's lifecycle to that app. Removed with the
+/// another app leaves the app's lifecycle to that app. On the web, the
+/// user leaving the page (closing its tab, reloading) is the request: `f`
+/// runs then, and a [`quit`] it calls at once lets the page go without a
+/// question; otherwise the browser asks the user whether to leave. The
+/// [`on_app_quit`] listeners run once the page is gone. Removed with the
 /// current owner.
 ///
 /// ```ignore
@@ -1096,6 +1105,12 @@ pub struct MenuItem {
     enabled: bool,
     checked: Option<bool>,
     icon: Option<ImageSrc>,
+    /// An SF Symbol name for iOS header menus; see [`Self::symbol`].
+    symbol: Option<String>,
+    /// Destructive on iOS; ignored on the desktops; see [`Self::destructive`].
+    destructive: bool,
+    /// Inline section when this is a submenu; see [`Self::inline`].
+    inline: bool,
     on_select: Option<MenuHandler>,
 }
 
@@ -1117,6 +1132,9 @@ impl MenuItem {
             enabled: true,
             checked: None,
             icon: None,
+            symbol: None,
+            destructive: false,
+            inline: false,
             on_select: None,
         }
     }
@@ -1194,9 +1212,34 @@ impl MenuItem {
     /// the color of the menu's text; a bitmap keeps its colors. It loads
     /// off the main thread and shows once it has (one that fails to load
     /// leaves the item without an icon, with a warning). GTK's menus show
-    /// no icons beside labels, and a terminal shows no images.
+    /// no icons beside labels, and a terminal shows no images. For an SF
+    /// Symbol name for iOS header menus, use [`Self::symbol`] instead.
     pub fn icon(mut self, src: impl Into<ImageSrc>) -> Self {
         self.icon = Some(src.into());
+        self
+    }
+
+    /// An SF Symbol name beside its label in iOS header menus; ignored
+    /// elsewhere (including macOS). Takes the place of [`Self::icon`] when
+    /// both are set.
+    pub fn symbol(mut self, name: impl Into<String>) -> Self {
+        self.symbol = Some(name.into());
+        self
+    }
+
+    /// Marks the action destructive: iOS draws it red; the desktops ignore
+    /// it.
+    pub fn destructive(mut self, destructive: bool) -> Self {
+        self.destructive = destructive;
+        self
+    }
+
+    /// An inline section when this is a submenu ([`Self::submenu`]): on
+    /// iOS, `UIMenuOptions.displayInline` with the label as the section
+    /// title; on the desktops, its items between separators, its label
+    /// not shown.
+    pub fn inline(mut self, inline: bool) -> Self {
+        self.inline = inline;
         self
     }
 
@@ -1229,6 +1272,17 @@ impl fmt::Debug for MenuItem {
 
 /// Makes the platform's items of `items`, keeping their handlers (run
 /// under `owner`) in `handlers` with the ids it gives them.
+pub(crate) fn decode_for_header(
+    items: Vec<MenuItem>,
+    mac: bool,
+    owner: &Owner,
+    handlers: &mut Vec<(u32, MenuHandler)>,
+) -> Vec<desktop::MenuItem> {
+    decode(items, mac, owner, handlers)
+}
+
+/// Makes the platform's items of `items`, keeping their handlers (run
+/// under `owner`) in `handlers` with the ids it gives them.
 fn decode(
     items: Vec<MenuItem>,
     mac: bool,
@@ -1245,6 +1299,8 @@ fn decode(
                 enabled: item.enabled,
                 items: decode(items, mac, owner, handlers),
                 icon: item.icon.as_ref().and_then(ImageSrc::menu_icon),
+                symbol: item.symbol,
+                inline: item.inline,
             },
             Kind::Action => {
                 let id = match item.on_select {
@@ -1270,6 +1326,8 @@ fn decode(
                     role: item.role,
                     when: item.when,
                     icon: item.icon.as_ref().and_then(ImageSrc::menu_icon),
+                    symbol: item.symbol,
+                    destructive: item.destructive,
                 })
             }
         })
@@ -1308,7 +1366,12 @@ pub fn set_application_menu(items: impl Into<Option<Vec<MenuItem>>>) {
     };
     let owner = Owner::current();
     let mut handlers = Vec::new();
-    let items = decode(items, super::os() == Os::MacOs, &owner, &mut handlers);
+    let items = desktop::MenuItem::with_inline_expanded(&decode(
+        items,
+        super::os() == Os::MacOs,
+        &owner,
+        &mut handlers,
+    ));
     let generation = {
         let mut m = menus.borrow_mut();
         m.app_generation += 1;
@@ -1358,7 +1421,12 @@ fn popup(items: Vec<MenuItem>, at: Option<Point<Points>>) -> Answer<()> {
     let menus = super::view_menus();
     let owner = Owner::current();
     let mut handlers = Vec::new();
-    let items = decode(items, super::os() == Os::MacOs, &owner, &mut handlers);
+    let items = desktop::MenuItem::with_inline_expanded(&decode(
+        items,
+        super::os() == Os::MacOs,
+        &owner,
+        &mut handlers,
+    ));
     let generation = {
         let mut m = menus.borrow_mut();
         // One context menu at a time: one shown before is closed by now.

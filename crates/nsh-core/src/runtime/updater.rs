@@ -12,7 +12,7 @@
 //! next start (`nsh_engine::updates`). They update the code on every
 //! platform with a launcher that runs them, iOS and Android included.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "updater"))]
 use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
@@ -153,14 +153,14 @@ impl ShellInfo {
     /// and whether the launcher runs packages.
     fn new(config: Option<&[u8]>, runs_packages: bool) -> ShellInfo {
         // (version, build, trusts package roots); nothing updates on the web
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "updater"))]
         let shipped = config
             .and_then(|bytes| nsh_updater::Config::parse(bytes).ok())
             .map(|config| {
                 let roots = !config.package_roots().is_empty();
                 (config.version, config.build.unwrap_or(1), roots)
             });
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", not(feature = "updater")))]
         let shipped: Option<(String, u64, bool)> = config.and(None);
         ShellInfo {
             version: shipped.as_ref().map(|(version, _, _)| version.clone()),
@@ -286,7 +286,7 @@ fn unavailable() -> JsError {
     .with_code(codes::UNAVAILABLE)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "updater"))]
 mod native {
     use nsh_updater::{Available, Config, Download};
 
@@ -777,8 +777,9 @@ mod native {
     }
 }
 
-/// Nothing updates on the web: a deploy updates its apps.
-#[cfg(target_arch = "wasm32")]
+/// Nothing updates on the web (a deploy updates its apps), nor in a build
+/// without the `updater` feature.
+#[cfg(any(target_arch = "wasm32", not(feature = "updater")))]
 mod native {
     use super::*;
 

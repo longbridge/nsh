@@ -23,7 +23,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
+    task::{
+        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
+        ImageSize,
+    },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -55,6 +58,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// What the performance monitor measured last, as the engine reports
+    /// it ([`perf_stats`]).
+    perf_stats: Option<Signal<Option<crate::platform::PerfStats>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -189,6 +195,16 @@ impl super::Runtime {
         let signal = perf_monitor_signal();
         if signal.get_untracked() != enabled {
             signal.set(enabled);
+        }
+    }
+
+    /// What the performance monitor measured last (`None`: it does not
+    /// measure): what read it runs again.
+    pub(crate) fn set_perf_stats(&self, stats: Option<crate::platform::PerfStats>) {
+        let _entered = self.enter();
+        let signal = perf_stats_signal();
+        if signal.get_untracked() != stats {
+            signal.set(stats);
         }
     }
 
@@ -645,6 +661,14 @@ pub fn open_url(url: impl Into<String>) -> Answer<bool> {
 /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
 pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
+}
+
+/// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
+/// text, and its HTML as the platform's HTML type, which apps that read
+/// formatting paste. Where the platform has no HTML on the clipboard (a
+/// terminal) the text only.
+pub fn set_clipboard_item(item: ClipboardItem) {
+    act(super::services::set_clipboard_item(item));
 }
 
 /// The text on the system clipboard, `""` when it holds none (TS:
@@ -1681,7 +1705,10 @@ impl super::ElementRef {
 
     /// Listens to the keyboard focus leaving the element: going from it
     /// or an element inside it to one outside, or to none (GPUI's
-    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// `on_focus_out`; the element leaves `focus-within`). An element
+    /// removed with the focus inside it, or one that stops carrying the
+    /// ref, is left too, and the focus coming into the next element that
+    /// carries the ref is heard by [`Self::on_focus_in`]. As
     /// [`Self::on_focus_in`] otherwise.
     pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
         let element = *self;
@@ -1855,6 +1882,24 @@ pub fn fps_enabled() -> bool {
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
+}
+
+/// What the performance monitor measured over the last second (TS:
+/// `perfStats()`): its frame rate and more, read once a second while it
+/// measures ([`fps_enabled`]), `None` while it does not (and until its first
+/// second). Reading it in a binding subscribes it.
+pub fn perf_stats() -> Option<crate::platform::PerfStats> {
+    perf_stats_signal().get()
+}
+
+/// The performance stats' signal, none until the engine reports some.
+fn perf_stats_signal() -> Signal<Option<crate::platform::PerfStats>> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_stats) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(None));
+    with_data(|d| d.ambient.perf_stats = Some(signal));
+    signal
 }
 
 /// How the performance monitor shows (TS: `setFpsMode`), now and whenever it

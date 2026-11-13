@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the main window, the application menu, the tray, global shortcuts, `quit` and quit requests, `restart` and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the windows the app opens (granted by `windows`) need no `application`.
 
 ```rust tabs
 use nsh_core::{
@@ -433,6 +433,16 @@ stops, the Quit item and the key quit at once again. The system ending the app (
 shutting down) never asks. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
 gets the request as `CloseRequest::Quit`.
 
+On the web, the user leaving the page (closing its tab, reloading, going to another site) is the quit request: it
+reaches the listener as the user leaves, so the example below works there as it is. A listener that calls `quit()` right
+away lets the page go without a question. A listener that asks first (here `askToSave()`) has the browser ask the user
+whether to leave; when the user stays, the app's own question is on the page, and once the work is saved the next leave
+goes at once. Desktop browsers show their question after the user has interacted with the page. However the user leaves,
+the app's `quit` listeners start once as the page goes: what they do synchronously completes, and work they await runs
+for as long as the page remains. A page the browser keeps in its back / forward cache keeps its app running, and the app
+goes on when the user comes back. This works whatever `isAvailable` says; an app that declares capabilities lists
+`"application": true` for it.
+
 ```rust tabs
 use nsh_core::{
     element::desktop::{on_app_quit, on_quit_request, quit},
@@ -470,7 +480,7 @@ function Editor() {
 
 `Application.on("quit", listener)` (Rust: `on_app_quit`) is the app's cleanup, as GPUI's `on_app_quit`: it runs
 however the app stops (its Quit item, `quit()`, its last window closing, the Dock's Quit, the system ending it when the
-user logs out, a host app removing its view), and cannot keep it running. A promise the listener returns is awaited,
+user logs out, a host app removing its view, the web page going), and cannot keep it running. A promise the listener returns is awaited,
 200 ms at most for all of them, while the platform waits for the app; past that the app stops. A listener added while a
 component renders goes with the component; the function `on` returns stops it.
 
@@ -559,7 +569,9 @@ The release runners of `nsh package` read the setting; `nsh run` starts its deve
 
 `Application.launchAtLogin()` says whether the system opens the app when the user logs in, as the system has it now,
 and `Application.setLaunchAtLogin(enabled)` turns it on or off. Rust code awaits `launch_at_login()` and
-`set_launch_at_login(enabled)` in a task. Like `quit` and `restart`, they need no capability.
+`set_launch_at_login(enabled)` in a task. Like `quit` and `restart`, an app that declares capabilities needs
+`"application": true` for them: without it `launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with
+`ERR_ACCESS_DENIED`.
 
 ```tsx
 import { signal } from "nsh";
@@ -822,7 +834,11 @@ type MenuItem =
       disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
+      icon?: ImageAsset | string;
+      symbol?: string;
+      destructive?: boolean;
       submenu?: MenuItem[];
+      inline?: boolean;
     };
 ```
 
@@ -834,12 +850,16 @@ type MenuItem =
 | `when` | When the shortcut chooses the item while a text field has the keyboard focus, on the GPUI backend: `"always"` (the default), `"auto"` (unless the field uses the key itself: keys that type, move the caret or delete, and the editing shortcuts, as with [`keymap`](./nsh.md#keymap)'s bindings) or `"notEditing"`. A key the item leaves goes to the field. |
 | `disabled` | `true` grays the item out (default `false`). |
 | `checked` | Set (to `true` or `false`) for an item with a check mark. |
-| `submenu` | Makes the item a submenu (it needs a `label`). |
+| `icon` | The image beside its label, as `<Image>`'s `src` takes it (an imported file or a URL). Fitted to the menu's icon size; see the TypeScript declaration for platform notes. For an SF Symbol name in iOS header menus, use `symbol` instead. |
+| `symbol` | An SF Symbol name beside its label in iOS header menus; ignored elsewhere (including macOS). Takes the place of `icon` when both are set. |
+| `destructive` | `true` marks a destructive action: iOS draws it red (`UIMenuElementAttributesDestructive`). The desktops ignore it. |
+| `submenu` | Makes the item a submenu (it needs a `label`). With `inline: true`, an inline section: on iOS, `UIMenuOptions.displayInline` with `label` as the section title; on the desktops, its items between separators, its label not shown. |
+| `inline` | An inline section when `submenu` is set (see `submenu`). |
 | `role` | A standard item the platform carries out (below). |
 
 `null`, `undefined` and `false` items are left out, so `cond && { … }` works in a list.
 
-In Rust, an item is `MenuItem::new(label)`, `MenuItem::role(role)`, `MenuItem::separator()` or `MenuItem::submenu(label, items)`, with the fields as methods: `.shortcut("mod+n")` (it panics on an invalid shortcut, with the right spelling), `.shortcut_when(When::Auto)`, `.disabled(true)`, `.checked(on)`, `.on_select(f)`, and `.label(..)` for a role's item.
+In Rust, an item is `MenuItem::new(label)`, `MenuItem::role(role)`, `MenuItem::separator()` or `MenuItem::submenu(label, items)`, with the fields as methods: `.shortcut("mod+n")` (it panics on an invalid shortcut, with the right spelling), `.shortcut_when(When::Auto)`, `.disabled(true)`, `.checked(on)`, `.on_select(f)`, `.icon(..)`, `.symbol(..)`, `.destructive(true)`, `.inline(true)` on a submenu, and `.label(..)` for a role's item.
 
 Modifiers:
 

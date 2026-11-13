@@ -43,6 +43,7 @@ mod gfx;
 mod global_shortcut;
 mod image;
 mod input;
+mod keyboard;
 mod keymap;
 mod linking;
 mod login_item;

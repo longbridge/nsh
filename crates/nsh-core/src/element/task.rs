@@ -166,6 +166,19 @@ pub(crate) enum Action {
     /// Whether a web view shows a page here: the platform shows web views
     /// and the app holds `webview`; the answer resolves the slot.
     WebViewAvailable(AnswerSlot<bool>),
+    /// A request on a web view ([`crate::webview`]) the core sends to the
+    /// platform once the target is known to be a mounted, granted web
+    /// view; its reply resolves `answer`.
+    WebViewRequest {
+        /// The web view's node.
+        node: NodeId,
+        /// What to do on it.
+        operation: crate::webview::WebViewOperation,
+        /// Where the platform's reply goes.
+        answer: AnswerSlot<Result<(), String>>,
+    },
+    /// Web view request `id` waited too long for the platform's answer.
+    WebViewTimeout(u64),
     /// A request on local paths for the platform
     /// ([`crate::file_dialog`]); its answer resolves the slot.
     FileRequest(crate::file_dialog::FileRequest, FileAnswer),
@@ -340,6 +353,22 @@ pub(crate) enum ClipboardRead {
     HasImage(AnswerSlot<bool>),
     /// The `file:` URLs of the local files on it.
     Files(AnswerSlot<Vec<String>>),
+}
+
+/// One item to put on the system clipboard (`Clipboard.write`): the same
+/// content in several formats, as plain text and, for apps that paste
+/// formatting, as HTML. Named as GPUI's `ClipboardItem` and the DOM's,
+/// which also hold one item's representations; this one is a plain
+/// object of its formats (`{ text, html? }`).
+#[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
+#[prop(exact)]
+#[non_exhaustive]
+pub struct ClipboardItem {
+    /// The content as plain text.
+    pub text: String,
+    /// The content as HTML (a fragment, as `text/html` on the web holds).
+    #[prop(skip_none)]
+    pub html: Option<String>,
 }
 
 /// An image read from the system clipboard (`Clipboard.readImage`).

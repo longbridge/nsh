@@ -169,7 +169,9 @@
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
   before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
-  an ellipsis move out of sight. Their own children are normal layout children; a text inside them built after the block
+  an ellipsis move out of sight. Their own children are normal layout children, made with the attachment: a scroll
+  view around the text never culls them (`Core::cull_scope`), as its walk does not reach inside texts, though past
+  a turn's budget they may wait for the next turns as other views do (`pace.rs`); a text inside them built after the block
   resizes them and builds the block again (`check_attachments`). They take presses of their own; copying leaves the
   placeholders out. Text inside an attachment takes the color of the text around it (the nearest color set on its
   spans, its block or the views around, as CSS's `color` reaches an inline block and `currentColor` reaches the

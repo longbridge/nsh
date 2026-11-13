@@ -95,6 +95,7 @@ What exists today:
 | `.header_left_system_item(..)` | `ios={{ headerLeftSystemItem }}` | `NavPage` | UIKit's own bar button at the start of the header, pressing `headerLeft`. |
 | `.header_right_symbol(..)` | `ios={{ headerRightSymbol }}` | `NavPage` | UIKit's own bar button showing an SF Symbol at the end of the header, pressing `headerRight`. |
 | `.header_left_symbol(..)` | `ios={{ headerLeftSymbol }}` | `NavPage` | UIKit's own bar button showing an SF Symbol at the start of the header, pressing `headerLeft`. |
+| `.header_right_items(..)` | `ios={{ headerRightItems }}` | `NavPage` | Several UIKit bar buttons at the end of the header; each takes `onPress` / a `nsh/desktop` `MenuItem` menu; see [Navigation](./navigation.md). |
 | `.back_forward_gestures(..)` | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS: two-finger trackpad swipes go back and forward in the page history; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `.window_drag(..)` | `desktop={{ windowDrag }}` | every element | Pressing it drags the window, as the system's title bar would (see [nsh/desktop](../modules/nsh-desktop.md#a-title-bar-of-your-own)). |
 | `.window_control(..)` | `desktop={{ windowControl }}` | every element | The view is the window's minimize, maximize or close button, drawn by the app. |
@@ -246,7 +247,7 @@ if (platform.os === "android") {
 
 ### platform.select
 
-In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops. In TSX, `platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `desktop` or `mobile` by [the rule above](#desktop-and-mobile) (`platform.desktop`), then `native` (every platform but the web), then `default`:
+In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops (and `platform_name()` for a platform built outside NSH). In TSX, `platform.select(spec)` returns the value for this platform. It looks for `platform.name` first (on a platform built outside NSH, such as `"miniprogram"`), then the OS's own key (`platform.os`), then `desktop` or `mobile` by [the rule above](#desktop-and-mobile) (`platform.desktop`), then `native` (every platform but the web), then `default`:
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};
