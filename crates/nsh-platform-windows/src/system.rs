@@ -730,6 +730,17 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 clipboard_answer(*id, has, text),
             );
         }
+        Command::SetClipboardHtml { text, html } => {
+            let units: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+            let text: Vec<u8> = units.iter().flat_map(|u| u.to_le_bytes()).collect();
+            let html = clipboard::cf_html(html);
+            let mut html = html.into_bytes();
+            html.push(0);
+            let unicode = u32::from(windows::Win32::System::Ole::CF_UNICODETEXT.0);
+            if !set_clipboard_formats(&[(unicode, &text), (html_format(), &html)]) {
+                log::debug!("windows: cannot set the clipboard");
+            }
+        }
         Command::SetClipboardImage(uri) => match clipboard::decode_data_uri(uri) {
             Some(("image/png", bytes)) => {
                 if !set_clipboard_bytes(png_format(), &bytes) {
@@ -2192,8 +2203,21 @@ fn clipboard_bytes(format: u32) -> Option<Vec<u8>> {
     }
 }
 
+/// Windows' `HTML Format` (CF_HTML).
+fn html_format() -> u32 {
+    use windows::{Win32::System::DataExchange::RegisterClipboardFormatW, core::w};
+    // SAFETY: a plain registration of a constant name.
+    unsafe { RegisterClipboardFormatW(w!("HTML Format")) }
+}
+
 /// Puts `bytes` on the clipboard as `format`, replacing what it holds.
 fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> bool {
+    set_clipboard_formats(&[(format, bytes)])
+}
+
+/// Puts each of `formats`' bytes on the clipboard as its format, together,
+/// replacing what it holds: the same content in several formats.
+fn set_clipboard_formats(formats: &[(u32, &[u8])]) -> bool {
     use windows::Win32::{
         Foundation::{GlobalFree, HANDLE, HGLOBAL},
         System::{
@@ -2201,24 +2225,28 @@ fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> bool {
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
         },
     };
-    // SAFETY: as in `set_clipboard_text`: the memory is the clipboard's once
-    // `SetClipboardData` succeeds, freed here otherwise.
+    // SAFETY: as in `set_clipboard_text`: each format's memory is the
+    // clipboard's once `SetClipboardData` succeeds, freed here otherwise.
     unsafe {
         if OpenClipboard(None).is_err() {
             return false;
         }
-        let mut ok = false;
-        if EmptyClipboard().is_ok()
-            && let Ok(memory) = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1))
-        {
-            let ptr = GlobalLock(memory) as *mut u8;
-            if !ptr.is_null() {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
-                let _ = GlobalUnlock(memory);
-                ok = SetClipboardData(format, Some(HANDLE(memory.0))).is_ok();
-            }
+        let mut ok = EmptyClipboard().is_ok();
+        for &(format, bytes) in formats {
             if !ok {
-                let _ = GlobalFree(Some(HGLOBAL(memory.0)));
+                break;
+            }
+            ok = false;
+            if let Ok(memory) = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1)) {
+                let ptr = GlobalLock(memory) as *mut u8;
+                if !ptr.is_null() {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                    let _ = GlobalUnlock(memory);
+                    ok = SetClipboardData(format, Some(HANDLE(memory.0))).is_ok();
+                }
+                if !ok {
+                    let _ = GlobalFree(Some(HGLOBAL(memory.0)));
+                }
             }
         }
         let _ = CloseClipboard();

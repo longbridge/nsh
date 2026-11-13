@@ -118,6 +118,8 @@ pub struct Screen {
     answered: usize,
     /// The clipboard's text.
     clipboard: Option<String>,
+    /// The HTML the clipboard holds with its text (`Clipboard.write`).
+    clipboard_html: Option<String>,
     /// Clipboard reads to answer: the request, and whether it asks only if
     /// the clipboard holds text.
     clipboard_reads: Vec<(u32, bool)>,
@@ -651,9 +653,19 @@ impl Screen {
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
-            Command::SetClipboard(text) => self.clipboard = Some(text.clone()),
+            Command::SetClipboard(text) => {
+                self.clipboard = Some(text.clone());
+                self.clipboard_html = None;
+            }
+            Command::SetClipboardHtml { text, html } => {
+                self.clipboard = Some(text.clone());
+                self.clipboard_html = Some(html.clone());
+            }
             // An image replaces the text.
-            Command::SetClipboardImage(_) => self.clipboard = None,
+            Command::SetClipboardImage(_) => {
+                self.clipboard = None;
+                self.clipboard_html = None;
+            }
             Command::ReadClipboard { id, has_only } => self.clipboard_reads.push((*id, *has_only)),
             Command::ReadClipboardImage { .. } => {
                 self.unsupported.push("reading an image from the clipboard");
@@ -1412,8 +1424,15 @@ impl Screen {
         self.clipboard.as_deref()
     }
 
+    /// The HTML the clipboard holds with its text, when the app put some
+    /// there (`Clipboard.write`).
+    pub fn clipboard_html(&self) -> Option<&str> {
+        self.clipboard_html.as_deref()
+    }
+
     pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
         self.clipboard = text;
+        self.clipboard_html = None;
     }
 
     /// The clipboard reads asked since the last call.

@@ -86,7 +86,7 @@ use objc2_app_kit::{
     NSApplicationOcclusionState, NSAttributedStringAppKitDocumentFormats,
     NSAttributedStringDocumentFormats, NSBitmapImageFileType, NSBitmapImageRep,
     NSDocumentTypeDocumentAttribute, NSExcludedElementsDocumentAttribute, NSHTMLTextDocumentType,
-    NSModalResponse, NSPasteboard, NSPasteboardTypeRTF, NSPasteboardTypeRTFD,
+    NSModalResponse, NSPasteboard, NSPasteboardTypeHTML, NSPasteboardTypeRTF, NSPasteboardTypeRTFD,
     NSPasteboardTypeString, NSScreen, NSWorkspace,
     NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification, NSWorkspaceDidWakeNotification,
 };
@@ -627,6 +627,14 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             // SAFETY: an immutable AppKit constant.
             pasteboard
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
+        }
+        Command::SetClipboardHtml { text, html } => {
+            let pasteboard = NSPasteboard::generalPasteboard();
+            pasteboard.clearContents();
+            // SAFETY: immutable AppKit constants.
+            let (string, kind_html) = unsafe { (NSPasteboardTypeString, NSPasteboardTypeHTML) };
+            pasteboard.setString_forType(&NSString::from_str(text), string);
+            pasteboard.setString_forType(&NSString::from_str(html), kind_html);
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),

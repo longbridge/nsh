@@ -2399,6 +2399,12 @@ final class Mounter {
                 SystemUi.setClipboard(context, (String) objects[b.getInt()]);
                 break;
             }
+            case 56: {
+                String text = (String) objects[b.getInt()];
+                String html = (String) objects[b.getInt()];
+                SystemUi.setClipboardHtml(context, text, html);
+                break;
+            }
             case 25: {
                 Picker.Request request = new Picker.Request();
                 request.id = b.getInt();

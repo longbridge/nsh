@@ -382,7 +382,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | **`nsh/mobile`: `BackHandler`** | | | |
 | `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.on("press", l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
 | **`nsh`: `Clipboard`** | | | |
-| `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
+| `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `write({ text, html }): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
 | `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
 | **`nsh`: `Storage`** | | | |

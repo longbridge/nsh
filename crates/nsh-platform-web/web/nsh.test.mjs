@@ -3099,6 +3099,48 @@ function fakeClipboard(t, { failWrite } = {}) {
   return log;
 }
 
+test("text with its HTML goes on the clipboard as one item of both types", async (t) => {
+  const log = fakeClipboard(t);
+  const { player } = fakePlayer();
+  player.writeClipboard("a b", "<p>a <b>b</b></p>");
+  assert.equal(log.items.length, 1);
+  const { data } = log.items[0];
+  assert.deepEqual(Object.keys(data), ["text/plain", "text/html"]);
+  assert.equal(await data["text/plain"].text(), "a b");
+  assert.equal(await data["text/html"].text(), "<p>a <b>b</b></p>");
+});
+
+test("a copy within the user's gesture puts text and HTML on the clipboard through the copy event", async (t) => {
+  const log = fakeClipboard(t);
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "document");
+  t.after(() => (saved ? Object.defineProperty(globalThis, "document", saved) : delete globalThis.document));
+  const listeners = new Map();
+  const data = {};
+  let defaultEnabled = false;
+  globalThis.document = {
+    addEventListener: (type, f) => listeners.set(type, f),
+    removeEventListener: (type, f) => listeners.get(type) === f && listeners.delete(type),
+    execCommand(command) {
+      assert.equal(command, "copy");
+      // Nothing is selected: Copy is enabled only when `beforecopy` is cancelled.
+      listeners.get("beforecopy")?.({ preventDefault: () => (defaultEnabled = true) });
+      if (!defaultEnabled) return false;
+      listeners.get("copy")?.({
+        clipboardData: { setData: (type, value) => (data[type] = value) },
+        preventDefault() {},
+        stopImmediatePropagation() {},
+      });
+      return true;
+    },
+  };
+  const { player } = fakePlayer();
+  player.writeClipboard("a b", "<p>a <b>b</b></p>");
+  assert.deepEqual(data, { "text/plain": "a b", "text/html": "<p>a <b>b</b></p>" });
+  // Synchronous: the async clipboard is not asked, and nothing is left listening.
+  assert.equal(log.items.length, 0);
+  assert.equal(listeners.size, 0);
+});
+
 test("an image that is not a PNG goes on the clipboard as a PNG", async (t) => {
   const log = fakeClipboard(t);
   const { player } = fakePlayer();
