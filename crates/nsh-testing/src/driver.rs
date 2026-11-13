@@ -34,7 +34,7 @@ pub(crate) trait Driver: Send {
     /// Drops local files (`file:` URLs) on what `selector` names.
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         let _ = (selector, uris);
-        Err("`dropFiles` runs headless and on Linux for now".into())
+        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
     }
     /// Drags without lifting, until [`Driver::drop_held`].
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {

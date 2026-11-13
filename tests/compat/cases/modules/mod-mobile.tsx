@@ -4,9 +4,12 @@
 // (`selectedIndex`), which the app sets, and `onChange`, which the
 // platform reports with the index of the tab the user chose. The bar takes
 // the frame the app's style gives it, as a native view does; its script
-// checks the frame and the app's side of the selection.
+// checks the frame and the app's side of the selection. `SegmentedControl`,
+// the system's segmented control on iOS: its segments (`items`, each
+// `{ title, icon, disabled }`), the selected one (`selectedIndex`), which
+// the app sets, `disabled`, and `onChange` with the index the user chose.
 import { Text, View, signal } from "nsh";
-import { TabBar, isAvailable } from "nsh/mobile";
+import { SegmentedControl, TabBar, isAvailable } from "nsh/mobile";
 
 function App() {
   const selected = signal(0);
@@ -22,6 +25,13 @@ function App() {
       <Text testID="tab-rename" onPress={() => items.set([{ title: "Records", icon: "list.bullet" }, { title: "Statistics", icon: "chart.bar", badge: "" }])}>
         Rename
       </Text>
+      <SegmentedControl
+        testID="segments"
+        items={[{ title: "Light", icon: "sun.max" }, { title: "Dark" }, { title: "Auto", disabled: true }]}
+        selectedIndex={selected()}
+        onChange={({ index }) => selected.set(index)}
+        style={{ marginHorizontal: 16, height: 32 }}
+      />
       <TabBar
         testID="tab-bar"
         items={items()}

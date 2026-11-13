@@ -286,6 +286,7 @@ tap id:tab-rename
 frame id:tab-bar 0 784 390 60
 covers [nsh/mobile] isAvailable
 covers [nsh/mobile] TabBar
+covers [nsh/mobile] SegmentedControl
 # mod-haptics
 tap id:case-mod-haptics
 # every call goes through; a name Haptics does not know throws.

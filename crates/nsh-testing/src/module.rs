@@ -1978,7 +1978,8 @@ impl App {
 
     /// Drops local files (`file:` URLs, as a file manager drags them) on
     /// the middle of what `selector` names: it, or the nearest view around
-    /// it listening, hears `onFileDrop`. Desktops, headless and on Linux for now.
+    /// it listening, hears `onFileDrop`. Desktops, headless, on Linux and
+    /// on macOS for now.
     pub async fn drop_files(
         this: Instance<Self>,
         selector: String,

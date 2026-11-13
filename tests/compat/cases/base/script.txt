@@ -344,6 +344,13 @@ covers [nsh/base] Dialog
 covers [props] Dialog.backdropStyle
 covers [props] Dialog.backdropClass
 covers [props] Dialog.backdropTestID
+# base-menu-button
+tap id:case-base-menu-button
+# The app's content shows in the frame its style gives the button.
+expect Account trigger
+expect Chosen: none
+frame id:menu-button 0 20 390 44
+covers [nsh/base] MenuButton
 # base-nav-page
 tap id:case-base-nav-page
 # pop and header are events and props here: the headless runtime has no
@@ -4385,6 +4392,19 @@ absent BubbleMenu
 tap text:ToggleMenu
 expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
+# Files dragged over the editor, away and dropped reach the app; the
+# document stays as it was.
+expect RichDrop: none
+event id:rich-drop onFileDragEnter uris=file:///tmp/shot%201.png
+expect RichDrop: enter file:///tmp/shot%201.png [image/png]
+event id:rich-drop onFileDragLeave
+expect RichDrop: enter file:///tmp/shot%201.png [image/png] leave
+event id:rich-drop onFileDrop uris=file:///tmp/shot%201.png uris=file:///tmp/notes.pdf
+expect RichDrop: dropped file:///tmp/shot%201.png file:///tmp/notes.pdf [image/png application/pdf]
+expect Some text
+covers [events] onFileDragEnter
+covers [events] onFileDragLeave
+covers [events] onFileDrop
 # The app's layer over the document takes presses and `nodeRect` answers in its points.
 expect LayerMark
 tap text:LayerMark
