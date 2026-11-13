@@ -3440,7 +3440,7 @@ function App() {
   );
   return (
     <View>
-      <Tabs testID="sections" class="flex-row">
+      <Tabs testID="sections" class="flex-row" accessibilityLabel="Sections">
         {tab("a", "Overview")}
         {tab("b", "Activity")}
         {tab("c", "Billing", true)}
@@ -3453,11 +3453,11 @@ function App() {
 mount(App);
 "##;
 
-/// `nsh/base`'s `Tab` in `Tabs`: the tab list role on the list, the tab
-/// role and its selected state on each tab alone, a press reported with
-/// `onPress` (the selected tab's too) while the app owns which tab is
-/// selected, a disabled tab reporting nothing, and the app's content
-/// inside following the tab with `group-selected:`.
+/// `nsh/base`'s `Tab` in `Tabs`: the tab list role and the app's name on
+/// the list, the tab role and its selected state on each tab alone, a
+/// press reported with `onPress` (the selected tab's too) while the app
+/// owns which tab is selected, a disabled tab reporting nothing, and the
+/// app's content inside following the tab with `group-selected:`.
 #[test]
 fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     use nsh_core::{AccessibilityRole, ViewProps};
@@ -3524,10 +3524,11 @@ fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     let (marker_a, marker_b) = (marker(a), marker(b));
     let initial = std::slice::from_ref(&first);
 
-    // The list: a tab list for screen readers, laid out by the app.
+    // The list: a tab list for screen readers, named by the app
+    // (`accessibilityLabel`) and laid out by it.
     let list = view_props(&first, sections).unwrap();
     assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
-    assert_eq!(list.accessibility.label, None);
+    assert_eq!(list.accessibility.label.as_deref(), Some("Sections"));
 
     // The selected tab: selected for screen readers, its `selectedStyle`,
     // and the app's marker `group-selected:`.

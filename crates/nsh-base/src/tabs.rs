@@ -110,11 +110,11 @@ pub struct TabsProps {
 
 /// The tab list around a set of [`Tab`]s: screen readers hear the tabs
 /// inside it as one list, named by its `accessibilityLabel`, each still an
-/// element of its own. It holds no
-/// value and no content: each tab is told whether it is selected and
-/// reports a press with `onPress`, and the app keeps which one is and shows
-/// that tab's content next to the list. Its layout and look are the app's
-/// `class` and `style` (`flex-row` for a row).
+/// element of its own. It holds no value and no content: each tab is told
+/// whether it is selected and reports a press with `onPress`, and the app
+/// keeps which one is and shows that tab's content next to the list. Its
+/// layout and look are the app's `class` and `style` (`flex-row` for a
+/// row).
 ///
 /// The keyboard, as WAI-ARIA's tab list pattern has it, where views that
 /// take presses are stops of the keyboard focus (macOS, the web): the list
