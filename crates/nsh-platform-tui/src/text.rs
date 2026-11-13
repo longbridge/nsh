@@ -305,6 +305,14 @@ impl TextEngine for CellTextEngine {
         )
     }
 
+    /// The bottom of the first row's own Cells: a Cell is its font's
+    /// ascent, with nothing below the baseline.
+    fn first_baseline(&self, text: &Self::Prepared, width: Points) -> Option<Points> {
+        let rows = self.rows(text, Some(width));
+        let (ascent, _) = row_extent(rows.first()?);
+        Some(self.cells.height() * ascent as f32)
+    }
+
     fn layout(&self, text: &Self::Prepared, size: Size<Points>) -> TextLayout {
         let rows = self.rows(text, Some(size.width));
         let glyphs = &text.glyphs;

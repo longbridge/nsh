@@ -1376,6 +1376,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         // The core answers these too.
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
+        // And offscreen canvas renders.
+        EventPayload::CanvasImage { id, .. } => obj.set("id", *id)?,
         // And speech sessions' events (`Speech`'s listeners get them).
         EventPayload::Speech { id, .. } => obj.set("id", *id)?,
         // And sounds' and players' events (their objects' listeners).

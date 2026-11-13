@@ -210,7 +210,7 @@ pub use crate::geometry::{
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
-    EllipsizeMode, EventKind, EventPayload, Haptic, HapticImpact, HapticNotification,
+    EllipsizeMode, EventKind, EventPayload, FpsMode, Haptic, HapticImpact, HapticNotification,
     HeaderSystemItem, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
     KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     ListAlignment, ListScrollPosition, ListViewport, MacOsBackdrop, MacOsBackdropBlending,

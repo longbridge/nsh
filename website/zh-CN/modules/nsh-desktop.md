@@ -841,6 +841,8 @@ Role：
 | `undo`、`redo`、`cut`、`copy`、`paste`、`selectAll` | 编辑获得焦点的文本框（快捷键仍归文本框自己） | 全部 |
 | `minimize`、`zoom`、`toggleFullScreen`、`close` | 窗口操作 | 全部 |
 
+在 macOS 上，第一个含窗口 role 的顶层菜单就是应用的 Window 菜单：macOS 会在它末尾加上“Bring All to Front”和已打开的窗口（按标题），并自动保持同步。默认菜单栏的 Window 菜单同样如此。其他平台没有这个列表。
+
 带 role 的菜单项默认使用平台的文字和快捷键，除非自己设置（macOS 会在 `about`、`hide` 和 `quit` 中加上应用名）。
 
 菜单快捷键的优先级最高，和原生应用一样：菜单项占用的按键不会再传给获得焦点的输入框，也不会触发 NSH 自己的按键处理。只有 [`keymap`](./nsh.md#keymap) 中相同按键组合的绑定排在它们前面。所以编辑快捷键（`mod+c`、`mod+v`、`mod+x`、`mod+a`、`mod+z`）只交给编辑类 role（它们会把按键转给输入框），也不要使用不带修饰键的键（`escape`、方向键、字母），否则输入框和返回导航就收不到它们了。在 GPUI 后端上，`when: "auto"` 让菜单项和输入框共用按键：没有输入框获得焦点时，`delete` 或 `mod+z` 选中菜单项；有输入框获得焦点时，它们编辑文本。

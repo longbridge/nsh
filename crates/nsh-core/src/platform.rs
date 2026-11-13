@@ -301,6 +301,10 @@ pub struct Environment {
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
     pub screen_color: bool,
+    /// The platform renders canvas drawings offscreen into images
+    /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
+    /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    pub canvas_render: bool,
     /// The platform shows the system's open and save dialogs and opens,
     /// reveals and trashes local paths ([`crate::Command::FileRequest`],
     /// the desktops); without it, those requests answer at once with an
@@ -399,6 +403,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             wake_count: 0,
             screen_color: false,
+            canvas_render: false,
             file_requests: false,
             speech: false,
             notifications: false,

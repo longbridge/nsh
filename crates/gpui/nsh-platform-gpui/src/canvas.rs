@@ -39,7 +39,9 @@
 //! two-circle radial and conic gradients are all exact.
 //! Shadows are the shape's alpha blurred by three box blurs (close to
 //! canvas' Gaussian of standard deviation blur / 2), offset in the view's
-//! coordinates. Composite operations other than `source-over` draw the
+//! coordinates, from all of the shape within three deviations of where
+//! the shadow shows (a shape past the pixmap's edge casts its shadow in
+//! too). Composite operations other than `source-over` draw the
 //! shape into a layer of its own, combined with the pixmap over the clip,
 //! so they act where the shape is transparent too.
 //!
@@ -89,6 +91,10 @@ use crate::{
     surface::Surface,
     view::{NshView, ViewState},
 };
+
+mod offscreen;
+
+pub(crate) use offscreen::render as render_offscreen;
 
 /// The largest side of a pixmap, in device pixels.
 const MAX_SIDE: i32 = 4096;
@@ -370,6 +376,35 @@ fn load_image(
             )
         }))
     });
+}
+
+/// A transparent `width` × `height` pixmap, as `sk::Pixmap::new` makes
+/// one (zeroed premultiplied RGBA, rows packed), `None` for an empty size,
+/// one past tiny-skia's limits, or when its memory cannot be allocated:
+/// `sk::Pixmap::new` aborts the process then, and a render the size of a
+/// large image must not.
+fn try_pixmap(width: u32, height: u32) -> Option<sk::Pixmap> {
+    let size = sk::IntSize::from_wh(width, height)?;
+    // The length `Pixmap::from_vec` requires, worked out as tiny-skia does:
+    // rows of `width * 4` bytes that fit an `i32`, packed, so
+    // `(height - 1) * row + width * 4` is `height * row`.
+    let row = usize::try_from(i32::try_from(width).ok()?.checked_mul(4)?).ok()?;
+    let len = row.checked_mul(height as usize)?;
+    let layout = std::alloc::Layout::array::<u8>(len).ok()?;
+    // SAFETY: `layout` is not zero-sized: `IntSize` has no empty side, so
+    // `len` is at least 4.
+    let data = unsafe { std::alloc::alloc_zeroed(layout) };
+    if data.is_null() {
+        return None;
+    }
+    // SAFETY: `data` was allocated by the global allocator with `layout`,
+    // a `u8` array of `len` (alignment 1, `len` bytes), so `len` is its
+    // capacity; all `len` bytes are initialized (zeroed, a valid `u8`
+    // each, transparent black when read as pixels). The vector owns the
+    // allocation from here on and frees it with that same layout, as does
+    // the pixmap it becomes (or `from_vec`, dropping it, on a mismatch).
+    let data = unsafe { Vec::from_raw_parts(data, len, len) };
+    sk::Pixmap::from_vec(data, size)
 }
 
 /// GPUI's straight BGRA pixels as a pixmap.
@@ -879,34 +914,7 @@ fn record(
     region: IRect,
     frac: (f32, f32),
 ) -> Recorded {
-    let [a, b, c, d] = key.linear.map(f64::from);
-    // The view's coordinates to the pixmap's.
-    let base = Affine {
-        a,
-        b,
-        c,
-        d,
-        e: (frac.0 - region.x0 as f32) as f64,
-        f: (frac.1 - region.y0 as f32) as f64,
-    };
-    let size = (region.width() as u32, region.height() as u32);
-    let mut replay = Replay {
-        args,
-        images,
-        text,
-        system,
-        size,
-        base,
-        scale: key.scale as f64,
-        state: State::new(base),
-        stack: Vec::new(),
-        path: PathBuf::default(),
-        layers: Vec::new(),
-        pixmap: sk::Pixmap::new(size.0, size.1),
-        drawn: false,
-        pending: Vec::new(),
-        pending_bounds: None,
-    };
+    let mut replay = Replay::new(args, images, (text, system), key, region, frac, true);
     for op in &drawing.ops {
         replay.op(op);
     }
@@ -1177,9 +1185,62 @@ struct Replay<'a> {
     pending: Vec<GlyphRun>,
     /// The bounds of `pending` (pixmap coordinates).
     pending_bounds: Option<sk::Rect>,
+    /// Glyphs without outlines are kept as GPUI glyphs above the pixmap
+    /// (on screen); without them (offscreen), they are left out and
+    /// everything paints into the one pixmap.
+    glyphs: bool,
+    /// A pixmap's memory could not be allocated: what needed it is not
+    /// drawn (an offscreen render answers that the image is too large).
+    out_of_memory: bool,
 }
 
 impl<'a> Replay<'a> {
+    /// A replay of a drawing for `key` over `region` (device pixels, the
+    /// view's origin `frac` into the pixel it falls in), into a pixmap of
+    /// that size.
+    fn new(
+        args: &'a [Option<AnimationValue>],
+        images: &'a FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+        (text, system): (&'a WindowTextSystem, &'a Arc<gpui::TextSystem>),
+        key: Key,
+        region: IRect,
+        frac: (f32, f32),
+        glyphs: bool,
+    ) -> Self {
+        let [a, b, c, d] = key.linear.map(f64::from);
+        // The view's coordinates to the pixmap's.
+        let base = Affine {
+            a,
+            b,
+            c,
+            d,
+            e: (frac.0 - region.x0 as f32) as f64,
+            f: (frac.1 - region.y0 as f32) as f64,
+        };
+        let size = (region.width() as u32, region.height() as u32);
+        let pixmap = try_pixmap(size.0, size.1);
+        let out_of_memory = pixmap.is_none() && size.0 > 0 && size.1 > 0;
+        Replay {
+            args,
+            images,
+            text,
+            system,
+            size,
+            base,
+            scale: key.scale as f64,
+            state: State::new(base),
+            stack: Vec::new(),
+            path: PathBuf::default(),
+            layers: Vec::new(),
+            pixmap,
+            drawn: false,
+            pending: Vec::new(),
+            pending_bounds: None,
+            glyphs,
+            out_of_memory,
+        }
+    }
+
     fn n(&self, n: Num) -> f64 {
         n.get(|s| {
             self.args
@@ -1319,7 +1380,7 @@ impl<'a> Replay<'a> {
             } => {
                 let source = source
                     .map(|s| [s.origin.x, s.origin.y, s.size.width, s.size.height].map(|v| v.0));
-                self.image(&image.uri, source, dest)
+                self.image(&image.uri, image.density(), source, dest)
             }
         }
     }
@@ -1679,7 +1740,8 @@ impl<'a> Replay<'a> {
         };
         if text.intersect(&bounds).is_some() {
             self.flush();
-            self.pixmap = sk::Pixmap::new(self.size.0, self.size.1);
+            self.pixmap = try_pixmap(self.size.0, self.size.1);
+            self.out_of_memory |= self.pixmap.is_none() && self.size.0 > 0 && self.size.1 > 0;
         }
     }
 
@@ -1711,7 +1773,9 @@ impl<'a> Replay<'a> {
         };
         let mut extent = bounds;
         if let Some((_, sigma, (dx, dy))) = shadow {
-            let grow = (3.0 * sigma) as f32;
+            // The blur's full spread, and a pixel for a shadow moved by a
+            // fraction of one.
+            let grow = (3.0 * sigma).ceil() as f32 + 1.0;
             let (dx, dy) = (dx as f32, dy as f32);
             if let Some(r) = sk::Rect::from_ltrb(
                 bounds.left() + dx.min(0.0) - grow,
@@ -1750,7 +1814,11 @@ impl<'a> Replay<'a> {
             y1: h as i32,
         };
         let rect = if destructive(composite) {
-            Some(all)
+            // The clip bounds what changes (the mask is empty past it).
+            match &clip {
+                Some((_, b)) => pixels_within(*b, (w, h)),
+                None => Some(all),
+            }
         } else {
             let r = [extent.left(), extent.top(), extent.right(), extent.bottom()];
             pixels_within(r, (w, h))
@@ -1758,14 +1826,37 @@ impl<'a> Replay<'a> {
         let Some(rect) = rect else {
             return;
         };
-        let Some(mut layer) = sk::Pixmap::new(rect.width() as u32, rect.height() as u32) else {
+        let Some(mut layer) = try_pixmap(rect.width() as u32, rect.height() as u32) else {
+            self.out_of_memory |= rect.width() > 0 && rect.height() > 0;
             return;
         };
         let to_layer = sk::Transform::from_translate(-rect.x0 as f32, -rect.y0 as f32);
         draw(&mut layer, to_layer, None, sk::BlendMode::SourceOver);
         if let Some((color, sigma, offset)) = shadow {
-            let area = shadow_area(bounds, rect, sigma);
-            let shadow = area.and_then(|area| shadow_pixels(&layer, area, sigma, color));
+            let shadow = match shadow_source(bounds, rect, sigma, offset, (w, h)) {
+                // All of the shape the shadow needs is in the layer.
+                Some(source) if rect.contains(&source) => {
+                    let area = shadow_area(bounds, rect, sigma, shadow_limit((w, h)));
+                    area.and_then(|area| shadow_pixels(&layer, area, sigma, color))
+                }
+                // Part of it is outside the pixmap (its shadow is cast
+                // in, or blurred in): that part is drawn on its own.
+                Some(source) => {
+                    let shape = try_pixmap(source.width() as u32, source.height() as u32);
+                    self.out_of_memory |=
+                        shape.is_none() && source.width() > 0 && source.height() > 0;
+                    shape.and_then(|mut shape| {
+                        let to =
+                            sk::Transform::from_translate(-source.x0 as f32, -source.y0 as f32);
+                        draw(&mut shape, to, None, sk::BlendMode::SourceOver);
+                        let area = shadow_area(bounds, source, sigma, shadow_limit((w, h)))?;
+                        let (pixels, x, y) = shadow_pixels(&shape, area, sigma, color)?;
+                        // In the layer's coordinates.
+                        Some((pixels, x + source.x0 - rect.x0, y + source.y0 - rect.y0))
+                    })
+                }
+                None => None,
+            };
             if let Some((shadow, x, y)) = shadow {
                 layer.draw_pixmap(
                     0,
@@ -1885,7 +1976,7 @@ impl<'a> Replay<'a> {
             };
             self.paint_path(path, mode);
         }
-        if glyphs.is_empty() {
+        if glyphs.is_empty() || !self.glyphs {
             return;
         }
         let color = match self.paint(mode) {
@@ -1947,7 +2038,7 @@ impl<'a> Replay<'a> {
 
     // --- Images ---
 
-    fn image(&mut self, uri: &str, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(&mut self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
         if self.state.singular {
             return;
         }
@@ -1960,9 +2051,11 @@ impl<'a> Replay<'a> {
             return;
         }
         let [dx, dy, dw, dh] = dest.map(|v| self.n(v));
-        // Missing sizes are the source's.
-        let dw = if dw.is_nan() { sw } else { dw };
-        let dh = if dh.is_nan() { sh } else { dh };
+        // Missing sizes are the source's pixels over the file name's
+        // density (`@3x`), as an `Image`'s: never the screen's.
+        let density = f64::from(density);
+        let dw = if dw.is_nan() { sw / density } else { dw };
+        let dh = if dh.is_nan() { sh / density } else { dh };
         if dw == 0.0 || dh == 0.0 {
             return;
         }
@@ -2166,7 +2259,14 @@ fn load_fonts(fonts: &mut Fonts) {
                 db.len(),
                 started.elapsed().as_secs_f64() * 1000.0
             );
-            crate::rt::invoke(move || fonts_loaded(db));
+            {
+                // Set here, so workers waiting for the fonts
+                // ([`wait_for_fonts_here`]) need no main thread.
+                let mut fonts = self::fonts();
+                fonts.db = Some(Arc::new(db));
+                fonts.loading = false;
+            }
+            crate::rt::invoke(fonts_loaded);
         });
     if let Err(e) = spawned {
         log::warn!("canvas: cannot find the system's fonts: {e}");
@@ -2174,14 +2274,9 @@ fn load_fonts(fonts: &mut Fonts) {
     }
 }
 
-/// The system's fonts were found: canvases that drew text without them
-/// draw again.
-fn fonts_loaded(db: fontdb::Database) {
-    {
-        let mut fonts = fonts();
-        fonts.db = Some(Arc::new(db));
-        fonts.loading = false;
-    }
+/// The system's fonts were found (main thread): canvases that drew text
+/// without them draw again.
+fn fonts_loaded() {
     let waiting = WAITING.with_borrow_mut(std::mem::take);
     for (surface, id) in waiting {
         let Some(view) = surface.upgrade().and_then(|s| s.view(id)) else {
@@ -2201,6 +2296,27 @@ fn wait_for_fonts(surface: &Rc<Surface>, view: &NshView) {
     if fonts.db.is_none() {
         WAITING.with_borrow_mut(|w| w.push((Rc::downgrade(surface), view.id())));
         load_fonts(&mut fonts);
+    }
+}
+
+/// Waits on this thread (a worker, never the main thread) until the
+/// system's fonts are found, starting the search if needed; gives up after
+/// `limit`, drawing text as before they are found.
+fn wait_for_fonts_here(limit: std::time::Duration) {
+    let started = std::time::Instant::now();
+    loop {
+        {
+            let mut fonts = fonts();
+            if fonts.db.is_some() {
+                return;
+            }
+            load_fonts(&mut fonts);
+        }
+        if started.elapsed() >= limit {
+            log::warn!("canvas: the system's fonts were not found in time");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -2455,12 +2571,54 @@ fn blend_mode(c: Composite) -> sk::BlendMode {
 
 // --- Shadows -----------------------------------------------------------------
 
+/// The pixels of a shape within `bounds` (pixmap pixels) whose shadow,
+/// blurred with standard deviation `sigma` and moved by `offset`, falls
+/// on `layer`: the layer moved back by the offset and grown by the blur's
+/// full spread (three deviations), within the shape's bounds. It may
+/// reach past the pixmap (`size`), whose shapes cast shadows into it, but
+/// never more than the spread past what the layer can show; `None` when
+/// the shadow misses the layer or is too large to blur.
+fn shadow_source(
+    bounds: sk::Rect,
+    layer: IRect,
+    sigma: f64,
+    (dx, dy): (f64, f64),
+    size: (u32, u32),
+) -> Option<IRect> {
+    let grow = (3.0 * sigma).ceil() as f32;
+    let (dx, dy) = (dx as f32, dy as f32);
+    let reach = IRect::round_out(
+        layer.x0 as f32 - dx - grow,
+        layer.y0 as f32 - dy - grow,
+        layer.x1 as f32 - dx + grow,
+        layer.y1 as f32 - dy + grow,
+    )?;
+    // Clamped before rounding: a shape may be far larger than any pixmap.
+    let source = IRect::round_out(
+        bounds.left().max(reach.x0 as f32),
+        bounds.top().max(reach.y0 as f32),
+        bounds.right().min(reach.x1 as f32),
+        bounds.bottom().min(reach.y1 as f32),
+    )?;
+    if source.width() as i64 * source.height() as i64 > shadow_limit(size) {
+        log::debug!("canvas: a shadow too large to blur is left out");
+        return None;
+    }
+    Some(source)
+}
+
+/// The most pixels a shadow is blurred over, for a pixmap of `size`: a
+/// shadow as large as the pixmap is always drawn.
+fn shadow_limit(size: (u32, u32)) -> i64 {
+    (2 * MAX_AREA).max(i64::from(size.0) * i64::from(size.1))
+}
+
 /// The pixels whose shadow (blurred with standard deviation `sigma`) the
 /// layer `layer` (pixmap pixels) needs, of a shape within `bounds`, in the
 /// layer's coordinates: the shape grown by the blur's spread, inside the
 /// layer grown likewise (the shape is drawn only in the layer); `None`
 /// when that is nothing or too much to blur.
-fn shadow_area(bounds: sk::Rect, layer: IRect, sigma: f64) -> Option<IRect> {
+fn shadow_area(bounds: sk::Rect, layer: IRect, sigma: f64, limit: i64) -> Option<IRect> {
     let grow = (3.0 * sigma).ceil() as i32;
     let around = IRect {
         x0: -grow,
@@ -2476,7 +2634,7 @@ fn shadow_area(bounds: sk::Rect, layer: IRect, sigma: f64) -> Option<IRect> {
         (bounds.bottom() - y).min(around.y1 as f32) + grow as f32,
     ];
     let area = IRect::round_out(shape[0], shape[1], shape[2], shape[3])?.intersect(&around)?;
-    if area.width() as i64 * area.height() as i64 > 2 * MAX_AREA {
+    if area.width() as i64 * area.height() as i64 > limit {
         log::debug!("canvas: a shadow too large to blur is left out");
         return None;
     }
@@ -3118,6 +3276,57 @@ mod tests {
     }
 
     #[test]
+    fn an_image_draws_its_pixels_over_its_file_density() {
+        // 60 × 30 pixels at (0, 0) without a destination size: 60 × 30
+        // points as `dot.png`, 20 × 10 as `dot@3x.png`, at scale 1 and 2.
+        let mut image = sk::Pixmap::new(60, 30).unwrap();
+        image.fill(sk::Color::from_rgba8(255, 0, 0, 255));
+        let image = Arc::new(image);
+        let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
+        let text = WindowTextSystem::new(system.clone());
+        for (uri, (w, h)) in [
+            ("asset:/dot.png", (60, 30)),
+            ("asset:/dot@3x.png", (20, 10)),
+        ] {
+            let nan = c(f32::NAN);
+            let drawing = Drawing {
+                ops: vec![CanvasOp::DrawImage {
+                    image: nsh_core::canvas::CanvasImage { uri: uri.into() },
+                    source: None,
+                    dest: [c(0.0), c(0.0), nan, nan],
+                }],
+                ..Drawing::default()
+            };
+            let images = [(Arc::from(uri), Some(image.clone()))]
+                .into_iter()
+                .collect();
+            for scale in [1u32, 2] {
+                let key = Key {
+                    linear: [scale as f32, 0.0, 0.0, scale as f32],
+                    scale: scale as f32,
+                    size: (100.0, 40.0),
+                };
+                let bounds = [0.0, 0.0, 100.0 * scale as f32, 40.0 * scale as f32];
+                let (region, _) = region(&key, (0.0, 0.0), bounds).unwrap();
+                let r = record(
+                    &drawing,
+                    &[],
+                    &images,
+                    (&text, &system),
+                    key,
+                    region,
+                    (0.0, 0.0),
+                );
+                let p = pixels(&r);
+                let what = format!("{uri} at scale {scale}");
+                assert_eq!(at(p, (w - 1) * scale, (h - 1) * scale)[3], 255, "{what}");
+                assert_eq!(at(p, w * scale, 0)[3], 0, "{what}");
+                assert_eq!(at(p, 0, h * scale)[3], 0, "{what}");
+            }
+        }
+    }
+
+    #[test]
     fn tiles_cover_the_pixmap_once() {
         let t = tiles(600, 300);
         assert_eq!(t.len(), 6);
@@ -3655,7 +3864,7 @@ mod tests {
             y1: 100,
         };
         let far = sk::Rect::from_ltrb(-1.0e9, -1.0e9, 1.0e9, 1.0e9).unwrap();
-        let area = shadow_area(far, layer, 10.0).unwrap();
+        let area = shadow_area(far, layer, 10.0, 2 * MAX_AREA).unwrap();
         assert_eq!(
             area,
             IRect {
@@ -3719,6 +3928,8 @@ mod tests {
             drawn: false,
             pending: Vec::new(),
             pending_bounds: None,
+            glyphs: true,
+            out_of_memory: false,
         };
         replay.op(&CanvasOp::FillRect(rect(0.0, 0.0, 10.0, 10.0)));
         // Text at (20, 20)–(30, 30).
@@ -3770,6 +3981,17 @@ mod tests {
         assert!(b.left() >= 9.0 && b.right() < 30.0, "{b:?}");
         assert!(b.bottom() <= 31.0 && b.top() > 10.0, "{b:?}");
         assert_eq!(file.glyphs.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pixmaps_too_large_to_allocate_are_none() {
+        let p = try_pixmap(3, 2).unwrap();
+        assert_eq!((p.width(), p.height()), (3, 2));
+        assert!(p.data().iter().all(|&b| b == 0));
+        assert!(try_pixmap(0, 2).is_none());
+        // Rows past tiny-skia's limit, then 4 EiB no allocator gives.
+        assert!(try_pixmap(1 << 29, 1).is_none());
+        assert!(try_pixmap(1 << 28, 1 << 30).is_none());
     }
 
     #[test]

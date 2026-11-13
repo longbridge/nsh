@@ -306,6 +306,8 @@ What the native side does for you:
 - **Pan, pinch and rotation run together** on the same view: one card can be dragged, pinched and rotated at once.
 - **Release velocity for physics.** The pan end's velocity feeds a spring's or a decay's velocity directly; the values let you pick a snap point.
 
+A view pans while it has a pan handler or `pan` values, so a condition in the expression turns its pan off and on: with `onPanEnd={zoomed() ? undefined : close}` the drags go to the content inside while `zoomed()` is true. The condition goes in the expression itself: a plain name (`onPanEnd={handler}`) is set once ([What runs again](./jsx-and-components.md#what-runs-again)).
+
 ```rust tabs
 // A card that snaps to the left or right edge.
 view()

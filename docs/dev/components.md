@@ -1171,7 +1171,10 @@ styles a Rust app's state style has even when the part's has none. Closing a des
 closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, the dropdowns' sheets) keeps
 `SheetMotion`; a dropdown's sheet on its way out takes no attempt to close it either (its backdrop or back pressed
 again sends no second `onCancel`). A searchable list (`Select`'s, `Combobox`'s) keeps its query and rows until its popup
-or sheet is gone, and each opening starts from the default query again.
+or sheet is gone, and each opening starts from the default query again. A panel that reaches the bottom of the screen
+(those sheets, `Sheet`'s side drawers, `DockArea`'s compact panels) ends above the software keyboard
+(`popup::keyboard_lift`: the keyboard's height past the bottom safe area, which the app's panel pads as without a
+keyboard), a reactive style the core animates with the keyboard.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -1420,7 +1423,9 @@ its own, a child of the view marked `decoration`: last among the children, so it
 appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
 its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
 range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
-waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
+waits for the engine while the content scrolls. A view sends its sticky cells in one set (its list's rows, its
+`position: sticky` views and its bar), the bar last: the platforms raise the cells in that order, so a list's sticky
+headers stay below the bar. The view's `ScrollConfig` turns the indicator off and says the bar
 `replaced` it. A new theme makes every bar
 made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the
