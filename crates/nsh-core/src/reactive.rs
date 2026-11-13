@@ -160,6 +160,8 @@ struct Node<H: Host> {
     /// The owner (for a root, the one it was made under: context and
     /// `runTop` look through it, but it does not own the root).
     owner: u32,
+    /// A root can outlive its owner and the slot that held it.
+    root_owner_generation: u32,
     owned: Vec<u32>,
     cleanups: Vec<H::Cleanup>,
     context: Option<Rc<Frame<H>>>,
@@ -186,6 +188,7 @@ impl<H: Host> Node<H> {
             sources: Vec::new(),
             observers: Vec::new(),
             owner: NONE,
+            root_owner_generation: 0,
             owned: Vec::new(),
             cleanups: Vec::new(),
             context: None,
@@ -360,10 +363,16 @@ impl<H: Host> Graph<H> {
     /// it; the current owner does not own it).
     pub fn root(&mut self) -> u32 {
         let current = self.owner;
+        let generation = if is_node(current) {
+            self.generation(current)
+        } else {
+            0
+        };
         let id = self.alloc(Kind::Root);
         let context = self.context_of(current);
         let n = &mut self.nodes[id as usize];
         n.owner = if current == DISPOSED { NONE } else { current };
+        n.root_owner_generation = generation;
         n.context = context;
         id
     }
@@ -414,9 +423,17 @@ impl<H: Host> Graph<H> {
         self.nodes[id as usize].generation
     }
 
-    /// The owner of node `id` (for a root, the one it was made under).
+    /// The owner of node `id` (for a root, the one it was made under while
+    /// its slot still names it).
     pub fn parent(&self, id: u32) -> u32 {
-        self.nodes[id as usize].owner
+        let node = &self.nodes[id as usize];
+        if node.root_owner_generation != 0
+            && !self.live(node.owner, node.root_owner_generation, u32::MAX)
+        {
+            NONE
+        } else {
+            node.owner
+        }
     }
 
     /// Node `id`'s kind.
@@ -854,7 +871,7 @@ fn run_top<H: Host>(h: H, id: u32) {
     }
     let exec = graph.exec;
     let mut ancestors = vec![id];
-    let mut at = node.owner;
+    let mut at = graph.parent(id);
     while is_node(at) {
         let n = &graph.nodes[at as usize];
         if n.updated_at.is_some_and(|t| t >= exec) {
@@ -863,7 +880,7 @@ fn run_top<H: Host>(h: H, id: u32) {
         if n.state != CLEAN && n.is_computation() {
             ancestors.push(at);
         }
-        at = n.owner;
+        at = graph.parent(at);
     }
     for &node in ancestors.iter().rev() {
         let n = &g(h).nodes[node as usize];
