@@ -23,7 +23,7 @@ use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, CGVector};
 use objc2_quartz_core::{CAAnimation, CALayer, CAMediaTiming, CATransform3D};
 use objc2_ui_kit::{
     UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents, UIDevice,
-    UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer,
+    UIGestureRecognizer, UIGestureRecognizerState, UINavigationController, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
     UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
     UISpringTimingParameters, UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimating,
@@ -657,8 +657,10 @@ pub(crate) struct Mounter {
     touch_trackers: Vec<(NodeId, Retained<crate::touch::TouchTracker>)>,
     /// Views listening to touches (the trackers run while there are any).
     touch_listeners: usize,
-    /// Scroll views a JS responder keeps from scrolling.
-    blocked_scrolls: Vec<Retained<UIScrollView>>,
+    /// The native gestures a JS responder keeps from taking its touches:
+    /// the pans of the scroll views and the swipe back of the stacks around
+    /// it.
+    blocked_gestures: Vec<Retained<UIGestureRecognizer>>,
     /// Vertical scroll views whose content size arrived in this batch, with
     /// the height that came with it. A batch applies a scroll view's content
     /// size before the frames of the children it measures (`ScrollContent` is
@@ -777,7 +779,7 @@ impl Mounter {
             sticky: Default::default(),
             touch_trackers: Vec::new(),
             touch_listeners: 0,
-            blocked_scrolls: Vec::new(),
+            blocked_gestures: Vec::new(),
             content_sizes: Vec::new(),
             narrowed: Vec::new(),
             frames_applied: false,
@@ -1894,6 +1896,10 @@ impl Mounter {
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
+            (Command::SetClipboardItem(item), _) => match &item.html {
+                Some(html) => crate::system::set_clipboard_html(&item.text, html),
+                None => crate::system::set_clipboard(&item.text),
+            },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text) = crate::system::read_clipboard(has_only);
@@ -2381,9 +2387,10 @@ impl Mounter {
     }
 
     /// A JS responder took the touches on `id`: with `block`, the scroll
-    /// views around it stop scrolling until it lets go, and the presses of
-    /// the views around it end without a press (the finger is the
-    /// responder's: a drag of a selection handle is no tap on the text).
+    /// views around it stop scrolling and the stacks around it take no
+    /// swipe back until it lets go, and the presses of the views around it
+    /// end without a press (the finger is the responder's: a drag of a
+    /// selection handle is no tap on the text).
     fn set_js_responder(&mut self, id: NodeId, block: bool) {
         self.clear_js_responder();
         if !block {
@@ -2400,11 +2407,20 @@ impl Mounter {
                     recognizer.setEnabled(true);
                 }
             }
-            if let Some(scroll) = v.downcast_ref::<UIScrollView>() {
-                let pan = scroll.panGestureRecognizer();
-                if pan.isEnabled() {
-                    pan.setEnabled(false);
-                    self.blocked_scrolls.push(scroll.retain());
+            let scroll = v
+                .downcast_ref::<UIScrollView>()
+                .map(|scroll| Retained::into_super(scroll.panGestureRecognizer()));
+            // A stack's view: its controller is the next responder.
+            let swipes = v
+                .nextResponder()
+                .and_then(|r| r.downcast::<UINavigationController>().ok())
+                .map(|nav| crate::navigation::back_swipes(&nav))
+                .unwrap_or_default();
+            for gesture in scroll.into_iter().chain(swipes) {
+                if gesture.isEnabled() {
+                    // Turning it off also cancels a gesture that began.
+                    gesture.setEnabled(false);
+                    self.blocked_gestures.push(gesture);
                 }
             }
             current = v.superview();
@@ -2412,8 +2428,8 @@ impl Mounter {
     }
 
     fn clear_js_responder(&mut self) {
-        for scroll in self.blocked_scrolls.drain(..) {
-            scroll.panGestureRecognizer().setEnabled(true);
+        for gesture in self.blocked_gestures.drain(..) {
+            gesture.setEnabled(true);
         }
     }
 

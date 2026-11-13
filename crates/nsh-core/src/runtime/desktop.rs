@@ -33,6 +33,7 @@ fn launch_at_login_error(error: LaunchAtLoginError) -> JsError {
         LaunchAtLoginError::Unavailable => {
             JsError::Error(error.to_string()).with_code(codes::UNAVAILABLE)
         }
+        LaunchAtLoginError::Denied => JsError::access_denied(error.to_string(), "application", ""),
         // Every failure has a code to branch on: the error's own, else EIO.
         LaunchAtLoginError::System(io) => {
             let code = io_code(&io).unwrap_or("EIO");
@@ -84,7 +85,9 @@ impl Application {
     /// setting on or off, never at every start: what the user chose in the
     /// system's settings stands. Rejects with
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the app cannot launch at
-    /// login, and with the system's error (Node's code, `EIO` without one).
+    /// login, with `ERR_ACCESS_DENIED` (`permission` `"application"`) for an
+    /// app that declares capabilities without `application`, and with the
+    /// system's error (Node's code, `EIO` without one).
     pub(crate) async fn set_launch_at_login(enabled: bool) -> Result<(), JsError> {
         crate::element::desktop::set_launch_at_login(enabled)
             .await

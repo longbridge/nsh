@@ -12,7 +12,7 @@ use std::{
 
 use super::{
     Answer, ImageSize,
-    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead, FileAnswer},
+    task::{Action, AnswerSlot, ClipboardImage, ClipboardItem, ClipboardRead, FileAnswer},
 };
 use crate::{
     Command, ROOT_ID,
@@ -145,6 +145,11 @@ pub(crate) fn perf_monitor_mode(mode: crate::FpsMode) -> Action {
 /// Puts `text` on the system clipboard.
 pub(crate) fn set_clipboard(text: String) -> Action {
     Action::Command(ROOT_ID, Command::SetClipboard(text))
+}
+
+/// Puts `item` on the system clipboard, each of its formats in one write.
+pub(crate) fn set_clipboard_item(item: ClipboardItem) -> Action {
+    Action::Command(ROOT_ID, Command::SetClipboardItem(item))
 }
 
 /// The text on the system clipboard (`""` when it holds none).
