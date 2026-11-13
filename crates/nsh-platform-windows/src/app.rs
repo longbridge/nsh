@@ -181,6 +181,13 @@ pub struct AppOptions {
     /// their presses (`nsh`'s `Notifications`). Without it the permission is
     /// `unavailable` and nothing shows. [`run_app`] sets it.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes its login item
+    /// (`Application.loginItem()`: a value named [`app_id`](Self::app_id)
+    /// in the current user's `Run` key holding this executable's path,
+    /// which Settings lists under Startup apps). False by default, and read
+    /// by [`run_app`]'s view only: a view embedded in another app has no
+    /// login item. The release runner sets it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -236,6 +243,7 @@ impl Default for AppOptions {
             single_instance: false,
             file_types: Vec::new(),
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
             background: false,
         }
@@ -273,6 +281,9 @@ pub struct AppView {
     surface: Rc<Surface>,
     hwnd: HWND,
     options: RefCell<AppOptions>,
+    /// The view is [`run_app`]'s: the standalone app's, not one embedded in
+    /// another app.
+    standalone: Cell<bool>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -327,6 +338,7 @@ impl AppView {
             surface,
             hwnd,
             options: RefCell::new(options),
+            standalone: Cell::new(false),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -467,12 +479,26 @@ impl AppView {
             speech: None,
             audio: None,
             windows: None,
+            login_item: self.login_item(&options),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.start(config);
+    }
+
+    /// The login item of the app this view runs: the standalone app's alone
+    /// ([`run_app`]'s view, not one embedded in another app, also while the
+    /// standalone app runs on this thread), when its runner says.
+    fn login_item(
+        &self,
+        options: &AppOptions,
+    ) -> Option<Arc<dyn nsh_core::desktop::LoginItemBackend>> {
+        (options.login_item && self.standalone.get()).then(|| {
+            Arc::new(crate::login_item::LoginItem::new(&options.app_id))
+                as Arc<dyn nsh_core::desktop::LoginItemBackend>
+        })
     }
 
     /// Where `asset:/` URIs resolve from now on.
@@ -702,6 +728,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
             return std::process::ExitCode::FAILURE;
         }
     };
+    view.standalone.set(true);
     crate::linking::launch(view.surface());
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
@@ -868,6 +895,28 @@ mod tests {
         }
         // SAFETY: the test's own window.
         let _ = unsafe { DestroyWindow(view.hwnd()) };
+    }
+
+    #[test]
+    fn only_the_standalone_apps_view_has_a_login_item() {
+        let options = AppOptions {
+            login_item: true,
+            ..Default::default()
+        };
+        // An embedded view, while the standalone app runs on this thread.
+        STANDALONE.set(true);
+        let embedded = AppView::new(None, options.clone()).unwrap();
+        assert!(embedded.login_item(&options).is_none());
+        // `run_app`'s own view, when its runner turns it on.
+        let standalone = AppView::new(None, options.clone()).unwrap();
+        standalone.standalone.set(true);
+        assert!(standalone.login_item(&options).is_some());
+        assert!(standalone.login_item(&AppOptions::default()).is_none());
+        STANDALONE.set(false);
+        for view in [embedded, standalone] {
+            // SAFETY: the test's own windows.
+            let _ = unsafe { DestroyWindow(view.hwnd()) };
+        }
     }
 
     #[test]
