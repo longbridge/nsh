@@ -15440,6 +15440,190 @@ mod components {
         );
     }
 
+    /// Renders a drawing offscreen when pressed (`Painter::render`).
+    #[component]
+    fn OffscreenRenderer() -> impl IntoElement {
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("render {}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let image = crate::element::Painter::new()
+                    .fill_color(crate::Color(0xff00_00ff))
+                    .fill_rect(0.0, 0.0, 30.0, 20.0)
+                    .render(
+                        crate::Size::new(px(30.0), px(20.0)),
+                        crate::canvas::render::RenderOptions {
+                            scale: Some(2.0),
+                            ..Default::default()
+                        },
+                    );
+                spawn(async move {
+                    shown.set(match image.await {
+                        Ok(bytes) => format!("ok {}", bytes.len()),
+                        Err(e) => format!("failed {}", e.code().unwrap_or("")),
+                    });
+                });
+            }))
+    }
+
+    fn press_offscreen_renderer(canvas_render: bool) -> (Core<FakeEngine>, Vec<Command>) {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<OffscreenRenderer>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let renders = c
+            .commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: command @ Command::RenderCanvas { .. },
+                } => Some(command),
+                _ => None,
+            })
+            .collect();
+        (c, renders)
+    }
+
+    #[test]
+    fn components_render_drawings_offscreen() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let [
+            Command::RenderCanvas {
+                id,
+                drawing,
+                width,
+                height,
+                scale,
+                ..
+            },
+        ] = &renders[..]
+        else {
+            panic!("one render: {renders:?}");
+        };
+        assert_eq!((*width, *height, *scale), (60, 40, 2.0));
+        assert!(
+            drawing
+                .ops
+                .iter()
+                .any(|op| matches!(op, crate::canvas::CanvasOp::FillRect(_)))
+        );
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: *id,
+                result: Ok(vec![1, 2, 3, 4])
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 4");
+    }
+
+    fn render_id(renders: &[Command]) -> u32 {
+        match renders {
+            [Command::RenderCanvas { id, .. }] => *id,
+            _ => panic!("one render: {renders:?}"),
+        }
+    }
+
+    #[test]
+    fn offscreen_renders_take_ids_unique_in_the_process() {
+        // A replaced core's render may still be answered: the new core's
+        // requests must not share its number.
+        let (_old, old) = press_offscreen_renderer(true);
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let (old, id) = (render_id(&old), render_id(&renders));
+        assert_ne!(old, id);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: old,
+                result: Ok(vec![9]),
+            },
+        ));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1, 2]),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 2");
+    }
+
+    #[test]
+    fn offscreen_renders_too_large_for_the_platform_fail_with_the_quota_code() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: render_id(&renders),
+                result: Err(crate::canvas::render::RenderFailure::TooLarge(
+                    "over the device's bitmap limit".into()
+                )),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_NSH_QUOTA_EXCEEDED"
+        );
+    }
+
+    #[test]
+    fn offscreen_renders_fail_by_their_deadline_and_drop_late_answers() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let id = render_id(&renders);
+        c.timeout_canvas_render(id);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(shown.last().unwrap(), "render failed ETIMEDOUT");
+        assert!(c.components.canvas_renders.is_empty());
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1]),
+            },
+        ));
+        c.run_component_tasks();
+        let shown = c.commit().map(|b| texts(&b)).unwrap_or_default();
+        assert!(
+            !shown.iter().any(|t| t.starts_with("render ok")),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn components_render_nothing_offscreen_where_the_platform_renders_none() {
+        let (mut c, renders) = press_offscreen_renderer(false);
+        assert!(renders.is_empty(), "{renders:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
+    }
+
     #[test]
     fn components_read_images_over_the_limit_as_none() {
         let mut c = core();
@@ -15635,6 +15819,159 @@ mod components {
         );
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 0")));
         assert_eq!(shown.last().unwrap(), "picked 0 []");
+    }
+
+    /// Turns launching at login on, reads it, turns it off and reads it
+    /// again when its button is pressed, all asked at once; shows each
+    /// answer in the order it was asked.
+    #[component]
+    fn LoginSwitch() -> impl IntoElement {
+        use crate::{
+            desktop::LaunchAtLoginError,
+            element::desktop::{launch_at_login, set_launch_at_login},
+        };
+        let shown = signal(String::new());
+        let add = move |line: String| shown.set(format!("{} {line}", untracked(|| shown.get())));
+        let said = |answer: Result<(), LaunchAtLoginError>| match answer {
+            Ok(()) => "ok".to_owned(),
+            Err(LaunchAtLoginError::System(e)) => {
+                format!("failed-{}", crate::element::io_code(&e).unwrap_or("none"))
+            }
+            Err(e) => format!("{e:?}"),
+        };
+        view()
+            .child(text(move || format!("login{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let on = set_launch_at_login(true);
+                let read = launch_at_login();
+                let off = set_launch_at_login(false);
+                let again = launch_at_login();
+                spawn(async move {
+                    add(said(on.await));
+                    add(read.await.to_string());
+                    add(said(off.await));
+                    add(again.await.to_string());
+                });
+            }))
+    }
+
+    /// The login item of a test: the calls it got, in order.
+    #[derive(Default)]
+    struct FakeLoginItem {
+        calls: std::sync::Mutex<Vec<Option<bool>>>,
+        enabled: std::sync::Mutex<bool>,
+        /// Changes fail as the system's refusal does.
+        refuses: bool,
+        /// The platform has no login item for the app (a sandbox).
+        sandboxed: bool,
+    }
+
+    impl crate::desktop::LoginItemBackend for FakeLoginItem {
+        fn status(&self) -> std::io::Result<crate::desktop::LoginItemStatus> {
+            use crate::desktop::LoginItemStatus;
+            self.calls.lock().unwrap().push(None);
+            Ok(if self.sandboxed {
+                LoginItemStatus::Unavailable
+            } else if *self.enabled.lock().unwrap() {
+                LoginItemStatus::Enabled
+            } else {
+                LoginItemStatus::Disabled
+            })
+        }
+
+        fn set(&self, enabled: bool) -> std::io::Result<crate::desktop::LoginItemStatus> {
+            if self.refuses {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            // A slow registration: what was asked after it still waits.
+            if enabled {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+            if !self.sandboxed {
+                *self.enabled.lock().unwrap() = enabled;
+            }
+            self.calls.lock().unwrap().push(Some(enabled));
+            self.status()
+        }
+    }
+
+    /// Mounts [`LoginSwitch`] in `c`, presses it and gives what it showed
+    /// once the four answers came.
+    fn switch_login_item(
+        c: &mut Core<FakeEngine>,
+        backend: Option<std::sync::Arc<FakeLoginItem>>,
+    ) -> String {
+        c.set_login_item(
+            backend.map(|b| b as std::sync::Arc<dyn crate::desktop::LoginItemBackend>),
+        );
+        c.mount_root(&crate::element::Root::new::<LoginSwitch>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(c, |s| {
+            s.last()
+                .is_some_and(|t| t.starts_with("login") && t.split(' ').count() == 5)
+        });
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn launch_at_login_needs_no_capability() {
+        // Apps without a declaration (the legacy set) use it as Rust apps
+        // do: it is the app's own lifecycle, as quit and restart are.
+        let backend = std::sync::Arc::new(FakeLoginItem::default());
+        let mut c = core();
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let shown = switch_login_item(&mut c, Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
+    }
+
+    #[test]
+    fn without_a_backend_the_app_has_no_login_item() {
+        // Reading answers `false`; changing it fails.
+        let shown = switch_login_item(&mut core(), None);
+        assert_eq!(shown, "login Unavailable false Unavailable false");
+    }
+
+    #[test]
+    fn the_backend_reads_and_changes_the_login_item_in_order() {
+        let backend = std::sync::Arc::new(FakeLoginItem::default());
+        let shown = switch_login_item(&mut core(), Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
+        // Each change reads the status after it; the slow registration ran
+        // before what was asked after it.
+        assert_eq!(
+            *backend.calls.lock().unwrap(),
+            [Some(true), None, None, Some(false), None, None]
+        );
+    }
+
+    #[test]
+    fn the_systems_refusal_and_a_sandbox_reach_the_app() {
+        let refuses = std::sync::Arc::new(FakeLoginItem {
+            refuses: true,
+            ..Default::default()
+        });
+        let shown = switch_login_item(&mut core(), Some(refuses));
+        assert_eq!(shown, "login failed-EACCES false failed-EACCES false");
+        // Where the platform has no login item for the app, a change fails
+        // as without a backend.
+        let sandboxed = std::sync::Arc::new(FakeLoginItem {
+            sandboxed: true,
+            ..Default::default()
+        });
+        let shown = switch_login_item(&mut core(), Some(sandboxed));
+        assert_eq!(shown, "login Unavailable false Unavailable false");
     }
 
     /// Starts a speech session when its first button is pressed (a new
@@ -33552,6 +33889,136 @@ mod built_in_scrollbars {
             _ => None,
         });
         assert_eq!(before, Some(Some(bar)), "the bar draws above it");
+    }
+
+    /// The views of list 2, bottom to top, as the platforms stack them:
+    /// in the order inserted, then the sticky cells raised on every
+    /// `StickyCells` and insert. `in_order` raises them in the order the
+    /// item lists them (iOS, Android), otherwise in the order they are
+    /// among the children (the desktops), when not all of them are last.
+    struct Stack {
+        views: Vec<NodeId>,
+        sticky: Vec<NodeId>,
+        in_order: bool,
+    }
+
+    impl Stack {
+        fn apply(&mut self, batch: &MountBatch) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Insert {
+                        parent: 2,
+                        child,
+                        before,
+                    } => {
+                        self.views.retain(|v| v != child);
+                        let at = before
+                            .and_then(|b| self.views.iter().position(|&v| v == b))
+                            .unwrap_or(self.views.len());
+                        self.views.insert(at, *child);
+                        self.raise();
+                    }
+                    MountItem::Remove { id } => self.views.retain(|v| v != id),
+                    MountItem::StickyCells { id: 2, cells } => {
+                        self.sticky = cells.iter().map(|c| c.cell).collect();
+                        self.raise();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn raise(&mut self) {
+            let sticky = |v: &NodeId| self.sticky.contains(v);
+            let cells: Vec<NodeId> = if self.in_order {
+                self.sticky.clone()
+            } else {
+                let at_end = self.views.iter().rev().take_while(|v| sticky(v)).count();
+                let cells: Vec<NodeId> = self.views.iter().copied().filter(sticky).collect();
+                if at_end == cells.len() {
+                    return;
+                }
+                cells
+            };
+            for cell in cells {
+                if self.views.contains(&cell) {
+                    self.views.retain(|&v| v != cell);
+                    self.views.push(cell);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_lists_sticky_rows_go_below_its_bar() {
+        for in_order in [false, true] {
+            let mut c = core();
+            let mut registry = Registry::new();
+            registry.scrollbars_from(bars);
+            c.set_components(registry);
+            c.set_builtin_scrollbars(Some(app_theme()));
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: 2,
+                        tag: Tag::List,
+                    },
+                    style_op(2, &[("height", StyleValue::Number(400.0))]),
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::EstimatedItemSize(px(50.0)),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::Count(100),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::StickyIndices(vec![0, 10]),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                ],
+            );
+            let mut stack = Stack {
+                views: Vec::new(),
+                sticky: Vec::new(),
+                in_order,
+            };
+            let batch = c.commit().unwrap();
+            stack.apply(&batch);
+            let [bar] = bars_in(&batch)[..] else {
+                panic!("one bar: {:?}", batch.items)
+            };
+            let (mut next_id, mut cells) = (100, Vec::new());
+            for offset in [0.0, 300.0, 600.0, 2000.0, 0.0] {
+                c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+                if let Some(batch) = c.commit() {
+                    stack.apply(&batch);
+                }
+                render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+                let batch = c.commit().unwrap();
+                // Every set the list pins keeps its bar, last (on top).
+                for item in &batch.items {
+                    if let MountItem::StickyCells { id: 2, cells } = item {
+                        assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                    }
+                }
+                stack.apply(&batch);
+                assert_eq!(
+                    stack.views.last(),
+                    Some(&bar),
+                    "at {offset}, raised in order: {in_order}: {:?} (sticky {:?})",
+                    stack.views,
+                    stack.sticky
+                );
+                assert!(stack.sticky.len() > 1, "a row sticks: {:?}", stack.sticky);
+            }
+        }
     }
 
     /// A core drawing every bar with `bars`: in a view 2, a multiline (or

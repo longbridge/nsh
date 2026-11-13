@@ -696,6 +696,16 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
+    act(action);
+    answer
+}
+
 /// Whether the platform lets the user pick a color on the screen
 /// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
 pub fn can_pick_screen_color() -> bool {
@@ -1878,6 +1888,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

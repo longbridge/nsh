@@ -2442,7 +2442,9 @@ impl Screen {
     /// [`nsh_core::ApproxTextEngine`] lays the text out: characters `0.55 ×`
     /// the font size wide, lines `1.2 ×` it tall, wrapped at the content
     /// box's width when multiline; a single line is centered in the box and
-    /// keeps the caret inside it.
+    /// keeps the caret inside it. A multiline input taller in text than its
+    /// box scrolls it to keep the caret's line in view, as the platforms'
+    /// do while the user edits: the line at the bottom of the box.
     pub(crate) fn input_caret(&self, id: NodeId) -> Option<Bounds<Points>> {
         let view = self.nodes.get(&id)?;
         let input = view.input.as_ref()?;
@@ -2469,7 +2471,9 @@ impl Screen {
         };
         let mut x = content.origin.x.0 + column as f32 * advance;
         let y = if input.config.multiline {
-            content.origin.y.0 + row as f32 * line
+            let at = row as f32 * line;
+            let scrolled = (at + line - content.size.height.0).max(0.0);
+            content.origin.y.0 + at - scrolled
         } else {
             x = x.min(content.origin.x.0 + (content.size.width.0 - 1.0).max(0.0));
             content.origin.y.0 + (content.size.height.0 - line) / 2.0
@@ -2820,6 +2824,40 @@ mod tests {
             layout: nsh_core::TextLayout(Arc::new(())),
             content: Bounds::default(),
         }
+    }
+
+    #[test]
+    fn a_multiline_input_taller_in_text_than_its_box_keeps_its_caret_in_view() {
+        let mut screen = Screen::default();
+        let mut config = nsh_core::InputConfig::default();
+        config.style.font_size = Points(10.0);
+        config.multiline = true;
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            frame(2, 0.0, 0.0, 60.0, 40.0),
+            MountItem::Input {
+                id: 2,
+                config: Box::new(config),
+            },
+            MountItem::InputContent {
+                id: 2,
+                content: Bounds::new(
+                    Point::new(Points(4.0), Points(6.0)),
+                    Size::new(Points(55.0), Points(28.0)),
+                ),
+            },
+            insert(1, 2),
+        ]));
+        // Five lines of 12 in a box of 28: the last line at its bottom.
+        screen.input_mut(2).unwrap().text = "a\nb\nc\nd\ne".into();
+        let caret = screen.input_caret(2).unwrap();
+        assert_eq!(
+            (caret.origin.y.0, caret.size.height.0),
+            (6.0 + 28.0 - 12.0, 12.0)
+        );
+        // One line: where it is.
+        screen.input_mut(2).unwrap().text = "a".into();
+        assert_eq!(screen.input_caret(2).unwrap().origin.y.0, 6.0);
     }
 
     #[test]

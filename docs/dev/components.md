@@ -326,7 +326,7 @@ reasons: `reactive-components.md`.
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task. `asset:/` URLs (`FileAsset::uri`, `assets!()`), from both, are the app's bundled files, the scheme in any case: the engine's `Net` answers them from `EngineConfig::assets` on the runtime's blocking pool (in WebAssembly in the turn), with no capability, and downloads what the host serves at `Assets::url` (the web page's files it did not preload); hosts are asked for the file by its path alone, `asset:/<path>` with the scheme in lower case and no query or fragment (`asset_file`: one file on every host, as a web server serves it); either way the response answers at the URL asked for, its scheme in lower case and without its fragment (`asset_response_url`), with the type its extension gives (`nsh_core::platform::content_type`, which the dev server serves files with too); a file the host does not have fails as a network error, and so do a path that would leave the host's directory (an empty, `.` or `..` segment, encoded or not, a backslash, a NUL or a colon: `is_inside_assets`; hosts join the path to their directory as it comes) and a method other than `GET` or `HEAD`, refused in `Net::asset` before any host reads the file or is asked where it serves it |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, `localeSettings()`, `lifecycle()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `locale_settings()`, `lifecycle()`, `reduce_motion()`, `screen_reader()`: reading subscribes (`layout_rtl()`, the surface's direction, is a hidden accessor for `nsh-base`'s controls only, which trade Left and Right by it: Rust's `rtl()` is dropped, apps set a view's `direction`) |
-  | `<Window>`, `Window.open`, `currentWindow()`, `WindowRef`'s `set({ title, titleBar, … })`, `setMode`, `setBounds`, `setPlacement`, `close()`, `on(..)`, `titleBar()`, `windowState()`, `displays()`, `Menu.setMenuBar`, `Application.quit()`, `Application.restart()` (`nsh/desktop`) | `element::desktop::window()` (a builder: `.id()`, `.kind()`, `.title()`, `.attributes(..)`, `.open(..)`, `.on_open_change(..)`, `.content(..)`), `current_window()` / `main_window()` (a `WindowRef`: `set(WindowAttributes)`, `set_mode(..)`, `set_bounds(..)`, `set_placement(..)`, `close()`, `state()`, `on_close_press(..)`, `on_focus_change(..)`, …), `title_bar()`, `displays()`, `set_menu_bar(..)`, `quit()`, `restart()`; the same window commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)`, `.window_control(..)` and `.window_resize(..)` on any interactive element mark native title bar regions |
+  | `<Window>`, `Window.open`, `currentWindow()`, `WindowRef`'s `set({ title, titleBar, … })`, `setMode`, `setBounds`, `setPlacement`, `close()`, `on(..)`, `titleBar()`, `windowState()`, `displays()`, `Menu.setMenuBar`, `Application.quit()`, `Application.restart()`, `Application.launchAtLogin()`, `Application.setLaunchAtLogin(enabled)` (`nsh/desktop`) | `element::desktop::window()` (a builder: `.id()`, `.kind()`, `.title()`, `.attributes(..)`, `.open(..)`, `.on_open_change(..)`, `.content(..)`), `current_window()` / `main_window()` (a `WindowRef`: `set(WindowAttributes)`, `set_mode(..)`, `set_bounds(..)`, `set_placement(..)`, `close()`, `state()`, `on_close_press(..)`, `on_focus_change(..)`, …), `title_bar()`, `displays()`, `set_menu_bar(..)`, `quit()`, `restart()`, `launch_at_login().await` (a `bool`) / `set_launch_at_login(true).await` (a `Result<(), LaunchAtLoginError>`) in a task (`Action::LoginItem` and the core's backend thread, as JS's); the same window commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)`, `.window_control(..)` and `.window_resize(..)` on any interactive element mark native title bar regions |
   | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").icon(asset!("new.svg")).on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` / `desktop` / `catalyst` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()`, `is_catalyst()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
@@ -1149,7 +1149,8 @@ reach (`crates/nsh-base/tests/base/menu_list.rs`).
 **Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
 toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
 `Popover`'s, `HoverCard`'s, `Menu`'s and `ContextMenu`'s `popupStartingClass` / `popupStartingStyle` and `popupEndingClass` /
-`popupEndingStyle` (a desktop menu's `Submenu`s take its menu's), `Tooltip`'s `startingClass` / `startingStyle` and
+`popupEndingStyle` (a desktop menu's `Submenu`s take its menu's; `Select`'s, `Combobox`'s and `DatePicker`'s desktop
+popups the same, through `popup::dropdown`), `Tooltip`'s `startingClass` / `startingStyle` and
 `endingClass` / `endingStyle` (its own `class` / `style` are the bubble's). `popup.rs`' `PopupPresence` follows the
 open state: opened, the popup is made with its starting look, which it keeps until the next display frame (or 50 ms
 where none comes, as `Toast`'s), so `transition-*` classes run from it; closed, it stays mounted with its ending look
@@ -1161,14 +1162,19 @@ waits that long, then unmounts, and `onClose` follows. A generation counter keep
 a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
 never gone, so neither `onClose` nor `onOpen` fires. On its way out it takes no keys either: the keyboard focus inside
 goes back to the trigger as it closes, not once it is gone (`PopupPresence::focus_back_on_close`, `Popover`'s and a
-desktop menu's), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
+desktop menu's; a dropdown's `Presence::back`), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
 during the exit is the trigger's (Return opens it again, taking it back). Without a look for a state, or while the user asks for less
 motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
 for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
 styles a Rust app's state style has even when the part's has none. Closing a desktop menu closes its submenus, and
-closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, `Select`'s list) keeps
-`SheetMotion`.
+closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, the dropdowns' sheets) keeps
+`SheetMotion`; a dropdown's sheet on its way out takes no attempt to close it either (its backdrop or back pressed
+again sends no second `onCancel`). A searchable list (`Select`'s, `Combobox`'s) keeps its query and rows until its popup
+or sheet is gone, and each opening starts from the default query again. A panel that reaches the bottom of the screen
+(those sheets, `Sheet`'s side drawers, `DockArea`'s compact panels) ends above the software keyboard
+(`popup::keyboard_lift`: the keyboard's height past the bottom safe area, which the app's panel pads as without a
+keyboard), a reactive style the core animates with the keyboard.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -1417,7 +1423,9 @@ its own, a child of the view marked `decoration`: last among the children, so it
 appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
 its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
 range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
-waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
+waits for the engine while the content scrolls. A view sends its sticky cells in one set (its list's rows, its
+`position: sticky` views and its bar), the bar last: the platforms raise the cells in that order, so a list's sticky
+headers stay below the bar. The view's `ScrollConfig` turns the indicator off and says the bar
 `replaced` it. A new theme makes every bar
 made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the

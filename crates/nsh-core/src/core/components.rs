@@ -568,6 +568,7 @@ struct SpeechSession {
 /// The core's component state.
 pub(super) struct Components {
     pub(super) web_evaluations: super::web_evaluation::Evaluations,
+    pub(super) canvas_renders: super::canvas_render::Renders,
     registry: Registry,
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
@@ -796,6 +797,7 @@ impl Default for Components {
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             web_evaluations: Default::default(),
+            canvas_renders: Default::default(),
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
             next_fetch: 1,
@@ -5352,6 +5354,42 @@ impl<M: TextEngine> Core<M> {
         (parent != NO_KEY).then(|| self.nodes[parent as usize].id)
     }
 
+    /// Reads (`enabled` `None`) or changes whether the app launches at
+    /// login: on the backend's thread when the runner gave the core one,
+    /// the answer (on or not) delivered in a task here; without one the app
+    /// does not launch at login, and a change fails.
+    fn login_item_action(
+        &mut self,
+        enabled: Option<bool>,
+        answer: crate::element::AnswerSlot<Result<bool, crate::desktop::LaunchAtLoginError>>,
+    ) {
+        use crate::desktop::{LaunchAtLoginError, LoginItemStatus};
+        let Some(items) = self.login_item.as_mut() else {
+            answer.borrow_mut().deliver(match enabled {
+                None => Ok(false),
+                Some(_) => Err(LaunchAtLoginError::Unavailable),
+            });
+            return;
+        };
+        let result = items.call(enabled);
+        crate::element::task::spawn_raw(
+            &self.components.executor,
+            crate::ROOT_ID,
+            Box::pin(async move {
+                let result = match result.await {
+                    // Nothing to change where the platform has no login
+                    // item for the app (a sandboxed Linux app).
+                    Ok(LoginItemStatus::Unavailable) if enabled.is_some() => {
+                        Err(LaunchAtLoginError::Unavailable)
+                    }
+                    Ok(status) => Ok(status == LoginItemStatus::Enabled),
+                    Err(error) => Err(LaunchAtLoginError::System(error)),
+                };
+                answer.borrow_mut().deliver(result);
+            }),
+        );
+    }
+
     /// Applies what the app asks about notifications: granted and where
     /// the platform shows them, the platform answers with
     /// [`EventKind::Notification`]; otherwise the answer is given here.
@@ -5818,6 +5856,7 @@ impl<M: TextEngine> Core<M> {
                 self.start_web_evaluation(node, script, timeout, answer)
             }
             Action::WebEvaluationTimeout(request) => self.timeout_web_evaluation(request),
+            Action::CanvasRenderTimeout(id) => self.timeout_canvas_render(id),
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
@@ -5997,6 +6036,7 @@ impl<M: TextEngine> Core<M> {
             Action::Speech(action) => self.speech_action(action),
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
+            Action::LoginItem(enabled, answer) => self.login_item_action(enabled, answer),
             Action::NextUrlSchemeOpen(answer) => {
                 let links = &mut self.components.url_schemes;
                 match links.pending.pop_front() {
@@ -6088,6 +6128,7 @@ impl<M: TextEngine> Core<M> {
                     command: Command::PickScreenColor { id },
                 });
             }
+            Action::RenderCanvas(request, answer) => self.start_canvas_render(*request, answer),
             Action::FileRequest(request, answer) => {
                 use crate::file_dialog::FileRequest;
                 if !self.components.environment.file_requests {
@@ -6595,6 +6636,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
+            EventKind::CanvasImage if id == crate::ROOT_ID => self.answer_canvas_render(payload),
             EventKind::FileRequest if id == crate::ROOT_ID => {
                 let EventPayload::FileRequest {
                     id: request,

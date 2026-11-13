@@ -381,6 +381,17 @@ impl InlineImages {
     }
 }
 
+/// `logo@2x.png` -> 2: the pixel density a file name declares (1 without).
+pub fn density(uri: &str) -> f32 {
+    let name = uri.rsplit(['/', '\\']).next().unwrap_or(uri);
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    stem.rsplit_once('@')
+        .and_then(|(_, s)| s.strip_suffix('x'))
+        .and_then(|n| n.parse::<f32>().ok())
+        .filter(|n| *n > 0.0)
+        .unwrap_or(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
