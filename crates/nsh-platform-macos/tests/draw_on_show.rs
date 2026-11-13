@@ -4,8 +4,8 @@
 //! batch, input or animation). A host app makes the view and puts it in a
 //! window itself. AppKit views live on the main thread, so this test runs
 //! without libtest's harness, on the process's own. Its arguments pick the
-//! cases to run (`window`, `unhide`, `scaled`, `animated`, `sharp`); none
-//! runs all.
+//! cases to run (`window`, `unhide`, `scaled`, `animated`, `sharp`,
+//! `nested`); none runs all.
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -18,7 +18,7 @@ fn main() {}
 #[cfg(target_os = "macos")]
 mod macos {
     use std::{
-        sync::atomic::{AtomicBool, Ordering},
+        sync::atomic::{AtomicBool, AtomicU8, Ordering},
         time::{Duration, Instant},
     };
 
@@ -42,6 +42,9 @@ mod macos {
     /// Shrinks the scale of [`Sharpened`]'s ancestor after the test checks
     /// the content layer's resolution.
     static SHRINK: AtomicBool = AtomicBool::new(false);
+
+    /// The scales [`NestedSharpened`]'s two ancestors take, in order.
+    static NESTED: AtomicU8 = AtomicU8::new(0);
 
     /// A text, in a view the test finds.
     #[component]
@@ -168,6 +171,52 @@ mod macos {
                         .top(px(20.0))
                         .w(px(120.0))
                         .h(px(24.0)),
+                ),
+        )
+    }
+
+    /// A text under two scaled ancestors, each the test changes: the
+    /// outer moves within one density step while the inner crosses one,
+    /// and the inner moves after the outer shrank its subtree.
+    #[component]
+    fn NestedSharpened() -> impl IntoElement {
+        let outer = signal(2.0);
+        let inner = signal(2.0);
+        set_interval(Duration::from_millis(20), move || {
+            let (o, i): (f32, f32) = match NESTED.load(Ordering::SeqCst) {
+                0 => (2.0, 2.0),
+                1 => (1.0, 2.0),
+                2 => (1.0, 4.6),
+                _ => (1.09, 4.6),
+            };
+            if outer.get_untracked() != o {
+                outer.set(o);
+            }
+            if inner.get_untracked() != i {
+                inner.set(i);
+            }
+        });
+        view().flex_1().overflow_hidden().child(
+            view()
+                .w(px(200.0))
+                .h(px(120.0))
+                .origin_top_left()
+                .scale(move || outer.get())
+                .child(
+                    view()
+                        .w(px(100.0))
+                        .h(px(60.0))
+                        .origin_top_left()
+                        .scale(move || inner.get())
+                        .child(
+                            text("Nested")
+                                .test_id("nested")
+                                .absolute()
+                                .left(px(20.0))
+                                .top(px(20.0))
+                                .w(px(120.0))
+                                .h(px(24.0)),
+                        ),
                 ),
         )
     }
@@ -392,6 +441,50 @@ mod macos {
         println!("draw_on_show: sharp: ok");
     }
 
+    /// Two scaled ancestors: the outer's step does not describe the inner
+    /// text's density, and an inner change after the outer shrank must not
+    /// trust the mark the shrink replaced.
+    fn nested_scaled_window(mtm: MainThreadMarker) {
+        let window = window(mtm);
+        window.setContentSize(NSSize::new(400.0, 200.0));
+        let app = AppView::new(
+            mtm,
+            AppOptions {
+                size: (400, 200),
+                ..AppOptions::default()
+            },
+        );
+        let root = app.view();
+        window.setContentView(Some(&root));
+        window.orderFrontRegardless();
+        app.load(Root::of::<NestedSharpened>().into());
+        until("the nested mount", || find(&root, "nested").is_some());
+        let text = find(&root, "nested").unwrap();
+        until("the nested text", || drawn(&text));
+
+        let backing = window.backingScaleFactor();
+        let density = |what: &str, step: f64| {
+            until(what, || {
+                content_scale(&text).is_some_and(|s| (s / (backing * step) - 1.0).abs() < 1e-6)
+            });
+        };
+        // The density steps `raster_zoom` picks for the effective scales
+        // 4, 2, 4.6 and 5.014.
+        density("the initial nested density", 1.25_f64.powi(7));
+        NESTED.store(1, Ordering::SeqCst);
+        density("the outer shrink's density", 1.25_f64.powi(4));
+        NESTED.store(2, Ordering::SeqCst);
+        density("the inner growth's density", 1.25_f64.powi(7));
+        // The outer keeps its own density step (1.0 -> 1.09 is below
+        // 1.25x), while the text's effective scale 4.6 -> 5.014 steps.
+        NESTED.store(3, Ordering::SeqCst);
+        density("the inner crossing's density", 1.25_f64.powi(8));
+
+        app.stop();
+        window.close();
+        println!("draw_on_show: nested: ok");
+    }
+
     /// A native transform must reveal deferred text on itself and below
     /// it, without a layout change or a drawing-forcing screenshot.
     fn animated_window(mtm: MainThreadMarker) {
@@ -437,6 +530,9 @@ mod macos {
         }
         if runs("sharp") {
             sharp_scaled_window(mtm);
+        }
+        if runs("nested") {
+            nested_scaled_window(mtm);
         }
     }
 }
