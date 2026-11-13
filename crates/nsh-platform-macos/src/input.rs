@@ -1524,14 +1524,24 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
     own()
 }
 
-/// The innermost view at `p` (`view`'s coordinates) among the children
-/// in `view`'s container.
+/// The innermost view at `p` (`view`'s coordinates) among the children in
+/// `view`'s container, and any native raised among them (a lifted input's
+/// pad, which stacks there rather than over the whole view).
 fn pick_children(view: &NshView, p: (f32, f32)) -> Option<Hit> {
-    let p = into_container(view, p);
-    view.child_views()
-        .iter()
+    let container = view.container();
+    let cp = into_container(view, p);
+    let subviews: Vec<_> = container.subviews().iter().collect();
+    subviews
+        .into_iter()
         .rev()
-        .find_map(|child| into_child(child, p).and_then(|cp| pick_in(child, cp)))
+        .find_map(|sub| match NshView::from_ns(&sub) {
+            Some(child) => into_child(&child, cp).and_then(|c| pick_in(&child, c)),
+            None if on_native(view, &sub, p) => Some(Hit {
+                view: view.clone(),
+                native: true,
+            }),
+            None => None,
+        })
 }
 
 /// Whether `p` (`view`'s coordinates) is on `sub`, a hosted view of

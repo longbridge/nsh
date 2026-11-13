@@ -1,13 +1,16 @@
 //! An input under a scaled view (#1675): AppKit places hosted views from
 //! its own geometry, which does not see the layer transform above them, so
 //! the field drew at the untransformed place (blank when that is off the
-//! window) and clicks there missed. The pad is hosted above the transform
-//! with the box it shows and its natural bounds, so its geometry carries
-//! the scale: the editor draws in the box, a click lands where it shows,
-//! and the caret goes to the character under it.
+//! window) and clicks there missed. The pad is hosted directly above the
+//! transformed view in its parent's container, with the box it shows and its
+//! natural bounds, so its geometry carries the scale: the editor draws in
+//! the box, a click lands where it shows, the caret goes to the character
+//! under it, and a sibling stacked over the transformed view stays over the
+//! pad and takes its presses.
 
 use std::{
     cell::RefCell,
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
 
@@ -32,30 +35,52 @@ const SCALE: f64 = 2.0;
 /// The input's box in the scaled view's space: (x, y, width, height).
 const FIELD: (f32, f32, f32, f32) = (60.0, 50.0, 150.0, 30.0);
 
+/// A view stacked over the middle of the field's box on screen (inside the
+/// window, so a press there reaches it).
+const COVER: (f32, f32, f32, f32) = (200.0, 120.0, 100.0, 60.0);
+
+/// Presses of the view covering the field's right half.
+static COVER_PRESSES: AtomicUsize = AtomicUsize::new(0);
+
 /// A field at [`FIELD`] under a view scaled [`SCALE`] times about its top
-/// left corner.
+/// left corner, with a view stacked over its right half.
 #[component]
 fn Page() -> impl IntoElement {
-    view().size_full().child(
-        view()
-            .absolute()
-            .left(px(20.0))
-            .top(px(20.0))
-            .w(px(180.0))
-            .h(px(60.0))
-            .origin_top_left()
-            .scale(SCALE as f32)
-            .child(
-                input()
-                    .absolute()
-                    .left(px(FIELD.0))
-                    .top(px(FIELD.1))
-                    .w(px(FIELD.2))
-                    .h(px(FIELD.3))
-                    .test_id("field")
-                    .default_value("Hello world"),
-            ),
-    )
+    view()
+        .size_full()
+        .child(
+            view()
+                .absolute()
+                .left(px(20.0))
+                .top(px(20.0))
+                .w(px(180.0))
+                .h(px(60.0))
+                .origin_top_left()
+                .scale(SCALE as f32)
+                .test_id("scaled")
+                .child(
+                    input()
+                        .absolute()
+                        .left(px(FIELD.0))
+                        .top(px(FIELD.1))
+                        .w(px(FIELD.2))
+                        .h(px(FIELD.3))
+                        .test_id("field")
+                        .default_value("Hello world"),
+                ),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(COVER.0))
+                .top(px(COVER.1))
+                .w(px(COVER.2))
+                .h(px(COVER.3))
+                .test_id("cover")
+                .on_press(|| {
+                    COVER_PRESSES.fetch_add(1, Ordering::SeqCst);
+                }),
+        )
 }
 
 /// The first view under `view` (itself included) that `matches`.
@@ -246,6 +271,30 @@ pub(super) fn run() {
         fail("the pad is still inside the input view".into());
     }
 
+    // The pad rides directly above the transformed view in its parent's
+    // container, so a sibling stacked over that view stays over the pad.
+    let scaled = view_with_id(&root, "scaled").expect("the scaled view");
+    let cover = view_with_id(&root, "cover").expect("the cover");
+    // SAFETY: AppKit's getters, on the main thread.
+    let holder = unsafe { scaled.superview() }.expect("the scaled view's container");
+    let pad_holder = unsafe { pad.superview() };
+    let subs: Vec<_> = holder.subviews().iter().collect();
+    let index = subs.iter().position(|v| std::ptr::eq(&**v, &*pad));
+    let below = index
+        .and_then(|i| i.checked_sub(1))
+        .and_then(|i| subs.get(i));
+    let above = index.and_then(|i| {
+        subs.iter()
+            .position(|v| std::ptr::eq(&**v, &*cover))
+            .map(|c| c > i)
+    });
+    if !pad_holder.is_some_and(|s| std::ptr::eq(&*s, &*holder))
+        || !below.is_some_and(|v| std::ptr::eq(&**v, &*scaled))
+        || above != Some(true)
+    {
+        fail("the pad is not stacked directly above the scaled view, under the cover".into());
+    }
+
     // It draws where the input view does, its text inside the box.
     let box_rect = drawn(&window, &input);
     let editor_rect = drawn(&window, &field);
@@ -338,6 +387,23 @@ pub(super) fn run() {
     let middle = insertion(box_rect.origin.x + 80.0);
     if !(3..="XHello world".len() - 2).contains(&middle) {
         fail(format!("a press in the text maps to {middle}, not in it"));
+    }
+
+    // A sibling stacked over the scaled view takes the press where it shows:
+    // the pad under it must not swallow it (it used to sit above every
+    // sibling, on the host view itself).
+    let before = COVER_PRESSES.load(Ordering::SeqCst);
+    click(
+        &window,
+        (COVER.0 + COVER.2 / 2.0) as f64,
+        (COVER.1 + COVER.3 / 2.0) as f64,
+    );
+    pump(150);
+    let pressed = COVER_PRESSES.load(Ordering::SeqCst);
+    if pressed != before + 1 {
+        fail(format!(
+            "a press under the cover reached the pad (cover presses {before} to {pressed})"
+        ));
     }
 
     surface.stop();
