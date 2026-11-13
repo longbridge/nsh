@@ -353,7 +353,7 @@ fn row(
         computed(move || {
             term.rev.get();
             let emu = term.emu.borrow();
-            let first_screen = emu.line_count() - term.size.borrow().rows as usize;
+            let first_screen = emu.line_count() - term.size.get().unwrap_or_default().rows as usize;
             let at_cursor = emu.cursor_position();
             (at.index() == first_screen + at_cursor.row as usize).then_some(at_cursor.col)
         })
@@ -566,7 +566,7 @@ fn sink(
             let at = term.emu.borrow().cursor_position();
             let frame = term.rows_frame.get();
             let lh = props.line_height.get();
-            let rows = term.size.borrow().rows as f32;
+            let rows = term.size.get().unwrap_or_default().rows as f32;
             let above = (frame.size.height - lh * rows).max(Points(0.0));
             point(
                 frame.origin.x + cell_width.get() * at.col as f32,
