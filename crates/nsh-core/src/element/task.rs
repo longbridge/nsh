@@ -341,6 +341,9 @@ impl FileAnswer {
 pub(crate) enum ClipboardRead {
     /// The text (`""` when it holds none).
     Text(AnswerSlot<String>),
+    /// The text for `Clipboard.readText`: `None` when the person refused
+    /// the read (iOS's paste prompt answered with Don't Allow Paste).
+    CheckedText(AnswerSlot<Option<String>>),
     /// Whether it holds text.
     Has(AnswerSlot<bool>),
     /// The image (`None` when it holds none, or one over

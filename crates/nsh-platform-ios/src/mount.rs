@@ -1903,13 +1903,16 @@ impl Mounter {
             },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
-                let (has, text) = crate::system::read_clipboard(has_only);
+                let (has, text, denied) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![
                     ("id", PayloadValue::Number(id as f64)),
                     ("has", PayloadValue::Bool(has)),
                 ];
                 if let Some(text) = text {
                     fields.push(("text", PayloadValue::Str(text)));
+                }
+                if denied {
+                    fields.push(("denied", PayloadValue::Bool(true)));
                 }
                 self.control.dispatch_event(
                     nsh_core::ROOT_ID,

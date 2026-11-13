@@ -436,6 +436,9 @@ pub(super) struct ClipboardAnswer {
     pub(super) has: bool,
     /// The text, for a text read.
     pub(super) text: Option<String>,
+    /// Whether the person refused a text read (iOS's paste prompt): the
+    /// clipboard holds text, but none was read.
+    pub(super) denied: bool,
     /// The image, for an image read.
     pub(super) image: Option<crate::element::ClipboardImage>,
     /// The size in encoded bytes of an image over
@@ -457,6 +460,7 @@ impl ClipboardAnswer {
             match (*k, v) {
                 ("has", crate::PayloadValue::Bool(b)) => answer.has = *b,
                 ("text", crate::PayloadValue::Str(t)) => answer.text = Some(t.clone()),
+                ("denied", crate::PayloadValue::Bool(b)) => answer.denied = *b,
                 ("uri", crate::PayloadValue::Str(u)) => uri = Some(u.clone()),
                 ("width", crate::PayloadValue::Number(n)) => width = *n,
                 ("height", crate::PayloadValue::Number(n)) => height = *n,
@@ -6127,10 +6131,12 @@ impl<M: TextEngine> Core<M> {
                 let id = self.components.next_clipboard_read;
                 self.components.next_clipboard_read += 1;
                 let command = match &read {
-                    ClipboardRead::Text(_) => Command::ReadClipboard {
-                        id,
-                        has_only: false,
-                    },
+                    ClipboardRead::Text(_) | ClipboardRead::CheckedText(_) => {
+                        Command::ReadClipboard {
+                            id,
+                            has_only: false,
+                        }
+                    }
                     ClipboardRead::Has(_) => Command::ReadClipboard { id, has_only: true },
                     ClipboardRead::Image(_) | ClipboardRead::CheckedImage(_) => {
                         Command::ReadClipboardImage {
@@ -6640,6 +6646,7 @@ impl<M: TextEngine> Core<M> {
         let ClipboardAnswer {
             has,
             text,
+            denied,
             image,
             too_large,
             files,
@@ -6647,6 +6654,9 @@ impl<M: TextEngine> Core<M> {
         let image = image.filter(|i| !i.url.is_empty());
         match self.components.clipboard_reads.remove(&id) {
             Some(ClipboardRead::Text(slot)) => slot.borrow_mut().deliver(text.unwrap_or_default()),
+            Some(ClipboardRead::CheckedText(slot)) => slot
+                .borrow_mut()
+                .deliver((!denied).then(|| text.unwrap_or_default())),
             Some(ClipboardRead::Has(slot) | ClipboardRead::HasImage(slot)) => {
                 slot.borrow_mut().deliver(has)
             }
