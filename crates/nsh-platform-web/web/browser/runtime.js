@@ -257,7 +257,7 @@ export function createBrowserHost(player) {
         dom.setMeasure((node, what) => modules.measure(node, what));
         animation = createAnimation(call, active, requestPump, env);
         const nsh = modules.exports.get("nsh") ?? {};
-        const canvas = createCanvas(call, reactive, dom, active, requestPump);
+        const canvas = createCanvas(call, reactive, dom, active, requestPump, (op, receiver, args) => modules.request(op, receiver, args));
         Object.assign(nsh, animation.api, canvas, { PanResponder: gestures.PanResponder });
         Object.assign(nsh, reactive, env.api, { List: lists.render, mount: dom.mount, resource: createResource(call, reactive, active, requestPump), keymap: createKeymap(call, reactive, dom, env.api.platform, requestPump, hot) });
         host = createHost(call, reactive, dom, env, active, nsh.host);

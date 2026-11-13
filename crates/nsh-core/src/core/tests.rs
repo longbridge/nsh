@@ -15440,6 +15440,190 @@ mod components {
         );
     }
 
+    /// Renders a drawing offscreen when pressed (`Painter::render`).
+    #[component]
+    fn OffscreenRenderer() -> impl IntoElement {
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("render {}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let image = crate::element::Painter::new()
+                    .fill_color(crate::Color(0xff00_00ff))
+                    .fill_rect(0.0, 0.0, 30.0, 20.0)
+                    .render(
+                        crate::Size::new(px(30.0), px(20.0)),
+                        crate::canvas::render::RenderOptions {
+                            scale: Some(2.0),
+                            ..Default::default()
+                        },
+                    );
+                spawn(async move {
+                    shown.set(match image.await {
+                        Ok(bytes) => format!("ok {}", bytes.len()),
+                        Err(e) => format!("failed {}", e.code().unwrap_or("")),
+                    });
+                });
+            }))
+    }
+
+    fn press_offscreen_renderer(canvas_render: bool) -> (Core<FakeEngine>, Vec<Command>) {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<OffscreenRenderer>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let renders = c
+            .commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: command @ Command::RenderCanvas { .. },
+                } => Some(command),
+                _ => None,
+            })
+            .collect();
+        (c, renders)
+    }
+
+    #[test]
+    fn components_render_drawings_offscreen() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let [
+            Command::RenderCanvas {
+                id,
+                drawing,
+                width,
+                height,
+                scale,
+                ..
+            },
+        ] = &renders[..]
+        else {
+            panic!("one render: {renders:?}");
+        };
+        assert_eq!((*width, *height, *scale), (60, 40, 2.0));
+        assert!(
+            drawing
+                .ops
+                .iter()
+                .any(|op| matches!(op, crate::canvas::CanvasOp::FillRect(_)))
+        );
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: *id,
+                result: Ok(vec![1, 2, 3, 4])
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 4");
+    }
+
+    fn render_id(renders: &[Command]) -> u32 {
+        match renders {
+            [Command::RenderCanvas { id, .. }] => *id,
+            _ => panic!("one render: {renders:?}"),
+        }
+    }
+
+    #[test]
+    fn offscreen_renders_take_ids_unique_in_the_process() {
+        // A replaced core's render may still be answered: the new core's
+        // requests must not share its number.
+        let (_old, old) = press_offscreen_renderer(true);
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let (old, id) = (render_id(&old), render_id(&renders));
+        assert_ne!(old, id);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: old,
+                result: Ok(vec![9]),
+            },
+        ));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1, 2]),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 2");
+    }
+
+    #[test]
+    fn offscreen_renders_too_large_for_the_platform_fail_with_the_quota_code() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: render_id(&renders),
+                result: Err(crate::canvas::render::RenderFailure::TooLarge(
+                    "over the device's bitmap limit".into()
+                )),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_NSH_QUOTA_EXCEEDED"
+        );
+    }
+
+    #[test]
+    fn offscreen_renders_fail_by_their_deadline_and_drop_late_answers() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let id = render_id(&renders);
+        c.timeout_canvas_render(id);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(shown.last().unwrap(), "render failed ETIMEDOUT");
+        assert!(c.components.canvas_renders.is_empty());
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1]),
+            },
+        ));
+        c.run_component_tasks();
+        let shown = c.commit().map(|b| texts(&b)).unwrap_or_default();
+        assert!(
+            !shown.iter().any(|t| t.starts_with("render ok")),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn components_render_nothing_offscreen_where_the_platform_renders_none() {
+        let (mut c, renders) = press_offscreen_renderer(false);
+        assert!(renders.is_empty(), "{renders:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
+    }
+
     #[test]
     fn components_read_images_over_the_limit_as_none() {
         let mut c = core();

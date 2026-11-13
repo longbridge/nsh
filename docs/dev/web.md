@@ -940,6 +940,12 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
   and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.
+- **Offscreen canvases** (`renderCanvas`, `docs/dev/canvas.md`): a size over the browser's canvas limit (iOS WebKit's
+  is 16777216 pixels in all; the probe of `offscreenCanvas` finds any browser's) answers `CANVAS_IMAGE.TOO_LARGE`,
+  which the app gets as `ERR_NSH_QUOTA_EXCEEDED`; the sizes that failed are remembered, so a size at least as large
+  fails without a canvas. Images are read back, so another origin's are loaded with CORS (`offscreenImage`); one its
+  server serves without CORS headers is loaded once more without CORS to tell why, and is skipped with a warning
+  naming it and its origin.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
   `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user. An image read
   is the first image item as a `data:` URI the player encodes itself; the core measures it against

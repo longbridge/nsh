@@ -44,6 +44,8 @@
 //! a drawing names them and kept per canvas (their frames make bitmaps per
 //! device).
 
+mod offscreen;
+
 use std::{cell::RefCell, f64::consts::TAU, rc::Rc, sync::Arc};
 
 use nsh_core::{
@@ -56,6 +58,7 @@ use nsh_core::{
     },
     geometry::{Percentage, Radians, point, size},
 };
+pub(crate) use offscreen::render as render_offscreen;
 use rustc_hash::FxHashMap;
 use windows::{
     Win32::Graphics::{
@@ -1371,7 +1374,7 @@ impl<'a> Replay<'a> {
             } => {
                 let source =
                     source.map(|s| [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]);
-                self.image(&image.uri, source, dest)?
+                self.image(&image.uri, image.density(), source, dest)?
             }
         }
         Ok(())
@@ -2327,6 +2330,7 @@ impl<'a> Replay<'a> {
     fn image(
         &mut self,
         uri: &str,
+        density: f32,
         source: Option<[f32; 4]>,
         dest: &[Num; 4],
     ) -> windows::core::Result<()> {
@@ -2349,9 +2353,7 @@ impl<'a> Replay<'a> {
             return Ok(());
         }
         let [dx, dy, dw, dh] = dest.map(|v| self.n(v));
-        // Missing sizes are the source's.
-        let dw = if dw.is_nan() { sw } else { dw };
-        let dh = if dh.is_nan() { sh } else { dh };
+        let [dw, dh] = dest_size([dw, dh], [sw, sh], density);
         if dw == 0.0 || dh == 0.0 {
             return Ok(());
         }
@@ -2375,6 +2377,17 @@ impl<'a> Replay<'a> {
             Ok(())
         })
     }
+}
+
+/// `drawImage`'s destination size: the given one, or where it is missing
+/// (NaN) the source's pixels over the file name's density (`@3x`, as an
+/// `Image`'s), never the screen's scale.
+fn dest_size([dw, dh]: [f64; 2], [sw, sh]: [f64; 2], density: f32) -> [f64; 2] {
+    let density = f64::from(density);
+    [
+        if dw.is_nan() { sw / density } else { dw },
+        if dh.is_nan() { sh / density } else { dh },
+    ]
 }
 
 /// A rectangle with its size made positive.
@@ -3533,6 +3546,15 @@ mod tests {
             CanvasOp::Stroke(None),
         ];
         assert!(recorded(&gfx, &ops, &args).iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn an_image_without_a_size_is_its_pixels_over_its_file_density() {
+        let nan = f64::NAN;
+        assert_eq!(dest_size([nan, nan], [60.0, 30.0], 1.0), [60.0, 30.0]);
+        assert_eq!(dest_size([nan, nan], [60.0, 30.0], 3.0), [20.0, 10.0]);
+        assert_eq!(dest_size([nan, 7.0], [60.0, 30.0], 2.0), [30.0, 7.0]);
+        assert_eq!(dest_size([5.0, 7.0], [60.0, 30.0], 3.0), [5.0, 7.0]);
     }
 
     /// An image at zero global alpha is skipped on the alpha alone; at a

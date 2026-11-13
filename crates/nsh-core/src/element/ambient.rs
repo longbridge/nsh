@@ -696,6 +696,16 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
+    act(action);
+    answer
+}
+
 /// Whether the platform lets the user pick a color on the screen
 /// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
 pub fn can_pick_screen_color() -> bool {

@@ -569,6 +569,7 @@ fn initial_environment() -> Environment {
         color_scheme: ColorScheme::Light,
         os: Os::Windows,
         idiom: Idiom::Desktop,
+        canvas_render: true,
         file_requests: true,
         notifications: true,
         audio: true,

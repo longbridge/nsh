@@ -241,6 +241,14 @@ pub(crate) fn file_request<T>(
     (result, Action::FileRequest(request, answer(slot)))
 }
 
+/// Renders `request` offscreen into an image ([`crate::canvas::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> (Answer<Result<Vec<u8>, super::JsError>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::RenderCanvas(Box::new(request), slot))
+}
+
 /// The color the user picks on the screen (none when cancelled).
 pub(crate) fn pick_screen_color() -> (Answer<Option<crate::Hsla>>, Action) {
     let (answer, slot) = Answer::new();
