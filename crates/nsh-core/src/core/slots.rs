@@ -342,7 +342,11 @@ impl<M: TextEngine> Core<M> {
             js.accessible = a.accessible;
             js.label = a.label.clone().map(SharedString::from);
             js.hint = a.hint.clone().map(SharedString::from);
-            js.description = a.description.clone().map(SharedString::from);
+            // Its own, not the text of an element describing it.
+            js.description = self
+                .own_description(key)
+                .unwrap_or_else(|| a.description.clone())
+                .map(SharedString::from);
             js.role = a.role;
             js.state = a.state;
             js.value = a.value.clone();

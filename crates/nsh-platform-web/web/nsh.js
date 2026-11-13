@@ -2115,9 +2115,10 @@ class Player {
   }
 
   /** The views that name others (`aria-activedescendant`,
-   * `aria-controls`) point at them by DOM id, after the batch made them:
-   * a row may be made after the field naming it. A view named that is
-   * not there yet is looked for again after the next batch. */
+   * `aria-controls`, `aria-describedby`) point at them by DOM id, after
+   * the batch made them: a row may be made after the field naming it. A
+   * view named that is not there yet is looked for again after the next
+   * batch. */
   linkRelations() {
     const pending = this.relating;
     this.relating = null;
@@ -2126,7 +2127,11 @@ class Player {
       const p = el._props ?? {};
       // The element that keeps the focus: an input's field.
       const focused = el._field ?? el;
-      for (const [name, id] of [["aria-activedescendant", p.activeDescendant], ["aria-controls", p.controls]]) {
+      for (const [name, id] of [
+        ["aria-activedescendant", p.activeDescendant],
+        ["aria-controls", p.controls],
+        ["aria-describedby", p.describedBy],
+      ]) {
         if (focused !== el) el.removeAttribute(name);
         const target = id == null ? null : this.view(id);
         if (!target) {
@@ -2863,9 +2868,9 @@ class Player {
     set("aria-valuetext", text);
     set("aria-live", p.live);
     set("aria-hidden", p.hidden && "true");
-    if (p.activeDescendant != null || p.controls != null || el._related) {
+    if (p.activeDescendant != null || p.controls != null || p.describedBy != null || el._related) {
       // Linked once the batch is applied (`linkRelations`).
-      el._related = p.activeDescendant != null || p.controls != null;
+      el._related = p.activeDescendant != null || p.controls != null || p.describedBy != null;
       (this.relating ??= new Set()).add(el);
     }
   }

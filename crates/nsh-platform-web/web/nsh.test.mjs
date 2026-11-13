@@ -336,6 +336,41 @@ test("a combo box's field names its highlighted row and its list by DOM id", () 
   assert.equal(field.attrs.get("aria-expanded"), "false");
 });
 
+test("a field names the line describing it by DOM id, followed as it comes and goes", () => {
+  const { player } = fakePlayer();
+  player.classPrefix = "nsh-p1-";
+  const element = (extra = {}) => {
+    const attrs = new Map();
+    return {
+      attrs,
+      id: "",
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+      ...extra,
+    };
+  };
+  const views = new Map();
+  player.view = (id) => views.get(id);
+  const field = element({ classList: { toggle() {} }, tagName: "INPUT" });
+  const el = element({ _field: field, _props: { label: "Name", describedBy: 4 } });
+  views.set(2, el);
+  // The error line is made after the field's props: linked once it is.
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.has("aria-describedby"), false, "not made yet");
+  const error = element();
+  views.set(4, error);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-describedby"), "nsh-p1-v4");
+  assert.equal(error.id, "nsh-p1-v4");
+  assert.equal(el.attrs.has("aria-describedby"), false, "on the field, which has the focus");
+  // The error is fixed: the field names none.
+  el._props = { label: "Name" };
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.has("aria-describedby"), false);
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
