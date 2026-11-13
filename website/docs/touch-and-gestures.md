@@ -439,7 +439,7 @@ While responding:
 
 | Rust | TSX | Description |
 |---|---|---|
-| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
+| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views, and on iOS the swipe back of the navigation stacks around it, from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
 | `.on_responder_reject(..)` | `onResponderReject` | Another view is the responder and would not let go. |
 | `.on_responder_start(..)` | `onResponderStart` | Another finger went down. |
 | `.on_responder_move(..)` | `onResponderMove` | A finger moved. |

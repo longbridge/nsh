@@ -519,6 +519,11 @@ Things that were found the hard way. Read the section of the area you change bef
   transition guards allow the gesture. `didShowViewController:` restores that editor if its page returns after
   cancellation and no other control took focus. Rejected gestures keep focus. The regression observes `onBlur` while the
   root's system-delivered touch is still down, rather than checking only after the page has detached.
+- **Interactive back and responders**: both pop recognizers sit on the navigation view, around every page, and
+  on iOS 26 the content one begins from a rightward drag anywhere in the page, so a drawing canvas's stroke would pop
+  its page while the responder still got the moves. A responder that blocks native gestures (`SetJsResponder`'s
+  `block`) turns them off until it lets go, as it does the pans of the scroll views around it
+  (`mount.rs` `set_js_responder`); turning a recognizer off also cancels a pop that began before the grant arrived.
 - **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
   UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
   keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
