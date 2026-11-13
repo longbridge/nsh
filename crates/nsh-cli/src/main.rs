@@ -19,6 +19,7 @@ mod package;
 mod platforms;
 mod play;
 mod publish_ios;
+mod render;
 mod run;
 mod runtime;
 mod rust_app;
@@ -136,6 +137,24 @@ enum Command {
         /// (`Screen.js`, ...), loaded on demand: how web apps are published.
         #[arg(long)]
         split: bool,
+    },
+    /// Render an app's page as static HTML at build time, without a
+    /// browser, for search engines: its first screen, laid out by the
+    /// browser at any width, with the page's head, links and the data the
+    /// app read, as JSON.
+    Render {
+        /// The entry module, or the app's directory (default: the current one).
+        #[arg(default_value = ".")]
+        entry: PathBuf,
+        /// The page's URL path (default `/`).
+        #[arg(long)]
+        path: Option<String>,
+        /// The site's URL, which relative requests resolve against.
+        #[arg(long, default_value = "http://localhost/")]
+        base: String,
+        /// The appearance the app renders in.
+        #[arg(long, default_value = "light")]
+        appearance: String,
     },
     /// Run an app's tests headless: its test files (`*.test.tsx`,
     /// `*.test.ts`, importing `nsh/test`), each test opening the app on an
@@ -615,6 +634,7 @@ impl Command {
             Command::Build { entry, .. }
             | Command::Test { entry, .. }
             | Command::Check { entry, .. }
+            | Command::Render { entry, .. }
             | Command::Dev { entry, .. }
             | Command::Run { entry, .. }
             | Command::Publish { entry, .. } => Some(entry),
@@ -882,6 +902,12 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             split,
         } => build::build(&entry, &out, release, split),
         Command::Check { entry, tsc, args } => check::check(&entry, tsc.as_deref(), &args),
+        Command::Render {
+            entry,
+            path,
+            base,
+            appearance,
+        } => render::render(&entry, path.as_deref(), &base, &appearance),
         Command::Test {
             path,
             entry,

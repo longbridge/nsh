@@ -1,8 +1,8 @@
-//! The CSS `font` of text styles (`css::css_font`).
+//! The CSS `font` of text styles (`nsh_html::css::css_font`) and the
+//! measurement rules of fonts (`css`).
 
 use nsh_core::{FontFamily, Points, ResolvedTextStyle};
-
-use crate::css::{css_font, family_list};
+use nsh_html::css::{css_font, family_list};
 
 fn style(family: Option<&str>) -> ResolvedTextStyle {
     ResolvedTextStyle {
@@ -84,8 +84,7 @@ fn the_shorthand_puts_the_family_before_the_system_stack() {
 #[test]
 fn numeric_variants_name_their_css() {
     use nsh_core::FontVariant;
-
-    use crate::css::font_variant_numeric;
+    use nsh_html::css::font_variant_numeric;
 
     assert_eq!(font_variant_numeric(FontVariant(0)), None);
     // Small caps are not numeric (canvas `font` takes them).

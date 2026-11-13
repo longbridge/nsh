@@ -81,6 +81,9 @@ crates/
   nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform;
                        feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
+  nsh-html/            Static HTML of an app's views with no platform: the CSS of NSH's styles (`css.rs`, which the web
+                       backend draws with) and a `Document` of a mounted tree from its mount batches, written as markup a
+                       browser lays out at any width (`nsh render`, docs/dev/native-render.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-updater/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/updater.md); `nsh-core`'s `runtime/updater.rs` is its JS face, `nsh/updater`
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
@@ -217,6 +220,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::elemen
 | packaging, the iOS / Android SDKs, native components | `docs/dev/embedding.md` |
 | `.nsh/types`, the dev server, hot reload | `docs/dev/tooling.md` |
 | the web runtime (`nsh-platform-web`), the website's demos | `docs/dev/web.md`, `website/README.md` |
+| `nsh render`: an app's pages as static HTML at build time, without a browser (static generation, SEO), `nsh-html` | `docs/dev/native-render.md` |
 | the Linux backend (`nsh-platform-linux`, GTK 4) | `docs/dev/linux.md` |
 | the macOS backend (`nsh-platform-macos`, AppKit) | `docs/dev/macos.md` |
 | the Windows backend (`nsh-platform-windows`, Win32 / Direct2D) | `docs/dev/windows.md` |

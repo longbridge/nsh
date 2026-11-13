@@ -191,7 +191,7 @@ See [nsh/desktop](../modules/nsh-desktop.md).
 ### nsh/web
 
 In browsers the app is a page of a site. `nsh/web`'s `Head` sets the page's title, description, canonical URL and
-metadata while it is mounted, for search engines and link previews. On the other platforms `Head` renders nothing. See [nsh/web](../modules/nsh-web.md) and [the web](./web.md#search-engines).
+metadata while it is mounted, for search engines and link previews. On the other platforms `Head` renders nothing; a page written ahead of time with [`nsh render`](./cli.md#nsh-render) carries the head it sets. See [nsh/web](../modules/nsh-web.md) and [the web](./web.md#search-engines).
 
 ### The status bar
 

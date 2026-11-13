@@ -1008,8 +1008,10 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 
 A site published with `nsh package --target web` can be read by search engines and link previews as server-rendered
 HTML is: its views carry the document's structure, its pages are URLs, and its head says what each page is.
-Prerendering (writing each URL's first screen as static HTML ahead of time, or on demand as incremental static
-regeneration does) is a tool of the site's own beside NSH; `examples/seo-site` is one (`server.mjs`, `render.mjs`).
+Prerendering at build time (writing each URL's first screen as static HTML when the site is built) is `nsh render`
+(`docs/dev/native-render.md`): it renders one page per run, and the site's own build decides which pages to render
+and writes the files (`examples/seo-site`'s `build.mjs` and `write-page.mjs`). Rendering on request, caching and
+revalidating are a service of the site's own, outside NSH.
 
 **Document elements.** `nsh.js` `elementTag` picks the HTML element a view or text is drawn as from its props
 (`encode.rs` `props_json`): `role="header"` is `h1` to `h6` by `accessibilityLevel` (`h2` without one, ARIA's
@@ -1026,7 +1028,9 @@ in it listens for `onContextMenu` (`contextMenu`, where the runtime otherwise pr
 backends store `web_element` and draw nothing differently.
 
 **The page's head.** `nsh/web` is a native module like the platform modules (`nsh_core::js::NATIVE_MODULES`): the
-QuickJS hosts serve `nsh-js`'s `web_page.rs` (`Head` renders nothing), the browser runtime its
+QuickJS hosts serve `nsh-js`'s `web_page.rs` (`Head` renders nothing: no node, no mount item; only in an app that is
+a page of a site, one whose bundle has a base URL as `nsh render`'s has, is it a zero-sized `nsh/head` component
+whose props `nsh_html::Document::head` folds as `page.js` does), the browser runtime its
 own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web` namespace). `page.js` runs in the
 page's realm (the app runs in its iframe's) and writes the page's real `<head>`: each mounted `Head` is an entry in
 mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later
@@ -1037,6 +1041,16 @@ the `setTitle` command, and the browser runtime's main window, `scope.js`, hands
 `setWindowTitle`; kept where the app is the page), else the page's own, written once the turn's history entries
 exist (after `syncHistory`, or after a traversal of its own lands) so each entry keeps its page's title. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
+
+**Static copies.** `nsh render` writes a page as static HTML (`docs/dev/native-render.md`) that the browser lays out
+at any width as the core would. Each view's layout comes from the core as CSS: `Core::layout_css(id)` (`nsh-core`
+`core/flow_css.rs`) writes a node's Taffy style (display, flex and grid container properties, its place in its
+parent's, its box) with React Native's defaults written out where CSS's differ; `nsh-html` writes the views as
+document elements, classes and text runs (texts as blocks whose runs flow inline and wrap in the browser, each line
+as tall as the core laid it out).
+
+**Prerendered pages.** The packaged page (`nsh-cli`'s `web/index.html`) removes `#prerendered` (the copy `nsh render`
+wrote) one frame after the app ran or when it fails to load.
 
 ## Not implemented
 

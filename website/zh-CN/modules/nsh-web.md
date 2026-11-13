@@ -6,7 +6,7 @@ order: 12.6
 
 # nsh/web
 
-`nsh/web` 提供 Web 上应用所在页面的能力：[`Head`](#head)，即文档的标题、描述和元数据，供搜索引擎收录、链接预览展示。该模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在手机和桌面上，`Head` 不渲染任何内容。
+`nsh/web` 提供 Web 上应用所在页面的能力：[`Head`](#head)，即文档的标题、描述和元数据，供搜索引擎收录、链接预览展示。该模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在手机和桌面上，`Head` 不渲染任何内容。用 [`nsh render`](../docs/cli.md#nsh-render) 提前写出的页面带有各个 `Head` 设置的 head。
 
 ```tsx
 import { Head } from "nsh/web";

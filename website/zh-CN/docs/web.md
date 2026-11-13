@@ -289,7 +289,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`，`data` 把运行时第一次需要时才下载的文件映射到 URL（`syntaxes`：`nsh-syntaxes.<digest>.bin`；默认是 `nsh.js` 旁边的 `nsh-<name>.bin`），`glue` 是 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 的运行时的 wasm-bindgen 胶水代码的 URL（`nsh-bindgen.<digest>.js`），播放器会随运行时一起加载它；`player.runModule(url, { capabilities, appId })` 在应用声明的能力（它的 `capabilities.json`）下运行应用，并把它的存储保存在 `nsh.json` 的 id 之下（没有 id 时保存在页面路径之下）。这些选项和应用图片里的相对 URL 都相对于创建播放器时页面的 URL（`player.baseURL`）解析，所以页面把地址改到其他目录后，它们仍能加载。`nsh package --target web` 写出的页面都用到了。
 
-`runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置；`runModule(url, { params })` 指定应用的 `host.params`：页面已经为应用准备好的 JSON 对象，比如首屏的数据。`nsh package --target web` 写出的页面里如果有 `<script type="application/json" id="nsh-params">`，就把它的 JSON 传给应用，这样提供页面的服务器可以随页面把数据交给应用，应用直接显示，不必再请求一次。
+`runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置；`runModule(url, { params })` 指定应用的 `host.params`：页面已经为应用准备好的 JSON 对象，比如首屏的数据。`nsh package --target web` 写出的页面里如果有 `<script type="application/json" id="nsh-params">`，就把它的 JSON 传给应用，这样提供页面的服务器可以随页面把数据交给应用，应用直接显示，不必再请求一次。[预渲染页面](#预渲染页面)也用这种方式把写入时所用的数据交给应用。
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` 运行以源码文本给出的 ES 模块，选项相同。使用 `nsh-playground.wasm` 时，`player.compileAndRun(tsx, name, options)` 会先编译 TSX，再用 `runSource` 的选项运行，结果是编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
@@ -471,6 +471,17 @@ fn show_title(title: &str) {
     main_window().set(attributes);
 }
 ```
+
+### 预渲染页面
+
+搜索引擎读取的是站点发布的页面 HTML。站点在构建时把每个 URL 的第一个界面生成为静态页面，以 HTML 交给它们。打包出的页面提供了生成页面需要的能力：
+
+- 写出的页面可以用 `<script id="nsh-params" type="application/json">` 携带渲染时所用的数据：打包出的页面把它作为 `host.params` 交给应用，应用的第一帧因此显示同样的数据，同时重新读取接口。
+- 写出的副本放在 id 为 `prerendered` 的元素里：访问者立即看到它，应用绘制出自己的第一帧后，打包出的页面会移除它。
+
+[`nsh render`](./cli.md#nsh-render) 不用浏览器就能写出页面：它在 QuickJS 和 core 上运行应用，从页面地址启动，返回第一个界面的 HTML、页面的 head、页面链接到的站点路径以及应用读到的数据，每个页面约 10 ms。
+
+`examples/seo-site` 就是这样生成的站点：笔记和价格来自接口，构建脚本用 `nsh render` 渲染首页和每篇笔记，并写进打包出的站点。
 
 ## 限制
 

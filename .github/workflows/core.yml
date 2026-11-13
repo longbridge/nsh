@@ -21,6 +21,7 @@ on:
       - "crates/nsh-core/**"
       - "crates/nsh-dev/**"
       - "crates/nsh-engine/**"
+      - "crates/nsh-html/**"
       - "crates/nsh-i18n/**"
       - "crates/nsh-js/**"
       - "crates/nsh-macros/**"
@@ -61,7 +62,7 @@ env:
   # whole pipeline), so its tests all run.
   PACKAGES: >-
     -p nsh-core -p nsh-macros -p nsh-js -p nsh-base -p nsh-engine
-    -p nsh-bundler -p nsh-package -p nsh-testing
+    -p nsh-bundler -p nsh-package -p nsh-testing -p nsh-html
     --features nsh-bundler/bundle,nsh-testing/bundle,nsh-testing/agent
 
 jobs:

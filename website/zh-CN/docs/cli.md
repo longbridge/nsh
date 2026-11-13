@@ -235,6 +235,22 @@ nsh package my-app --target web
 
 参见[打包](./packaging.md)。
 
+## nsh render
+
+```sh
+nsh render [ENTRY] [--path <PATH>] [--base <BASE>] [--appearance <light|dark>]
+```
+
+在构建时不用浏览器，把应用的一个页面渲染成静态 HTML，用于搜索引擎。应用像在 `nsh test` 里一样运行在 QuickJS 和 core 上，从页面地址启动（它的 `UrlScheme.url()` 就是页面的 URL，和在浏览器中一样），相对地址的请求相对于站点解析，能力取自 `nsh.json`。应用稳定下来后，它的第一个界面被写成浏览器能在任意宽度下排版的 HTML，每个视图都写成 Web 上绘制它的元素（标题、`Link` 的 `<a href>`、`web={{ element }}`）。命令输出一个 JSON 对象：`title`、`lang`、`head`（各个 `Head` 设置的 `<head>` 元素）、`html`、`css`、`links`（页面链接到的站点路径）、`fetches`（应用读到的 JSON 响应，按路径，页面会把它作为 `host.params` 交给应用）、`timedOut` 和 `ms`；页面无法渲染时只有 `path` 和 `error`。除应用自己的请求外，一个页面约需 10 ms。构建时每个页面运行一次，再发布生成的文件。
+
+| 参数 | 说明 |
+|---|---|
+| `--path <PATH>` | 页面的 URL 路径，可带查询（默认 `/`）。 |
+| `--base <BASE>` | 站点的 URL（`http` 或 `https`），相对地址的请求和规范链接都相对于它解析（默认 `http://localhost/`）。 |
+| `--appearance <light\|dark>` | 应用渲染时的外观（默认 `light`）。 |
+
+[Web](./web.md#预渲染页面) 展示了用这种方式生成的站点。
+
 ## 外部 target
 
 `nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行在 NSH 之外构建的同名平台：`PATH` 上的程序 `nsh-platform-<name>`，就像 Cargo 运行 `cargo-<name>` 一样。它收到命令和除 `--target` 及其值以外的所有参数，以及环境变量 `NSH`（当前的 `nsh` 可执行文件）、`NSH_VERSION` 和 `NSH_TARGET`（平台名）；它的退出码就是命令的退出码。

@@ -1,0 +1,13 @@
+{
+  "name": "Market Notes",
+  "cssVars": {
+    "light": {
+      "up": "#138a5a",
+      "down": "var(--destructive)"
+    },
+    "dark": {
+      "up": "#45d49a",
+      "down": "var(--destructive)"
+    }
+  }
+}

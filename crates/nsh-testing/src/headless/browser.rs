@@ -82,7 +82,7 @@ enum Tell {
 }
 
 impl History {
-    fn new(url: url::Url) -> History {
+    fn new(url: &url::Url, base: url::Url) -> History {
         History {
             entries: vec![HistoryEntry {
                 url: url.to_string(),
@@ -91,7 +91,7 @@ impl History {
             index: 0,
             depth: 0,
             shown: url.to_string(),
-            base: url,
+            base,
             pending: None,
             push: false,
             sets: 0,
@@ -256,6 +256,11 @@ impl Headless {
     /// on the web ([`Os::Web`]), the app's first `app_url` /
     /// `UrlScheme.url()` reads it, Rust's `set_app_url` resolves against
     /// it, and the page's history starts with it ([`Headless::browser`]).
+    ///
+    /// A JS app whose bundle has a base URL (`Bundle::with_base_url`: a
+    /// page with a `<base href>`, the directory its site is published to)
+    /// resolves its addresses against that base instead, as the web runtime
+    /// hands the app one `document.baseURI` for both.
     pub fn start_at_page(
         mut config: nsh_engine::EngineConfig,
         url: &str,
@@ -265,15 +270,25 @@ impl Headless {
         if !matches!(page.scheme(), "http" | "https") {
             return Err(invalid(format!("a page's address is http(s): {url}")));
         }
+        let base = match &config.app {
+            nsh_engine::App::Js(bundle) => bundle.base_url.as_deref(),
+            nsh_engine::App::Rust(_) => None,
+        };
+        let base = match base {
+            Some(base) => {
+                url::Url::parse(base).map_err(|e| invalid(format!("the base {base}: {e}")))?
+            }
+            None => page.clone(),
+        };
         config.environment.os = Os::Web;
         let payload = EventPayload::Map(vec![
             (url_scheme::URL, PayloadValue::Str(page.to_string())),
             (url_scheme::PAGE, PayloadValue::Bool(true)),
             (url_scheme::QUIET, PayloadValue::Bool(true)),
-            (url_scheme::BASE, PayloadValue::Str(page.to_string())),
+            (url_scheme::BASE, PayloadValue::Str(base.to_string())),
         ]);
         let mut app = Self::launched_with(config, || nsh_core::ApproxTextEngine, Some(payload))?;
-        app.history = Some(History::new(page));
+        app.history = Some(History::new(&page, base));
         Ok(app)
     }
 
@@ -667,5 +682,20 @@ mod tests {
         app.first_render().unwrap();
         assert!(app.browser().entries().is_empty());
         assert!(app.browser().back().is_err());
+    }
+
+    #[test]
+    fn a_page_is_an_http_address_and_a_bundles_base_a_url() {
+        let config = || EngineConfig::new(Root::of::<Mail>());
+        for url in ["notes/apple", "app://notes/apple"] {
+            let error = Headless::start_at_page(config(), url).err().unwrap();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{url}");
+        }
+        // The base of a JS app's page is its bundle's, checked as the page.
+        let bundle = nsh_engine::Bundle::source(String::new()).with_base_url("no base");
+        let error = Headless::start_at_page(EngineConfig::new(bundle), PAGE)
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

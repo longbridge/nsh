@@ -60,6 +60,16 @@ fn start_in(
     declared: Option<nsh_core::access::Capabilities>,
     environment: nsh_core::platform::Environment,
 ) -> (Engine, Receiver<MountBatch>) {
+    start_on(app, declared, environment, None)
+}
+
+/// [`start_in`], the app a page of a site at `base_url` when given.
+fn start_on(
+    app: &str,
+    declared: Option<nsh_core::access::Capabilities>,
+    environment: nsh_core::platform::Environment,
+    base_url: Option<&str>,
+) -> (Engine, Receiver<MountBatch>) {
     // One directory per app started: the tests run in parallel.
     static STARTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -77,6 +87,9 @@ fn start_in(
     .unwrap();
     let mut app = Bundle::source(bundle.code);
     app.policy.declared = declared;
+    if let Some(base_url) = base_url {
+        app = app.with_base_url(base_url);
+    }
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(app),
@@ -122,6 +135,89 @@ fn texts(batch: &MountBatch) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+const HEAD_APP: &str = r#"import { mount, Text, View } from "nsh";
+import { Head } from "nsh/web";
+
+mount(() => (
+  <View>
+    <Head title="Notes" description="Short notes" meta={[{ name: "robots", content: "index" }]} />
+    <Text>Body</Text>
+  </View>
+));
+"#;
+
+/// `nsh/web`'s `Head` on a host that draws views (no page): no node, so no
+/// mount item and no component the platform has not registered.
+#[test]
+fn a_head_mounts_nothing_where_there_is_no_page() {
+    let (_engine, rx) = start(HEAD_APP);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(texts(&first).contains(&"Body".to_owned()));
+    let extra: Vec<_> = first
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                MountItem::Create {
+                    kind: ViewKind::Native,
+                    ..
+                } | MountItem::Component { .. }
+                    | MountItem::ComponentProps { .. }
+            )
+        })
+        .collect();
+    assert!(extra.is_empty(), "{extra:?}");
+    // The view and the text, as without the head.
+    let created = first
+        .items
+        .iter()
+        .filter(|i| matches!(i, MountItem::Create { .. }))
+        .count();
+    assert_eq!(created, 2);
+}
+
+/// In an app that is a page of a site (`Bundle::with_base_url`: `nsh
+/// render`), the head's props reach the mount batches.
+#[test]
+fn a_head_of_a_page_carries_its_props() {
+    let (_engine, rx) = start_on(
+        HEAD_APP,
+        None,
+        Default::default(),
+        Some("https://notes.example.com/"),
+    );
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(
+        first
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Component { name, .. } if &**name == "nsh/head"))
+    );
+    let props: Vec<(String, Option<JsonValue>)> = first
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::ComponentProps { props, .. } => Some(props.clone()),
+            _ => None,
+        })
+        .flatten()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    assert!(props.contains(&("title".into(), Some(json!("Notes")))));
+    assert!(props.contains(&("description".into(), Some(json!("Short notes")))));
+    assert!(props.contains(&(
+        "meta".into(),
+        Some(json!([{ "name": "robots", "content": "index" }]))
+    )));
+    // What the head does not set is not sent.
+    assert!(!props.iter().any(|(k, _)| k == "canonical"));
 }
 
 #[test]

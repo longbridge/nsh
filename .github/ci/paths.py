@@ -46,6 +46,7 @@ WORKFLOWS = {
         "packages": [
             "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
             "nsh-bundler", "nsh-package", "nsh-updater", "nsh-base", "nsh-testing",
+            "nsh-html",
         ],
         # The fonts nsh-core's, nsh-macros', nsh-bundler's and nsh-engine's
         # tests read.

@@ -21,9 +21,9 @@ use nsh_core::{
     AttributedText, Bounds, EllipsizeMode, Point, Points, ResolvedTextStyle, Size, TextAlign,
     TextEngine, TextLayout, TextLine, TextPosition, text_edit::next_cluster,
 };
+use nsh_html::css::{css_font, font_variant_numeric};
 use rustc_hash::FxHashMap;
 
-pub(crate) use self::css::{css_font, font_variant_numeric};
 use self::{
     css::{emoji_excess, figure_width, measured_by_char},
     hit::Stop,
@@ -1472,7 +1472,7 @@ impl TextEngine for WebTextEngine {
 #[cfg(feature = "browser-core")]
 pub(crate) fn canvas_width(font: &nsh_core::canvas::CanvasFont, text: &str) -> f32 {
     let css = crate::canvas::font(font);
-    match css::font_variant_numeric(font.variant) {
+    match font_variant_numeric(font.variant) {
         Some(numeric) => ffi::measure_numeric_text(&css, &numeric, text),
         None => ffi::measure_text(&css, text),
     }

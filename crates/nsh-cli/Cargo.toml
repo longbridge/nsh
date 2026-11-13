@@ -28,6 +28,7 @@ nsh-dev = { workspace = true, features = ["server"] }
 nsh-js = { workspace = true, features = ["zlib", "crypto"] }
 nsh-base = { workspace = true, features = ["editor", "emoji-picker", "highlight", "plot", "rich-editor", "term"] }
 nsh-package.workspace = true
+nsh-html.workspace = true
 nsh-testing = { workspace = true, features = ["agent", "bundle"] }
 crossbeam-channel.workspace = true
 anyhow.workspace = true

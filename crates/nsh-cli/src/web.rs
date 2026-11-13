@@ -1485,7 +1485,8 @@ fn page(parts: &PageParts<'_>) -> String {
         .replace("{{app}}", &app)
 }
 
-fn escape_html(text: &str) -> String {
+/// `text` as HTML text or an attribute's value in double quotes.
+pub(crate) fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

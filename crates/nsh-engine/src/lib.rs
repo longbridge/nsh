@@ -1311,6 +1311,8 @@ enum Message {
     /// Runs what is queued and due now, then calls back with whether the
     /// engine is idle ([`EngineControl::flush`]).
     Flush(Box<dyn FnOnce(bool) + Send>),
+    /// The layout of views as CSS ([`EngineControl::layout_css`]).
+    LayoutCss(Vec<NodeId>, LayoutCssDone),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -1524,6 +1526,18 @@ impl EngineControl {
         if self.modality.swap(code, Ordering::Relaxed) != code {
             let _ = self.tx.send(Message::Modality(modality));
         }
+    }
+
+    /// Calls `done` on the engine thread with the layout of each view of
+    /// `ids` as CSS declarations ([`nsh_core::Core::layout_css`]), in order,
+    /// leaving out ids that are no views: what a static copy of the page lays
+    /// it out with in a browser at any width (`nsh render`).
+    pub fn layout_css(
+        &self,
+        ids: Vec<NodeId>,
+        done: impl FnOnce(Vec<(NodeId, String)>) + Send + 'static,
+    ) {
+        let _ = self.tx.send(Message::LayoutCss(ids, Box::new(done)));
     }
 
     /// Reports the interaction states of view `id` that the core asked to
@@ -3681,6 +3695,9 @@ fn apply_environment<M: TextEngine>(
     }
 }
 
+/// What [`EngineControl::layout_css`] calls with the views' layouts.
+type LayoutCssDone = Box<dyn FnOnce(Vec<(NodeId, String)>) + Send>;
+
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
@@ -3922,6 +3939,13 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         // The driver handles it ([`Driver::handle`]), and keeps the ones
         // sent before it started for after the first frame.
+        Message::LayoutCss(ids, done) => {
+            done(
+                ids.into_iter()
+                    .filter_map(|id| state.core.layout_css(id).map(|css| (id, css)))
+                    .collect(),
+            );
+        }
         Message::Advance(..) | Message::Flush(..) => unreachable!("the driver moves the clock"),
         Message::Shutdown => return false,
     }

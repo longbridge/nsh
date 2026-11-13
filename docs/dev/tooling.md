@@ -461,7 +461,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   (`headless/browser.rs`, `Headless::browser`): the driver keeps the entries `nsh.js` keeps (a stack's pages and the
   modals, the root's `SetAppUrl` / `PushAppUrl`), brought to the screen after each batch, and the user's `back`,
   `forward`, `go` and `type_address` report the root's `UrlScheme` events the page reports (`quiet`, `change`,
-  `open`); a change to the web's history in `nsh.js` changes it too;
+  `open`); a change to the web's history in `nsh.js` changes it too; the page's base (`document.baseURI`) is the
+  bundle's `base_url` when it has one (a page with a `<base href>`, as `nsh render` renders), else the page's address;
 - URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
   `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`), but
   `{ opened: false }` for those matching the globs of `Headless::fail_open_urls` (`app.failOpenUrls`);

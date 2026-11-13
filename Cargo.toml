@@ -44,6 +44,7 @@ nsh-macros = { version = "0.5.0", path = "crates/nsh-macros" }
 # Without `zlib` and `crypto`: what enables the VM picks them (`nsh-engine`'s `js`, the web runtime).
 nsh-js = { version = "0.5.0", path = "crates/nsh-js", default-features = false }
 nsh-engine = { version = "0.5.0", path = "crates/nsh-engine", default-features = false }
+nsh-html = { version = "0.5.0", path = "crates/nsh-html" }
 nsh-bundler = { version = "0.5.0", path = "crates/nsh-bundler", default-features = false }
 nsh-platform-ios = { version = "0.5.0", path = "crates/nsh-platform-ios", default-features = false }
 nsh-platform-linux = { version = "0.5.0", path = "crates/nsh-platform-linux", default-features = false }

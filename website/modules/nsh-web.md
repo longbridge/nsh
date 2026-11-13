@@ -8,7 +8,8 @@ order: 12.6
 
 `nsh/web` holds what the page around an app has on the web: [`Head`](#head), the document's title, description and
 metadata, which search engines index and link previews show. The module can be imported on every platform, so one
-bundle runs everywhere: on the phones and the desktops `Head` renders nothing.
+bundle runs everywhere: on the phones and the desktops `Head` renders nothing. A page written ahead of time with
+[`nsh render`](../docs/cli.md#nsh-render) carries the head its `Head`s set.
 
 ```tsx
 import { Head } from "nsh/web";

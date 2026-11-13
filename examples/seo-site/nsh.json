@@ -1,0 +1,10 @@
+{
+  "name": "Market Notes",
+  "id": "com.example.seo-site",
+  "theme": "theme.json",
+  "capabilities": {
+    "network": {
+      "hosts": ["*"]
+    }
+  }
+}

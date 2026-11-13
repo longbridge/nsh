@@ -319,7 +319,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, `data` maps the files the runtime fetches when it first needs them to their URLs (`syntaxes`: `nsh-syntaxes.<digest>.bin`; by default `nsh-<name>.bin` next to `nsh.js`), and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.runModule(url, { capabilities, appId })` runs the app under the capabilities it declares (its `capabilities.json`) and keeps its storage under its `nsh.json` id (without one, under the page's path). Relative URLs, in these options and the app's images alike, resolve against the page's URL as the player is made (`player.baseURL`), so they still load after the page moves the address to another directory. The page `nsh package --target web` writes uses all of them.
 
-`runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are, and `runModule(url, { params })` the app's `host.params`: a JSON object the page already has for the app, such as the data of its first screen. The page `nsh package --target web` writes passes the JSON of a `<script type="application/json" id="nsh-params">` element when the page has one, so a server that serves the page can hand the app its data with it and the app shows it without asking for it again.
+`runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are, and `runModule(url, { params })` the app's `host.params`: a JSON object the page already has for the app, such as the data of its first screen. The page `nsh package --target web` writes passes the JSON of a `<script type="application/json" id="nsh-params">` element when the page has one, so a server that serves the page can hand the app its data with it and the app shows it without asking for it again. A [prerendered page](#prerendered-pages) hands the app the data it was written with this way.
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
@@ -536,6 +536,24 @@ fn show_title(title: &str) {
     main_window().set(attributes);
 }
 ```
+
+### Prerendered pages
+
+Search engines read a page's HTML as the site publishes it. A site gives them each URL's first screen as HTML by
+generating it when the site is built, as static pages. The packaged page offers what a generated page needs:
+
+- A written page may carry the data it was rendered with as `<script id="nsh-params" type="application/json">`: the
+  packaged page hands it to the app as `host.params`, so the app's first frame shows the same data while it reads its
+  API again.
+- The written copy goes in an element with the id `prerendered`: visitors see it at once, and the packaged page
+  removes it once the app has drawn its own first frame.
+
+[`nsh render`](./cli.md#nsh-render) writes a page without a browser: it runs the app on QuickJS and the core,
+started at the page's address, and answers with its first screen as HTML, the page's head, the site's paths it links
+to and the data it read, in about 10 ms a page.
+
+`examples/seo-site` is a site generated this way: notes and prices from an API, and a build script that renders the
+home page and each note with `nsh render` and writes them into the packaged site.
 
 ## Limits
 

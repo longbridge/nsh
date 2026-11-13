@@ -239,6 +239,29 @@ nsh package my-app --target web
 
 See [Packaging](./packaging.md).
 
+## nsh render
+
+```sh
+nsh render [ENTRY] [--path <PATH>] [--base <BASE>] [--appearance <light|dark>]
+```
+
+Renders a page of the app as static HTML at build time, without a browser, for search engines. The app runs as
+`nsh test` runs it, on QuickJS and the core, started at the page's address (its `UrlScheme.url()` is the page's URL,
+as in a browser), with relative requests resolved against the site and its capabilities from `nsh.json`. Once it
+settles, its first screen is written as HTML that the browser lays out at any width, each view as the element the web
+draws it as (a heading, a `Link`'s `<a href>`, `web={{ element }}`). It prints one JSON object: `title`, `lang`,
+`head` (the `<head>` elements its `Head`s set), `html`, `css`, `links` (the paths of the site it links to), `fetches`
+(the JSON responses it read, by path, which the page hands the app as `host.params`), `timedOut` and `ms`; when the page cannot be rendered, `path` and `error` alone. A page
+takes about 10 ms past the app's own requests. A build runs it once per page and publishes the files.
+
+| Flag | Description |
+|---|---|
+| `--path <PATH>` | The page's URL path, with its query (default `/`). |
+| `--base <BASE>` | The site's URL (`http` or `https`), which relative requests and the canonical link resolve against (default `http://localhost/`). |
+| `--appearance <light\|dark>` | The appearance the app renders in (default `light`). |
+
+[The web](./web.md#prerendered-pages) shows a site generated this way.
+
 ## External targets
 
 `nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` that is none of NSH's own run the platform of that name, built outside NSH: the program `nsh-platform-<name>` on your `PATH`, as Cargo runs `cargo-<name>`. It gets the command and every argument but `--target` and its value, and the environment variables `NSH` (this `nsh` executable), `NSH_VERSION` and `NSH_TARGET` (the name); its exit code is the command's.

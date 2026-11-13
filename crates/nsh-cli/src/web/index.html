@@ -55,6 +55,7 @@
   let player;
 
   function fail(title, detail) {
+    document.getElementById("prerendered")?.remove();
     status.hidden = false;
     status.className = "failed";
     status.setAttribute("role", "alert");
@@ -135,6 +136,9 @@
     const params = served ? JSON.parse(served.textContent) : undefined;
     if (app.rust) player.runRust();
     else await player.runModule(app.code, { capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks, nativeExports: app.nativeExports, params });
+    // A page written ahead of time (`nsh render`'s `#prerendered`) showed
+    // its first screen until the app drew its own.
+    requestAnimationFrame(() => document.getElementById("prerendered")?.remove());
     player.preloadSides(app.sides);
   } catch (err) {
     fail("This app could not be loaded.", String(err?.message ?? err));

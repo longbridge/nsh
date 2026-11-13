@@ -19121,6 +19121,214 @@ fn web_element_is_a_view_prop() {
     )));
 }
 
+/// A view's layout as CSS (`Core::layout_css`, a static copy of a web
+/// page): its container and item properties and its box, React Native's
+/// defaults written out; no CSS for an id that is no view.
+#[test]
+fn layout_css_writes_a_views_layout_as_css() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(
+                2,
+                &[
+                    ("flexDirection", StyleValue::Str("row")),
+                    ("gap", StyleValue::Number(8.0)),
+                    ("padding", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("flex", StyleValue::Number(1.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    let row = c.layout_css(2).unwrap();
+    for part in [
+        "display:flex;",
+        "flex-direction:row;",
+        "column-gap:8px;",
+        "padding:10px 10px 10px 10px;",
+    ] {
+        assert!(row.contains(part), "{part} in {row}");
+    }
+    assert!(c.layout_css(4).unwrap().contains("flex-grow:1;"));
+    // React Native's defaults, where CSS's differ.
+    let plain = c.layout_css(6).unwrap();
+    assert!(plain.contains("flex-direction:column;"), "{plain}");
+    assert!(plain.contains("flex-shrink:0;"), "{plain}");
+    assert_eq!(c.layout_css(1000), None);
+}
+
+/// The layout CSS of view 2 styled `style`, under the root.
+fn layout_css_of(style: &[(&'static str, StyleValue)]) -> String {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, style),
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    c.layout_css(2).unwrap()
+}
+
+/// A grid's tracks are written with their minimums, their line names and
+/// the implicit tracks, so the browser places the items where taffy does.
+#[test]
+fn layout_css_writes_a_grids_tracks_names_and_implicit_tracks() {
+    let s = StyleValue::Str;
+    let grid = |columns: &'static str| {
+        layout_css_of(&[("display", s("grid")), ("gridTemplateColumns", s(columns))])
+    };
+    let has = |css: &str, part: &str| assert!(css.contains(part), "{part} in {css}");
+    has(
+        &grid("1fr 2fr 100px auto"),
+        "grid-template-columns:1fr 2fr 100px auto;",
+    );
+    // A minimum that is not the short form's stays.
+    has(
+        &grid("repeat(3, minmax(0, 1fr))"),
+        "grid-template-columns:repeat(3,minmax(0px,1fr));",
+    );
+    has(
+        &grid("repeat(auto-fill, minmax(200px, 1fr))"),
+        "grid-template-columns:repeat(auto-fill,minmax(200px,1fr));",
+    );
+    has(
+        &grid("min-content max-content fit-content(120px) minmax(auto, 50%)"),
+        "grid-template-columns:min-content max-content fit-content(120px) minmax(auto,50%);",
+    );
+    // Line names, a repetition's own included.
+    has(
+        &grid("[full-start] 40px [content-start main] 1fr [content-end]"),
+        "grid-template-columns:[full-start] 40px [content-start main] 1fr [content-end];",
+    );
+    has(
+        &grid("[a] repeat(2, [col] 1fr [gap] 10px) [z]"),
+        "grid-template-columns:[a] repeat(2,[col] 1fr [gap] 10px) [z];",
+    );
+
+    let css = layout_css_of(&[
+        ("display", s("grid")),
+        ("gridTemplateRows", s("[top] 40px 1fr")),
+        ("gridAutoRows", s("minmax(20px, auto)")),
+        ("gridAutoColumns", s("80px")),
+        ("gridAutoFlow", s("column dense")),
+        ("gridColumn", s("content-start / 2 col")),
+        ("gridRow", s("span 2 / -1")),
+    ]);
+    for part in [
+        "grid-template-rows:[top] 40px 1fr;",
+        "grid-auto-rows:minmax(20px,auto);",
+        "grid-auto-columns:80px;",
+        "grid-auto-flow:column dense;",
+        "grid-column:content-start / 2 col;",
+        "grid-row:span 2 / -1;",
+    ] {
+        has(&css, part);
+    }
+    // The defaults, and a view that is no grid, write none of it.
+    let plain = layout_css_of(&[("gridAutoRows", s("80px"))]);
+    assert!(!plain.contains("grid-"), "{plain}");
+    let default = grid("1fr");
+    assert!(!default.contains("grid-auto"), "{default}");
+}
+
+/// Insets place an absolute view and move a relative one; shares stay
+/// shares, and sizing keywords, `box-sizing` and the direction are written
+/// where they differ from the page's rules.
+#[test]
+fn layout_css_writes_insets_shares_and_the_box() {
+    let (s, n) = (StyleValue::Str, StyleValue::Number);
+    let has = |css: &str, part: &str| assert!(css.contains(part), "{part} in {css}");
+
+    let absolute = layout_css_of(&[
+        ("position", s("absolute")),
+        ("top", n(10.0)),
+        ("right", s("25%")),
+    ]);
+    has(&absolute, "position:absolute;top:10px;right:25%;");
+    // Sides not set stay automatic.
+    assert!(!absolute.contains("bottom:"), "{absolute}");
+    assert!(!absolute.contains("left:"), "{absolute}");
+
+    let relative = layout_css_of(&[("top", n(-4.0)), ("left", s("10%"))]);
+    has(&relative, "position:relative;top:-4px;left:10%;");
+    let untouched = layout_css_of(&[]);
+    has(&untouched, "position:relative;flex-direction:column;");
+
+    let shares = layout_css_of(&[
+        ("width", s("50%")),
+        ("minWidth", n(40.0)),
+        ("maxHeight", s("80%")),
+        ("flexBasis", s("25%")),
+        ("marginLeft", s("auto")),
+        ("paddingTop", s("5%")),
+    ]);
+    for part in [
+        "width:50%;",
+        "min-width:40px;",
+        "max-height:80%;",
+        "flex-basis:25%;",
+        "margin:0px 0px 0px auto;",
+        "padding:5% 0px 0px 0px;",
+    ] {
+        has(&shares, part);
+    }
+    has(
+        &layout_css_of(&[("width", s("min-content"))]),
+        "width:min-content;",
+    );
+    has(
+        &layout_css_of(&[("width", s("fit-content"))]),
+        "width:fit-content;",
+    );
+
+    assert!(!untouched.contains("box-sizing"), "{untouched}");
+    assert!(!untouched.contains("direction:rtl"), "{untouched}");
+    has(
+        &layout_css_of(&[("boxSizing", s("content-box"))]),
+        "box-sizing:content-box;",
+    );
+    has(&layout_css_of(&[("direction", s("rtl"))]), "direction:rtl;");
+}
+
 /// `focusable={false}` reaches the platform in the view's props.
 #[test]
 fn focusable_is_a_view_prop() {
