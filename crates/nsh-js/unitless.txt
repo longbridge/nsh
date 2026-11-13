@@ -1,2 +1,3 @@
 # Public API of nsh-js with bare floats that have no unit (docs/dev/geometry.md,
 # "Typed API"): one item path per line, then the reason.
+host::Host::set_fps_reading(fps)                                 # a frame rate (frames per second)

@@ -1159,6 +1159,12 @@ impl<M: TextEngine> Core<M> {
         self.components.runtime.set_perf_monitor(enabled);
     }
 
+    /// The performance monitor's last frame rate reading (`fpsReading()`;
+    /// `None` while it does not measure): what read it runs again.
+    pub fn set_fps_reading(&mut self, fps: Option<f32>) {
+        self.components.runtime.set_fps_reading(fps);
+    }
+
     /// The displays components read ([`crate::element::desktop::displays`]),
     /// as the platform reports them: what read them runs again.
     pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {

@@ -10,6 +10,7 @@ import ModAppInfo from "./mod-app-info";
 import ModAudio from "./mod-audio";
 import ModClipboard from "./mod-clipboard";
 import ModFps from "./mod-fps";
+import ModFpsReading from "./mod-fps-reading";
 import ModUrlScheme from "./mod-url-scheme";
 import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
@@ -35,6 +36,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-audio": ModAudio,
   "mod-clipboard": ModClipboard,
   "mod-fps": ModFps,
+  "mod-fps-reading": ModFpsReading,
   "mod-url-scheme": ModUrlScheme,
   "mod-desktop": ModDesktop,
   "mod-device": ModDevice,

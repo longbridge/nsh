@@ -55,6 +55,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// The performance monitor's last frame rate reading, as the engine
+    /// reports it ([`fps_reading`]).
+    fps_reading: Option<Signal<Option<f32>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -189,6 +192,16 @@ impl super::Runtime {
         let signal = perf_monitor_signal();
         if signal.get_untracked() != enabled {
             signal.set(enabled);
+        }
+    }
+
+    /// The performance monitor's last frame rate reading (`None`: it does
+    /// not measure): what read it runs again.
+    pub(crate) fn set_fps_reading(&self, fps: Option<f32>) {
+        let _entered = self.enter();
+        let signal = fps_reading_signal();
+        if signal.get_untracked() != fps {
+            signal.set(fps);
         }
     }
 
@@ -1845,6 +1858,24 @@ pub fn fps_enabled() -> bool {
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
+}
+
+/// The performance monitor's frame rate (TS: `fpsReading()`): frames shown
+/// over the last second, read once a second while it measures
+/// ([`fps_enabled`]), `None` while it does not. Reading it in a binding
+/// subscribes it. An idle app reads low, which is not slowness.
+pub fn fps_reading() -> Option<f32> {
+    fps_reading_signal().get()
+}
+
+/// The frame rate reading's signal, none until the engine reports one.
+fn fps_reading_signal() -> Signal<Option<f32>> {
+    if let Some(signal) = with_data(|d| d.ambient.fps_reading) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(None));
+    with_data(|d| d.ambient.fps_reading = Some(signal));
+    signal
 }
 
 /// The performance monitor's signal, off until the platform reports it.

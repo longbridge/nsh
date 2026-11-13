@@ -52,11 +52,12 @@ enum Part {
     WindowState,
     Displays,
     Fps,
+    FpsReading,
     Shaders,
     WakeCount,
 }
 
-const PARTS: usize = 17;
+const PARTS: usize = 18;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -193,6 +194,9 @@ pub(crate) fn init(cx: *mut JsContext) {
         } else if i == Part::Fps as usize {
             // No performance monitor until the platform installs one.
             boolean(false)
+        } else if i == Part::FpsReading as usize {
+            // No reading until the monitor measured a second.
+            qjs::JS_NULL
         } else {
             UNDEFINED
         };
@@ -645,6 +649,23 @@ pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), (
     }
 }
 
+/// Takes in the performance monitor's last reading of the frame rate
+/// (`fpsReading()`): `None` while it does not measure.
+pub(crate) fn set_fps_reading(cx: *mut JsContext, fps: Option<f32>) -> Result<(), ()> {
+    reactive::set_signal(
+        cx,
+        env(cx).signals[Part::FpsReading as usize].get(),
+        fps.map_or(qjs::JS_NULL, number),
+    );
+    let failed = reactive::finish_value(cx, UNDEFINED);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(failed) } {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
 /// `value` as JS (owned): what Rust's conversion makes of it, `undefined`
 /// when it fails (it does not for the environment's plain objects).
 pub(crate) fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
@@ -940,6 +961,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Ts::value(
             "Whether the performance monitor measures (reactive): on with `--fps`,\n`NSH_FPS=1` or `setFpsEnabled(true)` where the platform has one.",
             "Accessor<boolean>",
+        ),
+    ),
+    (
+        "fpsReading",
+        Export::Value(|cx| accessor(cx, Part::FpsReading)),
+        Ts::value(
+            "The performance monitor's frame rate (reactive): frames shown over the\nlast second, read once a second while it measures (`fpsEnabled()`), `null`\nwhile it does not. An idle app reads low, which is not slowness.",
+            "Accessor<number | null>",
         ),
     ),
     (

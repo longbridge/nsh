@@ -97,6 +97,9 @@ const ENGINE_STACK_SIZE: usize = 8 * 1024 * 1024;
 /// Minimum time between idle cycle collections. QuickJS frees acyclic
 /// garbage immediately; only cycles (such as detached node subtrees, whose
 /// parent/child links reference each other) wait for the collector.
+/// How often the performance monitor's frame rate is read for
+/// `fpsReading()` while it measures.
+const FPS_READING_INTERVAL: Duration = Duration::from_secs(1);
 const IDLE_GC_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How long the engine has had nothing to do (no message, no timer due)
@@ -1801,6 +1804,7 @@ fn drive<M: TextEngine + 'static>(driver: &mut Driver<M>, rx: &Receiver<Message>
         }
         driver.turn();
         driver.state.record_perf(started);
+        driver.read_fps();
         if rx.is_empty() {
             driver.collect_if_idle();
         }
@@ -1925,6 +1929,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
                 break;
             }
         }
+        self.driver.read_fps();
         self.driver.collect_if_idle();
         self.pumping
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2176,6 +2181,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             events: Vec::new(),
             trace: config.trace,
             perf: None,
+            fps_reading_at: None,
             perf_commit: perf::CommitTiming::default(),
             committed_since_gc: false,
             hot: Vec::new(),
@@ -2359,7 +2365,34 @@ impl<M: TextEngine + 'static> Driver<M> {
         } else {
             self.due()
         };
-        [due, gc_deadline].into_iter().flatten().min()
+        [due, gc_deadline, self.state.fps_reading_at]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
+    /// Reads the performance monitor's frame rate for `fpsReading()` when
+    /// a reading is due, once a second while it measures.
+    fn read_fps(&mut self) {
+        let Some(at) = self.state.fps_reading_at else {
+            return;
+        };
+        let now = Instant::now();
+        if now < at {
+            return;
+        }
+        self.state.fps_reading_at = Some(now + FPS_READING_INTERVAL);
+        let Some(fps) = self.state.perf.as_ref().map(|m| m.snapshot().fps) else {
+            return;
+        };
+        self.state.core.set_fps_reading(Some(fps));
+        if let Some(script) = &self.script {
+            script.set_fps_reading(Some(fps));
+        }
+        if let Some(batch) = self.state.commit(self.script.as_ref()) {
+            self.sink.submit(batch);
+        }
+        self.state.run_on_main_thread(&*self.sink);
     }
 
     /// When the next timer, task timer or throttled scroll or mouse move
@@ -2731,6 +2764,9 @@ struct State<M: TextEngine> {
     trace: bool,
     /// Where commit timings go ([`EngineControl::set_perf_monitor`]).
     perf: Option<Arc<perf::PerfMonitor>>,
+    /// When the monitor's frame rate is read next for `fpsReading()`
+    /// (while there is a monitor), on the system's time.
+    fps_reading_at: Option<Instant>,
     /// The core's share of the wake-up being measured (`layout`, `ops`,
     /// `items`; `js` is the rest of the wake-up).
     perf_commit: perf::CommitTiming,
@@ -3886,6 +3922,16 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.core.set_perf_monitor(monitor.is_some());
             if let Some(script) = script {
                 script.set_fps_enabled(monitor.is_some());
+            }
+            // A reading a second after the monitor starts; none without it.
+            state.fps_reading_at = monitor
+                .as_ref()
+                .map(|_| Instant::now() + FPS_READING_INTERVAL);
+            if monitor.is_none() {
+                state.core.set_fps_reading(None);
+                if let Some(script) = script {
+                    script.set_fps_reading(None);
+                }
             }
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();

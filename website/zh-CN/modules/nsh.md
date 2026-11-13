@@ -1076,6 +1076,18 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### fpsReading
+
+```ts
+const fpsReading: Accessor<number | null>;
+```
+
+监视器读到的帧率：最近一秒显示的帧数，监视器测量时（`fpsEnabled()`）每秒读一次，不测量时为 `null`，应用可以按自己的样式显示它。空闲的应用读数偏低，这不代表慢（只有应用有变化的屏幕刷新才计数）。无头测试也会测量，但不绘制帧，读数为 0。Rust：`fps_reading() -> Option<f32>`。
+
+```tsx
+<Text>{fpsReading() === null ? "" : `${Math.round(fpsReading()!)} FPS`}</Text>
+```
+
 ### shadersAvailable
 
 ```ts

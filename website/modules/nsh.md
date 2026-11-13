@@ -1114,6 +1114,18 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### fpsReading
+
+```ts
+const fpsReading: Accessor<number | null>;
+```
+
+The monitor's frame rate: frames shown over the last second, read once a second while it measures (`fpsEnabled()`), and `null` while it does not, so an app can show it its own way. An idle app reads low, which is not slowness (only display refreshes in which the app changed count). Headless test runs measure too and draw no frames: they read 0. Rust: `fps_reading() -> Option<f32>`.
+
+```tsx
+<Text>{fpsReading() === null ? "" : `${Math.round(fpsReading()!)} FPS`}</Text>
+```
+
 ### shadersAvailable
 
 ```ts
