@@ -40,8 +40,8 @@ struct HarnessProps {
     /// A clear button `Clear` (labelled `Clear food`) while an item is
     /// chosen.
     cleanable: bool,
-    /// The app's trigger says its content is invalid at first; F6
-    /// toggles it.
+    /// The app's trigger says its content is invalid, and that it is
+    /// busy, at first; F6 toggles `invalid`.
     invalid: bool,
 }
 
@@ -92,6 +92,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let push = move |s: String| log.update(|l| l.push(s));
     let items = signal(props.items.clone());
     let invalid = signal(props.invalid);
+    // Only the trigger that starts invalid is busy too, so that the other
+    // tests' trigger carries no state of the app's.
+    let busy = props.invalid;
     on_key("f6", move |_| invalid.update(|i| *i = !*i));
     on_key("f5", move |_| {
         items.set(vec![
@@ -114,7 +117,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 .test_id("trigger")
                 .accessibility_state(move || AccessibilityState {
                     invalid: invalid.get(),
-                    busy: true,
+                    busy,
                     ..AccessibilityState::default()
                 })
                 .w(px(160.0))
