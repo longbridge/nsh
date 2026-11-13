@@ -419,6 +419,10 @@ async function changeLanguage(language: string) {
 总会退出。最后一个 listener 停止后，「退出」项和快捷键恢复立即退出。系统结束应用（用户注销、关机）时不会询问。
 它适用于 macOS、Windows 和 Linux 的独立应用；拥有窗口的 GPUI 应用以 `CloseRequest::Quit` 收到这个请求。
 
+在 Web 上，关闭标签页、刷新和离开页面就是用户的退出。浏览器当场决定，并用它自己的提示询问，所以只要有 listener 在监听
+`quitRequest`，浏览器就会在页面离开前询问用户，listener 不会被调用。只在有东西会丢失时（上传进行中、工作未保存）监听，
+完成后停止：页面随即恢复立即离开。浏览器只在用户与页面交互过之后才会询问。
+
 ```rust tabs
 use nsh_core::{
     element::desktop::{on_app_quit, on_quit_request, quit},

@@ -1578,6 +1578,7 @@ class Player {
   reset() {
     this.stop();
     this.audioDispose();
+    this.askBeforeLeaving(false);
     this.resetHistory();
     this.app = (this.app ?? 0) + 1;
     const root = this.root;
@@ -6398,6 +6399,7 @@ class Player {
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
       case "pushAppUrl": this.setPageUrl(args[0], true); break;
+      case "quitOnRequest": this.askBeforeLeaving(!args[0]); break;
       case "exitApp": {
         const app = this.app;
         // Finish the current engine call before releasing its surface.
@@ -6433,6 +6435,27 @@ class Player {
   }
 
 
+
+  /** Whether leaving the page (closing its tab, reloading, going to
+   * another site) asks the user first: on while the app listens to quit
+   * requests (`quitOnRequest` false). The browser decides at once and
+   * shows its own question, so the app's listener is not called; the
+   * listener is only there while it is needed, as one keeps the page out
+   * of the back / forward cache. */
+  askBeforeLeaving(ask) {
+    if (typeof window === "undefined" || !ask === !this.leaveGuard) return;
+    if (ask) {
+      this.leaveGuard = (event) => {
+        event.preventDefault();
+        // Browsers before `preventDefault` was enough.
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", this.leaveGuard);
+    } else {
+      window.removeEventListener("beforeunload", this.leaveGuard);
+      this.leaveGuard = null;
+    }
+  }
 
   /** Has screen readers read `text` (`announce`), through the live region. */
   announce(text) {

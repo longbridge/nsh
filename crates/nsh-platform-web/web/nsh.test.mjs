@@ -2708,3 +2708,57 @@ test("a page without the async clipboard reports a write with a warning", async 
   await player.writeClipboardImage("data:image/png;base64,");
   assert.equal(log.warnings.length, 1);
 });
+
+test("while the app listens to quit requests, leaving the page asks first", () => {
+  const listeners = new Map();
+  const saved = { window: globalThis.window };
+  globalThis.window = {
+    addEventListener(type, listener) {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
+    removeEventListener(type, listener) {
+      listeners.set(type, (listeners.get(type) ?? []).filter((l) => l !== listener));
+    },
+  };
+  const leave = () => {
+    const event = {
+      defaultPrevented: false,
+      returnValue: undefined,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    for (const listener of listeners.get("beforeunload") ?? []) listener(event);
+    return event;
+  };
+  try {
+    const { player } = fakePlayer();
+    player.view = () => null;
+    assert.equal(leave().defaultPrevented, false);
+    // The app listens: quit requests no longer quit, so the browser asks.
+    player.op_cmd([0, 1, "quitOnRequest", false]);
+    const asked = leave();
+    assert.equal(asked.defaultPrevented, true);
+    assert.equal(asked.returnValue, "");
+    // Told twice, it still asks once.
+    player.op_cmd([0, 1, "quitOnRequest", false]);
+    assert.equal(listeners.get("beforeunload").length, 1);
+    // The last listener stopped: the page leaves at once again.
+    player.op_cmd([0, 1, "quitOnRequest", true]);
+    assert.equal(leave().defaultPrevented, false);
+    // A new run starts without the replaced app's question.
+    player.op_cmd([0, 1, "quitOnRequest", false]);
+    Object.assign(player, {
+      stop() {},
+      audioDispose() {},
+      resetHistory() {},
+      live: {},
+      views: new Map(),
+      mouseTracked: new Set(),
+      wheelTracked: new Set(),
+      root: { textContent: "", append() {}, clientWidth: 390, clientHeight: 844 },
+    });
+    player.reset();
+    assert.equal(leave().defaultPrevented, false);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});

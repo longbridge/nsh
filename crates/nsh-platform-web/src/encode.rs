@@ -1673,6 +1673,18 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .str(uri)
                 .end();
         }
+        // The app listens to quit requests: the page cannot ask it as the
+        // tab closes, so the browser asks the user before leaving.
+        Command::Desktop(desktop) => match &**desktop {
+            nsh_core::desktop::DesktopCommand::SetQuitOnRequest(quit) => {
+                out.item("cmd")
+                    .num(id)
+                    .str("quitOnRequest")
+                    .bool(*quit)
+                    .end();
+            }
+            other => log::debug!("web: command {other:?} is not supported"),
+        },
         // A browser's bars are the browser's; the browser's own developer
         // tools measure the page.
         Command::StatusBar(_) | Command::PerfMonitor(_) => {}

@@ -83,7 +83,10 @@ impl Application {
     /// longer quit: the app decides (it asks the user, saves, waits for work
     /// to finish), then calls `quit()`. The system ending the app (logging
     /// out, shutting down) never asks. Standalone apps on macOS, Windows and
-    /// Linux. Returns a function that stops listening.
+    /// Linux; on the web, while anything listens, the browser asks the user
+    /// before the page leaves (closing its tab, reloading) and the listener
+    /// is not called, so listen there only while leaving would lose
+    /// something. Returns a function that stops listening.
     #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance>) -> Stop)]
     #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]
     #[overload(fn(event: ApplicationQuitEvent, listener: Callback<()>) -> Stop)]

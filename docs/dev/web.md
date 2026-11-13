@@ -452,6 +452,12 @@ cryptographic entropy comes from the browser's `crypto.getRandomValues`. The `pa
 
 A granted `process.exit(code?)` follows the engine's `ExitApp` command to the player. The player queues `Player.reset()` in a microtask after the current mount batch returns, stopping the app and clearing its surface while retaining the host page. Deferring disposal avoids reentering and freeing the VM during its batch callback; the queued action checks the app identity so it cannot reset a replacement app.
 
+While the app listens to quit requests (`on_quit_request`, `Application.on("quitRequest")`), the core's
+`SetQuitOnRequest(false)` reaches the player as `quitOnRequest`, and the player holds a `beforeunload` listener that
+has the browser ask before the page leaves (`Player.askBeforeLeaving`). The browser cannot wait for the app, so the
+app's listener is not called; the listener is removed as soon as the app stops listening and on `reset()`, as a page
+with one leaves the back / forward cache.
+
 ## The playground's compiler
 
 Feature `compiler` adds `nsh_compile` (and `nsh_compiled_ptr` / `_len`): `nsh_bundler::compile_module`, the one-module

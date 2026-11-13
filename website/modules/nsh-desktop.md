@@ -429,6 +429,12 @@ stops, the Quit item and the key quit at once again. The system ending the app (
 shutting down) never asks. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
 gets the request as `CloseRequest::Quit`.
 
+On the web, closing the tab, reloading and leaving the page are the user's quit. The browser decides on the spot and
+asks with its own question, so while anything listens to `quitRequest` the browser asks the user before the page goes,
+and the listener is not called. Listen there only while something would be lost (an upload running, work not saved)
+and stop when it is done: the page then leaves at once again. Browsers ask only after the user has interacted with the
+page.
+
 ```rust tabs
 use nsh_core::{
     element::desktop::{on_app_quit, on_quit_request, quit},
