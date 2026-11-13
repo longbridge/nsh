@@ -162,6 +162,24 @@ suggest a starting point.
 `footer` is content below the rows, in a part of its own (`footerClass`, `footerStyle`): an action ("Manage tags"),
 a count, a hint. It stays in place while the rows scroll.
 
+## Entrance and exit
+
+On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
+`popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its
+own look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run,
+and `onClose` follows. The keyboard focus is back on the input as it closes. Opened again on its way out, it returns to
+its look from where it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user
+asks for less motion it appears and goes at once; the sheet of touch screens slides in and out on its own.
+
+```tsx
+<Combobox
+  items={items}
+  popupClass="rounded-lg bg-popover p-1 shadow-md transition-all duration-150 ease-out"
+  popupStartingClass="opacity-0 -translate-y-1"
+  popupEndingClass="opacity-0"
+/>
+```
+
 ## Props
 
 | Prop | Rust | Type | Default | Description |
@@ -179,6 +197,8 @@ a count, a hint. It stays in place while the rows scroll.
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What the choice is about, for screen readers. |
 | `placement`, `align`, `offset`, `margin` | `.placement(..)`, ... | as `Select`'s | `"bottom"`, `"start"`, 0, 0 | Desktops: where the popup goes against the field. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (touch screens). |
+| `popupStartingClass`, `popupStartingStyle` | `.popup_starting_class(..)`, `.popup_starting_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popup's look in its first frame, over its own: its transitions run from it. |
+| `popupEndingClass`, `popupEndingStyle` | `.popup_ending_class(..)`, `.popup_ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popup's look once closed, over its own: it stays while its transitions run. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The backdrop behind the sheet. |
 | `listClass`, `listStyle` | `.list_class(..)`, `.list_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The list, the scroll view of the rows. |
 | `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each item's row: `focus:` while highlighted, `selected:` while selected, `disabled:` while it cannot be. |

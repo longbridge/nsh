@@ -1672,6 +1672,17 @@ impl RichEditorApi {
         named("exitSuggestion", serde_json::json!({ "key": key }))
     }
 
+    /// Tells the plugin keyed `key` whether the app's list shows for the
+    /// active query: closed, its `captureKeys` go on to the editor (Enter
+    /// sends or splits the line), Escape still dismisses. Say it again when
+    /// the query changes; until then the list is open and takes the keys.
+    pub(crate) fn set_suggestion_open(open: bool, key: Option<String>) -> RichCommand {
+        named(
+            "setSuggestionOpen",
+            serde_json::json!({ "open": open, "key": key }),
+        )
+    }
+
     /// Replaces `range` (a suggestion's) with a mention of `id` labeled
     /// `label` and a space (Tiptap's Mention command).
     pub(crate) fn insert_mention(

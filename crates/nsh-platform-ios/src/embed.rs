@@ -557,6 +557,15 @@ pub extern "C" fn nsh_status_bar_animation() -> objc2_ui_kit::UIStatusBarAnimati
     crate::status_bar_animation()
 }
 
+/// Internal: the bridge behind `NshAppView.supportedInterfaceOrientations`
+/// (`NativeShell.swift`), which host apps use: the orientations the page
+/// shown asked for (`supportedOrientations`), empty when no page asks.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_supported_orientations() -> objc2_ui_kit::UIInterfaceOrientationMask {
+    main_thread();
+    crate::system::page_orientations().unwrap_or(objc2_ui_kit::UIInterfaceOrientationMask(0))
+}
+
 /// The keys, revocations and accepted builds that signed packages are
 /// verified against (opaque to C). Usable from any thread.
 pub struct NshTrust {

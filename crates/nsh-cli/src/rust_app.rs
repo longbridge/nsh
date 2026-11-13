@@ -605,7 +605,16 @@ fn hack_spec(package: &serde_json::Value, node: Option<&serde_json::Value>) -> O
 
 /// What a generated crate names of a platform crate's features: all but `js`
 /// and the standard JS modules, which a Rust app does not run.
-pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\"]";
+pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\", \"websocket\", \"updater\", \"svg\", \"net\"]";
+
+/// [`RUST_APP_PLATFORM`] for the platform crate `platform`, with the
+/// features only it has: Linux's `sound` (GStreamer).
+pub(crate) fn rust_app_platform(platform: &str) -> String {
+    match platform {
+        "nsh-platform-linux" => RUST_APP_PLATFORM.replacen(']', ", \"sound\"]", 1),
+        _ => RUST_APP_PLATFORM.to_owned(),
+    }
+}
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
@@ -1960,7 +1969,7 @@ panic = \"abort\"
         )?;
         self.write_rust_app(ws, root)?;
         write(&ws.join("rust-web/build.rs"), WEB_BUILD_RS)?;
-        let sets = self.rust_web_sets();
+        let sets = self.rust_sets();
         write(
             &ws.join("rust-web/lib.rs"),
             &format!(
@@ -2022,7 +2031,7 @@ panic = \"abort\"
     /// `run_rust` mounts the app's root.
     fn write_rust_runner(&self, ws: &Path, dir: &str, root: &RootConfig) -> anyhow::Result<()> {
         let app = self.dependencies();
-        let sets = self.sets();
+        let sets = self.rust_sets();
         let (os, lib, platform, exit) = match dir {
             "rust-linux" => (
                 "target_os = \"linux\"",
@@ -2057,7 +2066,7 @@ panic = \"abort\"
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, RUST_APP_PLATFORM),
+                self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -2915,7 +2924,7 @@ impl RustApp {
         format!("vec![{}]", sets.join(", "))
     }
 
-    /// The UI sets of a Rust app's web runtime: `nsh/base`'s core part
+    /// The UI sets of a Rust app's runners and web runtime: `nsh/base`'s core part
     /// only, then the app's ([`Self::sets`]). A Rust app runs no JS, so
     /// nothing makes a component by its registered name: its code makes
     /// each of `nsh/base`'s components by type (`nsh_base::button()`),
@@ -2924,7 +2933,7 @@ impl RustApp {
     /// `nsh/base` has, and the built-in scroll bars, the core part's.
     /// Registering every part would link every component into the module,
     /// the ones the app never makes included (`nsh_base::registry_of`).
-    fn rust_web_sets(&self) -> String {
+    fn rust_sets(&self) -> String {
         let mut sets = vec![
             "nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])".to_owned(),
         ];
@@ -4745,8 +4754,12 @@ panic = \"abort\"
                 "main.rs"
             };
             let code = read(&format!("{dir}/{file}"));
-            // A Rust app's web runtime takes `nsh/base`'s core part only.
-            let sets = if dir == "rust-web" {
+            // A Rust app's runners and web runtime run no JS: they take
+            // `nsh/base`'s core part only.
+            let sets = if matches!(
+                dir,
+                "rust-web" | "rust-linux" | "rust-macos" | "rust-windows" | "rust-ios"
+            ) {
                 "vec![nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part]), set_app_charts(), set_app_app_storage()]"
             } else {
                 sets

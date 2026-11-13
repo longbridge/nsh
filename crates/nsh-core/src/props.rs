@@ -251,7 +251,9 @@ pub struct Accessibility {
     pub hint: Option<Arc<str>>,
     /// `accessibilityDescription`: more about the element than its name
     /// (ARIA's `aria-description`): a dialog's message, what a field
-    /// expects.
+    /// expects. While `accessibilityDescribedBy` names a rendered element
+    /// with text, that text, which the core keeps current (ARIA's
+    /// `aria-describedby` wins over `aria-description` alike).
     pub description: Option<Arc<str>>,
     /// `role`.
     pub role: AccessibilityRole,
@@ -279,6 +281,12 @@ pub struct Accessibility {
     /// this one controls (ARIA's `aria-controls`): a combo box's listbox,
     /// a tab's panel. Resolved as [`Accessibility::active_descendant`].
     pub controls: Option<crate::NodeId>,
+    /// `accessibilityDescribedBy`: the view (its native id) whose text
+    /// describes this one (ARIA's `aria-describedby`): a field's error
+    /// line. Resolved as [`Accessibility::active_descendant`]; its text is
+    /// [`Accessibility::description`], so a platform without such a
+    /// relation reads it all the same.
+    pub described_by: Option<crate::NodeId>,
 }
 
 impl Accessibility {
@@ -376,6 +384,13 @@ pub enum AccessibilityProp {
     /// controls (ARIA's `aria-controls`): a combo box's listbox.
     #[prop(js = "accessibilityControls", with = crate::js::host_values::accessibility_controls, reset = AccessibilityProp::Controls(None), ts = "ViewRef | null")]
     Controls(Option<crate::element::ElementTarget>),
+    /// `accessibilityDescribedBy`: the element whose text describes this
+    /// one (ARIA's `aria-describedby`): a field's error or help line,
+    /// placed apart from it. Screen readers read that text after the
+    /// name, in the place of `accessibilityDescription` while it names a
+    /// rendered element with text.
+    #[prop(js = "accessibilityDescribedBy", with = crate::js::host_values::accessibility_described_by, reset = AccessibilityProp::DescribedBy(None), ts = "ViewRef | null")]
+    DescribedBy(Option<crate::element::ElementTarget>),
 }
 
 /// Android's press ripple (`android={{ ripple }}`).
@@ -451,6 +466,17 @@ pub struct ViewProps {
     /// keys); `Some(false)` keeps a view that takes presses out; `None`, the
     /// default, leaves it to the presses ([`ViewProps::focus_stop`]).
     pub focusable: Option<bool>,
+    /// Keys consumed by this view or a focused descendant before native
+    /// defaults run. Backends decide from the mounted rules without
+    /// waiting for a listener (`Interactive::capture_keys`).
+    pub key_capture: crate::KeyCapture,
+    /// Where keyboard ancestry continues for a portaled view (an overlay
+    /// whose native parent is its root view while its logical parent is
+    /// the view it is in): the logical parent's node id. Internal routing
+    /// only; native layout, focus and hit testing keep their parent. `None`
+    /// for ordinary views and for portals with no key listener or capture
+    /// rule on their logical ancestry.
+    pub key_parent: Option<crate::NodeId>,
     /// The view is a selectable view (`View`'s `selectable`): the
     /// texts in its subtree that are not `selectable={false}` share one
     /// selection, from text to text ([`crate::selection`]); an area inside
@@ -475,9 +501,8 @@ impl ViewProps {
     /// pressed by Return or Space (its keys reach it through the app's
     /// keymap while it has the focus), and a view needs no press handler to
     /// be focusable, which would take the presses of a pressable around it
-    /// (a chart in a card that opens a page). The platforms that move the
-    /// keyboard focus between views (macOS, the web, the headless driver)
-    /// all decide with this; inputs that edit are stops by their own rule,
+    /// (a chart in a card that opens a page). Backends use this decision
+    /// for view focus stops; inputs that edit are stops by their own rule,
     /// and each platform adds what it knows of visibility.
     pub fn focus_stop(&self, takes_presses: bool) -> bool {
         self.focusable.unwrap_or(takes_presses) && !self.accessibility.state.disabled

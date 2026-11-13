@@ -197,7 +197,9 @@ windows = { version = "0.62", features = [
   "Win32_System_Memory",
   "Win32_System_Ole",
   "Win32_System_Performance",
+  "Win32_System_Power",
   "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
@@ -224,7 +226,7 @@ webview2-com = "0.39"
 gtk4 = { version = "0.11", features = ["v4_14"] }
 pango = "0.22"
 pangocairo = "0.22"
-# The Linux backend's web views (its feature `webview`): WebKitGTK 6.0 (2.40+).
+# The Linux backend's web views (its feature `webview`): WebKitGTK 6.0 (2.42+ for downloads).
 webkit6 = "0.6"
 # The Linux backend's sounds: decoded once into memory, mixed in one pipeline
 # (GStreamer, which GTK's media streams already run on; the glib of gtk4's).
@@ -363,7 +365,10 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UILabel",
   "UILayoutGuide",
   "UILongPressGestureRecognizer",
+  "UIMenu",
   "UIMenuController",
+  "UIMenuElement",
+  "UIAction",
   "UIPasteboard",
   "UIPanGestureRecognizer",
   "UIRefreshControl",

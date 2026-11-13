@@ -23,7 +23,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
+    task::{
+        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
+        ImageSize,
+    },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -55,6 +58,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// What the performance monitor measured last, as the engine reports
+    /// it ([`perf_stats`]).
+    perf_stats: Option<Signal<Option<crate::platform::PerfStats>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -189,6 +195,16 @@ impl super::Runtime {
         let signal = perf_monitor_signal();
         if signal.get_untracked() != enabled {
             signal.set(enabled);
+        }
+    }
+
+    /// What the performance monitor measured last (`None`: it does not
+    /// measure): what read it runs again.
+    pub(crate) fn set_perf_stats(&self, stats: Option<crate::platform::PerfStats>) {
+        let _entered = self.enter();
+        let signal = perf_stats_signal();
+        if signal.get_untracked() != stats {
+            signal.set(stats);
         }
     }
 
@@ -647,6 +663,14 @@ pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
 }
 
+/// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
+/// text, and its HTML as the platform's HTML type, which apps that read
+/// formatting paste. Where the platform has no HTML on the clipboard (a
+/// terminal) the text only.
+pub fn set_clipboard_item(item: ClipboardItem) {
+    act(super::services::set_clipboard_item(item));
+}
+
 /// The text on the system clipboard, `""` when it holds none (TS:
 /// `Clipboard.readText`), to await in a task.
 pub fn clipboard_string() -> Answer<String> {
@@ -692,6 +716,16 @@ pub(crate) fn clipboard_checked_image() -> Answer<Result<Option<ClipboardImage>,
 /// `Clipboard.hasImage`).
 pub fn clipboard_has_image() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_image();
+    act(action);
+    answer
+}
+
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
     act(action);
     answer
 }
@@ -1847,6 +1881,33 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
+/// What the performance monitor measured over the last second (TS:
+/// `perfStats()`): its frame rate and more, read once a second while it
+/// measures ([`fps_enabled`]), `None` while it does not (and until its first
+/// second). Reading it in a binding subscribes it.
+pub fn perf_stats() -> Option<crate::platform::PerfStats> {
+    perf_stats_signal().get()
+}
+
+/// The performance stats' signal, none until the engine reports some.
+fn perf_stats_signal() -> Signal<Option<crate::platform::PerfStats>> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_stats) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(None));
+    with_data(|d| d.ambient.perf_stats = Some(signal));
+    signal
+}
+
+/// How the performance monitor shows (TS: `setFpsMode`), now and whenever it
+/// shows later: its whole panel ([`crate::FpsMode::Expanded`], the
+/// default), collapsed to its frame rate, or nothing while it still
+/// measures. A click on the panel switches between the first two. macOS's
+/// panel takes it; platforms without a panel ignore it.
+pub fn set_fps_mode(mode: crate::FpsMode) {
+    act(super::services::perf_monitor_mode(mode));
+}
+
 /// The performance monitor's signal, off until the platform reports it.
 fn perf_monitor_signal() -> Signal<bool> {
     if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
@@ -1878,6 +1939,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

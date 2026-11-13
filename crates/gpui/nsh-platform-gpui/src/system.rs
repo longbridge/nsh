@@ -1422,7 +1422,8 @@ mod os {
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
-        Command::SetClipboard(text) => {
+        // GPUI's clipboard items hold no HTML: the text only.
+        Command::SetClipboard(text) | Command::SetClipboardItem(nsh_core::element::ClipboardItem { text, .. }) => {
             let text = text.clone();
             crate::rt::on_app(move |cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
@@ -1493,6 +1494,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
         Command::PickFiles { id, request } => pick_files(surface, *id, request.clone()),
         Command::FileRequest { id, request } => file_request(surface, *id, request),
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
             // the surface). An embedded surface closes the window it is in,

@@ -218,6 +218,13 @@ final class SystemUi {
         if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText(null, text));
     }
 
+    /** {@code Clipboard.write}: a clip of text with its HTML, which apps that read formatting paste. */
+    static void setClipboardHtml(Context context, String text, String html) {
+        android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newHtmlText(null, text, html));
+    }
+
     /**
      * {@code Clipboard.readText} / {@code hasText}: the clip's text, null when it holds none;
      * with {@code hasOnly} "" for text, without reading the clip (its description says).

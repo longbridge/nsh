@@ -617,6 +617,7 @@ fn code_blocks_and_rules() {
                 language: Some("rust".into()),
                 meta: Some("title=\"main.rs\"".into()),
                 code: "fn main() {}".into(),
+                ..Default::default()
             }),
             Block::CodeBlock(CodeBlock::new(None, "indented")),
             Block::Rule,
@@ -1344,6 +1345,7 @@ fn streamed_fences_never_flash_empty_code_or_their_closer() {
             language: Some("py".into()),
             meta: None,
             code: "x\n``".into(),
+            ..Default::default()
         })]
     );
 }
