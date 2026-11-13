@@ -338,6 +338,10 @@ frame: changed views queue their old and new painted areas on their surface (`Su
 and the one before (`SwapChain::to_draw`), widened to the whole box and overflow of each shader view reading what is
 behind it that the damage meets (`with_backdrops`: the back buffer holds its own earlier output), and `Present1`
 presents only the changed rectangles.
+A subtree a frame leaves out (hidden, concealed, turned away, out of sight) forgets where it was painted
+(`NshView::forget_painted`): its old area was drawn by the change that left it out, and a record kept would add it to
+every later change of a view around it (a moved or shrunk panel's rows repainting their old area on each scroll
+frame). Each view knows whether its subtree holds a record at all, so these walks stop at subtrees that hold none.
 `Surface::invalidate` (theme, size, scale, device loss, composition) and changes it cannot bound draw the whole
 window. Changes wholly outside the window (an animation scrolled out of it) draw and present nothing.
 

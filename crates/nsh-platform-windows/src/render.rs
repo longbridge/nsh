@@ -689,7 +689,7 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
     if state.style.hidden || state.concealed || opacity <= 0.0 {
         drop(state);
         if cx.records {
-            view.set_painted(None);
+            view.forget_painted();
         }
         return;
     }
@@ -701,7 +701,7 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
     if crate::decor::backface_away(&state, &world) {
         drop(state);
         if cx.records {
-            view.set_painted(None);
+            view.forget_painted();
         }
         return;
     }
@@ -1008,7 +1008,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, pai
                     && hidden_by_clips(child, world, origin, visible)
                 {
                     if cx.records {
-                        child.set_painted(None);
+                        child.forget_painted();
                     }
                     continue;
                 }
@@ -2916,6 +2916,68 @@ mod tests {
         let fresh = target(&gfx, size);
         draw_into(&surface, &gfx, &fresh, 1.0, false, None, None, None).unwrap();
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
+    }
+
+    /// Where a subtree left out of a frame was painted is forgotten with
+    /// it: the views it holds would otherwise add where they were last
+    /// drawn to every later change of a view around them.
+    #[test]
+    fn a_subtree_left_out_forgets_where_it_was_painted() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (240, 240);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let panel = view(
+            Some(&surface.root),
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 200.0),
+        );
+        panel.state_mut().style.overflow_hidden = true;
+        let row = view(
+            Some(&panel),
+            4,
+            ViewKind::View,
+            rect(0.0, 100.0, 200.0, 40.0),
+        );
+        let cell = view(Some(&row), 6, ViewKind::View, rect(10.0, 10.0, 50.0, 20.0));
+        cell.state_mut().style.background_color = Color(0x3366_ccff);
+        let back = target(&gfx, size);
+        let partial = || {
+            let damage = surface.take_damage();
+            draw_into(
+                &surface,
+                &gfx,
+                &back,
+                1.0,
+                false,
+                None,
+                damage.as_deref(),
+                None,
+            )
+            .unwrap();
+        };
+        partial();
+        assert!(cell.painted_subtree().is_some());
+
+        // The panel shrinks: the row is out of its sight.
+        panel.state_mut().frame = rect(0.0, 0.0, 200.0, 50.0);
+        panel.moved();
+        partial();
+        let bottom = panel.painted_subtree().map(|a| a.bottom);
+        assert!(bottom.is_some_and(|b| b <= 52.0), "{bottom:?}");
+
+        // Shown again, then hidden: the same.
+        panel.state_mut().frame = rect(0.0, 0.0, 200.0, 200.0);
+        panel.moved();
+        partial();
+        assert!(cell.painted_subtree().is_some());
+        row.state_mut().style.hidden = true;
+        row.changed();
+        partial();
+        assert!(cell.painted_subtree().is_none());
     }
 
     /// A change wholly outside the window leaves nothing to draw, which
