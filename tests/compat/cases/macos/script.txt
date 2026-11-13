@@ -233,3 +233,9 @@ style id:material-surface glassEffect regular
 covers [props] macos
 covers [props] macos.backdrop
 covers [styles] glassTintColor
+# application-refused
+tap id:case-application-refused
+wait 300
+expect Minimized: unknown
+expect Launch at login: ERR_ACCESS_DENIED application
+covers [nsh/desktop] currentWindow

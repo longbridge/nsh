@@ -32,4 +32,6 @@ export 'Editor' in module 'nsh/base'`. Nothing checks at build time that an app'
 because `nsh` bundles against every part.
 
 `nsh-cli`'s generated crates and `xtask dist` use `default-features = false`: a new feature goes in `RUST_APP_PLATFORM`
-(`crates/nsh-cli/src/rust_app.rs`; one only a platform has, as Linux's `sound`, in `rust_app_platform`) and in `dist.rs`, or those builds lose it.
+(`crates/nsh-cli/src/rust_app.rs`; one only some platforms have, as Linux's `sound` or Linux's and Windows' `net`, in
+`rust_app_platform`: Cargo resolves the generated workspace for every target, so a feature named on a crate without it
+fails every build) and in `dist.rs`, or those builds lose it.
