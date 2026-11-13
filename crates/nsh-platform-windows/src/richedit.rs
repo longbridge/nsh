@@ -373,6 +373,37 @@ impl Editor {
         (min, max, pos, page)
     }
 
+    /// The height of the text laid out `width` pixels wide (pixels).
+    pub(crate) fn text_height(&self, width: i32) -> Option<i32> {
+        use windows::Win32::{
+            Foundation::SIZE,
+            Graphics::Gdi::{GetDC, ReleaseDC},
+            UI::Controls::RichEdit::{TXTNS_FITTOCONTENT, TXTNS_INCLUDELASTLINE},
+        };
+        let (mut w, mut h) = (width.max(1), 1);
+        // The extent (HIMETRIC) sets the width to fit the text in.
+        let extent = SIZE {
+            cx: w * 2540 / 96,
+            cy: 2540 / 96,
+        };
+        // SAFETY: the screen's DC, released below; local out values.
+        unsafe {
+            let dc = GetDC(None);
+            let done = self.services.TxGetNaturalSize(
+                1, // DVASPECT_CONTENT
+                dc,
+                Default::default(),
+                std::ptr::null_mut(),
+                (TXTNS_FITTOCONTENT.0 | TXTNS_INCLUDELASTLINE.0) as u32,
+                &extent,
+                &mut w,
+                &mut h,
+            );
+            ReleaseDC(None, dc);
+            done.ok().map(|_| h)
+        }
+    }
+
     /// Draws the text into `target` (an `ID2D1RenderTarget` whose
     /// transform maps client pixels), in `bounds`. False when the services
     /// would not draw: while an input method's edit holds the text (the
