@@ -43,6 +43,17 @@ pub fn enabled_by_env() -> bool {
         .is_some_and(|value| !matches!(value.to_str(), Some("" | "0" | "false")))
 }
 
+/// How the monitor shows at launch, as [`ENV_VAR`] names it: `collapsed`
+/// (the frame rate alone) or `hidden` (nothing on screen, still
+/// measuring); `None` for any other value, which shows it whole.
+pub fn mode_by_env() -> Option<nsh_core::FpsMode> {
+    match std::env::var(ENV_VAR).ok()?.as_str() {
+        "collapsed" => Some(nsh_core::FpsMode::Collapsed),
+        "hidden" => Some(nsh_core::FpsMode::Hidden),
+        _ => None,
+    }
+}
+
 /// The log target of the readings the platforms log once a second while
 /// the monitor runs (`--fps`). It is not `nsh::perf`, the timings of
 /// `--trace`, so a command line tells the two apart: `nsh run --fps` shows

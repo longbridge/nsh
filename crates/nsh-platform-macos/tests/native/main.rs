@@ -15,6 +15,8 @@
 #[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod fps_collapse;
+#[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
 mod input_hidden;
@@ -57,6 +59,8 @@ fn main() {
                 window_frames::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
+                fps_collapse::run();
             } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some()
                 || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
             {
@@ -74,6 +78,7 @@ fn main() {
                 window_frames::run();
                 ime::run();
                 input_hidden::run();
+                fps_collapse::run();
                 zoom::run();
                 mount::run();
                 // Last: it makes the process an accessory app.

@@ -1857,6 +1857,15 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
+/// How the performance monitor shows (TS: `setFpsMode`), now and whenever it
+/// shows later: its whole panel ([`crate::FpsMode::Expanded`], the
+/// default), collapsed to its frame rate, or nothing while it still
+/// measures. A click on the panel switches between the first two. macOS's
+/// panel takes it; platforms without a panel ignore it.
+pub fn set_fps_mode(mode: crate::FpsMode) {
+    act(super::services::perf_monitor_mode(mode));
+}
+
 /// The performance monitor's signal, off until the platform reports it.
 fn perf_monitor_signal() -> Signal<bool> {
     if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {

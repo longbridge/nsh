@@ -137,6 +137,11 @@ pub(crate) fn perf_monitor(enabled: bool) -> Action {
     Action::Command(ROOT_ID, Command::PerfMonitor(enabled))
 }
 
+/// How the performance monitor shows.
+pub(crate) fn perf_monitor_mode(mode: crate::FpsMode) -> Action {
+    Action::Command(ROOT_ID, Command::PerfMonitorMode(mode))
+}
+
 /// Puts `text` on the system clipboard.
 pub(crate) fn set_clipboard(text: String) -> Action {
     Action::Command(ROOT_ID, Command::SetClipboard(text))
