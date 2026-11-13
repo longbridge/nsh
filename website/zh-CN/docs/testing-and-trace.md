@@ -233,6 +233,14 @@ await app.press("Contact us");
 expect(app.openedUrls()).toEqual(["mailto:help@example.com"]);
 ```
 
+`app.failOpenUrls(url)` 让与它匹配的 URL 打开失败，就像设备上没有能打开它们的应用，测试便可检查链接没打开时应用显示什么：
+
+```tsx
+await app.failOpenUrls("https://example.com/*");
+await app.press("Read the guide");
+expect(app.shows("Could not open the link")).toBe(true);
+```
+
 ### 模拟网络
 
 `network` 按 `"<METHOD> <URL>"` 列出路由（只写 URL 表示 `GET`；`*` 匹配任意文字）。没有路由匹配的请求会失败，因此测试不会在
@@ -419,6 +427,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.openedUrls()` | 应用打开的 URL（`openUrl`），按顺序排列：只记录，不打开。 |
 | `await app.openWithUrl(url)` | 系统把一个打开应用的链接交给应用，就像用户在应用运行时打开链接一样（`UrlScheme.on("open")`；应用未认领的 scheme 的链接会被丢弃，与设备上一致），然后等待应用安静下来。仅限 headless 运行。 |
 | `await app.failImages(url)` | 从此刻起，来源为 `url` 的图片都加载失败，正在加载的也包括在内：每张图片都像在设备上一样用 `onError` 报告失败，测试便可检查应用改为显示的内容（头像的首字母、占位图）。`url` 整体匹配，其中的 `*` 匹配任意内容（`"https://cdn.example.com/avatars/*"`），与 `network` 路由的写法相同；打包图片的来源是 `asset:/<path>`。然后等待应用安静下来。仅限 headless 运行。 |
+| `await app.failOpenUrls(url)` | 从此刻起，应用打开的、与 `url` 匹配的 URL 都打开失败：`openUrl` resolve 为 `{ opened: false }`，就像设备上没有能打开它们的应用，测试便可检查应用此时显示的内容。`url` 整体匹配，其中的 `*` 匹配任意内容（`"https://example.com/*"`），与 `network` 路由的写法相同；`app.openedUrls()` 仍会列出它们。然后等待应用安静下来。仅限 headless 运行。 |
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
@@ -469,7 +478,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
 - **页面的宿主应答 `host`**：应用的 `nsh.json` 在 `web.host` 中指定了宿主时（[页面的宿主](#页面的宿主)）。
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
-- **URL 只被记录**：应用打开的 URL 以“已打开”回报，`app.openedUrls()` 列出它们。
+- **URL 只被记录**：应用打开的 URL 以“已打开”回报（测试用 `app.failOpenUrls` 让它失败的除外），`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` 和 `Picker.pickFiles` resolve 为 `[]`。
 - **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
