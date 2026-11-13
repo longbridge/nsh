@@ -1085,6 +1085,22 @@ impl Host {
         });
     }
 
+    /// Publishes what the performance monitor measured last to JS (`nsh`'s
+    /// `perfStats()`): `None` while it does not measure.
+    pub fn set_perf_stats(&self, stats: Option<&nsh_core::platform::PerfStats>) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_perf_stats(raw, stats) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {

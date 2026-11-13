@@ -347,3 +347,8 @@ expect Modes: not called
 tap id:modes
 expect Modes: done
 covers [nsh] setFpsMode
+# mod-perf-stats
+tap id:case-mod-perf-stats
+# no stats until the monitor measured a second.
+expect Fps: none
+covers [nsh] perfStats
