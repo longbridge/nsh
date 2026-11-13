@@ -48,6 +48,9 @@ pub enum LaunchAtLoginError {
     /// The system refused or failed (TS: Node's code of the error, `EIO`
     /// when it has none).
     System(std::io::Error),
+    /// The app declares capabilities without `application` (TS:
+    /// `ERR_ACCESS_DENIED`, `permission` `"application"`).
+    Denied,
 }
 
 impl std::fmt::Display for LaunchAtLoginError {
@@ -58,6 +61,10 @@ impl std::fmt::Display for LaunchAtLoginError {
                  can, and not under `nsh run`",
             ),
             Self::System(error) => write!(f, "launch at login could not be changed: {error}"),
+            Self::Denied => f.write_str(
+                "launching at login is not granted: add `\"application\": true` to \
+                 capabilities in nsh.json",
+            ),
         }
     }
 }
@@ -66,7 +73,7 @@ impl std::error::Error for LaunchAtLoginError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::System(error) => Some(error),
-            Self::Unavailable => None,
+            Self::Unavailable | Self::Denied => None,
         }
     }
 }

@@ -689,6 +689,12 @@ expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
 expect Unknown tag: <US tech> up
+# A code block's annotations show in place of its code; its actions get
+# the block, its id too.
+expect Annotated code
+style span:"Annotated code" fontWeight 600
+tap label:Export annotated
+expect Code action: export annotated: Annotated code
 covers [nsh/base] TextView
 covers [props] TextView.markdown
 covers [props] TextView.document

@@ -673,6 +673,11 @@ Things that were found the hard way. Read the section of the area you change bef
   for `accessibilityElementsHidden`. `setAccessibilityChildren:` cannot be undone: `nil` leaves the view without
   children instead of AppKit's again, so a subtree shown again stayed out of reach; `NshView` answers
   `accessibilityChildren` itself (none while hidden or grouped, else `NSView`'s).
+- An `NSTextField` or `NSSecureTextField` subclass that overrides `accessibilityRole` and forwards to `super`
+  exposes `AXUnknown` to an external accessibility client (checked on macOS 27). Return `AXTextField` explicitly
+  for ordinary inputs; editable combo boxes keep `AXComboBox`. The secure field still supplies its
+  `AXSecureTextField` subrole and masked value. A direct getter call is not the same as an external AX query:
+  even a plain `NSTextField` returns `AXUnknown` directly while exposing `AXTextField` externally.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no backdrop blur, sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:` shows them: WebKit draws them for it). Pages
@@ -695,6 +700,12 @@ Things that were found the hard way. Read the section of the area you change bef
   AppKit accessory app and in an NSH one (an NSH regular app did the same under synthetic input).
   `activateIgnoringOtherApps:YES` (deprecated in macOS 14) activated it, as Tauri, winit, Qt's `raise()` and GPUI call
   it to focus a window; `focus()` uses it, `show()` and new windows ask (`window::activation`).
+- **A sheet of a window out of sight is never seen**, and its completion handler waits for the window:
+  `beginSheetModalForWindow:` on a hidden window (a tray app's main window, `defaultVisible: false`), a minimized one or
+  one off every screen shows nothing until that window shows. Open and save panels then show in a window of their own
+  (`beginWithCompletionHandler:`); `NSAlert` shows on its own only app-modal (`runModal`), as Electron's message boxes
+  do without a visible parent (electron/electron#22671). How that modal loop is entered and ended, so the app's batches
+  go on while it shows, is in `system::run_alone` and its neighbours' comments (`tests/native/window_alert.rs`).
 - While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
   occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
   keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and
