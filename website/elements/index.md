@@ -238,6 +238,7 @@ desktop browsers, with an iPad's pointer or a Mac's mouse on iOS, and with a mou
 | `onMouseEnter` | `.on_mouse_enter(..)` | `(e: MouseEvent) => void` | The mouse came over the view or a view inside it (the DOM's `mouseenter`). |
 | `onMouseMove` | `.on_mouse_move(..)` | `(e: MouseEvent) => void` | The mouse moved over the view (or a view inside it), with or without a button down, or a modifier key was pressed or released while it rests there with none down (the DOM's `mousemove`). |
 | `onMouseLeave` | `.on_mouse_leave(..)` | `(e: MouseEvent) => void` | The mouse left the view and the views inside it, or the window; `e` is where it was last (the DOM's `mouseleave`). |
+| `onMouseUp` | `.on_mouse_up(..)` | `(e: MouseEvent) => void` | A mouse button was released over the view or a view inside it (the DOM's `mouseup`): `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and `modifiers`. Every listener around the view under the pointer hears it, inside out. The primary button's release also reports `onPressUp`. A release outside the view is not reported: the event has no pointer capture. Desktops (Windows, macOS, Linux, GPUI), the terminal and the web; iOS and Android never report it. |
 
 Like CSS `:hover` and the DOM's `mouseenter`, a view counts as hovered while the mouse is over it or over anything
 inside it, so the views around the one under the mouse hear `onMouseEnter` too (from the outside in; `onMouseLeave`
@@ -246,9 +247,11 @@ from the inside out). The events come after the fact and never on touches. A vie
 
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
-`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), and `pressedButton`, the button held
-down (`"left"`, `"right"`, `"middle"`, `"back"` or `"forward"`, GPUI's `MouseButton`) or `null`; in Rust `position`,
-`page_position`, `modifiers` and `pressed_button`. On the desktops and the web a drag is also a touch (`onTouchMove`,
+`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held
+down (`"left"`, `"right"`, `"middle"`, `"back"` or `"forward"`, GPUI's `MouseButton`) or `null` (`null` at a release),
+and `button`, the button that changed at this event: the released one on `onMouseUp`, `null` on a move; in Rust
+`position`, `page_position`, `modifiers`, `pressed_button` and `button`. On the desktops and the web a drag is also a
+touch (`onTouchMove`,
 the responder), and its moves reach `onMouseMove` with `pressedButton` set: feedback that only follows the hover skips
 those; on iOS and Android the hover reports the pointer with no button down. Moves come at most once a frame, the
 latest one, and always before the `onMouseLeave` that follows them, so a handler can redraw on each move:
@@ -289,7 +292,10 @@ const at = signal<number | null>(null);
 (the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
 it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
 pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
-or a view around one, only observes: the scroll view still scrolls. JS never cancels a native scroll after the fact
+or a view around one, only observes: the scroll view still scrolls. One scroll stays where it went, as a scroll
+view's does: a view that took it keeps the rest of it (a touchpad gesture and its momentum, notches while they keep
+coming) even when the pointer leaves it, and a scroll a scroll view has started is never taken over halfway by a
+listener that comes under the pointer: the listener only observes it. JS never cancels a native scroll after the fact
 (the main thread does not wait for it), so whether a view takes the wheel is decided by what is mounted, as with
 `onContextMenu`.
 
@@ -335,11 +341,37 @@ const offset = signal({ x: 0, y: 0 });
 />
 ```
 
+`onPinch` hears a touchpad pinch over a view, as GPUI's `on_pinch`, on macOS, Linux, the GPUI backend and Safari.
+Windows and the other browsers report a touchpad pinch as Control + wheel, which `onWheel` hears, so a view that zooms
+listens to both. The nearest view around the one under the pointer that listens hears the pinch, from its start to its
+end; when it is nearer than every view that pinches natively (`pinch` values, `onPinchStart`), it takes the pinch and
+nothing zooms natively. A view that starts listening during a pinch hears the rest of it, without its start. Fingers
+pinching a touchscreen are the native gesture's (`onPinchStart`, [Touch and gestures](../docs/touch-and-gestures.md)).
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `onPinch` | `.on_pinch(..)` | `(e: PinchEvent) => void` | A touchpad pinched over the view or a view inside it. |
+
+`PinchEvent` has `position`, `pagePosition` and `modifiers`, as `MouseEvent`, `delta`, how much the scale changed since
+the last event as a fraction (0.1 is 10 % bigger, negative smaller), and `phase`: `"start"`, `"move"` or `"end"`, as a
+touch's. In Rust `delta` is a `Percentage` and `phase` a `PinchPhase`.
+
+```tsx
+<View
+  style={{ flex: 1 }}
+  onPinch={(e) => zoom.update((z) => z * (1 + e.delta))}
+  onWheel={(e) => e.modifiers.control && zoom.update((z) => z * (1 - (e.delta.y * (e.deltaMode === "lines" ? 16 : 1)) / 200))}
+/>
+```
+
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
-desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
-every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it (at
+once when the pointer comes from another element whose hint it showed, within 300 ms of leaving it), and on
+every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
+that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
+exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
@@ -418,6 +450,10 @@ On macOS and the web, Tab moves the keyboard focus between its stops in tree ord
 presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and Return or Space
 presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
 only.
+
+The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
+the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the
+list after its last row.
 
 Focus and presses are separate. A view that takes keys while it has the focus (a chart, a slider, a list that moves
 its selection with the arrow keys) sets `focusable` and binds its keys while focused (`onFocus` / `onBlur` with
@@ -572,9 +608,12 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessible` | `.accessible(..)` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `.label(..)` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | More about the element than its name, read after it (a dialog's message). |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
+| `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | The item that is active inside the focused element: a combo box's highlighted option, a list's cursor row ([Accessibility](../docs/accessibility.md#the-active-item-of-a-focused-element)). |
+| `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | The element whose content this one controls: a combo box's list. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |
@@ -652,6 +691,7 @@ of its own.
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | Scrolls to an offset along the list's axis. |
 | `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | Scrolls an item into view. |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`, `ListRef` | Scrolls to the end of the content. |
+| `measureScrollPosition()` | `measure_scroll_position()` | `ListRef` | [Where the viewport starts among the rows](../docs/lists.md#keeping-a-reading-position). |
 | `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebViewRef` | Controls the page. |
 | `seek(seconds)` | `seek(seconds)` | `VideoRef` | Jumps to a time. |
 | `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |

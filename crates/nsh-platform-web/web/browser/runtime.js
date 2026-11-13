@@ -254,7 +254,7 @@ export function createBrowserHost(player) {
         modules = createModules(call, values, active, requestPump, components.make);
         // A UI set a later gate registers fills this namespace in place.
         for (const specifier of Object.keys(nativeExports)) if (!modules.exports.has(specifier)) modules.exports.set(specifier, Object.create(null));
-        dom.setMeasure(node => modules.measure(node));
+        dom.setMeasure((node, what) => modules.measure(node, what));
         animation = createAnimation(call, active, requestPump, env);
         const nsh = modules.exports.get("nsh") ?? {};
         const canvas = createCanvas(call, reactive, dom, active, requestPump);

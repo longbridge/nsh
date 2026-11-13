@@ -174,6 +174,19 @@ pub struct AppOptions {
     /// first brings its window forward and tells the app
     /// (`Application.on("secondInstance", ...)`).
     pub single_instance: bool,
+    /// The file types the app opens (nsh.json `fileTypes`), for
+    /// [`run_app`]: its desktop entry lists their MIME types, it runs once,
+    /// and hands each file to the app (`Application.on("openFiles", ...)`),
+    /// reported as a `file://` URL as for [`schemes`](Self::schemes).
+    pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// [`run_app`] runs the app in the background where a user may type
+    /// on the display (the development host's `--background`, which `nsh
+    /// test --target linux` passes): its windows show without taking the
+    /// focus from the app the user works in, the window it activates only
+    /// acts as the active one, and the test agent's keys go to the widgets
+    /// rather than through the X server. On an X server with no keyboard
+    /// but its own virtual ones (Xvfb) it runs as in the foreground.
+    pub background: bool,
 }
 
 impl Default for AppOptions {
@@ -196,6 +209,8 @@ impl Default for AppOptions {
             host: nsh_engine::HostChannel::default(),
             schemes: Vec::new(),
             single_instance: false,
+            file_types: Vec::new(),
+            background: false,
         }
     }
 }
@@ -504,6 +519,22 @@ pub(crate) fn quit() -> bool {
     true
 }
 
+/// The user asked to quit the standalone app (Ctrl+Q, its Quit item): it
+/// quits as [`quit`] does, unless the app listens to quit requests and
+/// decides ([`crate::chrome::ask_quit`]). False for a view embedded in
+/// another app, with nothing done.
+pub(crate) fn request_quit(surface: &Surface) -> bool {
+    let standalone = STANDALONE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .is_some_and(|app| app.upgrade().is_some())
+    });
+    if !standalone {
+        return false;
+    }
+    crate::chrome::ask_quit(surface) || quit()
+}
+
 /// Closes `app`'s windows (closing the main one stops its engine), then
 /// ends its run.
 fn quit_application(app: &gtk::Application) {
@@ -525,7 +556,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     glib::set_prgname(Some(&options.app_id));
     // An app that opens URLs runs once: a second launch hands its URL to
     // the first (GApplication's `open`) and ends.
-    let links = !options.schemes.is_empty();
+    let links = !options.schemes.is_empty() || !options.file_types.is_empty();
     // A single-instance app runs once too: a second launch hands its whole
     // command line to the first (`command-line`) and ends.
     let single = options.single_instance;
@@ -541,12 +572,23 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         .build();
     STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
     if links {
-        crate::links::register(&options.app_id, &options.title, &options.schemes);
+        let mut mime_types: Vec<String> = Vec::new();
+        for mime in options.file_types.iter().flat_map(|t| &t.mime_types) {
+            if !mime_types.contains(mime) {
+                mime_types.push(mime.clone());
+            }
+        }
+        crate::links::register(
+            &options.app_id,
+            &options.title,
+            &options.schemes,
+            &mime_types,
+        );
     }
     let args: Vec<String> = if single {
         std::env::args().collect()
     } else if links {
-        crate::links::launch_args(&options.schemes)
+        crate::links::launch_args(&options.schemes, &options.file_types)
     } else {
         Vec::new()
     };
@@ -564,16 +606,17 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             app.activate();
             return;
         }
-        if let Some((window, view)) = &*shown_open.borrow() {
+        if let Some((_, view)) = &*shown_open.borrow() {
             for file in files {
                 view.open_url(&file.uri());
             }
-            window.present();
+            crate::window::activate_main(&view.surface);
         }
     });
     let shown_line = shown.clone();
     let launch_line = launch_links.clone();
     let schemes = options.schemes.clone();
+    let file_types = options.file_types.clone();
     app.connect_command_line(move |app, line| {
         let mut args: Vec<String> = line
             .arguments()
@@ -584,10 +627,15 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         if !args.is_empty() {
             args.remove(0);
         }
+        let cwd = line.cwd();
         let urls: Vec<String> = args
             .iter()
-            .filter(|arg| crate::links::is_link(arg, &schemes))
-            .cloned()
+            .filter_map(|arg| {
+                if crate::links::is_link(arg, &schemes) {
+                    return Some(arg.clone());
+                }
+                crate::links::file_url(arg, cwd.as_deref(), &file_types)
+            })
             .collect();
         // This process's own launch: it opens the window.
         if shown_line.borrow().is_none() {
@@ -595,9 +643,8 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             app.activate();
             return gtk::glib::ExitCode::SUCCESS;
         }
-        if let Some((window, view)) = &*shown_line.borrow() {
-            let cwd = line
-                .cwd()
+        if let Some((_, view)) = &*shown_line.borrow() {
+            let cwd = cwd
                 .map(|cwd| cwd.to_string_lossy().into_owned())
                 .unwrap_or_default();
             view.surface.event(
@@ -608,18 +655,23 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             for url in urls {
                 view.open_url(&url);
             }
-            window.present();
+            crate::window::activate_main(&view.surface);
         }
         gtk::glib::ExitCode::SUCCESS
     });
     let source = RefCell::new(Some(source));
     app.connect_activate(move |app| {
         let Some(source) = source.borrow_mut().take() else {
-            if let Some((window, _)) = &*shown.borrow() {
-                window.present();
+            if let Some((_, view)) = &*shown.borrow() {
+                crate::window::activate_main(&view.surface);
             }
             return;
         };
+        if options.background
+            && let Some(display) = gtk::gdk::Display::default()
+        {
+            crate::window::run_in_background(&display);
+        }
         // nsh.json `window`: known before the window is made, so its first
         // frame has it.
         // A JS bundle's or a Rust app's root's.
@@ -695,12 +747,13 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             #[cfg(not(feature = "dev"))]
             Err(_) => {}
         }
-        install_shortcuts(app, &window);
+        install_shortcuts(app, &window, &view.surface);
         *shown.borrow_mut() = Some((window.clone(), view.clone()));
+        let surface = view.surface.clone();
         // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
         if present {
-            window.present();
+            crate::window::activate_main(&surface);
         }
     });
     // GTK must not parse the host's own arguments: only the URL the app
@@ -739,10 +792,19 @@ fn prefer_gl_on_nvidia() {
 /// GNOME's window shortcuts: Ctrl+W closes the window, Ctrl+Q quits, F11
 /// toggles full screen. Accelerators also match the keys of the layout's
 /// Latin group, so they work under Cyrillic or Greek layouts too.
-fn install_shortcuts(app: &gtk::Application, window: &gtk::ApplicationWindow) {
+fn install_shortcuts(
+    app: &gtk::Application,
+    window: &gtk::ApplicationWindow,
+    surface: &Rc<Surface>,
+) {
     let quit = gtk::gio::SimpleAction::new("quit", None);
     let weak = app.downgrade();
+    let asked = Rc::downgrade(surface);
     quit.connect_activate(move |_, _| {
+        // The app may listen to quit requests and decide.
+        if asked.upgrade().is_some_and(|s| crate::chrome::ask_quit(&s)) {
+            return;
+        }
         if let Some(app) = weak.upgrade() {
             quit_application(&app);
         }

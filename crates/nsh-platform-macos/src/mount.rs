@@ -221,6 +221,7 @@ impl Mounter {
         self.deleting.clear();
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
+        crate::input::release_hidden_focus(surface);
         crate::system::end_batch(surface);
         crate::input::content_moved(surface, false);
         crate::selectable_view::end_batch(surface);
@@ -297,6 +298,7 @@ impl Mounter {
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
+                    crate::input::removed(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -306,6 +308,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
                     // A view whose parent the batch deletes too stays in it:
@@ -317,6 +320,10 @@ impl Mounter {
                         && view
                             .parent_view()
                             .is_some_and(|p| self.deleting.contains(&p.id()));
+                    // Inside, it leaves with its root.
+                    if !inside {
+                        crate::input::removed(surface, &view);
+                    }
                     if inside {
                         // Its running layout animation ends with it.
                         crate::transition::deleted(&view);
@@ -409,13 +416,13 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
-                    let same = crate::text::draws_the_same(view, text, layout, *content);
+                    let damage = crate::text::damage(view, text, layout, *content);
                     crate::text::set(view, text, layout, *content);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
-                    if !same {
-                        self.draw_when_shown(view, Damage::All);
+                    if damage != Damage::None {
+                        self.draw_when_shown(view, damage);
                     }
                     crate::access::text_changed(view);
                 }

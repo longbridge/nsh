@@ -61,6 +61,15 @@ handler, and in development builds over the app), no JS runs after that, and the
 and operation quotas exist because native views and queued changes live in native memory, which the JS heap limit does
 not cover: without them, an app could exhaust the device's memory through the UI.
 
+**Arrays NSH reads natively hold up to 2^20 (1 048 576) items, in every app.** Children (nested arrays counted
+together), `<Each>`'s items, menus (submenus counted together), a tray's title, `Animated.sequence` / `parallel` /
+`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events`, a pan's `touches`
+and a canvas call's arguments (counted together) are read in native code, beyond the call budget's reach, and an array
+is as long as it says, empty or not (`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a
+`RangeError`, a `TypeError` for a menu or the tray; a canvas call ignores it with a warning. A navigation stack holds
+up to as many screens: `push` beyond that throws a `RangeError`. Children and submenus nested more than 64 levels deep
+throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
+
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
@@ -197,6 +206,7 @@ own path. An app without `capabilities` loads local files as before.
 |---|---|---|
 | `hosts` | `string[]` | Hosts a [web view](./web-view-and-video.md) may show and navigate to (`http` and `https`). Without `webview`, the app may not show web pages at all. |
 | `input` | `boolean` | A web view's ref may give its page trusted input ([`sendInput`](./web-view-and-video.md#input-as-the-users-own)). Never granted unless declared, also for an app without `"capabilities"`. |
+| `media` | `string[]` | What web pages may capture with `getUserMedia`: `"microphone"`, `"camera"`. Never granted unless declared, also for an app without `"capabilities"`. |
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
@@ -207,6 +217,17 @@ web views, so the base URL needs the grant a page there would: its host in `host
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
 and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
+
+`media` answers the web view's own media capture requests: those for a declared kind are allowed on macOS, iOS,
+Android, Windows and Linux, and the rest are denied. The system still asks the user the first time, so packages
+declare what it needs: `nsh package` writes `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (word them your
+own way with `ios.infoPlist` / `macos.infoPlist`), the macOS `com.apple.security.device.audio-input` /
+`com.apple.security.device.camera` entitlements, and Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app asks
+for when a page first needs them. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
+
+```json
+{ "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
+```
 
 ### `statusBar`
 
@@ -351,7 +372,10 @@ The declaration goes with the app wherever it goes:
 - `nsh build` and `nsh package` write it next to the bundle as `capabilities.json`;
 - `nsh publish` puts it in the [signed package](./signed-packages.md) header, covered by the signature;
 - `nsh dev` sends it with every build, so development enforces the same rules. Changing `capabilities` reloads the app
-  instead of hot-patching it.
+  instead of hot-patching it;
+- an app whose root is a Rust component (`"root"` in `nsh.json`) has it compiled in with the root, so every runner, the
+  web and `nsh test` included, checks the app's calls against it, as a TSX app's. Without `"capabilities"` it reaches
+  what any app without a declaration does.
 
 ## Grants: what a host app allows
 

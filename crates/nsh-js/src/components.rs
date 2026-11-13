@@ -58,6 +58,9 @@ const HOST_PROPS: &[&str] = &[
     "testID",
     "tooltip",
     "onLayout",
+    "onFileDragEnter",
+    "onFileDragLeave",
+    "onFileDrop",
 ];
 
 /// The components' part of a context's state.
@@ -260,12 +263,25 @@ fn evaluate_timeout(
 /// `ref.measure()`: a promise of where node `id` is after this turn's
 /// layout, which the core answers on the root (`Command::Measure`).
 pub(crate) fn measure(cx: *mut JsContext, id: u32) -> JsValue {
+    measure_with(cx, id, |call| Command::Measure { call })
+}
+
+/// `ref.measureScrollPosition()`: a promise of where list `id`'s viewport
+/// starts among its rows after this turn's layout, which the core answers
+/// on the root (`Command::MeasureScrollPosition`).
+pub(crate) fn measure_scroll_position(cx: *mut JsContext, id: u32) -> JsValue {
+    measure_with(cx, id, |call| Command::MeasureScrollPosition { call })
+}
+
+/// A promise of the core's answer to `command` (for a new call) on node
+/// `id`.
+fn measure_with(cx: *mut JsContext, id: u32, command: impl FnOnce(u32) -> Command) -> JsValue {
     let call = next_call(cx);
     if let Err(e) = dom::push_op(
         cx,
         Op::Command {
             id,
-            command: Command::Measure { call },
+            command: command(call),
         },
     ) {
         return e;

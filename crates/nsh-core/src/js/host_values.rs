@@ -7,8 +7,9 @@ use crate::{
     AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
     CellSlot, EdgeInsets, ImageScales, ImageSource, KeyboardTaps, ListContentStyle, MacOsBackdrop,
     MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, ModalProp, Prop,
-    RevealOptions, ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
-    element::TsTypes,
+    RevealOptions, ScreenProp, ScrollAlignment, ScrollProp, StatusBarSetting, StatusBarStyle,
+    Viewability,
+    element::{ElementTarget, TsTypes},
     geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
@@ -237,7 +238,8 @@ impl HostValue for PanActivation {
 }
 
 /// `{ disabled, selected, checked: true | false | "mixed", busy, expanded,
-/// pressed: true | false | "mixed", current: true | false | "page" | ... }`.
+/// pressed: true | false | "mixed", current: true | false | "page" | ...,
+/// hasPopup, invalid }`.
 impl HostValue for AccessibilityState {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
@@ -261,6 +263,7 @@ impl HostValue for AccessibilityState {
             expanded: input.field("expanded").and_then(|v| v.as_bool()),
             pressed: tristate("pressed"),
             has_popup: flag("hasPopup"),
+            invalid: flag("invalid"),
             // `false` and unknown words are no current item, as ARIA has it.
             current: match current.as_ref().and_then(|c| c.as_bool()) {
                 Some(true) => Some(AccessibilityCurrent::True),
@@ -288,7 +291,9 @@ impl HostValue for AccessibilityState {
              /** The current item of a set (ARIA's `aria-current`): a pagination's page, a wizard's step. */\n  \
              current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n  \
              /** Opens a popup, a menu or a list (ARIA's `aria-haspopup`); `expanded` says whether it is open. */\n  \
-             hasPopup?: boolean;\n}"
+             hasPopup?: boolean;\n  \
+             /** The content does not pass the app's checks (ARIA's `aria-invalid`): a rejected field. */\n  \
+             invalid?: boolean;\n}"
                 .into()
         })
     }
@@ -536,6 +541,26 @@ pub(crate) fn overlay_anchor<I: HostInput>(input: &I, _: &mut HostCx) -> Option<
     Some(OverlayProp::Anchor(anchor))
 }
 
+/// `accessibilityActiveDescendant`: an element (a ref), or nothing.
+pub(crate) fn active_descendant<I: HostInput>(
+    input: &I,
+    _: &mut HostCx,
+) -> Option<AccessibilityProp> {
+    Some(AccessibilityProp::ActiveDescendant(
+        input.node().map(ElementTarget::of_node),
+    ))
+}
+
+/// `accessibilityControls`: an element (a ref), or nothing.
+pub(crate) fn accessibility_controls<I: HostInput>(
+    input: &I,
+    _: &mut HostCx,
+) -> Option<AccessibilityProp> {
+    Some(AccessibilityProp::Controls(
+        input.node().map(ElementTarget::of_node),
+    ))
+}
+
 /// `tooltip`: an element (a node JS made), or nothing.
 pub(crate) fn tooltip<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     let content = input
@@ -722,8 +747,19 @@ pub(crate) fn keyboard_taps<I: HostInput>(input: &I, _: &mut HostCx) -> Option<S
     }))
 }
 
-/// `supportedOrientations`: the orientation names.
+/// A dialog's `supportedOrientations`: the orientation names.
 pub(crate) fn orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ModalProp> {
+    Some(ModalProp::Orientations(orientation_bits(input)))
+}
+
+/// A page's `supportedOrientations`: the orientation names.
+pub(crate) fn page_orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ScreenProp> {
+    Some(ScreenProp::Orientations(orientation_bits(input)))
+}
+
+/// The [`ModalConfig::PORTRAIT`] bits of a list of orientation names; a
+/// name it does not know adds none.
+fn orientation_bits<I: HostInput>(input: &I) -> u8 {
     let mut bits = 0;
     for name in input.items() {
         bits |= match name.as_string().as_deref() {
@@ -735,7 +771,7 @@ pub(crate) fn orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Mo
             _ => 0,
         };
     }
-    Some(ModalProp::Orientations(bits))
+    bits
 }
 
 /// A shader's `uniforms`: `{ name: value }`, a value a number, a CSS color,

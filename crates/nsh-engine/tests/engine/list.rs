@@ -402,6 +402,8 @@ struct Paced {
     list: Option<nsh_core::NodeId>,
     pressable: Option<nsh_core::NodeId>,
     dir: std::path::PathBuf,
+    /// Every item received, in order.
+    items: Vec<MountItem>,
 }
 
 impl Paced {
@@ -421,6 +423,7 @@ impl Paced {
             list: None,
             pressable: None,
             dir,
+            items: Vec::new(),
         };
         paced.receive();
         paced
@@ -432,6 +435,7 @@ impl Paced {
         let mut batches = Vec::new();
         while let Ok(batch) = self.rx.try_recv() {
             let mut set = Vec::new();
+            self.items.extend(batch.items.iter().cloned());
             for item in &batch.items {
                 match item {
                     MountItem::Text { id, text, .. } => {
@@ -718,6 +722,148 @@ mount(App);
     assert_eq!(paced.errors(), Vec::<String>::new());
 }
 
+/// A row added at the start of an inverted list under a layout animation
+/// (a chat's new message): the rows that showed slide up from where they
+/// were on screen, though the list scrolls to keep its distance from the
+/// end, and the cell the new row takes appears at its place instead of
+/// moving from the row it showed before.
+#[test]
+fn a_layout_animation_slides_an_inverted_lists_rows() {
+    let app = r#"
+import { LayoutAnimation, List, mount, signal, Text, View } from "nsh";
+const rows = signal(Array.from({ length: 100 }, (_, i) => ({ label: `row ${i}` })));
+function App() {
+  const add = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    rows.update((r) => [{ label: "new" }, ...r]);
+  };
+  return (
+    <View style={{ flex: 1 }}>
+      <View onPress={add} style={{ height: 0 }} />
+      <List each={rows()} inverted estimatedItemSize={50} style={{ flex: 1 }}>
+        {(row) => <View style={{ height: 50 }}><Text>{row().label}</Text></View>}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    use std::collections::HashMap;
+
+    use nsh_core::{NodeId, geometry::Bounds};
+    let mut paced = Paced::start(app);
+    paced.settle(|_, _| {});
+    let list = paced.list.expect("the list");
+    // What a platform holds: each view's parent and frame, the label each
+    // cell shows.
+    let mut parents: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut frames: HashMap<NodeId, Bounds<nsh_core::geometry::Points>> = HashMap::new();
+    let mut apply = |items: &[MountItem], parents: &mut HashMap<NodeId, NodeId>| {
+        for item in items {
+            match item {
+                MountItem::Insert { parent, child, .. } => {
+                    parents.insert(*child, *parent);
+                }
+                MountItem::Frame { id, frame } => {
+                    frames.insert(*id, *frame);
+                }
+                _ => {}
+            }
+        }
+    };
+    let cell_of = |parents: &HashMap<NodeId, NodeId>, mut id: NodeId| loop {
+        let parent = *parents.get(&id)?;
+        if parent == list {
+            return Some(id);
+        }
+        id = parent;
+    };
+    let before_items = std::mem::take(&mut paced.items);
+    apply(&before_items, &mut parents);
+    let labels = |paced: &Paced, parents: &HashMap<NodeId, NodeId>| -> HashMap<NodeId, String> {
+        paced
+            .texts
+            .iter()
+            .filter_map(|(id, text)| Some((cell_of(parents, *id)?, text.clone())))
+            .collect()
+    };
+    drop(apply);
+    let before = labels(&paced, &parents);
+    let at_before = frames.clone();
+
+    paced.engine.control().dispatch_event(
+        paced.pressable.expect("the pressable view"),
+        nsh_core::EventKind::Press,
+        nsh_core::EventPayload::None,
+    );
+    paced.turn();
+    let batch = std::mem::take(&mut paced.items);
+    // Replays the batch: each frame with the layout animation before it,
+    // from the frame the view had then.
+    let mut model = at_before.clone();
+    let mut animation = None;
+    let mut scrolled = 0.0;
+    let mut created = std::collections::HashSet::new();
+    let mut last: HashMap<NodeId, (Bounds<_>, bool)> = HashMap::new();
+    for item in &batch {
+        match item {
+            MountItem::LayoutAnimation(a) => animation = a.update,
+            MountItem::Create { id, .. } => {
+                created.insert(*id);
+            }
+            MountItem::Insert { parent, child, .. } => {
+                parents.insert(*child, *parent);
+            }
+            MountItem::ScrollBy { id, dy, .. } if *id == list => scrolled += dy.0,
+            MountItem::Frame { id, frame } => {
+                let from = model.insert(*id, *frame);
+                let animated = animation.is_some() && from.is_some() && !created.contains(id);
+                last.insert(*id, (from.unwrap_or(*frame), animated));
+            }
+            _ => {}
+        }
+    }
+    paced.receive();
+    let after = labels(&paced, &parents);
+    assert!(
+        scrolled > 0.0,
+        "an inverted list keeps its distance from the end"
+    );
+    let mut checked = 0;
+    for (cell, label) in &after {
+        let Some(&(from, animated)) = last.get(cell) else {
+            // No frame: the scroll moved it at once.
+            assert!(
+                before.get(cell) != Some(label) || scrolled == 0.0,
+                "{label} jumped with the scroll"
+            );
+            continue;
+        };
+        if label == "new" {
+            assert!(
+                !animated,
+                "the new row moved from another row's place to its own"
+            );
+            continue;
+        }
+        if before.get(cell) != Some(label) {
+            continue;
+        }
+        let shown = at_before[cell].origin.y.0;
+        assert!(animated, "{label} did not slide");
+        assert_eq!(
+            from.origin.y.0 - scrolled,
+            shown,
+            "{label} did not start where it showed"
+        );
+        assert_eq!(model[cell].origin.y.0, shown - 50.0 + scrolled, "{label}");
+        checked += 1;
+    }
+    assert!(checked >= 10, "rows checked: {checked}");
+    assert!(after.values().any(|l| l == "new"));
+    assert_eq!(paced.errors(), Vec::<String>::new());
+}
+
 /// A fling that moves the window faster than cells bind: once it stops,
 /// only rows of the window it stopped at are bound (requests for windows
 /// already left are dropped, not bound late).
@@ -838,5 +984,57 @@ mount(App);
     assert!(kept, "the visible rows did not keep their place");
     // 5000 pt from the start now: nothing more.
     assert!(!fired(&drain(300), "starts 2"), "fired again");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `ref.measureScrollPosition()` answers, after the layout of the turn
+/// that asks, which row the viewport starts in and how far into it, as
+/// the list lays out its rows of different sizes.
+#[test]
+fn a_list_measures_where_its_viewport_starts() {
+    let app = r#"
+import { List, mount, signal, Text, View, type ListRef } from "nsh";
+const shown = signal("waiting");
+let list!: ListRef;
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text>{shown()}</Text>
+      <List ref={list} each={Array.from({ length: 100 }, (_, i) => i)} estimatedItemSize={50} style={{ flex: 1 }}
+            onScroll={async () => {
+              const at = await list.measureScrollPosition();
+              shown.set(at ? `at ${at.index} ${at.offset}` : "none");
+            }}>
+        {(row) => <View style={{ height: 40 + (row() % 3) * 20 }} />}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let (engine, rx, dir) = start(app);
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let list = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: ViewKind::Scroll,
+            } => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {}
+    // Rows of 40, 60 and 80 points: row 8 starts at 460.
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(px(0.0), px(500.0)),
+        u32::MAX,
+    );
+    let shown: Vec<String> = std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(2)).ok())
+        .flat_map(|b| texts(&b))
+        .collect();
+    assert!(shown.iter().any(|t| t == "at 8 40"), "{shown:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }

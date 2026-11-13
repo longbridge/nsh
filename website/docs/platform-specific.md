@@ -89,6 +89,7 @@ What exists today:
 | `.input_accessory(..)` | `ios={{ inputAccessoryViewID }}` | `Input` | The `InputAccessoryView` shown over the keyboard. |
 | `.auto_fill(..)` | `ios={{ textContentType }}` | `Input` | iOS's names for autofill types (Rust's `AutoFill` covers both platforms). |
 | `.supported_orientations(..)` | `ios={{ supportedOrientations }}` | `Dialog` | The orientations it allows. |
+| `.supported_orientations(..)` | `ios={{ supportedOrientations }}`, `android={{ supportedOrientations }}` | `NavPage` | The orientations the screen may take while the page is shown ([NavPage](../elements/nav-stack.md#navpage-props)). |
 | `.back_forward_gestures(..)` | `ios={{ allowsBackForwardNavigationGestures }}` | `WebView` | Swipe back and forward in the page history. |
 | `.header_right_system_item(..)` | `ios={{ headerRightSystemItem }}` | `NavPage` | UIKit's own bar button at the end of the header, pressing `headerRight`. |
 | `.header_left_system_item(..)` | `ios={{ headerLeftSystemItem }}` | `NavPage` | UIKit's own bar button at the start of the header, pressing `headerLeft`. |

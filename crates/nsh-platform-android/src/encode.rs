@@ -685,6 +685,12 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             _ => -1,
                         });
                     }
+                    // `Mounter.orientations` reads the `ModalConfig`
+                    // bits (0: the app's own).
+                    Command::Orientations(bits) => {
+                        e.int(54);
+                        e.int(i32::from(bits));
+                    }
                     Command::ImageInfo { id, uri } => {
                         e.int(19);
                         e.int(id as i32);
@@ -739,13 +745,13 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     }
                     // `Picker.java`: the request, the limit, the extensions
                     // offered (comma-separated; empty: any file) and the
-                    // largest file read.
+                    // largest file read (at most 512 MiB: an `int`).
                     Command::PickFiles { id, request } => {
                         e.int(45);
                         e.int(id as i32);
                         e.int(request.limit as i32);
                         e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
-                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
+                        e.int(i32::try_from(request.size_limit()).unwrap_or(i32::MAX));
                     }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
@@ -754,6 +760,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToIndex { .. }
                     | Command::Reveal(_)
                     | Command::Measure { .. }
+                    | Command::MeasureScrollPosition { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
@@ -763,6 +770,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
+                    | Command::HostPost { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
@@ -830,6 +838,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.int(4);
                                 e.int(count as i32);
                             }
+                            N::CloseAll => e.int(5),
                             _ => e.int(-1),
                         }
                     }
@@ -1318,7 +1327,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(true) => 1,
     });
     e.opt_string(a.label.as_deref());
-    e.opt_string(a.hint.as_deref());
+    // The hint text: the description, then the hint (Android has no
+    // description of its own beside the label).
+    e.opt_string(a.help_text(None).as_deref());
     e.int(role_index(a.role));
     let s = a.state;
     let mut flags = 0;
@@ -1359,6 +1370,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(AccessibilityCurrent::Date) => 5,
         Some(AccessibilityCurrent::Time) => 6,
     } << 11;
+    if s.invalid {
+        flags |= 1 << 14;
+    }
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1457,6 +1471,8 @@ fn role_index(role: AccessibilityRole) -> i32 {
         TreeItem => 40,
         MenuItemCheckbox => 41,
         MenuItemRadio => 42,
+        Dialog => 43,
+        AlertDialog => 44,
     }
 }
 

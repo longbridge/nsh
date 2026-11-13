@@ -339,6 +339,7 @@ impl Rv {
                     KeyOptions {
                         when: When::Always,
                         repeat: spec.repeat,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| rv.key(&event),
@@ -1629,6 +1630,13 @@ impl Rv {
         state
             .some_prop(|p| p.create_selection_between(state, anchor, head))
             .unwrap_or_else(|| TextSelection::between(anchor, head, None))
+    }
+
+    /// Whether the content point `at` is on a task item's checkbox: its
+    /// press is the checkbox's, and neither moves the caret nor starts a
+    /// selection.
+    pub(crate) fn on_checkbox(&self, at: Point<Points>) -> bool {
+        self.geo.borrow().before_holder(at)
     }
 
     /// The pointer is over the content at `at` and the page at `page`: the

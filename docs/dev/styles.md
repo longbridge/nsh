@@ -64,8 +64,8 @@
   `selected`) / `checked:` (`accessibilityState.checked`, not mixed) / `indeterminate:` (`accessibilityState.checked`
   mixed, CSS's `:indeterminate`) / `aria-expanded:` (`accessibilityState.expanded`: a `Popover`'s or `Menu`'s trigger
   while its popup is open) / `aria-pressed:` (`accessibilityState.pressed` true: a toggle button that is on; not
-  `active:`, a press in progress) / `aria-busy:` / `aria-checked:` / `aria-selected:` (Tailwind v4's
-  `&[aria-busy="true"]`, ...: `busy`, `checked` true, `selected`; `aria-current:` and Tailwind's other `aria-*` names are
+  `active:`, a press in progress) / `aria-busy:` / `aria-checked:` / `aria-invalid:` / `aria-selected:` (Tailwind v4's
+  `&[aria-busy="true"]`, ...: `busy`, `checked` true, `invalid`, `selected`; `aria-current:` and Tailwind's other `aria-*` names are
   unknown, NSH has no such states), `data-<name>:` (Tailwind v4's boolean form, `&[data-<name>]`: a `data-*` attribute
   a Rust component's part shows, `Interactive::project_data`, `Prop::ProjectedData`, as a calendar's day shows
   `data-range-start`; names of lower case letters, digits and `-`; the value form `data-[state=open]:` is unknown;
@@ -74,12 +74,13 @@
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
-  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
-  `expanded`, `pressed` (`state::ARIA_PRESSED`) and `busy` are value states (`state::ACCESSIBILITY`, set by
+  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. A nested `<Text>` takes `hover:` and `active:` from the pointer over its characters (`text.md`
+  "Span states"). `selected`, `checked`, `indeterminate`,
+  `expanded`, `pressed` (`state::ARIA_PRESSED`), `busy` and `invalid` are value states (`state::ACCESSIBILITY`, set by
   `Core::set_accessibility_states` from `classes::accessibility_states`) the core sets from the accessibility state (never reported by the platform). The first three are
   below the interaction states: `checked`, then `indeterminate` (Tailwind's order), then `selected`, then `hover`,
   `focus`, `active` (gpui-base's order of value states); the `aria-*` variants are above them (`aria-busy`,
-  `aria-checked`, `aria-expanded`, `aria-pressed`, `aria-selected`, by name), as Tailwind's `aria-*` variants come
+  `aria-checked`, `aria-expanded`, `aria-invalid`, `aria-pressed`, `aria-selected`, by name), as Tailwind's `aria-*` variants come
   after its pseudo-classes, so an open popup's trigger keeps its look while hovered or pressed. `disabled` (any element) applies `disabled:` and drops
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles

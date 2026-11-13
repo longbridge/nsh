@@ -12,8 +12,8 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
-    WheelEvent,
+    MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points, PressEvent, Prop, Size, Tag,
+    TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -217,6 +217,7 @@ pub struct Attrs {
     pub(crate) accessible: Option<bool>,
     pub(crate) label: Option<SharedString>,
     pub(crate) hint: Option<SharedString>,
+    pub(crate) description: Option<SharedString>,
     pub(crate) role: AccessibilityRole,
     pub(crate) state: AccessibilityState,
     pub(crate) value: Option<AccessibilityValue>,
@@ -279,6 +280,11 @@ impl Attrs {
         if self.hint != old.hint {
             out.push(Prop::Accessibility(A::Hint(
                 self.hint.as_ref().map(SharedString::to_arc),
+            )));
+        }
+        if self.description != old.description {
+            out.push(Prop::Accessibility(A::Description(
+                self.description.as_ref().map(SharedString::to_arc),
             )));
         }
         if self.role != old.role {
@@ -1305,6 +1311,16 @@ pub trait Accessible: Element {
         self
     }
 
+    /// More about it than its name, which screen readers read after it
+    /// (TS: `accessibilityDescription`; `gpui-base`'s `aria_description`):
+    /// a dialog's message, what a field expects.
+    fn accessibility_description(mut self, description: impl IntoReactive<SharedString>) -> Self {
+        self.node().bind_attr(description, |a, description| {
+            a.description = Some(description)
+        });
+        self
+    }
+
     /// What it is (a button, a header, ...).
     fn role(mut self, role: impl IntoReactive<AccessibilityRole>) -> Self {
         self.node().bind_attr(role, |a, role| a.role = role);
@@ -1333,6 +1349,48 @@ pub trait Accessible: Element {
                 Prop::Accessibility(AccessibilityProp::Level((level > 0).then_some(level))),
             )
         });
+        self
+    }
+
+    /// The element that is the active one while it keeps the keyboard
+    /// focus, which screen readers read as it changes (TS:
+    /// `accessibilityActiveDescendant`; ARIA's `aria-activedescendant`):
+    /// a combo box field's highlighted option, the cursor row of a list
+    /// that is one stop of Tab. The element may be rendered after this
+    /// one (a virtualized list's row); `None`, or a ref no rendered
+    /// element carries, names none.
+    fn accessibility_active_descendant(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementRef>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+                super::host::set_in(
+                    &mut a.props,
+                    Prop::Accessibility(AccessibilityProp::ActiveDescendant(
+                        target.and_then(|t| t.element_target()),
+                    )),
+                )
+            });
+        self
+    }
+
+    /// The element whose content it controls, for assistive technologies
+    /// (TS: `accessibilityControls`; ARIA's `aria-controls`): a combo
+    /// box field's listbox. `None` names none.
+    fn accessibility_controls(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementRef>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+                super::host::set_in(
+                    &mut a.props,
+                    Prop::Accessibility(AccessibilityProp::Controls(
+                        target.and_then(|t| t.element_target()),
+                    )),
+                )
+            });
         self
     }
 
@@ -1494,6 +1552,34 @@ pub trait Interactive: Element {
         self.on(
             EventKind::Wheel,
             events::typed(listener.into_listener(), events::wheel),
+        )
+    }
+
+    /// A touchpad pinch over it (or an element inside it), as GPUI's
+    /// `on_pinch`: by how much the scale changed since the last event
+    /// ([`PinchEvent::delta`]), in which phase, where and with which
+    /// modifier keys (macOS, Linux, GPUI and Safari; Windows and the other
+    /// browsers report a touchpad pinch as Control + wheel, which
+    /// [`Self::on_wheel`] hears). The nearest element that listens hears
+    /// it; when it is nearer than any view that pinches natively it takes
+    /// the pinch and nothing zooms natively; a pinch stays on the element
+    /// its start went to. A pinch of fingers on a touchscreen is
+    /// [`Self::on_pinch_start`]'s.
+    fn on_pinch<M>(self, listener: impl IntoListener<PinchEvent, M>) -> Self {
+        self.on(
+            EventKind::Pinch,
+            events::typed(listener.into_listener(), events::touchpad_pinch),
+        )
+    }
+
+    /// A mouse button was released over it (or an element inside it): which
+    /// button (`button`), where, and with the modifier keys. The primary
+    /// button's release also reports [`Self::on_press_up`] (the DOM's
+    /// `mouseup`).
+    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.on(
+            EventKind::MouseUp,
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 
@@ -1713,7 +1799,8 @@ pub trait Interactive: Element {
     }
 
     /// On iOS, a vertical pan shares descendant scroll views' touches and
-    /// follows only the downward distance left after scrolling to the top.
+    /// follows only the downward distance left after scrolling to the top;
+    /// `on_pan_start` waits until that distance moves its values.
     /// Other platforms keep their normal pan and scroll arbitration.
     fn pan_scroll_handoff(mut self, enabled: impl IntoReactive<bool>) -> Self {
         super::host::bind_prop(self.node(), enabled, Prop::PanScrollHandoff);
@@ -1873,8 +1960,9 @@ pub trait Interactive: Element {
     /// Whether a desktop press drags the window and a double click follows
     /// the system's title-bar behavior. The nearest explicit value wins;
     /// inputs and press/touch handlers inside a drag region stay interactive.
-    /// On macOS and Linux, background clicks reach the app on release,
-    /// including ancestor press handlers; dragging does not deliver a click.
+    /// On the native desktop backends (AppKit, Win32 and GTK), background
+    /// clicks reach the app on release, including ancestor press handlers;
+    /// dragging does not deliver a click.
     /// Set false on a child to exclude it from its parent's drag region.
     fn window_drag(mut self, enabled: impl IntoReactive<bool>) -> Self {
         super::host::bind_prop(self.node(), enabled, |enabled| {

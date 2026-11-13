@@ -53,6 +53,13 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 不再运行任何 JS，视图保持原样。之所以有节点和操作配额，是因为原生视图和排队的变更位于原生内存中，不受 JS 堆限制约束：
 如果没有这些配额，应用就可能通过 UI 耗尽设备内存。
 
+**NSH 在原生代码中读取的数组最多 2^20（1 048 576）项，所有应用都是如此。** 子节点（嵌套的数组合计）、`<Each>` 的
+项、菜单（子菜单合计）、托盘的标题、`Animated.sequence` / `parallel` / `stagger`、`split` 的键、导航栈的路由、原生组件的
+`props` 和 `events`、平移手势的 `touches` 以及画布调用的参数（合计）都在原生代码中读取，调用预算管不到那里；而数组的长度
+就是它声称的长度，不论是否为空（`new Array(2 ** 32 - 1)`）。更长的数组会抛出应用可以捕获的错误：`RangeError`，菜单和托盘
+则是 `TypeError`；画布调用会忽略它并给出警告。导航栈最多容纳同样多的页面：超出后 `push` 会抛出 `RangeError`。子节点和
+子菜单嵌套超过 64 层会抛出 `TypeError`。`<List>` 的 `each` 行数不受此限。
+
 > [!TIP]
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
@@ -179,6 +186,7 @@ Web 上它沿用页面的协议，按补全后的 URL 检查；原生应用没�
 |---|---|---|
 | `hosts` | `string[]` | [web view](./web-view-and-video.md) 可以显示和导航到的主机（`http` 和 `https`）。没有 `webview` 时，应用完全不能显示网页。 |
 | `input` | `boolean` | web view 的 ref 可以向页面发送可信输入（[`sendInput`](./web-view-and-video.md#像用户一样输入)）。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
+| `media` | `string[]` | 网页可以通过 `getUserMedia` 采集的媒体：`"microphone"`、`"camera"`。只有声明了才会授予，没有 `"capabilities"` 的应用也不例外。 |
 
 web view 内的顶层导航也会在加载前由平台的导航代理检查。页面自身的子资源（脚本、图片、XHR）属于网页内容自己的事，
 不做检查。`about:blank` 和内联 HTML（`html`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
@@ -188,6 +196,16 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
 并在日志中说明要添加哪个键。
+
+`media` 负责回应 web view 自己的媒体采集请求：在 macOS、iOS、Android、Windows 和 Linux 上，已声明的种类会被允许，其余一律拒绝。
+系统第一次仍会询问用户，所以安装包要声明系统需要的内容：`nsh package` 会写入 `NSMicrophoneUsageDescription` /
+`NSCameraUsageDescription`（可以用 `ios.infoPlist` / `macos.infoPlist` 改成自己的措辞）、macOS 的
+`com.apple.security.device.audio-input` / `com.apple.security.device.camera` 权利（entitlements），以及 Android 的
+`RECORD_AUDIO` / `CAMERA` 权限，应用会在页面第一次需要时请求它们。页面需要处于安全上下文（`https:` 或 `localhost`）才能使用 `getUserMedia`。
+
+```json
+{ "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
+```
 
 ### `statusBar`
 
@@ -319,7 +337,9 @@ fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to c
 
 - `nsh build` 和 `nsh package` 把它作为 `capabilities.json` 写在 bundle 旁边；
 - `nsh publish` 把它放进[签名包](./signed-packages.md)的头部，受签名保护；
-- `nsh dev` 每次构建都会发送它，因此开发时执行的是同样的规则。修改 `capabilities` 会重新加载应用，而不是热更新。
+- `nsh dev` 每次构建都会发送它，因此开发时执行的是同样的规则。修改 `capabilities` 会重新加载应用，而不是热更新；
+- 以 Rust 组件为根的应用（`nsh.json` 的 `"root"`）把它和根一起编译进去，所以每个运行器（包括 Web 和 `nsh test`）都按它
+  检查应用的调用，和 TSX 应用一样。没有 `"capabilities"` 时，它能访问的和任何没有声明的应用相同。
 
 ## 授权：宿主应用允许什么
 

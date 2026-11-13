@@ -186,18 +186,24 @@ enum Command {
         /// `nsh/host` calls of each app the tests open and sends its events.
         #[arg(long, value_name = "JS")]
         web_host: Option<PathBuf>,
-        /// With `--target macos`: the display the apps' windows open on,
-        /// centered: 1 is the primary display (the one with the menu bar),
-        /// 2 the next, and so on; the main one when there is no such
-        /// display. Default: the first display besides the primary one
-        /// (not a mirror of it), so that a run keeps off the screen in use;
-        /// the primary one when there is no other.
+        /// With `--target ios`: the simulator the apps run in (name or
+        /// UDID); default: a booted one, else the newest iPhone.
+        #[arg(long, value_name = "DEVICE")]
+        device: Option<String>,
+        /// With `--target macos` or `gpui`: the display the apps' windows
+        /// open on, centered: 1 is the primary display (on macOS the one with
+        /// the menu bar), 2 the next, and so on; the main one when there is
+        /// no such display. Default: the first display besides the primary
+        /// one (not a mirror of it), so that a run keeps off the screen in
+        /// use; the primary one when there is no other.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
-        /// With `--target macos`: lets the apps become the active app, as
-        /// they would run for a user. By default they run in the
-        /// background: their windows show but never take the keyboard from
-        /// the app in use, and the tests' input goes to them directly.
+        /// With `--target macos`, `windows`, `gpui` or `linux`: lets the apps
+        /// become the active app, as they would run for a user. By default
+        /// they run in the background: their windows show but never take the
+        /// keyboard from the app in use, and the tests' input goes to them
+        /// directly (on Linux the keys go to the widgets, as on Wayland,
+        /// except on a display nobody types on, such as Xvfb).
         #[arg(long)]
         foreground: bool,
     },
@@ -781,8 +787,24 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             ui::path(entry)
         );
     }
+    // Only commands that build this machine's headless runner, host or
+    // runner after the describing program share one build with it; the
+    // others (a bundle, a check, a package or a host for another target)
+    // build only the describing program for this machine.
+    let here = |target: run::Target| target == run::Target::native() && target != run::Target::Web;
+    let unify = match &command {
+        Command::Test { .. } => true,
+        Command::Run { target, .. } => here(*target),
+        Command::Dev {
+            target,
+            server_only: false,
+            ..
+        } => here(*target),
+        Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
+        _ => false,
+    };
     let app = match command.entry_mut() {
-        Some(entry) => rust_app::of(entry)?,
+        Some(entry) => rust_app::of(entry, unify)?,
         None => None,
     };
     let Some(app) = app else {
@@ -870,6 +892,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser,
             web_host,
+            device,
             display,
             foreground,
         } => test::test(
@@ -882,6 +905,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser.as_deref(),
             web_host,
+            device.as_deref(),
             display.map(|n| n as usize),
             foreground,
         ),

@@ -211,6 +211,27 @@ expect Page 1
 tap id:prepend-page
 expect Page new 1
 prop scroll:text:"Page 1" contentOffset y=120
+# core-list-initial-end
+tap id:case-core-list-initial-end
+expect Shrink 49
+absent Shrink 0
+tap id:read-initial-end
+expect Shrink 48/0; Tall 49/180; Short 0/0; Empty null
+expect Short 0
+expect Short 1
+# Both rows fit: opening at the end does not bottom-align their content.
+frame parent:parent:text:"Short 0" 0 0 390 30
+covers [props] List.initialScrollAtEnd
+# core-list-position
+tap id:case-core-list-position
+expect Positioned 0
+tap id:read-position
+expect Row 0, 0 in; empty: null
+# Rows of 40, 60 and 80 points: 130 points down is 30 points into row 2.
+scroll id:positioned 0 130
+tap id:read-position
+expect Row 2, 30 in; empty: null
+covers [nsh] List
 # core-reactive
 tap id:case-core-reactive
 expect Sum: 3

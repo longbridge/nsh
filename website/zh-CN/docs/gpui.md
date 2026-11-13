@@ -123,6 +123,7 @@ view.load(App::Js(Bundle::source(code)));
 - `AppView::connect_dev_server(url, cx)`（feature `dev`）从 `nsh dev` 加载应用，边改边重新加载，错误浮层显示在视图上；`AppView::on_error` 照样收到应用的错误。
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。
 - `AppView::set_locale(locale, cx)` 和 `AppView::set_font_scale(scale, cx)` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
+- `AppView::set_theme_overrides(Some(json), cx)` 把你的应用的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件，其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变；`bg-primary` 等类名立即更新样式，之后加载的应用一开始就使用它（`None` 恢复应用自己的主题；无法解析的文件返回错误，不做任何改动）。用 `set_theme` / `set_theme_json` 给了整套主题时，覆盖压在那套主题的 token 之上，两者改动其一时另一个保持不变。
 - `AppView::run_package(&package)` 运行来自 `verify_package` 或 `load_package` 的[签名包](./signed-packages.md)；你的应用判定它健康之后，用 `accept_package` 记录它。
 - `set_ui_sets(sets)` 设置每个引擎提供的 UI 套件：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，由
   `#[native_module]` 生成；[用 Rust 开发](./rust.md)），也用来提供你的应用自己的套件：应用通过
@@ -133,7 +134,8 @@ view.load(App::Js(Bundle::source(code)));
 
 与原生桌面后端在绘制或行为上的不同之处：
 
-- **变换**：旋转、斜切和透视的视图，其背景、边框和阴影会随之变换，但文字保持直立，图片、视频和画布按其边界绘制。
+- **变换**：旋转、斜切和透视的视图，其背景、边框、阴影和图片会随之变换（转动中的照片在每个新角度重新绘制，单色 SVG 图标由 GPU
+  旋转），画布跟随旋转和斜切；文字保持直立，视频按其边界绘制。
 - **不透明度**作用于每种颜色而不是整组，因此半透明视图中相互重叠的子视图会彼此透出；图片的不透明度（淡入、半透明视图）以
   十六分之一为级变化。
 - **圆角裁剪**（带圆角的 `overflow: "hidden"`）会让子视图的背景和图片跟随圆角，但文字、边框、视频和原生组件按矩形裁剪。

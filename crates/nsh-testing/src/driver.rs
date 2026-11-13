@@ -29,10 +29,12 @@ pub(crate) trait Driver: Send {
     fn clear(&mut self, selector: &str) -> Result<(), String>;
     fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String>;
     fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String>;
+    /// An input method composes `text` in the input `selector` names.
+    fn compose(&mut self, selector: &str, text: &str) -> Result<(), String>;
     /// Drops local files (`file:` URLs) on what `selector` names.
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         let _ = (selector, uris);
-        Err("`dropFiles` runs headless and on Linux for now".into())
+        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
     }
     /// Drags without lifting, until [`Driver::drop_held`].
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
@@ -78,6 +80,10 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
+    /// The system wakes from sleep (`wakeCount()`).
+    fn wake(&mut self) -> Result<(), String> {
+        Err(headless_only("wake"))
+    }
     /// The user's locale settings that `settings` names, as the system
     /// reports them (`localeSettings()`).
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
@@ -88,6 +94,16 @@ pub(crate) trait Driver: Send {
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         let _ = url;
         Err(headless_only("openWithUrl"))
+    }
+    /// The images of `url` (a `*` glob) fail to load (`failImages`).
+    fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failImages"))
+    }
+    /// The URLs matching `url` (a `*` glob) fail to open (`failOpenUrls`).
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failOpenUrls"))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
@@ -198,6 +214,9 @@ impl Driver for Headless {
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         Headless::drop_files(self, selector, uris)
     }
+    fn compose(&mut self, selector: &str, text: &str) -> Result<(), String> {
+        Headless::compose(self, selector, text)
+    }
     fn drop_held(&mut self) -> Result<(), String> {
         Headless::drop_held(self)
     }
@@ -254,10 +273,19 @@ impl Driver for Headless {
             e.lifecycle = state;
         })
     }
+    fn wake(&mut self) -> Result<(), String> {
+        self.set_environment("wake()", |e| e.wake_count = e.wake_count.wrapping_add(1))
+    }
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
         let pins = settings.pins("setLocaleSettings")?;
         let what = format!("setLocaleSettings({})", settings.label());
         self.set_environment(&what, |e| pins.apply(e))
+    }
+    fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_images(self, url)
+    }
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_open_urls(self, url)
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)
@@ -470,6 +498,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::Hover { selector } => format!("hover({selector})"),
         TestStep::RightClick { selector } => format!("rightClick({selector})"),
         TestStep::Paste { selector, .. } => format!("paste({selector})"),
+        TestStep::Compose { selector, text } => format!("compose({selector}, {text:?})"),
         TestStep::ChooseMenuItem { label } => format!("chooseMenuItem({label})"),
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::HostSend { name, .. } => format!("host.send({name})"),
@@ -563,6 +592,12 @@ impl Driver for Remote {
     }
     fn drop_held(&mut self) -> Result<(), String> {
         self.action(TestStep::Drop)
+    }
+    fn compose(&mut self, selector: &str, text: &str) -> Result<(), String> {
+        self.action(TestStep::Compose {
+            selector: selector.into(),
+            text: text.into(),
+        })
     }
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         self.action(TestStep::DropFiles {

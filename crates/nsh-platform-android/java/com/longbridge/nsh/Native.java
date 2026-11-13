@@ -88,7 +88,9 @@ final class Native {
     static final int WINDOW = 76;
     static final int EDIT_ACTION = 77;
     static final int WHEEL = 78;
-    static final int WEB_EVALUATION = 79;
+    static final int PINCH = 79;
+    static final int WEB_EVALUATION = 80;
+    static final int MOUSE_UP = 81;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -151,6 +153,12 @@ final class Native {
     static native boolean allowsWebview(long handle, String url);
 
     /**
+     * Whether the running app's web pages may capture {@code kind}
+     * ({@code "microphone"}, {@code "camera"}): its {@code webview.media}.
+     */
+    static native boolean allowsWebMedia(long handle, String kind);
+
+    /**
      * The URL a media load redirected from {@code base} to {@code location}
      * goes on to, or null if the running app may not load it.
      */
@@ -191,8 +199,12 @@ final class Native {
 
     static native void packageFree(long pkg);
 
-    /** The images picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height in pixels. */
-    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes);
+    /**
+     * The images or files picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height
+     * in pixels; a file not read (larger than the pick reads) has {@code null} data and its size in bytes in
+     * {@code lengths}.
+     */
+    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes, long[] lengths);
 
     /** A native component emitted {@code name} with {@code json} data (null: none). */
     static native void componentEvent(long handle, int id, String name, String json);

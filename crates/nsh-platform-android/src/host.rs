@@ -994,6 +994,30 @@ extern "system" fn Java_com_longbridge_nsh_Native_allowsWebview(
     access.allows_webview(&String::from(url)).into()
 }
 
+/// Whether the running app's web pages may capture `kind` (`"microphone"`,
+/// `"camera"`).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_allowsWebMedia(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    kind: JString<'_>,
+) -> jboolean {
+    use nsh_core::access::WebMedia;
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Ok(kind) = env.get_string(&kind) else {
+        return 0;
+    };
+    let media = match String::from(kind).as_str() {
+        "microphone" => WebMedia::Microphone,
+        "camera" => WebMedia::Camera,
+        _ => return 0,
+    };
+    let access = host.access.lock().expect("access").clone();
+    access.allows_web_media(media).into()
+}
+
 /// The URL a media load redirected from `base` to `location` goes on to, or
 /// null if the running app may not load it.
 #[unsafe(no_mangle)]
@@ -2395,7 +2419,7 @@ fn floats(env: &JNIEnv<'_>, values: &[f32]) -> jfloatArray {
     array.into_raw()
 }
 
-/// A registered native component emitted `name` (JSON data or `null`).
+/// The files picked for a pick (`Picker.java`'s answer).
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_picked(
     mut env: JNIEnv<'_>,
@@ -2406,12 +2430,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_picked(
     types: jni::objects::JObjectArray<'_>,
     data: jni::objects::JObjectArray<'_>,
     sizes: jni::objects::JIntArray<'_>,
+    lengths: jni::objects::JLongArray<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let count = env.get_array_length(&data).unwrap_or(0).max(0);
     let mut dims = vec![0; count as usize * 2];
     let _ = env.get_int_array_region(&sizes, 0, &mut dims);
+    let mut lens = vec![0; count as usize];
+    let _ = env.get_long_array_region(&lengths, 0, &mut lens);
     let string = |env: &mut JNIEnv<'_>, array: &jni::objects::JObjectArray<'_>, i: i32| {
         env.get_object_array_element(array, i)
             .ok()
@@ -2426,6 +2453,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_picked(
         let Ok(bytes) = env.get_object_array_element(&data, i) else {
             continue;
         };
+        // No bytes: a file larger than the pick reads, its size alone.
+        if bytes.is_null() {
+            let len = u64::try_from(lens[i as usize]).unwrap_or(0);
+            files.push(nsh_core::picker::PickedFile::too_large(name, mime, len));
+            continue;
+        }
         let Ok(bytes) = env.convert_byte_array(JByteArray::from(bytes)) else {
             continue;
         };

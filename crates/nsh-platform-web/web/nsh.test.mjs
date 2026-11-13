@@ -140,7 +140,7 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
     setAttribute: (name, value) => attrs.set(name, value),
     removeAttribute: (name) => attrs.delete(name),
   };
-  const el = { _field: field };
+  const el = { _field: field, removeAttribute() {} };
   player.view = () => el;
   for (const multiline of [false, true]) {
     field.tagName = multiline ? "TEXTAREA" : "INPUT";
@@ -159,6 +159,163 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   }
 });
 
+test("an invalid view is aria-invalid, and so is the field of an input", () => {
+  const { player } = fakePlayer();
+  const element = () => {
+    const attrs = new Map();
+    return {
+      attrs,
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+    };
+  };
+  const el = { ...element(), _props: { invalid: true } };
+  const field = element();
+  player.updateAria(el);
+  assert.equal(el.attrs.get("aria-invalid"), "true");
+  // The field made after the props takes them too: it is what screen readers read.
+  field.classList = { toggle() {} };
+  field.tagName = "INPUT";
+  el._field = field;
+  player.view = () => el;
+  player.op_in(["in", 1, { multiline: false }, null]);
+  assert.equal(field.attrs.get("aria-invalid"), "true");
+  el._props.invalid = false;
+  player.updateAria(el);
+  assert.equal(el.attrs.has("aria-invalid"), false);
+  assert.equal(field.attrs.has("aria-invalid"), false);
+  el._props.invalid = true;
+  player.updateAria(el);
+  assert.equal(field.attrs.get("aria-invalid"), "true");
+});
+
+for (const multiline of [false, true]) {
+  for (const propsFirst of [false, true]) {
+    test(`a ${multiline ? "textarea" : "single-line input"} takes its name and description with props ${propsFirst ? "before" : "after"} its field`, () => {
+      const { player } = fakePlayer();
+      const element = () => {
+        const attrs = new Map();
+        return {
+          attrs, style: {}, classList: { toggle() {} },
+          setAttribute: (name, value) => attrs.set(name, value),
+          removeAttribute: (name) => attrs.delete(name),
+        };
+      };
+      const el = { ...element(), _props: {} };
+      const field = { ...element(), tagName: multiline ? "TEXTAREA" : "INPUT" };
+      player.view = () => el;
+      const props = { label: "价格", hint: "Amount in USD", invalid: true };
+      const update = (changes) => {
+        Object.assign(el._props, changes);
+        player.updateAria(el);
+      };
+      const input = () => {
+        el._field = field;
+        player.op_in(["in", 2, { multiline }, null]);
+      };
+      if (propsFirst) {
+        update(props);
+        assert.equal(el.attrs.get("aria-label"), "价格");
+        assert.equal(el.attrs.get("aria-description"), "Amount in USD");
+        input();
+      } else {
+        input();
+        update(props);
+      }
+      const named = (label, hint) => {
+        assert.equal(field.attrs.get("aria-label"), label);
+        assert.equal(field.attrs.get("aria-description"), hint);
+        assert.equal(el.attrs.has("aria-label"), false);
+        assert.equal(el.attrs.has("aria-description"), false);
+      };
+      named("价格", "Amount in USD");
+      assert.equal(field.attrs.get("aria-invalid"), "true");
+      player.op_al(["al", 2, "Limit price"]);
+      update({ hint: "Amount in EUR" });
+      named("Limit price", "Amount in EUR");
+      player.op_al(["al", 2, null]);
+      update({ hint: null, invalid: false });
+      named(undefined, undefined);
+      assert.equal(field.attrs.has("aria-invalid"), false);
+
+      // Text mount items supply the fallback name, independently of props.
+      player.updateRuns = () => true;
+      const text = (label) => player.op_t(["t", 2, 0, 0, 0, 0,
+        label ? [[0, 0, label, 0, 0]] : [], [], false, null]);
+      text("Price");
+      named("Price", undefined);
+      text("Market price");
+      named("Market price", undefined);
+      player.op_al(["al", 2, "Explicit price"]);
+      text("Latest price");
+      named("Explicit price", undefined);
+      player.op_al(["al", 2, null]);
+      named("Latest price", undefined);
+      text("");
+      named(undefined, undefined);
+      player.op_al(["al", 2, "Price"]);
+      update({ hint: "Enter a price" });
+      named("Price", "Enter a price");
+      player.op_al(["al", 2, ""]);
+      update({ hint: "" });
+      named(undefined, undefined);
+    });
+  }
+}
+
+test("a combo box's field names its highlighted row and its list by DOM id", () => {
+  const { player } = fakePlayer();
+  player.classPrefix = "nsh-p1-";
+  const element = (extra = {}) => {
+    const attrs = new Map();
+    return {
+      attrs,
+      id: "",
+      setAttribute: (name, value) => attrs.set(name, value),
+      removeAttribute: (name) => attrs.delete(name),
+      ...extra,
+    };
+  };
+  const views = new Map();
+  player.view = (id) => views.get(id);
+  const field = element({ classList: { toggle() {} }, tagName: "INPUT" });
+  const el = element({ _field: field, _props: { role: "combobox", label: "Tags", expanded: true, hasPopup: true, activeDescendant: 6, controls: 4 } });
+  const list = element();
+  views.set(2, el);
+  views.set(4, list);
+  // The row named is made after the field's props: linked after the
+  // batch (`apply` ends with `linkRelations`).
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-controls"), "nsh-p1-v4");
+  assert.equal(list.id, "nsh-p1-v4");
+  assert.equal(field.attrs.has("aria-activedescendant"), false, "not made yet");
+  const row = element();
+  views.set(6, row);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-activedescendant"), "nsh-p1-v6");
+  assert.equal(row.id, "nsh-p1-v6");
+  // The field is the combo box: the wrapper has no role of its own.
+  assert.equal(field.attrs.get("role"), "combobox");
+  assert.equal(field.attrs.get("aria-label"), "Tags");
+  assert.equal(field.attrs.get("aria-expanded"), "true");
+  assert.equal(field.attrs.get("aria-haspopup"), "listbox");
+  assert.equal(el.attrs.has("role"), false);
+  assert.equal(el.attrs.has("aria-activedescendant"), false);
+  // The highlight moves, then the list closes.
+  el._props = { ...el._props, activeDescendant: 8 };
+  views.set(8, element());
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.get("aria-activedescendant"), "nsh-p1-v8");
+  el._props = { role: "combobox", expanded: false, hasPopup: true };
+  player.updateAria(el);
+  player.linkRelations();
+  assert.equal(field.attrs.has("aria-activedescendant"), false);
+  assert.equal(field.attrs.has("aria-controls"), false);
+  assert.equal(field.attrs.get("aria-expanded"), "false");
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
@@ -171,6 +328,24 @@ test("events sent before the app runs reach it in order once it starts, later on
   ]);
   player.hostEvent("c");
   assert.deepEqual(events(sent), ["a", "b", "c"]);
+});
+
+test("posts go to the page host's post, else its call, and nothing comes back", async () => {
+  const posted = [];
+  const { player, sent } = fakePlayer({ host: { call: () => 1, post: (...args) => posted.push(args) } });
+  player.begin(390, started);
+  player.hostPost("note", { a: 1 });
+  assert.deepEqual(posted, [["note", { a: 1 }]]);
+  const called = [];
+  const fallback = fakePlayer({ host: { call: async (...args) => { called.push(args); throw new Error("boom"); } } });
+  fallback.player.begin(390, started);
+  fallback.player.hostPost("note", 2);
+  const throwing = fakePlayer({ host: { call() {}, post() { throw new Error("boom"); } } });
+  throwing.player.hostPost("note", 3);
+  fakePlayer().player.hostPost("note", 4);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(called, [["note", 2]]);
+  assert.deepEqual([...sent, ...fallback.sent, ...throwing.sent], []);
 });
 
 test("events for an app that failed to start reach neither it nor the next app", () => {
@@ -453,6 +628,62 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   delete globalThis.document;
 });
 
+test("setAccessibilityFocus leaves the keyboard focus in a field the user is typing in", async () => {
+  const { player } = fakePlayer();
+  player.live = { textContent: "" };
+  const focusable = (attrs = {}) => {
+    const el = {
+      attrs: new Map(Object.entries(attrs)),
+      focused: false,
+      isConnected: true,
+      closest: () => null,
+      hasAttribute(name) { return this.attrs.has(name); },
+      getAttribute(name) { return this.attrs.get(name) ?? null; },
+      set tabIndex(v) { this.attrs.set("tabindex", String(v)); },
+      focus() { this.focused = true; globalThis.document.activeElement = this; },
+    };
+    return el;
+  };
+  const field = Object.assign(focusable(), { tagName: "INPUT", type: "search" });
+  const title = Object.assign(focusable({ "aria-label": "Search" }), { textContent: "Search" });
+  const input = { _field: field };
+  const views = new Map([[2, title], [4, input]]);
+  player.view = (id) => views.get(id);
+  const a11yFocus = (id) => player.op_cmd([0, id, "a11yFocus"]);
+  try {
+    // Typing in the search field: the title is read out, the field keeps
+    // the keyboard focus.
+    globalThis.document = { activeElement: field };
+    a11yFocus(2);
+    assert.equal(title.focused, false);
+    assert.equal(document.activeElement, field);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(player.live.textContent, "Search");
+    // Nothing typed into: the title takes the focus, as before.
+    globalThis.document = { activeElement: null };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    assert.equal(title.getAttribute("tabindex"), "-1");
+    // An input takes it into its field.
+    a11yFocus(4);
+    assert.equal(field.focused, true);
+    assert.equal(document.activeElement, field);
+    // A field that no longer takes input (under a dialog) keeps nothing.
+    title.focused = false;
+    field.closest = (selector) => (selector === "[inert]" ? {} : null);
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    // Nor does a checkbox, which takes no typing.
+    title.focused = false;
+    field.closest = () => null;
+    globalThis.document = { activeElement: Object.assign(focusable(), { tagName: "INPUT", type: "checkbox" }) };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 test("a touch whose press focused a field leaves the focus there", () => {
   const { player } = fakePlayer();
   player.editable = (target) => target.field === true;
@@ -498,7 +729,7 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   const key = (focus) => {
     globalThis.document = { activeElement: focus };
     let prevented = false;
-    player.keyDown({ key: "Enter", preventDefault: () => (prevented = true), stopPropagation() {} });
+    player.keyDown({ key: "Enter", composedPath: () => [], preventDefault: () => (prevented = true), stopPropagation() {} });
     delete globalThis.document;
     return prevented;
   };
@@ -508,6 +739,134 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   assert.deepEqual(pressed, [button]);
   assert.equal(key(chart), false);
   assert.deepEqual(pressed, [button]);
+});
+
+test("Return and Space press the focused control unless the focus binds them", () => {
+  const { player } = fakePlayer();
+  // The app binds Return, Space and Mod+Return everywhere but text fields
+  // (binding 7), as the native match answers: on a control (focus bit 2)
+  // plain Return and Space fire only the focus' own bindings (binding 9,
+  // while `own`).
+  let own = false;
+  player.wasm.nsh_key = (code, mods, focus) => {
+    const pressing = (code === keyCode({ key: "Enter" }) || code === keyCode({ key: " " })) && !(mods & 11);
+    if (focus & 2 && pressing) return own ? 9 : -1;
+    return 7;
+  };
+  const fired = [];
+  player.call = (f) => f({ nsh_key_command: (id) => fired.push(id) });
+  player.modifiersChanged = () => {};
+  player.takesKeys = () => true;
+  player.selectionKey = () => false;
+  player.scrollKey = () => false;
+  player.back = () => false;
+  player.ancestors = () => [];
+  const pressed = [];
+  player.pressIn = (p) => pressed.push(p.press);
+  player.pressOut = () => {};
+  player.root = { contains: () => true };
+  const key = (focus, e) => {
+    globalThis.document = { activeElement: focus };
+    player.keyDown({ composedPath: () => [], preventDefault() {}, stopPropagation() {}, ...e });
+    if (e.key === " ") player.keyUp({ key: " " });
+    delete globalThis.document;
+  };
+  const button = focusView(true, {});
+  const chart = focusView(false, { focusable: true });
+  // On a button: the button takes them, the app's binding never fires.
+  key(button, { key: "Enter" });
+  key(button, { key: " " });
+  key(button, { key: "Enter", shiftKey: true });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, []);
+  // With Control or Command held the binding fires, as it does with the
+  // focus on no control or on a stop that takes no presses.
+  key(button, { key: "Enter", ctrlKey: true });
+  key(button, { key: "Enter", metaKey: true });
+  key(null, { key: "Enter" });
+  key(chart, { key: "Enter" });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, [7, 7, 7, 7]);
+  // The focus' own binding (a menu button opening its menu) takes them
+  // before the press.
+  own = true;
+  key(button, { key: "Enter" });
+  assert.deepEqual(pressed, [button, button, button]);
+  assert.deepEqual(fired, [7, 7, 7, 7, 9]);
+});
+
+test("a key a field's own handler took is not the page's shortcut as well", () => {
+  const { player } = fakePlayer();
+  // The app binds Return and Escape everywhere but text fields (binding 7),
+  // as the native match answers.
+  player.wasm.nsh_key = (_code, _mods, focus) => (focus & 1 ? -1 : 7);
+  const fired = [];
+  player.call = (f) => f({ nsh_key_command: (id) => fired.push(id) });
+  player.modifiersChanged = () => {};
+  player.selectionKey = () => false;
+  player.scrollKey = () => false;
+  player.back = () => false;
+  player.ancestors = () => [];
+  // A field in the root; once its handler has closed it, the root no longer
+  // holds it and the focus is on the body.
+  let mounted = true;
+  const body = { closest: () => null };
+  const field = { ...focusView(false, {}), classList: { contains: () => true }, closest: (selector) => (selector.includes(".nsh-field") ? field : null) };
+  const root = { contains: (el) => mounted && el === field };
+  player.root = root;
+  globalThis.document = { activeElement: field, body };
+  Player.active = player;
+  const press = (key, path) => {
+    const e = { key, composedPath: () => path, preventDefault() {}, stopPropagation() {} };
+    player.keyDown(e);
+  };
+  try {
+    // The key bubbles to the window after the field's handler ran.
+    mounted = false;
+    document.activeElement = body;
+    press("Enter", [field, root, body]);
+    press("Escape", [field, root, body]);
+    assert.deepEqual(fired, [], "the field's key is not a shortcut too");
+    // The same key on the page itself fires it.
+    press("Enter", [body]);
+    assert.deepEqual(fired, [7]);
+  } finally {
+    delete globalThis.document;
+    Player.active = null;
+  }
+});
+
+test("Return a shortcut takes does not submit the field as well", () => {
+  const { player, sent } = fakePlayer();
+  player.modifiersChanged = () => {};
+  // The app binds Return in text fields (binding 3, an autocomplete list's)
+  // while `bound` says so; otherwise nothing takes it.
+  let bound = true;
+  player.wasm.nsh_key = (code, _mods, focus) => (bound && code === 256 && focus & 1 ? 3 : -1);
+  const listeners = {};
+  const field = {
+    tagName: "TEXTAREA",
+    value: "/rev",
+    _count: 4,
+    addEventListener: (type, listener) => (listeners[type] = listener),
+    blur() {},
+  };
+  const el = { _id: 9, _events: new Set(["onSubmitEditing"]), _config: { submit: "submit" } };
+  player.wireInput(el, field);
+  const press = (key, extra = {}) => {
+    let prevented = false;
+    listeners.keydown({ key, keyCode: 13, isComposing: false, shiftKey: false, altKey: false, preventDefault: () => (prevented = true), ...extra });
+    return prevented;
+  };
+  const submits = () => sent.filter(([name]) => name === "onSubmitEditing").length;
+  // Taken: the shortcut's alone (`keyDown` fires it), as on the native platforms.
+  assert.equal(press("Enter"), false);
+  assert.equal(submits(), 0);
+  // Not taken: the field submits as before.
+  bound = false;
+  assert.equal(press("Enter"), true);
+  assert.equal(submits(), 1);
+  assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
 });
 
 /**
@@ -2348,4 +2707,123 @@ test("a page without the async clipboard reports a write with a warning", async 
   const { player } = fakePlayer();
   await player.writeClipboardImage("data:image/png;base64,");
   assert.equal(log.warnings.length, 1);
+});
+
+// Side modules -----------------------------------------------------------
+
+// A module that exports one empty function, `g`: a side module whose gate
+// is `g`, or (without a gate in its table entry) a shared one.
+const SIDE_WASM = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
+  0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+  0x03, 0x02, 0x01, 0x00, // one function of it
+  0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00, // export "g"
+  0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // its empty body
+]);
+
+/**
+ * A player that loads side modules from `fail`'s answers: `compileSide`
+ * rejects while `fail(url, attempt)` is true, and compiles `SIDE_WASM`
+ * otherwise. `compiled` lists the URLs it was asked for, `gates` the gates
+ * that ran.
+ */
+function sidePlayer(fail = () => false) {
+  const player = Object.create(Player.prototype);
+  const compiled = [];
+  const gates = [];
+  Object.assign(player, {
+    mainExports: {},
+    sideLoads: new Map(),
+    sideModules: new Map(),
+    afterGate: (gate) => gates.push(gate),
+    async compileSide(url, init) {
+      const attempt = compiled.filter((u) => u === url).length;
+      compiled.push(url);
+      await Promise.resolve();
+      if (fail(url, attempt, init)) throw new Error(`${url}: HTTP 503`);
+      return WebAssembly.compile(SIDE_WASM);
+    },
+  });
+  return { player, compiled, gates };
+}
+
+test("a side module that failed to load is loaded again by the next load that needs it", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => attempt === 0);
+  await assert.rejects(player.loadSides(["nsh_part_fields"], table), /HTTP 503/);
+  assert.deepEqual(gates, []);
+  assert.equal(player.sideLoads.has("nsh_part_fields"), false);
+  const [exports] = await player.loadSides(["nsh_part_fields"], table);
+  assert.equal(typeof exports.g, "function");
+  assert.deepEqual(compiled, ["fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("callers loading a side module at once share one load, and a loaded one is not loaded again", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer();
+  const first = player.loadSide("nsh_part_fields", table);
+  const second = player.loadSide("nsh_part_fields", table);
+  assert.equal(first, second);
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a, b);
+  assert.equal(await player.loadSide("nsh_part_fields", table), a);
+  assert.deepEqual(compiled, ["fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("callers sharing a failed load all see the failure, and the next load tries once more", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => attempt === 0);
+  const loads = [player.loadSide("nsh_part_fields", table), player.loadSide("nsh_part_fields", table)];
+  for (const load of loads) await assert.rejects(load, /HTTP 503/);
+  assert.deepEqual(compiled, ["fields.wasm"]);
+  const again = [player.loadSide("nsh_part_fields", table), player.loadSide("nsh_part_fields", table)];
+  assert.equal(again[0], again[1]);
+  await Promise.all(again);
+  assert.deepEqual(compiled, ["fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("a side module that failed keeps the modules it needs that loaded, and its retry reuses them", async () => {
+  const table = {
+    nsh_shared_1: { url: "shared.wasm", needs: [] },
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: ["nsh_shared_1"] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => url === "fields.wasm" && attempt === 0);
+  await assert.rejects(player.loadSide("nsh_part_fields", table), /fields.wasm: HTTP 503/);
+  const shared = await player.loadSide("nsh_shared_1", table);
+  await player.loadSide("nsh_part_fields", table);
+  assert.equal(await player.loadSide("nsh_shared_1", table), shared);
+  assert.deepEqual(compiled, ["shared.wasm", "fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("a module that a failed one needs failing is loaded again too", async () => {
+  const table = {
+    nsh_shared_1: { url: "shared.wasm", needs: [] },
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: ["nsh_shared_1"] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => url === "shared.wasm" && attempt === 0);
+  await assert.rejects(player.loadSide("nsh_part_fields", table), /shared.wasm: HTTP 503/);
+  assert.deepEqual(gates, []);
+  await player.loadSide("nsh_part_fields", table);
+  assert.deepEqual(compiled, ["shared.wasm", "shared.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("prefetching skips on-demand side modules, and a failed prefetch leaves the load to fetch it", async () => {
+  const table = {
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [], onDemand: true },
+    nsh_part_editor: { url: "editor.wasm", gate: "g", needs: [] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt, init) => init?.priority === "low");
+  player.prefetchSides(table);
+  assert.deepEqual(compiled, ["editor.wasm"]);
+  await player.sideModules.get("nsh_part_editor")?.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(player.sideModules.has("nsh_part_editor"), false);
+  await player.loadSides(["nsh_part_editor", "nsh_part_fields"], table);
+  assert.deepEqual(compiled, ["editor.wasm", "editor.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g", "g"]);
 });
