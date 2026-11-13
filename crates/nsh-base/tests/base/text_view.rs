@@ -15,6 +15,72 @@ use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
 #[component]
+fn AnnotatedCode() -> impl IntoElement {
+    use nsh_base::text_view::{
+        Block, CodeBlock, CustomNode, Document, Inline, TextViewCodeAction, TextViewCodeActionEvent,
+    };
+    // Annotations are custom nodes shown as their content: spans of the
+    // code's text, styled through the `custom` part.
+    provide_context(TextViewParts::new().part(TextViewPart::Custom, |s| {
+        s.font_weight(FontWeight::SEMIBOLD)
+    }));
+    let mut code = CodeBlock::new(None, "prefix 日本語 suffix");
+    code.id = Some("annotated".into());
+    code.wrap = true;
+    code.content = vec![
+        Inline::text("prefix "),
+        Inline::Custom(CustomNode::new("mark").with_text("日本語")),
+        Inline::text(" suffix"),
+    ];
+    let mut fallback = CodeBlock::new(None, "literal <tag>");
+    fallback.id = Some("fallback".into());
+    fallback.content = vec![Inline::text("replacement")];
+    let pressed = signal(String::new());
+    view()
+        .child(
+            text_view()
+                .document(Document::new(vec![
+                    Block::CodeBlock(code),
+                    Block::CodeBlock(fallback),
+                ]))
+                .code_block_actions(vec![TextViewCodeAction::new("export").with_label("Export")])
+                .on_code_block_action(move |e: &TextViewCodeActionEvent| {
+                    pressed.set(format!(
+                        "{} {}: {}",
+                        e.id,
+                        e.code.id.as_deref().unwrap_or_default(),
+                        e.code.code
+                    ));
+                }),
+        )
+        .child(text(move || format!("Pressed {}", pressed.get())))
+}
+
+#[test]
+fn annotated_code_shows_its_spans_and_hands_its_block_to_actions() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    app.wait_for("prefix 日本語 suffix").unwrap();
+    assert_eq!(
+        app.screen().span_style("text:日本語").unwrap().font_weight,
+        600
+    );
+    assert_eq!(
+        app.screen().span_style("text:prefix").unwrap().font_weight,
+        400
+    );
+    app.press("label:Export >> nth=0").unwrap();
+    app.wait_for("Pressed export annotated: prefix 日本語 suffix")
+        .unwrap();
+}
+
+#[test]
+fn code_content_that_does_not_spell_the_code_is_ignored() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
+    app.wait_for("literal <tag>").unwrap();
+    assert!(!app.shows("replacement"));
+}
+
+#[component]
 fn TypedRoot() -> impl IntoElement {
     provide_context(TextViewParts::new().part(TextViewPart::Root, |s| s.text_size(px(11.0))));
     text_view().markdown("Hello\n\nAnother paragraph")
@@ -284,6 +350,34 @@ fn a_link_press_reports_the_modifier_keys_held() {
          #footnote-n:cmd https://example.com/guide:plain",
     )
     .unwrap();
+}
+
+/// An image at the end of a paragraph that wraps in a narrow column.
+#[component]
+fn WrappedInlineImage() -> impl IntoElement {
+    view().w(px(120.0)).child(text_view().html(
+        "<p>A paragraph long enough to wrap onto several lines <img src=\"https://example.com/dot.png\" alt=\"Dot\" width=\"10\" height=\"10\"></p>",
+    ))
+}
+
+#[test]
+fn an_image_in_a_wrapped_line_is_inside_the_column() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<WrappedInlineImage>())).unwrap();
+    app.wait_for("label:Dot").unwrap();
+    let id = app.screen().id("label:Dot").unwrap();
+    let nodes = app.screen().layout_nodes();
+    let dot = nodes.iter().find(|n| n.id == id).unwrap().bounds;
+    let text = nodes
+        .iter()
+        .find(|n| n.text.is_some())
+        .expect("the paragraph")
+        .bounds;
+    assert!(dot.origin.x < px(120.0), "{dot:?}");
+    // On the last line, not the first.
+    assert!(
+        dot.origin.y > text.origin.y + px(25.0),
+        "{dot:?} in {text:?}"
+    );
 }
 
 /// An app's own image as wide as it asks, at most its box: 400 points

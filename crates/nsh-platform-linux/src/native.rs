@@ -209,6 +209,10 @@ pub(crate) struct NativeState {
     /// The application id: web views keep their data under it.
     #[cfg(feature = "webview")]
     app_id: RefCell<String>,
+    /// Where the running app's web views save automatic downloads (its
+    /// data directory's `<app id>/downloads`); `None` before an app starts.
+    #[cfg(feature = "webview")]
+    downloads: RefCell<Option<std::path::PathBuf>>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
 }
@@ -251,6 +255,17 @@ impl NativeState {
     /// The application id (nothing to keep without web views).
     #[cfg(not(feature = "webview"))]
     pub(crate) fn set_app_id(&self, _app_id: &str) {}
+
+    /// Where the app that starts saves its web views' automatic downloads:
+    /// its data directory's `<app id>/downloads`.
+    #[cfg(feature = "webview")]
+    pub(crate) fn set_downloads(&self, downloads: Option<std::path::PathBuf>) {
+        *self.downloads.borrow_mut() = downloads;
+    }
+
+    /// Where automatic downloads go (nothing to save without web views).
+    #[cfg(not(feature = "webview"))]
+    pub(crate) fn set_downloads(&self, _downloads: Option<std::path::PathBuf>) {}
 
     /// Whether any web view is mounted (input then keeps pointer events
     /// from the parts of pages nsh clips off).
@@ -411,6 +426,25 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
             if let Some(mut component) = take_component(surface, view.id()) {
                 component.command(name, args);
                 put_component(surface, view.id(), component);
+            }
+        }
+        #[cfg(feature = "webview")]
+        Command::WebViewRequest(request) => {
+            // Outside the hosts' borrow: WebKit may call back at once.
+            let target = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(Some(web))) => Some(web.request_target()),
+                _ => None,
+            };
+            match target {
+                Some((web, shared)) => web::web_request(&web, &shared, request),
+                None => surface.event(
+                    view.id(),
+                    EventKind::WebViewReply,
+                    nsh_core::webview::reply(
+                        request.id,
+                        Err("the web view is not available".into()),
+                    ),
+                ),
             }
         }
         #[cfg(feature = "webview")]
@@ -598,12 +632,15 @@ struct Emitter {
 }
 
 impl Emitter {
-    fn emit(&self, kind: EventKind, payload: impl FnOnce() -> EventPayload) {
-        let listens = self
-            .view
+    /// Whether the view has a listener for `kind`.
+    fn listens(&self, kind: EventKind) -> bool {
+        self.view
             .upgrade()
-            .is_some_and(|v| v.state().events.contains(kind));
-        if !listens {
+            .is_some_and(|v| v.state().events.contains(kind))
+    }
+
+    fn emit(&self, kind: EventKind, payload: impl FnOnce() -> EventPayload) {
+        if !self.listens(kind) {
             return;
         }
         if let Some(surface) = self.surface.upgrade() {

@@ -191,6 +191,25 @@ in `onOpenChange({ open, reason })`: `"triggerPress"` (a press of the trigger, o
 `"pressOutside"`, `"backdropPress"`, `"cancel"` (Escape or back) or `"focus"` (Tab or Shift+Tab moving the keyboard focus on from the open list). `onOpen` and `onClose` tell when the list is
 shown and gone (a sheet once it came in and once it went), `onCancel` that the user closed it without choosing.
 
+## Entrance and exit
+
+On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
+`popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its
+own look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run,
+and `onClose` follows. The keyboard focus is back on the trigger as it closes. Opened again on its way out, it returns to
+its look from where it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user
+asks for less motion it appears and goes at once; the sheet of touch screens slides in and out on its own.
+
+```tsx
+<Select
+  items={items}
+  popupClass="rounded-lg bg-popover p-1 shadow-md transition-all duration-150 ease-out"
+  popupStartingClass="opacity-0 -translate-y-1"
+  popupEndingClass="opacity-0"
+  trigger={<SelectTrigger />}
+/>
+```
+
 ## Search
 
 `searchable` puts a search field above the items: typing filters them by title, ignoring case, and a section with no
@@ -258,6 +277,8 @@ choice draws nothing again. `renderGroup` draws a section's header the same way:
 | `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the trigger and the list. |
 | `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (touch screens) the list is in. |
+| `popupStartingClass`, `popupStartingStyle` | `.popup_starting_class(..)`, `.popup_starting_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popup's look in its first frame, over its own: its transitions run from it. |
+| `popupEndingClass`, `popupEndingStyle` | `.popup_ending_class(..)`, `.popup_ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popup's look once closed, over its own: it stays while its transitions run. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Touch screens: the backdrop behind the sheet. |
 | `listClass`, `listStyle` | `.list_class(..)`, `.list_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The list, the scroll view of the rows. |
 | `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each item's row, its text styles inherited by its title: `focus:` while highlighted, `selected:` while chosen, `disabled:` while it cannot be. |

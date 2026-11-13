@@ -31,6 +31,19 @@ expect Allows: 1 Denies: 2 Sends: 0
 key mod+enter
 expect Allows: 1 Denies: 2 Sends: 1
 covers [nsh] keymap
+# mod-keymap-for-focus
+tap id:case-mod-keymap-for-focus
+# On the tile, Space is its forFocus binding's; Return still presses it.
+key tab
+key space
+expect Opens: 0 Flips: 1
+key enter
+expect Opens: 1 Flips: 1
+# On the next view, the tile's binding is gone: Space presses that view.
+key tab
+key space
+expect Opens: 1 Flips: 1
+covers [nsh] keymap
 # mod-standard-system
 tap id:case-mod-standard-system
 expect console.identity=true
@@ -220,3 +233,9 @@ style id:material-surface glassEffect regular
 covers [props] macos
 covers [props] macos.backdrop
 covers [styles] glassTintColor
+# application-refused
+tap id:case-application-refused
+wait 300
+expect Minimized: false
+expect Launch at login: ERR_ACCESS_DENIED application
+covers [nsh/desktop] currentWindow

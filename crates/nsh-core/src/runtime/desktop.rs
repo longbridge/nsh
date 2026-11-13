@@ -1,6 +1,7 @@
-//! `nsh/desktop`'s app functions (macOS, Windows, Linux; nothing happens
-//! elsewhere). Windows and menus, which call the app's functions and live
-//! in its reactive graph, are `nsh-js`'s.
+//! `nsh/desktop`'s app functions (macOS, Windows, Linux; elsewhere `quit`
+//! and `restart` do nothing and the app does not launch at login). Windows and
+//! menus, which call the app's functions and live in its reactive graph,
+//! are `nsh-js`'s.
 
 use std::{
     cell::{Cell, RefCell},
@@ -9,10 +10,10 @@ use std::{
 
 use crate::{
     Command, ROOT_ID,
-    desktop::DesktopCommand,
+    desktop::{DesktopCommand, LaunchAtLoginError},
     element::{
-        CallCx, Callback, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx, PropEnum,
-        PropError, Ret, Stop, System, TsTypes, module,
+        CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx,
+        PropEnum, PropError, Ret, Stop, System, TsTypes, codes, io_code, module,
         quit::{QuitRequestListener, Subscription},
         task::Action,
     },
@@ -24,6 +25,21 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
         ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// What a `setLaunchAtLogin` call rejects with.
+fn launch_at_login_error(error: LaunchAtLoginError) -> JsError {
+    match error {
+        LaunchAtLoginError::Unavailable => {
+            JsError::Error(error.to_string()).with_code(codes::UNAVAILABLE)
+        }
+        LaunchAtLoginError::Denied => JsError::access_denied(error.to_string(), "application", ""),
+        // Every failure has a code to branch on: the error's own, else EIO.
+        LaunchAtLoginError::System(io) => {
+            let code = io_code(&io).unwrap_or("EIO");
+            JsError::Error(LaunchAtLoginError::System(io).to_string()).with_code(code)
+        }
+    }
 }
 
 /// The application as a whole (desktops; its functions do nothing elsewhere,
@@ -52,6 +68,30 @@ impl Application {
     /// to that app.
     pub(crate) fn restart(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Restart);
+    }
+
+    /// Whether the system opens the app when the user logs in, as the
+    /// system has it now: ask again when the app shows it, as the user may
+    /// change it in the system's settings. `false` wherever the app cannot
+    /// launch at login (a view embedded in another app, `nsh run`, iOS,
+    /// Android, the web) and while macOS waits for the user to approve it
+    /// in Login Items.
+    pub(crate) async fn launch_at_login() -> bool {
+        crate::element::desktop::launch_at_login().await
+    }
+
+    /// Turns launching at login on or off: turning on what is on and off
+    /// what is off succeed. Call it when the user turns the app's own
+    /// setting on or off, never at every start: what the user chose in the
+    /// system's settings stands. Rejects with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the app cannot launch at
+    /// login, with `ERR_ACCESS_DENIED` (`permission` `"application"`) for an
+    /// app that declares capabilities without `application`, and with the
+    /// system's error (Node's code, `EIO` without one).
+    pub(crate) async fn set_launch_at_login(enabled: bool) -> Result<(), JsError> {
+        crate::element::desktop::set_launch_at_login(enabled)
+            .await
+            .map_err(launch_at_login_error)
     }
 
     /// Listens to `event`. `secondInstance`: with nsh.json

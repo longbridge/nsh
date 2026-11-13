@@ -183,6 +183,15 @@ test("a secondary press asks for a context menu at a cell or a title", async () 
   await app.waitFor("text:/target=none/");
 });
 
+test("onContextMenu is the table's own, not its host's", async () => {
+  const app = await start();
+  // The host hearing it too would call the handler without a row or column
+  // (headless asks the host itself; a browser hits the cell in the middle).
+  await app.rightClick("id:t");
+  await app.wait(100);
+  expect(app.shows("text:/menu=-:-/")).toBe(false);
+});
+
 test("a sort button sorts ascending, descending, then not at all", async () => {
   const app = await start();
   // The title selects the column; only the button sorts.

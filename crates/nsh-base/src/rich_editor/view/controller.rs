@@ -33,7 +33,7 @@ use crate::{
     rich_editor::{
         commands::base_keymap,
         extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
-        formats::{DomParser, slice_from_text, slice_to_text},
+        formats::{DomParser, DomSerializer, slice_from_text, slice_to_text},
         model::{Fragment, Mark, Node, SchemaSpec, Slice},
         state::{
             Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, GapCursor, KeyEvent,
@@ -1255,16 +1255,30 @@ impl Rv {
 
     // The clipboard.
 
+    /// A copy of the selection (ProseMirror's), also what a cut and the
+    /// touch edit menu's Copy and Cut put on the clipboard: through the
+    /// plugins' `transform_copied`, as plain text (the
+    /// `clipboard_text_serializer`'s, else the slice's text) and, in the
+    /// same write, as HTML (the schema's `to_dom`), marked with the
+    /// slice's open depths so a paste into an editor gets the same nodes
+    /// back.
     pub(crate) fn copy(&self) {
         let state = self.session.state();
         if state.selection().empty() {
             return;
         }
-        let slice = state.selection().content();
+        let mut slice = state.selection().content();
+        for plugin in state.plugins() {
+            slice = plugin.transform_copied(&state, slice);
+        }
         let text = state
             .some_prop(|p| p.clipboard_text_serializer(&state, &slice))
             .unwrap_or_else(|| slice_to_text(&slice));
-        set_clipboard(text);
+        let mut item = ClipboardItem::default();
+        item.text = text;
+        item.html =
+            Some(DomSerializer::from_schema(state.schema()).serialize_for_clipboard(&slice));
+        set_clipboard_item(item);
     }
 
     /// A paste of `text` and, when the clipboard had it, the same content as
@@ -1313,7 +1327,7 @@ impl Rv {
             let parser = state
                 .some_prop(|p| p.clipboard_parser(&state))
                 .unwrap_or_else(|| DomParser::from_schema(state.schema()));
-            slice = Some(parser.parse_with_context(&html, &from))
+            slice = Some(parser.parse_from_clipboard(&html, &from))
                 .filter(|s: &Slice| s.content.size() > 0);
         }
         let mut slice = match slice {
@@ -1630,6 +1644,13 @@ impl Rv {
         state
             .some_prop(|p| p.create_selection_between(state, anchor, head))
             .unwrap_or_else(|| TextSelection::between(anchor, head, None))
+    }
+
+    /// Whether the content point `at` is on a task item's checkbox: its
+    /// press is the checkbox's, and neither moves the caret nor starts a
+    /// selection.
+    pub(crate) fn on_checkbox(&self, at: Point<Points>) -> bool {
+        self.geo.borrow().before_holder(at)
     }
 
     /// The pointer is over the content at `at` and the page at `page`: the
