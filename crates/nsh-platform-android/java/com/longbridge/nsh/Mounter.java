@@ -418,6 +418,7 @@ final class Mounter {
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
+                        if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
                     if (barStyle == 0) {
                         SystemUi.statusBar(context, barStyle, barHidden, night());
