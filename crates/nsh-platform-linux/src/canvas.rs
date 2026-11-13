@@ -62,6 +62,10 @@ use crate::{
     view::{NshView, ViewState},
 };
 
+mod offscreen;
+
+pub(crate) use offscreen::render as render_offscreen;
+
 /// Layouts kept per canvas before the cache is emptied.
 const MAX_LAYOUTS: usize = 256;
 /// The largest side of a shadow mask, in pixels.
