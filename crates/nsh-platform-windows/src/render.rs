@@ -2288,6 +2288,46 @@ mod tests {
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
     }
 
+    /// A subtree taken out from its top and then torn down (an overlay
+    /// closing: its host leaves the root, then the views in it leave the
+    /// host) is drawn again wherever it was, the shadow of a view inside
+    /// it too, though only the host was still in the window when it left.
+    #[test]
+    fn a_subtree_torn_down_from_its_top_is_drawn_again_where_it_was() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (240, 160);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let host = view(
+            Some(&root),
+            2,
+            ViewKind::View,
+            rect(60.0, 40.0, 100.0, 60.0),
+        );
+        let menu = view(Some(&host), 4, ViewKind::View, rect(0.0, 0.0, 100.0, 60.0));
+        menu.state_mut().style.background_color = Color(0x2244ccff);
+        menu.state_mut().style.effects = Some(std::sync::Arc::new(Effects {
+            box_shadows: vec![BoxShadow {
+                blur: Points(16.0),
+                offset_y: Points(8.0),
+                color: Color(0x0000_00cc),
+                ..BoxShadow::default()
+            }],
+            ..Effects::default()
+        }));
+        let back = target(&gfx, size);
+        draw_into(&surface, &gfx, &back, 1.0, false, None, None, None).unwrap();
+        let _ = surface.take_damage();
+
+        host.unparent();
+        menu.unparent();
+        let areas = changed_areas(&surface, size);
+        fill_with_damage_and_compare_whole(&surface, &gfx, &back, size, &areas);
+    }
+
     /// A see-through window (a system backdrop behind it) clears to
     /// transparent: a partial frame of two areas apart must replace what
     /// was in them, not draw its translucent views over it.
