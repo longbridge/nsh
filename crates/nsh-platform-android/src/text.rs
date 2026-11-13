@@ -267,6 +267,15 @@ impl TextEngine for AndroidTextEngine {
         Size::new(Points(width), Points(height))
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: a `Layout`'s line ascent is what is between the line's top
+        // and its baseline (`getLineBaseline`).
+        let layout = self.layout(prepared, self.measure(prepared, Some(width)));
+        let first = self.lines(&layout).into_iter().next()?;
+        Some(first.y + first.ascender)
+    }
+
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
         let layout = prepared.0.as_ref().and_then(|obj| {
             with_env(|env| {
