@@ -268,16 +268,34 @@ fn install(mtm: MainThreadMarker) {
     );
     // The displays: plugged in, unplugged, arranged again.
     let screens = RcBlock::new(|_: NonNull<NSNotification>| screens_changed());
+    // Another app came in front (or this one hid): the keys held are no
+    // longer held, and their releases may never come. No release is made
+    // up for them.
+    let resigned = RcBlock::new(|_: NonNull<NSNotification>| {
+        for surface in surfaces() {
+            crate::keyboard::deactivated(&surface);
+        }
+    });
     // SAFETY: as above.
     let observers = observers
-        .chain([unsafe {
-            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
-                Some(NSApplicationDidChangeScreenParametersNotification),
-                None,
-                Some(&queue),
-                &screens,
-            )
-        }])
+        .chain([
+            unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidResignActiveNotification),
+                    None,
+                    Some(&queue),
+                    &resigned,
+                )
+            },
+            unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidChangeScreenParametersNotification),
+                    None,
+                    Some(&queue),
+                    &screens,
+                )
+            },
+        ])
         .collect();
     // VoiceOver posts no notification: its setting is observed.
     // SAFETY: NSObject's initializer.
@@ -593,6 +611,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 toggle(*show);
             }
         }
+        Command::PerfMonitorMode(mode) => {
+            if let Some(set) = &*surface.perf_mode.borrow() {
+                set(*mode);
+            }
+        }
         Command::Announce(text) => crate::access::announce(
             crate::window::key_root(surface).ns(),
             text,
@@ -616,6 +639,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             crate::file_requests::pick_files(surface, *id, request);
         }
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::Speech(command) => surface.control(|c| crate::speech::command(c, command)),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();

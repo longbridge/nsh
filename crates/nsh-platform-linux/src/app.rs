@@ -2,7 +2,7 @@
 //! standalone app ([`run_app`]: one `AppView` filling a window).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
@@ -22,7 +22,7 @@ use crate::{
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/base`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`'s core part, enough for a Rust app; hosts that run JS pass all of `nsh/base`, `nsh_base::registry()`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -75,13 +75,20 @@ fn register_app_components(components: &crate::native::Components) {
     }
 }
 
-/// The UI sets engines serve.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s core
+/// part only. A Rust app makes `nsh/base`'s components by type, so
+/// registering every part would link every component into its binary;
+/// hosts that run JS register the sets their code imports.
 pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| {
+            vec![nsh_base::registry_of([
+                nsh_base::parts::core as nsh_base::parts::Part
+            ])]
+        })
 }
 
 /// What [`run_app`] runs.
@@ -150,6 +157,13 @@ pub struct AppOptions {
     /// [`app_id`](Self::app_id) either way, so notifications show without it
     /// too; [`run_app`] sets it, as on macOS and Windows.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes its login item
+    /// (`Application.loginItem()`: an XDG autostart entry,
+    /// `~/.config/autostart/<app id>.desktop`, starting this executable).
+    /// False by default, and read by [`run_app`]'s view only: a view
+    /// embedded in another app has no login item. The release runner sets
+    /// it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -198,6 +212,7 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
             schemes: Vec::new(),
             single_instance: false,
@@ -248,6 +263,9 @@ pub struct AppView {
     /// ([`crate::chrome`]).
     outer: gtk::Box,
     options: RefCell<AppOptions>,
+    /// The view is [`run_app`]'s: the standalone app's, not one embedded in
+    /// another app.
+    standalone: Cell<bool>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -275,6 +293,7 @@ impl AppView {
             overlay,
             outer,
             options: RefCell::new(options),
+            standalone: Cell::new(false),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -336,7 +355,11 @@ impl AppView {
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
             content_culling: true,
+            // Without `net`, `fetch` rejects and remote images fail.
+            #[cfg(feature = "net")]
             network: Some(nsh_engine::net::network()),
+            #[cfg(not(feature = "net"))]
+            network: None,
             websocket: None,
             refuse_connections: None,
             filesystem: None,
@@ -360,12 +383,28 @@ impl AppView {
             audio: None,
             // Windows of the app's own are this backend's (`crate::window`).
             windows: None,
+            login_item: self.login_item(&options),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.start(config);
+    }
+
+    /// The login item of the app this view runs: the standalone app's alone
+    /// ([`run_app`]'s view, not one embedded in another app, also while the
+    /// standalone app runs on this thread), when its runner says.
+    fn login_item(
+        &self,
+        options: &AppOptions,
+    ) -> Option<Arc<dyn nsh_core::desktop::LoginItemBackend>> {
+        (options.login_item && self.standalone.get()).then(|| {
+            Arc::new(crate::login_item::LoginItem::new(
+                &options.app_id,
+                &options.title,
+            )) as Arc<dyn nsh_core::desktop::LoginItemBackend>
+        })
     }
 
     /// Where `asset:/` URIs resolve from now on.
@@ -444,6 +483,7 @@ fn initial_environment() -> Environment {
         color_scheme: ColorScheme::Light,
         os: Os::Linux,
         idiom: Idiom::Desktop,
+        canvas_render: true,
         file_requests: true,
         notifications: true,
         audio: true,
@@ -683,6 +723,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             .default_height(size.1.max(1))
             .build();
         let view = AppView::new(options.clone());
+        view.standalone.set(true);
         window.set_child(Some(&view.widget()));
         crate::window::launch_main(
             &view.surface,
@@ -805,4 +846,34 @@ fn unsafe_keep(window: &gtk::ApplicationWindow, view: Rc<AppView>) {
             view.stop();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_standalone_apps_view_has_a_login_item() {
+        crate::gtk_test::run(|| {
+            let options = AppOptions {
+                login_item: true,
+                ..Default::default()
+            };
+            // A view embedded in another app, also while the standalone app
+            // runs on this thread.
+            let app = gtk::Application::builder()
+                .application_id("com.example.logintest")
+                .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+                .build();
+            STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
+            let embedded = AppView::new(options.clone());
+            assert!(embedded.login_item(&options).is_none());
+            // `run_app`'s own view, when its runner turns it on.
+            let standalone = AppView::new(options.clone());
+            standalone.standalone.set(true);
+            assert!(standalone.login_item(&options).is_some());
+            assert!(standalone.login_item(&AppOptions::default()).is_none());
+            STANDALONE.with(|s| s.borrow_mut().take());
+        });
+    }
 }

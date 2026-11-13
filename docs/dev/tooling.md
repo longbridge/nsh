@@ -1131,17 +1131,12 @@ How users get it (`website/docs/installation.md`):
 
 ### Runners
 
-The Core and Examples workflows run on the organization's self-hosted runner labelled `public`, `Linux` and `X64`,
-which keeps the toolchains, Cargo's registry and huacnlee/cargo's builds (`~/.cargo/targets`) between jobs, so a run
-builds only what changed (the dependency caches are skipped there). The jobs install their toolchain there without
-making it the machine's default (`RUSTUP_TOOLCHAIN` picks it). Their jobs build, lint and run tests without windows;
-the checks that open windows (Linux's GTK and GPUI tests) stay on GitHub's runners, whose timing they are written for.
-The runner runs only the organization's own code: a pull request from a fork runs on GitHub's runners (`ubuntu-24.04`,
-the jobs' `runs-on` picks it), and the runner refuses a fork's pull request whatever its workflow names. The
-scheduled runs on `main` run there too: they save the dependencies' caches that forks' pull requests restore. Every
-other job runs on GitHub's runners: the other checks, the release (its builds, its `Plan`, `Release` and `Nightly` jobs, the
-crates' publication, the Homebrew formula's update) and the Website workflow's build and deployment of the published
-site: the jobs that hold write tokens or decide and build what users download run only on fresh runners.
+Some checks run on the organization's self-hosted runners, which keep their builds between jobs; each job's
+`runs-on` says where it runs. On a self-hosted runner a job installs its toolchain without making it the machine's
+default (`RUSTUP_TOOLCHAIN` picks it) and skips the dependency caches. Pull requests from forks and the scheduled runs
+on `main` run every check on GitHub's runners. The release (its builds, `Plan`, `Release` and `Nightly`), the crates'
+publication, the Homebrew formula's update and the website's deployment run only on GitHub's runners: the jobs that
+hold write tokens or decide and build what users download run on fresh machines.
 
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed

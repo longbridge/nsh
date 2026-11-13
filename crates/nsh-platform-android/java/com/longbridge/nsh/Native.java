@@ -91,6 +91,9 @@ final class Native {
     static final int PINCH = 79;
     static final int WEB_EVALUATION = 80;
     static final int MOUSE_UP = 81;
+    static final int CANVAS_IMAGE = 82;
+    static final int KEY_DOWN = 83;
+    static final int KEY_UP = 84;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -135,10 +138,12 @@ final class Native {
 
     /**
      * Ends a download of {@code url} through the disk cache: {@code status} 0 when the request failed, else the
-     * response's status, {@code headers} (names and values) and body. Returns the cached bytes when they are what to
-     * show (a 304; a stale copy when the request failed), or null. Any thread.
+     * response's status, {@code headers} (names and values), body and {@code redirects}, the URLs the download was
+     * redirected to (null: none), which the cache keeps with the copy and checks again before it serves it. Returns
+     * the cached bytes when they are what to show (a 304; a stale copy when the request failed), or null. Any thread.
      */
-    static native byte[] imageCacheComplete(long handle, String url, int status, String[] headers, byte[] body);
+    static native byte[] imageCacheComplete(
+            long handle, String url, int status, String[] headers, byte[] body, String[] redirects);
 
     /**
      * The embedding app's theme overrides (a shadcn/ui theme file, null: the
@@ -286,6 +291,13 @@ final class Native {
 
     /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
     static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
+
+    /**
+     * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image
+     * {@code bytes}, or when they are null why not: {@code failure} ({@link CanvasRender#RENDER_FAILED},
+     * {@link CanvasRender#RENDER_TOO_LARGE}) and the message {@code error}.
+     */
+    static native void canvasImage(long handle, int request, byte[] bytes, int failure, String error);
 
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);

@@ -622,8 +622,9 @@ pub(crate) fn border_quad(
 }
 
 /// Draws `view` and its subtree; `parent` is the transform of the
-/// parent's coordinates and `origin` where the view goes in them.
-pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origin: (f32, f32)) {
+/// parent's coordinates and `local` the view's into them
+/// ([`crate::view::ViewState::child_matrix`]).
+pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, local: Mat4) {
     let state = view.state();
     if state.style.hidden || state.concealed {
         return;
@@ -631,10 +632,6 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
     let opacity = state.opacity();
     if opacity <= 0.0 {
         return;
-    }
-    let mut local = Mat4::new().translate(origin.0, origin.1);
-    if let Some(t) = state.transform() {
-        local = Mat4::mul(&t, &local);
     }
     let world = Mat4::mul(&local, &parent);
     if crate::decor::backface_away(&state, &world) {
@@ -652,6 +649,16 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
         cx.pop();
     }
     cx.pop();
+}
+
+/// The transform of a root view drawn at `origin` (window coordinates):
+/// its own transform, then the origin.
+pub(crate) fn root_matrix(view: &NshView, origin: (f32, f32)) -> Mat4 {
+    let local = Mat4::new().translate(origin.0, origin.1);
+    match view.state().transform() {
+        Some(t) => Mat4::mul(&t, &local),
+        None => local,
+    }
 }
 
 /// Draws what `view` draws and its subtree at `world` (set on the
@@ -701,11 +708,8 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     if !culled {
         view.with_children(|children| {
             for child in children {
-                let origin = {
-                    let s = child.state();
-                    view.state().child_origin(s.frame, s.shift)
-                };
-                draw_view(cx, child, world, origin);
+                let local = view.state().child_matrix(&child.state());
+                draw_view(cx, child, world, local);
             }
         });
     }
@@ -855,7 +859,12 @@ impl Element for SurfaceElement {
                 dcx.measured = Some((0, 0.0));
             }
             let origin = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
-            draw_view(&mut dcx, &surface.root, Mat4::new(), origin);
+            draw_view(
+                &mut dcx,
+                &surface.root,
+                Mat4::new(),
+                root_matrix(&surface.root, origin),
+            );
             if let (Some(stats), Some((paths, canvas))) =
                 (surface.stats.borrow_mut().as_mut(), dcx.measured)
             {

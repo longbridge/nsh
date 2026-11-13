@@ -376,6 +376,37 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
   encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
   their handlers (`docs/dev/components.md`).
+- **Raw key notifications** (`onKeyDown` / `onKeyUp`, Rust `Interactive::on_key_down` / `on_key_up`): a platform
+  sends ONE `EventPayload::Key` at the focused view. The engine's common routing takes the core's window-bounded,
+  enabled path (`Core::key_path`) and notifies Rust component listeners and JS listeners once each per view, for
+  both transitions; no backend sends an event per ancestor. `KeyEvent` carries the source's raw logical `key`
+  (`SharedString`: the DOM's spelling for named keys, else the character the layout reports, its case kept), the
+  physical `code` in the DOM's spelling (`"KeyA"`, `"ArrowLeft"`, `"NumpadEnter"`, `"ShiftLeft"`; `""` when the
+  source has no genuine physical identity — GPUI's logical events, synthetic input — and never inferred from
+  `key`), modifiers, repeat and `default_prevented`. `default_prevented` is DOM-shaped observable state: the
+  mounted capture rule's decision for that one transition, computed before the platform runs a default. It is not
+  a veto a listener can cast: the UI thread never waits for JS or Rust callbacks, which are told afterwards, so
+  GTK's propagation loop, AppKit's default handling and beep, Win32's `TranslateMessage` and `DefWindowProc`, and
+  GPUI's `on_key_event` Bubble pass (it reads the window's `prevent_default` after the pass that notifies the
+  listener) all run on the decision the backend already made.
+  `KeyCapture` (JS `captureKeys`) stores canonical `Keystroke`s, decoded once by the shared host decoder with the
+  platform's `mod`; the backend matches them against the transition's canonical shortcut stroke from its own
+  matcher (`KeyCapture::captures_key`), never against `key` or `code`. A backend whose keymap
+  vocabulary is richer than the physical identity (Win32's virtual key, GTK's layout groups) builds that stroke
+  itself. A native adapter walks interest and capture along `ViewProps::key_parent` when it is set: an overlay's
+  native view is inserted in its root view while its logical parent is the view the app put it in, and only the
+  logical ancestry may hear the key. That forwarding only engages for a logical ancestry that has a key listener
+  or capture rule: an ordinary overlay (a menu, a popover, a dialog with no raw-key interest above it) gets no
+  override and keeps its upstream routing. The override is internal routing data (never an app prop), set by the
+  core from what is mounted; native focus, hit testing and layout keep the platform parent. Native backends decide
+  the capture before defaults and set `default_prevented` on the event they send; an in-process host (the browser)
+  calls `LocalEngine::key_event`, which computes the same decision and returns it for the host's own
+  `preventDefault`. A focused native text input keeps the keys that edit it (nothing an ancestor captures
+  intercepts its typing, caret or editing, and input methods own their composition). A legacy terminal reports
+  only strokes: no invented releases, repeats or codes. Losing the window's focus clears held state and synthesizes
+  nothing; a real release is reported where the focus is, as the DOM does.
+  The generated props are common host props, as `focusable` is: a `Scroll`, `List` or `Overlay` can listen or
+  capture for a focused descendant with the same typed Rust and TSX interface as `View`.
 - **System UI**: the status bar follows UIKit, where the topmost view controller's `preferredStatusBarStyle` decides
   and Info.plist holds the default: a page's or dialog's `statusBar` (`{ foreground, hidden, animated }`, a host prop
   of screens and modals, `ScreenProp::StatusBar`, decoded to a `StatusBarSetting`; `Screen::status_bar` /
@@ -386,7 +417,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (`nsh/base`: a promise of `{ action }`, the chosen action's `id` (required: the app's name for it, never its label), `null` when closed without an action;
   `presentation: "actionSheet"` is a list dialog on Android; every label is the app's: NSH adds no strings of its
   own, and an iPad / Mac action sheet gets an untitled cancel action). Answers come back as the
-  root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`.
+  root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`,
+  and its `supportedInterfaceOrientations` to `NshAppView.supportedInterfaceOrientations` (a page's `supportedOrientations`; `nil`: the controller's own).
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right), keeps the left and right properties

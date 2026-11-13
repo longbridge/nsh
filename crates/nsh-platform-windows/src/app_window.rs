@@ -873,6 +873,9 @@ pub(crate) fn close_all(surface: &Surface) {
 
 fn destroy(surface: &Surface, window: &AppWindow) {
     release_owner(window);
+    // Its views keep their trees, but the window that showed them is gone:
+    // no view of it holds the keyboard focus any more.
+    crate::keyboard::forget_window(surface, window.id);
     window.view.clear_invalidate();
     // What it hosts does not go with its native window: web views close,
     // components' windows go back to the main window, hidden.
