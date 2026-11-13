@@ -233,9 +233,9 @@ final class Mounter {
             }
 
             @Override
-            public byte[] complete(String url, int status, String[] headers, byte[] body) {
+            public byte[] complete(String url, int status, String[] headers, byte[] body, String[] redirects) {
                 long handle = handle();
-                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body);
+                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body, redirects);
             }
         };
         root = new Box(context, this, 1);
@@ -2446,6 +2446,18 @@ final class Mounter {
                         new Object[] {(double) request, "not supported on Android"});
                 break;
             }
+            case 55: {
+                // `encode.rs` `Command::RenderCanvas`: the request, the size in pixels, the scale, the format,
+                // then the drawing as `CANVAS` carries it.
+                int request = b.getInt(), width = b.getInt(), height = b.getInt();
+                float scale = b.getFloat();
+                int format = b.getInt(), words = b.getInt();
+                int[] code = new int[words];
+                b.asIntBuffer().get(code);
+                b.position(b.position() + words * 4);
+                CanvasRender.render(this, request, width, height, scale, format, code, objects);
+                break;
+            }
             case 44: {
                 Notifications.command(this, b, objects);
                 break;
@@ -2784,6 +2796,17 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /**
+     * Answers `OffscreenCanvas` render {@code request} ({@link CanvasRender}): the encoded image, or why it failed
+     * ({@code failure}: {@link CanvasRender#RENDER_FAILED} or {@link CanvasRender#RENDER_TOO_LARGE}, and {@code error}).
+     * Once the view is destroyed there is no app to tell.
+     */
+    void canvasImage(int request, byte[] bytes, int failure, String error) {
+        long handle = handle();
+        if (handle == 0) return;
+        Native.canvasImage(handle, request, bytes, failure, error);
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {

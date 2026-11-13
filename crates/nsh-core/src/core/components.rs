@@ -15,7 +15,7 @@ use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{Core, Kind, NO_KEY, views::Anchor};
+use super::{Core, Key, Kind, NO_KEY, views::Anchor};
 use crate::{
     ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
     Tag, TextEngine,
@@ -568,6 +568,7 @@ struct SpeechSession {
 /// The core's component state.
 pub(super) struct Components {
     pub(super) web_evaluations: super::web_evaluation::Evaluations,
+    pub(super) canvas_renders: super::canvas_render::Renders,
     registry: Registry,
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
@@ -796,6 +797,7 @@ impl Default for Components {
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             web_evaluations: Default::default(),
+            canvas_renders: Default::default(),
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
             next_fetch: 1,
@@ -1157,6 +1159,12 @@ impl<M: TextEngine> Core<M> {
     /// (`fpsEnabled()`): what read it runs again.
     pub fn set_perf_monitor(&mut self, enabled: bool) {
         self.components.runtime.set_perf_monitor(enabled);
+    }
+
+    /// What the performance monitor measured last (`perfStats()`; `None`
+    /// while it does not measure): what read it runs again.
+    pub fn set_perf_stats(&mut self, stats: Option<crate::platform::PerfStats>) {
+        self.components.runtime.set_perf_stats(stats);
     }
 
     /// The displays components read ([`crate::element::desktop::displays`]),
@@ -5107,6 +5115,131 @@ impl<M: TextEngine> Core<M> {
         handled
     }
 
+    /// Whether node `id` has a listener for `event` (a JS handler or a Rust
+    /// component's), as the platform sees it mounted. The engine skips
+    /// nodes without one when it fans a key notification out.
+    #[doc(hidden)]
+    pub fn listens(&self, id: NodeId, event: EventKind) -> bool {
+        self.key(id)
+            .is_ok_and(|key| self.nodes[key as usize].mounted_events().contains(event))
+    }
+
+    /// Whether `id` or an enabled logical ancestor up to its window root
+    /// hears a key transition (`KeyDown` or `KeyUp`) or has a capture rule
+    /// that is not `None`. Follows the logical tree (`node.parent`), so an
+    /// overlay's content finds the views it is logically in even where a
+    /// backend mounts it elsewhere. No allocation: a walk per transition.
+    #[doc(hidden)]
+    pub fn key_interest(&self, id: NodeId) -> bool {
+        let Ok(mut key) = self.key(id) else {
+            return false;
+        };
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            let disabled = node
+                .props
+                .as_ref()
+                .is_some_and(|p| p.accessibility.state.disabled);
+            if !disabled {
+                let events = node.mounted_events();
+                if events.contains(EventKind::KeyDown) || events.contains(EventKind::KeyUp) {
+                    return true;
+                }
+                if node
+                    .props
+                    .as_ref()
+                    .is_some_and(|p| !p.key_capture.is_none())
+                {
+                    return true;
+                }
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
+    /// The views a key notification on `id` reaches, in order: `id`, then
+    /// each enabled ancestor, up to and including the root of `id`'s window.
+    /// The engine notifies every one of them (Rust and JS listeners alike)
+    /// from one platform event; a native window is a keyboard boundary even
+    /// when its declarative root remains in another window's logical tree.
+    /// A disabled view hears nothing, and its enabled ancestors still do.
+    #[doc(hidden)]
+    pub fn key_path(&self, id: NodeId, out: &mut Vec<NodeId>) {
+        out.clear();
+        let Ok(mut key) = self.key(id) else {
+            return;
+        };
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            let disabled = node
+                .props
+                .as_ref()
+                .is_some_and(|p| p.accessibility.state.disabled);
+            if !disabled {
+                out.push(node.id);
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return;
+            }
+            key = node.parent;
+        }
+    }
+
+    /// Whether `id` or an enabled ancestor within its window captures the
+    /// transition whose canonical shortcut stroke is `keystroke` under its
+    /// mounted [`crate::KeyCapture`] rule (`captureKeys`). The platform
+    /// decides before native defaults from the stroke its own shortcut
+    /// vocabulary names, never from [`crate::KeyEvent`]'s `key` or `code`;
+    /// `None` (a key no shortcut names) is captured only by
+    /// [`crate::KeyCapture::All`]. A focused native text input keeps the
+    /// keys that edit it: nothing captures them.
+    #[doc(hidden)]
+    pub fn key_captured(&self, id: NodeId, keystroke: Option<&crate::keymap::Keystroke>) -> bool {
+        let Ok(mut key) = self.key(id) else {
+            return false;
+        };
+        // A native text input owns the keys that edit it: an ancestor's
+        // capture never intercepts its typing, caret or editing commands.
+        if self.nodes[key as usize].kind == Kind::Input {
+            return false;
+        }
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            let disabled = node
+                .props
+                .as_ref()
+                .is_some_and(|p| p.accessibility.state.disabled);
+            if !disabled
+                && node
+                    .props
+                    .as_ref()
+                    .is_some_and(|p| p.key_capture.captures_key(keystroke))
+            {
+                return true;
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
+    /// The root of the window `key` is in, `key` itself when it is one.
+    pub(super) fn key_window(&self, key: Key) -> NodeId {
+        let node = &self.nodes[key as usize];
+        if node.kind == Kind::Modal && self.window_ids.values().any(|(root, _)| *root == node.id) {
+            node.id
+        } else {
+            self.window_of(key)
+        }
+    }
+
     fn flush_component_emits(&mut self) {
         // What views' listeners emitted reaches its listeners (JS hears it
         // in this turn).
@@ -5854,6 +5987,7 @@ impl<M: TextEngine> Core<M> {
                 self.start_web_evaluation(node, script, timeout, answer)
             }
             Action::WebEvaluationTimeout(request) => self.timeout_web_evaluation(request),
+            Action::CanvasRenderTimeout(id) => self.timeout_canvas_render(id),
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
@@ -6125,6 +6259,7 @@ impl<M: TextEngine> Core<M> {
                     command: Command::PickScreenColor { id },
                 });
             }
+            Action::RenderCanvas(request, answer) => self.start_canvas_render(*request, answer),
             Action::FileRequest(request, answer) => {
                 use crate::file_dialog::FileRequest;
                 if !self.components.environment.file_requests {
@@ -6632,6 +6767,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
+            EventKind::CanvasImage if id == crate::ROOT_ID => self.answer_canvas_render(payload),
             EventKind::FileRequest if id == crate::ROOT_ID => {
                 let EventPayload::FileRequest {
                     id: request,

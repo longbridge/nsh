@@ -136,6 +136,47 @@ const ENTER_LATE_MS = 250;
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
 
+/** The status of an offscreen render's answer (`nsh_canvas_image`, `src/lib.rs`
+ * `CanvasImageStatus`): the image's bytes, or a message why there are none. */
+const CANVAS_IMAGE = { FAILED: 0, OK: 1, TOO_LARGE: 2 };
+
+/** An offscreen render over the browser's canvas size limit
+ * (`CANVAS_IMAGE.TOO_LARGE`). */
+class CanvasTooLarge extends Error {}
+
+function tooLarge(width, height) {
+  return `this browser cannot make a ${width} × ${height} pixel canvas (${width * height} pixels): it is over the browser's canvas size limit`;
+}
+
+/** Whether `src` is on the page's origin. */
+function sameOrigin(src) {
+  try {
+    return new URL(src, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** `logo@2x.png` → 2: the pixel density a file name declares, 1 without
+ * (`nsh_core::image::loader::density`). */
+function imageDensity(uri) {
+  const name = String(uri).split(/[/\\]/).pop();
+  const dot = name.lastIndexOf(".");
+  const stem = dot < 0 ? name : name.slice(0, dot);
+  const at = stem.lastIndexOf("@");
+  if (at < 0 || !stem.endsWith("x")) return 1;
+  const n = Number(stem.slice(at + 1, -1));
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function originOf(src) {
+  try {
+    return new URL(src, location.href).origin;
+  } catch {
+    return src;
+  }
+}
+
 const KEYFRAMES = `
 @property --nsh-ko { syntax: "<number>"; inherits: false; initial-value: 1; }
 @keyframes nsh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -4919,11 +4960,27 @@ class Player {
     const cx = canvas.getContext("2d");
     cx.setTransform(ratio, 0, 0, ratio, 0, 0);
     cx.clearRect(0, 0, w, h);
+    this.replayCanvas(cx, el._ops, el._slots, (uri) => {
+      const img = this.canvasImage(uri, el);
+      // A cross-origin image without CORS taints the canvas for good
+      // (the browser never clears the flag): shaders' pictures leave
+      // it out (`paintTree`).
+      if (img && !this.paintable(img)) canvas._tainted = true;
+      return img;
+    });
+  }
+
+  /**
+   * Replays a drawing (`cv`'s operations, `src/canvas.rs`) onto 2D context
+   * `cx`, whose transform maps points: `slots` are its animated values
+   * (missing ones read 0), `image(uri)` the loaded image a `drawImage`
+   * names, or none (it draws nothing).
+   */
+  replayCanvas(cx, ops, slots, image) {
     cx.save();
-    const slots = el._slots;
-    const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots[n[1]] ?? 0) : n);
+    const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots?.[n[1]] ?? 0) : n);
     const paint = (p) => {
-      if (Array.isArray(p) && p[0] === "$") return slots[p[1]] ?? "transparent";
+      if (Array.isArray(p) && p[0] === "$") return slots?.[p[1]] ?? "transparent";
       if (p && typeof p === "object" && p.g) {
         const a = p.args;
         const g = p.g === "linear" ? cx.createLinearGradient(a[0], a[1], a[2], a[3])
@@ -4942,7 +4999,7 @@ class Player {
       }
       return p;
     };
-    for (const [name, ...args] of el._ops) {
+    for (const [name, ...args] of ops) {
       try {
         if (name.startsWith("=")) {
           const prop = name.slice(1);
@@ -4959,15 +5016,19 @@ class Player {
         } else if (name === "roundRect") {
           cx.roundRect(...args.slice(0, 4).map(v), args[4].map(v));
         } else if (name === "drawImage") {
-          const img = this.canvasImage(args[0], el);
+          const img = image(args[0]);
           if (!img) continue;
-          // A cross-origin image without CORS taints the canvas for good
-          // (the browser never clears the flag): shaders' pictures leave
-          // it out (`paintTree`).
-          if (!this.paintable(img)) canvas._tainted = true;
-          const dest = args.slice(2).map(v);
-          if (args[1]) cx.drawImage(img, ...args[1], ...dest);
-          else cx.drawImage(img, ...dest);
+          // The source in the image's pixels; a missing destination size
+          // is the source's over the file name's density (`@3x`), as an
+          // `Image`'s, never the screen's (`CanvasImage::density`).
+          const [sx, sy, sw, sh] = args[1] ?? [0, 0, img.naturalWidth || img.width, img.naturalHeight || img.height];
+          const [dx, dy, dw, dh] = args.slice(2).map(v);
+          const density = imageDensity(args[0]);
+          cx.drawImage(
+            img, sx, sy, sw, sh, dx, dy,
+            Number.isFinite(dw) ? dw : sw / density,
+            Number.isFinite(dh) ? dh : sh / density,
+          );
         } else if (name === "fillText" || name === "strokeText") {
           cx[name](args[0], ...args.slice(1).map(v));
         } else if (name === "setLineDash") {
@@ -4980,6 +5041,123 @@ class Player {
       }
     }
     cx.restore();
+  }
+
+  /**
+   * `OffscreenCanvas.convertToBlob` (`Command::RenderCanvas`): the drawing
+   * replayed as `draw` replays a canvas view's, into a transparent
+   * `width` × `height` pixel canvas of its own at `scale` pixels per point,
+   * its animated values at 0, once the images it names have loaded (a
+   * failed one draws nothing), and encoded as `type`. The bytes, or why
+   * there are none, go to the engine (`nsh_canvas_image`, with a
+   * `CANVAS_IMAGE` status): a canvas over the browser's size limit
+   * (`offscreenCanvas`) answers `TOO_LARGE`, which the app gets as
+   * `ERR_NSH_QUOTA_EXCEEDED`.
+   */
+  async renderCanvas(request, ops, width, height, scale, type) {
+    const app = this.app;
+    let status = CANVAS_IMAGE.OK;
+    let bytes;
+    try {
+      const uris = [...new Set(ops.filter(([name]) => name === "drawImage").map(([, uri]) => uri))];
+      const images = new Map(await Promise.all(uris.map(async (uri) => [uri, await this.offscreenImage(uri)])));
+      const { canvas, cx } = this.offscreenCanvas(width, height);
+      cx.setTransform(scale, 0, 0, scale, 0, 0);
+      this.replayCanvas(cx, ops, null, (uri) => images.get(uri));
+      let blob;
+      try {
+        blob = canvas.convertToBlob
+          ? await canvas.convertToBlob({ type })
+          : await new Promise((resolve) => canvas.toBlob(resolve, type));
+      } catch (err) {
+        // A size the canvas took but the encoder has no memory for.
+        if (err?.name === "RangeError" || err?.name === "IndexSizeError") throw new CanvasTooLarge(tooLarge(width, height));
+        throw err;
+      }
+      // `toBlob` hands no error, only nothing, when the bitmap is too large to encode.
+      if (!blob) throw new CanvasTooLarge(tooLarge(width, height));
+      bytes = new Uint8Array(await blob.arrayBuffer());
+    } catch (err) {
+      status = err instanceof CanvasTooLarge ? CANVAS_IMAGE.TOO_LARGE : CANVAS_IMAGE.FAILED;
+      bytes = String(err?.message ?? err);
+    }
+    if (app !== this.app) return;
+    this.call((w) => this.withStrings([bytes], (p, l) => w.nsh_canvas_image(request, status, p, l)));
+  }
+
+  /**
+   * A `width` × `height` pixel canvas and its 2D context for an offscreen
+   * render, or a `CanvasTooLarge` when the browser cannot make one that size.
+   * Past their limits (iOS WebKit's is 16777216 pixels in all; Chromium's and
+   * Firefox's are larger than the core's own) browsers make no context,
+   * throw, or make a canvas that silently draws nothing, so one opaque pixel
+   * is drawn in the far corner and read back before the drawing: a canvas
+   * that kept it holds every pixel. Sizes that failed are remembered
+   * (`tooLargeCanvases`): any size at least as large in both sides fails
+   * again without allocating.
+   */
+  offscreenCanvas(width, height) {
+    const known = (this.tooLargeCanvases ??= []);
+    if (known.some(([w, h]) => width >= w && height >= h)) throw new CanvasTooLarge(tooLarge(width, height));
+    const fail = () => {
+      known.push([width, height]);
+      if (known.length > 8) known.shift();
+      return new CanvasTooLarge(tooLarge(width, height));
+    };
+    let canvas;
+    let cx;
+    try {
+      canvas = typeof OffscreenCanvas !== "undefined"
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement("canvas"), { width, height });
+      cx = canvas.getContext("2d");
+    } catch {
+      throw fail();
+    }
+    if (!cx) throw fail();
+    const x = width - 1;
+    const y = height - 1;
+    let kept;
+    try {
+      cx.fillRect(x, y, 1, 1);
+      kept = cx.getImageData(x, y, 1, 1).data[3] === 255;
+      cx.clearRect(x, y, 1, 1);
+    } catch {
+      kept = false;
+    }
+    if (!kept) throw fail();
+    return { canvas, cx };
+  }
+
+  /**
+   * The image at `uri` for an offscreen render, loaded (null when it fails):
+   * one that would taint the canvas (another origin's without CORS) is
+   * asked for again with CORS, so the image can still be read back. One that
+   * fails is skipped with a warning, as every platform skips it; when it
+   * loads without CORS but not with it, the warning says that its server
+   * sends no CORS headers.
+   */
+  offscreenImage(uri) {
+    const src = this.asset(uri);
+    const cached = this.images.get(src);
+    if (cached?.ready && this.paintable(cached.img)) return Promise.resolve(cached.img);
+    const load = (cors) => new Promise((resolve) => {
+      const img = new Image();
+      if (cors) img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+    const cors = !/^(data|blob):/.test(src) && !sameOrigin(src);
+    return load(cors).then(async (img) => {
+      if (img) return img;
+      if (cors && await load(false)) {
+        console.warn(`[nsh] offscreen canvas: ${uri} is skipped: its server (${originOf(src)}) sends no CORS headers (Access-Control-Allow-Origin), so the page cannot read it back; on the web, images come from the page's origin or servers that allow CORS`);
+      } else {
+        console.warn(`[nsh] offscreen canvas: ${uri} could not be loaded and is skipped`);
+      }
+      return null;
+    });
   }
 
   canvasImage(uri, el) {
@@ -6449,6 +6627,7 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
+      case "renderCanvas": this.renderCanvas(...args); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
@@ -7920,6 +8099,58 @@ class Player {
     }
   }
 
+  /** Whether `view` or an enabled logical ancestor hears raw keys
+   * (`onKeyDown` / `onKeyUp`) or captures them (`captureKeys`), from the
+   * core's own tree: an overlay's content is that tree's, whatever its DOM
+   * ancestry. Only then does a transition need a `KeyEvent`. Cheap, and
+   * without allocation. */
+  keyInterest(view) {
+    return this.wasm?.nsh_key_interest?.(view._id) > 0;
+  }
+
+  /**
+   * Reports a raw key transition on `view` to the core, which decides with
+   * the mounted capture rules of it and its enabled ancestors and routes
+   * one event to the view and its ancestors (no duplicates here): true
+   * when the policy captured the key, so the browser's default does not
+   * run. The event carries what the browser reported — `e.key` as its
+   * logical key (its actual case and layout) and the DOM's own `e.code`
+   * (`KeyA`, `ArrowLeft`; empty when the browser names none) — never a
+   * US-layout guess, and never derived from the logical key. `stroke` is
+   * the page's canonical shortcut key (`keyCode(e)`), the one `nsh_key`
+   * matches and `captureKeys` names: not a layout guess from the code.
+   */
+  rawKey(view, down, e, stroke) {
+    if (!this.wasm?.nsh_key_event) return false;
+    // An input method owns a composing key (some browsers report 229 rather
+    // than `isComposing`): the raw key is not the app's.
+    if (e.isComposing || e.keyCode === 229) return false;
+    const key = typeof e.key === "string" && e.key !== "" ? e.key : "Unidentified";
+    const code = typeof e.code === "string" ? e.code : "";
+    const modifiers = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    let captured = false;
+    // The event's entry into the engine returns the pump delay, as every
+    // entry does; the capture answer of that transition comes separately.
+    this.call(() => {
+      const delay = this.withStrings([key, code], (kp, kl, cp, cl) =>
+        this.wasm.nsh_key_event(view._id, down ? 1 : 0, stroke, kp, kl, cp, cl,
+          modifiers, e.repeat ? 1 : 0));
+      captured = this.wasm.nsh_key_captured?.() > 0;
+      return delay;
+    });
+    return captured;
+  }
+
+  /** The view that holds the keyboard focus in this player, when it is a
+   * view of the app's and not a native field, page or video, which keeps
+   * its own keys. */
+  keyFocusView() {
+    const focus = document.activeElement;
+    if (!focus || focus === document.body || !this.root.contains(focus)) return null;
+    if (focus.isContentEditable || focus.closest?.(".nsh-field, [contenteditable], iframe, video")) return null;
+    return this.viewOf(focus);
+  }
+
   /**
    * The app's shortcut (`nsh/keymap`) key `e` fires, matched natively
    * against the mounted table: its binding, -2 for a held key whose binding
@@ -7945,7 +8176,7 @@ class Player {
     const path = e.composedPath();
     const focus = path.includes(this.root) ? path[0] : document.activeElement;
     const inRoot = path.includes(this.root) || (focus && this.root.contains(focus));
-    const editing = inRoot && !!focus.closest(".nsh-field, iframe");
+    const editing = inRoot && (!!focus.isContentEditable || !!focus.closest(".nsh-field, [contenteditable], iframe"));
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     // The control the focus is on, which Return and Space press (a stop
     // that takes no presses, a `focusable` chart, hears them through the
@@ -7964,6 +8195,18 @@ class Player {
       return;
     }
     if (e.defaultPrevented || e.isComposing) return;
+    // A key the focus hears as a raw transition goes to the core with the
+    // browser's own logical key and DOM code, and its canonical
+    // shortcut stroke for `captureKeys`; a mounted capture rule takes it
+    // before the browser's defaults, as the native backends do. The core
+    // answers from its own logical tree (an overlay's ancestors included).
+    // Native fields, pages and videos keep their own keys.
+    const keyView = this.keyFocusView();
+    if (keyView && this.keyInterest(keyView) && this.rawKey(keyView, true, e, keyCode(e))) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     // Then they press the control (`nsh_core::input::presses_focused_control`):
     // a binding of Return elsewhere does not act instead of the control the
     // focus was moved to.
@@ -8012,6 +8255,24 @@ class Player {
 
   keyUp(e) {
     if (this.wasm) this.modifiersChanged(e);
+    // The release of a key the core reports on the focused view: it decides
+    // anew whether the mounted capture policy matches this transition
+    // (`nsh_key_event`), as a browser delivers the release to whatever has
+    // the focus now.
+    let captured = false;
+    if (this.wasm && !e.isComposing && e.keyCode !== 229) {
+      const keyView = this.keyFocusView();
+      if (keyView && this.keyInterest(keyView)) captured = this.rawKey(keyView, false, e, keyCode(e));
+    }
+    if (captured) {
+      e.preventDefault();
+      e.stopPropagation();
+      // A release the policy took cancels what an uncaptured press armed
+      // (Space down, Shift pressed, Space released): no onPress, and the
+      // pressed states clear. Another key's captured release leaves it.
+      if (e.key === " " && this.keyPress) this.keyPressEnd(false);
+      return;
+    }
     if (e.key === " " && this.keyPress) this.keyPressEnd(true);
   }
 

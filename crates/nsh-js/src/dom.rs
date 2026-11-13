@@ -963,6 +963,10 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
             // Not the op queue: a finalizer may run while it is borrowed.
             d.shared.releases.borrow_mut().push(data.id);
         }
+        // Trailing header bar handlers live as long as the page.
+        if data.tag == Some(Tag::Screen) {
+            crate::desktop::clear_header_rt(rt, data.id);
+        }
         // A removed modal still hears its dismissal.
         if data.tag == Some(Tag::Modal)
             && let Some(i) = data
@@ -1368,6 +1372,9 @@ fn set_prop(
         }
         "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
+    }
+    if name == "headerRightItems" {
+        return crate::desktop::set_header_right_items(cx, id, value);
     }
     if let Some(prop) = nsh_core::js::host::style_patch_prop(name) {
         let prop = prop(part_style(cx, name, value)?);
@@ -5054,9 +5061,7 @@ mod tests {
             first.iter().any(|o| matches!(
                 o,
                 Op::SetProp {
-                    prop: nsh_core::Prop::ComponentPropBinding(name, Some(_)),
-                    ..
-                } if &**name == "progress"
+                    prop: nsh_core::Prop::ComponentPropBinding(name, Some(_)), .. } if &**name == "progress"
             )),
             "{first:?}"
         );

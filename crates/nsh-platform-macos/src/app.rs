@@ -34,7 +34,7 @@ use crate::{
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/base`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`'s core part, enough for a Rust app; hosts that run JS pass all of `nsh/base`, `nsh_base::registry()`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -87,13 +87,20 @@ fn register_app_components(components: &crate::native::Components) {
     }
 }
 
-/// The UI sets engines serve.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s core
+/// part only. A Rust app makes `nsh/base`'s components by type, so
+/// registering every part would link every component into its binary;
+/// hosts that run JS register the sets their code imports.
 pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| {
+            vec![nsh_base::registry_of([
+                nsh_base::parts::core as nsh_base::parts::Part
+            ])]
+        })
 }
 
 /// What [`run_app`] runs.
@@ -330,6 +337,9 @@ pub struct AppView {
     options: RefCell<AppOptions>,
     /// The performance monitor's HUD, while it shows.
     fps: RefCell<Option<Rc<crate::fps::Hud>>>,
+    /// How the performance monitor shows ([`AppView::set_fps_mode`]): kept
+    /// while it is hidden, and switched by a click on its panel.
+    fps_mode: Rc<Cell<nsh_core::FpsMode>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -367,6 +377,9 @@ impl AppView {
             container,
             options: RefCell::new(options),
             fps: RefCell::new(None),
+            fps_mode: Rc::new(Cell::new(
+                nsh_engine::perf::mode_by_env().unwrap_or_default(),
+            )),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -375,6 +388,12 @@ impl AppView {
         *view.surface.perf_toggle.borrow_mut() = Some(Box::new(move |show| {
             if let Some(view) = weak.upgrade() {
                 view.set_fps_monitor(show);
+            }
+        }));
+        let weak = Rc::downgrade(&view);
+        *view.surface.perf_mode.borrow_mut() = Some(Box::new(move |mode| {
+            if let Some(view) = weak.upgrade() {
+                view.set_fps_mode(mode);
             }
         }));
         if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
@@ -482,9 +501,23 @@ impl AppView {
     pub fn set_fps_monitor(&self, show: bool) {
         let mut hud = self.fps.borrow_mut();
         match (show, hud.is_some()) {
-            (true, false) => *hud = Some(crate::fps::Hud::show(self)),
+            (true, false) => *hud = Some(crate::fps::Hud::show(self, self.fps_mode.clone())),
             (false, true) => *hud = None,
             _ => {}
+        }
+    }
+
+    /// How the performance monitor shows, now and whenever it shows later
+    /// (`setFpsMode`): its whole panel ([`nsh_core::FpsMode::Expanded`],
+    /// the default; `NSH_FPS=collapsed` or `hidden` start it otherwise),
+    /// a pill with the frame rate alone, colored by the frame budget
+    /// ([`nsh_core::FpsMode::Collapsed`]), or nothing while it still
+    /// measures and logs ([`nsh_core::FpsMode::Hidden`]). A click on the
+    /// panel switches between the first two.
+    pub fn set_fps_mode(&self, mode: nsh_core::FpsMode) {
+        self.fps_mode.set(mode);
+        if let Some(hud) = &*self.fps.borrow() {
+            hud.update();
         }
     }
 
@@ -557,6 +590,7 @@ fn initial_environment() -> Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
         screen_color: true,
+        canvas_render: true,
         file_requests: true,
         speech: true,
         notifications: true,
