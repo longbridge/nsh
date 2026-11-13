@@ -262,15 +262,22 @@ frame: changed views queue their old and new painted areas on their surface (`Su
 and the one before (`SwapChain::to_draw`), widened to the whole box and overflow of each shader view reading what is
 behind it that the damage meets (`with_backdrops`: the back buffer holds its own earlier output), and `Present1`
 presents only the changed rectangles.
+A frame of several areas draws through a layer masked by their rectangles, and the layer is blended over the back
+buffer, so the clear inside it would keep what a transparent window (whose background is clear) had there: such a
+window first clears each area on the back buffer under an axis-aligned clip.
 A subtree a frame leaves out (hidden, concealed, turned away, out of sight) forgets where it was painted
 (`NshView::forget_painted`): its old area was drawn by the change that left it out, and a record kept would add it to
 every later change of a view around it (a moved or shrunk panel's rows repainting their old area on each scroll
 frame). Each view knows whether its subtree holds a record at all, so these walks stop at subtrees that hold none.
+A view taken out of the tree keeps the area its whole subtree was painted in (`NshView::unparent`): a subtree leaves
+from its top and is then torn down, and its views, out of the window, cannot queue their own areas any more.
 `Surface::invalidate` (theme, size, scale, device loss, composition) and changes it cannot bound draw the whole
 window. Changes wholly outside the window (an animation scrolled out of it) draw and present nothing.
 
 `render.rs`'s `a_partial_frame_draws_what_a_whole_one_does` draws a tree whole, changes it (a move, a color, a
-removal) and checks that drawing the damage over the old pixels gives the bytes a whole frame gives.
+removal) and checks that drawing the damage over the old pixels gives the bytes a whole frame gives;
+`a_partial_frame_of_a_transparent_window_replaces_its_areas` does so for two areas apart in a transparent window, and
+`a_subtree_torn_down_from_its_top_is_drawn_again_where_it_was` for a view with a shadow that leaves after its host.
 
 A view whose own painted area (its box, shadows, outline and shader overflow) meets no damage paints none of its
 own decoration in a partial frame: no backdrop filter, shadows, background, shader, content, hosted items, scroll
