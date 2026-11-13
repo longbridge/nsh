@@ -1618,10 +1618,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_canvasImage(
         let error = (!error.is_null())
             .then(|| env.get_string(&error).ok().map(String::from))
             .flatten();
-        Err(error.unwrap_or_else(|| "the canvas could not be drawn".into()))
+        Err(error
+            .unwrap_or_else(|| "the canvas could not be drawn".into())
+            .into())
     } else {
         env.convert_byte_array(&bytes)
-            .map_err(|e| format!("the image could not be read: {e}"))
+            .map_err(|e| format!("the image could not be read: {e}").into())
     };
     if let Some(control) = host.control() {
         control.dispatch_event(

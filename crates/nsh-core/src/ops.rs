@@ -1089,8 +1089,8 @@ pub enum EventPayload {
     CanvasImage {
         /// The request.
         id: u32,
-        /// The encoded image, or the platform's message.
-        result: Result<Vec<u8>, String>,
+        /// The encoded image, or why there is none.
+        result: Result<Vec<u8>, crate::canvas::render::RenderFailure>,
     },
     /// An event of a registered native component: its name and data (any
     /// JSON value), handed to JS as `{ name, data }`.

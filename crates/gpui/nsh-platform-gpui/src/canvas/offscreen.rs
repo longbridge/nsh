@@ -67,7 +67,10 @@ pub(crate) fn render(
                     surface.event(
                         ROOT_ID,
                         EventKind::CanvasImage,
-                        EventPayload::CanvasImage { id, result },
+                        EventPayload::CanvasImage {
+                            id,
+                            result: result.map_err(Into::into),
+                        },
                     );
                 }
             });

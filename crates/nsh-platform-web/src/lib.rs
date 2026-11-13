@@ -1383,7 +1383,7 @@ pub unsafe extern "C" fn nsh_canvas_image(
     let result = if ok != 0 {
         Ok(data.to_vec())
     } else {
-        Err(String::from_utf8_lossy(data).into_owned())
+        Err(String::from_utf8_lossy(data).into_owned().into())
     };
     send(|app| {
         app.control.dispatch_event(

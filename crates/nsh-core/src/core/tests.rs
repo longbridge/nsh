@@ -15570,6 +15570,26 @@ mod components {
     }
 
     #[test]
+    fn offscreen_renders_too_large_for_the_platform_fail_with_the_quota_code() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: render_id(&renders),
+                result: Err(crate::canvas::render::RenderFailure::TooLarge(
+                    "over the device's bitmap limit".into()
+                )),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_NSH_QUOTA_EXCEEDED"
+        );
+    }
+
+    #[test]
     fn offscreen_renders_fail_by_their_deadline_and_drop_late_answers() {
         let (mut c, renders) = press_offscreen_renderer(true);
         let id = render_id(&renders);

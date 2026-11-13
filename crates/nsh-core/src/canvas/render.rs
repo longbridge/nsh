@@ -75,6 +75,39 @@ pub struct RenderRequest {
     pub format: ImageFormat,
 }
 
+/// Why a platform rendered no image ([`EventPayload::CanvasImage`](crate::EventPayload::CanvasImage)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RenderFailure {
+    /// The platform cannot make an image this large (its bitmap or texture
+    /// limit, or the memory for it): `ERR_NSH_QUOTA_EXCEEDED`.
+    TooLarge(String),
+    /// Anything else, with the platform's message.
+    Failed(String),
+}
+
+impl From<String> for RenderFailure {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<&str> for RenderFailure {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.into())
+    }
+}
+
+impl RenderFailure {
+    /// The error JS and Rust get.
+    pub(crate) fn into_error(self) -> JsError {
+        match self {
+            Self::TooLarge(message) => error(codes::QUOTA_EXCEEDED, &message),
+            Self::Failed(message) => JsError::Error(message),
+        }
+    }
+}
+
 /// How [`Painter::render`](crate::element::Painter::render) renders.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[non_exhaustive]

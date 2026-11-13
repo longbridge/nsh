@@ -56,7 +56,10 @@ pub(crate) fn render(
                 control.dispatch_event(
                     ROOT_ID,
                     EventKind::CanvasImage,
-                    EventPayload::CanvasImage { id, result },
+                    EventPayload::CanvasImage {
+                        id,
+                        result: result.map_err(Into::into),
+                    },
                 );
                 return;
             }
@@ -71,7 +74,10 @@ pub(crate) fn render(
                 thread.dispatch_event(
                     ROOT_ID,
                     EventKind::CanvasImage,
-                    EventPayload::CanvasImage { id, result },
+                    EventPayload::CanvasImage {
+                        id,
+                        result: result.map_err(Into::into),
+                    },
                 );
             });
         if let Err(e) = spawned {
@@ -80,7 +86,7 @@ pub(crate) fn render(
                 EventKind::CanvasImage,
                 EventPayload::CanvasImage {
                     id,
-                    result: Err(format!("the image could not be encoded: {e}")),
+                    result: Err(format!("the image could not be encoded: {e}").into()),
                 },
             );
         }

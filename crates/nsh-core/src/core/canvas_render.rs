@@ -161,7 +161,7 @@ impl<M: crate::TextEngine> Core<M> {
             pending
                 .answer
                 .borrow_mut()
-                .deliver(result.clone().map_err(JsError::Error));
+                .deliver(result.clone().map_err(render::RenderFailure::into_error));
         }
         true
     }
