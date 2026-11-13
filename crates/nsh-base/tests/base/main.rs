@@ -46,6 +46,8 @@ mod slider;
 mod submenu;
 mod switch;
 mod tabs;
+#[cfg(feature = "term")]
+mod term;
 mod terminal;
 mod text_view;
 mod time_field;
