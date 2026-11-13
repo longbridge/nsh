@@ -1000,7 +1000,8 @@ pub enum DesktopCommand {
     /// platform reports them on the root ([`WindowEvent::QuitRequest`])
     /// instead, and the app sends [`DesktopCommand::Quit`] when it is
     /// ready. The system ending the app (logging out, shutting down) quits
-    /// either way. Sent when it changes; `true` until the first.
+    /// either way. Sent when it changes; `true` until the first. On the
+    /// web, while it is `false`, the user leaving the page is the request.
     SetQuitOnRequest(bool),
     /// The application menu (macOS's menu bar, the window's menu bar on
     /// Windows and Linux; not shown there while the title bar is hidden,
