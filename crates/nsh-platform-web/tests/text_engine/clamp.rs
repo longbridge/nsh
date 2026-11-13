@@ -2,7 +2,10 @@
 //! not after the last word that fit there: a `truncate`d name in a row
 //! ended at a space with the box empty past it.
 
-use nsh_core::{AttributedText, EllipsizeMode, Points, ResolvedTextStyle, TextEngine};
+use nsh_core::{
+    AttributedText, Color, EllipsizeMode, EventKind, EventMask, Points, ResolvedTextStyle,
+    TextEngine, TextLink,
+};
 
 use crate::text::{WebLayout, WebTextEngine};
 
@@ -59,5 +62,56 @@ fn clamped_last_line_is_cut_at_the_box() {
         );
         // The ellipsis stands for the rest of the text.
         assert_eq!(last.end as usize, long.len(), "{long}");
+    }
+}
+
+/// What of a link a clamped line shows is the link's, and the ellipsis is
+/// no link's: a link the box cuts keeps its drawn characters (a press there
+/// is the link's, as on the native backends), one wholly past the box draws
+/// none, and the ellipsis standing for either takes no press.
+#[test]
+fn a_clamped_line_links_only_the_characters_it_shows() {
+    let engine = WebTextEngine::default();
+    let w = engine
+        .measure(&engine.prepare(&clamped("x", 0)), None)
+        .width
+        .0;
+    // Twenty characters wide: nineteen beside the ellipsis.
+    let box_width = 20.0 * w;
+    let mut events = EventMask::default();
+    events.set(EventKind::Press, true);
+    let mut link_style = ResolvedTextStyle::default();
+    link_style.color = Color(0x0000_ffff);
+    // (characters before the link, the link's, how many of the link show)
+    for (before, linked, shown) in [(4, 30, 15), (25, 8, 0)] {
+        let mut t = AttributedText::default();
+        t.push(&"A".repeat(before), ResolvedTextStyle::default());
+        t.push(&"W".repeat(linked), link_style);
+        t.links.push(TextLink {
+            start: before as u32,
+            end: (before + linked) as u32,
+            node: 2,
+            events,
+            focus_stop: true,
+        });
+        t.max_lines = 1;
+        t.ellipsize = EllipsizeMode::Tail;
+        let p = engine.prepare(&t);
+        let size = engine.measure(&p, Some(Points(box_width)));
+        let layout = engine.layout(&p, size);
+        let runs = &layout.downcast::<WebLayout>().unwrap().runs;
+        let drawn: String = runs.iter().map(|r| r.text.as_str()).collect();
+        let expected = format!("{}{}…", "A".repeat(before.min(19)), "W".repeat(shown));
+        assert_eq!(drawn, expected, "{before} + {linked}");
+        // ASCII: a run's UTF-16 offsets are its byte offsets.
+        let in_links: String = runs
+            .iter()
+            .flat_map(|r| {
+                r.links
+                    .iter()
+                    .map(|&(from, to, _)| &r.text[from as usize..to as usize])
+            })
+            .collect();
+        assert_eq!(in_links, "W".repeat(shown), "{before} + {linked}");
     }
 }
