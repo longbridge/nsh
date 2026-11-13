@@ -5045,6 +5045,9 @@ class Player {
     field.readOnly = !config.editable;
     field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
     field.spellcheck = config.autoCorrect;
+    // `spellcheck` alone only stops suggestions: Chrome on Android still asks
+    // the keyboard to autocorrect unless this attribute is off.
+    field.setAttribute("autocorrect", config.autoCorrect ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
