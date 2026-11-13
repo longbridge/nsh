@@ -5287,7 +5287,8 @@
 			platform,
 			shadersAvailable: () => fields.shaders(),
 			wakeCount: () => fields.wakeCount(),
-			fpsEnabled: () => false
+			fpsEnabled: () => false,
+			fpsReading: () => null
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),
