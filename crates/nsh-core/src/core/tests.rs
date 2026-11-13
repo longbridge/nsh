@@ -17777,6 +17777,98 @@ fn reveals_a_view() {
     assert_eq!(scroll(&mut c, Nearest), Some(250.0));
 }
 
+#[test]
+fn revealing_an_inline_attachment_first_lays_out_its_culled_text() {
+    for nested in [false, true] {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            class_op(2, "h-[100px]"),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        for row in 0..60 {
+            let id = 10 + row * 2;
+            ops.extend([
+                Op::Create { id, tag: Tag::Text },
+                Op::CreateText {
+                    id: id + 1,
+                    text: format!("Row {row}"),
+                },
+                Op::Insert {
+                    parent: id,
+                    child: id + 1,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        ops.extend([
+            Op::Create {
+                id: 200,
+                tag: Tag::View,
+            },
+            class_op(200, "w-[1px] h-[1px]"),
+            Op::Insert {
+                parent: 128,
+                child: 200,
+                before: None,
+            },
+        ]);
+        let target = if nested {
+            ops.extend([
+                Op::Create {
+                    id: 201,
+                    tag: Tag::View,
+                },
+                class_op(201, "w-[1px] h-[1px]"),
+                Op::Insert {
+                    parent: 200,
+                    child: 201,
+                    before: None,
+                },
+            ]);
+            201
+        } else {
+            200
+        };
+        apply(&mut c, ops);
+        c.commit().unwrap();
+        assert!(c.measure(target).is_none());
+        c.apply(Op::Command {
+            id: target,
+            command: Command::Reveal(crate::RevealOptions::default()),
+        })
+        .unwrap();
+        let batch = c.commit().unwrap();
+        let offset = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Command {
+                    id: 2,
+                    command: Command::ScrollTo { y, .. },
+                } => Some(*y),
+                _ => None,
+            })
+            .expect("the containing scroll view reveals the attachment");
+        c.set_scroll_offset(2, point(Points::ZERO, offset), u32::MAX);
+        c.commit();
+        let shown = c.measure(target).unwrap();
+        assert!((0.0..=100.0).contains(&shown.page.y.0), "{shown:?}");
+    }
+}
+
 /// A scroll view 300pt high (2) over content 1000pt high with a padding of
 /// 20 (4), holding view 6 at `top` below the padding, `height` high.
 fn scroll_around_view(top: f32, height: f32) -> Core<FakeEngine> {
