@@ -1931,6 +1931,11 @@ final class Mounter {
         Native.event(handle(), id, Native.INSETS, null, packed, top, bottom);
     }
 
+    /** Reports the room (dp) a screen's toolbar leaves header title view `id` (`Core::set_root_size`). */
+    void headerRoom(int id, float width) {
+        Native.rootSize(handle(), id, width, 0, 0, 0, 0, 0);
+    }
+
     void rootSize(int id, float w, float h, float top, float right, float bottom, float left) {
         Native.rootSize(handle(), id, w, h, top, right, bottom, left);
         insets(id, top, right, bottom, left);

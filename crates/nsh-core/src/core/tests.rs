@@ -5303,6 +5303,133 @@ fn screens_fill_their_stack_below_the_header() {
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 320.0, 480.0)));
 }
 
+/// A native header's title view is as wide as its content until the
+/// platform reports the room its bar leaves: then a long one-line title
+/// shrinks to that room, its button inside it, and a short one keeps its
+/// own width.
+#[test]
+fn a_native_header_title_fits_the_room_the_bar_leaves() {
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let title = |id: NodeId, text: &str| {
+        vec![
+            Op::Create {
+                id,
+                tag: Tag::HeaderItem,
+            },
+            Op::SetProp {
+                id,
+                prop: Prop::HeaderSlot(crate::HeaderSlot::Title),
+            },
+            Op::Create {
+                id: id + 2,
+                tag: Tag::View,
+            },
+            style_op(id + 2, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: id + 4,
+                tag: Tag::Text,
+            },
+            style_op(
+                id + 4,
+                &[
+                    ("flex", StyleValue::Number(1.0)),
+                    ("numberOfLines", StyleValue::Number(1.0)),
+                ],
+            ),
+            Op::CreateText {
+                id: id + 5,
+                text: text.to_owned(),
+            },
+            Op::Create {
+                id: id + 6,
+                tag: Tag::View,
+            },
+            style_op(
+                id + 6,
+                &[
+                    ("width", StyleValue::Number(44.0)),
+                    ("height", StyleValue::Number(44.0)),
+                    ("flexShrink", StyleValue::Number(0.0)),
+                ],
+            ),
+            insert(id + 4, id + 5),
+            insert(id + 2, id + 4),
+            insert(id + 2, id + 6),
+            insert(id, id + 2),
+        ]
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Stack,
+        },
+        style_op(2, &[("flex", StyleValue::Number(1.0))]),
+        Op::Create {
+            id: 3,
+            tag: Tag::Screen,
+        },
+        Op::Create {
+            id: 5,
+            tag: Tag::Screen,
+        },
+    ];
+    ops.extend(title(
+        10,
+        &"a title far too long to fit in the bar ".repeat(3),
+    ));
+    ops.extend(title(30, "Hi"));
+    ops.extend([
+        insert(3, 10),
+        insert(5, 30),
+        insert(2, 3),
+        insert(2, 5),
+        insert(ROOT_ID, 2),
+    ]);
+    apply(&mut c, ops);
+    // Frames are sent when they change: keep the latest of each.
+    let mut frames = std::collections::HashMap::<NodeId, Bounds<Points>>::new();
+    let mut commit = |c: &mut Core<FakeEngine>| {
+        let batch = c.commit().unwrap_or_default();
+        for item in batch.items.iter() {
+            if let MountItem::Frame { id, frame } = item {
+                frames.insert(*id, *frame);
+            }
+        }
+        frames.clone()
+    };
+    let before = commit(&mut c);
+    assert!(
+        before[&10].size.width > px(390.0),
+        "max-content before a report"
+    );
+    let short = before[&30].size.width;
+    assert!(short < px(200.0));
+
+    c.set_root_size(10, size_pt(200.0, 0.0), EdgeInsets::default());
+    c.set_root_size(30, size_pt(200.0, 0.0), EdgeInsets::default());
+    let after = commit(&mut c);
+    assert_eq!(
+        after[&10].size.width,
+        px(200.0),
+        "the long title fits the room"
+    );
+    let button = after[&16];
+    assert_eq!(
+        button.origin.x + button.size.width,
+        px(200.0),
+        "its button inside it"
+    );
+    assert_eq!(
+        after[&30].size.width, short,
+        "a short title keeps its width"
+    );
+}
+
 /// Without a native header, a screen's `header` slot is as wide as the
 /// screen whatever it holds: a long one-line title shrinks instead of
 /// pushing the header, and the button after it, past the window's edge.

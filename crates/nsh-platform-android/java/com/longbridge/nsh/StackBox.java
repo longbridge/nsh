@@ -376,10 +376,14 @@ final class StackBox extends FrameLayout implements Node {
         /** `popOnBack` false: the back buttons only send `onBackPress`. */
         boolean preventBack;
         private final BackArrow arrow;
+        private final Mounter mounter;
+        /** The header's title view and right items (-1: none), and the room last reported for the title (px). */
+        private int titleId = -1, rightId = -1, titleRoom = -1;
 
         ScreenBox(Context context, Mounter mounter, int id) {
             super(context);
             this.id = id;
+            this.mounter = mounter;
             root = new Box(context, mounter, id);
             addView(root);
             toolbar = new Toolbar(context);
@@ -413,6 +417,39 @@ final class StackBox extends FrameLayout implements Node {
             Box.Frame f = Box.frame(root);
             root.layout(f.left, f.top, f.right, f.bottom);
             toolbar.layout(0, 0, r - l, toolbar.getMeasuredHeight());
+            reportTitleRoom();
+        }
+
+        /**
+         * Tells the core the room the bar leaves the title view, from its
+         * start to the right items (or the bar's end) less the margin the
+         * bar keeps after a title, which the core keeps
+         * the title within: laid out as wide as its content, a long title
+         * would push the right items off the bar. Sent when it changes.
+         */
+        private void reportTitleRoom() {
+            if (titleId < 0 || toolbar.getVisibility() != VISIBLE) return;
+            View title = mounter.views.get(titleId);
+            if (title == null || title.getParent() != toolbar) return;
+            View right = rightId >= 0 ? mounter.views.get(rightId) : null;
+            if (right != null && right.getParent() != toolbar) right = null;
+            int room;
+            if (toolbar.getLayoutDirection() == LAYOUT_DIRECTION_RTL) {
+                int end = right != null
+                        ? right.getRight() + ((Toolbar.LayoutParams) right.getLayoutParams()).rightMargin
+                        : toolbar.getPaddingLeft() + toolbar.getCurrentContentInsetEnd();
+                room = title.getRight() - end;
+            } else {
+                int end = right != null
+                        ? right.getLeft()
+                        : toolbar.getWidth() - toolbar.getPaddingRight() - toolbar.getCurrentContentInsetEnd();
+                room = end - title.getLeft();
+            }
+            // The space the bar keeps after its own title.
+            room = Math.max(1, room - toolbar.getTitleMarginEnd());
+            if (room == titleRoom) return;
+            titleRoom = room;
+            mounter.headerRoom(titleId, room / mounter.density);
         }
 
         /** Applies `encode.rs` `screen_config`. */
@@ -444,6 +481,9 @@ final class StackBox extends FrameLayout implements Node {
             for (int i = toolbar.getChildCount() - 1; i >= 0; i--) {
                 if (toolbar.getChildAt(i) instanceof Box) toolbar.removeViewAt(i);
             }
+            if (titleView != titleId) titleRoom = -1;
+            titleId = titleView;
+            rightId = right;
             add(m, left, android.view.Gravity.START);
             add(m, titleView, android.view.Gravity.START);
             add(m, right, android.view.Gravity.END);

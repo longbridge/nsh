@@ -1621,7 +1621,9 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The platform presents root `id` (a modal) at `size`, with `insets`
-    /// of it covered by system UI.
+    /// of it covered by system UI. For a native header's title view, `size`
+    /// is the room the bar leaves it: the view is as wide as its content up
+    /// to that width.
     pub fn set_root_size(&mut self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let Ok(key) = self.key(id) else { return };
         if let Some(root) = self.nodes[key as usize].root.as_mut()
@@ -8194,6 +8196,18 @@ impl<M: TextEngine> Core<M> {
                 }
                 (size, 0.0, available)
             }
+            // A native header's title view: as wide as its content, up to
+            // the room the platform reported between the bar's own items
+            // (`set_root_size`), so a long title shrinks instead of pushing
+            // them off the bar.
+            Kind::HeaderItem if native_header && root.slot == HeaderSlot::Title => (
+                size_pt(root.reported.map_or(0.0, |r| r.width.0), 0.0),
+                0.0,
+                taffy::Size {
+                    width: AvailableSpace::MaxContent,
+                    height: AvailableSpace::MaxContent,
+                },
+            ),
             // As wide as the window, as tall as its content.
             Kind::InputAccessory => (
                 size_pt(self.viewport.width.0, 0.0),
@@ -8216,7 +8230,18 @@ impl<M: TextEngine> Core<M> {
         if !changed && !self.layout.dirty(layout) {
             return;
         }
-        if kind == Kind::InputAccessory || (kind == Kind::HeaderItem && size.width > Points::ZERO) {
+        let title = kind == Kind::HeaderItem && native_header && root.slot == HeaderSlot::Title;
+        if title {
+            // Until the platform reports a room, the app's own style
+            // stands.
+            if size.width > Points::ZERO {
+                let mut style = self.layout.style(layout).clone();
+                style.max_size.width = taffy::LengthPercentageAuto::length(size.width.0);
+                self.layout.set_style(layout, style);
+            }
+        } else if kind == Kind::InputAccessory
+            || (kind == Kind::HeaderItem && size.width > Points::ZERO)
+        {
             let mut style = self.layout.style(layout).clone();
             style.size.width = taffy::Dimension::length(size.width.0);
             self.layout.set_style(layout, style);
