@@ -236,6 +236,8 @@ drawImage(image: string | ImageAsset, ...args: CanvasNumber[]): void;
 - `drawImage(image, dx, dy, dw, dh)`：缩放到矩形内。
 - `drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh)`：绘制图片的一部分（源区域以图片像素计）。
 
+图片的原始尺寸（单位为点）是它的像素数除以文件名声明的密度，与 `Image` 相同：300 像素宽的 `logo@3x.png` 绘制为 100 点宽，没有 `@2x` / `@3x` 的文件每个像素一个点，在任何屏幕上都一样。只给出源区域时，按源区域的像素除以同一密度绘制；导入的资源按导入时的尺寸绘制。
+
 ## Path2D
 
 ```ts
@@ -282,7 +284,11 @@ const png = await canvas.convertToBlob({ scale: 2 });
 url.set(URL.createObjectURL(png)); // <Image src={url()} />, or its bytes: await png.arrayBuffer()
 ```
 
+一块画布可以生成多张图片：在没有设置变换和裁剪时整块清除它（`cx.clearRect(0, 0, canvas.width, canvas.height)`），绘制会重新开始，上下文的状态（样式、字体、当前路径）保持不变，每张图片只渲染清除之后绘制的内容。
+
 图片单边最多 16384 像素、总共最多 6400 万像素，一个应用同时最多渲染 16 张；超出任一限制时 `convertToBlob` 以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。平台 30 秒内没有完成的渲染以 `ETIMEDOUT` 拒绝。iOS、Android、macOS、Windows、Linux、GPUI 后端和 Web 都渲染离屏画布，画法与各自屏上的画布相同；其他平台上（包括 `nsh test` 的 headless 运行），`convertToBlob` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝（`nsh test --target` 在它指定的平台上渲染）。
+
+在 Web 上，图片还要在浏览器的画布上限之内（iOS 和 iPadOS 上的 Safari 总共 16,777,216 像素，即 4096 × 4096）；更大的图片以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。绘制中的图片来自页面的同源地址或允许 CORS 的服务器；其他图片会被跳过并给出警告，与各平台跳过加载失败的图片一样。
 
 ## 不支持的功能
 

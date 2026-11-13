@@ -20,7 +20,8 @@
   gradients, `drawImage` (all three forms, images by URI or asset: native canvases load them through their
   platform's image module, which rasterizes an SVG with `nsh_core::svg` and hands its bitmap to the canvas, as bytes no
   decoder reads fail; draw an SVG into an explicit destination rectangle, its raster is sized in the loader's own
-  pixels; the web's draws what the browser draws). Any number argument and colors may be animated values
+  pixels; the web's draws what the browser draws; a missing destination size is the source's pixels over
+  `CanvasImage::density`, the file name's `@Nx` as an `Image`'s, never the screen's scale, on every platform). Any number argument and colors may be animated values
   (`createAnimatedValue`, `interpolate`, ...): those become slots bound like style values (`AnimationProp::CanvasArg`) and the
   platform redraws on its own while they animate, without JS (only what they change on iOS and macOS: "Partial
   redraws" below). Deriving a node again (`interpolate`, `mul`, ... in a `draw`
@@ -41,6 +42,13 @@
 `Painter::render` with `canvas::render::RenderOptions`). An object of a size of its own whose `getContext("2d")` is
 a context recording as `<Canvas draw>`'s does (`new_recording`, never closed); `convertToBlob` decodes what it
 recorded into a `Drawing` (the same `max_canvas_ops` limit) and pushes `Op::RenderCanvas` with a JS call number.
+A `clearRect` covering the whole canvas under the identity transform, with no clip and no `save` open, starts the
+recording anew (`offscreen.rs` `Reuse`; the browser runtime's `canvas.js` `track`, op 605 asking which property
+values took effect): it keeps only the state HTML keeps across the clear, each property's last value that took effect
+and the current path, so a canvas reused for many images neither replays earlier ones nor reaches the limit. The
+transform counts as the identity until a call changes it (`translate(0, 0)` and the like do not) and again after
+`setTransform` / `resetTransform` to it; nothing is dropped when the kept state reads an animated value or the path
+was added under another transform. `width` and `height` are read-only, so there is no size reset.
 The core (`core/canvas_render.rs`, `canvas::render`) checks the size against `MAX_SIDE` / `MAX_PIXELS`, takes the
 screen's pixel ratio when no `scale` is given, and sends `Command::RenderCanvas` on the root to platforms whose
 `Environment::canvas_render` is set (elsewhere it answers `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` at once); the
@@ -59,15 +67,20 @@ on-screen painter, so the image matches the canvas:
 - Android (`CanvasRender.java`): `CanvasPainter` on a `Bitmap` on one background thread, `Bitmap.compress`; the
   command is `encode.rs` opcode 55, the reply `Native.canvasImage` (bytes as a `byte[]`).
 - Windows (`canvas/offscreen.rs`): the on-screen `record`ed command list drawn into a D2D bitmap of the UI thread's
-  device (the painter's resources are that thread's), read back, encoded with WIC's PNG encoder on a thread.
+  device (the painter's resources are that thread's), read back once a Direct3D event query polled from a thread
+  timer says the GPU is done, so the UI thread never waits for it, encoded with WIC's PNG encoder on a thread.
 - Linux (`canvas/offscreen.rs`): the Cairo `Replay` into an `ImageSurface` on the main thread (Pango text needs it),
   encoded by GDK (`save_to_png_bytes`) on a thread.
 - GPUI (`canvas/offscreen.rs`): the tiny-skia `Replay` on a thread into one pixmap the size of the image (scratch
   pixmaps only for shadows and composites, sized to what they touch); text without outlines (emoji, color glyphs) is
   not in the image (`docs/dev/gpui.md`).
 - Web (`web/nsh.js` `renderCanvas`): the on-screen `replayCanvas` onto an `OffscreenCanvas` (or a `<canvas>`),
-  images loaded CORS-clean, `convertToBlob`, back through `nsh_canvas_image`; the browser runtime's `nsh` exports its
-  own `OffscreenCanvas` (`web/browser/canvas.js`, op 604), apart from the browser's global one.
+  images loaded CORS-clean, `convertToBlob`, back through `nsh_canvas_image` with a status (`CANVAS_IMAGE`,
+  `src/lib.rs` `CanvasImageStatus`: image, failed, too large); the browser runtime's `nsh` exports its own
+  `OffscreenCanvas` (`web/browser/canvas.js`, op 604), apart from the browser's global one. Browsers cap canvases
+  below the core's limits (WebKit on iOS at 16777216 pixels in all) and past them draw nothing instead of failing, so
+  `offscreenCanvas` reads back one pixel drawn in the far corner before the drawing; a canvas that lost it, no context
+  or the encoder's `RangeError` answers `TooLarge` (`docs/dev/web.md` "Platform services").
 
 **Partial redraws.** While animated values animate, iOS, macOS and Windows redraw only the area the changed values
 affect: `nsh_core::canvas::DamageScan` finds it from the recorded operations, falling back to a full redraw
