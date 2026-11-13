@@ -233,6 +233,14 @@ await app.press("Contact us");
 expect(app.openedUrls()).toEqual(["mailto:help@example.com"]);
 ```
 
+`app.failOpenUrls(url)` 让与它匹配的 URL 打开失败，就像设备上没有能打开它们的应用，测试便可检查链接没打开时应用显示什么：
+
+```tsx
+await app.failOpenUrls("https://example.com/*");
+await app.press("Read the guide");
+expect(app.shows("Could not open the link")).toBe(true);
+```
+
 ### 模拟网络
 
 `network` 按 `"<METHOD> <URL>"` 列出路由（只写 URL 表示 `GET`；`*` 匹配任意文字）。没有路由匹配的请求会失败，因此测试不会在
@@ -389,7 +397,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.keyboard.press(keys)` | 按下一个带修饰键的按键，写法同 `keymap`（`"mod+k"`、`"shift+/"`、`"escape"`；`mod` 是平台的命令键），如同硬件键盘，在所有平台上都可用（手机和平板也可以接硬件键盘）：由应用的对应快捷键接收（`keymap.bind`、`onKeyCommand`），否则在桌面上选中应用菜单里带这个快捷键的项（`Menu.setApplicationMenu`，输入框有焦点时遵守它的 `when`），否则在 macOS 和 Web 上由 Tab 和 Shift+Tab 在输入框和可按压的视图之间移动键盘焦点（`onFocus`、`onBlur`、`focus:` 样式；有对话框开着时只在最新的对话框里移动，对话框关闭后焦点回到打开前所在的视图），Return 或空格按下焦点所在的视图，在 Web 上（`platform: "web"`）Shift+F10 为它请求上下文菜单（`onContextMenu`，`pointerType` 为 `null`），否则由获得焦点的输入框接收字符、Backspace 或回车，否则 Escape 执行返回。 |
 | `await app.keyboard.down(keys)` / `up(keys)` | 按住修饰键（`"mod"`、`"shift"`、`"alt"`、`"ctrl"`、`"meta"`，用 `+` 连接）直到 `up`：期间的按压、拖动和悬停都带着这些键，如同 Mod 加点击或 Shift 加拖动。目前在 headless 和 Linux 上可用。 |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | 像 `drag` 一样拖动，但手指一直按着，直到 `drop()` 在当前位置抬起：其间的步骤可以查看拖动中的画面（拖动预览、放置线）。目前在 headless 和 Linux 上可用。 |
-| `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless 和 Linux 上可用。 |
+| `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless、Linux 和 macOS 上可用。 |
 | `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。在手动时钟上，等待时每次把时钟推进一个显示帧，最多推进 `timeout`。 |
@@ -413,12 +421,14 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.audio()` | 应用对扬声器发出的请求（`Sound`、`AudioPlayer`），按顺序：`command`（`"load"`、`"play"`、`"stop"`、`"unload"`、`"open"`、`"preload"`、`"resume"`、`"pause"`、`"seek"`、`"set"`、`"close"`）、`src`，以及适用时的 `volume`、`rate`、`position`。仅限无界面运行。 |
 | `app.endAudio()` | 正在播放的播放器播到结尾（`end`；循环的从头再播）。仅限无界面运行。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
+| `app.clipboardItem()` | 剪贴板当前的条目 `{ text, html? }`（`Clipboard.write`；只有文字时没有 `html`），没有时为 `null`。仅无头测试。 |
 | `app.requests()` | 应用发出的请求，按顺序排列：`method`、`url`、`headers`、`body`。 |
 | `await app.host.send(name, data?)` | 以宿主应用的身份向应用发送事件（`host.on`），然后等待它空闲。见[扮演宿主应用](#扮演宿主应用)。 |
 | `app.host.calls()`、`app.host.posts()` | `open` 的 `host.handlers` 收到的应用调用和投递，按顺序排列：`name`、`data`。 |
 | `app.openedUrls()` | 应用打开的 URL（`openUrl`），按顺序排列：只记录，不打开。 |
 | `await app.openWithUrl(url)` | 系统把一个打开应用的链接交给应用，就像用户在应用运行时打开链接一样（`UrlScheme.on("open")`；应用未认领的 scheme 的链接会被丢弃，与设备上一致），然后等待应用安静下来。仅限 headless 运行。 |
 | `await app.failImages(url)` | 从此刻起，来源为 `url` 的图片都加载失败，正在加载的也包括在内：每张图片都像在设备上一样用 `onError` 报告失败，测试便可检查应用改为显示的内容（头像的首字母、占位图）。`url` 整体匹配，其中的 `*` 匹配任意内容（`"https://cdn.example.com/avatars/*"`），与 `network` 路由的写法相同；打包图片的来源是 `asset:/<path>`。然后等待应用安静下来。仅限 headless 运行。 |
+| `await app.failOpenUrls(url)` | 从此刻起，应用打开的、与 `url` 匹配的 URL 都打开失败：`openUrl` resolve 为 `{ opened: false }`，就像设备上没有能打开它们的应用，测试便可检查应用此时显示的内容。`url` 整体匹配，其中的 `*` 匹配任意内容（`"https://example.com/*"`），与 `network` 路由的写法相同；`app.openedUrls()` 仍会列出它们。然后等待应用安静下来。仅限 headless 运行。 |
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.setLifecycle(state)` | 把应用移到 `"background"`、`"inactive"` 或 `"active"`，就像用户离开应用、切换到另一个应用或窗口、再回来时系统所做的那样（`lifecycle()`）。仅限 headless 运行。 |
@@ -469,7 +479,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
 - **页面的宿主应答 `host`**：应用的 `nsh.json` 在 `web.host` 中指定了宿主时（[页面的宿主](#页面的宿主)）。
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
-- **URL 只被记录**：应用打开的 URL 以“已打开”回报，`app.openedUrls()` 列出它们。
+- **URL 只被记录**：应用打开的 URL 以“已打开”回报（测试用 `app.failOpenUrls` 让它失败的除外），`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` 和 `Picker.pickFiles` resolve 为 `[]`。
 - **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
 - **声音交给假扬声器**：音效按 WAV 解码（时长取自文件头，其他字节以 `decode` 失败），播放器立即播放其源的一分钟，在 `endAudio()` 时播到结尾。
@@ -555,7 +565,7 @@ nsh test --target tui                         # 在内存终端里运行
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
-窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。应用以目标平台运行（`platform.os`）。
+窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕（在 macOS 上，`setViewport` 改变大小后窗口也不会超出屏幕；比屏幕还大时，左上角留在屏幕内）；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。在 macOS、Windows、GPUI 和 Linux 上，应用在后台运行：窗口照常显示，键盘留在你正在输入的应用里，步骤的点击、按键和快捷键直接发给这些窗口（`--foreground` 让它们成为当前活跃的应用）。应用以目标平台运行（`platform.os`）。
 手动 `clock` 和 headless 时一样：`app.clock.runFor`、
 `fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)`、`waitFor` 和 `waitUntil` 也会推进它；
 平台每显示一帧，时钟前进一帧（1/60 秒），所以应用在动画时时间照常流逝。平台自身的动画和路由的 `delay` 按真实时间进行。应用的请求和 headless
@@ -583,7 +593,7 @@ Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，
 每次 `open` 得到一个拥有独立存储的页面。输入是浏览器的可信输入，与用户的输入一样：鼠标点击、滚轮滚动和按键。
 
 在 iOS 上，应用运行在 iOS 模拟器里的开发 host 中：使用 `--device` 指定的模拟器（名称或 UDID），否则使用已启动的模拟器，
-再否则 `nsh test` 会启动最新的 iPhone。步骤是手指的触摸和软键盘的输入，
+再否则 `nsh test` 会启动最新的 iPhone。模拟器应用在你正在输入的应用后面打开，步骤直接发给模拟器中的应用。步骤是手指的触摸和软键盘的输入，
 UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟器的外观，`nsh test` 会在应用结束后把它恢复原样；屏幕是所模拟设备的尺寸。
 `nsh test` 环境中由应用在 `capabilities.process.env` 里声明的变量，会传给模拟器中的应用，与桌面上一样（`nsh run --target ios` 也会传递）；
 `HOME`、`TMPDIR` 和 `PATH` 是模拟器为应用设置的路径。

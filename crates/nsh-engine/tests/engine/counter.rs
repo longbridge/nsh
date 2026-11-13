@@ -57,6 +57,7 @@ fn config() -> EngineConfig {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     }
 }
 

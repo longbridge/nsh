@@ -116,7 +116,7 @@ parts! {
     /// The row of a code block's actions (`codeBlockActions`), floating
     /// over its top right corner (only with actions).
     code_block_header => CodeBlockHeader,
-    /// The horizontal scroll view of a code block's code.
+    /// The horizontal scroll view of unwrapped code (`wrap: false`).
     code_block_scroll => CodeBlockScroll,
     /// The code of a code block (monospace, as written).
     code_block_code => CodeBlockCode,

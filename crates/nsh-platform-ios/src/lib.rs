@@ -49,6 +49,8 @@ mod surface;
 #[cfg(feature = "dev")]
 mod synth;
 mod system;
+mod system_menu_button;
+mod system_segmented_control;
 mod system_tab_bar;
 mod target;
 mod text;
@@ -63,7 +65,7 @@ mod zoom;
 
 pub use nsh_engine::{Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Root};
 
-/// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
+/// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`'s core part).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::element::Registry>>> =
     std::sync::RwLock::new(None);
 
@@ -122,13 +124,20 @@ fn root() -> Option<nsh_engine::Root> {
     root.map(|root| root())
 }
 
-/// The UI sets engines serve.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s core
+/// part only. A Rust app makes `nsh/base`'s components by type, so
+/// registering every part would link every component into its binary;
+/// hosts that run JS register the sets their code imports.
 fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| {
+            vec![nsh_base::registry_of([
+                nsh_base::parts::core as nsh_base::parts::Part
+            ])]
+        })
 }
 
 pub use crate::{

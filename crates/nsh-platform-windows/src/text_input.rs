@@ -697,11 +697,10 @@ impl InputState {
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
                 dc.BeginDraw();
-                // RichEdit draws in the window's client pixels.
-                dc.SetTransform(
-                    &(Matrix3x2::translation(-ox as f32, -oy as f32)
-                        * Matrix3x2::scale(1.0 / s, 1.0 / s)),
-                );
+                // RichEdit maps its client rectangle through the target's
+                // DPI and draws in DIPs: only the origin comes back to the
+                // view's points (the scale is the DPI's already).
+                dc.SetTransform(&Matrix3x2::translation(-ox as f32 / s, -oy as f32 / s));
                 let drawn = e.draw(dc.as_raw(), bounds);
                 let ended = dc.EndDraw(None, None);
                 dc.SetTarget(None);
@@ -954,7 +953,25 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     if view.attached() && view.state().input.is_some() {
         return Some(view);
     }
-    if let Some(input) = input_of(&view) {
+    drop_quietly(surface, &view);
+    None
+}
+
+/// `view` was removed ([`crate::input::removed`]): a field in it loses the
+/// focus without a blur, its `FOCUSED` state cleared.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let field = FOCUS.with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()));
+    if let Some(field) = field
+        && crate::input::holds(view, &field)
+    {
+        drop_quietly(surface, &field);
+        crate::input::set_state(surface, &field, state::FOCUSED, false);
+    }
+}
+
+/// The focused `field` loses the focus without a word.
+fn drop_quietly(surface: &Surface, field: &NshView) {
+    if let Some(input) = input_of(field) {
         input.focused.set(false);
         if let Some(e) = &input.editor {
             e.set_focus(false);
@@ -967,7 +984,29 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     });
     update_ime(surface);
     blink::update();
-    None
+}
+
+/// The surface stopped (its views are detached): its focused field goes
+/// now, while the thread is alive, rather than with the thread's locals,
+/// whose destruction order is undefined (#1767).
+pub(crate) fn stopped(surface: &Surface) {
+    let view = FOCUS.with(|f| {
+        f.borrow_mut()
+            .get_mut(&surface.key())
+            .and_then(|f| f.view.take())
+    });
+    if let Some(input) = view.as_ref().and_then(input_of) {
+        input.focused.set(false);
+    }
+    // Dropped outside the borrow: the field's editor drops with it.
+    drop(view);
+    blink::update();
+}
+
+/// The surface's window was destroyed: forgets its focus entirely.
+pub(crate) fn destroyed(surface: &Surface) {
+    stopped(surface);
+    FOCUS.with(|f| f.borrow_mut().remove(&surface.key()));
 }
 
 fn window_active(surface: &Surface) -> bool {
@@ -980,6 +1019,12 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     let old = focused(surface);
     if old.as_ref() == view {
         return;
+    }
+    if let Some(view) = view {
+        // A custom view of this window gives its keyboard focus to the
+        // field, as the field's gives way to the view's
+        // (`crate::keyboard`).
+        crate::keyboard::blur_window(surface, crate::app_window::window_of(surface, view));
     }
     surface.chrome.context_area.take();
     if let Some(old) = &old {
@@ -2045,6 +2090,18 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_and_destroy_forget_the_focus() {
+        let surface = Surface::new(Default::default());
+        FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().inactive = true);
+        stopped(&surface);
+        // Stopping keeps whether the window is active (the app may restart).
+        assert!(!window_active(&surface));
+        destroyed(&surface);
+        assert!(FOCUS.with(|f| !f.borrow().contains_key(&surface.key())));
+        assert!(window_active(&surface));
+    }
 
     #[test]
     fn alignment() {

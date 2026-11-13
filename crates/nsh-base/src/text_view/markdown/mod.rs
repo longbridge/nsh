@@ -657,6 +657,7 @@ impl<'a> Converter<'a> {
             language: code.lang.clone(),
             meta: code.meta.clone(),
             code: code.value.clone(),
+            ..CodeBlock::default()
         })
     }
 

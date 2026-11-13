@@ -120,6 +120,47 @@ const inLink = () => (revision(), editor.isActive("link"));
 A link menu edits the link under the caret with `chain([extendMarkRange("link"), command("setLink", { href })])`
 and removes it with `command("unsetLink")` after the same `extendMarkRange`.
 
+`contentLayer` is the app's own layer over the document, inside the box that scrolls: what it holds moves with
+the text in the same frame. Place its children in the content box's points, where `editor.nodeRect(pos)` (the box
+of the block starting at `pos`) and `editor.coordsAtPos(pos)` answer: a handle in a block's margin, a marker beside
+a node. The layer itself takes no press; its children do.
+
+```tsx
+const box = editor.nodeRect(blockStart);
+
+<RichEditor
+  editor={editor}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+/>
+```
+
+### Copy and paste
+
+A copy or cut puts the selection on the clipboard in two forms at once, as ProseMirror does: as plain text (Markdown with the
+`markdown` extension's `copyAsMarkdown`) and as HTML written by the schema's `renderHTML`, which mail, documents and
+other editors paste with its formatting. The HTML marks the copied slice (`data-pm-slice`), so a paste into a
+`RichEditor` gets the same nodes back, mentions and other inline nodes included, a part of a list item stays a part of
+one, and spaces are kept. Pasted HTML from elsewhere is read by the schema's parse rules. A Rust plugin changes what
+is copied with `transform_copied`.
+
+### Pasted and dropped files
+
+Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the
+editor inserts nothing for them and keeps its selection, where the app inserts what it makes of them. A paste of
+images or of files copied in a file manager calls `onPasteFiles` with `{ files, uris }`: `files` the images with
+their bytes, `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
+the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file drops](./view.md#desktop-file-drops)
+do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
+`onFileDrop` the editor leaves dropped files to the view around it that listens.
+
+```tsx
+<RichEditor
+  editor={editor}
+  onPasteFiles={({ files }) => attach(files)}
+  onFileDrop={({ uris, mimeTypes }) => attachFiles(uris, mimeTypes)}
+/>
+```
+
 ## Schemas
 
 `defineSchema(spec)` reads a schema in ProseMirror's shape and throws with what is wrong in it. Node types name their
@@ -342,21 +383,25 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 Three plugins carry Tiptap's Link, CharacterCount and Suggestion behavior, all of it native:
 
 ```tsx
-import { RichEditor, characterCount, createRichEditor, insertMention, link, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
+import { RichEditor, characterCount, createRichEditor, insertMention, link, setSuggestionOpen, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
 
 const editor = createRichEditor({
   schema: withMention(starterSchema()),
   plugins: [
+    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
     starterKit(),
     link({ defaultProtocol: "https" }),
     characterCount({ limit: 280 }),
-    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
   ],
 });
 
 editor.on("transaction", () => {
   const s = editor.suggestion("mention");
-  if (s?.active) showPeople(s.query, editor.coordsAtPos(s.range.from), s.lastKey);
+  if (s?.active) {
+    const people = peopleMatching(s.query);
+    editor.run(setSuggestionOpen(people.length > 0, "mention"));
+    showPeople(people, editor.coordsAtPos(s.range.from), s.lastKey);
+  }
   setCount(`${editor.characters()} / ${editor.characterLimit}`);
 });
 
@@ -383,10 +428,16 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 - `suggestion(options?)`: follows a trigger (`char`, `@` by default) typed before the cursor. `allowSpaces` lets the
   query hold spaces, `allowedPrefixes` lists what may precede the trigger (a space by default; `anyPrefix` takes
   anything), `startOfLine` asks for it at the line's start (a `/` command menu). `editor.suggestion(key)` gives
-  `{ active, range, query, text, lastKey, keyCount }`; the active range carries the app's `decorationClass` (and
+  `{ active, range, query, text, lastKey, keyCount, open }`; the active range carries the app's `decorationClass` (and
   `decorationEmptyClass` while the query is empty). While a suggestion is active the keys in `captureKeys` belong
   to the app's list: the editor takes them and records the last one in the state, and Escape dismisses the
-  suggestion (`exitSuggestion(key)` does too). `replaceSuggestion(content, key?)` replaces the trigger and the query
+  suggestion (`exitSuggestion(key)` does too). `setSuggestionOpen(open, key?)` tells the suggestion whether the
+  list shows for the query (its state's `open`): closed, the keys in `captureKeys` go on to the editor, so Enter
+  sends or starts a new line when nothing matches, and Escape still dismisses. It holds for the query it was said
+  for, so say it each time the query changes; until then the list is open and the keys are its own. A list that
+  loads its items (a remote people search) closes only once it knows the list is empty, not while the results are
+  still loading, or Enter would act before they arrive.
+  A suggestion comes before `starterKit()` and the app's own keys in `plugins`, so its keys reach it first. `replaceSuggestion(content, key?)` replaces the trigger and the query
   with text or JSON content.
 - `withMention(schema, { name?, char? })` adds Tiptap's mention node: an inline atom with `id`, `label` and its
   trigger, written as `@label` in text and as `<span data-type="mention">` in HTML. `insertMention(range, id, label?)`

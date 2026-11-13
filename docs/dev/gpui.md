@@ -129,7 +129,12 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   opacity, so `DrawCx` keeps the current transform (`geom::Mat4`) and applies opacity and color filters
   (`push_color_matrix`) to every color, as GPUI's own element opacity does. Axis-aligned rectangles are GPUI's quads,
   exact; under a rotation, skew or perspective they are filled as paths whose points are mapped one by one
-  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright. Clips
+  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright.
+  Images turn too (`image/turn.rs`): a one-color SVG (tinted, or of one color) under an affine transform is a GPUI
+  monochrome sprite carrying the transform (`paint_svg` with a `TransformationMatrix`, fed a generated SVG of the
+  picture's alpha, never the app's SVG); any other picture is resampled on the CPU through the whole transform into a
+  bitmap of the device pixels it covers, cut to the view's box and the clip polygon, kept while the transform's linear
+  part stays. Clips
   are rectangles in window coordinates (GPUI's content masks), intersected as they nest; a rounded or rotated clip is
   also kept as a convex polygon paths are cut to, and the innermost rounded clip rounds the corners of the quads and
   images reaching into its corners (`clip_rounded`). `paint(|window, app| …)` paints inside the current clip.
@@ -145,9 +150,11 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   the main thread paints with). GPUI shapes one line of one font size at a time and leaves breaking, bidi, line
   heights and ellipses to its callers, so each paragraph is shaped once, in segments of one bidi level and font size,
   into clusters; measuring at another width only re-breaks them (UAX #14, `unicode-linebreak`), and the final layout
-  orders each line's clusters by their bidi levels (`unicode-bidi`). Line heights follow Pango's model, as on Linux
-  and Windows. The final layout is plain data (lines, cluster boxes, positioned glyphs); the main thread paints the
-  glyphs (`paint_glyph`, `paint_emoji`) and reads colors and decorations from the spans, as the Linux backend does.
+  orders each line's clusters by their bidi levels (`unicode-bidi`). The last line a line clamp shows holds the rest of
+  its paragraph and is cut at the box for the ellipsis, inside a word if need be, as CoreText, Pango and StaticLayout
+  cut it. Line heights follow Pango's model, as on Linux and Windows. The final layout is plain data (lines, cluster
+  boxes, positioned glyphs); the main thread paints the glyphs (`paint_glyph`, `paint_emoji`) and reads colors and
+  decorations from the spans, as the Linux backend does.
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
@@ -171,7 +178,22 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   listeners: the surface listens in the bubble phase), and only the window's shortcuts, the app's bindings and the
   menu's shortcuts see what it lets through, as from a text field (`input::component_key`). Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
   system, gestures) as on Windows. Keys become Windows virtual key codes (`keys.rs`), which the shared input,
-  scrolling, keymap and editing code reads.
+  scrolling, keymap and editing code reads; and, for the view with the keyboard focus (and its ancestors), a raw
+  key event (`onKeyDown` / `onKeyUp`) before any native default, as on Linux: `nsh_core::KeyEvent`'s `key` is the
+  logical key GPUI reported, in the web's spelling for the named keys it names alike (`Enter`, `ArrowLeft`, `F5`)
+  or the character the key types as the platform reported it (`A` for Shift+A, the layout's own `é`, `?` for
+  Shift+/), and its `code` is always empty: GPUI's public API exposes no scan code or key position, and no DOM
+  code is ever inferred from the logical key. The app's shortcuts and the window's take the key first
+  (`keymap::key_stroke`), by the source's own key: a key with a virtual code by the code, and one without (`?`) by
+  its canonical stroke (`shift+/`), so `nsh/keymap` bindings fire for those keys too. A mount's `capture_keys`
+  (on the focus or around it) then decides whether the platform keeps it — a binding that consumes the key runs
+  before any capture notification, a taken key runs no default, and a text field or native component owns its
+  keys (the views around them never see them). `defaultPrevented` reports the mounted policy's decision for that
+  transition, decided anew for each from the rules matched by the same canonical stroke of the source's key,
+  never by rewriting the event: its key, code and modifiers stay exactly as the source reported them. GPUI
+  dispatches the key on the window's thread before its own default (and before the app's key engine hands the
+  notification to JS and Rust callbacks), so the value is observable state for that transition, never a
+  synchronous veto the UI thread waits for.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,
   cx))`, then `load(App::Js(bundle))` or `load(App::Rust(root))`; it renders a `SurfaceElement` and is `Focusable`.
   `open_app_window` opens one in a window of a running GPUI app; `run_app` runs one app on its own, as the development
@@ -181,7 +203,8 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
   quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `WindowRef.close()`, the close
   button) to the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
-  nothing here, restarting is the host's. `AssetBase::Directories` looks
+  nothing here, restarting is the host's, and so is opening at login (`Application.launchAtLogin()` reads
+  `false`: `EngineConfig::login_item` stays `None`). `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode, `set_theme_overrides` only the tokens it names (over the host's theme if there is one: `Surface::host_tokens`); `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
@@ -199,11 +222,14 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 |---|---|---|
 | Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). selectable text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place); `fontFamily` lists: the first installed candidate is the font's family, the others its `FontFallbacks`, before `TEXT_FALLBACKS` |
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). A `drop-shadow()` filter's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
-| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
+| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image` (turned: `image/turn.rs`, see `DrawCx` above). GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
+| Offscreen canvases | `canvas/offscreen.rs` | `OffscreenCanvas`'s `convertToBlob`: the drawing replayed with the canvas views' tiny-skia replay on a thread of its own, at the image's scale with animated values at 0, into one pixmap the size of the image (up to 16384 pixels a side, 64 megapixels); a shadow, a composite operation other than `source-over` or a gradient takes pixels of its own sized to what it touches, and a shape outside the image casts its shadow into it. The images it names load first on the main thread; the pixmap is encoded as PNG in place. Text is shaped by the app's GPUI text system (the surface's, once it has drawn) and painted as outlines from the font files fontdb finds, the system's and those the app registers, after waiting up to 10 seconds for the system's to be found; the glyphs a canvas view paints as GPUI glyphs (emoji and other color glyphs, fonts without a matching file) are the parts of text the image leaves out |
 | Shaders | `shader.rs` | `nsh_engine::shader`'s frames as GPUI images under the children (`docs/dev/shaders.md`); fills only (below) |
-| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
+| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures; zoomable views (`maximumZoomScale` above `minimumZoomScale`; the zoom is `nsh_core::scroll`'s, which only this backend turns on, `ScrollState::can_zoom`) scroll both ways, zoom with touchpad pinches around the pointer (`scroll.rs`'s `pinch`; Ctrl + wheel scrolls them) and with `zoomTo` (eased), center content smaller than the viewport (`centerContent`) and show no indicator; their children are drawn, hit tested and converted through the zoom (`ViewState::child_matrix`), text shaped at the zoomed size every frame |
 | Input | `input.rs`, `events.rs`, `nsh_core::input` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onMouseEnter` / `onMouseLeave` / `onMouseMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
+| Keyboard | `keys.rs`, `input.rs`, `key_focus.rs` | The shared keymap, scrolling, navigation, editing and key-focus code on GPUI's keystrokes as Windows virtual key codes (`keys.rs`), and the raw logical keys of a focused view (`onKeyDown` / `onKeyUp`, `capture_keys`): GPUI's `Keystroke` (its `key` and `key_char`), its `is_held` repeat mark and its modifier state, reported as `nsh_core::KeyEvent` with an empty `code` (GPUI's public API has no scan code, key position or modifier side, so no DOM code is inferred from the logical key). A key GPUI has no virtual code for matches the shared table by its canonical stroke instead (`shift+/` for `?`, `keymap::key_stroke`), for the app's bindings and for capture, with the same window, yielding, repeat and pass-through rules; the event keeps what the source reported. Raw keys go to the focused view only, after the app's and the window's shortcuts and before the menu's and every other default; a text field or native component keeps its own keys. A portaled overlay's content follows its logical ancestors for keyboard interest and capture (`ViewProps::key_parent`, an internal routing override), while focus, hit testing and layout keep its mounted parent. Focus is the surface's (`key_focus`), so no key crosses between application windows |
+| Focus traversal | `input.rs`, `key_focus.rs` | Tab visits enabled custom view stops as well as fields and embedded native components; the current custom stop participates in forward and reverse traversal. A captured Tab stays put; past the edge, Tab returns to the embedding window. A pointer press focuses an explicitly `focusable` custom view or ancestor, while fields and native components retain their input ownership |
 | Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer while its field has the focus of an active window that is presented (a minimized or suspended window keeps the field, its caret still), and on Linux stays shown after 18 blinks (GTK's `gtk-cursor-blink-timeout` of 10 s) until the next edit, caret move or focus change; Cmd on macOS where Ctrl is used elsewhere |
 | Navigation, dialogs | `navigation.rs` | As on Windows (the decisions in `nsh_core::navigation`): pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
 | Alerts (`AlertDialog`) | `system.rs` | Drawn in the surface as items the root hosts (the Windows backend's content dialogs), so they stay with an embedded surface and never block the main loop |
@@ -261,9 +287,24 @@ app), finds the window whose `AppView` shows the surface, and acts through the h
 (`synth.rs`): a press is a mouse down and up at the view's middle (the window's view focused first), a scroll precise
 touchpad events a frame apart, typing `text_input::char_input`, select all the platform's command key with A, back
 the mouse's back button (it goes back from wherever the focus is), a dialog's answer a click at its button's laid-out
-middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's bounds are its frame's corners through
+middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A key step (`app.press("mod+k")`,
+`app.press("shift+/")`) is a source key as GPUI's own are (`synth::press_keys`): the requested keystroke builds the
+raw key (`code` is empty) and the press and release go through the window's key router
+(`input::window_key`), so `onKeyDown`/`onKeyUp` and `captureKeys` are exercised; the agent's programmatic keys
+(select all, a typed line's Return, clear) are the platform's action and send no raw event. A view's bounds are its frame's corners through
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
+
+`nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app runs in
+the background, its windows neither take the focus nor come to the front, and the keyboard stays with the app the
+user types in. The window that would have the keyboard is kept in `window.rs` ("Running in the background"): what the
+app sees of the focus (`WindowState.focused`, a focused field's caret, the title bar's controls) follows it, and the
+agent's input goes to it directly. `lifecycle()` stays `inactive`, as on macOS.
+
+`nsh test` also passes `--display` (the display `nsh test --display` names, else `secondary`) and
+`--keep-window-size` (`AppOptions::display`, `AppOptions::keep_size`), so a test run keeps off the screen in use and
+a test's window keeps the size the test asked for, as with the macOS host. `window.rs` ("Where windows open") places
+the main window and the app's own windows that name no display or position on that display.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
 again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
@@ -273,9 +314,10 @@ and Windows.
 
 ## Not implemented, or different
 
-- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows), but glyphs stay
-  upright at their mapped origins, and images, videos and canvases draw at their bounds (GPUI has no transform for
-  sprites or glyphs).
+- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows) and turn their
+  images (one-color SVGs on the GPU, other pictures resampled on the CPU at each new angle, on the main thread),
+  canvases follow rotations and skews, but glyphs stay upright at their mapped origins and videos draw at their bounds
+  (GPUI has no transform for glyphs or color sprites).
 - **Opacity** is applied to each color rather than to a group, so overlapping translucent children show through each
   other; an image's opacity (a view's, a fade-in) steps in sixteenths, each step a variant of its pixels.
 - **Clips** are rectangles (GPUI's content masks): a rounded clip rounds the backgrounds and images that reach into its
@@ -284,8 +326,8 @@ and Windows.
   passes); shadows are not cut out of a translucent fill; `borderCurve: "continuous"` draws circular corners.
 - **Canvas text** is approximated: clipped to its clip's bounds, upright under rotations, made smaller rather than
   narrower for `maxWidth`, gradients paint it in their middle color, `strokeText` fills, its shadows are not blurred,
-  composite operations and `clearRect` do not apply to it.
-- **Zooming scroll views**: `zoomTo` and the zoom props are ignored.
+  composite operations and `clearRect` do not apply to it. The images of offscreen canvases hold the glyphs drawn as
+  outlines, which follow every canvas rule; emoji and glyphs of fonts without a matching file stay on screen only.
 - **Shader effects and transitions**: only shader fills draw (GPUI has no offscreen passes to picture children
   in): an effect's or a transition's children show as they are and a transition changes them at once, a screen effect
   or transition draws nothing, and pages and dialogs with `transitionShader` come and go as they would without it.
@@ -300,6 +342,28 @@ and Windows.
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on
   Windows; custom actions, `ShowContextMenu` and scroll actions are in the nodes but not called yet.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
+- **Keyboard metadata**: raw key events report GPUI's logical key only. There is no physical identity (no scan
+  code, key position or modifier side), so `code` is always the empty string, never inferred from the logical
+  key; auto-repeats are only the ones a platform
+  marks (`is_held`: not on X11), and releases are only the ones a platform sends (GPUI's X11 backend drops some,
+  and it never delivers a modifier key's own down or up, so Shift, Control, Alt and Command never reach a view,
+  even with `captureKeys: "all"`). Typed text and input methods stay with the focused field's input handler
+  (`EntityInputHandler`), never with these events; a text field or native component with the focus keeps its
+  keys, and the views around it hear none of them. No raw down target or synthetic release is kept between
+  transitions; the keymap's held key (by virtual code, or by stroke for a key without one) is what a repeat is
+  judged against, and a blur or window deactivation forgets it, as for every key. GPUI reports some
+  platforms' keys already shift-resolved (`?` for Shift+/) and lower-cases letters on others: the reported key
+  keeps that spelling in the event, while `capture_keys` matches the canonical keystroke of the source's own key
+  for matching only. A letter keeps the source's Shift (`["shift+a"]` captures Shift+A), and a shifted symbol
+  matches the US key it is typed with (`["shift+/"]` captures `?`, `["shift+8"]` captures `*`); the payload is
+  never rewritten, and a capital the source reports without Shift (Caps Lock) matches the lower-case key alone.
+  A non-ASCII character, and a key the keymap does not name, has no canonical stroke and is captured only by
+  `captureKeys: "all"`. `defaultPrevented` is the mounted policy's decision for that transition, decided before
+  GPUI's own default and reported with the event; the app's callbacks run afterwards, so they observe it rather
+  than vetoing the key synchronously. App bindings follow the same rule: a key with a virtual key code matches by it (main's
+  semantics), and a key without one (`?`) matches the shared table by its canonical stroke — with the same
+  window, focused-control yielding, repeat and pass-through rules — before the raw notification and the
+  defaults, so `shift+/` bindings fire from it.
 - **No desktop equivalent**: the status bar; the safe area and the keyboard height are 0.
 - **Not yet tried** on macOS and Windows: the backend was built and checked on Linux (X11 / Xwayland); CI builds
   and tests it on macOS and Windows (the text tests need the main thread on macOS and are skipped there), but the offscreen
@@ -347,6 +411,11 @@ close, Escape and blur policies are answered on the main thread; states, close p
 reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
+
+Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
+top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
+reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks
+for them ends, as the system reports a move to GPUI while it makes it.
 
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
 workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it
