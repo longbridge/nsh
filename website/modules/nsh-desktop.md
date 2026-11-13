@@ -433,11 +433,13 @@ stops, the Quit item and the key quit at once again. The system ending the app (
 shutting down) never asks. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
 gets the request as `CloseRequest::Quit`.
 
-On the web, closing the tab, reloading and leaving the page are the user's quit. The browser decides on the spot and
-asks with its own question, so while anything listens to `quitRequest` the browser asks the user before the page goes,
-in the place of the listener. This works whatever `isAvailable` says. Listen there only while something would be lost (an upload running, work not saved)
-and stop when it is done: the page then leaves at once again. Browsers ask only after the user has interacted with the
-page.
+On the web, the user leaving the page (closing its tab, reloading, going to another site) is the quit request: it
+reaches the listener as the user leaves, so the example below works there as it is. A listener that calls `quit()` right
+away lets the page go at once, and the app's `quit` listeners start as it goes: what they do synchronously completes,
+and work they await runs for as long as the page remains. A listener that asks first (here `askToSave()`) has the
+browser ask the user whether to leave; when the user stays, the app's own question is on the page, and once the work is
+saved the next leave goes at once. Browsers show their question after the user has interacted with the page. This works
+whatever `isAvailable` says.
 
 ```rust tabs
 use nsh_core::{

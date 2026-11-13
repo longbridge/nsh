@@ -24457,6 +24457,49 @@ mod rust_windows {
         );
     }
 
+    /// A listener that quits at once answers within the request's delivery:
+    /// the quit is in the commit that follows it, so a platform that must
+    /// decide on the spot (a web page leaving) knows the answer before it
+    /// returns.
+    #[test]
+    fn a_quit_request_answered_at_once_quits_in_the_same_commit() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        c.commit();
+        let dirty = Rc::new(std::cell::Cell::new(true));
+        let _root = {
+            let _entered = c.components.runtime.enter();
+            let dirty = dirty.clone();
+            crate::element::create_root(move || {
+                crate::element::desktop::on_quit_request(move || {
+                    if !dirty.get() {
+                        crate::element::desktop::quit();
+                    }
+                });
+            })
+        };
+        c.commit();
+        let request = |c: &mut Core<FakeEngine>| {
+            c.component_event(
+                crate::ROOT_ID,
+                EventKind::Window,
+                &EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+            );
+            c.commit().map(|b| app_commands(&b)).unwrap_or_default()
+        };
+        assert_eq!(
+            request(&mut c),
+            [],
+            "something to lose: the app keeps running"
+        );
+        dirty.set(false);
+        assert_eq!(request(&mut c), [DesktopCommand::Quit]);
+    }
+
     thread_local! {
         static FITTED: RefCell<Option<crate::element::desktop::WindowRef>> =
             const { RefCell::new(None) };

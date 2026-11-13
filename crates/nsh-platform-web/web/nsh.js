@@ -6638,6 +6638,10 @@ class Player {
       case "setAppUrl": this.setPageUrl(args[0]); break;
       case "pushAppUrl": this.setPageUrl(args[0], true); break;
       case "quitOnRequest": this.askBeforeLeaving(!args[0]); break;
+      // The app's `quit()`: its answer while it is asked about leaving the
+      // page; a page cannot close its own tab, so at other times the page
+      // stays as it is.
+      case "quit": if (this.quitAsked) this.quitAsked.granted = true; break;
       case "setTitle": this.setWindowTitle(args[0]); break;
       case "exitApp": {
         const app = this.app;
@@ -6676,15 +6680,14 @@ class Player {
 
 
   /** Whether leaving the page (closing its tab, reloading, going to
-   * another site) asks the user first: on while the app listens to quit
-   * requests (`quitOnRequest` false). The browser decides at once and
-   * shows its own question, so the app's listener is not called; the
-   * listener is only there while it is needed, as one keeps the page out
-   * of the back / forward cache. */
+   * another site) asks the app first: on while the app listens to quit
+   * requests (`quitOnRequest` false). The listener is only there while it
+   * is needed, as one keeps the page out of the back / forward cache. */
   askBeforeLeaving(ask) {
     if (typeof window === "undefined" || !ask === !this.leaveGuard) return;
     if (ask) {
       this.leaveGuard = (event) => {
+        if (this.deliverQuitRequest()) return;
         event.preventDefault();
         // Browsers before `preventDefault` was enough.
         event.returnValue = "";
@@ -6694,6 +6697,30 @@ class Player {
       window.removeEventListener("beforeunload", this.leaveGuard);
       this.leaveGuard = null;
     }
+  }
+
+  /** The user is leaving the page: the app hears the quit request as the
+   * desktops' quit key reports it, its listeners running before this
+   * returns. Whether the app quit meanwhile; its quit listeners then start
+   * while the page is still there, and the page leaves at once. Otherwise
+   * the browser asks the user, and what the listeners started (their own
+   * question, a save) is on the page should the user stay. A request the
+   * engine cannot take now (it is running: the page left from inside an
+   * engine call) or that fails leaves the question to the browser. */
+  deliverQuitRequest() {
+    if (this.depth > 0 || this.trapped) return false;
+    const asked = { granted: false };
+    this.quitAsked = asked;
+    try {
+      this.call((w) => w.nsh_quit_request());
+    } catch (err) {
+      console.error("[nsh]", err);
+      return false;
+    } finally {
+      this.quitAsked = null;
+    }
+    if (asked.granted) this.call((w) => w.nsh_quit());
+    return asked.granted;
   }
 
   /** Has screen readers read `text` (`announce`), through the live region. */

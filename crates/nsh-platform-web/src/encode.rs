@@ -1706,14 +1706,19 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     out.item("cmd").num(id).str("setTitle").str(title).end();
                 }
             }
-            // The app listens to quit requests: the page cannot ask it as the
-            // tab closes, so the browser asks the user before leaving.
+            // While the app listens to quit requests, leaving the page asks
+            // the app first (`nsh.js` `deliverQuitRequest`).
             (_, nsh_core::desktop::DesktopCommand::SetQuitOnRequest(quit)) => {
                 out.item("cmd")
                     .num(id)
                     .str("quitOnRequest")
                     .bool(*quit)
                     .end();
+            }
+            // The app's answer to the user leaving the page, while the page
+            // asks it.
+            (true, nsh_core::desktop::DesktopCommand::Quit) => {
+                out.item("cmd").num(id).str("quit").end();
             }
             _ => log::debug!("web: command {desktop:?} is not supported"),
         },
@@ -1899,5 +1904,15 @@ mod tests {
             commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(true)),
             r#"[["cmd",1,"quitOnRequest",true]]"#
         );
+    }
+
+    #[test]
+    fn the_apps_quit_reaches_the_player() {
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::Quit),
+            r#"[["cmd",1,"quit"]]"#
+        );
+        // Restarting is the browser's (the user reloads).
+        assert_eq!(commands(nsh_core::ROOT_ID, DesktopCommand::Restart), "[]");
     }
 }

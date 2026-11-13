@@ -54,7 +54,8 @@ impl Application {
     /// window alone would leave it running (a window kept hidden, a tray
     /// icon). It quits while the app listens to `quitRequest` too: that is
     /// how an app that asks first quits once it is ready. A view embedded
-    /// in another app leaves the app's lifecycle to that app.
+    /// in another app leaves the app's lifecycle to that app. On the web,
+    /// called while a `quitRequest` listener runs, it lets the page leave.
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
     }
@@ -120,10 +121,10 @@ impl Application {
     /// longer quit: the app decides (it asks the user, saves, waits for work
     /// to finish), then calls `quit()`. The system ending the app (logging
     /// out, shutting down) never asks. Standalone apps on macOS, Windows and
-    /// Linux; on the web, while anything listens, the browser asks the user
-    /// before the page leaves (closing its tab, reloading) and the listener
-    /// is not called, so listen there only while leaving would lose
-    /// something. Returns a function that stops listening.
+    /// Linux; on the web, the user leaving the page (closing its tab,
+    /// reloading) is the request: a `quit()` the listener calls at once lets
+    /// the page go, otherwise the browser asks the user whether to leave.
+    /// Returns a function that stops listening.
     #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance>) -> Stop)]
     #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]
     #[overload(fn(event: ApplicationQuitEvent, listener: Callback<()>) -> Stop)]

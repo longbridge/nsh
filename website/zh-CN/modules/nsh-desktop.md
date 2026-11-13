@@ -423,9 +423,11 @@ async function changeLanguage(language: string) {
 总会退出。最后一个 listener 停止后，「退出」项和快捷键恢复立即退出。系统结束应用（用户注销、关机）时不会询问。
 它适用于 macOS、Windows 和 Linux 的独立应用；拥有窗口的 GPUI 应用以 `CloseRequest::Quit` 收到这个请求。
 
-在 Web 上，关闭标签页、刷新和离开页面就是用户的退出。浏览器当场决定，并用它自己的提示询问，所以只要有 listener 在监听
-`quitRequest`，浏览器就会在页面离开前询问用户，代替 listener 来问。不论 `isAvailable` 怎么说都是这样。只在有东西会丢失时（上传进行中、工作未保存）监听，
-完成后停止：页面随即恢复立即离开。浏览器只在用户与页面交互过之后才会询问。
+在 Web 上，用户离开页面（关闭标签页、刷新、前往其他网站）就是退出请求：它在用户离开时交给 listener，所以下面的示例在
+Web 上原样可用。listener 立即调用 `quit()` 时，页面随即离开，应用的 `quit` listener 在页面离开时开始运行：它们同步做的事
+会完成，它们等待的工作在页面还在时继续运行。先询问的 listener（这里是 `askToSave()`）让浏览器询问用户是否离开；用户留下时，
+应用自己的询问就在页面上，工作保存之后，下一次离开会立即进行。浏览器在用户与页面交互过之后显示它的询问。不论 `isAvailable`
+怎么说都是这样。
 
 ```rust tabs
 use nsh_core::{

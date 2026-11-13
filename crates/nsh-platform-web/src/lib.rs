@@ -1754,6 +1754,36 @@ pub extern "C" fn nsh_root_size(
     })
 }
 
+/// The user is leaving the page (`beforeunload`) while the app listens to
+/// quit requests: the request goes to the app's listeners, Rust's and JS's,
+/// and what they do in turn reaches the page before this returns, as the
+/// desktops' quit key does. A `quit()` among it is the app's answer
+/// (`nsh.js` `deliverQuitRequest`). Returns the pump delay.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_quit_request() -> f64 {
+    send(|app| {
+        app.control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(nsh_core::desktop::WindowEvent::QuitRequest)),
+        )
+    })
+}
+
+/// The app granted the user's leaving: its quit listeners
+/// (`Application.on("quit")`, `on_app_quit`) start while the page is still
+/// there. Returns the pump delay.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_quit() -> f64 {
+    APP.with(|a| {
+        if let Some(app) = a.borrow_mut().as_mut() {
+            app.engine.quit();
+        }
+    });
+    // Their async work goes on in the pumps the page still runs.
+    pump()
+}
+
 /// The interaction states of view `id` (`active:`, `hover:`, `focus:`
 /// classes).
 #[unsafe(no_mangle)]

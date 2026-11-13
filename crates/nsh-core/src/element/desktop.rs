@@ -942,8 +942,10 @@ impl super::Component for OpenedWindowsHost {
 /// that owns the window is asked first and quits when it is ready. For a
 /// menu item or a button of
 /// the app's own that quits, and for restarting after an update. A view
-/// embedded in another app leaves the app's lifecycle to that app. On
-/// platforms without desktop windows this has no effect.
+/// embedded in another app leaves the app's lifecycle to that app. On the
+/// web, called while a quit request listener runs, it lets the page leave
+/// ([`on_quit_request`]). On platforms without desktop windows this has no
+/// effect.
 pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
@@ -988,11 +990,11 @@ where
 /// then calls [`quit`]. Without one they quit as before. The system ending
 /// the app (logging out, shutting down) never asks: [`on_app_quit`] runs
 /// then. Standalone apps on macOS, Windows and Linux; a view embedded in
-/// another app leaves the app's lifecycle to that app. On the web, while
-/// one is registered, the browser asks the user before the page leaves
-/// (closing its tab, reloading) and `f` is not called: the browser cannot
-/// wait for the app, so register one there only while leaving would lose
-/// something. Removed with the current owner.
+/// another app leaves the app's lifecycle to that app. On the web, the
+/// user leaving the page (closing its tab, reloading) is the request: `f`
+/// runs then, and a [`quit`] it calls at once lets the page go; otherwise
+/// the browser asks the user whether to leave. Removed with the current
+/// owner.
 ///
 /// ```ignore
 /// on_quit_request(move || {

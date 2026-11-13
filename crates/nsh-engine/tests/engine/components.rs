@@ -2815,6 +2815,98 @@ fn quit_requests_reach_the_app_and_it_decides() {
     );
 }
 
+const QUIT_AT_ONCE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+const saved = signal(false);
+const quitting = signal(false);
+Application.on("quitRequest", () => {
+  if (saved()) Application.quit();
+  else saved.set(true);
+});
+Application.on("quit", () => quitting.set(true));
+mount(() => <Text>{`saved ${saved()} quitting ${quitting()}`}</Text>);
+"#;
+
+/// On a [`nsh_engine::LocalEngine`] (the web's), the pump that takes a quit
+/// request runs the app's TS listener and carries its answer: a host that
+/// must decide before it returns (a page leaving) learns whether the app
+/// quit. [`nsh_engine::LocalEngine::quit`] then runs the app's `quit`
+/// listeners in that call.
+#[test]
+fn a_local_engine_answers_a_quit_request_within_the_pump_that_takes_it() {
+    use nsh_core::desktop::{DesktopCommand, WindowEvent};
+
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut engine = nsh_engine::LocalEngine::start(
+        app_config(
+            QUIT_AT_ONCE,
+            Environment {
+                os: nsh_engine::Os::Linux,
+                ..Environment::default()
+            },
+            None,
+            None,
+        ),
+        ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .expect("the app starts");
+    let app_commands = |batches: &[MountBatch]| -> Vec<DesktopCommand> {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some((**command).clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    // The listener is added by a task of the core: a pump or two.
+    let mut listening = false;
+    for _ in 0..4 {
+        engine.pump();
+        let batches: Vec<MountBatch> = rx.try_iter().collect();
+        if app_commands(&batches).contains(&DesktopCommand::SetQuitOnRequest(false)) {
+            listening = true;
+            break;
+        }
+    }
+    assert!(listening, "the app listens to quit requests");
+    let request = |engine: &mut nsh_engine::LocalEngine<ApproxTextEngine>| {
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+        );
+        engine.pump();
+        rx.try_iter().collect::<Vec<MountBatch>>()
+    };
+    let kept = request(&mut engine);
+    assert!(
+        kept.iter().any(|b| shows(b, "saved true quitting false")),
+        "the listener ran: {kept:?}"
+    );
+    assert!(
+        !app_commands(&kept).contains(&DesktopCommand::Quit),
+        "the app keeps running: {kept:?}"
+    );
+    let quit = request(&mut engine);
+    assert!(
+        app_commands(&quit).contains(&DesktopCommand::Quit),
+        "the app quit within the pump: {quit:?}"
+    );
+    engine.quit();
+    let after: Vec<MountBatch> = rx.try_iter().collect();
+    assert!(
+        after.iter().any(|b| shows(b, "saved true quitting true")),
+        "its quit listener ran: {after:?}"
+    );
+}
+
 /// German's data stands for what the bundle of an app listing it carries.
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
 import { fontScale, locale } from "nsh";

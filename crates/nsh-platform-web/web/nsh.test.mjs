@@ -2977,7 +2977,9 @@ test("a page without the async clipboard reports a write with a warning", async 
   assert.equal(log.warnings.length, 1);
 });
 
-test("while the app listens to quit requests, leaving the page asks first", () => {
+/** A page whose `window` keeps its listeners, and a leave of it: the
+ * `beforeunload` event its listeners got. */
+function leavingPage() {
   const listeners = new Map();
   const saved = { window: globalThis.window };
   globalThis.window = {
@@ -2997,23 +2999,111 @@ test("while the app listens to quit requests, leaving the page asks first", () =
     for (const listener of listeners.get("beforeunload") ?? []) listener(event);
     return event;
   };
+  const guards = () => (listeners.get("beforeunload") ?? []).length;
+  return { leave, guards, restore: () => Object.assign(globalThis, saved) };
+}
+
+/** A player whose app answers quit requests with `answer()`: true quits,
+ * as the app's `quit()` reaches the page, within the engine's call. */
+function quittingPlayer(answer) {
+  const { player } = fakePlayer();
+  player.view = () => null;
+  const calls = { requests: 0, quits: 0 };
+  player.wasm.nsh_quit_request = () => {
+    calls.requests++;
+    if (answer()) player.op_cmd(["cmd", 1, "quit"]);
+    return -1;
+  };
+  player.wasm.nsh_quit = () => {
+    calls.quits++;
+    return -1;
+  };
+  return { player, calls };
+}
+
+test("nothing listens to quit requests: the page leaves without asking anyone", () => {
+  const page = leavingPage();
   try {
-    const { player } = fakePlayer();
-    player.view = () => null;
-    assert.equal(leave().defaultPrevented, false);
-    // The app listens: quit requests no longer quit, so the browser asks.
-    player.op_cmd([0, 1, "quitOnRequest", false]);
-    const asked = leave();
+    const { player, calls } = quittingPlayer(() => false);
+    assert.equal(page.guards(), 0, "no listener: the page stays in the back / forward cache");
+    assert.equal(page.leave().defaultPrevented, false);
+    assert.equal(calls.requests, 0);
+    // The last listener stopped: none is left on the page.
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    player.op_cmd(["cmd", 1, "quitOnRequest", true]);
+    assert.equal(page.guards(), 0);
+    assert.equal(page.leave().defaultPrevented, false);
+    assert.equal(calls.requests, 0);
+  } finally {
+    page.restore();
+  }
+});
+
+test("an app that quits on a quit request lets the page leave at once", () => {
+  const page = leavingPage();
+  try {
+    const { player, calls } = quittingPlayer(() => true);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    // Told twice, it listens once.
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    assert.equal(page.guards(), 1);
+    const left = page.leave();
+    assert.equal(calls.requests, 1, "the app heard the request");
+    assert.equal(left.defaultPrevented, false, "no question");
+    assert.equal(left.returnValue, undefined);
+    assert.equal(calls.quits, 1, "its quit listeners started");
+  } finally {
+    page.restore();
+  }
+});
+
+test("an app that does not quit on a quit request has the browser ask", () => {
+  const page = leavingPage();
+  try {
+    let dirty = true;
+    const { player, calls } = quittingPlayer(() => !dirty);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    const asked = page.leave();
+    assert.equal(calls.requests, 1, "the listener ran once");
     assert.equal(asked.defaultPrevented, true);
     assert.equal(asked.returnValue, "");
-    // Told twice, it still asks once.
-    player.op_cmd([0, 1, "quitOnRequest", false]);
-    assert.equal(listeners.get("beforeunload").length, 1);
-    // The last listener stopped: the page leaves at once again.
-    player.op_cmd([0, 1, "quitOnRequest", true]);
-    assert.equal(leave().defaultPrevented, false);
-    // A new run starts without the replaced app's question.
-    player.op_cmd([0, 1, "quitOnRequest", false]);
+    assert.equal(calls.quits, 0);
+    // The user stayed and the app quits from its own question: a page
+    // cannot close its tab, so it stays as it is, and still asks the app.
+    player.op_cmd(["cmd", 1, "quit"]);
+    assert.equal(page.guards(), 1);
+    assert.equal(calls.quits, 0);
+    // Saved: the next leave goes at once.
+    dirty = false;
+    assert.equal(page.leave().defaultPrevented, false);
+    assert.equal(calls.requests, 2);
+    assert.equal(calls.quits, 1);
+  } finally {
+    page.restore();
+  }
+});
+
+test("a quit request the engine cannot take now leaves the question to the browser", () => {
+  const page = leavingPage();
+  try {
+    const { player, calls } = quittingPlayer(() => true);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    // The page leaves from inside an engine call (the app navigated it).
+    player.depth = 1;
+    const asked = page.leave();
+    player.depth = 0;
+    assert.equal(calls.requests, 0);
+    assert.equal(asked.defaultPrevented, true);
+  } finally {
+    page.restore();
+  }
+});
+
+test("a new run starts without the replaced app's quit request listener", () => {
+  const page = leavingPage();
+  try {
+    const { player, calls } = quittingPlayer(() => false);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
     Object.assign(player, {
       stop() {},
       audioDispose() {},
@@ -3025,9 +3115,11 @@ test("while the app listens to quit requests, leaving the page asks first", () =
       root: { textContent: "", append() {}, clientWidth: 390, clientHeight: 844 },
     });
     player.reset();
-    assert.equal(leave().defaultPrevented, false);
+    assert.equal(page.guards(), 0);
+    assert.equal(page.leave().defaultPrevented, false);
+    assert.equal(calls.requests, 0);
   } finally {
-    Object.assign(globalThis, saved);
+    page.restore();
   }
 });
 

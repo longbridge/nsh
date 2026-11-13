@@ -1937,6 +1937,24 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         }
         self.driver.deadline()
     }
+
+    /// The app quits while its host goes on a moment longer (a web page
+    /// leaving after the app granted the user's quit request): starts the
+    /// app's quit listeners' work ([`Core::start_quit`]) and runs what is due
+    /// at once, as one [`pump`](Self::pump). What they do synchronously is
+    /// done when this returns; their async work runs in the pumps the host
+    /// still makes.
+    pub fn quit(&mut self) {
+        {
+            let _clock = self.driver.clock.enter();
+            let _context = self.driver.context.enter();
+            if !self.driver.state.core.has_quit_listeners() {
+                return;
+            }
+            self.driver.state.core.start_quit();
+        }
+        self.pump();
+    }
 }
 
 impl<M: TextEngine + 'static> Drop for LocalEngine<M> {
