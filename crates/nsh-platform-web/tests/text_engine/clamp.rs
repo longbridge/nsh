@@ -80,8 +80,10 @@ fn a_clamped_line_links_only_the_characters_it_shows() {
     let box_width = 20.0 * w;
     let mut events = EventMask::default();
     events.set(EventKind::Press, true);
-    let mut link_style = ResolvedTextStyle::default();
-    link_style.color = Color(0x0000_ffff);
+    let link_style = ResolvedTextStyle {
+        color: Color(0x0000_ffff),
+        ..Default::default()
+    };
     // (characters before the link, the link's, how many of the link show)
     for (before, linked, shown) in [(4, 30, 15), (25, 8, 0)] {
         let mut t = AttributedText::default();
