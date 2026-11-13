@@ -648,7 +648,7 @@ export function Form() {
               api="url"
               testID="site"
               prefix="https://"
-              suffix=".nsh.app"
+              suffix=".nsh.dev"
               addon
               keyboardType="url"
               autoCapitalize="none"

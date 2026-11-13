@@ -188,15 +188,7 @@ fn collect(view: &NshView, m: &Mat4, area: &Mat4, out: &mut Vec<AreaText>) {
     }
     view.with_children(|children| {
         for child in children {
-            let local = {
-                let c = child.state();
-                let (x, y) = s.child_origin(c.frame, c.shift);
-                let local = Mat4::new().translate(x, y);
-                match c.transform() {
-                    Some(t) => Mat4::mul(&t, &local),
-                    None => local,
-                }
-            };
+            let local = s.child_matrix(&child.state());
             collect(child, &Mat4::mul(&local, m), area, out);
         }
     });

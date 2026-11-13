@@ -1,3 +1,4 @@
+mod canvas_render;
 mod classes;
 mod components;
 mod cull;
@@ -385,8 +386,8 @@ struct ScrollState {
     pending: Vec<(u32, PendingScroll)>,
     /// What its lists asked of it in this commit, sent at its end.
     asked: Option<parent_viewport::Asked>,
-    /// The sticky cells it was last sent with its lists' (its own too, when
-    /// it is a list), while its lists have any.
+    /// The sticky cells it was last sent: its lists' (its own too, when it
+    /// is a list), its sticky views' and its built-in bar's.
     page_sticky: Vec<list::StickyRange>,
     /// The ranges of the `position: sticky` views in it.
     view_sticky: Vec<list::StickyRange>,
@@ -1435,6 +1436,9 @@ pub struct Core<M: TextEngine> {
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
     audio: Option<Arc<dyn crate::audio::AudioBackend>>,
+    /// The app's login item ([`Core::set_login_item`]); without one the app
+    /// has none.
+    login_item: Option<crate::desktop::LoginItems>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1505,6 +1509,7 @@ impl<M: TextEngine> Core<M> {
             window_backend: None,
             speech: None,
             audio: None,
+            login_item: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1825,6 +1830,14 @@ impl<M: TextEngine> Core<M> {
     /// platform's (`None`: the platform's, the default).
     pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
         self.audio = backend;
+    }
+
+    /// Reads and changes the app's login item (`Application.launchAtLogin`)
+    /// with `backend`: the platform's, which a standalone app's runner gives,
+    /// or a test's fake. `None` (the default): the app has no login item,
+    /// it does not launch at login ([`crate::desktop::LoginItemBackend`]).
+    pub fn set_login_item(&mut self, backend: Option<Arc<dyn crate::desktop::LoginItemBackend>>) {
+        self.login_item = backend.map(crate::desktop::LoginItems::new);
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -2392,6 +2405,10 @@ impl<M: TextEngine> Core<M> {
                 timeout,
             } => {
                 self.start_js_web_evaluation(id, call, script, timeout);
+                Ok(())
+            }
+            Op::RenderCanvas { call, request } => {
+                self.start_js_canvas_render(call, *request);
                 Ok(())
             }
             Op::Rust(op) => {
@@ -3939,8 +3956,9 @@ impl<M: TextEngine> Core<M> {
         if node.fixed_view {
             style.position = Position::Fixed;
         }
-        self.layout.set_style(layout, style);
-        self.needs_layout = true;
+        if self.layout.set_style(layout, style) {
+            self.needs_layout = true;
+        }
     }
 
     fn set_inline_style(
@@ -4162,8 +4180,10 @@ impl<M: TextEngine> Core<M> {
             node.base_layout = Some(Box::new(layout));
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
-            self.layout.set_style(l, layout);
-            self.needs_layout = true;
+            // A style that only changed what is painted lays nothing out.
+            if self.layout.set_style(l, layout) {
+                self.needs_layout = true;
+            }
         } else if node.kind == Kind::Text {
             // A span: kept for when it is a block again.
             node.base_layout = Some(Box::new(layout));
@@ -7599,6 +7619,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     let press = pressable(child.events);
                     let hinted = child.overlay_watched & overlay::watch::HINT != 0;
+                    // Read from the classes, not `tracked`, which may be
+                    // updated after this merge in the same commit.
+                    let tracked = child.classes.as_ref().map_or(0, |c| c.tracked_states());
+                    let hovers = tracked & crate::tailwind::state::HOVERED != 0;
                     self.collect_text(c, inner, out, alignments, in_press || press);
                     // A link with a hint (its URL) hears the pointer come
                     // over its characters and leave them. A span that takes
@@ -7608,12 +7632,19 @@ impl<M: TextEngine> Core<M> {
                     // takes presses it is none, so that span, the innermost
                     // link there, keeps the press of those characters.
                     // Hidden characters take no presses, as CSS's hidden
-                    // elements take no pointer events.
-                    if !inner.hidden && (press || (hinted && !in_press)) {
+                    // elements take no pointer events. A span with
+                    // `hover:` / `active:` styles hears the pointer and
+                    // its presses the same way: it has no view to report
+                    // its states, `Self::span_state` takes them from these.
+                    if !inner.hidden && (press || ((hinted || hovers) && !in_press)) {
                         let mut events = child.events;
-                        if hinted {
+                        if hinted || hovers {
                             events.set(EventKind::MouseEnter, true);
                             events.set(EventKind::MouseLeave, true);
+                        }
+                        if press && tracked & crate::tailwind::state::PRESSED != 0 {
+                            events.set(EventKind::PressDown, true);
+                            events.set(EventKind::PressUp, true);
                         }
                         out.links.push(crate::text::TextLink {
                             start,
@@ -9571,22 +9602,12 @@ impl<M: TextEngine> Core<M> {
                 self.page_sticky_changed(key, o.view, &old);
             }
         } else if sticky_cells != list.sent_sticky {
-            let cells = sticky_cells
-                .iter()
-                .map(|r| StickyCell {
-                    cell: r.cell,
-                    start: Points(r.start),
-                    end: Points(r.end),
-                    offset: r.offset,
-                })
-                .collect();
+            // Sent at the end of the commit in one set with the other
+            // views it pins (its built-in bar, its sticky views, its lists'
+            // rows in its viewport): a set of its rows alone would drop the
+            // others and raise its rows above its bar.
             list.sent_sticky = sticky_cells;
-            self.mount.push(MountItem::StickyCells { id, cells });
-            // Its lists in its viewport pin theirs with its own.
-            let scroll = self.nodes[key as usize].scroll.as_ref();
-            if scroll.is_some_and(|s| !s.page_sticky.is_empty()) {
-                self.sticky_views.push(key);
-            }
+            self.sticky_views.push(key);
         }
 
         if let Some(o) = &outer {
@@ -10598,6 +10619,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::PickFiles { .. }
                 | C::OpenUrl { .. }
                 | C::PickScreenColor { .. }
+                | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Speech { .. }
                 | C::Audio { .. }

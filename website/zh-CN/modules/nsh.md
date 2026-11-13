@@ -1076,6 +1076,14 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### setFpsMode
+
+```ts
+function setFpsMode(mode: "expanded" | "collapsed" | "hidden"): void;
+```
+
+性能监视器的显示方式，立即生效，之后再显示时也照此显示：`"expanded"`，完整的面板（默认）；`"collapsed"`，只显示帧率的小药丸，颜色按帧预算区分；`"hidden"`，屏幕上不显示任何东西，但照常测量并记录日志。点击面板会在前两种之间切换。macOS 的面板支持它（见 [macOS](../docs/macos.md#性能监视器)）；没有面板的平台忽略它，Linux 的面板点击可以收起，但暂不支持这个设置。`NSH_FPS=collapsed` 或 `NSH_FPS=hidden` 让监视器以这种方式启动。Rust：`set_fps_mode(FpsMode::Collapsed)`。
+
 ### shadersAvailable
 
 ```ts

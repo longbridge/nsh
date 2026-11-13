@@ -185,6 +185,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
         }
         EventPayload::Picked { id, .. }
         | EventPayload::FileRequest { id, .. }
+        | EventPayload::CanvasImage { id, .. }
         | EventPayload::Speech { id, .. }
         | EventPayload::Audio { id, .. } => object([("id", number(*id))])?,
         EventPayload::Native { name, data } => object([

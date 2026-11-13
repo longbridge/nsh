@@ -24,6 +24,7 @@ on:
       - "crates/nsh-updater/**"
       - "crates/nsh-platform-linux/**"
       - "crates/nsh-platform-apple/**"
+      - "crates/nsh-platform-ios/**"
       - "crates/nsh-platform-macos/**"
       - "crates/nsh-platform-web/**"
       - "crates/nsh-platform-windows/**"
@@ -82,7 +83,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # The Linux and Windows runs of a pull request from this repository run
+    # on the self-hosted runners; forks' pull requests, the scheduled runs
+    # (which save the dependencies' caches forks restore) and macOS run on
+    # GitHub's runners (docs/dev/tooling.md "Runners").
+    runs-on: ${{ (github.event_name != 'schedule' && !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository)) && (matrix.os == 'ubuntu-24.04' && fromJSON('["public", "Linux", "X64"]') || matrix.os == 'windows-latest' && fromJSON('["public", "Windows", "X64"]')) || matrix.os }}
     defaults:
       run:
         shell: bash
@@ -98,9 +103,22 @@ jobs:
       - name: Install GTK 4 and GStreamer
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        if: runner.environment == 'github-hosted'
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # The self-hosted runner is shared: install the toolchain without
+      # making it the machine's default (RUSTUP_TOOLCHAIN picks it).
+      - name: Setup Rust (self-hosted)
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          export PATH="$bin:$PATH"
+          command -v rustup || curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+          rustup toolchain install stable --profile minimal -c clippy,rustfmt
+          echo "$bin" >> "$GITHUB_PATH"
       # huacnlee/cargo, and the dependencies' builds: main's runs save
       # them, pull requests restore them.
       - name: Cargo
@@ -151,8 +169,8 @@ jobs:
       # QuickJS is C: bindgen needs libclang for the CLI; the web runtime's
       # C code (zstd) clang and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
-      - name: Install clang, LLVM, GTK 4 and GStreamer
-        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Install clang, LLVM, GTK 4, WebKitGTK and GStreamer
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
