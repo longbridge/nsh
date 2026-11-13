@@ -2869,6 +2869,188 @@ fn quit_requests_reach_the_app_and_it_decides() {
     );
 }
 
+const QUIT_AT_ONCE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+const saved = signal(false);
+const quits = signal(0);
+Application.on("quitRequest", () => {
+  if (saved()) Application.quit();
+  else saved.set(true);
+});
+Application.on("quit", () => quits.set(quits() + 1));
+mount(() => <Text>{`saved ${saved()} quits ${quits()}`}</Text>);
+"#;
+
+/// On a [`nsh_engine::LocalEngine`] (the web's), the pump that takes a quit
+/// request runs the app's TS listener and carries its answer: a host that
+/// must decide before it returns (a page leaving) learns whether the app
+/// quit. Granting the request does not end the app (the page may still
+/// stay); [`nsh_engine::LocalEngine::start_quit`], as the page goes, runs
+/// the app's `quit` listeners in that call, once.
+#[test]
+fn a_local_engine_answers_a_quit_request_within_the_pump_that_takes_it() {
+    use nsh_core::desktop::{DesktopCommand, WindowEvent};
+
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut engine = nsh_engine::LocalEngine::start(
+        app_config(
+            QUIT_AT_ONCE,
+            Environment {
+                os: nsh_engine::Os::Linux,
+                ..Environment::default()
+            },
+            None,
+            None,
+        ),
+        ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .expect("the app starts");
+    let app_commands = |batches: &[MountBatch]| -> Vec<DesktopCommand> {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some((**command).clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    // The listener is added by a task of the core: a pump or two.
+    let mut listening = false;
+    for _ in 0..4 {
+        engine.pump();
+        let batches: Vec<MountBatch> = rx.try_iter().collect();
+        if app_commands(&batches).contains(&DesktopCommand::SetQuitOnRequest(false)) {
+            listening = true;
+            break;
+        }
+    }
+    assert!(listening, "the app listens to quit requests");
+    let request = |engine: &mut nsh_engine::LocalEngine<ApproxTextEngine>| {
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+        );
+        engine.pump();
+        rx.try_iter().collect::<Vec<MountBatch>>()
+    };
+    let kept = request(&mut engine);
+    assert!(
+        kept.iter().any(|b| shows(b, "saved true quits 0")),
+        "the listener ran: {kept:?}"
+    );
+    assert!(
+        !app_commands(&kept).contains(&DesktopCommand::Quit),
+        "the app keeps running: {kept:?}"
+    );
+    let quit = request(&mut engine);
+    assert!(
+        app_commands(&quit).contains(&DesktopCommand::Quit),
+        "the app quit within the pump: {quit:?}"
+    );
+    assert!(
+        !quit.iter().any(|b| shows(b, "saved true quits 1")),
+        "granting the request does not end the app: {quit:?}"
+    );
+    engine.start_quit();
+    let after: Vec<MountBatch> = rx.try_iter().collect();
+    assert!(
+        after.iter().any(|b| shows(b, "saved true quits 1")),
+        "its quit listener ran: {after:?}"
+    );
+    // The app ends once.
+    engine.start_quit();
+    engine.pump();
+    let again: Vec<MountBatch> = rx.try_iter().collect();
+    assert!(
+        !again.iter().any(|b| shows(b, "saved true quits 2")),
+        "its quit listener ran again: {again:?}"
+    );
+}
+
+const WINDOW: &str = r#"import { mount, Text } from "nsh";
+import { Menu, currentWindow } from "nsh/desktop";
+import os from "os";
+
+Menu.setApplicationMenu([{ label: "File", submenu: [{ role: "quit" }] }]);
+Menu.popup([{ label: "Copy link", onSelect: () => {} }]);
+let home: string;
+try {
+  home = typeof os.homedir();
+} catch (e) {
+  home = (e as Error & { code?: string }).code ?? "thrown";
+}
+
+function App() {
+  const win = currentWindow();
+  win.set({ title: "Spoofed" });
+  win.minimize();
+  return <Text>{`home ${home}`}</Text>;
+}
+
+mount(() => <App />);
+"#;
+
+/// The main window, the application menu and `os.homedir()` are granted by
+/// `application` and `homeDir`, which apps without a declaration keep;
+/// context menus, in the app's own view, need neither.
+#[test]
+fn the_application_and_the_home_directory_are_capabilities() {
+    use nsh_core::desktop::{DesktopCommand, WindowRequest};
+
+    let run = |capabilities: Option<&str>, home: &str| {
+        let environment = Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        };
+        let (_engine, rx) = start_with(WINDOW, environment, capabilities, None);
+        let batches = until(&rx, |batch| shows(batch, home));
+        assert!(
+            batches.iter().any(|b| shows(b, home)),
+            "{capabilities:?}: no {home:?}"
+        );
+        let mut seen = batches
+            .into_iter()
+            .flat_map(|b| b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => match *command {
+                    DesktopCommand::SetAttributes(_) => Some("title"),
+                    DesktopCommand::Request(WindowRequest::Minimize) => Some("minimize"),
+                    DesktopCommand::SetMenu(_) => Some("menu"),
+                    DesktopCommand::PopupMenu { .. } => Some("popup"),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        seen.sort_unstable();
+        seen
+    };
+    let all = ["menu", "minimize", "popup", "title"];
+    // Declared without them: refused (`os.homedir()` throws
+    // `ERR_ACCESS_DENIED`).
+    assert_eq!(run(Some("{}"), "home ERR_ACCESS_DENIED"), ["popup"]);
+    // Declared with them.
+    assert_eq!(
+        run(
+            Some(r#"{ "application": true, "homeDir": true }"#),
+            "home string"
+        ),
+        all
+    );
+    // Not declared: as before.
+    assert_eq!(run(None, "home string"), all);
+}
+
 /// German's data stands for what the bundle of an app listing it carries.
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
 import { fontScale, locale } from "nsh";
