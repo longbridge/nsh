@@ -2198,6 +2198,17 @@ unsafe extern "C" fn item_run(
     {
         return item_memo(cx, r);
     }
+    // An array holding functions (a component's `children` shown beside a
+    // branch of its own, `{cond ? a : b}{props.children}`): each gets a memo
+    // too, as `insert_run` gives them, or the array's effect would call
+    // them all, and make their nodes again, when any one of them changes.
+    if unsafe { qjs::JS_IsArray(r) }
+        && let Some(memos) = memoize_run(cx, r)
+    {
+        // SAFETY: the copy holds what it needs of `r`.
+        unsafe { qjs::JS_FreeValue(cx, r) };
+        return memos;
+    }
     r
 }
 
