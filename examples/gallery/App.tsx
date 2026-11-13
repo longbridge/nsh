@@ -21,7 +21,7 @@ import tapSound from "./sounds/tap.wav";
 import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
-import { field } from "../nsh-gallery-ui/demo";
+import { field, fieldLook, fieldSize, fieldText } from "../nsh-gallery-ui/demo";
 import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl, appearance, setAppearance, type Appearance, segmentedLook, menuPopup } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
@@ -390,22 +390,35 @@ function SidebarToggle() {
 function Search() {
   let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
+  // The terminal's field is a lone input; elsewhere the input sits in the field's well beside the icon (below).
+  const look = terminal
+    ? field()
+    : {
+        get style() {
+          return { ...fieldText({ inWell: true }), paddingStart: 8 };
+        },
+      };
+  const box = (
+    <Input
+      ref={(node) => (input = node)}
+      {...look}
+      value={query()}
+      onChange={({ value }) => query.set(value)}
+      onKeyPress={(e) => e.key === "Escape" && query.set("")}
+      placeholder={`Search demos  ${keymap.label("mod+k")}`}
+      accessibilityLabel="Search demos"
+    />
+  );
+  if (terminal) return <View style={{ paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW }}>{box}</View>;
+  // The row centers the icon on the field, whatever its height; a press on the icon focuses the input.
   return (
-    <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 12, paddingBottom: 8 }}>
-      <Input
-        ref={(node) => (input = node)}
-        {...field({ style: terminal ? undefined : { paddingStart: 26 } })}
-        value={query()}
-        onChange={({ value }) => query.set(value)}
-        onKeyPress={(e) => e.key === "Escape" && query.set("")}
-        placeholder={`Search demos  ${keymap.label("mod+k")}`}
-        accessibilityLabel="Search demos"
-      />
-      <If when={!terminal}>
-        <View style={{ position: "absolute", start: 20, top: 7, pointerEvents: "none" }}>
+    <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+      <View {...fieldLook()} onPress={() => input?.focus()} focusable={false}>
+        <View style={{ paddingStart: fieldSize.pad, pointerEvents: "none" }}>
           <Icon name="search" size={14} tint={colors.faint} />
         </View>
-      </If>
+        {box}
+      </View>
     </View>
   );
 }

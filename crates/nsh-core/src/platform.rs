@@ -791,12 +791,16 @@ pub struct PerfStats {
     /// The rate the display refreshes at (Hz), once the monitor saw it
     /// refresh.
     pub refresh_rate: Option<f32>,
-    /// The share of recent frames that took longer than one refresh.
+    /// The share of recent frames that took longer than one refresh, from 0
+    /// to 1 (`0.05` is 5%), as TS's `dropped` reads it.
     pub dropped: crate::geometry::Percentage,
 }
 
 impl PerfStats {
-    /// Stats of `fps` frames a second, the rest unknown.
+    /// Stats of `fps` frames a second, the rest unknown: the engine's way
+    /// to make them (the type is non-exhaustive). Apps read them
+    /// ([`crate::element::perf_stats`]) and never make one.
+    #[doc(hidden)]
     pub fn new(fps: f32) -> PerfStats {
         PerfStats {
             fps,
