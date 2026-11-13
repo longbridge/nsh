@@ -274,6 +274,24 @@ pub struct SelectProps {
     /// The inline style of the popup or sheet, over its classes.
     #[prop(default)]
     pub popup_style: Prop<Style>,
+    /// Desktops: classes the popup has in its first frame, which its
+    /// `transition` classes animate from (Tailwind's `starting:`, CSS's
+    /// `@starting-style`): its entrance. A state's classes apply over
+    /// `popupClass` and `popupStyle`, as a state's styles do. A sheet
+    /// comes in with its own motion.
+    pub popup_starting_class: Prop<Option<SharedString>>,
+    /// Desktops: the inline style of the popup in its first frame, over
+    /// `popupStyle`.
+    #[prop(default)]
+    pub popup_starting_style: Prop<Style>,
+    /// Desktops: classes the popup has while it goes: it stays, taking no
+    /// presses, until the transitions it has then ran (`onClose` after),
+    /// so they run its exit.
+    pub popup_ending_class: Prop<Option<SharedString>>,
+    /// Desktops: the inline style of the popup while it goes, over
+    /// `popupStyle`.
+    #[prop(default)]
+    pub popup_ending_style: Prop<Style>,
     /// Touch screens: the classes of the backdrop behind the sheet
     /// (pressing it closes the list).
     pub backdrop_class: Prop<Option<SharedString>>,
@@ -469,10 +487,10 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         if !next {
             closed_by.replace(Some(reason));
         }
-        // Reported before the state follows: the popup has no motion on
-        // the desktops, so `onOpen` / `onClose` come in this same turn,
+        // Reported before the state follows: `onOpen` / `onClose` come
         // after it (as `Menu`'s order says: `onCancel`, `onOpenChange`,
-        // then the lifecycle).
+        // then the lifecycle), in this same turn while the popup has no
+        // looks for its states.
         open.request(next, || cx.emit(SelectEvent::OpenChange(next, reason)));
     });
     // The value of item `item`, if it can be chosen.
@@ -610,15 +628,15 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
                 return;
             }
             cx.emit(SelectEvent::Close);
-            // The keyboard goes back to the trigger, unless a press outside
-            // or Tab took it somewhere else.
+        }),
+        // The keyboard goes back to the trigger, unless a press outside or
+        // Tab took it somewhere else.
+        back: Rc::new(move || {
             let by = closed_by.replace(None);
-            if is_desktop()
-                && !matches!(
-                    by,
-                    Some(OpenChangeReason::PressOutside | OpenChangeReason::Focus)
-                )
-            {
+            if !matches!(
+                by,
+                Some(OpenChangeReason::PressOutside | OpenChangeReason::Focus)
+            ) {
                 anchor.focus();
             }
         }),
@@ -631,6 +649,10 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
             margin: props.margin,
             popup_class: props.popup_class,
             popup_style: props.popup_style,
+            popup_starting_class: props.popup_starting_class,
+            popup_starting_style: props.popup_starting_style,
+            popup_ending_class: props.popup_ending_class,
+            popup_ending_style: props.popup_ending_style,
             backdrop_class: props.backdrop_class,
             backdrop_style: props.backdrop_style,
         },

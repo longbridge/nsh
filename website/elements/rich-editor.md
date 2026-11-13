@@ -374,21 +374,25 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 Three plugins carry Tiptap's Link, CharacterCount and Suggestion behavior, all of it native:
 
 ```tsx
-import { RichEditor, characterCount, createRichEditor, insertMention, link, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
+import { RichEditor, characterCount, createRichEditor, insertMention, link, setSuggestionOpen, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
 
 const editor = createRichEditor({
   schema: withMention(starterSchema()),
   plugins: [
+    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
     starterKit(),
     link({ defaultProtocol: "https" }),
     characterCount({ limit: 280 }),
-    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
   ],
 });
 
 editor.on("transaction", () => {
   const s = editor.suggestion("mention");
-  if (s?.active) showPeople(s.query, editor.coordsAtPos(s.range.from), s.lastKey);
+  if (s?.active) {
+    const people = peopleMatching(s.query);
+    editor.run(setSuggestionOpen(people.length > 0, "mention"));
+    showPeople(people, editor.coordsAtPos(s.range.from), s.lastKey);
+  }
   setCount(`${editor.characters()} / ${editor.characterLimit}`);
 });
 
@@ -415,10 +419,16 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 - `suggestion(options?)`: follows a trigger (`char`, `@` by default) typed before the cursor. `allowSpaces` lets the
   query hold spaces, `allowedPrefixes` lists what may precede the trigger (a space by default; `anyPrefix` takes
   anything), `startOfLine` asks for it at the line's start (a `/` command menu). `editor.suggestion(key)` gives
-  `{ active, range, query, text, lastKey, keyCount }`; the active range carries the app's `decorationClass` (and
+  `{ active, range, query, text, lastKey, keyCount, open }`; the active range carries the app's `decorationClass` (and
   `decorationEmptyClass` while the query is empty). While a suggestion is active the keys in `captureKeys` belong
   to the app's list: the editor takes them and records the last one in the state, and Escape dismisses the
-  suggestion (`exitSuggestion(key)` does too). `replaceSuggestion(content, key?)` replaces the trigger and the query
+  suggestion (`exitSuggestion(key)` does too). `setSuggestionOpen(open, key?)` tells the suggestion whether the
+  list shows for the query (its state's `open`): closed, the keys in `captureKeys` go on to the editor, so Enter
+  sends or starts a new line when nothing matches, and Escape still dismisses. It holds for the query it was said
+  for, so say it each time the query changes; until then the list is open and the keys are its own. A list that
+  loads its items (a remote people search) closes only once it knows the list is empty, not while the results are
+  still loading, or Enter would act before they arrive.
+  A suggestion comes before `starterKit()` and the app's own keys in `plugins`, so its keys reach it first. `replaceSuggestion(content, key?)` replaces the trigger and the query
   with text or JSON content.
 - `withMention(schema, { name?, char? })` adds Tiptap's mention node: an inline atom with `id`, `label` and its
   trigger, written as `@label` in text and as `<span data-type="mention">` in HTML. `insertMention(range, id, label?)`

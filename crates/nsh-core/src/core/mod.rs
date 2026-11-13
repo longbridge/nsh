@@ -1,3 +1,4 @@
+mod canvas_render;
 mod classes;
 mod components;
 mod cull;
@@ -385,8 +386,8 @@ struct ScrollState {
     pending: Vec<(u32, PendingScroll)>,
     /// What its lists asked of it in this commit, sent at its end.
     asked: Option<parent_viewport::Asked>,
-    /// The sticky cells it was last sent with its lists' (its own too, when
-    /// it is a list), while its lists have any.
+    /// The sticky cells it was last sent: its lists' (its own too, when it
+    /// is a list), its sticky views' and its built-in bar's.
     page_sticky: Vec<list::StickyRange>,
     /// The ranges of the `position: sticky` views in it.
     view_sticky: Vec<list::StickyRange>,
@@ -621,6 +622,9 @@ struct Node {
     /// to when its style was last applied ([`Core::sync_env`]).
     env: Option<Box<(crate::style::EnvEdges, [EdgeInsets; 2])>>,
     events: EventMask,
+    /// Keyboard ancestry for a portaled view: its logical parent, when the
+    /// native parent it is inserted into differs (`sync_key_parents`).
+    key_parent: Option<NodeId>,
     /// `zIndex`: native views are ordered by it (stable) among siblings.
     z_index: i32,
     /// `verticalAlign`: where it sits in its line as an attachment.
@@ -850,6 +854,7 @@ impl Node {
             .as_ref()
             .and_then(|root| root.overlay.as_ref())
             .and_then(|overlay| overlay.tab_after);
+        props.key_parent = self.key_parent;
         if props.pointer_events == crate::props::PointerEvents::Auto {
             props.pointer_events = self.class_pointer;
         }
@@ -919,6 +924,7 @@ impl Node {
             insets: None,
             env: None,
             events: EventMask::default(),
+            key_parent: None,
             z_index: 0,
             vertical_align: crate::style::VerticalAlign::Baseline,
             rtl: false,
@@ -1269,6 +1275,10 @@ pub struct Core<M: TextEngine> {
     /// The tree changed: the shown overlays' places in the Tab order are
     /// found again ([`Core::order_overlays_for_tab`]).
     tab_places_stale: bool,
+    /// A key listener or capture rule changed, or an overlay moved in:
+    /// the shown overlays' `key_parent` overrides are found again
+    /// ([`Core::sync_key_parents`]).
+    key_ancestry_dirty: bool,
     /// Mount the states nodes show as parts of a control
     /// ([`MountItem::ProjectStates`]).
     mount_projected: bool,
@@ -1435,6 +1445,9 @@ pub struct Core<M: TextEngine> {
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
     audio: Option<Arc<dyn crate::audio::AudioBackend>>,
+    /// The app's login item ([`Core::set_login_item`]); without one the app
+    /// has none.
+    login_item: Option<crate::desktop::LoginItems>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1505,6 +1518,7 @@ impl<M: TextEngine> Core<M> {
             window_backend: None,
             speech: None,
             audio: None,
+            login_item: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1557,6 +1571,7 @@ impl<M: TextEngine> Core<M> {
             track_tree_order: false,
             tree_order_changed: false,
             tab_places_stale: false,
+            key_ancestry_dirty: false,
             mount_projected: false,
             batches: 0,
             commands: Vec::new(),
@@ -1825,6 +1840,14 @@ impl<M: TextEngine> Core<M> {
     /// platform's (`None`: the platform's, the default).
     pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
         self.audio = backend;
+    }
+
+    /// Reads and changes the app's login item (`Application.launchAtLogin`)
+    /// with `backend`: the platform's, which a standalone app's runner gives,
+    /// or a test's fake. `None` (the default): the app has no login item,
+    /// it does not launch at login ([`crate::desktop::LoginItemBackend`]).
+    pub fn set_login_item(&mut self, backend: Option<Arc<dyn crate::desktop::LoginItemBackend>>) {
+        self.login_item = backend.map(crate::desktop::LoginItems::new);
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -2394,6 +2417,10 @@ impl<M: TextEngine> Core<M> {
                 self.start_js_web_evaluation(id, call, script, timeout);
                 Ok(())
             }
+            Op::RenderCanvas { call, request } => {
+                self.start_js_canvas_render(call, *request);
+                Ok(())
+            }
             Op::Rust(op) => {
                 self.run_rust(op);
                 Ok(())
@@ -2444,9 +2471,13 @@ impl<M: TextEngine> Core<M> {
                     self.report_frame(key);
                 }
                 let node = &self.nodes[key as usize];
+                let key_events = matches!(event, EventKind::KeyDown | EventKind::KeyUp);
                 if node.events != before {
                     let relink = node.inline && (pressable(before) || pressable(node.events));
                     self.mark(key, dirty::EVENTS);
+                    if key_events {
+                        self.key_ancestry_dirty = true;
+                    }
                     // Pressable spans are part of their block's text.
                     if relink {
                         self.mark_text_block(key);
@@ -3056,6 +3087,9 @@ impl<M: TextEngine> Core<M> {
         self.sync_ch();
         self.sync_fixed();
         self.sync_overlays();
+        if std::mem::take(&mut self.key_ancestry_dirty) {
+            self.sync_key_parents();
+        }
         // The rows holding the focus or an open overlay stay rendered,
         // before the lists update their windows.
         if self.focus.is_some() || !self.overlays.is_empty() || !self.kept_lists.is_empty() {
@@ -5073,6 +5107,7 @@ impl<M: TextEngine> Core<M> {
         }
         let node = &mut self.nodes[key as usize];
         let mut flags = 0;
+        let mut key_ancestry = false;
         let mut rebuild_span = false;
         let mut slop_moved = false;
         match prop {
@@ -5618,6 +5653,14 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::KeyCapture(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.key_capture != value {
+                    props.key_capture = value;
+                    flags |= dirty::VIEW_PROPS;
+                    key_ancestry = true;
+                }
+            }
             Prop::SelectableView(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.selectable_view != value {
@@ -5710,6 +5753,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderRightSymbol(v) => c.right_symbol = v,
                         ScreenProp::HeaderLeftSystemItem(v) => c.left_system_item = v,
                         ScreenProp::HeaderLeftSymbol(v) => c.left_symbol = v,
+                        ScreenProp::HeaderRightItems(v) => c.right_items = v,
                         ScreenProp::PopOnSwipe(v) => c.gesture_enabled = v,
                         ScreenProp::PopOnBack(v) => c.prevent_back = !v,
                         ScreenProp::Animation(v) => c.animation = v,
@@ -6038,6 +6082,9 @@ impl<M: TextEngine> Core<M> {
         if rebuild_span {
             self.mark_text_block(key);
         }
+        if key_ancestry {
+            self.key_ancestry_dirty = true;
+        }
         Ok(())
     }
 
@@ -6119,6 +6166,10 @@ impl<M: TextEngine> Core<M> {
             self.set_hidden_in_text(child, false);
         }
         self.nodes[child as usize].parent = parent;
+        if self.nodes[child as usize].kind == Kind::Overlay {
+            // Its logical parent changed: find its keyboard override again.
+            self.key_ancestry_dirty = true;
+        }
         self.nodes[parent as usize].children.insert(pos, child);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
@@ -9585,22 +9636,12 @@ impl<M: TextEngine> Core<M> {
                 self.page_sticky_changed(key, o.view, &old);
             }
         } else if sticky_cells != list.sent_sticky {
-            let cells = sticky_cells
-                .iter()
-                .map(|r| StickyCell {
-                    cell: r.cell,
-                    start: Points(r.start),
-                    end: Points(r.end),
-                    offset: r.offset,
-                })
-                .collect();
+            // Sent at the end of the commit in one set with the other
+            // views it pins (its built-in bar, its sticky views, its lists'
+            // rows in its viewport): a set of its rows alone would drop the
+            // others and raise its rows above its bar.
             list.sent_sticky = sticky_cells;
-            self.mount.push(MountItem::StickyCells { id, cells });
-            // Its lists in its viewport pin theirs with its own.
-            let scroll = self.nodes[key as usize].scroll.as_ref();
-            if scroll.is_some_and(|s| !s.page_sticky.is_empty()) {
-                self.sticky_views.push(key);
-            }
+            self.sticky_views.push(key);
         }
 
         if let Some(o) = &outer {
@@ -10612,6 +10653,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::PickFiles { .. }
                 | C::OpenUrl { .. }
                 | C::PickScreenColor { .. }
+                | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Speech { .. }
                 | C::Audio { .. }

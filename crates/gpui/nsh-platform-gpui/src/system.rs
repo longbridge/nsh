@@ -1493,6 +1493,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
         Command::PickFiles { id, request } => pick_files(surface, *id, request.clone()),
         Command::FileRequest { id, request } => file_request(surface, *id, request),
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
             // the surface). An embedded surface closes the window it is in,

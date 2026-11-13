@@ -10415,6 +10415,8 @@ fn menu_and_tray_icons_load_what_the_check_granted() {
             role: None,
             when: Default::default(),
             icon: icon(uri),
+            symbol: None,
+            destructive: false,
         })
     };
     let items = || -> Arc<[MenuItem]> {
@@ -10425,6 +10427,8 @@ fn menu_and_tray_icons_load_what_the_check_granted() {
                 enabled: true,
                 items: vec![action("https://evil.example/b.png")],
                 icon: icon("https://evil.example/c.png"),
+                symbol: None,
+                inline: false,
             },
         ]
         .into()
@@ -15440,6 +15444,190 @@ mod components {
         );
     }
 
+    /// Renders a drawing offscreen when pressed (`Painter::render`).
+    #[component]
+    fn OffscreenRenderer() -> impl IntoElement {
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("render {}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let image = crate::element::Painter::new()
+                    .fill_color(crate::Color(0xff00_00ff))
+                    .fill_rect(0.0, 0.0, 30.0, 20.0)
+                    .render(
+                        crate::Size::new(px(30.0), px(20.0)),
+                        crate::canvas::render::RenderOptions {
+                            scale: Some(2.0),
+                            ..Default::default()
+                        },
+                    );
+                spawn(async move {
+                    shown.set(match image.await {
+                        Ok(bytes) => format!("ok {}", bytes.len()),
+                        Err(e) => format!("failed {}", e.code().unwrap_or("")),
+                    });
+                });
+            }))
+    }
+
+    fn press_offscreen_renderer(canvas_render: bool) -> (Core<FakeEngine>, Vec<Command>) {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<OffscreenRenderer>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let renders = c
+            .commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: command @ Command::RenderCanvas { .. },
+                } => Some(command),
+                _ => None,
+            })
+            .collect();
+        (c, renders)
+    }
+
+    #[test]
+    fn components_render_drawings_offscreen() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let [
+            Command::RenderCanvas {
+                id,
+                drawing,
+                width,
+                height,
+                scale,
+                ..
+            },
+        ] = &renders[..]
+        else {
+            panic!("one render: {renders:?}");
+        };
+        assert_eq!((*width, *height, *scale), (60, 40, 2.0));
+        assert!(
+            drawing
+                .ops
+                .iter()
+                .any(|op| matches!(op, crate::canvas::CanvasOp::FillRect(_)))
+        );
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: *id,
+                result: Ok(vec![1, 2, 3, 4])
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 4");
+    }
+
+    fn render_id(renders: &[Command]) -> u32 {
+        match renders {
+            [Command::RenderCanvas { id, .. }] => *id,
+            _ => panic!("one render: {renders:?}"),
+        }
+    }
+
+    #[test]
+    fn offscreen_renders_take_ids_unique_in_the_process() {
+        // A replaced core's render may still be answered: the new core's
+        // requests must not share its number.
+        let (_old, old) = press_offscreen_renderer(true);
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let (old, id) = (render_id(&old), render_id(&renders));
+        assert_ne!(old, id);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: old,
+                result: Ok(vec![9]),
+            },
+        ));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1, 2]),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 2");
+    }
+
+    #[test]
+    fn offscreen_renders_too_large_for_the_platform_fail_with_the_quota_code() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: render_id(&renders),
+                result: Err(crate::canvas::render::RenderFailure::TooLarge(
+                    "over the device's bitmap limit".into()
+                )),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_NSH_QUOTA_EXCEEDED"
+        );
+    }
+
+    #[test]
+    fn offscreen_renders_fail_by_their_deadline_and_drop_late_answers() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let id = render_id(&renders);
+        c.timeout_canvas_render(id);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(shown.last().unwrap(), "render failed ETIMEDOUT");
+        assert!(c.components.canvas_renders.is_empty());
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1]),
+            },
+        ));
+        c.run_component_tasks();
+        let shown = c.commit().map(|b| texts(&b)).unwrap_or_default();
+        assert!(
+            !shown.iter().any(|t| t.starts_with("render ok")),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn components_render_nothing_offscreen_where_the_platform_renders_none() {
+        let (mut c, renders) = press_offscreen_renderer(false);
+        assert!(renders.is_empty(), "{renders:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
+    }
+
     #[test]
     fn components_read_images_over_the_limit_as_none() {
         let mut c = core();
@@ -15635,6 +15823,159 @@ mod components {
         );
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 0")));
         assert_eq!(shown.last().unwrap(), "picked 0 []");
+    }
+
+    /// Turns launching at login on, reads it, turns it off and reads it
+    /// again when its button is pressed, all asked at once; shows each
+    /// answer in the order it was asked.
+    #[component]
+    fn LoginSwitch() -> impl IntoElement {
+        use crate::{
+            desktop::LaunchAtLoginError,
+            element::desktop::{launch_at_login, set_launch_at_login},
+        };
+        let shown = signal(String::new());
+        let add = move |line: String| shown.set(format!("{} {line}", untracked(|| shown.get())));
+        let said = |answer: Result<(), LaunchAtLoginError>| match answer {
+            Ok(()) => "ok".to_owned(),
+            Err(LaunchAtLoginError::System(e)) => {
+                format!("failed-{}", crate::element::io_code(&e).unwrap_or("none"))
+            }
+            Err(e) => format!("{e:?}"),
+        };
+        view()
+            .child(text(move || format!("login{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let on = set_launch_at_login(true);
+                let read = launch_at_login();
+                let off = set_launch_at_login(false);
+                let again = launch_at_login();
+                spawn(async move {
+                    add(said(on.await));
+                    add(read.await.to_string());
+                    add(said(off.await));
+                    add(again.await.to_string());
+                });
+            }))
+    }
+
+    /// The login item of a test: the calls it got, in order.
+    #[derive(Default)]
+    struct FakeLoginItem {
+        calls: std::sync::Mutex<Vec<Option<bool>>>,
+        enabled: std::sync::Mutex<bool>,
+        /// Changes fail as the system's refusal does.
+        refuses: bool,
+        /// The platform has no login item for the app (a sandbox).
+        sandboxed: bool,
+    }
+
+    impl crate::desktop::LoginItemBackend for FakeLoginItem {
+        fn status(&self) -> std::io::Result<crate::desktop::LoginItemStatus> {
+            use crate::desktop::LoginItemStatus;
+            self.calls.lock().unwrap().push(None);
+            Ok(if self.sandboxed {
+                LoginItemStatus::Unavailable
+            } else if *self.enabled.lock().unwrap() {
+                LoginItemStatus::Enabled
+            } else {
+                LoginItemStatus::Disabled
+            })
+        }
+
+        fn set(&self, enabled: bool) -> std::io::Result<crate::desktop::LoginItemStatus> {
+            if self.refuses {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            // A slow registration: what was asked after it still waits.
+            if enabled {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+            if !self.sandboxed {
+                *self.enabled.lock().unwrap() = enabled;
+            }
+            self.calls.lock().unwrap().push(Some(enabled));
+            self.status()
+        }
+    }
+
+    /// Mounts [`LoginSwitch`] in `c`, presses it and gives what it showed
+    /// once the four answers came.
+    fn switch_login_item(
+        c: &mut Core<FakeEngine>,
+        backend: Option<std::sync::Arc<FakeLoginItem>>,
+    ) -> String {
+        c.set_login_item(
+            backend.map(|b| b as std::sync::Arc<dyn crate::desktop::LoginItemBackend>),
+        );
+        c.mount_root(&crate::element::Root::new::<LoginSwitch>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(c, |s| {
+            s.last()
+                .is_some_and(|t| t.starts_with("login") && t.split(' ').count() == 5)
+        });
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn launch_at_login_needs_no_capability() {
+        // Apps without a declaration (the legacy set) use it as Rust apps
+        // do: it is the app's own lifecycle, as quit and restart are.
+        let backend = std::sync::Arc::new(FakeLoginItem::default());
+        let mut c = core();
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let shown = switch_login_item(&mut c, Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
+    }
+
+    #[test]
+    fn without_a_backend_the_app_has_no_login_item() {
+        // Reading answers `false`; changing it fails.
+        let shown = switch_login_item(&mut core(), None);
+        assert_eq!(shown, "login Unavailable false Unavailable false");
+    }
+
+    #[test]
+    fn the_backend_reads_and_changes_the_login_item_in_order() {
+        let backend = std::sync::Arc::new(FakeLoginItem::default());
+        let shown = switch_login_item(&mut core(), Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
+        // Each change reads the status after it; the slow registration ran
+        // before what was asked after it.
+        assert_eq!(
+            *backend.calls.lock().unwrap(),
+            [Some(true), None, None, Some(false), None, None]
+        );
+    }
+
+    #[test]
+    fn the_systems_refusal_and_a_sandbox_reach_the_app() {
+        let refuses = std::sync::Arc::new(FakeLoginItem {
+            refuses: true,
+            ..Default::default()
+        });
+        let shown = switch_login_item(&mut core(), Some(refuses));
+        assert_eq!(shown, "login failed-EACCES false failed-EACCES false");
+        // Where the platform has no login item for the app, a change fails
+        // as without a backend.
+        let sandboxed = std::sync::Arc::new(FakeLoginItem {
+            sandboxed: true,
+            ..Default::default()
+        });
+        let shown = switch_login_item(&mut core(), Some(sandboxed));
+        assert_eq!(shown, "login Unavailable false Unavailable false");
     }
 
     /// Starts a speech session when its first button is pressed (a new
@@ -21480,6 +21821,202 @@ mod views {
         );
     }
 
+    /// A screen whose trailing bar is several UIKit buttons, one with a menu.
+    #[derive(Default)]
+    struct RightItemsPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RightItemsPageProps {}
+
+    impl Component for RightItemsPage {
+        type Props = RightItemsPageProps;
+        type Event = NoEvent;
+
+        #[allow(deprecated)]
+        fn view(_: RightItemsPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            use crate::{
+                HeaderSystemItem,
+                element::{desktop::MenuItem, header::HeaderItem},
+            };
+            stack().flex_1().child(
+                screen()
+                    .header_right_items(vec![
+                        HeaderItem::system(HeaderSystemItem::Edit).key("edit"),
+                        HeaderItem::symbol("ellipsis.circle").key("more").menu([
+                            MenuItem::new("Share"),
+                            MenuItem::submenu(
+                                "Danger",
+                                [MenuItem::new("Delete").destructive(true)],
+                            )
+                            .inline(true),
+                        ]),
+                    ])
+                    .header_right_system_item(HeaderSystemItem::Add)
+                    .header_right(view().on_press(|_: &()| {}))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// Trailing `header_right_items` reach the screen's config, including a
+    /// menu; a non-empty list leaves the single system item set too (the
+    /// platform prefers the list).
+    #[test]
+    fn trailing_header_items_reach_the_screens_config() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RightItemsPage>(|| RightItemsPageProps {}));
+        let config = c
+            .commit()
+            .unwrap()
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("a screen");
+        assert_eq!(config.right_items.len(), 2);
+        assert_eq!(config.right_items[0].key.as_deref(), Some("edit"));
+        assert_eq!(
+            config.right_items[0].content,
+            crate::HeaderItemContent::SystemItem(crate::HeaderSystemItem::Edit)
+        );
+        assert_eq!(config.right_items[1].key.as_deref(), Some("more"));
+        let menu = config.right_items[1].menu.as_ref().expect("a menu");
+        assert_eq!(menu.len(), 2);
+        assert_eq!(
+            config.right_system_item,
+            Some(crate::HeaderSystemItem::Add),
+            "the single system item stays in the config; the platform prefers the list"
+        );
+    }
+
+    /// A header button's `on_press` and a menu item's `on_select` run when
+    /// the platform reports their ids as the root's `Menu` event; replacing
+    /// the items (same keys, so UIKit keeps the buttons) assigns new ids
+    /// and drops the previous generation's handlers.
+    #[test]
+    fn trailing_header_item_handlers_run_on_menu_and_drop_when_replaced() {
+        use std::cell::Cell;
+
+        use crate::{
+            EventKind, EventPayload, HeaderSystemItem, PayloadValue, ROOT_ID,
+            element::{desktop::MenuItem, header::HeaderItem, reactive::signal},
+        };
+
+        thread_local! {
+            static PRESSES: Cell<u32> = const { Cell::new(0) };
+            static SELECTS: Cell<u32> = const { Cell::new(0) };
+        }
+        PRESSES.with(|c| c.set(0));
+        SELECTS.with(|c| c.set(0));
+
+        #[derive(Default)]
+        struct HandlersPage;
+        #[derive(Clone, PartialEq, Props)]
+        struct HandlersPageProps {}
+        impl Component for HandlersPage {
+            type Props = HandlersPageProps;
+            type Event = NoEvent;
+            fn view(_: HandlersPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+                // `phase` cannot be named `gen` (edition 2024 keyword).
+                let phase = signal(0u32);
+                stack().flex_1().child(
+                    screen()
+                        .header_right_items(move || {
+                            let suspended = phase.get() != 0;
+                            vec![
+                                HeaderItem::system(HeaderSystemItem::Edit)
+                                    .key("edit")
+                                    .on_press(|| PRESSES.with(|c| c.set(c.get() + 1))),
+                                HeaderItem::symbol("ellipsis.circle").key("more").menu([
+                                    MenuItem::new(if suspended { "Reinstate" } else { "Suspend" })
+                                        .on_select(|| SELECTS.with(|c| c.set(c.get() + 1))),
+                                ]),
+                            ]
+                        })
+                        .child(view().flex_1().on_press(move |_: &()| {
+                            phase.set(1);
+                        })),
+                )
+            }
+        }
+
+        let mut c = core();
+        c.mount_root(&Root::new::<HandlersPage>(|| HandlersPageProps {}));
+        let batch = c.commit().unwrap();
+        let config = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("a screen");
+        let content_id = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events }
+                    if events.contains(EventKind::Press) && *id != ROOT_ID =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect("the content view");
+        let press_id = config.right_items[0].press_id;
+        let select_id = match &config.right_items[1].menu.as_ref().unwrap()[0] {
+            crate::desktop::MenuItem::Action(a) => a.id,
+            _ => panic!("action"),
+        };
+        assert!(press_id != 0 && select_id != 0);
+        let menu = |id| EventPayload::Map(vec![("id", PayloadValue::Number(id as f64))]);
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(press_id)));
+        assert_eq!(PRESSES.with(|c| c.get()), 1);
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(select_id)));
+        assert_eq!(SELECTS.with(|c| c.get()), 1);
+
+        // Same keys / looks: the platform keeps the buttons. The binding
+        // still gives each a new id; the previous generation is gone.
+        assert!(c.component_event(content_id, EventKind::Press, &EventPayload::None));
+        let updated = c
+            .commit()
+            .unwrap()
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("updated screen");
+        assert!(
+            crate::element::header::same_right_buttons(&config.right_items, &updated.right_items),
+            "identity stays so UIKit keeps the UIBarButtonItems"
+        );
+        let new_press_id = updated.right_items[0].press_id;
+        let new_select_id = match &updated.right_items[1].menu.as_ref().unwrap()[0] {
+            crate::desktop::MenuItem::Action(a) => {
+                assert_eq!(a.label, "Reinstate");
+                a.id
+            }
+            _ => panic!("action"),
+        };
+        assert_ne!(new_press_id, press_id);
+        assert_ne!(new_select_id, select_id);
+        assert!(new_press_id != 0 && new_select_id != 0);
+
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(press_id)));
+        assert_eq!(PRESSES.with(|c| c.get()), 1, "stale press id is dropped");
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(select_id)));
+        assert_eq!(SELECTS.with(|c| c.get()), 1, "stale menu id is dropped");
+
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(new_press_id)));
+        assert_eq!(PRESSES.with(|c| c.get()), 2);
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(new_select_id)));
+        assert_eq!(SELECTS.with(|c| c.get()), 2);
+    }
+
     /// A Rust component that renders a native component.
     #[derive(Default)]
     struct NativeHost;
@@ -23530,7 +24067,7 @@ mod rust_desktop {
             batch
                 .items
                 .iter()
-                .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "42 78 0"))
+                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "42 78 0"))
         );
         {
             let _entered = c.components.runtime.enter();
@@ -23575,7 +24112,7 @@ mod rust_desktop {
             batch
                 .items
                 .iter()
-                .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "42 0 138"))
+                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "42 0 138"))
         );
         c.set_environment(crate::element::Environment::default());
         let batch = c.commit().unwrap();
@@ -23583,7 +24120,7 @@ mod rust_desktop {
             batch
                 .items
                 .iter()
-                .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "0 0 0"))
+                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "0 0 0"))
         );
         assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
@@ -24985,6 +25522,99 @@ mod rust_menus {
         assert_eq!(icons[4].as_ref().map(|i| &*i.uri), Some("asset:/quit.svg"));
     }
 
+    /// Inline sections leave the element API expanded: items between
+    /// separators, their labels not shown.
+    #[test]
+    fn rust_menus_expand_inline_sections_before_the_platform() {
+        #[component]
+        fn InlineMenus() -> impl IntoElement {
+            set_application_menu(vec![MenuItem::submenu(
+                "File",
+                [
+                    MenuItem::new("New"),
+                    MenuItem::submenu("Danger", [MenuItem::new("Delete"), MenuItem::new("Wipe")])
+                        .inline(true),
+                    MenuItem::new("Quit"),
+                ],
+            )]);
+            view().child(text("ready").on_press(move |e: &PressEvent| {
+                drop(popup_menu_at(
+                    vec![
+                        MenuItem::new("Rename"),
+                        MenuItem::submenu("More", [MenuItem::new("Duplicate")]).inline(true),
+                        MenuItem::new("Delete"),
+                    ],
+                    e.page_position,
+                ));
+            }))
+        }
+
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<InlineMenus>());
+        let batch = c.commit().unwrap();
+        let menu = batch
+            .items
+            .iter()
+            .filter_map(desktop)
+            .find_map(|c| match c {
+                DesktopCommand::SetMenu(Some(items)) => Some(items.clone()),
+                _ => None,
+            })
+            .expect("the application menu");
+        let Item::Submenu { items, .. } = &menu[0] else {
+            panic!("a submenu: {menu:?}");
+        };
+        let labels: Vec<_> = items
+            .iter()
+            .map(|i| match i {
+                Item::Separator => "—",
+                Item::Action(a) => a.label.as_str(),
+                Item::Submenu { label, inline, .. } => {
+                    assert!(!inline, "inline already expanded");
+                    label.as_str()
+                }
+            })
+            .collect();
+        assert_eq!(labels, ["New", "—", "Delete", "Wipe", "—", "Quit"]);
+
+        let ready = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "ready" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let press = PressEvent {
+            page_position: point(px(10.0), px(20.0)),
+            ..Default::default()
+        };
+        assert!(c.component_event(ready, EventKind::Press, &EventPayload::Press(press)));
+        let batch = c.commit().unwrap();
+        let popup = batch
+            .items
+            .iter()
+            .filter_map(desktop)
+            .find_map(|c| match c {
+                DesktopCommand::PopupMenu { items, .. } => Some(items.clone()),
+                _ => None,
+            })
+            .expect("the context menu");
+        let popup_labels: Vec<_> = popup
+            .iter()
+            .map(|i| match i {
+                Item::Separator => "—",
+                Item::Action(a) => a.label.as_str(),
+                Item::Submenu { .. } => "sub",
+            })
+            .collect();
+        assert_eq!(popup_labels, ["Rename", "—", "Duplicate", "—", "Delete"]);
+    }
+
     #[test]
     fn rust_menus_do_nothing_off_desktops() {
         let mut c = core();
@@ -25276,6 +25906,239 @@ fn mouse_ups_reach_rust_listeners_with_their_positions_and_button() {
     let delivered = c.commit().unwrap();
     assert!(delivered.items.iter().any(|item| matches!(item,
         MountItem::Text { text, .. } if text.text == "6 7 16 27 Right")));
+}
+
+#[test]
+fn retained_views_clear_omitted_capture_rules() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Configured() -> impl IntoElement {
+        let configured = signal(true);
+        view()
+            .on_press(move || configured.set(false))
+            .child(dynamic(move || {
+                view()
+                    .key("pad")
+                    .when(configured.get(), |view| view.capture_keys(KeyCapture::All))
+            }))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Configured>());
+    let initial = c.commit().unwrap();
+    let trigger = initial
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let pad = initial
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props } if props.key_capture == KeyCapture::All => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    c.component_event(trigger, EventKind::Press, &EventPayload::None);
+    let changed = c.commit().unwrap();
+    assert!(!changed.items.iter().any(|item| matches!(item,
+        MountItem::Delete { id } if *id == pad
+    )));
+    let cleared = changed
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props } if *id == pad => Some(props),
+            _ => None,
+        })
+        .expect("omitted props must clear the retained native view");
+    assert_eq!(cleared.key_capture, KeyCapture::None);
+}
+
+#[test]
+fn key_capture_reads_mounted_rules_with_canonical_strokes() {
+    use crate::{keymap::Keystroke, prelude::*};
+
+    let stroke = Keystroke::parse_with("mod+k", true).unwrap();
+    #[component]
+    fn Captured() -> impl IntoElement {
+        view()
+            .capture_keys(KeyCapture::keys([
+                Keystroke::parse_with("mod+k", true).unwrap()
+            ]))
+            .child(view())
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Captured>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props }
+                if props.key_capture == KeyCapture::keys([stroke]) =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the capture rule mounts");
+
+    // Command+K on Apple conventions; the same stroke's key with no
+    // modifier is not it.
+    assert!(c.key_captured(host, Some(&stroke)));
+    let plain_k = Keystroke::parse_with("k", true).unwrap();
+    assert!(!c.key_captured(host, Some(&plain_k)));
+
+    // The path reaches the focused view and its ancestors, ending at the
+    // window's root.
+    let mut path = Vec::new();
+    c.key_path(host, &mut path);
+    assert_eq!(path.first(), Some(&host));
+    assert_eq!(path.last(), Some(&crate::ROOT_ID));
+}
+
+/// Capture matches the stroke the adapter's own shortcut vocabulary names,
+/// never a stroke derived from the event's `code`: a browser whose
+/// `KeyboardEvent.code` differs from the logical key (NumLock-off Numpad1
+/// for End, AZERTY `z` on KeyW) captures what its existing shortcut matcher
+/// would, and the event's physical identity does not decide.
+#[test]
+fn key_capture_uses_the_adapters_stroke_not_the_physical_code() {
+    use crate::{keymap::Keystroke, prelude::*};
+
+    let end = Keystroke::parse_with("end", false).unwrap();
+    let z = Keystroke::parse_with("z", false).unwrap();
+    #[component]
+    fn Captured() -> impl IntoElement {
+        view()
+            .capture_keys(KeyCapture::keys([
+                Keystroke::parse_with("end", false).unwrap(),
+                Keystroke::parse_with("z", false).unwrap(),
+            ]))
+            .child(view())
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Captured>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props }
+                if props.key_capture == KeyCapture::keys([end, z]) =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the capture rule mounts");
+
+    // The transition's DOM codes name other US-layout keys (`Numpad1` is
+    // `1`, `KeyW` is `w`); the adapter's stroke alone matches.
+    let numeric_one = Keystroke::parse_with("1", false).unwrap();
+    let w = Keystroke::parse_with("w", false).unwrap();
+    assert!(c.key_captured(host, Some(&end)));
+    assert!(!c.key_captured(host, Some(&numeric_one)));
+    assert!(c.key_captured(host, Some(&z)));
+    assert!(!c.key_captured(host, Some(&w)));
+    // No shortcut names it: only `All` captures it.
+    assert!(!c.key_captured(host, None));
+}
+
+#[test]
+fn key_interest_walks_portaled_overlay_logical_ancestors() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Portals() -> impl IntoElement {
+        let popup = || {
+            overlay()
+                .test_id("capturing-portal")
+                .child(view().test_id("inside").focusable(true))
+        };
+        view()
+            .child(
+                view()
+                    .test_id("holder")
+                    .capture_keys(KeyCapture::All)
+                    .child(popup()),
+            )
+            .child(
+                view()
+                    .test_id("listener")
+                    .on_key_down(|_: &KeyEvent| {})
+                    .child(
+                        overlay()
+                            .test_id("listening-portal")
+                            .child(view().test_id("heard").focusable(true)),
+                    ),
+            )
+            .child(
+                overlay()
+                    .test_id("unrelated-portal")
+                    .child(view().test_id("outside").focusable(true)),
+            )
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Portals>());
+    let batch = c.commit().unwrap();
+    let view = |wanted: &str| {
+        batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(wanted) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{wanted} is mounted"))
+    };
+    let (holder, inside, heard, outside) = (
+        view("holder"),
+        view("inside"),
+        view("heard"),
+        view("outside"),
+    );
+    // The overlay content is not a native child of the view it is in, but
+    // it is its logical descendant: interest and capture follow the
+    // logical ancestor, and never the unrelated sibling portal.
+    assert!(c.key_interest(inside));
+    assert!(c.key_interest(heard));
+    assert!(!c.key_interest(outside));
+    assert!(c.key_captured(inside, None));
+    assert!(!c.key_captured(outside, None));
+    // The engine's notification path keeps the same logical ancestor.
+    let mut path = Vec::new();
+    c.key_path(inside, &mut path);
+    assert!(path.contains(&holder), "{path:?}");
+    // The overlays whose logical ancestry has key interest carry the
+    // routing override; the unrelated one carries none.
+    let routed_parent = |name| {
+        let id = view(name);
+        batch
+            .items
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                MountItem::ViewProps { id: target, props } if *target == id => {
+                    Some(props.key_parent)
+                }
+                _ => None,
+            })
+            .expect("the portal's final native props")
+    };
+    assert_eq!(routed_parent("capturing-portal"), Some(holder));
+    assert_eq!(routed_parent("listening-portal"), Some(view("listener")));
+    assert_eq!(routed_parent("unrelated-portal"), None);
 }
 
 #[test]
@@ -28871,6 +29734,65 @@ fn image_scales_decode_from_js() {
         "url": "asset:/a.png", "scales": [1, 1, 1, 1, 1, 1, 1, 1, 2]
     }));
     assert_eq!(long.unwrap().scales.iter().collect::<Vec<_>>(), [1.0]);
+}
+
+/// `captureKeys` decodes through the one backend decoder, parsing each
+/// keystroke once with the platform's `mod`, which the host resolves from
+/// its environment (outside one, the `HostValue` decoder uses non-Apple
+/// conventions).
+#[test]
+fn capture_keys_decode_from_js() {
+    use crate::{
+        KeyCapture,
+        js::host::{HostCx, HostValue, decode_capture_keys},
+        keymap::Keystroke,
+    };
+
+    let decode = |value: serde_json::Value, apple: bool| {
+        decode_capture_keys(&J(value), &mut HostCx::default(), apple)
+    };
+    assert_eq!(
+        decode(serde_json::json!("none"), false),
+        Some(KeyCapture::None)
+    );
+    assert_eq!(
+        decode(serde_json::json!("all"), true),
+        Some(KeyCapture::All)
+    );
+    assert_eq!(
+        decode(serde_json::json!(["mod+k", "shift+tab"]), true),
+        Some(KeyCapture::keys([
+            Keystroke::parse_with("mod+k", true).unwrap(),
+            Keystroke::parse_with("shift+tab", true).unwrap(),
+        ]))
+    );
+    // `mod` is Control where conventions are not Apple's.
+    assert_eq!(
+        decode(serde_json::json!(["mod+k"]), false),
+        Some(KeyCapture::keys([
+            Keystroke::parse_with("mod+k", false).unwrap()
+        ]))
+    );
+    // The standard decoder takes the convention from the engine's ambient
+    // environment; outside one (as here) it parses non-Apple `mod`.
+    assert_eq!(
+        KeyCapture::decode(&J(serde_json::json!(["mod+k"])), &mut HostCx::default()),
+        Some(KeyCapture::keys([
+            Keystroke::parse_with("mod+k", false).unwrap()
+        ]))
+    );
+    // Nothing and unknown strings clear the rule; invalid keystrokes are
+    // reported and left out.
+    assert_eq!(decode(serde_json::Value::Null, false), None);
+    let mut cx = HostCx::default();
+    let decoded = decode_capture_keys(&J(serde_json::json!(["a", "not+a+key"])), &mut cx, false);
+    assert_eq!(
+        decoded,
+        Some(KeyCapture::keys([
+            Keystroke::parse_with("a", false).unwrap()
+        ]))
+    );
+    assert!(cx.warnings.iter().any(|w| w.contains("captureKeys")));
 }
 
 #[test]
@@ -32597,9 +33519,7 @@ fn keyboard_inset_height_pads_and_animates_with_the_keyboard() {
         matches!(
             &batch.items[0],
             MountItem::LayoutAnimation(crate::LayoutAnimation {
-                update: Some(t),
-                ..
-            }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
+                update: Some(t), .. }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
         ),
         "{:?}",
         batch.items
@@ -32637,9 +33557,7 @@ fn styles_that_read_the_keyboard_height_move_with_the_keyboard() {
         matches!(
             &batch.items[0],
             MountItem::LayoutAnimation(crate::LayoutAnimation {
-                update: Some(t),
-                ..
-            }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
+                update: Some(t), .. }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
         )
     };
     let mut c = core();
@@ -33552,6 +34470,136 @@ mod built_in_scrollbars {
             _ => None,
         });
         assert_eq!(before, Some(Some(bar)), "the bar draws above it");
+    }
+
+    /// The views of list 2, bottom to top, as the platforms stack them:
+    /// in the order inserted, then the sticky cells raised on every
+    /// `StickyCells` and insert. `in_order` raises them in the order the
+    /// item lists them (iOS, Android), otherwise in the order they are
+    /// among the children (the desktops), when not all of them are last.
+    struct Stack {
+        views: Vec<NodeId>,
+        sticky: Vec<NodeId>,
+        in_order: bool,
+    }
+
+    impl Stack {
+        fn apply(&mut self, batch: &MountBatch) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Insert {
+                        parent: 2,
+                        child,
+                        before,
+                    } => {
+                        self.views.retain(|v| v != child);
+                        let at = before
+                            .and_then(|b| self.views.iter().position(|&v| v == b))
+                            .unwrap_or(self.views.len());
+                        self.views.insert(at, *child);
+                        self.raise();
+                    }
+                    MountItem::Remove { id } => self.views.retain(|v| v != id),
+                    MountItem::StickyCells { id: 2, cells } => {
+                        self.sticky = cells.iter().map(|c| c.cell).collect();
+                        self.raise();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn raise(&mut self) {
+            let sticky = |v: &NodeId| self.sticky.contains(v);
+            let cells: Vec<NodeId> = if self.in_order {
+                self.sticky.clone()
+            } else {
+                let at_end = self.views.iter().rev().take_while(|v| sticky(v)).count();
+                let cells: Vec<NodeId> = self.views.iter().copied().filter(sticky).collect();
+                if at_end == cells.len() {
+                    return;
+                }
+                cells
+            };
+            for cell in cells {
+                if self.views.contains(&cell) {
+                    self.views.retain(|&v| v != cell);
+                    self.views.push(cell);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_lists_sticky_rows_go_below_its_bar() {
+        for in_order in [false, true] {
+            let mut c = core();
+            let mut registry = Registry::new();
+            registry.scrollbars_from(bars);
+            c.set_components(registry);
+            c.set_builtin_scrollbars(Some(app_theme()));
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: 2,
+                        tag: Tag::List,
+                    },
+                    style_op(2, &[("height", StyleValue::Number(400.0))]),
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::EstimatedItemSize(px(50.0)),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::Count(100),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::StickyIndices(vec![0, 10]),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                ],
+            );
+            let mut stack = Stack {
+                views: Vec::new(),
+                sticky: Vec::new(),
+                in_order,
+            };
+            let batch = c.commit().unwrap();
+            stack.apply(&batch);
+            let [bar] = bars_in(&batch)[..] else {
+                panic!("one bar: {:?}", batch.items)
+            };
+            let (mut next_id, mut cells) = (100, Vec::new());
+            for offset in [0.0, 300.0, 600.0, 2000.0, 0.0] {
+                c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+                if let Some(batch) = c.commit() {
+                    stack.apply(&batch);
+                }
+                render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+                let batch = c.commit().unwrap();
+                // Every set the list pins keeps its bar, last (on top).
+                for item in &batch.items {
+                    if let MountItem::StickyCells { id: 2, cells } = item {
+                        assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                    }
+                }
+                stack.apply(&batch);
+                assert_eq!(
+                    stack.views.last(),
+                    Some(&bar),
+                    "at {offset}, raised in order: {in_order}: {:?} (sticky {:?})",
+                    stack.views,
+                    stack.sticky
+                );
+                assert!(stack.sticky.len() > 1, "a row sticks: {:?}", stack.sticky);
+            }
+        }
     }
 
     /// A core drawing every bar with `bars`: in a view 2, a multiline (or

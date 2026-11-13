@@ -1085,6 +1085,22 @@ impl Host {
         });
     }
 
+    /// Publishes what the performance monitor measured last to JS (`nsh`'s
+    /// `perfStats()`): `None` while it does not measure.
+    pub fn set_perf_stats(&self, stats: Option<&nsh_core::platform::PerfStats>) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = match crate::env::set_perf_stats(raw, stats) {
+                    Ok(()) => Ok(()),
+                    Err(()) => Err(rquickjs::Error::Exception),
+                };
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
     pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
@@ -1290,6 +1306,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 None => obj.set("button", Value::new_null(cx.clone()))?,
             }
         }
+        EventPayload::Key(event) => {
+            obj.set("key", event.key.as_str())?;
+            obj.set("code", event.code.as_str())?;
+            obj.set("modifiers", modifiers_object(cx, &event.modifiers)?)?;
+            obj.set("repeat", event.repeat)?;
+            obj.set("defaultPrevented", event.default_prevented)?;
+        }
         EventPayload::Wheel(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
             obj.set("pagePosition", point_object(cx, e.page_position)?)?;
@@ -1360,6 +1383,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         // The core answers these too.
         EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
+        // And offscreen canvas renders.
+        EventPayload::CanvasImage { id, .. } => obj.set("id", *id)?,
         // And speech sessions' events (`Speech`'s listeners get them).
         EventPayload::Speech { id, .. } => obj.set("id", *id)?,
         // And sounds' and players' events (their objects' listeners).
