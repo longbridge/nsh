@@ -53,7 +53,7 @@ pub(crate) enum PackageTarget {
 impl PackageTarget {
     /// This machine's desktop target (`None` off macOS, Windows and
     /// Linux): where `--target gpui` points.
-    fn desktop() -> Option<PackageTarget> {
+    pub(crate) fn desktop() -> Option<PackageTarget> {
         if cfg!(target_os = "macos") {
             Some(PackageTarget::Macos)
         } else if cfg!(windows) {
@@ -1068,7 +1068,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             codesign(&app, "-", path.as_deref())?;
             ui::done(format!("packaged {}", ui::path(&app)));
             if options.run {
-                let udid = crate::run::simulator(None)?;
+                let udid = crate::run::simulator(None, crate::run::SimulatorWindow::Front)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
                 crate::run::simctl_with_env(

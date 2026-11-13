@@ -36,7 +36,7 @@ const engine = (changes = {}) => ({
   window: { width: 390, height: 844 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
   colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
-  locale: "de-AT", host: false, lifecycle: "active", shaders: true, localeSettings: settings(),
+  locale: "de-AT", host: false, lifecycle: "active", shaders: true, wakeCount: 0, localeSettings: settings(),
   platform: { os: "web", version: "0.0", idiom: "desktop", desktop: true, appleKeyboard: false },
   ...changes,
 });
@@ -67,6 +67,14 @@ test("the environment serves every export of nsh/device and nsh/accessibility", 
       assert.equal(namespace[name], env.api[name], `${specifier}'s \`${name}\` is nsh's`);
     }
   }
+});
+
+test("the browser reports no system wakes", () => {
+  const { env } = environment();
+  assert.equal(env.api.wakeCount(), 0);
+  env.update(engine({ lifecycle: "background" }));
+  env.update(engine({ lifecycle: "active" }));
+  assert.equal(env.modules["nsh/device"].wakeCount(), 0);
 });
 
 test("setTheme hands the theme to the engine and reads the tokens again once it took", () => {

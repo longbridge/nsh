@@ -1,6 +1,6 @@
 ---
 title: Menu
-description: "Menu and ContextMenu with MenuItem, MenuSeparator and Submenu: a popup with cascading submenus on desktops, a sheet with submenus in place on phones, styled by the app."
+description: "Menu and ContextMenu with MenuItem, MenuSeparator and Submenu: a popup with cascading submenus on desktops, a sheet with submenus in place on phones, styled by the app; MenuButton for the system's own menu."
 group: base
 demo: el-menu
 ---
@@ -10,7 +10,8 @@ demo: el-menu
 A menu is a list of actions its trigger opens. One structure serves every device, presented as each expects:
 
 - On the desktops and in desktop browsers, a popup at the trigger; a `Submenu` cascades beside its item as the
-  pointer comes over it or presses it.
+  pointer comes over it or presses it, its first item level with that item (inside the padding and border of your
+  `popupClass`).
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the
   sheet in place of the menu's, with a row of yours leading back.
 
@@ -139,6 +140,10 @@ it. On macOS, VoiceOver's "show menu" action (VO-Shift-M) opens it, and on Windo
 menu" action through UI Automation does. These openings place the menu below the trigger, starting at its start edge, with the keyboard focus on
 its first enabled item, as WAI-ARIA describes for context menus. Make the trigger `focusable` so the keyboard reaches
 it. A view's own `onContextMenu` tells these openings apart by `pointerType`, which is `null` for them.
+
+When you control `open` and set it to `true` yourself, for a shortcut of your own or for a list that has the focus
+while one of its rows is the one asked about, the menu opens the same way: below the trigger, with the keyboard
+focus on its first enabled item, and closing it gives the focus back to the trigger.
 
 ## Checkable items
 
@@ -309,6 +314,60 @@ menu()
     )
     .child(submenu().trigger(text("Reasoning")).child(/* … */))
 ```
+
+## The system's menu: MenuButton
+
+`Menu` draws a menu in your app's look on every device. When an app wants the system's own menu instead (the iOS
+pull-down menu, with its placement, motion and Liquid Glass on iOS 26), `MenuButton` shows one from a trigger you draw:
+
+```tsx
+import { MenuButton } from "nsh/base";
+
+<MenuButton
+  accessibilityLabel="Account"
+  title={email()}
+  items={[
+    { id: "settings", label: "Settings", icon: "gearshape" },
+    { id: "read", label: "Mark all as read", disabled: !unread() },
+    { id: "", label: "Language", items: languages.map((l) => ({ id: l.id, label: l.label, checked: l.id === lang() })) },
+    { id: "", label: "Appearance", inline: true, items: [
+      { id: "light", label: "Light", checked: !dark() },
+      { id: "dark", label: "Dark", checked: dark() },
+    ] },
+  ]}
+  onSelect={({ id }) => choose(id)}
+  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+>
+  <Avatar … />
+  <Text>{account()}</Text>
+</MenuButton>;
+```
+
+The items are data, each with an `id` of yours that `onSelect({ id })` reports; a check, `disabled` and `destructive`
+(red on iOS) are the item's state, the app's to change; an item with `items` is a submenu, or with `inline` a section
+shown in place under its `label`. The children, `class` and `style` are the trigger, drawn by the app on every platform.
+
+- **iOS and Mac Catalyst**: the trigger is covered by a transparent `UIButton` whose `UIMenu` is its primary action:
+  a tap, VoiceOver's activation or a hardware keyboard opens it at once, without waiting for JS. `icon` is an SF
+  Symbol; `title` heads the menu. VoiceOver reaches the button, named by `accessibilityLabel`, and not the trigger's
+  content under it. New `items` change the menu the next time it opens.
+- **Desktops (macOS, Windows, Linux)**: a press shows the items as the platform's context menu at the pointer (as
+  `Menu.popup` from `nsh/desktop`), sections between separators; `icon`, `title` and `destructive` are not shown.
+- **Android and the web**: there is no system menu for a view; the trigger shows and opens nothing. Use `Menu` there,
+  picked by `platform.os`.
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | The menu's items, in order. |
+| `title` | `.title(..)` | `string` | none | iOS: the menu's title, above its items. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | It cannot be pressed and opens nothing. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the button. |
+| `class`, `style`, `children` | style methods, `.child(..)` | | none | The trigger the app draws. |
+
+`MenuButtonItem` is `{ id, label, icon?, checked?, disabled?, destructive?, items?, inline? }` (Rust:
+`MenuButtonItem::new(id, label)`, `::submenu(label, items)`, `::section(label, items)`, then `.icon(..)`,
+`.checked(..)`, `.disabled(..)`, `.destructive(..)`). Its one event is `onSelect({ id })` (Rust:
+`.on_select(|id: &SharedString| ..)`), after the menu closed.
 
 ## Props
 

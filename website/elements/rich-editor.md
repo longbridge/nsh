@@ -120,6 +120,38 @@ const inLink = () => (revision(), editor.isActive("link"));
 A link menu edits the link under the caret with `chain([extendMarkRange("link"), command("setLink", { href })])`
 and removes it with `command("unsetLink")` after the same `extendMarkRange`.
 
+`contentLayer` is the app's own layer over the document, inside the box that scrolls: what it holds moves with
+the text in the same frame. Place its children in the content box's points, where `editor.nodeRect(pos)` (the box
+of the block starting at `pos`) and `editor.coordsAtPos(pos)` answer: a handle in a block's margin, a marker beside
+a node. The layer itself takes no press; its children do.
+
+```tsx
+const box = editor.nodeRect(blockStart);
+
+<RichEditor
+  editor={editor}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+/>
+```
+
+### Pasted and dropped files
+
+Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the
+editor inserts nothing for them and keeps its selection, where the app inserts what it makes of them. A paste of
+images or of files copied in a file manager calls `onPasteFiles` with `{ files, uris }`: `files` the images with
+their bytes, `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
+the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file drops](./view.md#desktop-file-drops)
+do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
+`onFileDrop` the editor leaves dropped files to the view around it that listens.
+
+```tsx
+<RichEditor
+  editor={editor}
+  onPasteFiles={({ files }) => attach(files)}
+  onFileDrop={({ uris, mimeTypes }) => attachFiles(uris, mimeTypes)}
+/>
+```
+
 ## Schemas
 
 `defineSchema(spec)` reads a schema in ProseMirror's shape and throws with what is wrong in it. Node types name their
@@ -394,6 +426,36 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 
 The popup is the app's: it reads the suggestion's state, places itself at `coordsAtPos(range.from)` and draws the
 items its own way.
+
+## A block editor
+
+A Notion-style editor is made of the pieces above, with the UI around the document the app's own. The gallery's Block editor demo (`examples/gallery/demos/BlockEditorDemo.tsx`) is one: a `/` menu of blocks, a handle on each block and a toolbar over a selection.
+
+```tsx
+import { Overlay } from "nsh";
+import { RichEditor, StarterKit, chain, command, createRichEditor, defineExtension, deleteRange, suggestion } from "nsh/base";
+
+// An extension ranks above the keymap, so Enter picks an item before it splits the paragraph.
+const slash = defineExtension({
+  name: "slashCommand",
+  priority: 1000,
+  addProseMirrorPlugins: () => [suggestion({ key: "slash", char: "/", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] })],
+});
+const editor = createRichEditor({ extensions: [StarterKit, slash] });
+
+// The menu goes in `bubbleMenu` while `editor.suggestion("slash")?.active`; a pick replaces the trigger and the query.
+const { range } = editor.suggestion("slash")!;
+editor.run(chain([deleteRange({ from: range.from, to: range.to }), command("toggleBulletList")]));
+
+// A handle: the block under the pointer, and where it is on the page for an `Overlay` anchored there.
+const start = editor.posAtPageCoords(event.pagePosition);
+const rect = editor.pageNodeRect(start!);
+editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // then dragTo(point) while moving, endDrag() on release
+```
+
+- The plugins of `createRichEditor`'s own `plugins` come after the extensions' and the keymap; a plugin whose keys must come first (a suggestion's Enter) is an extension with a high `priority`.
+- `pageNodeRect(pos)` and `posAtPageCoords(point)` answer in page points, the coordinates of `Overlay`'s `anchor` and of pointer events, so a handle sits in the editor's margin as an overlay that follows the block.
+- `dragBlock(pos, point)`, `dragTo(point)` and `endDrag()` move a block with the pointer: the drop line follows it and the drop is one undo step. A handle that also opens a menu on a tap claims the pointer only once it has moved (`onMoveShouldSetResponder`), so the tap keeps its `onPress`; a `Button` takes its own presses and passes the drag no responder.
 
 ## Tables
 

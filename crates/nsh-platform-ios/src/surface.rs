@@ -775,6 +775,7 @@ impl RootView {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]

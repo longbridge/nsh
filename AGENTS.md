@@ -142,7 +142,8 @@ crates/
                        `DrawCx` with the transform and opacity GPUI lacks), text shaped by GPUI's text system on the engine
                        thread, the main-thread queue (`rt.rs`), GPUI events (`events.rs`, keys as Windows VK codes);
                        `AppView` is a GPUI view for GPUI / GPUI Kit apps; features `webview` (wry), `video` (GStreamer),
-                       `dev` as above, `shot` (screenshots on macOS / Windows: GPUI's test support); it is the
+                       `dev` as above, `shot` (screenshots on macOS / Windows: GPUI's test support), the runtime's
+                       optional parts as the other platform crates (docs/dev/features.md); it is the
                        backend for embedding, standalone apps run on each OS's own backend (docs/dev/gpui.md)
   gpui/nsh-gpui-host/  Development host on GPUI (`nsh run --target gpui`): shows a TSX app as GPUI apps that embed it
                        show it; connects to a dev server or runs a bundle
@@ -585,6 +586,13 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
   (`.github/pull_request_template.md`).
 - A PR review presents, in order: the PR's purpose (the problem and the scope of the changes), whether the requirement
   and approach are reasonable, then concrete findings, the validation performed and its limits.
+- **Scope comes first.** NSH stays a lightweight GUI framework, not an all-in-one platform. Fixes, performance,
+  refinements of existing behavior and options of an existing component that are common in its domain are welcome;
+  a new feature an app can build in Rust (its own crate, native components, platform APIs) or with existing APIs,
+  that one app needs, or that does not work the same on every platform is not accepted, and one that would need a new
+  section or page of the website's documentation opens a new direction, the hardest to accept (`CONTRIBUTING.md`
+  "Scope: what NSH accepts"). A PR adding a new feature without a maintainer's agreement on an issue is flagged before its
+  code is reviewed, and its review recommends closing it rather than polishing it.
 
 ## Performance rules (the project's first priority)
 
@@ -630,8 +638,11 @@ CI builds with huacnlee/cargo, as developers do: `.github/actions/cargo` install
 and caches the dependencies' builds (`~/.cargo/targets/shared-deps`) with the registry, one cache per job, saved by
 `main` and restored by pull requests. It builds without incremental state or debug info and ignores the toolchain
 file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the release. Files a crate reads from outside its
-directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. Every workflow,
-the release and the website's deployment included, runs on GitHub's runners (`docs/dev/tooling.md` "Runners").
+directory (`include_bytes!`, test fixtures) go into its workflows' `files` in `paths.py`. The Examples workflow and
+the Linux runs of TUI, Rust application and GPUI run on a self-hosted runner that keeps their builds between jobs
+(forks' pull requests and the scheduled runs, which save the dependencies' caches, run them on GitHub's runners);
+every other job, Core, `CI paths`, Compat, the release and the website's deployment included, runs on GitHub's
+runners (`docs/dev/tooling.md` "Runners").
 
 ## Parallel agents
 

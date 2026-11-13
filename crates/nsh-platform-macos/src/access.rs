@@ -49,6 +49,7 @@
 
 pub(crate) mod scroll_bar;
 pub(crate) mod table;
+pub(crate) mod text_spans;
 
 use std::{
     cell::{Cell, RefCell},
@@ -71,11 +72,25 @@ use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSRect, NSString};
 
 use crate::view::{NshView, ViewState, superview};
 
+/// What text accessibility reads, omitting inline views' placeholder characters.
+fn spoken(text: &AttributedText) -> std::borrow::Cow<'_, str> {
+    if text.attachments.is_empty() {
+        text.visible_text()
+    } else {
+        std::borrow::Cow::Owned(text.copied_text(0..text.len_utf16()))
+    }
+}
+
 /// The drawn bounds in AppKit screen coordinates. Convert through the
 /// layer tree first: NSView's conversions omit layer transforms. The
 /// outermost layer-backed view bridges back to window coordinates, also
 /// when the surface is embedded in another view.
 pub(crate) fn frame(view: &NSView) -> Option<NSRect> {
+    frame_of(view, view.layer()?.bounds())
+}
+
+/// A rectangle of a view in AppKit screen coordinates, including layer transforms.
+pub(crate) fn frame_of(view: &NSView, rect: NSRect) -> Option<NSRect> {
     let window = view.window()?;
     let layer = view.layer()?;
     let mut outer = view.retain();
@@ -86,7 +101,7 @@ pub(crate) fn frame(view: &NSView) -> Option<NSRect> {
             outer = view;
         }
     }
-    let bounds = layer.convertRect_toLayer(layer.bounds(), outer.layer().as_deref());
+    let bounds = layer.convertRect_toLayer(rect, outer.layer().as_deref());
     Some(window.convertRectToScreen(outer.convertRect_toView(bounds, None)))
 }
 
@@ -106,8 +121,12 @@ pub(crate) struct Applied {
     ax: AxState,
     /// Stable, non-view columns, created only when an AX client asks.
     columns: Vec<Retained<table::Column>>,
+    /// Inline text elements, created only when an AX client asks.
+    text_spans: Option<std::rc::Rc<text_spans::Snapshot>>,
     /// A scroll area's scroll bar, created only when an AX client asks.
     scroll_bar: Option<Retained<scroll_bar::ScrollBar>>,
+    /// The active descendant last told of ([`relations_changed`]).
+    active: Option<nsh_core::NodeId>,
 }
 
 /// Which of its children VoiceOver reaches through a view.
@@ -146,6 +165,9 @@ pub(crate) fn controls(children: Option<Retained<NSArray>>) -> Retained<NSArray>
     let mut out: Vec<Retained<AnyObject>> = Vec::new();
     fn gather(children: Option<Retained<NSArray>>, out: &mut Vec<Retained<AnyObject>>) {
         for child in children.iter().flat_map(|c| c.iter()) {
+            if text_spans::is_static(&child) {
+                continue;
+            }
             let content = child.downcast_ref::<NSView>().filter(|view| {
                 NshView::from_ns(view)
                     .is_some_and(|v| v.try_state().is_some_and(|s| is_content(&s)))
@@ -187,10 +209,11 @@ pub(crate) fn in_reading_order(
     let container = view.container();
     let mut keyed = Vec::with_capacity(list.count());
     for child in list.iter() {
-        let Some(origin) = child
+        let native = child
             .downcast_ref::<NSView>()
-            .and_then(|v| child_origin(&container, v))
-        else {
+            .map(Message::retain)
+            .or_else(|| text_spans::owner(&child));
+        let Some(origin) = native.as_deref().and_then(|v| child_origin(&container, v)) else {
             return children;
         };
         keyed.push((origin, child));
@@ -294,7 +317,7 @@ fn gather_name(view: &NSView, out: &mut String) {
                 .label
                 .as_deref()
                 .map(str::to_owned)
-                .or_else(|| s.text.as_ref().map(|t| t.text.visible_text().into_owned())),
+                .or_else(|| s.text.as_ref().map(|t| spoken(&t.text).into_owned())),
         };
         drop(s);
         match own {
@@ -614,6 +637,96 @@ pub(crate) fn props_changed(view: &NshView) {
         view.state_mut().access.test_id = id;
     }
     update(view);
+    relations_changed(view);
+}
+
+/// The view `id` names in `view`'s surface.
+fn named(view: &NshView, id: Option<nsh_core::NodeId>) -> Option<NshView> {
+    let surface = view.surface()?;
+    let mounter = surface.mounter.try_borrow().ok()?;
+    mounter.views.get(&id?).cloned()
+}
+
+/// The view that is active inside `view` while it keeps the focus
+/// (`accessibilityActiveDescendant`): its `AXSelectedChildren`, as WebKit
+/// and Chromium answer for an ARIA active descendant.
+pub(crate) fn active_descendant(view: &NshView) -> Option<Retained<AnyObject>> {
+    let id = view.try_state()?.props.accessibility.active_descendant;
+    named(view, id)
+        .map(|v| Retained::into_super(Retained::into_super(Retained::into_super(v.ns().retain()))))
+}
+
+/// The view whose content `view` controls (`accessibilityControls`): its
+/// `AXLinkedUIElements`, as WebKit gives ARIA's `aria-controls`.
+pub(crate) fn controlled(view: &NshView) -> Option<Retained<AnyObject>> {
+    let id = view.try_state()?.props.accessibility.controls;
+    named(view, id)
+        .map(|v| Retained::into_super(Retained::into_super(Retained::into_super(v.ns().retain()))))
+}
+
+/// What a combo box's field answers ([`combobox_field`]).
+pub(crate) struct ComboboxField {
+    /// The input's label.
+    pub(crate) label: Option<Arc<str>>,
+    /// Its list is open.
+    pub(crate) expanded: bool,
+    /// Its active descendant.
+    pub(crate) active: Option<Retained<AnyObject>>,
+    /// The list it controls.
+    pub(crate) controls: Option<Retained<AnyObject>>,
+}
+
+/// An input that is a combo box (`role="combobox"`): its field, which
+/// keeps the keyboard focus, is the combo box VoiceOver is on, as WebKit's
+/// editable combo box is, and the input view is no element of its own
+/// ([`base_role`]).
+pub(crate) fn combobox_field(view: &NshView) -> Option<ComboboxField> {
+    let (label, expanded) = {
+        let s = view.try_state()?;
+        let a = &s.props.accessibility;
+        if s.kind != ViewKind::Input || a.role != Role::Combobox {
+            return None;
+        }
+        (a.label.clone(), a.state.expanded == Some(true))
+    };
+    Some(ComboboxField {
+        label,
+        expanded,
+        active: active_descendant(view),
+        controls: controlled(view),
+    })
+}
+
+/// The view's active descendant changed: VoiceOver, which stays on the
+/// focused element, hears of its selected children changing and reads the
+/// one now active (`NSAccessibilitySelectedChildrenChangedNotification`,
+/// as WebKit and Chromium post for a combo box's active descendant).
+fn relations_changed(view: &NshView) {
+    let active = view.state().props.accessibility.active_descendant;
+    if view.state().access.active == active {
+        return;
+    }
+    view.state_mut().access.active = active;
+    if active.is_none() {
+        return;
+    }
+    let element = crate::text_input::accessibility_element(view);
+    // A text field's notifications go out from its cell: AppKit passes on
+    // none posted on the field itself.
+    let cell = element
+        .downcast_ref::<objc2_app_kit::NSControl>()
+        .and_then(|f| f.cell());
+    let from: &AnyObject = match &cell {
+        Some(cell) => cell,
+        None => &element,
+    };
+    // SAFETY: a notification AppKit defines, on a live element.
+    unsafe {
+        objc2_app_kit::NSAccessibilityPostNotification(
+            from,
+            objc2_app_kit::NSAccessibilitySelectedChildrenChangedNotification,
+        )
+    };
 }
 
 /// The view's event listeners changed: views with press handlers are
@@ -635,11 +748,23 @@ pub(crate) fn text_changed(view: &NshView) {
         let mut s = view.state_mut();
         let s = &mut *s;
         let Some(drawn) = &s.text else { return };
-        let old = s.access.text.replace(drawn.text.clone());
+        let text = drawn.text.clone();
+        let old = s.access.text.replace(text.clone());
+        if old.as_ref().is_none_or(|old| !Arc::ptr_eq(old, &text)) {
+            s.access.text_spans = None;
+        }
         match old {
             Some(old)
-                if Arc::ptr_eq(&old, &drawn.text)
-                    || old.visible_text() == drawn.text.visible_text() =>
+                if Arc::ptr_eq(&old, &text)
+                    || (old.links == text.links
+                        && old
+                            .visible_text()
+                            .chars()
+                            .filter(|&c| c != nsh_core::ATTACHMENT_CHAR)
+                            .eq(text
+                                .visible_text()
+                                .chars()
+                                .filter(|&c| c != nsh_core::ATTACHMENT_CHAR))) =>
             {
                 return;
             }
@@ -730,12 +855,17 @@ fn update(view: &NshView) -> bool {
         let a = &s.props.accessibility;
         let pressable = is_pressable(s.events);
         // Hidden runs are not read.
-        let text = s.text.as_ref().map(|t| t.text.visible_text());
+        let text = s.text.as_ref().map(|t| spoken(&t.text));
         let mut spec = spec_for(a, s.kind, pressable, text.as_deref(), s.style.hidden);
         if let Some(control) = s.props.window_control
             && !spec.hidden
         {
             spec.role = window_button(control);
+        }
+        if text_spans::separate_text(s) {
+            // Inline links and plain stretches are separate elements in
+            // document order. Reading the complete parent duplicates them.
+            spec.role = Ax::Generic;
         }
         if s.access.spec.as_deref() == Some(&spec) {
             return false;
@@ -1152,6 +1282,8 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
         Role::Summary => Ax::Status,
         Role::Alert => Ax::Alert,
         Role::Checkbox => Ax::CheckBox,
+        // An input's field is the combo box (`combobox_field`).
+        Role::Combobox if kind == ViewKind::Input => Ax::Generic,
         Role::Combobox => Ax::ComboBox,
         Role::Menu => Ax::Menu,
         Role::Menubar => Ax::MenuBar,
@@ -1211,7 +1343,7 @@ fn announce_live(view: &NshView) {
                 .state()
                 .text
                 .as_ref()
-                .map(|t| t.text.visible_text().into_owned());
+                .map(|t| spoken(&t.text).into_owned());
             if let Some(text) = text {
                 announce(view.ns(), &text, priority(live));
             }

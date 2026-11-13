@@ -50,7 +50,7 @@ use nsh_core::{
     EventKind, EventPayload, ImageSource, NodeId, PayloadValue, ROOT_ID,
     desktop::{
         DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, TitleBarOptions,
-        TitleBarStyle, WindowFrame, menu_icon,
+        TitleBarStyle, WindowEvent, WindowFrame, menu_icon,
     },
     geometry::{DevicePixels, Edges, Points, size},
 };
@@ -148,6 +148,10 @@ pub(crate) struct Chrome {
     pub(crate) labels: RefCell<MenuLabels>,
     /// The loads of the icons of that menu, given up with it.
     menu_icons: RefCell<Vec<crate::image::Load>>,
+    /// The app listens to quit requests
+    /// (`DesktopCommand::SetQuitOnRequest(false)`): the Quit item and
+    /// Command-Q ask it ([`ask_quit`]).
+    asks_quit: Cell<bool>,
 }
 
 /// A window's title bar as the app set it (`titleBar`).
@@ -519,6 +523,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // with its window kept hidden; an embedding app keeps its own
         // lifecycle.
         DesktopCommand::Quit => crate::app::quit_app(),
+        DesktopCommand::SetQuitOnRequest(quit) => surface.chrome.asks_quit.set(!quit),
         // Quits as above, then the runner starts the app again.
         DesktopCommand::Restart => crate::app::restart_app(),
         DesktopCommand::SetMenu(items) => set_menu(surface, items.clone()),
@@ -555,6 +560,22 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             crate::global_shortcut::unregister(surface, *id)
         }
     }
+}
+
+/// The user asked to quit (the Quit item, Command-Q, the Dock): while the
+/// app listens to quit requests, it hears this one
+/// ([`WindowEvent::QuitRequest`]) and decides, and this is true; false when
+/// quitting goes on.
+pub(crate) fn ask_quit(surface: &Surface) -> bool {
+    if !surface.chrome.asks_quit.get() {
+        return false;
+    }
+    surface.event(
+        ROOT_ID,
+        EventKind::Window,
+        EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+    );
+    true
 }
 
 /// Moves and sizes the window: a field left out keeps its value.

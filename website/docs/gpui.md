@@ -91,7 +91,9 @@ on need them installed, with GTK 3 and GStreamer's base and good plug-ins (Debia
 
 The `nsh-platform-gpui` crate (from the NSH repository) gives a Rust GPUI app `AppView`: one NSH engine as a GPUI
 view (`Entity<AppView>`), which fills the space its parent element gives it. Each `AppView` is independent; several
-can run at once. It runs a Rust root, the root component of your crate:
+can run at once. Like the other platform crates it has every optional part of the runtime on by default; a GPUI app
+that embeds only some apps can [leave parts out of its binary](./project-structure.md#leaving-parts-out-of-the-binary).
+It runs a Rust root, the root component of your crate:
 
 ```rust
 use gpui::{AppContext, WindowOptions};
@@ -162,6 +164,12 @@ so only load it from your own app's files.
 - `AppView::set_locale(locale, cx)` and `AppView::set_font_scale(scale, cx)` give the app your app's language and
   text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
   follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+- `AppView::set_theme_overrides(Some(json), cx)` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens):
+  a theme file in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light
+  and dark mode while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start
+  with it (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing). With
+  a whole theme from `set_theme` / `set_theme_json`, the overrides win over that one's tokens, and each stays when the
+  other changes.
 - `AppView::run_package(&package)` runs a [signed package](./signed-packages.md#loading-packages-in-a-host-app)
   from `verify_package` or `load_package`; `accept_package` records it once your app decided it is healthy.
 - `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
@@ -174,8 +182,9 @@ so only load it from your own app's files.
 
 What draws or behaves differently from the native desktop backends:
 
-- **Transforms**: rotated, skewed and projected views turn their backgrounds, borders and shadows, but text stays
-  upright, and images, videos and canvases draw at their bounds.
+- **Transforms**: rotated, skewed and projected views turn their backgrounds, borders, shadows and images (a turning
+  photo is redrawn at each new angle, a one-color SVG icon is turned by the GPU), and canvases follow rotations and
+  skews; text stays upright and videos draw at their bounds.
 - **Opacity** applies to each color rather than to a group, so overlapping children of a translucent view show
   through each other; an image's opacity (a fade-in, a translucent view) changes in sixteenths.
 - **Rounded clips** (`overflow: "hidden"` with a radius) round the backgrounds and images of the children, but text,

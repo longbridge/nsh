@@ -5,7 +5,8 @@
 //! [`crate::EventKind::Menu`]; mobile platforms ignore them. The platforms
 //! report the main window's state in the environment ([`WindowState`]),
 //! the other windows' as [`WindowEvent`]s, and the displays with their own
-//! message ([`Display`]).
+//! message ([`Display`]). The app's login item is a backend the runner
+//! gives the core ([`LoginItemBackend`]).
 
 use std::sync::Arc;
 
@@ -17,11 +18,14 @@ use crate::{
     keymap::{self, Keystroke, Modifiers, When},
 };
 
+mod login_item;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod menu_icon;
 pub mod window;
 mod window_state;
 
+pub(crate) use login_item::LoginItems;
+pub use login_item::{LaunchAtLoginError, LoginItemBackend, LoginItemStatus};
 pub use window::{
     Backdrop, CloseReason, MainWindowOptions, OpenWindow, ProgressState, ResizeEdge, SizeToContent,
     TitleBarOptions, WindowAttributes, WindowBackend, WindowCloseCause, WindowControl, WindowEvent,
@@ -865,6 +869,14 @@ pub enum DesktopCommand {
     /// ([`crate::restart`]). A view embedded in another app leaves the
     /// app's lifecycle to that app: nothing happens there.
     Restart,
+    /// Whether the user's quit requests quit the app: its Quit item and
+    /// the platform's quit key (Command-Q, Ctrl+Q). `false` while the app
+    /// listens to them ([`crate::element::desktop::on_quit_request`]): the
+    /// platform reports them on the root ([`WindowEvent::QuitRequest`])
+    /// instead, and the app sends [`DesktopCommand::Quit`] when it is
+    /// ready. The system ending the app (logging out, shutting down) quits
+    /// either way. Sent when it changes; `true` until the first.
+    SetQuitOnRequest(bool),
     /// The application menu (macOS's menu bar, the window's menu bar on
     /// Windows and Linux; not shown there while the title bar is hidden,
     /// its shortcuts still work); `None` restores the platform's default.

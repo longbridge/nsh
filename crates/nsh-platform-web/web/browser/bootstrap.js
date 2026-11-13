@@ -3722,7 +3722,15 @@
 			"disabledStyle",
 			"testID",
 			"tooltip",
-			"onLayout"
+			"onLayout",
+			"onFileDragEnter",
+			"onFileDragLeave",
+			"onFileDrop",
+			"onMouseEnter",
+			"onMouseMove",
+			"onMouseLeave",
+			"onMouseUp",
+			"onContextMenu"
 		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {
@@ -5123,7 +5131,8 @@
 			e.id,
 			e.when,
 			e.repeat,
-			e.passThrough
+			e.passThrough,
+			e.forFocus
 		]), !!platform.appleKeyboard]);
 		dom.rootProp("onKeyCommand", (id) => {
 			const entry = entries.find((entry) => entry.id === id);
@@ -5143,7 +5152,7 @@
 					pairs = [[String(first), handler]];
 				}
 				if (options != null && typeof options !== "object") throw new TypeError("keymap.bind: options must be an object");
-				const when = options?.when, repeat = !!options?.repeat, passThrough = !!options?.passThrough;
+				const when = options?.when, repeat = !!options?.repeat, passThrough = !!options?.passThrough, forFocus = !!options?.forFocus;
 				if (when !== void 0 && when !== "always" && when !== "notEditing") throw new TypeError("keymap.bind: when must be always or notEditing");
 				const added = pairs.map(([text, handler]) => {
 					if (typeof handler !== "function") throw new TypeError(`keymap.bind: the handler of ${JSON.stringify(text)} is not a function`);
@@ -5154,7 +5163,8 @@
 						id: next++,
 						when,
 						repeat,
-						passThrough
+						passThrough,
+						forFocus
 					};
 				});
 				const updated = [...entries, ...added];
@@ -5232,6 +5242,7 @@
 			host: false,
 			lifecycle: "active",
 			shaders: true,
+			wakeCount: 0,
 			localeSettings: {
 				languages: ["en-US"],
 				timeZone: "UTC",
@@ -5275,6 +5286,7 @@
 			lifecycle: () => fields.lifecycle(),
 			platform,
 			shadersAvailable: () => fields.shaders(),
+			wakeCount: () => fields.wakeCount(),
 			fpsEnabled: () => false
 		};
 		const accessibility = {
@@ -6140,7 +6152,7 @@
 		installFetch: () => installFetch,
 		installTesting: () => installTesting
 	});
-	function configureAPIs(nsh, modules, dom, active, env) {
+	function configureAPIs(nsh, modules, dom, active, env, page = {}) {
 		nsh.nextTick = (callback, ...args) => {
 			if (typeof callback !== "function") throw new TypeError("nextTick: callback must be a function");
 			queueMicrotask(() => {
@@ -6159,7 +6171,9 @@
 			parent: null,
 			state: () => null,
 			titleBar: env.titleBar,
-			set() {},
+			set(attributes) {
+				if (typeof attributes?.title === "string") page.setWindowTitle?.(attributes.title);
+			},
 			show() {},
 			hide() {},
 			focus() {},
