@@ -19,7 +19,10 @@ mod emulator;
 mod keys;
 mod vt;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use nsh_core::{
     element::{Style, measure_text},
@@ -114,7 +117,8 @@ impl TerminalApi {
 #[derive(Clone)]
 struct Term {
     emu: Rc<RefCell<Box<dyn TerminalEmulator>>>,
-    size: Rc<RefCell<TerminalSize>>,
+    /// The size in cells the last layout gave, `None` before the first.
+    size: Rc<Cell<Option<TerminalSize>>>,
     rev: Signal<u64>,
     cx: Scope<TerminalEvent>,
     sink: ElementRef,
@@ -151,10 +155,12 @@ impl Term {
     }
 
     fn resize(&self, size: TerminalSize) {
-        if *self.size.borrow() == size {
+        // The first layout reports its size even when it is the one the
+        // emulator starts at.
+        if self.size.get() == Some(size) {
             return;
         }
-        *self.size.borrow_mut() = size;
+        self.size.set(Some(size));
         self.emu.borrow_mut().resize(size);
         self.rev.update(|r| *r += 1);
         self.cx
@@ -253,7 +259,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
     };
     let term = Term {
         emu: Rc::new(RefCell::new(emu)),
-        size: Rc::new(RefCell::new(size)),
+        size: Rc::new(Cell::new(None)),
         rev: signal(0),
         cx,
         sink: element_ref(),
@@ -331,7 +337,8 @@ fn row(
     let cursor = computed(move || {
         term.rev.get();
         let emu = term.emu.borrow();
-        let first_screen = emu.line_count() - term.size.borrow().rows as usize;
+        let rows = term.size.get().unwrap_or_default().rows;
+        let first_screen = emu.line_count() - rows as usize;
         let cursor = emu.cursor()?;
         (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)
     });
