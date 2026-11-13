@@ -48,7 +48,8 @@
   Android's minimum span (about 27 mm between the fingers). In a pager, as UIKit's nesting does: a `ZScroll` with
   content to pan keeps a scroll view around from intercepting until its drag passes the slop, then keeps the drag if it
   has content that way and leaves it otherwise; panning into an edge, it hands the rest of the drag to a scroll view
-  around that can go on (the next or previous page). macOS: the scroll view's container's bounds are its frame over the
+  around that can go on (the next or previous page). The web does the same with its own touch pans (`chainDrag` in
+  `nsh.js`, `docs/dev/web.md` "Zooming"). macOS: the scroll view's container's bounds are its frame over the
   zoom scale (AppKit shows it as the container layer's scale, and hit tests and converts the zoomed children), committed
   on every move; the offset is UIKit's zoomed `contentOffset`, along both axes; trackpad pinches and Control + wheel zoom
   the innermost zoomable view around the pointer (`scroll.rs`'s `pinch`), wheels and trackpads scroll it both ways, and
