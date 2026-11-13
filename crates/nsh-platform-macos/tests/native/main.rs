@@ -38,7 +38,9 @@ fn main() {
     } else {
         #[cfg(target_os = "macos")]
         {
-            if mount::bench_only() {
+            if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
+                title_bar::run();
+            } else if mount::bench_only() {
                 mount::bench_alone();
             } else if std::env::var_os("NSH_MOUNT_CHECK_ONLY").is_some() {
                 mount::run();
