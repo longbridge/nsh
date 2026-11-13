@@ -14,12 +14,24 @@ pub trait ClipboardBackend: Send + Sync {
     /// Holds `text` from now on (`None`: nothing, as after an image was
     /// copied, which the backend does not keep).
     fn set_text(&self, text: Option<String>);
+    /// The HTML it holds with its text (`Clipboard.write`), if it keeps
+    /// HTML; a backend that keeps text only has none.
+    fn html(&self) -> Option<String> {
+        None
+    }
+    /// Holds `html` with the text from now on (`None`: none, as after
+    /// [`ClipboardBackend::set_text`] alone). A backend that keeps text
+    /// only drops it.
+    fn set_html(&self, html: Option<String>) {
+        let _ = html;
+    }
 }
 
 /// A clipboard in memory.
 #[derive(Debug, Default)]
 pub struct MemoryClipboard {
     text: Mutex<Option<String>>,
+    html: Mutex<Option<String>>,
 }
 
 impl MemoryClipboard {
@@ -27,6 +39,7 @@ impl MemoryClipboard {
     pub fn new(text: Option<String>) -> MemoryClipboard {
         MemoryClipboard {
             text: Mutex::new(text),
+            html: Mutex::new(None),
         }
     }
 }
@@ -38,5 +51,13 @@ impl ClipboardBackend for MemoryClipboard {
 
     fn set_text(&self, text: Option<String>) {
         *self.text.lock().unwrap_or_else(|e| e.into_inner()) = text;
+    }
+
+    fn html(&self) -> Option<String> {
+        self.html.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set_html(&self, html: Option<String>) {
+        *self.html.lock().unwrap_or_else(|e| e.into_inner()) = html;
     }
 }

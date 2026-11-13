@@ -157,6 +157,11 @@ pub(crate) trait Driver: Send {
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
     fn clipboard(&mut self) -> Result<Option<String>, String>;
+    /// The HTML on the clipboard with its text (`app.clipboardHtml`).
+    /// Only the headless app keeps it.
+    fn clipboard_html(&mut self) -> Result<Option<String>, String> {
+        Err("the clipboard's HTML is only read in a headless test".into())
+    }
     /// The embedding app sends event `name` with `data` to the app
     /// (`app.host.send`), which then settles.
     fn send_host_event(&mut self, name: &str, data: Value) -> Result<(), String>;
@@ -372,6 +377,10 @@ impl Driver for Headless {
     fn clipboard(&mut self) -> Result<Option<String>, String> {
         self.catch_up();
         Ok(self.screen().clipboard().map(str::to_owned))
+    }
+    fn clipboard_html(&mut self) -> Result<Option<String>, String> {
+        self.catch_up();
+        Ok(self.screen().clipboard_html().map(str::to_owned))
     }
     fn send_host_event(&mut self, name: &str, data: Value) -> Result<(), String> {
         Headless::send_host_event(self, name, data)

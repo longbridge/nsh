@@ -342,6 +342,22 @@ pub(crate) enum ClipboardRead {
     Files(AnswerSlot<Vec<String>>),
 }
 
+/// One item to put on the system clipboard (`Clipboard.write`): the same
+/// content in several formats, as plain text and, for apps that paste
+/// formatting, as HTML. Named as GPUI's `ClipboardItem` and the DOM's,
+/// which also hold one item's representations; this one is a plain
+/// object of its formats (`{ text, html? }`).
+#[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
+#[prop(exact)]
+#[non_exhaustive]
+pub struct ClipboardItem {
+    /// The content as plain text.
+    pub text: String,
+    /// The content as HTML (a fragment, as `text/html` on the web holds).
+    #[prop(skip_none)]
+    pub html: Option<String>,
+}
+
 /// An image read from the system clipboard (`Clipboard.readImage`).
 #[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
 pub struct ClipboardImage {

@@ -1521,6 +1521,7 @@ import { Clipboard } from "nsh";
 ```ts
 const Clipboard: {
   writeText(text: string): Promise<void>;
+  write(item: ClipboardItem): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1528,6 +1529,11 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+interface ClipboardItem {
+  text: string; // the content as plain text
+  html?: string; // the same content as HTML
+}
 
 interface ClipboardImage {
   url: string; // a URL that Image shows and fetch reads
@@ -1538,6 +1544,7 @@ interface ClipboardImage {
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1590,6 +1597,41 @@ const copied = signal(false);
 >
   <Text>{copied() ? "Copied" : "Copy"}</Text>
 </View>;
+```
+
+### Clipboard.write
+
+```ts
+write(item: ClipboardItem): Promise<void>;
+```
+
+Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
+selection: apps that read formatting (mail, documents, rich text editors) paste the HTML, others the text. `html` is
+a fragment (`<p>Hello <b>world</b></p>`), not a whole page. Without `html` it is `writeText(text)`. Rust:
+`set_clipboard_item(item)` with a `ClipboardItem`.
+
+A `ClipboardItem` is one item on the clipboard in several formats, as GPUI's `ClipboardItem` and the DOM's are; here it
+is a plain object of its formats, `{ text, html? }`.
+
+The HTML goes on as each platform's HTML type, in one write with the text: `text/html` on the web and Linux,
+`public.html` on macOS and iOS, an HTML clip on Android and `HTML Format` on Windows. GPUI and terminals put the text.
+On the web, a write made while the user's key or press is handled (a `RichEditor`'s copy) goes through the page's copy
+event, as a browser copies a selection. `Clipboard.readText` reads the text back; a paste reads the HTML (`onPaste`'s
+`html`).
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let mut item = ClipboardItem::default();
+item.text = "Hello world".into();
+item.html = Some("<p>Hello <b>world</b></p>".into());
+set_clipboard_item(item);
+```
+
+```tsx tabs
+import { Clipboard } from "nsh";
+
+await Clipboard.write({ text: "Hello world", html: "<p>Hello <b>world</b></p>" });
 ```
 
 ### Clipboard.readText

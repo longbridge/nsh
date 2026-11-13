@@ -23,7 +23,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
+    task::{
+        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
+        ImageSize,
+    },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -658,6 +661,14 @@ pub fn open_url(url: impl Into<String>) -> Answer<bool> {
 /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
 pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
+}
+
+/// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
+/// text, and its HTML as the platform's HTML type, which apps that read
+/// formatting paste. Where the platform has no HTML on the clipboard (a
+/// terminal) the text only.
+pub fn set_clipboard_item(item: ClipboardItem) {
+    act(super::services::set_clipboard_item(item));
 }
 
 /// The text on the system clipboard, `""` when it holds none (TS:

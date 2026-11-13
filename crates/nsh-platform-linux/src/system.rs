@@ -783,6 +783,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 display.clipboard().set_text(text);
             }
         }
+        Command::SetClipboardHtml { text, html } => set_clipboard_html(text, html),
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),
         Command::ReadClipboardImage { id, has_only } => {
@@ -1406,6 +1407,22 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
             answer(&surface, text.is_some(), text);
         }
     });
+}
+
+/// `Clipboard.write`: `text` and `html` offered together, the HTML as
+/// `text/html` and the text in GDK's text formats.
+fn set_clipboard_html(text: &str, html: &str) {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let providers = [
+        gdk::ContentProvider::for_bytes("text/html", &glib::Bytes::from(html.as_bytes())),
+        gdk::ContentProvider::for_value(&glib::Value::from(text)),
+    ];
+    let provider = gdk::ContentProvider::new_union(&providers);
+    if let Err(err) = display.clipboard().set_content(Some(&provider)) {
+        log::warn!("Clipboard.write: {err}");
+    }
 }
 
 /// `Clipboard.writeImage`: the image of a `data:` URI as a GDK texture,

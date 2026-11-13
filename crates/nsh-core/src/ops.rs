@@ -2339,6 +2339,16 @@ pub enum Command {
     },
     /// Put `text` on the system clipboard (on the root; `Clipboard.writeText`).
     SetClipboard(String),
+    /// Put `text` and `html`, the same content, on the system clipboard:
+    /// the text as plain text, the HTML as the platform's HTML type, which
+    /// apps that read formatting paste (on the root; `Clipboard.write`). A
+    /// platform without one puts the text only.
+    SetClipboardHtml {
+        /// The plain text.
+        text: String,
+        /// The HTML.
+        html: String,
+    },
     /// Read the system clipboard and report it as [`EventKind::Clipboard`]
     /// `id` (on the root): `has` and, unless `has_only`, `text`. Asking
     /// only whether it holds text does not read it (no iOS paste notice).

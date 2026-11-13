@@ -1250,6 +1250,59 @@ fn serve_clipboard(engine: &Engine, rx: &Receiver<MountBatch>, wanted: &str) -> 
     commands
 }
 
+const CLIPBOARD_HTML: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  await Clipboard.write({ text: "a b", html: "<p>a <b>b</b></p>" });
+  await Clipboard.write({ text: "plain" });
+  shown.set("written");
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+/// `Clipboard.write` sends the text with its HTML, and the text alone
+/// when it has none.
+#[test]
+fn the_clipboard_takes_text_with_its_html() {
+    let (engine, rx) = start(CLIPBOARD_HTML);
+    let mut commands = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command,
+            } = item
+            {
+                commands.push(command.clone());
+            }
+        }
+        shows(batch, "written")
+    });
+    drop(engine);
+    let written: Vec<_> = commands
+        .into_iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Command::SetClipboard(_) | Command::SetClipboardHtml { .. }
+            )
+        })
+        .collect();
+    assert_eq!(
+        written,
+        [
+            Command::SetClipboardHtml {
+                text: "a b".into(),
+                html: "<p>a <b>b</b></p>".into()
+            },
+            Command::SetClipboard("plain".into()),
+        ]
+    );
+}
+
 #[test]
 fn the_clipboard_round_trips_through_the_platform() {
     let (engine, rx) = start(CLIPBOARD);
