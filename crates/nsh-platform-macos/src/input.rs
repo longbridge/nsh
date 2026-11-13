@@ -1552,7 +1552,7 @@ fn on_native(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> bool
 /// The origin of `view`'s container's bounds (its scroll offset) and its
 /// zoom: the scroll state, not the bounds — while scrolling the offset
 /// shows as a layer transform and the bounds catch up when it settles.
-fn container_offset(view: &NshView) -> ((f32, f32), f32) {
+pub(crate) fn container_offset(view: &NshView) -> ((f32, f32), f32) {
     if view.container_view().is_none() {
         return ((0.0, 0.0), 1.0);
     }

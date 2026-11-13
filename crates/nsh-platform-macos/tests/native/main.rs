@@ -29,6 +29,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
+mod scaled_input;
+#[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
 mod window_dialog;
@@ -63,6 +65,8 @@ fn main() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
                 fps_collapse::run();
+            } else if std::env::var_os("NSH_SCALED_INPUT_CHECK_ONLY").is_some() {
+                scaled_input::run();
             } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some()
                 || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
             {
@@ -85,6 +89,7 @@ fn main() {
                 ime::run();
                 input_hidden::run();
                 fps_collapse::run();
+                scaled_input::run();
                 zoom::run();
                 mount::run();
                 // Last: it makes the process an accessory app.

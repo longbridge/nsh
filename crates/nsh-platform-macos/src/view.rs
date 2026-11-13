@@ -2412,6 +2412,9 @@ impl NshView {
             parent.track_inputs(self.state().input_count, false);
             parent.adjust_waiting(self.ivars().waiting.get(), false);
         }
+        if self.state().input_count != 0 {
+            crate::text_input::left(self);
+        }
         self.ns().removeFromSuperview();
     }
 
@@ -2457,6 +2460,18 @@ impl NshView {
     /// Stops hosting `view`.
     pub(crate) fn remove_native(&self, view: &NSView) {
         self.state_mut().natives.retain(|n| &*n.view != view);
+        if superview(view).as_deref() == Some(self.ns()) {
+            view.removeFromSuperview();
+        }
+    }
+
+    /// Stops hosting `view`, also while its state is in use: for a hosted
+    /// view outliving what put it here (an input's pad lifted onto a view
+    /// above its input).
+    pub(crate) fn forget_native(&self, view: &NSView) {
+        if let Ok(mut s) = self.0.ivars().state.try_borrow_mut() {
+            s.natives.retain(|n| &*n.view != view);
+        }
         if superview(view).as_deref() == Some(self.ns()) {
             view.removeFromSuperview();
         }
