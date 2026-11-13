@@ -1858,9 +1858,10 @@ impl NshView {
         let Some(layer) = self.container_view().and_then(|c| c.layer()) else {
             return;
         };
+        let scale = self.backing_scale().max(1.0);
         let mut t = IDENTITY;
-        t.m41 = dx as CGFloat;
-        t.m42 = dy as CGFloat;
+        t.m41 = snap_to_scale(dx, scale);
+        t.m42 = snap_to_scale(dy, scale);
         layer.setSublayerTransform(t);
     }
 
@@ -1868,14 +1869,17 @@ impl NshView {
     /// zoom to its size) and drops the layer transform: a no-op visually
     /// (the transform carried exactly the committed-to-live difference),
     /// one subtree walk for AppKit to learn where things are; none when
-    /// they are there.
+    /// they are there. The origin is snapped to the backing pixels, as the
+    /// live transform is ([`NshView::set_layer_scroll`]): a content point
+    /// is `zoom` points on screen.
     pub(crate) fn commit_bounds(&self, x: f32, y: f32) {
         let c = self.ensure_container();
         // In AppKit's floats: unzoomed, the bounds' size is the frame's.
         let zoom = CGFloat::from(crate::scroll::zoom(self));
+        let grid = self.backing_scale().max(1.0) * zoom;
         let size = c.frame().size;
         let bounds = NSRect::new(
-            NSPoint::new(x as CGFloat, y as CGFloat),
+            NSPoint::new(snap_to_scale(x, grid), snap_to_scale(y, grid)),
             CGSize::new(size.width / zoom, size.height / zoom),
         );
         if c.bounds() != bounds {
@@ -2571,9 +2575,28 @@ impl crate::sight::Tree for Planned {
     }
 }
 
+/// Rounds a scroll offset in points to the display's physical backing grid so
+/// stacked cell fills stay pixel-aligned while scrolling and once committed.
+fn snap_to_scale(offset: f32, scale: CGFloat) -> CGFloat {
+    let scale = scale.max(1.0);
+    (offset as CGFloat * scale).round() / scale
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_offsets_snap_to_backing_pixels_consistently_across_commit() {
+        assert_eq!(snap_to_scale(-14.37, 2.0), -14.5);
+        assert_eq!(snap_to_scale(14.37, 2.0), 14.5);
+        // Live delta (`committed - origin`) plus committed origin stays identical
+        // to the snapped target when `commit_bounds` drops the transform.
+        let committed = snap_to_scale(10.12, 2.0);
+        let target: f32 = 24.37;
+        let live_dx = snap_to_scale(committed as f32 - target, 2.0);
+        assert_eq!(committed - live_dx, snap_to_scale(target, 2.0));
+    }
 
     #[test]
     fn content_rasters_step_with_the_scale() {
