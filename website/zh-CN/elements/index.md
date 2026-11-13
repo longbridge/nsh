@@ -371,7 +371,7 @@ import { Menu } from "nsh/desktop";
 
 `ContextMenuEvent` 包含视图中的 `position`、根视图中的 `pagePosition`（`Menu.popup` 放置菜单的位置：`Menu.popup(items, e.pagePosition)`）、`modifiers` 以及 DOM 的 `pointerType`：指针为 `"mouse"`、`"pen"` 或 `"touch"`，键盘或读屏软件为 `null`，此时位置是视图的底部起始角，菜单放在这里就会出现在视图下方；Rust 中为 `position`、`page_position`、`modifiers` 和 `pointer_type`（`Option<PointerType>`）。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
 
-每个组件也都接受 `onContextMenu`（`<Button onContextMenu>`、`button().on_context_menu(..)`），以同样的 `ContextMenuEvent` 报告组件的根视图。在那里显示自己菜单的组件（`ContextMenu` 的 trigger）保留这个事件。
+每个组件也都接受 `onContextMenu`（`<Button onContextMenu>`、`button().on_context_menu(..)`），以同样的 `ContextMenuEvent` 报告组件的根视图。在那里显示自己菜单的组件（`ContextMenu` 的 trigger）保留这个事件。`DataTable` 和 `Editor` 有自己的 `onContextMenu`，报告的是行和列，或文本中的位置。
 
 ### 键盘焦点
 
@@ -390,6 +390,8 @@ ref 的 `focus()` 像 Tab 一样把键盘焦点移到停靠点上（显示它的
 | `focusable` | `.focusable(..)` | `boolean` | 可按压的视图为 `true` | 视图是否是 Tab 的停靠点。`true` 让任何视图成为停靠点，无论它自己接收按压，还是把按压留给外层视图；`false` 把可按压的视图留给指针（关闭浮层的背景层、用方向键切换的列表行）。 |
 | `onFocus` | `.on_focus(..)` | `() => void` | | Tab（或 `focus()`）让视图获得了键盘焦点。 |
 | `onBlur` | `.on_blur(..)` | `() => void` | | 键盘焦点离开了视图。 |
+| `onKeyDown` / `onKeyUp` | `.on_key_down(..)` / `.on_key_up(..)` | `(e: KeyEvent) => void` | | 硬件按键在聚焦视图或其内部按下 / 在聚焦视图上抬起。`KeyEvent` 为 `{ key, code, modifiers, repeat, defaultPrevented }`；一个事件沿原生窗口内的已启用监听祖先各传播一次（[硬件按键](./keyboard.md#自定义视图的硬件按键)）。 |
+| `captureKeys` | `.capture_keys(..)` | `"none" \| "all" \| readonly string[]` | `"none"` | 该视图或聚焦后代在原生默认行为之前消费的按键：规范的按键序列，如 `["mod+k", "escape"]`。`defaultPrevented` 报告该决定；应用快捷键优先，原生输入框保留用于编辑的按键（[硬件按键](./keyboard.md#自定义视图的硬件按键)）。 |
 
 ```rust tabs
 view()
@@ -519,6 +521,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |
 | `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | 获得焦点的元素里当前活动的那一项：组合框高亮的选项、列表的光标行（[无障碍](../docs/accessibility.md#获得焦点的元素里的活动项)）。 |
 | `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | 内容由这个元素控制的元素：组合框的列表。 |
+| `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | 文字用来说明这个元素的元素：输入框的错误提示行（[无障碍](../docs/accessibility.md#说明另一个元素的元素)）。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |

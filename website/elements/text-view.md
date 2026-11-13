@@ -641,7 +641,7 @@ the types of `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, 
 | `heading` | `level` (1–6), `content`, `anchor?` |
 | `blockquote` | `children`, `alert?` (`"note"`, `"tip"`, `"important"`, `"warning"`, `"caution"`) |
 | `list` | `ordered?`, `start?`, `loose?`, `items` (`{ checked?, children }`) |
-| `codeBlock` | `language?`, `meta?`, `code` |
+| `codeBlock` | `language?`, `meta?`, `code`, `id?`, `content?`, `wrap?` |
 | `math` | `tex` |
 | `table` | `align?` (`"none"`, `"left"`, `"center"`, `"right"` per column), `head` (cells), `rows?` (rows of cells); a cell is `{ content }` |
 | `rule` | |
@@ -664,6 +664,8 @@ the types of `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, 
 A document also has `footnotes?`: `{ label, index, children }`, shown after the blocks in the order of their first
 reference. An app can store replies as documents, build them from its own data, or mix in custom nodes that
 `renderCustom` shows.
+
+A code block's `id` is the app's: `onCodeBlockAction` hands the block back with it, so an action knows which block it acts on. `wrap: true` fits the code to the view instead of scrolling it sideways. `content` is the code as inline content (the app's annotations: emphasis, highlights, custom nodes shown as their content in the `custom` part); it shows in place of the highlighted code when its plain text is `code`, so what shows is what copying takes.
 
 ### Parsing and plain text
 

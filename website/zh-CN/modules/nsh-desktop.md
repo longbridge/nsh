@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。声明了能力的应用需要 `"application": true` 才能使用主窗口、应用菜单、托盘、全局快捷键、`quit`、`restart` 和登录时打开（[能力](../docs/sandbox-and-capabilities.md#application)），否则它们什么也不做。右键菜单和应用打开的窗口（由 `windows` 授权）不需要 `application`。
 
 ```rust tabs
 use nsh_core::{
@@ -549,7 +549,7 @@ Rust 代码 await `nsh_core::prelude` 的 `next_second_instance()`，得到带 `
 ### 登录时打开
 
 `Application.launchAtLogin()` 返回系统此刻是否会在用户登录时打开应用，`Application.setLaunchAtLogin(enabled)` 打开或关闭它。Rust
-代码在任务中等待 `launch_at_login()` 和 `set_launch_at_login(enabled)`。和 `quit`、`restart` 一样，它们不需要任何能力。
+代码在任务中等待 `launch_at_login()` 和 `set_launch_at_login(enabled)`。和 `quit`、`restart` 一样，声明了能力的应用需要 `"application": true`：没有它时 `launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED` 拒绝。
 
 ```tsx
 import { signal } from "nsh";
@@ -807,7 +807,11 @@ type MenuItem =
       disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
+      icon?: ImageAsset | string;
+      symbol?: string;
+      destructive?: boolean;
       submenu?: MenuItem[];
+      inline?: boolean;
     };
 ```
 
@@ -819,12 +823,16 @@ type MenuItem =
 | `when` | 在 GPUI 后端上，输入框获得键盘焦点时快捷键何时选中该菜单项：`"always"`（默认）、`"auto"`（除非输入框自己使用这个按键：输入字符、移动光标或删除的键，以及编辑快捷键，和 [`keymap`](./nsh.md#keymap) 的绑定相同）或 `"notEditing"`。菜单项让出的键交给输入框。 |
 | `disabled` | `true` 时菜单项变灰（默认 `false`）。 |
 | `checked` | 设置（为 `true` 或 `false`）后菜单项带勾选标记。 |
-| `submenu` | 让菜单项成为子菜单（需要 `label`）。 |
+| `icon` | 标签旁的图片，写法与 `<Image>` 的 `src` 相同（导入的文件或 URL）。会适配到菜单的图标尺寸；各平台细节见 TypeScript 声明。iOS 标题栏菜单的 SF Symbol 名称请用 `symbol`。 |
+| `symbol` | iOS 标题栏菜单中标签旁的 SF Symbol 名称；其他平台（包括 macOS）忽略。与 `icon` 同时设置时以它为准。 |
+| `destructive` | `true` 表示破坏性操作：iOS 显示为红色（`UIMenuElementAttributesDestructive`）。桌面端忽略。 |
+| `submenu` | 让菜单项成为子菜单（需要 `label`）。配合 `inline: true` 成为内联分组：在 iOS 上是带 `label` 为分组标题的 `UIMenuOptions.displayInline`；在桌面上是夹在分隔线之间的条目，不显示 `label`。 |
+| `inline` | 在设置了 `submenu` 时表示内联分组（见 `submenu`）。 |
 | `role` | 由平台执行的标准菜单项（见下）。 |
 
 `null`、`undefined` 和 `false` 项会被忽略，因此可以在列表中写 `cond && { … }`。
 
-在 Rust 中，菜单项是 `MenuItem::new(label)`、`MenuItem::role(role)`、`MenuItem::separator()` 或 `MenuItem::submenu(label, items)`，字段对应同名方法：`.shortcut("mod+n")`（快捷键无效时 panic，并给出正确写法）、`.shortcut_when(When::Auto)`、`.disabled(true)`、`.checked(on)`、`.on_select(f)`，以及给 role 菜单项设置文字的 `.label(..)`。
+在 Rust 中，菜单项是 `MenuItem::new(label)`、`MenuItem::role(role)`、`MenuItem::separator()` 或 `MenuItem::submenu(label, items)`，字段对应同名方法：`.shortcut("mod+n")`（快捷键无效时 panic，并给出正确写法）、`.shortcut_when(When::Auto)`、`.disabled(true)`、`.checked(on)`、`.on_select(f)`、`.icon(..)`、`.symbol(..)`、`.destructive(true)`、子菜单上的 `.inline(true)`，以及给 role 菜单项设置文字的 `.label(..)`。
 
 修饰键：
 

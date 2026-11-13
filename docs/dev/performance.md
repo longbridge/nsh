@@ -4,6 +4,30 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Cross-platform keyboard integration (2026-11-12, macOS arm64, debug, upstream `9fd11f836` against the core at
+`c46f72f8c`): one fresh process per version running the same counter command below on the same machine.
+
+| Phase | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| Initial frame | 681 | 744 | 57 | 51 | 21 |
+| Press `+1` | 765 | 918 | 10 | 7 | 24 |
+
+Both runs passed. Ordinary views emitted the same work; these single-run smoke timings are not a speed benchmark.
+Native GTK, AppKit, Android and browser checks separately exercised actual key delivery and capture.
+
+Focused-view keyboard input (Linux x86_64, debug, against `a44d5628b`): one fresh process per version running
+`printf 'await app.press("+1");\n' | target/debug/nsh test examples/counter/App.tsx --trace`.
+The counter has no raw key listeners; its work counts stay unchanged.
+
+| Phase | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| Initial frame | 524 | 507 | 57 | 51 | 21 |
+| Press `+1` | 392 | 568 | 10 | 7 | 24 |
+
+These are single-run smoke timings, not a speed benchmark. Native XTest checks separately cover capture before
+defaults, menu ordering, popup-held releases and NumLock. In the native smoke app, a 1,250 ms key callback left
+the GTK 100 ms timer running (12 ticks); capture never waits for that callback.
+
 Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
 `nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
 culling enabled, 80 ASCII characters per paragraph, both Core order checks applied together:
@@ -636,6 +660,35 @@ draw a panel.
   Before: GPUI's 30 fps cap of unfocused windows (frames 40–42 ms apart) and, in Stocks, canvases rasterized in full
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
+
+  Canvas animated argument batches (`canvas.rs`, 2026-11-12, Linux x86_64, Ryzen 9 7950X, against
+  `9fd11f83`): the before / after setters and unchanged `DamageScan`, extracted into an isolated harness.
+  Rust 1.99.1, opt-level 3, fat LTO, one codegen unit, pinned to CPU 2, no concurrent builds; four warmup
+  updates, three processes with seven alternating pairs each, medians of all 21 samples per implementation:
+
+  | Static path points | Changed slots | Argument update, before → after |
+  |---|---|---|
+  | 0 | 64 | 16.157 → 1.311 µs |
+  | 400 | 64 | 272.069 → 5.407 µs |
+  | 4,000 | 8 | 316.143 → 41.026 µs |
+  | 4,000 | 32 | 1,263.803 → 41.492 µs |
+  | 4,000 | 64 | 2,526.364 → 42.080 µs |
+  | 4,000 | 256 | 10,262.553 → 46.824 µs |
+
+  A canvas's animated values are applied together: at most two whole-drawing damage scans and one
+  `view.changed()`, instead of up to two scans and one call per changed slot. Changed-slot storage is reused;
+  one changed slot keeps a scalar predicate. Controls with one slot and 0 / 400 / 4,000 static points take
+  0.0566 / 4.048 / 39.514 → 0.0563 / 3.986 / 39.279 µs (medians within 1.6%). The harness includes input
+  preparation, state borrowing and slot writes, with a notification counter and supporting type shims. It
+  excludes the actual invalidation walk, rasterization, workers, uploads, GPU work and presentation.
+
+  Headless `nsh test <entry> --trace` (debug, three alternating runs per version): a canvas of 256 animated
+  rectangles after 4,000 static path points keeps 287 ops / 284 mount items / 10 nodes initially, then
+  0 ops / 6 items / 10 nodes and 0 ops / 5 items / 10 nodes when resized to 760×420 and 920×540. Commit
+  medians are 2448 / 185 / 127 → 2490 / 171 / 140 µs. The counter control keeps 57 ops / 51 items / 21 nodes
+  initially and 10 ops / 7 items / 24 nodes after `+1` (395 / 276 → 410 / 305 µs). Every mount item matches
+  between versions. These are smoke checks of unchanged engine work; the optimization is in GPUI's animated
+  argument writes. Native frame-time and process CPU/GPU changes have not been measured.
 
 The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO (the published distribution thin LTO over 16 codegen units: `docs/dev/tooling.md` "Releases").
 

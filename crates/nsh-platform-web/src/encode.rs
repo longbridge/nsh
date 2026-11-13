@@ -804,12 +804,16 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = a.level {
         let _ = write!(s, ",\"level\":{l}");
     }
-    // The views it names (`aria-activedescendant`, `aria-controls`).
+    // The views it names (`aria-activedescendant`, `aria-controls`,
+    // `aria-describedby`).
     if let Some(id) = a.active_descendant {
         let _ = write!(s, ",\"activeDescendant\":{id}");
     }
     if let Some(id) = a.controls {
         let _ = write!(s, ",\"controls\":{id}");
+    }
+    if let Some(id) = a.described_by {
+        let _ = write!(s, ",\"describedBy\":{id}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
@@ -1516,6 +1520,17 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.bool(*animated).end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::SetClipboardItem(item) => {
+            out.item("cmd")
+                .num(id)
+                .str("setClipboardItem")
+                .str(&item.text);
+            match &item.html {
+                Some(html) => out.str(html),
+                None => out.raw("null"),
+            };
+            out.end();
+        }
         Command::Notification(command) => {
             use nsh_core::notifications::NotificationCommand as N;
             match command {

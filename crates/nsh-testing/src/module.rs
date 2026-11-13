@@ -2475,6 +2475,13 @@ impl App {
         self.with(|app| app.clipboard())
     }
 
+    /// The item on the clipboard now, `{ text, html? }` (`Clipboard.write`;
+    /// text alone has no `html`), `null` when it holds none. Headless tests
+    /// only.
+    pub fn clipboard_item(&self) -> Result<Option<ClipboardItem>, JsError> {
+        self.with(|app| app.clipboard_item())
+    }
+
     /// `f` with the app as it is now (the batches that came applied); a
     /// failure has the `code` it says ([`step_error`]).
     fn with<R>(&self, f: impl FnOnce(&mut dyn Driver) -> Result<R, String>) -> Result<R, JsError> {

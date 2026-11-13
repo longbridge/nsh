@@ -1020,6 +1020,12 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     if old.as_ref() == view {
         return;
     }
+    if let Some(view) = view {
+        // A custom view of this window gives its keyboard focus to the
+        // field, as the field's gives way to the view's
+        // (`crate::keyboard`).
+        crate::keyboard::blur_window(surface, crate::app_window::window_of(surface, view));
+    }
     surface.chrome.context_area.take();
     if let Some(old) = &old {
         if let Some(input) = input_of(old) {

@@ -27,6 +27,7 @@ function App() {
       <Text>{`Catalyst: ${platform.catalyst}`}</Text>
       <Text>{`Version: ${platform.version}`}</Text>
       <Text>{`Select: ${platform.select({ ios: "ios", android: "android", default: "other" })}`}</Text>
+      <Text>{`Select named: ${platform.select({ miniprogram: "miniprogram", ios: "ios", default: "other" })}`}</Text>
       <Text>{`Select mobile: ${platform.select({ mobile: "mobile", desktop: "desktop" })}`}</Text>
       <Text>{`Ratio: ${pixelRatio()}`}</Text>
       <Text>{`Font scale: ${fontScale()}`}</Text>

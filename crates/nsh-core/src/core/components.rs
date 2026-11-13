@@ -15,7 +15,7 @@ use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{Core, Kind, NO_KEY, views::Anchor};
+use super::{Core, Key, Kind, NO_KEY, views::Anchor};
 use crate::{
     ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
     Tag, TextEngine,
@@ -697,6 +697,12 @@ pub(super) struct Components {
     /// Presses to pass on inside elements once this commit is laid out
     /// ([`crate::element::ElementRef::press_at`]).
     pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
+    /// Requests on web views ([`crate::webview`]), by request id: the node
+    /// they went to and the answer waiting for the platform.
+    webview_requests: FxHashMap<u64, (NodeId, AnswerSlot<Result<(), String>>)>,
+    /// The timeout of each request not answered yet.
+    webview_timeouts: FxHashMap<u64, crate::element::Task<()>>,
+    next_webview_request: u64,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
     /// Views JS made, waiting to be in the tree to make their view.
@@ -806,6 +812,9 @@ impl Default for Components {
             scroll_positions: Vec::new(),
             transition_times: Vec::new(),
             presses: Vec::new(),
+            webview_requests: FxHashMap::default(),
+            webview_timeouts: FxHashMap::default(),
+            next_webview_request: 1,
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
             waiting: Vec::new(),
@@ -1159,6 +1168,12 @@ impl<M: TextEngine> Core<M> {
     /// (`fpsEnabled()`): what read it runs again.
     pub fn set_perf_monitor(&mut self, enabled: bool) {
         self.components.runtime.set_perf_monitor(enabled);
+    }
+
+    /// What the performance monitor measured last (`perfStats()`; `None`
+    /// while it does not measure): what read it runs again.
+    pub fn set_perf_stats(&mut self, stats: Option<crate::platform::PerfStats>) {
+        self.components.runtime.set_perf_stats(stats);
     }
 
     /// The displays components read ([`crate::element::desktop::displays`]),
@@ -5109,6 +5124,131 @@ impl<M: TextEngine> Core<M> {
         handled
     }
 
+    /// Whether node `id` has a listener for `event` (a JS handler or a Rust
+    /// component's), as the platform sees it mounted. The engine skips
+    /// nodes without one when it fans a key notification out.
+    #[doc(hidden)]
+    pub fn listens(&self, id: NodeId, event: EventKind) -> bool {
+        self.key(id)
+            .is_ok_and(|key| self.nodes[key as usize].mounted_events().contains(event))
+    }
+
+    /// Whether `id` or an enabled logical ancestor up to its window root
+    /// hears a key transition (`KeyDown` or `KeyUp`) or has a capture rule
+    /// that is not `None`. Follows the logical tree (`node.parent`), so an
+    /// overlay's content finds the views it is logically in even where a
+    /// backend mounts it elsewhere. No allocation: a walk per transition.
+    #[doc(hidden)]
+    pub fn key_interest(&self, id: NodeId) -> bool {
+        let Ok(mut key) = self.key(id) else {
+            return false;
+        };
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            let disabled = node
+                .props
+                .as_ref()
+                .is_some_and(|p| p.accessibility.state.disabled);
+            if !disabled {
+                let events = node.mounted_events();
+                if events.contains(EventKind::KeyDown) || events.contains(EventKind::KeyUp) {
+                    return true;
+                }
+                if node
+                    .props
+                    .as_ref()
+                    .is_some_and(|p| !p.key_capture.is_none())
+                {
+                    return true;
+                }
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
+    /// The views a key notification on `id` reaches, in order: `id`, then
+    /// each enabled ancestor, up to and including the root of `id`'s window.
+    /// The engine notifies every one of them (Rust and JS listeners alike)
+    /// from one platform event; a native window is a keyboard boundary even
+    /// when its declarative root remains in another window's logical tree.
+    /// A disabled view hears nothing, and its enabled ancestors still do.
+    #[doc(hidden)]
+    pub fn key_path(&self, id: NodeId, out: &mut Vec<NodeId>) {
+        out.clear();
+        let Ok(mut key) = self.key(id) else {
+            return;
+        };
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            let disabled = node
+                .props
+                .as_ref()
+                .is_some_and(|p| p.accessibility.state.disabled);
+            if !disabled {
+                out.push(node.id);
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return;
+            }
+            key = node.parent;
+        }
+    }
+
+    /// Whether `id` or an enabled ancestor within its window captures the
+    /// transition whose canonical shortcut stroke is `keystroke` under its
+    /// mounted [`crate::KeyCapture`] rule (`captureKeys`). The platform
+    /// decides before native defaults from the stroke its own shortcut
+    /// vocabulary names, never from [`crate::KeyEvent`]'s `key` or `code`;
+    /// `None` (a key no shortcut names) is captured only by
+    /// [`crate::KeyCapture::All`]. A focused native text input keeps the
+    /// keys that edit it: nothing captures them.
+    #[doc(hidden)]
+    pub fn key_captured(&self, id: NodeId, keystroke: Option<&crate::keymap::Keystroke>) -> bool {
+        let Ok(mut key) = self.key(id) else {
+            return false;
+        };
+        // A native text input owns the keys that edit it: an ancestor's
+        // capture never intercepts its typing, caret or editing commands.
+        if self.nodes[key as usize].kind == Kind::Input {
+            return false;
+        }
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            let disabled = node
+                .props
+                .as_ref()
+                .is_some_and(|p| p.accessibility.state.disabled);
+            if !disabled
+                && node
+                    .props
+                    .as_ref()
+                    .is_some_and(|p| p.key_capture.captures_key(keystroke))
+            {
+                return true;
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
+    }
+
+    /// The root of the window `key` is in, `key` itself when it is one.
+    pub(super) fn key_window(&self, key: Key) -> NodeId {
+        let node = &self.nodes[key as usize];
+        if node.kind == Kind::Modal && self.window_ids.values().any(|(root, _)| *root == node.id) {
+            node.id
+        } else {
+            self.window_of(key)
+        }
+    }
+
     fn flush_component_emits(&mut self) {
         // What views' listeners emitted reaches its listeners (JS hears it
         // in this turn).
@@ -5171,6 +5311,11 @@ impl<M: TextEngine> Core<M> {
             };
             self.overlay_hover(id, kind, at);
         }
+        // A pending download's listener gets a handle bound to the native
+        // web view node the platform reported, not the component host its
+        // handlers were registered on: only this dispatch can make one.
+        let _target = (kind == EventKind::DownloadPending)
+            .then(|| crate::element::download_target(id, Rc::downgrade(&self.components.executor)));
         if self.platform_event(id, kind, payload) {
             return true;
         }
@@ -5241,6 +5386,7 @@ impl<M: TextEngine> Core<M> {
         kind: EventKind,
         payload: &EventPayload,
     ) -> bool {
+        let id = self.base_of(id);
         let mut handled = false;
         let mut from = 0;
         while let Some((at, listener)) = self.next_handler(host, id, kind, from) {
@@ -5364,6 +5510,16 @@ impl<M: TextEngine> Core<M> {
         answer: crate::element::AnswerSlot<Result<bool, crate::desktop::LaunchAtLoginError>>,
     ) {
         use crate::desktop::{LaunchAtLoginError, LoginItemStatus};
+        // Launching at login acts on the application as a whole: an app
+        // declaring capabilities needs `application` to change it, and is
+        // told it does not launch at login otherwise.
+        if !self.access.allows_application() {
+            answer.borrow_mut().deliver(match enabled {
+                None => Ok(false),
+                Some(_) => Err(LaunchAtLoginError::Denied),
+            });
+            return;
+        }
         let Some(items) = self.login_item.as_mut() else {
             answer.borrow_mut().deliver(match enabled {
                 None => Ok(false),
@@ -6115,6 +6271,14 @@ impl<M: TextEngine> Core<M> {
                     self.components.environment.web_views && self.access.allows_webviews();
                 answer.borrow_mut().deliver(available);
             }
+            Action::WebViewRequest {
+                node,
+                operation,
+                answer,
+            } => self.web_view_request(node, operation, answer),
+            Action::WebViewTimeout(request) => {
+                self.webview_failed(request, crate::webview::NO_ANSWER)
+            }
             Action::PickScreenColor(answer) => {
                 if !self.components.environment.screen_color {
                     answer.borrow_mut().deliver(None);
@@ -6159,6 +6323,94 @@ impl<M: TextEngine> Core<M> {
                     },
                 });
             }
+        }
+    }
+
+    /// Sends `operation` to the web view `node` (a download decision's
+    /// handle, [`crate::webview`]) and keeps `answer` for the platform's
+    /// reply. Fails at once where the platform has no such controls, the
+    /// app holds no `webview` grant, the node is no web view, or the
+    /// operation's own input is invalid (a download's destination);
+    /// otherwise the answer fails too if it comes after
+    /// [`crate::webview::REPLY_TIMEOUT`] or the node unmounts.
+    fn web_view_request(
+        &mut self,
+        node: NodeId,
+        operation: crate::webview::WebViewOperation,
+        answer: AnswerSlot<Result<(), String>>,
+    ) {
+        if !self.components.environment.webview_requests {
+            answer
+                .borrow_mut()
+                .deliver(Err(crate::webview::UNSUPPORTED.into()));
+            return;
+        }
+        if !self.access.allows_webviews() {
+            answer.borrow_mut().deliver(Err(
+                "web views are not granted: add `webview` to capabilities in nsh.json".into(),
+            ));
+            return;
+        }
+        let web = self
+            .key(node)
+            .ok()
+            .is_some_and(|key| self.nodes[key as usize].kind == Kind::WebView);
+        if !web {
+            answer
+                .borrow_mut()
+                .deliver(Err(crate::webview::NOT_A_WEB_VIEW.into()));
+            return;
+        }
+        if let Err(error) = crate::webview::check_operation(&operation) {
+            answer.borrow_mut().deliver(Err(error));
+            return;
+        }
+        // Ids are unique among the requests pending: a reply settles the
+        // request it names and no other.
+        let id = loop {
+            let id = self.components.next_webview_request;
+            self.components.next_webview_request = id.wrapping_add(1);
+            if !self.components.webview_requests.contains_key(&id) {
+                break id;
+            }
+        };
+        let executor = self.components.executor.clone();
+        let timeout = crate::element::task::act_after(
+            &executor,
+            node,
+            crate::webview::REPLY_TIMEOUT,
+            Action::WebViewTimeout(id),
+        );
+        self.components.webview_timeouts.insert(id, timeout);
+        self.components.webview_requests.insert(id, (node, answer));
+        let _ = self.apply_op(Op::Command {
+            id: node,
+            command: Command::WebViewRequest(crate::webview::WebViewRequest { id, operation }),
+        });
+    }
+
+    /// Web view request `id` fails with `error` (the platform has none of
+    /// these controls, the node is no web view or goes, no answer came):
+    /// its answer resolves, its timeout goes.
+    pub(super) fn webview_failed(&mut self, id: u64, error: impl Into<String>) {
+        self.components.webview_timeouts.remove(&id);
+        if let Some((_, answer)) = self.components.webview_requests.remove(&id) {
+            answer.borrow_mut().deliver(Err(error.into()));
+        }
+    }
+
+    /// The node `id` is released (it unmounted): the web view requests
+    /// pending on it fail, their answers never coming.
+    pub(super) fn webview_released(&mut self, id: NodeId) {
+        let pending: Vec<u64> = self
+            .components
+            .webview_requests
+            .iter()
+            .filter(|(_, (node, _))| *node == id)
+            .map(|(request, _)| *request)
+            .collect();
+        for request in pending {
+            self.webview_failed(request, crate::webview::NOT_MOUNTED);
         }
     }
 
@@ -6648,6 +6900,58 @@ impl<M: TextEngine> Core<M> {
                 };
                 if let Some(answer) = self.components.file_requests.remove(request) {
                     answer.deliver(paths.clone(), error.clone());
+                }
+                true
+            }
+            // The platform's answer to a web view request
+            // (`crate::webview`), on the node it was sent to.
+            EventKind::WebViewReply => {
+                let EventPayload::Json(reply) = payload else {
+                    return false;
+                };
+                // JSON's numbers may come as floats (`1.0`); `1.5` is no
+                // request.
+                let request = reply.get("id").and_then(|id| {
+                    id.as_u64().or_else(|| {
+                        id.as_f64()
+                            .filter(|n| n.is_finite() && n.fract() == 0.0 && *n >= 0.0)
+                            .map(|n| n as u64)
+                    })
+                });
+                let Some(request) = request else {
+                    log::debug!(target: "js", "web view: dropped a reply without a request's id: {reply}");
+                    return true;
+                };
+                let Some(target) = self
+                    .components
+                    .webview_requests
+                    .get(&request)
+                    .map(|(node, _)| *node)
+                else {
+                    log::debug!(target: "js", "web view: dropped a reply to unknown request {request}: {reply}");
+                    return true;
+                };
+                // Only the web view the request went to answers it.
+                if target != id {
+                    log::debug!(
+                        target: "js",
+                        "web view: dropped a reply to request {request} from node {id}, not {target}: {reply}"
+                    );
+                    return true;
+                }
+                self.components.webview_timeouts.remove(&request);
+                let Some((_, answer)) = self.components.webview_requests.remove(&request) else {
+                    return true;
+                };
+                if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
+                    answer.borrow_mut().deliver(Ok(()));
+                } else {
+                    let error = reply
+                        .get("error")
+                        .and_then(crate::JsonValue::as_str)
+                        .unwrap_or(crate::webview::NO_ANSWER)
+                        .to_string();
+                    answer.borrow_mut().deliver(Err(error));
                 }
                 true
             }
