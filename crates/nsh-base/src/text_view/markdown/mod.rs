@@ -28,7 +28,7 @@ use markdown::{
     mdast::{self, AlignKind, AttributeContent, AttributeValue, Node},
 };
 
-pub use self::streaming::repair_streaming;
+pub(crate) use self::streaming::repair_streaming;
 use self::{container::Segment, offsets::Inserted};
 use super::{
     Parser,
@@ -654,12 +654,10 @@ impl<'a> Converter<'a> {
             }
         }
         Block::CodeBlock(CodeBlock {
-            id: None,
             language: code.lang.clone(),
             meta: code.meta.clone(),
             code: code.value.clone(),
-            content: Vec::new(),
-            wrap: false,
+            ..CodeBlock::default()
         })
     }
 

@@ -362,7 +362,8 @@ pub(crate) fn inline_text(inlines: &[Inline], out: &mut String) {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct CodeBlock {
-    /// Optional application identity for per-block actions.
+    /// The app's id of the block, handed back with its actions
+    /// (`onCodeBlockAction`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// Its language (the info string's first word: `rust`), if named.
@@ -373,10 +374,10 @@ pub struct CodeBlock {
     pub meta: Option<String>,
     /// The code, without a final line break.
     pub code: String,
-    /// Optional styled inline content of the code, including annotations
-    /// and custom nodes. Used when its plain text equals `code`; otherwise
-    /// the normal syntax highlighter renders the code. Copy always uses
-    /// `code`.
+    /// The code as inline content (the app's annotations: strong text,
+    /// highlights, custom nodes shown as their content), shown in place of
+    /// the highlighted code when its plain text is `code`; other content is
+    /// ignored with a warning, so what shows is what copying takes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content: Vec<Inline>,
     /// Wraps long lines in the available width instead of scrolling them.
@@ -388,12 +389,9 @@ impl CodeBlock {
     /// Code `code` in `language`.
     pub fn new(language: Option<String>, code: impl Into<String>) -> Self {
         Self {
-            id: None,
             language,
-            meta: None,
             code: code.into(),
-            content: Vec::new(),
-            wrap: false,
+            ..Self::default()
         }
     }
 }
@@ -781,7 +779,7 @@ export type TextViewInline =
 
 const CODE_BLOCK: &str = "/** A block of code. */
 export interface TextViewCodeBlock {
-  /** Application identity for per-block actions. */
+  /** The app's id of the block, handed back with its actions (`onCodeBlockAction`). */
   id?: string;
   /** Its language (the info string's first word: `rust`), if named. */
   language?: string;
@@ -789,7 +787,7 @@ export interface TextViewCodeBlock {
   meta?: string;
   /** The code, without a final line break. */
   code: string;
-  /** Styled inline content with the same plain text as code; otherwise ignored. */
+  /** The code as inline content (the app's annotations), shown when its plain text is `code`. */
   content?: TextViewInline[];
   /** Wrap long lines instead of scrolling horizontally. */
   wrap?: boolean;

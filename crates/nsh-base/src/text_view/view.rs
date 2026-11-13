@@ -76,15 +76,10 @@ pub struct TextViewProps {
     /// Shows a custom node (an extension's or the document's): `node.name`
     /// tells which. Without it, a custom node shows its content.
     pub render_custom: Prop<Option<Renderer<CustomNode>>>,
-    /// Overrides `renderCustom` for inline nodes. A Rust `Text` joins the
-    /// paragraph spans; views and JS renderers remain inline attachments.
-    pub render_inline_custom: Prop<Option<Renderer<CustomNode>>>,
     /// Shows a code block in place of the default (the code in a
     /// horizontal scroll view): syntax highlighting of the app's.
     pub render_code_block: Prop<Option<Renderer<CodeBlock>>>,
-    /// Application actions in a row before a code block, replacing `codeBlockActions`.
-    /// The default code layout, selection and scrolling stay in TextView.
-    pub render_code_block_actions: Prop<Option<Renderer<CodeBlock>>>,
+    /// Content of the app's floating over each code block's top right
     /// The icon of a code block's action of the app's (`codeBlockActions`):
     /// the button around it (its size, hover and press backgrounds) is the
     /// text view's, so every action looks alike. Without it, an action
@@ -472,9 +467,7 @@ struct Cx {
     table_scrollbar: bool,
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
-    render_inline_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
-    render_code_block_actions: Option<Renderer<CodeBlock>>,
     render_code_block_action: Option<Renderer<TextViewCodeAction>>,
     code_block_actions: Vec<TextViewCodeAction>,
     render_table_actions: Option<Renderer<Table>>,
@@ -515,9 +508,7 @@ impl Cx {
             table_scrollbar: props.table_scrollbar.get(),
             caret: props.streaming_caret.get(),
             render_custom: props.render_custom.get(),
-            render_inline_custom: props.render_inline_custom.get(),
             render_code_block: props.render_code_block.get(),
-            render_code_block_actions: props.render_code_block_actions.get(),
             render_code_block_action: props.render_code_block_action.get(),
             code_block_actions: props.code_block_actions.get(),
             render_table_actions: props.render_table_actions.get(),
@@ -1106,20 +1097,16 @@ impl Cx {
         if is_terminal() {
             return self.terminal_code_block(code, tail);
         }
-        // Default actions float at the top right; a custom per-block renderer
-        // gets a row before the body. Desktop hover reveals either header;
-        // touch screens always show it.
+        // The app's actions float over the top right corner, so the code
+        // keeps its first line (no row is kept for them). Where a pointer
+        // hovers (desktops, desktop browsers) they show while it is over the
+        // block; touch screens have no hover, so there they always show.
         let hover = is_desktop();
-        let header = (!self.code_block_actions.is_empty()
-            || self.render_code_block_actions.is_some())
-        .then(|| {
+        let header = (!self.code_block_actions.is_empty()).then(|| {
             let header = view()
-                .when(self.render_code_block_actions.is_none(), |header| {
-                    header.absolute().top(px(6.0)).right(px(6.0))
-                })
-                .when(self.render_code_block_actions.is_some(), |header| {
-                    header.self_end().mt(px(6.0)).mr(px(6.0))
-                })
+                .absolute()
+                .top(px(6.0))
+                .right(px(6.0))
                 .flex_row()
                 .items_center()
                 .gap(px(2.0))
@@ -1129,35 +1116,25 @@ impl Cx {
                         .transition_opacity()
                         .duration(150.0)
                 });
-            let content = match &self.render_code_block_actions {
-                Some(render) => vec![
-                    render
-                        .render(format!("code-actions:{key}"), code.clone())
-                        .into_element(),
-                ],
-                None => self
-                    .code_block_actions
+            self.part(header, Part::CodeBlockHeader).children(
+                self.code_block_actions
                     .iter()
                     .enumerate()
-                    .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}")))
-                    .collect(),
-            };
-            self.part(header, Part::CodeBlockHeader).children(content)
+                    .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}"))),
+            )
         });
-        // The app's highlighter, else the built-in one (which may color the
-        // code a moment after it shows), else plain.
-        let mut annotated_text = String::new();
-        super::document::inline_text(&code.content, &mut annotated_text);
-        let body = if !code.content.is_empty() && annotated_text == code.code {
-            self.span(&code.content, key)
-        } else {
-            match &self.highlighter {
+        // The block's own annotated content, else the app's highlighter, else
+        // the built-in one (which may color the code a moment after it
+        // shows), else plain.
+        let body = match annotated(code) {
+            Some(content) => self.span(content, key),
+            None => match &self.highlighter {
                 Some(h) => text("").children(h.spans(code)),
                 None => match super::highlight::built_in(code) {
                     Some(spans) => text("").children(spans),
                     None => text(code.code.clone()),
                 },
-            }
+            },
         };
         // The padding is the code's, inside the scroll view: the code
         // scrolls to the edges, and the scroll bar sits in the bottom
@@ -1189,12 +1166,11 @@ impl Cx {
             .child(body)
             .into_element()
         };
-        let block = self.part(block, Part::CodeBlock);
-        if self.render_code_block_actions.is_some() {
-            block.child(header).child(content).into_element()
-        } else {
-            block.child(content).child(header).into_element()
-        }
+        // The actions last, so they are drawn over the code.
+        self.part(block, Part::CodeBlock)
+            .child(content)
+            .child(header)
+            .into_element()
     }
 
     /// A code block in a terminal: a band as wide as its longest line and
@@ -1790,11 +1766,6 @@ impl Cx {
             Inline::Custom(node) => {
                 if let Some(el) = self.plugins.render(node) {
                     return el;
-                }
-                if let Some(render) = &self.render_inline_custom {
-                    return render
-                        .render_inline(format!("custom:{key}"), node.clone())
-                        .into_element();
                 }
                 if let Some(render) = &self.render_custom {
                     return render
@@ -2486,6 +2457,23 @@ fn ink_on(bg: Hsla) -> Hsla {
         rgb(0x1f1e1c).into()
     } else {
         rgb(0xf4f3f0).into()
+    }
+}
+
+/// A code block's annotated `content`, when it has one whose plain text is
+/// its `code` (what copying takes): other content would show one text and
+/// copy another, so it is ignored with a warning.
+fn annotated(code: &CodeBlock) -> Option<&[Inline]> {
+    if code.content.is_empty() {
+        return None;
+    }
+    let mut plain = String::new();
+    super::document::inline_text(&code.content, &mut plain);
+    if plain == code.code {
+        Some(&code.content)
+    } else {
+        log::warn!("TextView: a code block's content does not spell its code; showing the code");
+        None
     }
 }
 

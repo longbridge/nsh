@@ -30,7 +30,6 @@ pub use self::{
         MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins, ParseContext, Parser,
         mdast,
     },
-    markdown::repair_streaming,
     parts::{PartStyle, TextViewClasses, TextViewPart, TextViewParts, TextViewStyles},
     selection::{TextSelectionFormat, TextSelectionOptions},
     view::{

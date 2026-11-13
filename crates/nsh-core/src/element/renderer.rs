@@ -134,26 +134,6 @@ impl<T: JsValue + Clone + PartialEq + 'static> Renderer<T> {
         }
         Rendered(node)
     }
-
-    /// Content in a text run. A Rust renderer returning a Text keeps its
-    /// spans in that run, preserving wrapping and selection; the returned
-    /// `Rendered` is then the Text itself, with no wrapper view. Views and JS
-    /// renderers keep their inline attachment wrapper.
-    pub fn render_inline(&self, key: impl Into<SharedString>, value: T) -> Rendered {
-        match &self.kind {
-            Kind::Rust(render) => {
-                let content = render(&value).0;
-                if content.tag == Tag::Text {
-                    Rendered(content)
-                } else {
-                    let mut node = ElNode::new(Tag::View);
-                    node.children.push(content);
-                    Rendered(node)
-                }
-            }
-            Kind::Js { .. } => self.render(key, value),
-        }
-    }
 }
 
 /// What a [`Renderer`] rendered, placed as a view: style it like one (its

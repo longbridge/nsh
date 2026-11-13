@@ -614,12 +614,10 @@ fn code_blocks_and_rules() {
         ),
         vec![
             Block::CodeBlock(CodeBlock {
-                id: None,
                 language: Some("rust".into()),
                 meta: Some("title=\"main.rs\"".into()),
                 code: "fn main() {}".into(),
-                content: Vec::new(),
-                wrap: false,
+                ..Default::default()
             }),
             Block::CodeBlock(CodeBlock::new(None, "indented")),
             Block::Rule,

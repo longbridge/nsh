@@ -115,25 +115,14 @@ order and their styles merged, later parts winning. The full list is `parts.rs`;
 Rust views also style parts with typed styles: `provide_context(TextViewParts::new().part(TextViewPart::Code, |s| ..))`
 refines a part's `StyleRefinement` (theme colors stay adaptive) before the app's `classes` and `styles` apply.
 
-## Annotating code without replacing its layout
+## Annotated code
 
-A document's `CodeBlock` can carry `id` (the app's identity), `content` (inline
-annotations) and `wrap` (default false). When the annotations' plain text equals
-`code`, they supply the code body's spans; otherwise the normal highlighter and
-literal source render. The built-in code copy action uses `code`. Text selection follows the rendered
-characters, so annotation renderers preserve their plain text.
-`wrap: true` fits the code to the view instead of making a horizontal scroll area.
-`renderCodeBlockActions` (`render_code_block_actions`, `Renderer<CodeBlock>`) places
-an app-owned set of controls in a header before the body, in place of
-`codeBlockActions`; it receives the current block, including its identity and wrap
-state. Updating the document updates those controls while TextView keeps the body.
-
-Opt in with `renderInlineCustom` (`render_inline_custom`) to override `renderCustom`
-for inline nodes. A Rust renderer returning `Text` becomes a span of
-its paragraph, so annotations wrap and select with their surrounding text.
-Returning a `View` keeps an inline attachment, as does a JS renderer. For apps that
-build their own documents, Rust's `repair_streaming(&str) -> Cow<'_, str>` exposes
-the same incomplete-Markdown repair that the parser's streaming option uses.
+A document's `CodeBlock` can carry `id` (the app's, handed back with its actions in `onCodeBlockAction`), `content`
+(the code as inline content: the app's annotations) and `wrap` (fit the code to the view instead of scrolling it
+sideways; default false). `content` shows in place of the highlighted code only when its plain text is `code`, so
+what shows, what is selected and what copying takes stay the same text; other content is ignored with a warning
+(`view.rs` `annotated`). Annotations are ordinary inlines: emphasis, highlights, or custom nodes without
+`renderCustom`, shown as their content in the `custom` part, so they wrap and select with the code.
 
 ## Syntax highlighting
 

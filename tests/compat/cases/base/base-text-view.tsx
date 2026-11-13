@@ -129,10 +129,6 @@ function App() {
         classes={{ heading1: "text-[#ff0000]" }}
         styles={{ paragraph: { color: "#00ff00" } }}
       />
-      <TextView
-        document={{ blocks: [{ type: "paragraph", content: [{ type: "custom", name: "token", text: "value" }] }] }}
-        renderInlineCustom={(node) => <Text>{`Inline ${node.text}`}</Text>}
-      />
       <Text>{`Plain: ${TextView.plainText(parsed)}`}</Text>
       <Text>{`Parsed: ${parsed.blocks.length} ${first.type}`}</Text>
       <Text>{`Cited: ${cited.type}`}</Text>
@@ -145,8 +141,8 @@ function App() {
       <TextView
         document={{ blocks: [{ type: "codeBlock", id: "annotated", code: "Annotated code", wrap: true,
           content: [{ type: "strong", content: [{ type: "text", text: "Annotated code" }] }] }] }}
-        renderCodeBlockActions={(code) => <View role="button" accessibilityLabel="Export annotated"
-          onPress={() => action.set(`export ${code.id}: ${code.code}`)}><Text>Export annotated</Text></View>}
+        codeBlockActions={[{ id: "export", label: "Export annotated" }]}
+        onCodeBlockAction={(event) => action.set(`${event.id} ${event.code.id}: ${event.code.code}`)}
       />
     </View>
   );

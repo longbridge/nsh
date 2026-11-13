@@ -16,7 +16,14 @@ use nsh_testing::Headless;
 
 #[component]
 fn AnnotatedCode() -> impl IntoElement {
-    use nsh_base::text_view::{Block, CodeBlock, CustomNode, Document, Inline};
+    use nsh_base::text_view::{
+        Block, CodeBlock, CustomNode, Document, Inline, TextViewCodeAction, TextViewCodeActionEvent,
+    };
+    // Annotations are custom nodes shown as their content: spans of the
+    // code's text, styled through the `custom` part.
+    provide_context(TextViewParts::new().part(TextViewPart::Custom, |s| {
+        s.font_weight(FontWeight::SEMIBOLD)
+    }));
     let mut code = CodeBlock::new(None, "prefix 日本語 suffix");
     code.id = Some("annotated".into());
     code.wrap = true;
@@ -28,61 +35,49 @@ fn AnnotatedCode() -> impl IntoElement {
     let mut fallback = CodeBlock::new(None, "literal <tag>");
     fallback.id = Some("fallback".into());
     fallback.content = vec![Inline::text("replacement")];
-    text_view()
-        .document(Document::new(vec![
-            Block::CodeBlock(code),
-            Block::CodeBlock(fallback),
-        ]))
-        .render_inline_custom(|node: &CustomNode| {
-            text(node.text.clone())
-                .test_id("annotation")
-                .font_weight(FontWeight::SEMIBOLD)
-        })
-        .render_code_block_actions(|code: &CodeBlock| {
-            let source = code.code.clone();
-            view()
-                .role(AccessibilityRole::Button)
-                .label(format!("Copy {}", code.id.as_deref().unwrap_or_default()))
-                .on_press(move || set_clipboard(source.clone()))
-                .child(text(format!(
-                    "Actions {}",
-                    code.id.as_deref().unwrap_or_default()
-                )))
-        })
+    let pressed = signal(String::new());
+    view()
+        .child(
+            text_view()
+                .document(Document::new(vec![
+                    Block::CodeBlock(code),
+                    Block::CodeBlock(fallback),
+                ]))
+                .code_block_actions(vec![TextViewCodeAction::new("export").with_label("Export")])
+                .on_code_block_action(move |e: &TextViewCodeActionEvent| {
+                    pressed.set(format!(
+                        "{} {}: {}",
+                        e.id,
+                        e.code.id.as_deref().unwrap_or_default(),
+                        e.code.code
+                    ));
+                }),
+        )
+        .child(text(move || format!("Pressed {}", pressed.get())))
 }
 
 #[test]
-fn annotated_code_keeps_one_text_run_and_copies_its_literal_source() {
+fn annotated_code_shows_its_spans_and_hands_its_block_to_actions() {
     let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
     app.wait_for("prefix 日本語 suffix").unwrap();
     assert_eq!(
-        app.screen()
-            .span_style("id:annotation")
-            .unwrap()
-            .font_weight,
+        app.screen().span_style("text:日本語").unwrap().font_weight,
         600
     );
-    let texts = app.screen().texts();
     assert_eq!(
-        texts,
-        [
-            "Actions annotated",
-            "prefix 日本語 suffix",
-            "Actions fallback",
-            "literal <tag>"
-        ]
+        app.screen().span_style("text:prefix").unwrap().font_weight,
+        400
     );
-    app.press("label:Copy annotated").unwrap();
-    assert_eq!(app.screen().clipboard(), Some("prefix 日本語 suffix"));
+    app.press("label:Export >> nth=0").unwrap();
+    app.wait_for("Pressed export annotated: prefix 日本語 suffix")
+        .unwrap();
 }
 
 #[test]
-fn mismatched_code_annotations_cannot_replace_the_displayed_or_copied_source() {
+fn code_content_that_does_not_spell_the_code_is_ignored() {
     let mut app = Headless::start(EngineConfig::new(Root::of::<AnnotatedCode>())).unwrap();
     app.wait_for("literal <tag>").unwrap();
     assert!(!app.shows("replacement"));
-    app.press("label:Copy fallback").unwrap();
-    assert_eq!(app.screen().clipboard(), Some("literal <tag>"));
 }
 
 #[component]
