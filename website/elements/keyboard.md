@@ -247,6 +247,29 @@ accepts reactive values; omitting it on a retained view restores `"none"`. Eligi
 priority, focused native inputs keep the keys that edit them, and a capture cannot defeat a shortcut the operating
 system never delivers. A captured Tab stays in the view; an observed Tab follows normal traversal.
 
+Custom Rust views also take committed text with `on_text_input`, reporting what typing, a dead key or an input method
+committed. A captured key commits nothing. `on_composition_change` reports an input method's preedit while it
+composes; during a composition the input method is offered each key before the platform's activation, so Return
+commits the text instead of pressing the view, even when the view listens only for committed text. `Input` and
+`Terminal` keep their own text input. These are Rust APIs: TSX has no `onTextInput` prop, no
+`onCompositionChange` on a custom `<View>`, and no `imeCursorArea`; a Rust UI set can expose an app-specific
+component that forwards them.
+
+`ime_cursor_area` places the input method's candidate window in the view's own coordinates, so a nested view's
+rectangle is relative to that view and is not translated to the root. It is reactive and optional: a
+`Signal<Option<Bounds<Points>>>`, a closure returning `Some` or `None`, or a fixed value. Setting it to `None`, and
+omitting it on a retained view, returns the candidate window to the view's origin instead of leaving a stale
+rectangle. The platform reacts to every mounted change without waiting for a listener.
+
+```rust
+// A focused canvas: committed text, preedit and a candidate window under its caret.
+view()
+    .focusable(true)
+    .on_text_input(move |e: &TextInputEvent| text.update(|t| t.push_str(&e.text)))
+    .on_composition_change(move |e: &Composition| composing.set(e.text.clone()))
+    .ime_cursor_area(move || caret.get()) // Option<Bounds<Points>>
+```
+
 ```tsx
 import { signal, Text, View } from "nsh";
 
@@ -265,8 +288,10 @@ function Pad() {
 }
 ```
 
-The Rust API is also exercised by the Linux-desktop headless driver; Rust UI sets can expose app-specific
-components and events to TSX. Input sources differ: a terminal that reports only strokes (legacy terminals) sends
+The Rust API is also exercised by the Linux-desktop headless driver, which commits the character a plain or Shifted
+key types to a focused view that listens for it but has no emulated input method; Rust UI sets can expose
+app-specific components and events to TSX. Input sources differ: a terminal that reports only strokes (legacy
+terminals) sends
 no synthetic releases, repeats or codes, and GPUI's logical events have no physical code (`code` is `""`). See
 `docs/dev/tooling.md` and each platform's development page for what its source reports.
 

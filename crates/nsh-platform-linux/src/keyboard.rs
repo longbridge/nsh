@@ -1,16 +1,21 @@
-//! The keys of a focused view: the `on_key_down` / `on_key_up` events a
-//! view and its ancestors hear, and the capture rules mounted on them.
+//! The keys and text of a focused view: the `on_key_down` / `on_key_up`
+//! events a view and its ancestors hear, the capture rules mounted on
+//! them, text generation through an input method (`on_text_input`; its
+//! preedit is `on_composition_change`) and where the input method shows its
+//! candidates (`imeCursorArea`).
 //!
 //! The focus and the keys themselves are [`crate::key_focus`]'s: its one
 //! key controller per window decides, in GTK's capture phase, whether the
 //! key is the app's ([`crate::keymap::claims`]), captured by the focused
-//! view (`capture_keys`), or a default (Tab's traversal, Return and Space
-//! pressing, a context menu, scrolling). This module only does what that
-//! decision needs: it builds the [`KeyEvent`], matches the focus's capture
-//! rules ([`captures`]), and reports the event to the engine as the plain
-//! `KeyDown` / `KeyUp` events ([`notify`], [`released`]). No engine answer
-//! is waited for: what a listener does is reported afterwards, in the
-//! app's frame.
+//! view (`capture_keys`), an active composition's input method, or a
+//! default (Tab's traversal, Return and Space pressing, a context menu,
+//! scrolling), and, last, ordinary text through the view's input method.
+//! This module only does what that decision needs: it builds the
+//! [`KeyEvent`], matches the focus's capture rules ([`captures`]), reports
+//! the event to the engine as the plain `KeyDown` / `KeyUp` events
+//! ([`notify`], [`released`]), and runs the input method ([`text`]). No
+//! engine answer is waited for: what a listener does is reported
+//! afterwards, in the app's frame.
 //!
 //! Events follow the focus, in both phases: a key up goes to the view
 //! focused when the source reports it, even when its press went to another
@@ -30,48 +35,221 @@
 //! A captured key still notifies the focused view and its ancestors (the
 //! engine bubbles it), with `KeyEvent::default_prevented` set as the
 //! mounted policy's decision; it runs no default (no traversal, activation
-//! or context menu). A key that only *listens* is not captured: the app
-//! hears it and the default still runs.
+//! or context menu) and commits no text. A key that only *listens* is not
+//! captured: the app hears it and the default still runs.
 //!
-//! A view that hears none of the raw keys and captures none takes
-//! [`crate::key_focus`]'s original path: [`listens`] is a few mask
-//! checks, with no raw [`KeyEvent`] allocation. Modifier transitions
-//! remain tracked across focus moves, including from native inputs.
+//! A native input, web view, native component or video owns its keys and
+//! text: the input method is never attached to it and its keys are never
+//! reported as view input. A view that hears none of the raw keys, the
+//! text events, and captures none takes [`crate::key_focus`]'s original
+//! path with no raw [`KeyEvent`] allocation. Modifier transitions remain
+//! tracked across focus moves, including from native inputs.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 use gtk4::{self as gtk, gdk, glib, prelude::*};
 use nsh_core::{
-    EventKind, EventPayload, KeyEvent, ViewKind,
+    Bounds, EventKind, EventPayload, KeyEvent, Points, TextInputEvent, ViewKind,
     element::SharedString,
     keymap::{Key as ShortcutKey, Keystroke},
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{surface::Surface, view::NshView};
 
 /// A surface's keyboard state.
 #[derive(Default)]
 pub(crate) struct Keyboard {
+    /// The view GTK last gave the focus to (none: a native field, a hosted
+    /// widget or nothing).
+    focused: RefCell<Option<glib::WeakRef<NshView>>>,
     /// The hardware keycodes held down, and the window each was pressed
     /// in, for auto-repeat detection (GDK does not mark repeats).
     pressed: RefCell<FxHashMap<u32, glib::WeakRef<gtk::Window>>>,
+    /// The input method attached to the focused view, while it hears text.
+    ime: RefCell<Option<Ime>>,
+    /// The preedit the input method last reported (to send each change
+    /// once). It runs even when only committed text is listened to.
+    preedit: RefCell<String>,
     /// The physical modifier keys held (by keycode) and the modifier each
     /// stands for: a key event's modifier mask comes from these, not from
     /// its pre-key state, so releasing one Shift keeps the other's.
     modifiers: RefCell<FxHashMap<u32, gdk::ModifierType>>,
+    /// The surface, for the input method's signals (which outlive the call
+    /// that attaches it).
+    weak: RefCell<Option<std::rc::Weak<Surface>>>,
+    /// The text the input method committed (`gtk_test`): the XTest test
+    /// has no engine control to observe the event.
+    #[cfg(all(test, feature = "dev"))]
+    committed: RefCell<Vec<String>>,
 }
 
-/// The app stopped: forgets the keys held.
+/// An input method context of a focused view.
+struct Ime {
+    context: gtk::IMMulticontext,
+    /// The view it is attached to (`client_widget`).
+    widget: gtk::Widget,
+    /// The keycodes whose press this context filtered: their release is the
+    /// context's too. Dropped with the context.
+    downs: FxHashSet<u32>,
+}
+
+/// Remembers the surface, for the input method's signals. The key
+/// controller itself is [`crate::key_focus`]'s.
+pub(crate) fn install(surface: &Rc<Surface>) {
+    *surface.keyboard.weak.borrow_mut() = Some(Rc::downgrade(surface));
+}
+
+/// The app stopped: forgets the focus, the keys held and the input method.
 pub(crate) fn reset(surface: &Surface) {
+    end_composition(surface);
+    detach_ime(surface);
     surface.keyboard.pressed.borrow_mut().clear();
     surface.keyboard.modifiers.borrow_mut().clear();
+    surface.keyboard.focused.borrow_mut().take();
+    surface.keyboard.preedit.borrow_mut().clear();
+}
+
+/// Whether `kind` is heard by `view`.
+fn hears(view: &NshView, kind: EventKind) -> bool {
+    view.state().events.contains(kind)
+}
+
+/// The view is going away: an input method attached to it ends its
+/// composition and is detached before the widget is destroyed, and a focus
+/// tracked on it is forgotten (GTK reports the next focus separately).
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    if attached_to(surface, view) {
+        end_composition(surface);
+        detach_ime(surface);
+    }
+    if owner(surface, view) {
+        surface.keyboard.focused.borrow_mut().take();
+    }
+}
+
+/// Whether `view` is the view the input method is for (the focus the
+/// keyboard follows): a view of another, inactive window changing does not
+/// repoint it.
+fn owner(surface: &Surface, view: &NshView) -> bool {
+    surface
+        .keyboard
+        .focused
+        .borrow()
+        .as_ref()
+        .and_then(|weak| weak.upgrade())
+        .is_some_and(|focused| focused == *view)
+}
+
+/// Whether the input method attached to `view` is composing (its preedit
+/// is not empty): the keys then go to it before the platform's defaults.
+pub(crate) fn composing(surface: &Surface, view: &NshView) -> bool {
+    attached_to(surface, view) && !surface.keyboard.preedit.borrow().is_empty()
+}
+
+/// Whether the surface's input method context is attached to `view`.
+fn attached_to(surface: &Surface, view: &NshView) -> bool {
+    surface
+        .keyboard
+        .ime
+        .borrow()
+        .as_ref()
+        .is_some_and(|ime| ime.widget == view.clone().upcast::<gtk::Widget>())
+}
+
+/// `MountItem::ViewProps`: where the input method puts its candidate
+/// window may have moved, or the view may have stopped hearing text.
+pub(crate) fn props_changed(surface: &Surface, view: &NshView) {
+    events_changed(surface, view);
+}
+
+/// `MountItem::Events`: the focused view started (or stopped) hearing text.
+pub(crate) fn events_changed(surface: &Surface, view: &NshView) {
+    if !owner(surface, view) {
+        return;
+    }
+    if wants_text(view) && crate::key_focus::is_stop(view) {
+        attach_ime(surface, view);
+    } else {
+        end_composition(surface);
+        detach_ime(surface);
+    }
+}
+
+/// The focus moved (`key_focus::moved`): the input method follows it. The
+/// keys held are not released by a focus move (a window-level controller
+/// still sees their releases): they stay held.
+pub(crate) fn focus_changed(surface: &Surface, window: &gtk::Window, next: Option<&NshView>) {
+    // Each window retains its local focus. Setting it while the window is
+    // inactive must not end the active window's composition.
+    if next.is_some() && !window.is_active() {
+        return;
+    }
+    let tracked = surface
+        .keyboard
+        .focused
+        .borrow()
+        .as_ref()
+        .and_then(|weak| weak.upgrade());
+    match next {
+        Some(view) if tracked.as_ref() != Some(view) => {
+            // The keys held are not released by a focus move: their
+            // repeats and the focused release keep working (a window-level
+            // controller still sees the release).
+            end_composition(surface);
+            detach_ime(surface);
+            attach_ime(surface, view);
+            *surface.keyboard.focused.borrow_mut() = Some(view.downgrade());
+        }
+        Some(_) => {}
+        None => {
+            // This window lost its focus: forget it only when the view
+            // tracked was in it (another window's view keeps the input
+            // method). Keys held stay too: the window may still have the
+            // OS focus and send their releases.
+            let in_window = tracked.is_some_and(|view| {
+                view.root()
+                    .and_then(|root| root.downcast::<gtk::Window>().ok())
+                    .as_ref()
+                    == Some(window)
+            });
+            if in_window {
+                end_composition(surface);
+                detach_ime(surface);
+                surface.keyboard.focused.borrow_mut().take();
+            }
+        }
+    }
+}
+
+/// `window` became active: its focus widget is the keyboard's focus again.
+/// GTK keeps each window's focus widget while it is inactive, and no
+/// `focus-widget` change tells of the switch back, so the input method is
+/// pointed at that view (and its composition ended for the one it left).
+pub(crate) fn window_activated(surface: &Surface, window: &gtk::Window) {
+    let Some(focus) = GtkWindowExt::focus(window) else {
+        return;
+    };
+    let Some(view) = focus.downcast::<NshView>().ok() else {
+        return;
+    };
+    if !crate::window::holds(surface, &view) {
+        return;
+    }
+    focus_changed(surface, window, Some(&view));
+}
+
+/// Whether `view` hears what an input method context is needed for.
+fn wants_text(view: &NshView) -> bool {
+    hears(view, EventKind::TextInput) || hears(view, EventKind::CompositionChange)
 }
 
 /// `window` lost the OS focus (`is-active` off): its releases may never
 /// come, so the keys held there are no press of a key any more (another
-/// window's stay). Nothing is reported: a blur is no key release.
+/// window's stay). Its input method leaves the view it had and ends a
+/// pending composition. No key is released: a blur is no key release.
 pub(crate) fn window_deactivated(surface: &Surface, window: &gtk::Window) {
+    focus_changed(surface, window, None);
     surface
         .keyboard
         .pressed
@@ -108,11 +286,21 @@ fn keyboard_parent(surface: &Surface, view: &NshView) -> Option<NshView> {
     (parent.id() != view.id() && parent.root() == view.root()).then_some(parent)
 }
 
-/// Whether `view` or a logical ancestor hears a raw key event, or captures
-/// keys: only then does a key need a [`KeyEvent`], its capture rules and
-/// the per-key state. A view that hears none takes
-/// [`crate::key_focus`]'s original path, with nothing built.
+/// Whether `view` hears a raw key or text event (text reaches the focused
+/// view only, so an ancestor's text listener never counts) or captures
+/// keys, or a logical ancestor hears a raw key or captures keys: only then
+/// does a key need a [`KeyEvent`], its capture rules and the per-key
+/// state. A view that hears none takes [`crate::key_focus`]'s original
+/// path, with nothing built.
 pub(crate) fn listens(surface: &Surface, view: &NshView) -> bool {
+    {
+        let state = view.state();
+        if state.events.contains(EventKind::TextInput)
+            || state.events.contains(EventKind::CompositionChange)
+        {
+            return true;
+        }
+    }
     let mut current = Some(view.clone());
     while let Some(view) = current {
         {
@@ -253,9 +441,11 @@ fn effective_modifiers(
 }
 
 /// A real key came up: clear its hold in `window` (whatever view heard its
-/// press) and report `KeyUp` to the view focused now, if any. A held
-/// modifier is tracked even when nothing has the focus or the key went to
-/// a native widget: the next raw event must carry it.
+/// press), report `KeyUp` to the view focused now and offer the release to
+/// the input method that took the press (never to another view's context:
+/// the focus may have moved since). A held modifier is tracked even when
+/// nothing has the focus or the key went to a native widget: the next raw
+/// event must carry it.
 pub(crate) fn released(
     surface: &Surface,
     window: Option<&gtk::Window>,
@@ -263,7 +453,7 @@ pub(crate) fn released(
     keyval: gdk::Key,
     keycode: u32,
     state: gdk::ModifierType,
-    group: i32,
+    event: Option<&gdk::Event>,
 ) {
     track_modifiers(surface, keyval, keycode, false);
     // Only the window the key was pressed in loses its hold (another
@@ -289,9 +479,30 @@ pub(crate) fn released(
     }
     // The view focused now hears the release, even when the press went to
     // another view; its capture decision is the mounted policy now.
-    let mut event = key_event(surface, keyval, keycode, state, KeyPhase::Up);
-    event.default_prevented = captures(surface, view, &event, keycode, state, group);
-    notify(surface, view, EventKind::KeyUp, event);
+    let mut key = key_event(surface, keyval, keycode, state, KeyPhase::Up);
+    let captured = captures(surface, view, &key, keycode, state, layout(event));
+    key.default_prevented = captured;
+    notify(surface, view, EventKind::KeyUp, key);
+    // GDK's input methods see the release too (`filter_keypress` handles
+    // both), but only the context that filtered its press: the current one
+    // may be another view's (the focus moved) or may only have seen the
+    // press, not its release. A release the mounted capture rule now takes
+    // commits no text, as its press would: the keycode is still consumed
+    // from the per-key state, but a compose sequence it would end on GTK's
+    // simple input method (releasing Control or Shift) never reaches it.
+    let saw_press = surface
+        .keyboard
+        .ime
+        .borrow_mut()
+        .as_mut()
+        .is_some_and(|ime| ime.downs.remove(&keycode));
+    if saw_press
+        && !captured
+        && let Some(event) = event
+        && let Some(ime) = surface.keyboard.ime.borrow().as_ref()
+    {
+        ime.context.filter_keypress(event);
+    }
 }
 
 /// The transition being reported; releases cannot be auto-repeats.
@@ -324,6 +535,260 @@ pub(crate) fn key_event(
     event.modifiers = modifiers;
     event.repeat = repeat;
     event
+}
+
+/// Offers the key to the focused view's input method context; true when it
+/// took it (its commit or preedit arrives through the signals). Also
+/// attaches the context when the view started hearing text after it got
+/// the focus.
+pub(crate) fn text(
+    surface: &Surface,
+    view: &NshView,
+    keycode: u32,
+    event: Option<&gdk::Event>,
+) -> bool {
+    if !wants_text(view) {
+        return false;
+    }
+    if !attached_to(surface, view) {
+        // The key went to `view`: a context still bound to the view it
+        // replaced (the focus moved between windows without a
+        // `focus-widget` change) would take its text and put its candidates
+        // there. End what it composed, then bind it here.
+        end_composition(surface);
+        *surface.keyboard.focused.borrow_mut() = Some(view.downgrade());
+        attach_ime(surface, view);
+    }
+    let Some(event) = event else {
+        return false;
+    };
+    // The context filters this press (its commits and preedits arrive
+    // through the signals); its release belongs to it too.
+    let handled = match surface.keyboard.ime.borrow().as_ref() {
+        Some(ime) => ime.context.filter_keypress(event),
+        None => return false,
+    };
+    if let Some(ime) = surface.keyboard.ime.borrow_mut().as_mut() {
+        ime.downs.insert(keycode);
+    }
+    handled
+}
+
+/// Attaches an input method context to `view` when it hears text (or
+/// replaces the one it has).
+fn attach_ime(surface: &Surface, view: &NshView) {
+    if !wants_text(view) || !crate::key_focus::is_stop(view) || native_owns(view) {
+        detach_ime(surface);
+        return;
+    }
+    let same = surface
+        .keyboard
+        .ime
+        .borrow()
+        .as_ref()
+        .is_some_and(|ime| ime.widget == view.clone().upcast::<gtk::Widget>());
+    if same {
+        update_ime_area(surface, view);
+        return;
+    }
+    detach_ime(surface);
+    let context = gtk::IMMulticontext::new();
+    context.set_client_widget(Some(view));
+    // The signals outlive this call: they find the surface and the view
+    // through weak references.
+    let weak_surface = match surface.keyboard.weak.borrow().clone() {
+        Some(weak) => weak,
+        None => return,
+    };
+    let weak = view.downgrade();
+    let signals = weak_surface.clone();
+    context.connect_commit(move |context, text| {
+        let (Some(surface), Some(view)) = (signals.upgrade(), weak.upgrade()) else {
+            return;
+        };
+        if !crate::key_focus::is_stop(&view)
+            || !surface
+                .keyboard
+                .ime
+                .borrow()
+                .as_ref()
+                .is_some_and(|ime| ime.context == *context)
+        {
+            return;
+        }
+        let had_preedit = !surface.keyboard.preedit.borrow().is_empty();
+        surface.keyboard.preedit.borrow_mut().clear();
+        #[cfg(all(test, feature = "dev"))]
+        surface
+            .keyboard
+            .committed
+            .borrow_mut()
+            .push(text.to_owned());
+        if hears(&view, EventKind::TextInput) {
+            surface.event(
+                view.id(),
+                EventKind::TextInput,
+                EventPayload::TextInput(TextInputEvent::new(text.to_owned())),
+            );
+        }
+        if had_preedit && hears(&view, EventKind::CompositionChange) {
+            surface.event(
+                view.id(),
+                EventKind::CompositionChange,
+                composition(false, ""),
+            );
+        }
+    });
+    let weak = view.downgrade();
+    let signals = weak_surface;
+    context.connect_preedit_changed(move |context| {
+        let (Some(surface), Some(view)) = (signals.upgrade(), weak.upgrade()) else {
+            return;
+        };
+        if !crate::key_focus::is_stop(&view)
+            || !surface
+                .keyboard
+                .ime
+                .borrow()
+                .as_ref()
+                .is_some_and(|ime| ime.context == *context)
+        {
+            return;
+        }
+        let (text, _, _) = context.preedit_string();
+        let text = text.to_string();
+        if *surface.keyboard.preedit.borrow() == text {
+            return;
+        }
+        *surface.keyboard.preedit.borrow_mut() = text;
+        // Preedit is native input state even when the application only
+        // subscribes to committed text. Only the notification is optional.
+        if hears(&view, EventKind::CompositionChange) {
+            let text = surface.keyboard.preedit.borrow();
+            surface.event(
+                view.id(),
+                EventKind::CompositionChange,
+                composition(!text.is_empty(), &text),
+            );
+        }
+    });
+    *surface.keyboard.ime.borrow_mut() = Some(Ime {
+        context: context.clone(),
+        widget: view.clone().upcast(),
+        downs: FxHashSet::default(),
+    });
+    context.focus_in();
+    update_ime_area_with(view, &context);
+}
+
+/// Removes the focused view's input method context.
+fn detach_ime(surface: &Surface) {
+    let context = surface
+        .keyboard
+        .ime
+        .borrow()
+        .as_ref()
+        .map(|ime| ime.context.clone());
+    if let Some(context) = context {
+        // An eligible view may receive a final commit from focus_out.
+        // Keep that context current until its synchronous signals finish.
+        context.focus_out();
+        context.set_client_widget(None::<&gtk::Widget>);
+        surface.keyboard.ime.borrow_mut().take();
+    }
+    surface.keyboard.preedit.borrow_mut().clear();
+}
+
+/// Tells the input method where the focused view's candidate window goes
+/// (`imeCursorArea`).
+fn update_ime_area(surface: &Surface, view: &NshView) {
+    if let Some(ime) = surface.keyboard.ime.borrow().as_ref() {
+        update_ime_area_with(view, &ime.context);
+    }
+}
+
+fn update_ime_area_with(view: &NshView, context: &gtk::IMMulticontext) {
+    let rectangle = ime_rectangle(view.state().props.ime_cursor_area);
+    context.set_cursor_location(&rectangle);
+}
+
+/// Where the candidate window goes: `ime_cursor_area` as it is, in the
+/// view's own coordinates, or the default at its origin: a point-sized
+/// rectangle there, never a stale one from before the area was cleared.
+///
+/// GTK's `IMContext::set_cursor_location` is relative to the client widget,
+/// which is the view, so a nested or transformed view's rectangle is not
+/// translated to root coordinates here: the input method computes the
+/// window position from the client widget's own place.
+pub(crate) fn ime_rectangle(area: Option<Bounds<Points>>) -> gdk::Rectangle {
+    let Some(area) = area else {
+        return gdk::Rectangle::new(0, 0, 1, 1);
+    };
+    gdk::Rectangle::new(
+        area.origin.x.0.round() as i32,
+        area.origin.y.0.round() as i32,
+        area.size.width.0.round().max(1.0) as i32,
+        area.size.height.0.round().max(1.0) as i32,
+    )
+}
+
+/// The preedit the attached input method currently reports (`gtk_test`);
+/// `None` when it composes nothing.
+#[cfg(all(test, feature = "dev"))]
+pub(crate) fn preedit(surface: &Surface) -> Option<String> {
+    let preedit = surface.keyboard.preedit.borrow();
+    (!preedit.is_empty()).then(|| (*preedit).clone())
+}
+
+/// The text the input method committed (`gtk_test`).
+#[cfg(all(test, feature = "dev"))]
+pub(crate) fn committed(surface: &Surface) -> Vec<String> {
+    surface.keyboard.committed.borrow().clone()
+}
+
+/// The view the attached input method serves (`gtk_test`).
+#[cfg(test)]
+pub(crate) fn ime_view(surface: &Surface) -> Option<nsh_core::NodeId> {
+    surface
+        .keyboard
+        .ime
+        .borrow()
+        .as_ref()
+        .and_then(|ime| ime.widget.clone().downcast::<NshView>().ok())
+        .map(|view| view.id())
+}
+
+/// A composition left pending when the focus goes: the view that was
+/// composing hears it end (its `on_composition_change`), and the preedit is
+/// cleared.
+fn end_composition(surface: &Surface) {
+    if surface.keyboard.preedit.borrow().is_empty() {
+        return;
+    }
+    surface.keyboard.preedit.borrow_mut().clear();
+    let view = surface
+        .keyboard
+        .focused
+        .borrow()
+        .as_ref()
+        .and_then(|weak| weak.upgrade());
+    if let Some(view) = view
+        && hears(&view, EventKind::CompositionChange)
+    {
+        surface.event(
+            view.id(),
+            EventKind::CompositionChange,
+            composition(false, ""),
+        );
+    }
+}
+
+/// A composition payload (`EventKind::CompositionChange`).
+fn composition(composing: bool, text: &str) -> EventPayload {
+    EventPayload::Map(vec![
+        ("composing", nsh_core::PayloadValue::Bool(composing)),
+        ("text", nsh_core::PayloadValue::Str(text.to_owned())),
+    ])
 }
 
 /// The DOM `KeyboardEvent.code` of GDK's hardware keycode: where the key
@@ -800,6 +1265,135 @@ mod tests {
             );
             assert!(held.modifiers.shift && held.modifiers.ctrl);
         });
+    }
+
+    /// GTK's simple input method commits the Unicode character a
+    /// Ctrl-Shift-U hex sequence names when Control or Shift is released.
+    /// A release the mounted capture rule takes must consume its per-key
+    /// state but never reach the input method, while an uncaptured release
+    /// on the same composition still commits. Requires
+    /// `GTK_IM_MODULE=gtk-im-context-simple` on an X11 display.
+    #[cfg(feature = "dev")]
+    mod unicode_compose {
+        use nsh_core::{EventKind, EventMask, KeyCapture, ROOT_ID, ViewKind, ViewProps};
+
+        use super::*;
+        use crate::gtk_test::{frame, show, wait_until};
+
+        /// A focusable view that hears text at `(0, y)`.
+        fn text_view(surface: &Rc<Surface>, id: nsh_core::NodeId, y: f32) {
+            apply(
+                surface,
+                &[
+                    MountItem::Create {
+                        id,
+                        kind: ViewKind::View,
+                    },
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                    MountItem::Frame {
+                        id,
+                        frame: frame(0.0, y, 100.0, 40.0),
+                    },
+                ],
+            );
+            props(surface, id, |props| props.focusable = Some(true));
+            let mut events = EventMask::default();
+            events.set(EventKind::TextInput, true);
+            apply(surface, &[MountItem::Events { id, events }]);
+        }
+
+        /// `props` of `id`, changed as `edit` says.
+        fn props(surface: &Rc<Surface>, id: nsh_core::NodeId, edit: impl FnOnce(&mut ViewProps)) {
+            let mut props = view(surface, id).state().props.clone();
+            edit(&mut props);
+            apply(surface, &[MountItem::ViewProps { id, props }]);
+        }
+
+        /// The display's keycode for `key`.
+        fn keycode(key: gdk::Key) -> u32 {
+            gdk::Display::default()
+                .and_then(|display| display.map_keyval(key))
+                .and_then(|keys| keys.first().map(|key| key.keycode()))
+                .expect("a keycode")
+        }
+
+        #[test]
+        fn a_captured_release_does_not_commit_a_unicode_composition() {
+            run(|| {
+                if gdk::Display::default()
+                    .is_none_or(|display| display.type_().name() != "GdkX11Display")
+                {
+                    return;
+                }
+                let surface = surface();
+                text_view(&surface, 2, 0.0);
+                let first = view(&surface, 2);
+                let window = show(&surface);
+                assert!(wait_until(|| first.is_mapped()));
+                let (shift, control) = (keycode(gdk::Key::Shift_L), keycode(gdk::Key::Control_L));
+                crate::xtest::Xtest::with(|x| {
+                    x.focus(&window);
+                    assert!(wait_until(|| window.is_active()));
+                    crate::key_focus::focus(&first);
+                    assert!(wait_until(|| first.is_focus()));
+                    assert!(wait_until(|| ime_view(&surface) == Some(2)));
+                    // Ctrl-Shift-U then 1 2 3 composes U+0123.
+                    assert!(x.key(crate::xtest::CONTROL_L, true));
+                    assert!(x.key(crate::xtest::SHIFT_L, true));
+                    assert!(x.key(crate::xtest::char_keysym('u'), true));
+                    assert!(x.key(crate::xtest::char_keysym('u'), false));
+                    for c in ['1', '2', '3'] {
+                        assert!(x.key(crate::xtest::char_keysym(c), true));
+                        assert!(x.key(crate::xtest::char_keysym(c), false));
+                    }
+                    assert!(
+                        wait_until(|| preedit(&surface).as_deref() == Some("u123")),
+                        "GTK's simple input method composes the hex sequence"
+                    );
+                    assert!(
+                        held_key(&surface, shift) && held_key(&surface, control),
+                        "the modifiers are held"
+                    );
+                    // Capture starts between the press and release.
+                    props(&surface, 2, |props| props.key_capture = KeyCapture::All);
+                    assert!(x.key(crate::xtest::SHIFT_L, false));
+                    assert!(
+                        wait_until(|| !held_key(&surface, shift)),
+                        "the captured release is processed"
+                    );
+                    assert_eq!(
+                        committed(&surface),
+                        Vec::<String>::new(),
+                        "a captured release commits no text"
+                    );
+                    assert_eq!(
+                        preedit(&surface).as_deref(),
+                        Some("u123"),
+                        "the input method never saw the captured release"
+                    );
+                    // The same release without the capture still commits:
+                    // the composition was live, not cancelled by the first
+                    // release.
+                    props(&surface, 2, |props| props.key_capture = KeyCapture::None);
+                    assert!(x.key(crate::xtest::CONTROL_L, false));
+                    assert!(
+                        wait_until(|| !held_key(&surface, control)),
+                        "the uncaptured release is processed"
+                    );
+                    assert!(
+                        wait_until(|| committed(&surface).last().map(String::as_str) == Some("ģ")),
+                        "an uncaptured release commits the composed character"
+                    );
+                    assert_eq!(preedit(&surface), None);
+                })
+                .expect("real XTest is required");
+                window.destroy();
+            });
+        }
     }
 
     #[test]

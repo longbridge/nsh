@@ -93,7 +93,7 @@ pub use crate::{
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     image::ImageData,
-    keyboard::{KeyCapture, KeyEvent},
+    keyboard::{KeyCapture, KeyEvent, TextInputEvent},
     mount::{
         AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
         NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,

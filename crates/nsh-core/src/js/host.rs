@@ -1099,6 +1099,9 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Dismiss,
     EventKind::RequestClose,
     EventKind::Show,
+    // Raw view input has typed Rust listeners, not TSX event props: a Rust
+    // UI set can forward the text it needs.
+    EventKind::TextInput,
 ];
 
 /// The interfaces of the host props, by the elements their props apply

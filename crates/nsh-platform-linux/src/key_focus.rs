@@ -7,14 +7,16 @@
 //! One key controller per window, in GTK's capture phase, decides a press
 //! in this order: the app's shortcuts, the focused view's `KeyDown`
 //! (reported to the engine, never waited for) with its `capture_keys` rules
-//! ([`crate::keyboard`]), the application menu's shortcuts
-//! ([`crate::chrome::menu_shortcut`]), then the defaults of this module. A
-//! view that hears raw keys runs the app's bindings itself, once
-//! ([`crate::keymap::raw`]), and its shortcut's action skips that press;
-//! other views leave the shortcuts to the app's `ShortcutController`, as
-//! before. A captured key is reported (`KeyEvent::captured`) and runs none
-//! of the menu's shortcuts or defaults: no traversal, activation or context
-//! menu. A key that only listens runs them as before.
+//! ([`crate::keyboard`]), an active composition's input method, the
+//! application menu's shortcuts ([`crate::chrome::menu_shortcut`]), the
+//! defaults of this module and, last, ordinary text through the view's
+//! input method. A view that hears raw keys runs the app's bindings itself,
+//! once ([`crate::keymap::raw`]), and its shortcut's action skips that
+//! press; other views leave the shortcuts to the app's
+//! `ShortcutController`, as before. A captured key is reported
+//! (`KeyEvent::default_prevented`) and runs none of the menu's shortcuts or
+//! defaults: no traversal, activation, context menu or text. A key that
+//! only listens runs them as before.
 //!
 //! A native popup (a context menu, the menu bar's menus, their nested
 //! submenus) grabs the keyboard: its releases never reach the window's
@@ -104,9 +106,10 @@ pub(crate) fn blur(view: &NshView) -> bool {
 
 /// Follows the focus of the surface's window, and takes the keys of a
 /// focused stop: the app's shortcuts first, then the view's raw keys and
-/// capture rules, then the application menu's shortcuts and the defaults
-/// of this module (see [`press`]).
+/// capture rules, an active composition, the application menu's shortcuts,
+/// the defaults of this module and ordinary text (see [`press`]).
 pub(crate) fn install(surface: &Rc<Surface>) {
+    crate::keyboard::install(surface);
     let weak = Rc::downgrade(surface);
     let installed = RefCell::new(glib::WeakRef::<gtk::Window>::new());
     surface.root.connect_realize(move |root| {
@@ -166,7 +169,7 @@ pub(crate) fn watch(surface: &Rc<Surface>, window: &gtk::Window) {
                 keyval,
                 keycode,
                 modifiers,
-                crate::keyboard::layout(keys.current_event().as_ref()),
+                keys.current_event().as_ref(),
             );
         }
     });
@@ -175,7 +178,11 @@ pub(crate) fn watch(surface: &Rc<Surface>, window: &gtk::Window) {
     // it (a focus move inside it does not).
     let inactive = Rc::downgrade(surface);
     window.connect_is_active_notify(move |window| {
+        let Some(surface) = inactive.upgrade() else {
+            return;
+        };
         if window.is_active() {
+            crate::keyboard::window_activated(&surface, window);
             return;
         }
         // GTK's native popovers can briefly deactivate and reactivate the
@@ -259,7 +266,7 @@ pub(crate) fn observe_popovers(surface: &Rc<Surface>, widget: &gtk::Widget) {
                     keyval,
                     keycode,
                     modifiers,
-                    crate::keyboard::layout(keys.current_event().as_ref()),
+                    keys.current_event().as_ref(),
                 );
             }
         });
@@ -309,6 +316,9 @@ fn moved(surface: &Surface, window: &gtk::Window, current: &RefCell<Option<NshVi
         return;
     }
     let previous = current.replace(next.clone());
+    // The input method follows the focus before the view hears of it: a
+    // listener may set its cursor area as it arrives.
+    crate::keyboard::focus_changed(surface, window, next.as_ref());
     if let Some(view) = previous {
         view.set_focusable(false);
         crate::input::set_state(surface, &view, state::FOCUSED, false);
@@ -322,16 +332,17 @@ fn moved(surface: &Surface, window: &gtk::Window, current: &RefCell<Option<NshVi
 
 /// A key on its way to the focus: the app's shortcuts first (the app's
 /// `ShortcutController` runs right after this, when the key is the app's),
-/// then the focused view's `KeyDown` and capture rules, then the
-/// application menu's shortcuts ([`crate::chrome::menu_shortcut`]), then
-/// the defaults (Tab's traversal, Return and Space pressing, a context
-/// menu). True when the key is consumed.
+/// then the focused view's `KeyDown` and capture rules, an active
+/// composition's input method, the application menu's shortcuts
+/// ([`crate::chrome::menu_shortcut`]), then the defaults (Tab's traversal,
+/// Return and Space pressing, a context menu) and, last, ordinary text
+/// through the view's input method. True when the key is consumed.
 ///
-/// A focused view whose ancestry hears none of the raw keys and captures
-/// none builds no raw [`KeyEvent`]; the app's bindings, the menu and
-/// [`defaults`] decide. A native input or native content focus owns its
-/// keys the same way, capture rules around it aside. Modifier transitions
-/// stay tracked.
+/// A focused view that hears no text event, and whose ancestry hears none
+/// of the raw keys and captures none, builds no raw [`KeyEvent`]; the app's
+/// bindings, the menu and [`defaults`] decide. A native input or native
+/// content focus owns its keys and text the same way, capture rules around
+/// it aside. Modifier transitions stay tracked.
 pub(crate) fn press(
     surface: &Rc<Surface>,
     widget: Option<&gtk::Widget>,
@@ -427,18 +438,41 @@ pub(crate) fn press(
     key_event.default_prevented = captured;
     crate::keyboard::notify(surface, &view, EventKind::KeyDown, key_event);
     if captured {
-        // The view took the key: no menu shortcut, traversal, activation or
-        // context menu.
+        // The view took the key: no menu shortcut, traversal, activation,
+        // context menu, text or scroll.
         return true;
     }
+    // A composition has the keys before the menu and the defaults: Return
+    // commits it instead of pressing the view, Escape cancels it, arrows
+    // and digits pick candidates. It is offered each key once; a key it
+    // refuses goes on to the menu and the defaults.
+    let mut offered = false;
+    if crate::keyboard::composing(surface, &view) {
+        offered = true;
+        if crate::keyboard::text(surface, &view, keycode, event) {
+            return true;
+        }
+    }
     // The application menu's shortcuts come before the defaults: a menu's
-    // key is the app's, not a traversal or a context menu.
+    // key is the app's, not a traversal or a context menu, and it types
+    // nothing.
     if menu_shortcut() {
         return true;
     }
-    // Tab's traversal is a default too: it is armed here, then GTK moves the
-    // focus right after this, in the same dispatch.
-    defaults(surface, &view, keyval, modifiers)
+    if is_tab(keyval) {
+        // GTK moves the focus right after this, in the same dispatch.
+        return defaults(surface, &view, keyval, modifiers);
+    }
+    if defaults(surface, &view, keyval, modifiers) {
+        return true;
+    }
+    if offered {
+        return false;
+    }
+    // Ordinary text through the view's input method, after every native
+    // default: a key the platform kept and no composition took types its
+    // text there.
+    crate::keyboard::text(surface, &view, keycode, event)
 }
 
 /// Whether `keyval` is a Tab (the app's traversal).
@@ -937,7 +971,7 @@ mod tests {
                 gdk::Key::Escape,
                 9,
                 gdk::ModifierType::empty(),
-                0,
+                None,
             );
             assert!(!crate::keyboard::held_key(&surface, 9));
             window.destroy();
@@ -974,6 +1008,127 @@ mod tests {
                 "a capture policy"
             );
         });
+    }
+
+    /// A focusable view that hears text at `(0, y)`.
+    fn text_view(surface: &Rc<Surface>, id: NodeId, y: f32) {
+        apply(
+            surface,
+            &[
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+                MountItem::Frame {
+                    id,
+                    frame: frame(0.0, y, 100.0, 40.0),
+                },
+            ],
+        );
+        props(surface, id, |props| props.focusable = Some(true));
+        let mut events = EventMask::default();
+        events.set(EventKind::TextInput, true);
+        apply(surface, &[MountItem::Events { id, events }]);
+    }
+
+    /// The input method is bound to the view the key goes to, even when
+    /// another window's retained focus left it elsewhere, and neither an
+    /// inactive view's props nor its events repoint it.
+    #[test]
+    fn the_input_method_follows_the_focused_view() {
+        run(|| {
+            let surface = surface();
+            text_view(&surface, 2, 0.0);
+            text_view(&surface, 3, 40.0);
+            let (a, b) = (view(&surface, 2), view(&surface, 3));
+            let window = show(&surface);
+            assert!(wait_until(|| a.is_mapped()));
+            focus(&a);
+            assert!(a.is_focus());
+            assert!(
+                wait_until(|| crate::keyboard::ime_view(&surface) == Some(2)),
+                "attached to the view that hears text"
+            );
+            // A disabled view stops composing, and can type again once it
+            // is enabled.
+            props(&surface, 2, |props| {
+                props.accessibility.state.disabled = true
+            });
+            assert_eq!(crate::keyboard::ime_view(&surface), None);
+            props(&surface, 2, |props| {
+                props.accessibility.state.disabled = false
+            });
+            assert_eq!(crate::keyboard::ime_view(&surface), Some(2));
+            // The same surface's focus moved to b (b's context), while the
+            // window kept a as its focus widget: a's key must not go
+            // through b's context.
+            crate::keyboard::focus_changed(&surface, &window, Some(&b));
+            assert_eq!(crate::keyboard::ime_view(&surface), Some(3));
+            assert!(!crate::keyboard::text(&surface, &a, 0, None));
+            assert_eq!(
+                crate::keyboard::ime_view(&surface),
+                Some(2),
+                "rebound to the view the key went to"
+            );
+            // Activation points the input method at that window's retained
+            // focus widget again, though no focus-widget change came.
+            crate::keyboard::focus_changed(&surface, &window, Some(&b));
+            crate::keyboard::window_activated(&surface, &window);
+            assert_eq!(
+                crate::keyboard::ime_view(&surface),
+                Some(2),
+                "activation rebinds to the window's focus"
+            );
+            // A view that is not the input method's changing leaves it be.
+            crate::keyboard::props_changed(&surface, &b);
+            crate::keyboard::events_changed(&surface, &b);
+            assert_eq!(crate::keyboard::ime_view(&surface), Some(2));
+            focus(&b);
+            assert!(
+                wait_until(|| crate::keyboard::ime_view(&surface) == Some(3)),
+                "follows the focused view"
+            );
+            focus(&a);
+            assert!(wait_until(|| crate::keyboard::ime_view(&surface) == Some(2)));
+            // Deleting the view detaches its context before the widget goes.
+            apply(&surface, &[MountItem::Delete { id: 2 }]);
+            assert_eq!(crate::keyboard::ime_view(&surface), None);
+            window.destroy();
+        });
+    }
+
+    /// A cleared area returns the candidate window to the view's origin,
+    /// not to the rectangle it had before, and a nested view's area stays in
+    /// that view's coordinates: GTK's cursor location is relative to the
+    /// client widget, so the input method applies the view's own transform.
+    #[test]
+    fn the_cursor_area_is_the_views_own_and_clears_to_the_origin() {
+        use nsh_core::geometry::{bounds, point, size};
+
+        let area = bounds(
+            point(Points(12.0), Points(34.0)),
+            size(Points(5.0), Points(6.0)),
+        );
+        let rectangle = crate::keyboard::ime_rectangle(Some(area));
+        assert_eq!(
+            (
+                rectangle.x(),
+                rectangle.y(),
+                rectangle.width(),
+                rectangle.height()
+            ),
+            (12, 34, 5, 6)
+        );
+        let none = crate::keyboard::ime_rectangle(None);
+        assert_eq!(
+            (none.x(), none.y(), none.width(), none.height()),
+            (0, 0, 1, 1)
+        );
     }
 
     #[test]

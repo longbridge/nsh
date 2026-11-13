@@ -18,11 +18,13 @@
 //! its stops (those that take presses, and `focusable` ones that take none)
 //! where the platform does (macOS, the web, Linux), Shift+F10 asks it for
 //! its context menu (the web, Linux), the focused input takes the keys that
-//! edit it, and Escape goes back.
+//! edit it, and Escape goes back. A character no default took is committed
+//! to the focused view that listens for `on_text_input` (there is no
+//! emulated input method).
 
 use nsh_core::{
     Command, EventKind, EventPayload, KeyEvent, MountBatch, MountItem, NodeId, PayloadValue,
-    ROOT_ID,
+    ROOT_ID, TextInputEvent,
     desktop::{MenuItem, Shortcut},
     element::SharedString,
     geometry::Points,
@@ -81,10 +83,11 @@ impl Headless {
     /// captured), with its capture rule read afresh. What the platform
     /// keeps goes on to its defaults: Return and Space press
     /// the focused control, then the application menu's shortcuts, a
-    /// window's Escape, the context-menu keys and Tab; elsewhere the focused
-    /// input takes a character, Backspace or the return key, and Escape goes
-    /// back as the desktops' back key does when there is something to go
-    /// back from.
+    /// window's Escape, the context-menu keys and Tab; a focused view that
+    /// listens for text takes the character the key types (`on_text_input`),
+    /// and elsewhere the focused input takes a character, Backspace or the
+    /// return key, and Escape goes back as the desktops' back key does when
+    /// there is something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
         self.step(format!("keyboard.press({keys})"));
         self.send_key(keys)?;
@@ -249,6 +252,23 @@ impl Headless {
                 }
                 if stroke.key == keymap::Key::Tab && plain && self.tabs_to_views() {
                     self.tab(m.shift);
+                    break 'defaults;
+                }
+                // Ordinary text goes to the focused view that listens for
+                // it, once no shortcut, capture or activation kept the
+                // press: what the key types, as a platform input method
+                // commits it.
+                if let Some(view) = self.screen.key_focus()
+                    && self.screen.hears(view, EventKind::TextInput)
+                    && !(m.ctrl || m.alt || m.cmd)
+                    && let keymap::Key::Char(c) = stroke.key
+                {
+                    let c = if m.shift { shifted(c) } else { c };
+                    self.send(
+                        view,
+                        EventKind::TextInput,
+                        EventPayload::TextInput(TextInputEvent::new(c.to_string())),
+                    );
                     break 'defaults;
                 }
                 if let Some(input) = self.screen.focused() {

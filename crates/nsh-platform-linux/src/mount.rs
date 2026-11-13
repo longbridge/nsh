@@ -142,6 +142,7 @@ impl Mounter {
                 crate::file_drop::deleted(surface, *id);
                 crate::navigation::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::keyboard::removed(surface, &view);
                     crate::selectable_view::touched(surface, &view);
                     crate::input::removed(surface, &view);
                     crate::native::deleted(surface, &view);
@@ -228,6 +229,7 @@ impl Mounter {
                     view.state_mut().events = *events;
                     crate::file_drop::events_changed(surface, view);
                     crate::input::events_changed(surface, view);
+                    crate::keyboard::events_changed(surface, view);
                     crate::access::events_changed(surface, view);
                 }
             }
@@ -333,6 +335,7 @@ impl Mounter {
                 view.set_can_target(!matches!(props.pointer_events, PointerEvents::None));
                 view.state_mut().props = props.clone();
                 crate::input::props_changed(surface, view);
+                crate::keyboard::props_changed(surface, view);
                 crate::selectable_view::props_changed(surface, view);
                 crate::access::props_changed(surface, view);
             }

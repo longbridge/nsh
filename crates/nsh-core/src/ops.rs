@@ -238,7 +238,7 @@ events! {
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     MouseMove = "onMouseMove": "The mouse moved over the view or a view inside it, with or without a button down, or a modifier key changed while it rests there with none down (payload: [`EventPayload::Mouse`]; at most one per frame).",
     ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
-    CompositionChange = "onCompositionChange": "An input method's composition in an input started, changed or ended (payload: `composing`, `text`: the text being composed, empty once it ends; after the `onChangeText` of the committed text).",
+    CompositionChange = "onCompositionChange": "An input method's composition in an input or a focused Rust view started, changed or ended (payload: `composing`, `text`: the text being composed, empty once it ends; after the committed text of an input's `onChangeText` or a Rust view's `onTextInput`).",
     PressOutside = "onPressOutside": "A press went down outside an overlay, its anchor and the overlays inside it (payload: `pageX`, `pageY`; raised by the core).",
     Cancel = "onCancel": "Escape or the Android back button was pressed while the overlay was the top one listening to it (raised by the core).",
     Position = "onPosition": "The core placed an overlay (payload: `placement`, the side it went on, `x`, `y`, `width`, `height` in the root view, `availableWidth`, `availableHeight`: the room on that side).",
@@ -266,6 +266,7 @@ events! {
     CanvasImage = "onCanvasImage": "A [`Command::RenderCanvas`] request finished (root only; payload: [`EventPayload::CanvasImage`]).",
     KeyDown = "onKeyDown": "A hardware key went down on the focused view or a view inside it (payload: [`EventPayload::Key`]). Notifications bubble to enabled listening ancestors within the same native window; returning from the listener cannot change handling, and `default_prevented` reports the mounted capture policy's decision for this transition.",
     KeyUp = "onKeyUp": "A hardware key came up on the focused view (payload: [`EventPayload::Key`]), with `default_prevented` as the capture policy decided for this transition. It bubbles to enabled ancestors as `onKeyDown` does.",
+    TextInput = "onTextInput" as "": "Text was committed to the focused Rust view by typing, a dead key or an input method (payload: [`EventPayload::TextInput`]); a captured key commits nothing. It reaches the focused view only. Linux and the headless Linux driver deliver it; the other platforms send none yet.",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -1033,6 +1034,9 @@ pub enum EventPayload {
     Pinch(PinchEvent),
     /// A hardware key transition on a focused Rust view.
     Key(crate::KeyEvent),
+    /// Text committed to a focused Rust view by typing, a dead key or an
+    /// input method.
+    TextInput(crate::TextInputEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
     /// `onPressDown`, `onPressUp`), with the modifier keys and the click
     /// count, on backends that know it.
@@ -3222,6 +3226,12 @@ pub enum Prop {
     /// inputs keep their keys. Omitting it restores `"none"`.
     #[prop(js = "captureKeys", reset = Prop::KeyCapture(crate::KeyCapture::None))]
     KeyCapture(crate::KeyCapture),
+    /// `imeCursorArea`: where an input method shows its candidate window
+    /// while a view that listens to `on_text_input` has the keyboard focus,
+    /// in the view's own coordinates (Rust: `ime_cursor_area`). Unset, the
+    /// platform puts it at the view's origin.
+    #[prop(reset = Prop::ImeCursorArea(None))]
+    ImeCursorArea(Option<Bounds<Points>>),
     /// `selectable` of a view: the texts in it share one selection, as a
     /// browser page's do ([`crate::selection`]); texts with
     /// `selectable={false}` stay out of it, a selectable view inside

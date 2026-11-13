@@ -13,7 +13,7 @@ use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
     ListContentStyle, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points,
-    PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
+    PressEvent, Prop, Size, Tag, TextInputEvent, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -1608,6 +1608,51 @@ pub trait Interactive: Element {
             EventKind::KeyUp,
             events::typed(listener.into_listener(), events::key_event),
         )
+    }
+
+    /// Text was committed to it while it had the keyboard focus: typing, a
+    /// dead key or an input method (whose preedit
+    /// [`Self::on_composition_change`] reports before the commit). It
+    /// reaches the focused view only. A key captured by
+    /// [`Self::capture_keys`] commits nothing. Linux and the headless Linux
+    /// desktop driver deliver it; the other platforms keep the API compiling
+    /// and never send one yet. Rust views only: an
+    /// [`Input`](super::Input) and `Terminal` keep their own text input.
+    fn on_text_input<M>(self, listener: impl IntoListener<TextInputEvent, M>) -> Self {
+        self.on(
+            EventKind::TextInput,
+            events::typed(listener.into_listener(), events::text_input),
+        )
+    }
+
+    /// An input method's composition in it started, changed or ended: the
+    /// text being composed (pinyin before a character is chosen, kana
+    /// before conversion), empty once it ends. The view needs the keyboard
+    /// focus and an input method context, which [`Self::on_text_input`]
+    /// enables too. Linux delivers it; the headless driver has no emulated
+    /// input method, and the other platforms never send one yet.
+    ///
+    /// The input method runs even without this listener when the view
+    /// listens to [`Self::on_text_input`]: its preedit still takes the keys
+    /// of a composition, so Return commits the text before the view is
+    /// activated.
+    fn on_composition_change<M>(self, listener: impl IntoListener<events::Composition, M>) -> Self {
+        self.on(
+            EventKind::CompositionChange,
+            events::typed(listener.into_listener(), events::composition),
+        )
+    }
+
+    /// Where an input method shows its candidate window while the view has
+    /// the keyboard focus, in the view's own coordinates
+    /// ([`Self::on_text_input`]): a nested view's area is relative to that
+    /// view, not to the root. The value is reactive and optional: `None`
+    /// (and omitting the prop on a retained view) returns the candidate
+    /// window to the view's origin instead of leaving a stale rectangle
+    /// behind. Linux uses it today.
+    fn ime_cursor_area(mut self, area: impl IntoReactive<Option<Bounds<Points>>>) -> Self {
+        super::host::bind_prop(self.node(), area, Prop::ImeCursorArea);
+        self
     }
 
     /// Keys consumed on this view or a focused descendant before native

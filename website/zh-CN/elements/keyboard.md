@@ -223,6 +223,24 @@ TSX 的 `captureKeys`（`{"none"}`、`{"all"}`，或 `{["mod+k", "escape"]}` 这
 规则支持响应式值；保留视图再次渲染时省略规则，会恢复 `"none"`。可用的应用快捷键保持优先级，获得焦点的原生输入框保留用于编辑的按键，
 捕获也无法越过操作系统根本不投递的快捷键。被捕获的 Tab 留在当前视图；仅被观察的 Tab 按正常规则切换焦点。
 
+自定义 Rust 视图还可以用 `on_text_input` 接收已提交的文字：键盘输入、死键或输入法提交的内容。被捕获的按键不提交文字。
+`on_composition_change` 报告输入法组合中的预编辑文字；组合期间，输入法会在平台激活之前先收到每个按键，因此 Return 会提交
+组合文字而不是激活视图，即使视图只监听已提交的文字。`Input` 和 `Terminal` 保留各自的文本输入。这些是 Rust API：TSX 没有
+自定义视图的 `onTextInput`、`onCompositionChange` 或 `imeCursorArea`；Rust UI 集可以暴露一个应用专用组件来转发它们。
+
+`ime_cursor_area` 用视图自身的坐标放置输入法候选窗口，因此嵌套视图的矩形相对该视图，不会被转换到根视图坐标。
+它是响应式且可选的：可以是 `Signal<Option<Bounds<Points>>>`、返回 `Some` 或 `None` 的闭包，或固定值。
+设为 `None`，或在保留视图上省略该属性，会把候选窗口移回视图原点，而不会留下旧矩形。平台在每次挂载变化时立即响应，不等待监听函数。
+
+```rust
+// 一个获得焦点的画布：已提交文字、预编辑文字，以及光标下方的候选窗口。
+view()
+    .focusable(true)
+    .on_text_input(move |e: &TextInputEvent| text.update(|t| t.push_str(&e.text)))
+    .on_composition_change(move |e: &Composition| composing.set(e.text.clone()))
+    .ime_cursor_area(move || caret.get()) // Option<Bounds<Points>>
+```
+
 ```tsx
 import { signal, Text, View } from "nsh";
 
@@ -241,7 +259,8 @@ function Pad() {
 }
 ```
 
-Linux 桌面模式的无界面驱动也会执行这一 Rust API；Rust UI 集可以向 TSX 暴露应用专用组件及事件。
+Linux 桌面模式的无界面驱动也会执行这一 Rust API：它会把普通按键或 Shift 按键输入的字符作为已提交文字发送给监听的聚焦视图，
+但不模拟输入法。Rust UI 集可以向 TSX 暴露应用专用组件及事件。
 不同输入源的能力不同：只报告击键的旧式终端不会产生释放、重复或物理键码，GPUI 的逻辑事件也没有物理键码（`code` 为 `""`）。
 各平台输入源报告的字段见 `docs/dev/tooling.md` 及各平台的开发文档。
 

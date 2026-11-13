@@ -25666,6 +25666,99 @@ fn retained_views_clear_omitted_capture_rules() {
     assert_eq!(cleared.key_capture, KeyCapture::None);
 }
 
+/// `imeCursorArea` is reactive and optional: a moved area clears the
+/// retained view's old rectangle, and omitting the prop sets it back to
+/// `None` instead of leaving the last value mounted.
+#[test]
+fn reactive_ime_cursor_areas_change_clear_and_reset_to_none() {
+    use crate::prelude::*;
+
+    fn area(x: f32, y: f32) -> Bounds<Points> {
+        crate::geometry::bounds(
+            crate::geometry::point(Points(x), Points(y)),
+            crate::geometry::size(Points(10.0), Points(12.0)),
+        )
+    }
+
+    #[component]
+    fn Areas() -> impl IntoElement {
+        let stage = signal(0_u32);
+        let include = signal(true);
+        view()
+            .on_press(move || {
+                stage.update(|s| *s += 1);
+                if stage.get() == 4 {
+                    include.set(false);
+                }
+            })
+            .child(dynamic(move || {
+                view().key("pad").when(include.get(), |pad| {
+                    pad.ime_cursor_area(move || match stage.get() {
+                        0 => Some(area(10.0, 20.0)),
+                        1 => Some(area(30.0, 40.0)),
+                        2 => None,
+                        3 => Some(area(50.0, 60.0)),
+                        _ => None,
+                    })
+                })
+            }))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Areas>());
+    let initial = c.commit().unwrap();
+    let trigger = initial
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let pad = initial
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::ViewProps { id, props }
+                if props.ime_cursor_area == Some(area(10.0, 20.0)) =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let mounted = |batch: &MountBatch| {
+        batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::ViewProps { id, props } if *id == pad => Some(props.clone()),
+                _ => None,
+            })
+            .expect("the retained pad keeps its props")
+    };
+
+    c.component_event(trigger, EventKind::Press, &EventPayload::None);
+    let changed = c.commit().unwrap();
+    assert!(!changed.items.iter().any(|item| matches!(item,
+        MountItem::Delete { id } if *id == pad
+    )));
+    assert_eq!(mounted(&changed).ime_cursor_area, Some(area(30.0, 40.0)));
+
+    c.component_event(trigger, EventKind::Press, &EventPayload::None);
+    let cleared = c.commit().unwrap();
+    assert_eq!(mounted(&cleared).ime_cursor_area, None);
+
+    // A value set again is cleared by omitting the prop: the retained view
+    // must reset to `None`, not keep the last rectangle.
+    c.component_event(trigger, EventKind::Press, &EventPayload::None);
+    let set_again = c.commit().unwrap();
+    assert_eq!(mounted(&set_again).ime_cursor_area, Some(area(50.0, 60.0)));
+    c.component_event(trigger, EventKind::Press, &EventPayload::None);
+    let omitted = c.commit().unwrap();
+    assert_eq!(mounted(&omitted).ime_cursor_area, None);
+}
+
 #[test]
 fn key_capture_reads_mounted_rules_with_canonical_strokes() {
     use crate::{keymap::Keystroke, prelude::*};

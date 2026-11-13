@@ -4405,6 +4405,77 @@ mod tests {
         }
     }
 
+    /// A focusable pad that listens for committed text, with what it heard
+    /// and what the raw key said.
+    #[component]
+    fn TextPad() -> impl IntoElement {
+        let typed = signal(String::from("none"));
+        let captured = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .on_text_input(move |e: &TextInputEvent| typed.set(e.text.to_string()))
+                    .on_key_down(move |e: &KeyEvent| {
+                        captured.set(format!("{} {}", key_name(e), e.default_prevented));
+                    }),
+            )
+            .child(text(move || format!("typed {}", typed.get())))
+            .child(text(move || format!("captured {}", captured.get())))
+    }
+
+    #[test]
+    fn typed_text_reaches_a_focused_view_that_listens_for_it() {
+        let mut app = start_linux(Root::of::<TextPad>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // The key is the view's and still types its text, as a platform
+        // input method commits it.
+        app.press_key("a").unwrap();
+        app.wait_for("typed a").unwrap();
+        app.wait_for("captured a false").unwrap();
+        app.press_key("shift+b").unwrap();
+        app.wait_for("typed B").unwrap();
+    }
+
+    /// The same pad, capturing every key: its keys are reported captured
+    /// and type nothing.
+    #[component]
+    fn TextCaptured() -> impl IntoElement {
+        let typed = signal(String::from("none"));
+        let captured = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .capture_keys(KeyCapture::All)
+                    .on_text_input(move |e: &TextInputEvent| typed.set(e.text.to_string()))
+                    .on_key_down(move |e: &KeyEvent| {
+                        captured.set(format!("{} {}", key_name(e), e.default_prevented));
+                    }),
+            )
+            .child(text(move || format!("typed {}", typed.get())))
+            .child(text(move || format!("captured {}", captured.get())))
+    }
+
+    #[test]
+    fn a_captured_key_commits_no_text() {
+        let mut app = start_linux(Root::of::<TextCaptured>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        app.press_key("a").unwrap();
+        app.wait_for("captured a true").unwrap();
+        app.wait_for("typed none").unwrap();
+    }
+
     /// Two focusable pads, each focused through its ref; what each heard.
     #[component]
     fn FocusPads() -> impl IntoElement {

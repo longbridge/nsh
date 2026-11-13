@@ -5661,6 +5661,13 @@ impl<M: TextEngine> Core<M> {
                     key_ancestry = true;
                 }
             }
+            Prop::ImeCursorArea(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.ime_cursor_area != value {
+                    props.ime_cursor_area = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::SelectableView(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.selectable_view != value {

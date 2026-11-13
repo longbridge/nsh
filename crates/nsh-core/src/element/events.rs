@@ -145,9 +145,9 @@ pub struct CaretEvent {
     pub page_bounds: Bounds<Points>,
 }
 
-/// An input method's composition in an input (`on_composition_change`):
-/// the text being composed (pinyin before a character is chosen, kana
-/// before conversion), not yet the input's text.
+/// An input method's composition in an input or a focused Rust view
+/// (`on_composition_change`): the text being composed (pinyin before a
+/// character is chosen, kana before conversion), not yet the text.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Composition {
@@ -620,6 +620,13 @@ pub(crate) fn touchpad_pinch(p: &EventPayload) -> Option<Cow<'_, PinchEvent>> {
 pub(crate) fn key_event(p: &EventPayload) -> Option<Cow<'_, crate::KeyEvent>> {
     match p {
         EventPayload::Key(event) => Some(Cow::Borrowed(event)),
+        _ => None,
+    }
+}
+
+pub(crate) fn text_input(p: &EventPayload) -> Option<Cow<'_, crate::TextInputEvent>> {
+    match p {
+        EventPayload::TextInput(event) => Some(Cow::Borrowed(event)),
         _ => None,
     }
 }

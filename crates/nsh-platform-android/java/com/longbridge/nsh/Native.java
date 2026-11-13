@@ -94,6 +94,7 @@ final class Native {
     static final int CANVAS_IMAGE = 82;
     static final int KEY_DOWN = 83;
     static final int KEY_UP = 84;
+    static final int TEXT_INPUT = 85;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

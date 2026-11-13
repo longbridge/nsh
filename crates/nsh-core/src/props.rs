@@ -455,6 +455,11 @@ pub struct ViewProps {
     /// defaults run. Backends decide from the mounted rules without
     /// waiting for a listener (`Interactive::capture_keys`).
     pub key_capture: crate::KeyCapture,
+    /// `imeCursorArea`: where an input method shows its candidate window
+    /// while the view has the keyboard focus, in the view's coordinates
+    /// (`Interactive::on_text_input`). Cleared, the platform returns the
+    /// candidate window to the view's origin.
+    pub ime_cursor_area: Option<crate::Bounds<Points>>,
     /// Where keyboard ancestry continues for a portaled view (an overlay
     /// whose native parent is its root view while its logical parent is
     /// the view it is in): the logical parent's node id. Internal routing

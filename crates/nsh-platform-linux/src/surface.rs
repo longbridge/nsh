@@ -191,7 +191,7 @@ pub(crate) struct Surface {
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
-    /// Focused views' keys ([`crate::keyboard`]).
+    /// Focused views' keys and input method ([`crate::keyboard`]).
     pub(crate) keyboard: crate::keyboard::Keyboard,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,

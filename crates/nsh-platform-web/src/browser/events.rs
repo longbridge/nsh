@@ -140,6 +140,9 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
             ("repeat", boolean(event.repeat)),
             ("defaultPrevented", boolean(event.default_prevented)),
         ])?,
+        // Raw view input has typed Rust listeners, not TSX event props; the
+        // payload stays accurate for inspection.
+        EventPayload::TextInput(e) => object([("text", Value::string(e.text.as_str())?)])?,
         EventPayload::Wheel(w) => {
             let (dx, dy) = w.delta.xy();
             object([

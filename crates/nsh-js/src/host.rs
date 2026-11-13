@@ -1297,6 +1297,9 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             obj.set("repeat", event.repeat)?;
             obj.set("defaultPrevented", event.default_prevented)?;
         }
+        // Raw view input has typed Rust listeners, not TS event handlers;
+        // the payload stays accurate for inspection.
+        EventPayload::TextInput(e) => obj.set("text", e.text.as_str())?,
         EventPayload::Wheel(e) => {
             obj.set("position", point_object(cx, e.position)?)?;
             obj.set("pagePosition", point_object(cx, e.page_position)?)?;

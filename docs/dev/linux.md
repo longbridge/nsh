@@ -168,7 +168,7 @@ report nothing: the key being handled is kept until the main loop is idle, and `
 
 ### Custom Rust views
 
-`keyboard.rs` adds hardware key notifications to the existing focus path in `key_focus.rs`.
+`keyboard.rs` adds hardware key notifications and input-method text to the existing focus path in `key_focus.rs`.
 An app-rendered view can observe the source's logical key, its physical code, repeats and releases through
 `Interactive::on_key_down` and `on_key_up`. These are asynchronous observations; `capture_keys` mounts a reactive
 `KeyCapture` rule so GTK can consume a key without waiting for the engine. Omitting the rule on a retained view
@@ -189,7 +189,10 @@ key as the shortcut controller matches one. The raw logical key string is never 
 adapter. `All` takes a key whose layout names no shortcut key; no rule at all is the fast path.
 
 Eligible app shortcuts run first, including their window, repeat and pass-through rules. The raw key path follows,
-then existing native defaults. A captured Tab never arms traversal. `default_prevented` is the decision the GTK
+then an active composition's input method, the application menu's shortcuts, the existing native defaults and,
+last, ordinary text through the view's input method. During a composition the input method is offered a key before
+activation, so Return commits the composition instead of pressing the view. A captured key commits no text and runs
+no menu shortcut or default. A captured Tab never arms traversal. `default_prevented` is the decision the GTK
 capture phase made for this transition; the listener runs later, on the app's frame, so it reports that decision
 and cannot veto a key whose default already ran or is about to run. Notifications are focus-scoped and use the
 mounted rule when each phase arrives: `KeyDown` and `KeyUp` reach listening, enabled ancestors within the native
@@ -200,12 +203,29 @@ logical parent, while focus, hit testing and layout keep the native one. No orig
 focus move is no release, and a window deactivation clears held state without emitting a synthetic key up. Native
 menu popovers observe releases while holding GTK's keyboard grab,
 reporting them to the focused view without reporting popup presses as view input. Native inputs, web views, native
-components and videos own their keys: a capture around them does not intercept their editing. Ordinary views with
-no raw listener or capture keep the existing fast path.
+components and videos own their keys and text: a capture around them does not intercept their editing. Ordinary
+views with no raw listener, capture or text listener keep the existing fast path.
+
+Committed text (`on_text_input`) and preedit (`on_composition_change`) come from a `gtk::IMMulticontext` attached to
+the focused stop while it hears either event. The context follows the active window's focus, not an inactive window's
+retained focus; disabling the view, removing its listeners or moving the focus ends a pending composition and
+detaches it, and deleting the view detaches it before its widget is destroyed. The preedit is kept even when the app
+only listens for committed text, so composition keys still reach the input method. The context is offered the
+releases of the keycodes it filtered, never another view's, and a composition commit is reported asynchronously
+through the engine channel. `ViewProps::ime_cursor_area` (Rust: `Interactive::ime_cursor_area`, an
+`Option<Bounds<Points>>`) places the candidate window in the view's own coordinates: GTK's cursor location is
+relative to the client widget, which is the view, so a nested or transformed view's rectangle is never translated to
+root coordinates here. Clearing it, or omitting the prop on a retained view, resets GTK's cursor location to a 1×1
+rectangle at the view's origin rather than leaving the last rectangle. `props_changed` and `events_changed` in
+`mount.rs` keep the context and its cursor location current. `TextInput` reaches the focused view only; it is not
+bubbled like `KeyDown` / `KeyUp`, and it is not a TSX event prop.
 
 The API belongs to Rust UI sets, with Linux and Linux-desktop headless providers. The headless simulator reports the
 logical key its generated stroke names (no fabricated code or repeat) on the simulated backends
-whose raw path delivers input, and a focused native input owns its keys. The shared cross-platform `onWheel` API
+whose raw path delivers input, and a focused native input owns its keys and text. The headless Linux driver commits
+the character a plain or Shifted key types as `TextInputEvent` to a focused view that listens for it, after every
+shortcut, capture and default; it has no emulated input method, so it sends no composition. The shared cross-platform
+`onWheel` API
 and its `deltaMode` payload stay in `ops.rs`; the headless wheel path uses `input::wheel_listener` and
 `input::scroll_target`, so an observer on or outside a scroll view hears the wheel while that scroll view still
 scrolls.

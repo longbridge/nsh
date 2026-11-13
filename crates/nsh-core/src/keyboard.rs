@@ -1,10 +1,14 @@
-//! Hardware key transitions and mounted capture rules for custom Rust views
-//! and for TSX views.
+//! Hardware key transitions, mounted capture rules and committed text for
+//! custom Rust views and for TSX views.
 //!
 //! Desktops and browsers deliver [`KeyEvent`] notifications for the
 //! focused view; app-rendered interaction surfaces can forward the logical
-//! key, its DOM `code`, repeats and releases to their own input engine. Raw
-//! key names are input data: the DOM's spelling for named keys, and the
+//! key, its DOM `code`, repeats and releases to their own input engine.
+//! Linux also delivers [`TextInputEvent`] for text a key, a dead key or an
+//! input method committed to a focused view that listens for it, and the
+//! headless Linux driver commits the characters its generated key types.
+//! The other platforms keep the API compiling and send none yet. Raw key
+//! names are input data: the DOM's spelling for named keys, and the
 //! character a printable key reports, never forced onto a made-up layout.
 //! `code` is the source's physical identity in the DOM's spelling, mapped
 //! by the backend from the native identifier it really has; a source
@@ -69,6 +73,30 @@ impl Default for KeyEvent {
             repeat: false,
             default_prevented: false,
         }
+    }
+}
+
+/// Text committed to the focused view (`on_text_input`): what a key typed,
+/// a dead key's composition or an input method committed.
+///
+/// A press captured by [`KeyCapture`] commits nothing, and this is not a
+/// key's preview: an input method reports the text it is composing through
+/// `on_composition_change` and then its commit here. Linux and the headless
+/// Linux desktop driver deliver it; the other platforms keep the API
+/// compiling and send none yet. A native input and a terminal keep their own
+/// text input.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TextInputEvent {
+    /// The committed text (more than one character when an input method
+    /// commits a word, or when it commits a paste at once).
+    pub text: SharedString,
+}
+
+impl TextInputEvent {
+    /// Builds an event containing committed `text`.
+    pub fn new(text: impl Into<SharedString>) -> TextInputEvent {
+        TextInputEvent { text: text.into() }
     }
 }
 
