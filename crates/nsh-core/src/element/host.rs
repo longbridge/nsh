@@ -63,6 +63,10 @@ crate::static_reactive!(crate::AccessibilityRole: crate::AccessibilityRole);
 crate::static_reactive!(AutoCapitalize: AutoCapitalize);
 crate::static_reactive!(AutoFill: AutoFill);
 crate::static_reactive!(crate::HeaderSystemItem: crate::HeaderSystemItem);
+crate::static_reactive!(crate::HeaderItem: crate::HeaderItem);
+crate::static_reactive!(Vec<crate::HeaderItem>: Vec<crate::HeaderItem>);
+crate::static_reactive!(super::header::HeaderItem: super::header::HeaderItem);
+crate::static_reactive!(Vec<super::header::HeaderItem>: Vec<super::header::HeaderItem>);
 crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
 crate::static_reactive!(KeyboardType: KeyboardType);
 crate::static_reactive!(ModalAnimation: ModalAnimation);
@@ -1072,6 +1076,22 @@ impl Screen {
     pub fn header_left_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
         self.bind_prop(name, |n| {
             Prop::Screen(ScreenProp::HeaderLeftSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
+    /// The trailing header buttons are UIKit's own (`ios={{
+    /// headerRightItems }}`): a non-empty list wins over
+    /// [`Self::header_right_system_item`] / [`Self::header_right_symbol`]
+    /// and leaves the `header_right` view out of the iOS bar. Empty is
+    /// unset. Each item's [`super::header::HeaderItem::on_press`] and its
+    /// menu items' [`super::desktop::MenuItem::on_select`] run when the
+    /// platform reports their ids as the root's [`EventKind::Menu`].
+    pub fn header_right_items(
+        self,
+        items: impl IntoReactive<Vec<super::header::HeaderItem>>,
+    ) -> Self {
+        self.bind_prop(items, |items| {
+            Prop::Screen(ScreenProp::HeaderRightItems(super::header::register(items)))
         })
     }
 

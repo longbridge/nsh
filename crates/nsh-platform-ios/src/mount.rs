@@ -4074,6 +4074,16 @@ impl Mounter {
         }
     }
 
+    /// A trailing `ios.headerRightItems` press or menu action: the root's
+    /// [`EventKind::Menu`] with the item's numeric id.
+    pub(crate) fn menu_id_event(&self, id: u32) {
+        self.control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::Menu,
+            EventPayload::Map(vec![("id", nsh_core::PayloadValue::Number(id as f64))]),
+        );
+    }
+
     /// The finger lifted on a pressable view.
     pub(crate) fn pressed(&mut self, id: NodeId, at: PressAt) {
         if let Some(s) = self.slot(id)

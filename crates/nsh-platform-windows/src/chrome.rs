@@ -538,6 +538,8 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
                     role: None,
                     when: nsh_core::keymap::When::Always,
                     icon: None,
+                    symbol: None,
+                    destructive: false,
                 })
             }
         })
@@ -1566,6 +1568,7 @@ fn append(
                     enabled,
                     items,
                     icon,
+                    ..
                 } => {
                     let Ok(sub) = CreatePopupMenu() else { continue };
                     append(sub, items, labels, entries, icons, true);
@@ -2138,6 +2141,8 @@ mod tests {
             role: Some(MenuRole::Copy),
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         };
         let text = |labels: &MenuLabels| String::from_utf16(&item_text(&action, labels)).unwrap();
         assert_eq!(text(&MenuLabels::default()), "Copy\tCtrl+C\0");

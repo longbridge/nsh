@@ -47,6 +47,7 @@ mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
+pub mod header;
 pub(crate) mod host;
 mod js;
 pub(crate) mod json_host;
