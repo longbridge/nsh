@@ -3710,28 +3710,6 @@
 //#region ../nsh-platform-web/web/browser/components.js
 	function createComponents(invoke, values, reactive, dom) {
 		const states = /* @__PURE__ */ new WeakMap();
-		const hostProps = [
-			"class",
-			"classList",
-			"style",
-			"activeStyle",
-			"hoverStyle",
-			"focusStyle",
-			"focusWithinStyle",
-			"focusVisibleStyle",
-			"disabledStyle",
-			"testID",
-			"tooltip",
-			"onLayout",
-			"onFileDragEnter",
-			"onFileDragLeave",
-			"onFileDrop",
-			"onMouseEnter",
-			"onMouseMove",
-			"onMouseLeave",
-			"onMouseUp",
-			"onContextMenu"
-		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {
 			const rt = dom.rt;
@@ -3797,7 +3775,7 @@
 					prop.name,
 					value
 				]));
-				for (const name of hostProps) update(name, (value) => rt.prop(node, name, value));
+				for (const name of spec.hostProps) update(name, (value) => rt.prop(node, name, value));
 				if (failed) throw failed;
 			});
 			if (typeof props.ref === "function") {
