@@ -78,11 +78,14 @@ pub struct Display {
     pub scale_factor: f32,
     /// Frames per second it shows, where the platform tells.
     pub refresh_rate: Option<f32>,
+    /// The parts of the display a camera housing hides (a MacBook's notch),
+    /// in screen coordinates; empty where it has none.
+    pub cutouts: Vec<Bounds<Points>>,
 }
 
 impl Display {
-    /// A display with `id`, `bounds` and `visible_bounds`, at a scale of 1
-    /// and with no name.
+    /// A display with `id`, `bounds` and `visible_bounds`, at a scale of 1,
+    /// with no name and no cutouts.
     pub fn new(
         id: DisplayId,
         bounds: Bounds<Points>,
@@ -97,6 +100,7 @@ impl Display {
             name: String::new(),
             scale_factor: 1.0,
             refresh_rate: None,
+            cutouts: Vec::new(),
         }
     }
 }

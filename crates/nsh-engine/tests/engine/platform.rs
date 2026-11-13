@@ -187,7 +187,12 @@ const shown = () => {
 };
 const listed = () =>
   displays().length
-    ? displays().map((d) => `${d.id} ${d.primary} ${d.visibleBounds.size.width}`).join(",")
+    ? displays()
+        .map((d) => {
+          const cutouts = d.cutouts.map((c) => `${c.origin.x}+${c.size.width}x${c.size.height}`);
+          return `${d.id} ${d.primary} ${d.visibleBounds.size.width} [${cutouts.join(";")}]`;
+        })
+        .join(",")
     : "no displays";
 
 mount(() => <Text>{`${shown()} | ${listed()}`}</Text>);
@@ -216,12 +221,14 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
     })
     .unwrap();
     let rect = |x: f32, w: f32, h: f32| Bounds::new(point(px(x), px(0.0)), size(px(w), px(h)));
-    let display = Display::new(
+    let mut display = Display::new(
         DisplayId(0xab),
         rect(0.0, 1440.0, 900.0),
         rect(0.0, 1440.0, 875.0),
         true,
     );
+    // A notch at the top's middle.
+    display.cutouts = vec![rect(620.0, 200.0, 32.0)];
     let window = rect(100.0, 800.0, 600.0);
     let mut state = WindowState::new(window, WindowPlacement::new(WindowMode::Normal, window));
     state.display = Some(display.id);
@@ -277,7 +284,7 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
     let (text, restored) = read("normal 100 false false 00000000000000ab");
     assert_eq!(
         text,
-        "normal 100 false false 00000000000000ab | 00000000000000ab true 1440"
+        "normal 100 false false 00000000000000ab | 00000000000000ab true 1440 [620+200x32]"
     );
     assert_eq!(
         restored,

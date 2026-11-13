@@ -598,7 +598,46 @@ fn display(screen: &NSScreen, primary_height: f64) -> Display {
     display.scale_factor = screen.backingScaleFactor() as f32;
     let rate = screen.maximumFramesPerSecond();
     display.refresh_rate = (rate > 0).then_some(rate as f32);
+    display.cutouts = notch(
+        screen.auxiliaryTopLeftArea(),
+        screen.auxiliaryTopRightArea(),
+        screen.safeAreaInsets().top,
+        frame,
+        primary_height,
+    )
+    .into_iter()
+    .collect();
     display
+}
+
+/// The notch of a screen of `frame` (Cocoa coordinates), in NSH's: the gap
+/// between the menu bar's two parts beside the camera housing (`left` and
+/// `right`, `NSScreen`'s auxiliary top areas), as tall as the safe area's
+/// top inset. Only the areas' widths are read, measured in from the frame's
+/// edges, so their origins' coordinate space does not matter. `None` on a
+/// screen without one: an area missing (empty), no inset, no gap.
+fn notch(
+    left: NSRect,
+    right: NSRect,
+    safe_top: f64,
+    frame: NSRect,
+    primary_height: f64,
+) -> Option<Bounds<Points>> {
+    let present = |area: NSRect| area.size.width > 0.0 && area.size.height > 0.0;
+    if !present(left) || !present(right) || safe_top <= 0.0 {
+        return None;
+    }
+    let start = frame.origin.x + left.size.width;
+    let end = frame.origin.x + frame.size.width - right.size.width;
+    if end <= start {
+        return None;
+    }
+    let top = frame.origin.y + frame.size.height;
+    let rect = NSRect::new(
+        NSPoint::new(start, top - safe_top),
+        NSSize::new(end - start, safe_top),
+    );
+    Some(to_bounds(rect, primary_height))
 }
 
 /// The screen's display id (`CGDirectDisplayID`).
@@ -651,6 +690,55 @@ pub(crate) fn from_bounds(bounds: Bounds<Points>, primary_height: f64) -> NSRect
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+        Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+
+    #[test]
+    fn a_notch_is_the_gap_between_the_auxiliary_areas() {
+        // A 14-inch MacBook Pro's built-in screen, the primary one.
+        let frame = rect(0.0, 0.0, 1512.0, 982.0);
+        let left = rect(0.0, 950.0, 664.0, 32.0);
+        let right = rect(849.0, 950.0, 663.0, 32.0);
+        assert_eq!(
+            notch(left, right, 32.0, frame, 982.0),
+            Some(bounds(664.0, 0.0, 185.0, 32.0)),
+        );
+    }
+
+    #[test]
+    fn a_screen_without_a_notch_has_none() {
+        let frame = rect(0.0, 0.0, 2560.0, 1440.0);
+        let none = NSRect::ZERO;
+        assert_eq!(notch(none, none, 0.0, frame, 1440.0), None);
+        // Areas without an inset, or an inset without areas.
+        let left = rect(0.0, 1415.0, 1200.0, 25.0);
+        let right = rect(1360.0, 1415.0, 1200.0, 25.0);
+        assert_eq!(notch(left, right, 0.0, frame, 1440.0), None);
+        assert_eq!(notch(none, none, 25.0, frame, 1440.0), None);
+        // Areas that meet leave no gap.
+        let right = rect(1200.0, 1415.0, 1360.0, 25.0);
+        assert_eq!(notch(left, right, 25.0, frame, 1440.0), None);
+    }
+
+    #[test]
+    fn a_notch_on_a_secondary_screen_is_in_screen_coordinates() {
+        // The built-in screen right of a 2560 × 1440 primary display, its
+        // bottom 200 points below the primary's (Cocoa's y grows up).
+        let frame = rect(2560.0, -200.0, 1512.0, 982.0);
+        let left = rect(2560.0, 750.0, 664.0, 32.0);
+        let right = rect(3409.0, 750.0, 663.0, 32.0);
+        // Its top is 1440 - 782 = 658 points below the primary's.
+        assert_eq!(
+            notch(left, right, 32.0, frame, 1440.0),
+            Some(bounds(3224.0, 658.0, 185.0, 32.0)),
+        );
+    }
 
     #[test]
     fn a_window_hides_at_once_out_of_full_screen() {
