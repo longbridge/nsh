@@ -757,6 +757,9 @@ pub(crate) fn show_main(surface: &Rc<Surface>, hwnd: HWND) {
     surface.paint();
     crate::window::show(hwnd);
     crate::window::set_cloaked(hwnd, false);
+    // The show's own messages worked the state out while the window was
+    // still cloaked, and uncloaking sends the window none.
+    crate::system::lifecycle_changed(surface);
     if let Some(mode) = surface.main_opening_mode.take() {
         crate::window_state::set_mode(hwnd, mode);
     }

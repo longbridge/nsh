@@ -127,6 +127,9 @@ struct WindowData {
     /// The dialog root a window of the app's own shows
     /// ([`crate::app_window`]); none for the surface's window.
     window: Option<NodeId>,
+    /// What the surface's window registered for to follow whether the user
+    /// can see it ([`crate::presence`]); none for the app's other windows.
+    presence: Cell<Option<crate::presence::Watch>>,
 }
 
 thread_local! {
@@ -220,6 +223,7 @@ pub(crate) fn create(
         shell: crate::shell::Shell::new(nsh_core::desktop::WindowKind::Normal),
         root: Cell::new(None),
         window: None,
+        presence: Cell::new(None),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -251,10 +255,11 @@ pub(crate) fn create(
         )?
     };
     surface.set_hwnd(hwnd);
-    if parent.is_some()
-        && let Some(window) = self::data(hwnd)
-    {
-        window.root.set(observe_root(hwnd));
+    if let Some(window) = self::data(hwnd) {
+        if parent.is_some() {
+            window.root.set(observe_root(hwnd));
+        }
+        window.presence.set(Some(crate::presence::watch(hwnd)));
     }
     if parent.is_none() {
         OPEN.with(|o| o.set(o.get() + 1));
@@ -319,6 +324,7 @@ pub(crate) fn create_app_window(
         shell,
         root: Cell::new(None),
         window: Some(id),
+        presence: Cell::new(None),
     });
     let title = attributes.title.clone().unwrap_or_default();
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
@@ -940,6 +946,11 @@ unsafe extern "system" fn window_proc(
     {
         unobserve_root(root, hwnd);
     }
+    if msg == WM_DESTROY
+        && let Some(watch) = data.presence.take()
+    {
+        crate::presence::unwatch(hwnd, watch);
+    }
     if msg == WM_DESTROY && data.top_level {
         let left = OPEN.with(|o| {
             o.set(o.get().saturating_sub(1));
@@ -1322,6 +1333,17 @@ fn handle(
         }
         // An embedded surface's: its root window's ([`observe_root`]).
         WM_NSH_ROOT => crate::system::lifecycle_changed(surface),
+        // The display turned off or on (the surface's window registered
+        // for it: [`crate::presence`]).
+        WM_POWERBROADCAST
+            if data.window.is_none() && wparam.0 == PBT_POWERSETTINGCHANGE as usize =>
+        {
+            crate::presence::power_setting_changed(surface, lparam);
+        }
+        // The session was locked, unlocked, switched away from or back to.
+        WM_WTSSESSION_CHANGE if data.window.is_none() => {
+            crate::presence::session_changed(surface, wparam.0 as u32);
+        }
         WM_DESTROY => {
             crate::window_close::destroyed(surface);
             crate::tray::destroyed(hwnd);
