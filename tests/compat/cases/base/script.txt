@@ -2610,6 +2610,9 @@ covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
 prop label:Locked accessibilityState disabled=true expanded=false hasPopup=true
 covers [props] disabled
+# The states the app gives its trigger element (`busy`; `invalid` alike)
+# stay, beside the ones the select sets.
+prop label:Checked accessibilityState busy=true expanded=false hasPopup=true
 # `searchable`: a field above the items (its placeholder, name for screen
 # readers and look the app's; on a phone the keyboard comes when it is
 # pressed) filters them by title, ignoring case, and a section without a
