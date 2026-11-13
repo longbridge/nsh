@@ -204,8 +204,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
   / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included. On a stop
-  that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`: a component's
-  keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
+  that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
+  component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
   moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`).
   A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
@@ -266,8 +266,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   pressable view responds. Children placed outside their parent (`position: "absolute"`, `overflow` visible: a
   dropdown under its field) can be touched where they are drawn: UIKit and Android only look for a touch's target
   inside a view's bounds, so the core mounts, for each view whose descendants reach outside it, the area they cover
-  (`MountItem::Overflow`, in the view's coordinates, from the layout frames, only when it changes; clipping views,
-  scroll views, lists and stacks have none). `NshView`'s `hitTest` looks in its subviews when the point is outside its
+  (`MountItem::Overflow`, in the view's coordinates, from the layout frames and the descendants' `hitSlop`, only
+  when it changes; clipping views, scroll views, lists and stacks have none). A child's slop reaching out of its parent
+  so takes touches through every view around it that does not clip; siblings keep their order (the topmost first). `NshView`'s `hitTest` looks in its subviews when the point is outside its
   bounds (and hit slop) but in that area, and never returns the view itself there; Android's `Box` delivers the touch
   (and the rest of the gesture) to the child whose area holds it, which passes it on to its children only, and the touch
   tracker's hit test (`TouchTracker.deepest`) descends the same way. `pointerEvents` keeps its meaning (`box-only` and
@@ -301,7 +302,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
   `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
   views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
-  interception; a scroll view that intercepts first (past its touch slop) wins as before. Web: `nsh.js` defers its
+  interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
+  touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
+  (no activation, within the touch slop) to the nearest pressable `Box` around it. Web: `nsh.js` defers its
   drag scrolling while the gate is undecided. The activation travels with the touches (`TouchEvent::activated`; the
   iOS gate hands it to the root's tracker, which reports it with these touches or the next), and the gated view
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
@@ -522,7 +525,8 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
   moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
+  (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
+  its side, so a submenu's first item is level with its trigger, and places it outside the menu
   around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
   `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
   what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`

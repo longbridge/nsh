@@ -384,9 +384,11 @@ report it:
   batch; what `waitUntil` waits for between calls there until the frames' time reaches its timeout), `idle`
   (until quiet for a while).
 
-A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
-for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
-waiting (below). Native animations that loop forever (a
+A step first applies the batches that came since the last one (they belong to it), then, on the system's clock, has
+the engine run what the step sent (`EngineControl::flush`, again while the batches applied send more back:
+`Headless::caught_up`), so an engine slower than the quiet window still finishes a step before the next one acts, and
+waits until the app is quiet for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual
+clock it asks instead of waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
 time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output), when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
@@ -461,7 +463,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   `forward`, `go` and `type_address` report the root's `UrlScheme` events the page reports (`quiet`, `change`,
   `open`); a change to the web's history in `nsh.js` changes it too;
 - URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
-  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`);
+  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`), but
+  `{ opened: false }` for those matching the globs of `Headless::fail_open_urls` (`app.failOpenUrls`);
 - the platform has no eyedropper (`Environment::screen_color` false) until a Rust test calls
   `Headless::on_screen_color(color)`: then `Command::PickScreenColor` is answered with `onScreenColor`, that color (or
   none, a cancel);
@@ -599,15 +602,22 @@ For each `open`, the CLI builds the entry, starts a dev server of its own in a t
 besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
 (`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
 unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
-taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. And
-it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. The
+GPUI host gets both as well (`test_host::opens_on_a_display`): its windows open centered on that display
+(`docs/dev/gpui.md` "Checking a change"). And the macOS host
+gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
 `Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
 without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
 the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
 "Checking a change"). It gets `--activation-policy` too when nsh.json's `macos.activationPolicy` is not the default
 (`MacosConfig::host_args`, as under `nsh run`): `--background` takes precedence, so the app runs with its policy under
-`--foreground` (`docs/dev/macos.md` "Activation policy"). A left button press into a web view of the inactive app goes
+`--foreground` (`docs/dev/macos.md` "Activation policy"). The Windows, GPUI and Linux hosts get `--background` too
+unless `--foreground` (`test_host::runs_in_background`): their windows neither take the focus nor come to the front,
+and the window that would have the keyboard reads as focused to the app. On Linux that holds where a user may type on
+the display, and the agent's keys go to the widgets; on a virtual display (Xvfb, CI) the app runs as in the
+foreground (`docs/dev/windows.md`, `gpui.md` and `linux.md`, "Checking a change"). Linux has no `--display`: Wayland
+does not let an app place its windows. A left button press into a web view of the inactive app goes
 to the `WKWebView` directly (`agent::mouse`), since AppKit gives an inactive window's first click only to views that
 accept the first mouse. A window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
@@ -746,7 +756,8 @@ GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s c
 offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
 feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (the one `--device` names, else a
-booted one, else the newest iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
+booted one, else the newest iPhone; the Simulator app opened behind the app in use, where `nsh run`
+brings it to the front: `run::SimulatorWindow`) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
 simulator shares the Mac's network and files). As `nsh run --target ios` and
 `nsh package --target ios-simulator --run` do, it passes the app the variables of its environment that the app's
 `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads them as on the desktops, whose
@@ -1120,10 +1131,22 @@ How users get it (`website/docs/installation.md`):
 
 ### Runners
 
-Every workflow runs on GitHub's runners: the checks, the release (its builds, its `Plan`, `Release` and `Nightly`
-jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's build and deployment of the
-published site. This repository is public, so its jobs run on GitHub's fresh runners, never on machines shared with
-other projects.
+The Examples workflow and the Linux runs of the TUI, Rust application and GPUI checks run on the organization's
+self-hosted runner labelled `public`, `Linux` and `X64`, which keeps the toolchains, Cargo's registry and
+huacnlee/cargo's builds (`~/.cargo/targets`) between jobs, so a run builds only what changed (the dependency caches
+are skipped there). The jobs install their toolchain there without making it the machine's default
+(`RUSTUP_TOOLCHAIN` picks it). There is one runner and it takes one job at a time, so it gets the jobs whose time is
+mostly building, which the kept builds shorten to minutes or seconds. Core's time is mostly its tests, which the
+kept builds do not shorten and GitHub's runners run faster, so Core runs there; so do the checks that open windows
+(Linux's GTK and GPUI tests), whose timing is written for GitHub's runners, and the checks every pull request runs
+(`CI paths`, Compat).
+The runner runs only the organization's own code: a pull request from a fork runs on GitHub's runners (`ubuntu-24.04`,
+the jobs' `runs-on` picks it), and the runner refuses a fork's pull request whatever its workflow names. The
+scheduled runs on `main` run on GitHub's runners too: they save the dependencies' caches that forks' pull requests
+restore. Every other job runs on GitHub's runners: the other checks, the release (its builds, its `Plan`, `Release`
+and `Nightly` jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's build and
+deployment of the published site: the jobs that hold write tokens or decide and build what users download run only
+on fresh runners.
 
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed

@@ -307,7 +307,16 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
                     }
                     None => w.0.push_str("null"),
                 }
-                w.nums(dest);
+                // A missing size (NaN) as `null`: the player sizes it.
+                for &n in dest {
+                    match n {
+                        Num::Const(v) if v.is_nan() => {
+                            w.sep();
+                            w.0.push_str("null");
+                        }
+                        n => w.num(n),
+                    }
+                }
             }),
         }
     }

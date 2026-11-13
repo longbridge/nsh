@@ -156,6 +156,9 @@ struct Gestures {
 struct PanScroll {
     view: Retained<UIScrollView>,
     offset: f32,
+    /// `onPanStart` went out: it waits for the panel to move, so scrolling
+    /// alone does not start a sheet's drag (which ends editing).
+    started: bool,
 }
 
 /// Pull-to-refresh. `UIRefreshControl` throws under Mac Catalyst's Mac
@@ -593,6 +596,8 @@ pub(crate) struct Mounter {
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
+    /// `OffscreenCanvas` renders waiting for their images.
+    offscreen: crate::canvas::Offscreen,
     /// The engine's sounds and players ([`crate::audio`]).
     audio: crate::audio::Speaker,
     /// What the app may reach (web view navigations check it).
@@ -735,6 +740,7 @@ impl Mounter {
                 },
                 access.clone(),
             ),
+            offscreen: Default::default(),
             audio: Default::default(),
             control,
             access,
@@ -1814,6 +1820,32 @@ impl Mounter {
                 native,
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
+            }
+            (
+                Command::RenderCanvas {
+                    id: request,
+                    drawing,
+                    width,
+                    height,
+                    scale,
+                    format,
+                },
+                _,
+            ) if id == nsh_core::ROOT_ID => {
+                let display_scale = self.display_scale();
+                self.offscreen.render(
+                    crate::canvas::RenderRequest {
+                        id: request,
+                        drawing,
+                        width,
+                        height,
+                        scale,
+                        format,
+                    },
+                    &mut self.images,
+                    display_scale,
+                    &self.control,
+                );
             }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
@@ -2988,6 +3020,7 @@ impl Mounter {
     }
 
     pub(crate) fn image_loaded(&mut self, key: &str, result: Result<DecodedImage, String>) {
+        self.offscreen.image_loaded(key, &result, &self.control);
         for id in self.images.finish(key, &result) {
             if let Some(Slot {
                 native: Native::Canvas(view),
@@ -4107,6 +4140,7 @@ impl Mounter {
                     view: scroll.retain(),
                     offset: (scroll.contentOffset().y + scroll.adjustedContentInset().top).max(0.0)
                         as f32,
+                    started: false,
                 });
                 break;
             }
@@ -4199,7 +4233,8 @@ impl Mounter {
             if let Some(s) = self.slot_mut(id) {
                 (s.gesture_start[0], s.gesture_start[1]) = (x, y);
             }
-            if events.contains(EventKind::PanStart) {
+            let deferred = self.slot(id).is_some_and(|s| s.pan_scroll.is_some());
+            if events.contains(EventKind::PanStart) && !deferred {
                 self.control
                     .dispatch_event(id, EventKind::PanStart, payload(self));
             }
@@ -4219,6 +4254,15 @@ impl Mounter {
                     .map_or(start[1] + t.y as f32, |scroll| {
                         (start[1] + t.y as f32 - scroll.offset).max(0.0)
                     });
+                let begins = y != start[1]
+                    && self
+                        .slot_mut(id)
+                        .and_then(|s| s.pan_scroll.as_mut())
+                        .is_some_and(|scroll| !std::mem::replace(&mut scroll.started, true));
+                if begins && events.contains(EventKind::PanStart) {
+                    self.control
+                        .dispatch_event(id, EventKind::PanStart, payload(self));
+                }
                 self.animator.set(n, y);
                 if let Some(scroll) = self.slot(id).and_then(|s| s.pan_scroll.as_ref()) {
                     let offset = scroll.view.contentOffset();

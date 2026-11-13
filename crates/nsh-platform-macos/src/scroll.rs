@@ -1986,18 +1986,12 @@ pub(crate) fn pinch_end(surface: &Rc<Surface>, view: &NshView, at: (f32, f32)) {
     }
 }
 
-/// Draws the texts and canvases of `view`'s content again at its zoom's
-/// resolution once a zoom ends, as iOS does, so that zoomed in they stay
-/// sharp rather than scale their pictures (and back at the screen's once
-/// it is not zoomed in).
+/// Draws the texts and canvases of `view`'s subtree again at the density
+/// its zoom and the transforms above it need, once a zoom ends, as iOS
+/// does, so that zoomed in they stay sharp rather than scale their
+/// pictures (and back at the screen's once it is not zoomed in).
 fn sharpen(view: &NshView) {
-    let scale = view.ns().window().map_or(2.0, |w| w.backingScaleFactor());
-    let zoom = f64::from(zoom(view));
-    let mut views = view.child_views();
-    while let Some(v) = views.pop() {
-        v.draw_zoomed(scale, zoom);
-        views.extend(v.child_views());
-    }
+    view.sharpen();
 }
 
 // Pointer drags.

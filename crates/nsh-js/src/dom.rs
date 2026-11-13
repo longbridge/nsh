@@ -46,8 +46,21 @@ const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 const DETACHED: NodeId = 0;
 /// The surface's root view.
 const ROOT: NodeId = 1;
-/// How deep nested arrays and accessors are unwrapped.
-const MAX_DEPTH: u32 = 64;
+/// How deep nested arrays and accessors are unwrapped (and menus nested).
+pub(crate) const MAX_DEPTH: u32 = 64;
+/// Most array items the runtime reads natively from one value of the app's,
+/// nested arrays counted together: one place's children, an `<Each>` list,
+/// a menu with its submenus, a tray's title, `Animated.sequence` /
+/// `parallel` / `stagger`'s animations, `split`'s keys, a navigation
+/// stack's routes (and screens), a native component's names, a pan's
+/// touches, a canvas call's arguments. Arrays the renderer makes itself
+/// ([`own_items`]) are not the app's. Each index is read natively, where
+/// the time budget cannot interrupt, and a sparse array is as long as it
+/// says: without a
+/// bound `new Array(2 ** 32 - 1)` held the engine thread for billions of
+/// reads, and an array holding itself (`a.fill(a)`) multiplies its length
+/// at each level of nesting.
+pub(crate) const MAX_ARRAY_ITEMS: u32 = 1 << 20;
 
 /// The renderer's part of a context's state.
 pub(crate) struct Dom {
@@ -166,6 +179,39 @@ fn throw_type(cx: *mut JsContext, message: &str) -> JsValue {
     let message = std::ffi::CString::new(message).unwrap_or_default();
     // SAFETY: throws on a live context; `%s` keeps the message literal.
     unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) }
+}
+
+/// The length of the app's array `array` (borrowed, checked to be one),
+/// read once, for a native loop over its items: `None` (an exception
+/// pending) when reading it threw or it is longer than [`MAX_ARRAY_ITEMS`].
+pub(crate) fn checked_len(cx: *mut JsContext, array: JsValue) -> Option<u32> {
+    take_len(cx, array, &mut { MAX_ARRAY_ITEMS })
+}
+
+/// The length of array `array` (borrowed, checked to be one), read once
+/// and taken from `budget` (the items left of [`MAX_ARRAY_ITEMS`] for the
+/// value being read); `None` when reading it threw or it is longer than
+/// what is left (an exception is pending either way).
+pub(crate) fn take_len(cx: *mut JsContext, array: JsValue, budget: &mut u32) -> Option<u32> {
+    let mut len: i64 = 0;
+    // SAFETY: a length read of a live value.
+    if unsafe { qjs::JS_GetLength(cx, array, &mut len) } != 0 {
+        return None;
+    }
+    let len = len.max(0);
+    if len > i64::from(*budget) {
+        let message = std::ffi::CString::new(format!(
+            "nsh: arrays of more than {MAX_ARRAY_ITEMS} items in all cannot be read \
+             (one says it has {len})"
+        ))
+        .unwrap_or_default();
+        // SAFETY: throws on a live context; `%s` keeps the message literal.
+        unsafe { qjs::JS_ThrowRangeError(cx, c"%s".as_ptr(), message.as_ptr()) };
+        return None;
+    }
+    let len = len as u32;
+    *budget -= len;
+    Some(len)
 }
 
 /// A JS value's string (`ToString`), or `None` when that throws.
@@ -1755,7 +1801,7 @@ unsafe extern "C" fn spread_run(
         let (node, props) = (*data, *data.add(1));
         // A third value: keys to leave out (`spread_except`).
         let skip: Vec<String> = if magic == 1 {
-            array_items(cx, *data.add(2))
+            own_items(cx, *data.add(2))
                 .into_iter()
                 .map(|k| {
                     let s = to_string(cx, k).unwrap_or_default();
@@ -1848,6 +1894,18 @@ fn resolve(
     keep: &mut Vec<JsValue>,
     depth: u32,
 ) -> Result<(), JsValue> {
+    resolve_within(cx, value, out, keep, depth, &mut { MAX_ARRAY_ITEMS })
+}
+
+/// [`resolve`] with `budget` array items left to read.
+fn resolve_within(
+    cx: *mut JsContext,
+    value: JsValue,
+    out: &mut Vec<Item>,
+    keep: &mut Vec<JsValue>,
+    depth: u32,
+    budget: &mut u32,
+) -> Result<(), JsValue> {
     if depth > MAX_DEPTH {
         return Err(throw_type(cx, "nsh: children nested too deeply"));
     }
@@ -1875,20 +1933,19 @@ fn resolve(
                 return Err(r);
             }
             keep.push(r);
-            return resolve(cx, r, out, keep, depth + 1);
+            return resolve_within(cx, r, out, keep, depth + 1, budget);
         }
         if qjs::JS_IsArray(value) {
-            let mut len: i64 = 0;
-            if qjs::JS_GetLength(cx, value, &mut len) != 0 {
+            let Some(len) = take_len(cx, value, budget) else {
                 return Err(qjs::JS_EXCEPTION);
-            }
-            for i in 0..len.max(0) as u32 {
+            };
+            for i in 0..len {
                 let item = qjs::JS_GetPropertyUint32(cx, value, i);
                 if qjs::JS_IsException(item) {
                     return Err(item);
                 }
                 keep.push(item);
-                resolve(cx, item, out, keep, depth + 1)?;
+                resolve_within(cx, item, out, keep, depth + 1, budget)?;
             }
             return Ok(());
         }
@@ -1949,6 +2006,11 @@ fn free_values(cx: *mut JsContext, values: Vec<JsValue>) {
 /// Whether `value` holds a function (directly or in nested arrays): its
 /// children change over time.
 fn is_dynamic(cx: *mut JsContext, value: JsValue, depth: u32) -> bool {
+    is_dynamic_within(cx, value, depth, &mut { MAX_ARRAY_ITEMS })
+}
+
+/// [`is_dynamic`] with `budget` array items left to read.
+fn is_dynamic_within(cx: *mut JsContext, value: JsValue, depth: u32, budget: &mut u32) -> bool {
     // SAFETY: inline checks and reads of live values, each freed.
     unsafe {
         if qjs::JS_IsFunction(cx, value) {
@@ -1957,14 +2019,15 @@ fn is_dynamic(cx: *mut JsContext, value: JsValue, depth: u32) -> bool {
         if depth > MAX_DEPTH || !qjs::JS_IsArray(value) {
             return false;
         }
-        let mut len: i64 = 0;
-        if qjs::JS_GetLength(cx, value, &mut len) != 0 {
+        // Too long (or a throwing length): not dynamic; rendering it
+        // reports the error.
+        let Some(len) = take_len(cx, value, budget) else {
             qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
             return false;
-        }
-        for i in 0..len.max(0) as u32 {
+        };
+        for i in 0..len {
             let item = qjs::JS_GetPropertyUint32(cx, value, i);
-            let dynamic = is_dynamic(cx, item, depth + 1);
+            let dynamic = is_dynamic_within(cx, item, depth + 1, budget);
             qjs::JS_FreeValue(cx, item);
             if dynamic {
                 return true;
@@ -2077,7 +2140,12 @@ fn memoize_run(cx: *mut JsContext, value: JsValue) -> Option<JsValue> {
     if unsafe { !qjs::JS_IsArray(value) } {
         return None;
     }
-    let items = array_items(cx, value);
+    let Some(items) = array_items(cx, value) else {
+        // Too long: left as it is, and rendering it reports the error.
+        // SAFETY: frees the pending exception.
+        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
+        return None;
+    };
     // SAFETY: borrowed values checked.
     let functions = items
         .iter()
@@ -2155,8 +2223,28 @@ unsafe extern "C" fn insert(
         .unwrap_or(UNDEFINED)
 }
 
-/// The values of array `array` (owned), empty for other values.
-fn array_items(cx: *mut JsContext, array: JsValue) -> Vec<JsValue> {
+/// The values of the app's array `array` (owned), empty for other values;
+/// `None` (an exception pending) when its length throws or is longer than
+/// [`MAX_ARRAY_ITEMS`].
+fn array_items(cx: *mut JsContext, array: JsValue) -> Option<Vec<JsValue>> {
+    // SAFETY: a type check of a live value.
+    if unsafe { !qjs::JS_IsArray(array) } {
+        return Some(Vec::new());
+    }
+    // The length is read once: a proxy's could change between reads.
+    let len = take_len(cx, array, &mut { MAX_ARRAY_ITEMS })?;
+    // SAFETY: reads of a live array.
+    Some(
+        (0..len)
+            .map(|i| unsafe { qjs::JS_GetPropertyUint32(cx, array, i) })
+            .collect(),
+    )
+}
+
+/// The values of array `array` (owned), empty for other values: for arrays
+/// the renderer made itself (what a place shows), as long as what they
+/// hold.
+fn own_items(cx: *mut JsContext, array: JsValue) -> Vec<JsValue> {
     let mut out = Vec::new();
     // SAFETY: reads of a live array.
     unsafe {
@@ -2263,7 +2351,7 @@ fn show(
         free_values(cx, keep);
         return Err(e);
     }
-    let old = array_items(cx, shown);
+    let old = own_items(cx, shown);
     // A lone text node shown again as text is updated in place.
     let reuse = match old.as_slice() {
         [only] => Some(*only),
@@ -2512,15 +2600,20 @@ pub(crate) unsafe extern "C" fn split(
     unsafe {
         let mut names = Vec::new();
         if qjs::JS_IsArray(keys) {
-            let mut n: i64 = 0;
-            qjs::JS_GetLength(cx, keys, &mut n);
-            for i in 0..n.max(0) {
-                let k = qjs::JS_GetPropertyInt64(cx, keys, i);
+            // Read natively: a sparse array is as long as it says.
+            let Some(n) = checked_len(cx, keys) else {
+                return qjs::JS_EXCEPTION;
+            };
+            for i in 0..n {
+                let k = qjs::JS_GetPropertyUint32(cx, keys, i);
                 let atom = qjs::JS_ValueToAtom(cx, k);
                 qjs::JS_FreeValue(cx, k);
                 names.push(atom);
             }
         }
+        // Looked up once per property of `source`: sorted, so neither count
+        // multiplies the other.
+        names.sort_unstable();
         let picked = qjs::JS_NewObject(cx);
         let rest = qjs::JS_NewObject(cx);
         if qjs::JS_IsObject(source) {
@@ -2531,7 +2624,11 @@ pub(crate) unsafe extern "C" fn split(
             if qjs::JS_GetOwnPropertyNames(cx, &mut tab, &mut len, source, flags) == 0 {
                 for j in 0..len as usize {
                     let atom = (*tab.add(j)).atom;
-                    let target = if names.contains(&atom) { picked } else { rest };
+                    let target = if names.binary_search(&atom).is_ok() {
+                        picked
+                    } else {
+                        rest
+                    };
                     copy_property(cx, target, source, atom);
                 }
                 qjs::JS_FreePropertyEnum(cx, tab, len);
@@ -2862,6 +2959,9 @@ unsafe extern "C" fn each_run(
     }
     let items_v = array_items(cx, items);
     unsafe { qjs::JS_FreeValue(cx, items) };
+    let Some(items_v) = items_v else {
+        return qjs::JS_EXCEPTION;
+    };
     let keyed = unsafe { qjs::JS_IsFunction(cx, key_fn) };
     // SAFETY: a borrowed value, read when it is a string.
     let by_index = !keyed
@@ -3406,7 +3506,7 @@ unsafe extern "C" fn unmount(
     let mut id = 0f64;
     unsafe { qjs::JS_ToFloat64(cx, &mut id, owner) };
     reactive::dispose_owner(cx, id as u32);
-    let before = array_items(cx, before);
+    let before = own_items(cx, before);
     let root = dom(cx).root.get();
     let current: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
         .iter()

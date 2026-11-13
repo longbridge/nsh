@@ -1114,6 +1114,14 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### setFpsMode
+
+```ts
+function setFpsMode(mode: "expanded" | "collapsed" | "hidden"): void;
+```
+
+How the performance monitor shows, now and whenever it shows later: `"expanded"`, its whole panel (the default); `"collapsed"`, a pill with the frame rate alone, colored by the frame budget; `"hidden"`, nothing on screen while it still measures and logs. A click on the panel switches between the first two. macOS's panel takes it ([macOS](../docs/macos.md#performance-monitor)); platforms without a panel ignore it, and Linux's panel collapses on a click but doesn't take it yet. `NSH_FPS=collapsed` or `NSH_FPS=hidden` start the monitor so. Rust: `set_fps_mode(FpsMode::Collapsed)`.
+
 ### shadersAvailable
 
 ```ts
@@ -2015,8 +2023,8 @@ async function notifyMe() {
 }
 ```
 
-Rust code calls `request_notification_permission`, `show_notification`, `close_notification`, `set_badge` and
-`next_notification_press` of `nsh_core::prelude`.
+Rust code calls `request_notification_permission`, `show_notification`, `close_notification`,
+`close_all_notifications`, `set_badge` and `next_notification_press` of `nsh_core::prelude`.
 
 | Platform | Notifications | Badge |
 | --- | --- | --- |
@@ -2041,6 +2049,20 @@ to the browser.
 
 ```tsx
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.closeAll
+
+`closeAll()` removes every notification the app showed, shown or waiting to show. Call it when the user signs out, so
+what the notifications said goes with the account. On Apple platforms, Windows and Android the system's notification
+center keeps notifications across runs, and `closeAll()` removes the ones NSH showed there, an earlier run's included,
+while an embedding app's own notifications stay. On Linux and the web it removes those the running app showed.
+
+```tsx
+async function signOut() {
+  await Notifications.closeAll();
+  Notifications.setBadge(0);
+}
 ```
 
 ### Notifications.on
@@ -2848,13 +2870,14 @@ interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
+  forFocus?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -3026,6 +3049,20 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 
 ```tsx tabs
 keymap.bind("tab", close, { passThrough: true });
+```
+
+With the keyboard focus on a view that takes presses (`onPress`), a plain Return or Space (Shift allowed) presses that view, and the app's other bindings of those keys give way to it: a dialog's Return for its main action does not act instead of the button the user moved the focus to. A view's own Return or Space binds with `forFocus: true`: bound while the view has the focus, it takes those keys before the press. A tile whose Space flips its switch and whose Return opens it:
+
+```rust tabs
+on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, move |_| flip());
+```
+
+```tsx tabs
+<View
+  onPress={open}
+  onFocus={() => (unbind = keymap.bind("space", flip, { forFocus: true }))}
+  onBlur={() => unbind?.()}
+/>
 ```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.

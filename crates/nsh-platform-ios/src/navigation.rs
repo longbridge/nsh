@@ -707,6 +707,15 @@ define_class!(
             size_screens(nav);
             defer_to_back_swipe(nav);
             fit_large_title(nav);
+            // A bar that comes back with the transition (the screen that
+            // left hid the header) is put at the top of a stack that starts
+            // below the top of the window, above where UIKit keeps it at
+            // rest, and nothing lays the screen out again once the
+            // transition is over: this pass moves the bar to its place and
+            // reports the header the screen's content starts below.
+            if let Some(view) = controller.viewIfLoaded() {
+                view.setNeedsLayout();
+            }
             // Safety net: whatever the transition did, the bar ends where the
             // stack says it goes.
             slide_bottom_bar(nav, bottom_bar_hidden(nav));

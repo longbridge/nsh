@@ -25,10 +25,12 @@
   Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
   font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
 - A text laid out gives Taffy its first line's baseline, below its top through its padding and border
-  (`TextEngine::first_baseline`: web, macOS; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
-  with `items-baseline` lines its texts up by their baselines, as CSS does. An engine that does not report one gives
-  `None` and the text is aligned by its bottom edge, Taffy's fallback for a box without a baseline: texts of different
-  sizes in a row then sit off each other's baseline by the difference of what is below their baselines. Only a text
+  (`TextEngine::first_baseline`: every built-in engine, CoreText on macOS and iOS, Android, Pango, DirectWrite, GPUI,
+  the web, Cells and the headless one; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
+  with `items-baseline` lines its texts up by their first baselines on every platform, as CSS does. An engine that does
+  not report one (the trait's default, for a custom engine) gives `None` and the text is aligned by its bottom edge,
+  Taffy's fallback for a box without a baseline: texts of different sizes in a row then sit off each other's baseline
+  by the difference of what is below their baselines. Only a text
   aligned by baseline is asked (`layout_tree::Aligned`, from its `align-self` or its container's `align-items`), and
   only when it is laid out, not measured (Taffy's baseline pass lays its items out); a text measured by an estimate has
   none.
@@ -116,6 +118,14 @@
   text is mounted with the layout, so a word fading in, or shown after waiting hidden, costs one draw, not a new layout
   of its paragraph. macOS draws again only the lines of the characters drawn otherwise
   (`AttributedText::recolored_ranges`, `text::damage`). The other backends typeset it again.
+- **Span states**: a nested `<Text>` has no view to report its interaction states, so the core takes them from the
+  events of its link. A span whose classes or state styles read `hover:` is a link hearing `MouseEnter` /
+  `MouseLeave` (as a hinted one: no press, no stop of Tab, none inside a span taking presses), and a link reading
+  `active:` also hears `PressDown` / `PressUp` (`Core::collect_text`); `Core::span_state` turns those events into the
+  span's `HOVERED` / `PRESSED` before anything else handles them (a cancelled press's dropped release too), and the
+  restyled span merges into its text again. The platforms only hit-test their links as they already do for hints
+  and presses. A color change takes the path above; a decoration line typesets the paragraph again without laying
+  out the views around it (`layout_eq`).
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.

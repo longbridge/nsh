@@ -129,7 +129,12 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   opacity, so `DrawCx` keeps the current transform (`geom::Mat4`) and applies opacity and color filters
   (`push_color_matrix`) to every color, as GPUI's own element opacity does. Axis-aligned rectangles are GPUI's quads,
   exact; under a rotation, skew or perspective they are filled as paths whose points are mapped one by one
-  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright. Clips
+  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright.
+  Images turn too (`image/turn.rs`): a one-color SVG (tinted, or of one color) under an affine transform is a GPUI
+  monochrome sprite carrying the transform (`paint_svg` with a `TransformationMatrix`, fed a generated SVG of the
+  picture's alpha, never the app's SVG); any other picture is resampled on the CPU through the whole transform into a
+  bitmap of the device pixels it covers, cut to the view's box and the clip polygon, kept while the transform's linear
+  part stays. Clips
   are rectangles in window coordinates (GPUI's content masks), intersected as they nest; a rounded or rotated clip is
   also kept as a convex polygon paths are cut to, and the innermost rounded clip rounds the corners of the quads and
   images reaching into its corners (`clip_rounded`). `paint(|window, app| …)` paints inside the current clip.
@@ -145,9 +150,11 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   the main thread paints with). GPUI shapes one line of one font size at a time and leaves breaking, bidi, line
   heights and ellipses to its callers, so each paragraph is shaped once, in segments of one bidi level and font size,
   into clusters; measuring at another width only re-breaks them (UAX #14, `unicode-linebreak`), and the final layout
-  orders each line's clusters by their bidi levels (`unicode-bidi`). Line heights follow Pango's model, as on Linux
-  and Windows. The final layout is plain data (lines, cluster boxes, positioned glyphs); the main thread paints the
-  glyphs (`paint_glyph`, `paint_emoji`) and reads colors and decorations from the spans, as the Linux backend does.
+  orders each line's clusters by their bidi levels (`unicode-bidi`). The last line a line clamp shows holds the rest of
+  its paragraph and is cut at the box for the ellipsis, inside a word if need be, as CoreText, Pango and StaticLayout
+  cut it. Line heights follow Pango's model, as on Linux and Windows. The final layout is plain data (lines, cluster
+  boxes, positioned glyphs); the main thread paints the glyphs (`paint_glyph`, `paint_emoji`) and reads colors and
+  decorations from the spans, as the Linux backend does.
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
@@ -181,7 +188,8 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
   quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Application.quit()`, `WindowRef.close()`, the close
   button) to the host, which quits or closes when it is ready (after saving, say); `Application.restart()` does
-  nothing here, restarting is the host's. `AssetBase::Directories` looks
+  nothing here, restarting is the host's, and so is opening at login (`Application.launchAtLogin()` reads
+  `false`: `EngineConfig::login_item` stays `None`). `AssetBase::Directories` looks
   `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode, `set_theme_overrides` only the tokens it names (over the host's theme if there is one: `Surface::host_tokens`); `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
@@ -199,10 +207,11 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 |---|---|---|
 | Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). selectable text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place); `fontFamily` lists: the first installed candidate is the font's family, the others its `FontFallbacks`, before `TEXT_FALLBACKS` |
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). A `drop-shadow()` filter's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
-| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
+| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image` (turned: `image/turn.rs`, see `DrawCx` above). GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
+| Offscreen canvases | `canvas/offscreen.rs` | `OffscreenCanvas`'s `convertToBlob`: the drawing replayed with the canvas views' tiny-skia replay on a thread of its own, at the image's scale with animated values at 0, into one pixmap the size of the image (up to 16384 pixels a side, 64 megapixels); a shadow, a composite operation other than `source-over` or a gradient takes pixels of its own sized to what it touches, and a shape outside the image casts its shadow into it. The images it names load first on the main thread; the pixmap is encoded as PNG in place. Text is shaped by the app's GPUI text system (the surface's, once it has drawn) and painted as outlines from the font files fontdb finds, the system's and those the app registers, after waiting up to 10 seconds for the system's to be found; the glyphs a canvas view paints as GPUI glyphs (emoji and other color glyphs, fonts without a matching file) are the parts of text the image leaves out |
 | Shaders | `shader.rs` | `nsh_engine::shader`'s frames as GPUI images under the children (`docs/dev/shaders.md`); fills only (below) |
-| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
+| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures; zoomable views (`maximumZoomScale` above `minimumZoomScale`; the zoom is `nsh_core::scroll`'s, which only this backend turns on, `ScrollState::can_zoom`) scroll both ways, zoom with touchpad pinches around the pointer (`scroll.rs`'s `pinch`; Ctrl + wheel scrolls them) and with `zoomTo` (eased), center content smaller than the viewport (`centerContent`) and show no indicator; their children are drawn, hit tested and converted through the zoom (`ViewState::child_matrix`), text shaped at the zoomed size every frame |
 | Input | `input.rs`, `events.rs`, `nsh_core::input` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onMouseEnter` / `onMouseLeave` / `onMouseMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
 | Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer while its field has the focus of an active window that is presented (a minimized or suspended window keeps the field, its caret still), and on Linux stays shown after 18 blinks (GTK's `gtk-cursor-blink-timeout` of 10 s) until the next edit, caret move or focus change; Cmd on macOS where Ctrl is used elsewhere |
 | Navigation, dialogs | `navigation.rs` | As on Windows (the decisions in `nsh_core::navigation`): pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
@@ -265,6 +274,17 @@ middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's 
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
 
+`nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app runs in
+the background, its windows neither take the focus nor come to the front, and the keyboard stays with the app the
+user types in. The window that would have the keyboard is kept in `window.rs` ("Running in the background"): what the
+app sees of the focus (`WindowState.focused`, a focused field's caret, the title bar's controls) follows it, and the
+agent's input goes to it directly. `lifecycle()` stays `inactive`, as on macOS.
+
+`nsh test` also passes `--display` (the display `nsh test --display` names, else `secondary`) and
+`--keep-window-size` (`AppOptions::display`, `AppOptions::keep_size`), so a test run keeps off the screen in use and
+a test's window keeps the size the test asked for, as with the macOS host. `window.rs` ("Where windows open") places
+the main window and the app's own windows that name no display or position on that display.
+
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
 again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
 pixmap after requesting a fresh frame. The host runs under X11 or Xwayland (see "Looking at a change on Linux");
@@ -273,9 +293,10 @@ and Windows.
 
 ## Not implemented, or different
 
-- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows), but glyphs stay
-  upright at their mapped origins, and images, videos and canvases draw at their bounds (GPUI has no transform for
-  sprites or glyphs).
+- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows) and turn their
+  images (one-color SVGs on the GPU, other pictures resampled on the CPU at each new angle, on the main thread),
+  canvases follow rotations and skews, but glyphs stay upright at their mapped origins and videos draw at their bounds
+  (GPUI has no transform for glyphs or color sprites).
 - **Opacity** is applied to each color rather than to a group, so overlapping translucent children show through each
   other; an image's opacity (a view's, a fade-in) steps in sixteenths, each step a variant of its pixels.
 - **Clips** are rectangles (GPUI's content masks): a rounded clip rounds the backgrounds and images that reach into its
@@ -284,8 +305,8 @@ and Windows.
   passes); shadows are not cut out of a translucent fill; `borderCurve: "continuous"` draws circular corners.
 - **Canvas text** is approximated: clipped to its clip's bounds, upright under rotations, made smaller rather than
   narrower for `maxWidth`, gradients paint it in their middle color, `strokeText` fills, its shadows are not blurred,
-  composite operations and `clearRect` do not apply to it.
-- **Zooming scroll views**: `zoomTo` and the zoom props are ignored.
+  composite operations and `clearRect` do not apply to it. The images of offscreen canvases hold the glyphs drawn as
+  outlines, which follow every canvas rule; emoji and glyphs of fonts without a matching file stay on screen only.
 - **Shader effects and transitions**: only shader fills draw (GPUI has no offscreen passes to picture children
   in): an effect's or a transition's children show as they are and a transition changes them at once, a screen effect
   or transition draws nothing, and pages and dialogs with `transitionShader` come and go as they would without it.
@@ -347,6 +368,11 @@ close, Escape and blur policies are answered on the main thread; states, close p
 reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
+
+Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
+top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
+reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks
+for them ends, as the system reports a move to GPUI while it makes it.
 
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
 workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it

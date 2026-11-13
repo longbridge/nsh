@@ -696,6 +696,16 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
+    act(action);
+    answer
+}
+
 /// Whether the platform lets the user pick a color on the screen
 /// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
 pub fn can_pick_screen_color() -> bool {
@@ -879,6 +889,13 @@ pub fn close_notification(id: impl Into<String>) {
     act(Action::Notification(super::NotificationAction::Close(
         id.into(),
     )));
+}
+
+/// Removes every notification of the app's, shown or waiting to show, those
+/// an earlier run of the app left included where the platform can reach
+/// them (TS: `Notifications.closeAll`): what signing out clears.
+pub fn close_all_notifications() {
+    act(Action::Notification(super::NotificationAction::CloseAll));
 }
 
 /// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
@@ -1358,7 +1375,7 @@ pub fn timer(delay: Duration) -> Delay {
 pub fn timer_until(at: Instant) -> Delay {
     Delay {
         at,
-        registered: false,
+        timer: None,
         #[cfg(not(target_arch = "wasm32"))]
         elsewhere: None,
     }
@@ -1371,8 +1388,9 @@ pub fn timer_until(at: Instant) -> Delay {
 #[derive(Debug)]
 pub struct Delay {
     at: Instant,
-    /// The core keeps it.
-    registered: bool,
+    /// Its timer in the core, which dropping the delay takes back (a task
+    /// cancelled before its time).
+    timer: Option<task::TimerKey>,
     #[cfg(not(target_arch = "wasm32"))]
     elsewhere: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
@@ -1389,15 +1407,18 @@ impl Future for Delay {
             return sleep.as_mut().poll(cx);
         }
         if crate::time::now() >= self.at {
+            // Its timer goes too if it has not fired yet (the task was
+            // polled for something else).
+            self.timer = None;
             return std::task::Poll::Ready(());
         }
-        if self.registered {
+        if let Some(timer) = &self.timer {
+            timer.set_waker(cx.waker());
             return std::task::Poll::Pending;
         }
         match super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten() {
             Some(executor) => {
-                executor.add_timer(self.at, cx.waker().clone());
-                self.registered = true;
+                self.timer = Some(executor.add_timer(self.at, cx.waker().clone()));
                 std::task::Poll::Pending
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1836,6 +1857,15 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
+/// How the performance monitor shows (TS: `setFpsMode`), now and whenever it
+/// shows later: its whole panel ([`crate::FpsMode::Expanded`], the
+/// default), collapsed to its frame rate, or nothing while it still
+/// measures. A click on the panel switches between the first two. macOS's
+/// panel takes it; platforms without a panel ignore it.
+pub fn set_fps_mode(mode: crate::FpsMode) {
+    act(super::services::perf_monitor_mode(mode));
+}
+
 /// The performance monitor's signal, off until the platform reports it.
 fn perf_monitor_signal() -> Signal<bool> {
     if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
@@ -1867,6 +1897,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

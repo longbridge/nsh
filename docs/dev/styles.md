@@ -74,7 +74,8 @@
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
-  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
+  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. A nested `<Text>` takes `hover:` and `active:` from the pointer over its characters (`text.md`
+  "Span states"). `selected`, `checked`, `indeterminate`,
   `expanded`, `pressed` (`state::ARIA_PRESSED`), `busy` and `invalid` are value states (`state::ACCESSIBILITY`, set by
   `Core::set_accessibility_states` from `classes::accessibility_states`) the core sets from the accessibility state (never reported by the platform). The first three are
   below the interaction states: `checked`, then `indeterminate` (Tailwind's order), then `selected`, then `hover`,

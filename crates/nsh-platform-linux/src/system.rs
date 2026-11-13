@@ -62,7 +62,7 @@
 //! theme's), as the root view has none of its own.
 //!
 //! The status bar has no desktop equivalent. (`AccessibilityFocus`, which
-//! moves keyboard focus when the view can take it, is the mounter's.)
+//! moves the screen reader's focus, is the mounter's: `access::focus`.)
 //!
 //! The clipboard is the display's (`GdkClipboard`, the "CLIPBOARD"
 //! selection): `Clipboard.writeText` sets its text, reads are answered as
@@ -797,6 +797,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();
             crate::audio::command(&surface.audio, c, command, base.as_ref())

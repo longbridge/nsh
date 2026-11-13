@@ -1,3 +1,4 @@
+mod canvas_render;
 mod classes;
 mod components;
 mod cull;
@@ -385,8 +386,8 @@ struct ScrollState {
     pending: Vec<(u32, PendingScroll)>,
     /// What its lists asked of it in this commit, sent at its end.
     asked: Option<parent_viewport::Asked>,
-    /// The sticky cells it was last sent with its lists' (its own too, when
-    /// it is a list), while its lists have any.
+    /// The sticky cells it was last sent: its lists' (its own too, when it
+    /// is a list), its sticky views' and its built-in bar's.
     page_sticky: Vec<list::StickyRange>,
     /// The ranges of the `position: sticky` views in it.
     view_sticky: Vec<list::StickyRange>,
@@ -1313,6 +1314,10 @@ pub struct Core<M: TextEngine> {
     /// region's whole subtree was walked for each view inserted in it (an
     /// editor's highlighted rows: 1600 spans, 2500 views, 10 ms a commit).
     pointer_pending: Vec<Key>,
+    /// Views whose hit slop changed since the last round: the areas of the
+    /// views around them are worked out again after the layout
+    /// ([`Self::update_slop_overflow`]).
+    slop_moved: Vec<Key>,
     /// The view with the keyboard focus, by key and id (keys are reused),
     /// as the platform reports it (`classes::focus_reported`).
     focus: Option<(Key, NodeId)>,
@@ -1431,6 +1436,9 @@ pub struct Core<M: TextEngine> {
     speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Plays the app's sound in place of the platform ([`Core::set_audio`]).
     audio: Option<Arc<dyn crate::audio::AudioBackend>>,
+    /// The app's login item ([`Core::set_login_item`]); without one the app
+    /// has none.
+    login_item: Option<crate::desktop::LoginItems>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1501,6 +1509,7 @@ impl<M: TextEngine> Core<M> {
             window_backend: None,
             speech: None,
             audio: None,
+            login_item: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1568,6 +1577,7 @@ impl<M: TextEngine> Core<M> {
             orientations_shown: 0,
             pointer_none_classes: 0,
             pointer_pending: Vec::new(),
+            slop_moved: Vec::new(),
             focus: None,
             focus_chain: Vec::new(),
             focus_scratch: Vec::new(),
@@ -1820,6 +1830,14 @@ impl<M: TextEngine> Core<M> {
     /// platform's (`None`: the platform's, the default).
     pub fn set_audio(&mut self, backend: Option<Arc<dyn crate::audio::AudioBackend>>) {
         self.audio = backend;
+    }
+
+    /// Reads and changes the app's login item (`Application.launchAtLogin`)
+    /// with `backend`: the platform's, which a standalone app's runner gives,
+    /// or a test's fake. `None` (the default): the app has no login item,
+    /// it does not launch at login ([`crate::desktop::LoginItemBackend`]).
+    pub fn set_login_item(&mut self, backend: Option<Arc<dyn crate::desktop::LoginItemBackend>>) {
+        self.login_item = backend.map(crate::desktop::LoginItems::new);
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -2387,6 +2405,10 @@ impl<M: TextEngine> Core<M> {
                 timeout,
             } => {
                 self.start_js_web_evaluation(id, call, script, timeout);
+                Ok(())
+            }
+            Op::RenderCanvas { call, request } => {
+                self.start_js_canvas_render(call, *request);
                 Ok(())
             }
             Op::Rust(op) => {
@@ -3114,6 +3136,9 @@ impl<M: TextEngine> Core<M> {
             self.sync_culled();
         }
         self.update_lists(relayout);
+        if !self.slop_moved.is_empty() {
+            self.update_slop_overflow();
+        }
         // Views that waited for the budget, once lists placed their cells
         // (`pace.rs`).
         if !self.pace.waiting.is_empty() {
@@ -3931,8 +3956,9 @@ impl<M: TextEngine> Core<M> {
         if node.fixed_view {
             style.position = Position::Fixed;
         }
-        self.layout.set_style(layout, style);
-        self.needs_layout = true;
+        if self.layout.set_style(layout, style) {
+            self.needs_layout = true;
+        }
     }
 
     fn set_inline_style(
@@ -4154,8 +4180,10 @@ impl<M: TextEngine> Core<M> {
             node.base_layout = Some(Box::new(layout));
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
-            self.layout.set_style(l, layout);
-            self.needs_layout = true;
+            // A style that only changed what is painted lays nothing out.
+            if self.layout.set_style(l, layout) {
+                self.needs_layout = true;
+            }
         } else if node.kind == Kind::Text {
             // A span: kept for when it is a block again.
             node.base_layout = Some(Box::new(layout));
@@ -5063,6 +5091,7 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let mut flags = 0;
         let mut rebuild_span = false;
+        let mut slop_moved = false;
         match prop {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
@@ -5389,6 +5418,7 @@ impl<M: TextEngine> Core<M> {
                 if props.hit_slop != value {
                     props.hit_slop = value;
                     flags |= dirty::VIEW_PROPS;
+                    slop_moved = true;
                 }
             }
             Prop::Href(value) => {
@@ -6019,6 +6049,9 @@ impl<M: TextEngine> Core<M> {
         }
         if flags != 0 {
             self.mark(key, flags);
+        }
+        if slop_moved {
+            self.slop_moved.push(key);
         }
         if rebuild_span {
             self.mark_text_block(key);
@@ -7587,6 +7620,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     let press = pressable(child.events);
                     let hinted = child.overlay_watched & overlay::watch::HINT != 0;
+                    // Read from the classes, not `tracked`, which may be
+                    // updated after this merge in the same commit.
+                    let tracked = child.classes.as_ref().map_or(0, |c| c.tracked_states());
+                    let hovers = tracked & crate::tailwind::state::HOVERED != 0;
                     self.collect_text(c, inner, out, alignments, in_press || press);
                     // A link with a hint (its URL) hears the pointer come
                     // over its characters and leave them. A span that takes
@@ -7596,12 +7633,19 @@ impl<M: TextEngine> Core<M> {
                     // takes presses it is none, so that span, the innermost
                     // link there, keeps the press of those characters.
                     // Hidden characters take no presses, as CSS's hidden
-                    // elements take no pointer events.
-                    if !inner.hidden && (press || (hinted && !in_press)) {
+                    // elements take no pointer events. A span with
+                    // `hover:` / `active:` styles hears the pointer and
+                    // its presses the same way: it has no view to report
+                    // its states, `Self::span_state` takes them from these.
+                    if !inner.hidden && (press || ((hinted || hovers) && !in_press)) {
                         let mut events = child.events;
-                        if hinted {
+                        if hinted || hovers {
                             events.set(EventKind::MouseEnter, true);
                             events.set(EventKind::MouseLeave, true);
+                        }
+                        if press && tracked & crate::tailwind::state::PRESSED != 0 {
+                            events.set(EventKind::PressDown, true);
+                            events.set(EventKind::PressUp, true);
                         }
                         out.links.push(crate::text::TextLink {
                             start,
@@ -9473,8 +9517,22 @@ impl<M: TextEngine> Core<M> {
             this.set_left_behind(cell, false);
             this.set_spare(cell, false);
             if std::mem::take(&mut this.nodes[cell as usize].relaid) {
+                // A cell that waits to be made (`pace.rs`) made none of
+                // its views: they wait with it, placed as culled views
+                // are, so the ones that show are made when the cell is,
+                // not behind every view that waits out of sight.
+                let waits = {
+                    let node = &this.nodes[cell as usize];
+                    !node.created && node.culled
+                };
                 let children = std::mem::take(&mut this.nodes[cell as usize].children);
                 for &child in &children {
+                    if waits {
+                        let node = &mut this.nodes[child as usize];
+                        if !node.created && !node.is_layout_root() {
+                            node.culled = true;
+                        }
+                    }
                     this.emit_frames(child);
                 }
                 this.nodes[cell as usize].children = children;
@@ -9545,22 +9603,12 @@ impl<M: TextEngine> Core<M> {
                 self.page_sticky_changed(key, o.view, &old);
             }
         } else if sticky_cells != list.sent_sticky {
-            let cells = sticky_cells
-                .iter()
-                .map(|r| StickyCell {
-                    cell: r.cell,
-                    start: Points(r.start),
-                    end: Points(r.end),
-                    offset: r.offset,
-                })
-                .collect();
+            // Sent at the end of the commit in one set with the other
+            // views it pins (its built-in bar, its sticky views, its lists'
+            // rows in its viewport): a set of its rows alone would drop the
+            // others and raise its rows above its bar.
             list.sent_sticky = sticky_cells;
-            self.mount.push(MountItem::StickyCells { id, cells });
-            // Its lists in its viewport pin theirs with its own.
-            let scroll = self.nodes[key as usize].scroll.as_ref();
-            if scroll.is_some_and(|s| !s.page_sticky.is_empty()) {
-                self.sticky_views.push(key);
-            }
+            self.sticky_views.push(key);
         }
 
         if let Some(o) = &outer {
@@ -10085,6 +10133,31 @@ fn measure_leaf_size<M: TextEngine>(
     cx: Option<&mut LeafContext<M::Prepared>>,
     style: &taffy::Style,
 ) -> taffy::LayoutOutput {
+    use taffy::{MaybeResolve as _, ResolveOrZero as _};
+    // An input's text scrolls within its maximum height: its content is
+    // never taller than its content box can be. Taffy leaves the maximum out
+    // of the content size it asks for a flex basis (`SizingMode::ContentSize`)
+    // and a column container sizes itself from the flex bases, so without
+    // this a long value grew the input's parent past the input.
+    let input_max_height = match &cx {
+        Some(LeafContext::Text(cx)) if cx.field.is_some() => {
+            let parent = input.parent_size;
+            let max: Option<f32> = style
+                .max_size
+                .height
+                .maybe_resolve(parent.height, |_, _| 0.0);
+            max.map(|max| {
+                let inset = (style.padding.resolve_or_zero(parent.width, |_, _| 0.0)
+                    + style.border.resolve_or_zero(parent.width, |_, _| 0.0))
+                .vertical_axis_sum();
+                match style.box_sizing {
+                    taffy::BoxSizing::BorderBox => (max - inset).max(0.0),
+                    taffy::BoxSizing::ContentBox => max,
+                }
+            })
+        }
+        _ => None,
+    };
     taffy::compute_leaf_layout(
         input,
         style,
@@ -10116,7 +10189,10 @@ fn measure_leaf_size<M: TextEngine>(
                         .width
                         .or(field.and(max_width))
                         .unwrap_or(measured.width.0),
-                    height: known.height.unwrap_or(measured.height.0),
+                    height: known.height.unwrap_or(match input_max_height {
+                        Some(max) => measured.height.0.min(max),
+                        None => measured.height.0,
+                    }),
                 }
             }
             Some(LeafContext::Image(Some(natural))) => {
@@ -10544,6 +10620,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::PickFiles { .. }
                 | C::OpenUrl { .. }
                 | C::PickScreenColor { .. }
+                | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Speech { .. }
                 | C::Audio { .. }

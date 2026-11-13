@@ -1911,6 +1911,14 @@ final class Mounter {
         updateBack();
     }
 
+    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    void reportAllScreenInsets() {
+        for (int i = 0; i < screenOptions.size(); i++) {
+            int id = screenOptions.keyAt(i);
+            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+        }
+    }
+
     /** A screen's insets below its header, for `safeAreaInsets()`. */
     private void reportScreenInsets(int id, ScreenOptions o) {
         float top = o.shown && !o.transparent ? 0 : host.safeTop();
@@ -2438,6 +2446,18 @@ final class Mounter {
                         new Object[] {(double) request, "not supported on Android"});
                 break;
             }
+            case 55: {
+                // `encode.rs` `Command::RenderCanvas`: the request, the size in pixels, the scale, the format,
+                // then the drawing as `CANVAS` carries it.
+                int request = b.getInt(), width = b.getInt(), height = b.getInt();
+                float scale = b.getFloat();
+                int format = b.getInt(), words = b.getInt();
+                int[] code = new int[words];
+                b.asIntBuffer().get(code);
+                b.position(b.position() + words * 4);
+                CanvasRender.render(this, request, width, height, scale, format, code, objects);
+                break;
+            }
             case 44: {
                 Notifications.command(this, b, objects);
                 break;
@@ -2676,6 +2696,7 @@ final class Mounter {
     private final android.util.SparseArray<float[]> panActivations = new android.util.SparseArray<>();
     /** Scroll views an activated pan gate blocks. */
     private final java.util.ArrayList<ScrollBox> gatedScrolls = new java.util.ArrayList<>();
+    private View activeGate;
 
     private void clearJsResponder() {
         for (ScrollBox s : blockedScrolls) s.jsBlocked = false;
@@ -2700,6 +2721,7 @@ final class Mounter {
     /** The pan gate of {@code v} activated: the scroll views around it stop taking the touches. */
     void gateBlock(View v) {
         gateRelease();
+        activeGate = v;
         for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
             if (p instanceof ScrollBox) {
                 ((ScrollBox) p).gateBlocked = true;
@@ -2711,8 +2733,14 @@ final class Mounter {
 
     /** The touches of an activated pan gate ended. */
     void gateRelease() {
+        activeGate = null;
         for (ScrollBox s : gatedScrolls) s.gateBlocked = false;
         gatedScrolls.clear();
+    }
+
+    /** The view whose pan gate activated for the touches down now, or null. */
+    View activeGate() {
+        return activeGate;
     }
 
     void event(int id, int kind) {
@@ -2768,6 +2796,17 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /**
+     * Answers `OffscreenCanvas` render {@code request} ({@link CanvasRender}): the encoded image, or why it failed
+     * ({@code failure}: {@link CanvasRender#RENDER_FAILED} or {@link CanvasRender#RENDER_TOO_LARGE}, and {@code error}).
+     * Once the view is destroyed there is no app to tell.
+     */
+    void canvasImage(int request, byte[] bytes, int failure, String error) {
+        long handle = handle();
+        if (handle == 0) return;
+        Native.canvasImage(handle, request, bytes, failure, error);
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {

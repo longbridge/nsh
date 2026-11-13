@@ -91,6 +91,14 @@ Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`; mi
 `nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds; the monitor costs nothing
 while it is off.
 
+A click on the panel collapses it to a pill with the frame rate alone, green, amber or red as the frames' 95th percentile
+main-thread time is within half of one refresh, within it, or over it (the bars' colors); another click expands it.
+VoiceOver reads it as a button with that value and presses it the same way. The panel takes the clicks on it and no
+others: the rest of the app gets the mouse as it does without it. The app sets how it shows with `setFpsMode`
+(`"expanded"`, `"collapsed"`, or `"hidden"`, which shows nothing while it still measures and logs; Rust:
+`set_fps_mode(FpsMode::Collapsed)`, `AppView::set_fps_mode` when embedding), now and whenever it shows later;
+`NSH_FPS=collapsed` or `NSH_FPS=hidden` start it so.
+
 ## Packaging
 
 ```sh
@@ -172,6 +180,9 @@ function App() {
 mount(App);
 ```
 
+A menu bar app often offers to open at login: when the user turns that on, `Application.setLaunchAtLogin(true)` registers the app
+bundle as a login item ([Opening at login](../modules/nsh-desktop.md#opening-at-login)).
+
 An app embedded with `AppView` takes part in the system's UI as its host app does (the host's `LSUIElement`, or
 `NSApplication.setActivationPolicy`).
 
@@ -247,6 +258,10 @@ An embedded `AppView` does not change the window it is put in: make your own `NS
 `AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:
 its banners, presses and badge. It is off by default, so an embedded app's notifications are `unavailable` and your
 app's stay yours; `run_app` sets it.
+
+`AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): the
+app bundle's (`SMAppService.mainApp`). It is off by default and read by `run_app` alone, so an embedded app
+never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's

@@ -907,7 +907,7 @@ pub(crate) fn request(hwnd: HWND, request: &WindowRequest) -> bool {
                     crate::window::show(hwnd);
                 }
                 if crate::window::shell(hwnd).is_none_or(|s| s.attrs().focusable) {
-                    let _ = SetForegroundWindow(hwnd);
+                    crate::window::set_foreground(hwnd);
                 }
             }
             WindowRequest::Close => return false,
