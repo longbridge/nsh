@@ -138,10 +138,12 @@ final class Native {
 
     /**
      * Ends a download of {@code url} through the disk cache: {@code status} 0 when the request failed, else the
-     * response's status, {@code headers} (names and values) and body. Returns the cached bytes when they are what to
-     * show (a 304; a stale copy when the request failed), or null. Any thread.
+     * response's status, {@code headers} (names and values), body and {@code redirects}, the URLs the download was
+     * redirected to (null: none), which the cache keeps with the copy and checks again before it serves it. Returns
+     * the cached bytes when they are what to show (a 304; a stale copy when the request failed), or null. Any thread.
      */
-    static native byte[] imageCacheComplete(long handle, String url, int status, String[] headers, byte[] body);
+    static native byte[] imageCacheComplete(
+            long handle, String url, int status, String[] headers, byte[] body, String[] redirects);
 
     /**
      * The embedding app's theme overrides (a shadcn/ui theme file, null: the
