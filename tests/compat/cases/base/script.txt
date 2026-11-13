@@ -170,8 +170,9 @@ prop id:sides hitSlop {}
 tap text:Widen
 prop id:sides hitSlop top=4 left=2
 prop id:plain hitSlop {}
-# The mouse comes over, moves with Shift held, drags with the left button
-# down, and leaves from where it was: the view's `MouseEvent`.
+# The mouse over a component, as over a view: it comes over, moves with
+# Shift held, drags with the left button down, and leaves from where it
+# was; a toggle hears it the same way.
 listens id:hover onMouseEnter
 listens id:hover onMouseMove
 listens id:hover onMouseLeave
@@ -184,6 +185,9 @@ event id:hover onMouseMove position.x=6.5 position.y=1 pressedButton=left
 expect Mouse: move 6.5,1 page 288 left down
 event id:hover onMouseLeave position.x=-2 position.y=0
 expect Mouse: move 6.5,1 page 288 left down out -2,0
+listens id:hover-toggle onMouseEnter
+event id:hover-toggle onMouseEnter position.x=1 position.y=1
+expect Mouse: toggle in
 covers [nsh/base] Button
 covers [events] onMouseEnter
 covers [events] onMouseMove

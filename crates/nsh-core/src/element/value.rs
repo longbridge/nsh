@@ -678,66 +678,6 @@ impl JsValue for crate::keymap::Modifiers {
     }
 }
 
-/// A mouse button: TS's `MouseButton` (`"left"`, `"right"`, ...).
-impl JsValue for crate::MouseButton {
-    fn ts_type(_types: &mut TsTypes) -> String {
-        "MouseButton".into()
-    }
-
-    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        value
-            .as_string()
-            .and_then(|name| Self::from_name(&name))
-            .ok_or_else(|| value.expected("a mouse button"))
-    }
-
-    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
-        Ok(JsOwned::new(host, host.new_string(self.name())?))
-    }
-}
-
-/// Where the mouse is over a view: TS's `MouseEvent`, as a view's
-/// `onMouseEnter` / `onMouseMove` / `onMouseLeave` carry it, so a
-/// component reporting the mouse hands the app the same object.
-impl JsValue for crate::MouseEvent {
-    fn ts_type(_types: &mut TsTypes) -> String {
-        "MouseEvent".into()
-    }
-
-    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        if value.kind() != JsKind::Object {
-            return Err(value.expected("a mouse event"));
-        }
-        let mut e = Self::new(
-            field_of(value, "position")?,
-            field_of(value, "pagePosition")?,
-            object_field(value, "modifiers", false)?.unwrap_or_default(),
-            object_field(value, "pressedButton", true)?.flatten(),
-        );
-        e.button = object_field::<Option<crate::MouseButton>>(value, "button", true)?.flatten();
-        Ok(e)
-    }
-
-    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
-        let owned = JsOwned::new(host, host.new_object()?);
-        let object = owned.get().raw();
-        host.set_field(object, "position", self.position.to_js(host)?.into_raw())?;
-        host.set_field(
-            object,
-            "pagePosition",
-            self.page_position.to_js(host)?.into_raw(),
-        )?;
-        host.set_field(object, "modifiers", self.modifiers.to_js(host)?.into_raw())?;
-        host.set_field(
-            object,
-            "pressedButton",
-            self.pressed_button.to_js(host)?.into_raw(),
-        )?;
-        host.set_field(object, "button", self.button.to_js(host)?.into_raw())?;
-        Ok(owned)
-    }
-}
-
 impl JsValue for SharedString {
     fn ts_type(_types: &mut TsTypes) -> String {
         "string".into()

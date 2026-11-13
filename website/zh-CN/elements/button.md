@@ -85,13 +85,8 @@ button()
 | `onPress` | `.on_press(\|\| ..)` | 按钮被按下：轻点、单击、拥有键盘焦点时按 Return 或空格，或屏幕阅读器激活它。 |
 | `onPressDown` | `.on_press_down(\|\| ..)` | 一次按压在它上面按下。 |
 | `onPressUp` | `.on_press_up(\|\| ..)` | 按压结束：松开、移开或被取消。 |
-| `onMouseEnter` | `.on_mouse_enter(\|e: &MouseEvent\| ..)` | 鼠标移到按钮或其内容上。 |
-| `onMouseMove` | `.on_mouse_move(\|e: &MouseEvent\| ..)` | 鼠标在按钮上移动，无论是否按着按键。 |
-| `onMouseLeave` | `.on_mouse_leave(\|e: &MouseEvent\| ..)` | 鼠标离开按钮，或离开窗口；`e` 是鼠标最后所在的位置。 |
 
 `onPressDown` 和 `onPressUp` 用于你自己的按压反馈，比如状态样式表达不了的弹簧效果或高亮。禁用的按钮不会报告这些事件。
-
-`onMouseEnter`、`onMouseMove` 和 `onMouseLeave` 就是视图的[鼠标事件](./index.md#悬停)：每个都收到一个 `MouseEvent`，包含在按钮中的 `position`、`pagePosition`、按住的 `modifiers` 和 `pressedButton`，触摸从不触发。跟随指针的预览或显示在旁边的提示，不需要在按钮外再包一层 `View`。
 
 <a id="styling"></a>
 

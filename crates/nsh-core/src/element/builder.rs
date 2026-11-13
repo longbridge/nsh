@@ -2867,6 +2867,30 @@ pub trait ComponentBuilder: Element {
         self
     }
 
+    /// The mouse came over its root or an element inside it, as a view's
+    /// [`Interactive::on_mouse_enter`]: after the component's own
+    /// listener, if it has one. Listened to only while given.
+    fn on_mouse_enter<M>(mut self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.node().handlers.push((EventKind::MouseEnter, listener));
+        self
+    }
+
+    /// The mouse moved over its root, as a view's
+    /// [`Interactive::on_mouse_move`].
+    fn on_mouse_move<M>(mut self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.node().handlers.push((EventKind::MouseMove, listener));
+        self
+    }
+
+    /// The mouse left its root, as a view's [`Interactive::on_mouse_leave`].
+    fn on_mouse_leave<M>(mut self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.node().handlers.push((EventKind::MouseLeave, listener));
+        self
+    }
+
     /// Styles while its root has focus and shows it (`focus-visible:`):
     /// the keyboard moved the focus there.
     fn focus_visible(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {

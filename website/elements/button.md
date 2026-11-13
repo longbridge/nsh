@@ -88,16 +88,9 @@ button()
 | `onPress` | `.on_press(\|\| ..)` | The button was pressed: a tap, a click, Return or Space while it has the keyboard focus, or a screen reader's activation. |
 | `onPressDown` | `.on_press_down(\|\| ..)` | A press went down on it. |
 | `onPressUp` | `.on_press_up(\|\| ..)` | The press ended: released, moved away or cancelled. |
-| `onMouseEnter` | `.on_mouse_enter(\|e: &MouseEvent\| ..)` | The mouse came over the button or its content. |
-| `onMouseMove` | `.on_mouse_move(\|e: &MouseEvent\| ..)` | The mouse moved over it, with or without a button down. |
-| `onMouseLeave` | `.on_mouse_leave(\|e: &MouseEvent\| ..)` | The mouse left it, or the window; `e` is where it was last. |
 
 `onPressDown` and `onPressUp` are for press feedback of your own, such as a spring or a highlight that the state
 styles do not express. A disabled button reports none of them.
-
-`onMouseEnter`, `onMouseMove` and `onMouseLeave` are a view's [mouse events](./index.md#hover): each gets a
-`MouseEvent` with `position` in the button, `pagePosition`, the `modifiers` held and `pressedButton`, and they never
-come from touches. A preview that follows the pointer or a hint shown next to it needs no `View` around the button.
 
 ## Styling
 

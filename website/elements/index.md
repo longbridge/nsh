@@ -245,6 +245,11 @@ inside it, so the views around the one under the mouse hear `onMouseEnter` too (
 from the inside out). The events come after the fact and never on touches. A view removed from under the mouse hears
 `onMouseLeave`, on Linux and Windows at the next mouse move.
 
+The components of [`nsh/base`](../modules/nsh-base.md) (`Button`, `Toggle`, `Link`, ...) take `onMouseEnter`,
+`onMouseMove` and `onMouseLeave` too, on their root view, with the same `MouseEvent`: in Rust `.on_mouse_enter(..)`,
+`.on_mouse_move(..)` and `.on_mouse_leave(..)` of their element. They listen only while you give a listener, and a
+component that follows the mouse itself (a chart's hover) still does.
+
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
 `alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held

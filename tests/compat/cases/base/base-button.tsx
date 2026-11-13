@@ -8,7 +8,7 @@
 // every side or some sides), all following signals. Its script checks
 // each.
 import { Text, View, signal } from "nsh";
-import { Button } from "nsh/base";
+import { Button, Toggle } from "nsh/base";
 
 function App() {
   const presses = signal(0);
@@ -78,6 +78,9 @@ function App() {
       >
         <Text>Hover me</Text>
       </Button>
+      <Toggle testID="hover-toggle" pressed={false} onMouseEnter={() => mouse.set("toggle in")}>
+        <Text>Hover toggle</Text>
+      </Toggle>
       <Text>{`Mouse: ${mouse()}`}</Text>
     </View>
   );

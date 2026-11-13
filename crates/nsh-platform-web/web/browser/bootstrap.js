@@ -3725,7 +3725,10 @@
 			"onLayout",
 			"onFileDragEnter",
 			"onFileDragLeave",
-			"onFileDrop"
+			"onFileDrop",
+			"onMouseEnter",
+			"onMouseMove",
+			"onMouseLeave"
 		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {

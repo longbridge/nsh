@@ -132,7 +132,8 @@ pub(super) struct Instance {
     /// The app's classes, or the styles the view this one is in gives it:
     /// applied after the root's own.
     pub(super) user: Option<std::rc::Rc<ClassList>>,
-    /// Events JS listens to on the host.
+    /// Events JS listens to on the host (or, on a host a view made, the
+    /// view: its mouse listeners).
     js_events: EventMask,
     /// The view, expanded (its root is the host); a list cell's row as
     /// built last.
@@ -4272,6 +4273,10 @@ impl<M: TextEngine> Core<M> {
             }
             inst.event_handlers
                 .extend(c.on_event.into_iter().map(|listener| (id, listener)));
+            // The view's own listeners on it (`.on_mouse_enter(..)`) go on
+            // its host as JS's do on a host JS made: listened to only while
+            // given.
+            let events = self.listen_on_host(id, &el.handlers, old_events, kept, inst);
             // Its `ComponentRef`.
             let element_ref = el.attrs.element_ref.take();
             if old_attrs.element_ref != element_ref
@@ -4337,7 +4342,7 @@ impl<M: TextEngine> Core<M> {
                 },
                 style: el.style,
                 classes: (None, None),
-                events: EventMask::default(),
+                events,
                 list: ListConfig::default(),
                 part,
                 children,
@@ -5065,7 +5070,24 @@ impl<M: TextEngine> Core<M> {
             if let Some(slot) = self.adopted_host(base) {
                 self.handle(slot, base, kind, payload);
             }
-            return self.handle(base, base, kind, payload);
+            let handled = self.handle(base, base, kind, payload);
+            // The mouse over a component reaches the app's listener on its
+            // host after the component's own, as it reaches a view's: the
+            // view that made the host runs it here, JS after this.
+            let given = matches!(
+                kind,
+                EventKind::MouseEnter | EventKind::MouseMove | EventKind::MouseLeave
+            ) && self.components.instances[&id].js_events.contains(kind);
+            if !given {
+                return handled;
+            }
+            return match self.components.owners.get(&id).copied() {
+                Some(owner) => {
+                    self.handle_exact(owner, id, kind, payload);
+                    true
+                }
+                None => false,
+            };
         }
         // A component's own list reports its viewable rows as they settle.
         if kind == EventKind::ViewableItemsChange && self.components.virtual_lists.contains_key(&id)
@@ -5151,6 +5173,59 @@ impl<M: TextEngine> Core<M> {
             .skip(from)
             .find(|(_, (n, k, _))| *n == id && *k == kind)
             .map(|(at, (_, _, l))| (at, l.clone()))
+    }
+
+    /// Registers the listeners a view gives its nested component on that
+    /// component's host `id` (in the view's `inst`), listening as JS does on
+    /// a host it made; returns the events they listen to.
+    fn listen_on_host(
+        &mut self,
+        id: NodeId,
+        handlers: &[(EventKind, Listener<EventPayload>)],
+        old: EventMask,
+        kept: bool,
+        inst: &mut Instance,
+    ) -> EventMask {
+        if kept {
+            inst.handlers.retain(|(n, _, _)| *n != id);
+        }
+        let mut mask = EventMask::default();
+        for (kind, handler) in handlers {
+            mask.set(*kind, true);
+            inst.handlers.push((id, *kind, handler.clone()));
+        }
+        if !self.is_host(id) {
+            return mask;
+        }
+        let mut changed = mask.bits() ^ old.bits();
+        while changed != 0 {
+            let event = EventKind::ALL[changed.trailing_zeros() as usize];
+            changed &= changed - 1;
+            let enabled = mask.contains(event);
+            if let Ok(Some(op)) = self.intercept(Op::Listen { id, event, enabled }) {
+                let _ = self.apply_op(op);
+            }
+        }
+        mask
+    }
+
+    /// Runs `host`'s handlers of `kind` on exactly node `id` (a nested
+    /// component's host, whatever its root is), in order.
+    fn handle_exact(&mut self, host: NodeId, id: NodeId, kind: EventKind, payload: &EventPayload) {
+        let mut from = 0;
+        while let Some((at, listener)) = self.components.instances.get(&host).and_then(|inst| {
+            inst.handlers
+                .iter()
+                .enumerate()
+                .skip(from)
+                .find(|(_, (n, k, _))| *n == id && *k == kind)
+                .map(|(at, (_, _, l))| (at, l.clone()))
+        }) {
+            from = at + 1;
+            if !self.run_listener(host, &listener, payload) {
+                break;
+            }
+        }
     }
 
     /// The part of `host`'s node `id` in the touch responder.

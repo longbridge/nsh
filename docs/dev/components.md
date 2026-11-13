@@ -460,9 +460,11 @@ reasons: `reactive-components.md`.
   on the top host). Its state styles (`.active(|s| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)`, and
   `Styled`'s `.selected(..)` / `.checked(..)`) are variants of those styles, so they follow the states of that root
   (pressed and hovered as reported by the platform when the root takes presses, disabled, selected and checked as its
-  view sets them), as an app's `active:` classes on a TSX component do. Listeners and accessibility are not on it
-  (a component's element is not `Interactive` or `Accessible`): a component says what it hears and is through its
-  events and props.
+  view sets them), as an app's `active:` classes on a TSX component do. Accessibility and the other listeners are
+  not on it (a component's element is not `Interactive` or `Accessible`): a component says what it hears and is
+  through its events and props. The mouse over its root is the exception, `ComponentBuilder`'s `.on_mouse_enter(..)`,
+  `.on_mouse_move(..)` and `.on_mouse_leave(..)`, as `onMouseEnter` / `onMouseMove` / `onMouseLeave` are on a host JS
+  made (below).
 - An app's own types become static values for setters with `nsh_core::static_reactive!(Tone: Tone);`. A closure
   returning a bare float literal for an `f32` setter needs its type: `move || if on { 0.5_f32 } else { 1.0 }`.
 
@@ -811,8 +813,12 @@ element: at the view's first mount, before the host's native view is sent, the c
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
 region goes in the host view. Besides the component's own props, JS sets a view's props on the host
 (`nsh-js` `components.rs`' `HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
-`onLayout` and the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), so a component is a drop
-destination only where the app listens.
+`onLayout`, the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), so a component is a drop
+destination only where the app listens, and the mouse over it (`onMouseEnter`, `onMouseMove`, `onMouseLeave`). The
+mouse's events are listened to on the host only while the app (JS, or the Rust view with the component's element)
+gives a listener, and reach it after the component's own listener on its root, if any (`Core::dispatch_event`: a
+plot follows the mouse itself and the app hears it too); a host a Rust view made registers the view's listeners as
+JS's (`listen_on_host`, `Instance::js_events`).
 
 A root that is a component (a view that is `press()`) is made on the same host, as a TSX function component returning
 another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
