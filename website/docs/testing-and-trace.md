@@ -258,6 +258,15 @@ await app.press("Contact us");
 expect(app.openedUrls()).toEqual(["mailto:help@example.com"]);
 ```
 
+`app.failOpenUrls(url)` makes the URLs that match it fail to open, as on a device with no app for them, so a test
+checks what the app shows when a link does not open:
+
+```tsx
+await app.failOpenUrls("https://example.com/*");
+await app.press("Read the guide");
+expect(app.shows("Could not open the link")).toBe(true);
+```
+
 ### Stubbing the network
 
 `network` lists routes by `"<METHOD> <URL>"` (a bare URL is a `GET`; `*` matches any text). A request no route
@@ -455,6 +464,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
 | `await app.openWithUrl(url)` | The system hands the app a link that opens it, as when the user opens one while it runs (`UrlScheme.on("open")`; a link of a scheme the app does not claim is dropped, as on a device), then waits until it is quiet. Headless runs only. |
 | `await app.failImages(url)` | The images whose source is `url` fail to load from now on, those loading now included: each reports the failure with `onError`, as on a device, so a test checks what the app shows instead (an avatar's initials, a placeholder). `url` is matched whole and `*` in it matches anything (`"https://cdn.example.com/avatars/*"`), as `network` routes are; a bundled image's is `asset:/<path>`. Then waits until the app is quiet. Headless runs only. |
+| `await app.failOpenUrls(url)` | The URLs the app opens that match `url` fail to open from now on: `openUrl` resolves `{ opened: false }`, as on a device with no app for them, so a test checks what the app shows then. `url` is matched whole and `*` in it matches anything (`"https://example.com/*"`), as `network` routes are; `app.openedUrls()` still lists them. Then waits until the app is quiet. Headless runs only. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
@@ -514,7 +524,7 @@ that only a real platform can do:
   host](#the-pages-host)).
 - **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
   so what it does not declare is refused.
-- **URLs are recorded**: what the app opens is reported opened, and `app.openedUrls()` lists it.
+- **URLs are recorded**: what the app opens is reported opened unless the test fails it (`app.failOpenUrls`), and `app.openedUrls()` lists it.
 - **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` and `Picker.pickFiles` resolve `[]`.
 - **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.
