@@ -34,7 +34,7 @@ pub(crate) trait Driver: Send {
     /// Drops local files (`file:` URLs) on what `selector` names.
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         let _ = (selector, uris);
-        Err("`dropFiles` runs headless and on Linux for now".into())
+        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
     }
     /// Drags without lifting, until [`Driver::drop_held`].
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
@@ -80,6 +80,10 @@ pub(crate) trait Driver: Send {
         let _ = state;
         Err(headless_only("setLifecycle"))
     }
+    /// The system wakes from sleep (`wakeCount()`).
+    fn wake(&mut self) -> Result<(), String> {
+        Err(headless_only("wake"))
+    }
     /// The user's locale settings that `settings` names, as the system
     /// reports them (`localeSettings()`).
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
@@ -90,6 +94,16 @@ pub(crate) trait Driver: Send {
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         let _ = url;
         Err(headless_only("openWithUrl"))
+    }
+    /// The images of `url` (a `*` glob) fail to load (`failImages`).
+    fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failImages"))
+    }
+    /// The URLs matching `url` (a `*` glob) fail to open (`failOpenUrls`).
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        let _ = url;
+        Err(headless_only("failOpenUrls"))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
@@ -259,10 +273,19 @@ impl Driver for Headless {
             e.lifecycle = state;
         })
     }
+    fn wake(&mut self) -> Result<(), String> {
+        self.set_environment("wake()", |e| e.wake_count = e.wake_count.wrapping_add(1))
+    }
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
         let pins = settings.pins("setLocaleSettings")?;
         let what = format!("setLocaleSettings({})", settings.label());
         self.set_environment(&what, |e| pins.apply(e))
+    }
+    fn fail_images(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_images(self, url)
+    }
+    fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        Headless::fail_open_urls(self, url)
     }
     fn open_with_url(&mut self, url: &str) -> Result<(), String> {
         Headless::open_with_url(self, url)

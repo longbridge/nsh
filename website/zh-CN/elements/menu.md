@@ -9,7 +9,7 @@ demo: el-menu
 
 菜单是由触发元素打开的一组操作。同一个结构适用于每种设备，并按各自的习惯呈现：
 
-- 在桌面平台和桌面浏览器中，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开。
+- 在桌面平台和桌面浏览器中，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开，它的第一个条目与该条目齐平（在你的 `popupClass` 的内边距和边框之内）。
 - 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet；`Submenu` 在 sheet 中就地显示它的条目，取代菜单的条目，并由你提供的一行返回上一级。
 
 选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，在触摸屏上由手指按住触发元素打开，或在触发元素下方由浏览器和 Linux 上的键盘、macOS 和 Windows 上的读屏软件打开。
@@ -117,6 +117,8 @@ import { ContextMenu, MenuItem } from "nsh/base";
 在桌面平台上，辅助按键在指针所在处打开它。在触摸屏上，手指按住触发元素会以 sheet 的形式打开它；触发元素自己的按压和周围的滚动视图照常工作，移动手指会取消这次按住。
 
 键盘和读屏用户同样可以打开它。在浏览器和 Linux 上，触发元素获得焦点时按 Shift+F10 或菜单键即可打开。在 macOS 上，VoiceOver 的「显示菜单」操作（VO-Shift-M）可以打开它；在 Windows 上，读屏软件通过 UI Automation 的「显示上下文菜单」操作也可以打开它。这样打开时，菜单出现在触发元素下方、从它的起始边开始，键盘焦点落在第一个可用的条目上，与 WAI-ARIA 对上下文菜单的描述一致。给触发元素设置 `focusable`，键盘才能到达它。视图自己的 `onContextMenu` 可以通过 `pointerType` 区分这类打开方式：此时它为 `null`。
+
+由你控制 `open` 并自己把它设为 `true` 时（比如你自己的快捷键，或者获得焦点的列表要打开其中某一行的菜单），菜单也这样打开：出现在触发元素下方，键盘焦点落在第一个可用的条目上，关闭后焦点回到触发元素。
 
 <a id="checkable-items"></a>
 
@@ -273,6 +275,49 @@ menu()
 ```
 
 <a id="props"></a>
+
+## 系统菜单：MenuButton
+
+`Menu` 在每种设备上以应用自己的外观绘制菜单。应用若需要系统自己的菜单（iOS 的下拉菜单，有系统的位置、动效，在 iOS 26 上是 Liquid Glass），用 `MenuButton` 从应用绘制的触发器上打开它：
+
+```tsx
+import { MenuButton } from "nsh/base";
+
+<MenuButton
+  accessibilityLabel="账户"
+  title={email()}
+  items={[
+    { id: "settings", label: "设置", icon: "gearshape" },
+    { id: "read", label: "全部已读", disabled: !unread() },
+    { id: "", label: "语言", items: languages.map((l) => ({ id: l.id, label: l.label, checked: l.id === lang() })) },
+    { id: "", label: "外观", inline: true, items: [
+      { id: "light", label: "浅色", checked: !dark() },
+      { id: "dark", label: "深色", checked: dark() },
+    ] },
+  ]}
+  onSelect={({ id }) => choose(id)}
+  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+>
+  <Avatar … />
+  <Text>{account()}</Text>
+</MenuButton>;
+```
+
+条目是数据，每个都有应用自己的 `id`，由 `onSelect({ id })` 报告；勾选、`disabled` 和 `destructive`（在 iOS 上为红色）是条目的状态，由应用改变；带 `items` 的条目是子菜单，再加 `inline` 则是以 `label` 为标题、就地显示的分组。子元素、`class` 和 `style` 构成触发器，在所有平台上都由应用绘制。
+
+- **iOS 和 Mac Catalyst**：触发器上覆盖一个透明的 `UIButton`，它的 `UIMenu` 是主操作：点按、VoiceOver 激活或硬件键盘都会立即打开菜单，不等待 JS。`icon` 是 SF Symbol；`title` 显示在菜单顶部。VoiceOver 访问的是这个按钮（名称来自 `accessibilityLabel`），而不是它下面的触发器内容。新的 `items` 在下次打开时生效。
+- **桌面（macOS、Windows、Linux）**：按下时在指针处以平台的上下文菜单显示这些条目（同 `nsh/desktop` 的 `Menu.popup`），分组之间用分隔线；不显示 `icon`、`title` 和 `destructive`。
+- **Android 和 Web**：视图没有系统菜单；触发器照常显示，按下不打开任何内容。在这些平台上按 `platform.os` 改用 `Menu`。
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | 菜单的条目，按顺序。 |
+| `title` | `.title(..)` | `string` | 无 | iOS：菜单的标题，显示在条目上方。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不能按下，不打开任何内容。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件为这个按钮朗读的内容。 |
+| `class`、`style`、`children` | 样式方法、`.child(..)` | | 无 | 应用绘制的触发器。 |
+
+`MenuButtonItem` 为 `{ id, label, icon?, checked?, disabled?, destructive?, items?, inline? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
 
 ## 属性
 

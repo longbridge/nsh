@@ -157,6 +157,9 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
             .pan_values(None, Some(&motion.drag_y))
             .pan_enabled(move || swipe() && open.get() && motion.settled.get())
             .pan_scroll_handoff(swipe)
+            // At the start, as a stack's back swipe (#430): the keyboard
+            // would cover the panel the finger is moving.
+            .on_pan_start(|_: &PanEvent| dismiss_keyboard())
             .on_pan_end(move |e: &PanEvent| {
                 if !open.get_untracked() {
                     return;

@@ -47,6 +47,7 @@ fn config(app: App) -> EngineConfig {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     }
 }
 

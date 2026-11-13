@@ -90,6 +90,7 @@ expect Picked: pending
 expect Files: not picked
 tap id:pick-files
 expect Files refused: rejected RangeError
+expect Size refused: rejected RangeError
 expect Files: pending
 covers [nsh] Picker
 # mod-speech
@@ -121,10 +122,12 @@ covers [nsh] AudioPlayer
 # mod-notifications
 tap id:case-mod-notifications
 # nothing shows notifications there: the permission is unavailable and nothing
-# shows, the badge and close do nothing, and bad arguments reject.
+# shows, the badge, close and closeAll do nothing (closeAll resolves with
+# nothing), and bad arguments reject.
 expect Permission: unknown
 tap id:notify
 expect Permission: unavailable unavailable
+expect Closed: undefined
 expect Refused: RangeError RangeError
 expect Shown: false false
 covers [nsh] Notifications
@@ -212,6 +215,7 @@ expect Font scale: 1
 expect Window: 390x844
 expect Scheme: light
 expect Lifecycle: active
+expect Wakes: 0
 expect Time zone: UTC
 expect Intl local time: its zone
 expect Languages: en-US
@@ -234,6 +238,7 @@ covers [nsh] setColorScheme
 covers [nsh] fontScale
 covers [nsh] windowSize
 covers [nsh] lifecycle
+covers [nsh] wakeCount
 covers [nsh] localeSettings
 # mod-host-channel
 tap id:case-mod-host-channel
@@ -281,6 +286,7 @@ tap id:tab-rename
 frame id:tab-bar 0 784 390 60
 covers [nsh/mobile] isAvailable
 covers [nsh/mobile] TabBar
+covers [nsh/mobile] SegmentedControl
 # mod-haptics
 tap id:case-mod-haptics
 # every call goes through; a name Haptics does not know throws.

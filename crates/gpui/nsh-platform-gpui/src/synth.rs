@@ -36,7 +36,8 @@ pub(crate) async fn sleep(cx: &mut AsyncApp, ms: u64) {
 
 /// Waits until the window drew a frame with everything changed so far
 /// (false when the window closed). A window that draws no frames (hidden,
-/// minimized) is given up on after a second.
+/// minimized) is given up on after a second; a background app's (covered
+/// by the app in use) is drawn then.
 pub(crate) async fn drawn(window: AnyWindowHandle, cx: &mut AsyncApp) -> bool {
     // Next-frame callbacks run before their frame is drawn: the second
     // one runs once the frame the first one asked for is drawn.
@@ -53,8 +54,15 @@ pub(crate) async fn drawn(window: AnyWindowHandle, cx: &mut AsyncApp) -> bool {
     let start = std::time::Instant::now();
     while !done.get() {
         if start.elapsed() > Duration::from_secs(1) {
-            log::warn!("test: the window draws no frames");
-            break;
+            if !cx.update(|cx| crate::window::in_background(cx)) {
+                log::warn!("test: the window draws no frames");
+                break;
+            }
+            // Covered by other windows (a background app's under the app
+            // the user works in), hidden or minimized: drawn here, so its
+            // frame has everything changed so far.
+            log::debug!("test: the window draws no frames; drawing it");
+            return in_window(window, cx, |window, cx| window.draw(cx).clear(cx)).is_some();
         }
         sleep(cx, 4).await;
     }

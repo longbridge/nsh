@@ -88,6 +88,7 @@ struct EnvSignals {
     locale: Memo<Locale>,
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
+    wake_count: Memo<u32>,
     screen_color: Memo<bool>,
     shaders: Memo<bool>,
 }
@@ -118,6 +119,7 @@ impl EnvSignals {
                 locale: part!(locale),
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
+                wake_count: part!(wake_count),
                 screen_color: part!(screen_color),
                 shaders: part!(shaders),
             }
@@ -308,6 +310,16 @@ pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
 }
 
+/// The platform's screen readers follow the active descendant a focused
+/// element names ([`super::Interactive::accessibility_active_descendant`],
+/// [`crate::platform::Environment::reads_active_descendants`]); it does
+/// not change.
+pub fn reads_active_descendants() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.reads_active_descendants)
+}
+
 /// Whether the platform draws shader views ([`super::shader`] and the
 /// other shader elements; TS: `shadersAvailable()`), reading subscribes.
 /// `false` where the platform was built without a renderer, on a grid
@@ -372,6 +384,18 @@ pub fn locale_settings() -> LocaleSettings {
 /// so an effect pauses work in the background and resumes it after.
 pub fn lifecycle() -> Lifecycle {
     env(|e| e.lifecycle)
+}
+
+/// How many times the system woke from sleep while the app ran (TS:
+/// `wakeCount()`), 0 until the first wake. Reading it subscribes, so an
+/// effect that reads it runs again after each wake: a sleep may leave
+/// [`lifecycle`] as it was (a laptop's lid closed and opened with the app
+/// in front), while network connections and timers did not live through
+/// it, so the app checks or opens them again there. macOS, Windows and
+/// Linux count wakes; on iOS and Android a sleeping device takes the app
+/// to the background, which [`lifecycle`] reports.
+pub fn wake_count() -> u32 {
+    env(|e| e.wake_count)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.
@@ -588,6 +612,20 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
 /// ```
 pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
+}
+
+/// The file the app's log lines are written to (TS: `process.logFile`): a
+/// packaged desktop app's rolling log, `logs/app.log` in the app's data
+/// directory, for a diagnostics report or an "Open logs folder" command
+/// (older files beside it are `app.1.log`, `app.2.log`, ...). `None` where
+/// the lines go to the platform's log only: development hosts, embedding
+/// apps, mobile, the web.
+///
+/// ```ignore
+/// let folder = log_file().and_then(|file| file.parent().map(Path::to_path_buf));
+/// ```
+pub fn log_file() -> Option<std::path::PathBuf> {
+    crate::log_file::path().map(std::path::Path::to_path_buf)
 }
 
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
@@ -841,6 +879,13 @@ pub fn close_notification(id: impl Into<String>) {
     act(Action::Notification(super::NotificationAction::Close(
         id.into(),
     )));
+}
+
+/// Removes every notification of the app's, shown or waiting to show, those
+/// an earlier run of the app left included where the platform can reach
+/// them (TS: `Notifications.closeAll`): what signing out clears.
+pub fn close_all_notifications() {
+    act(Action::Notification(super::NotificationAction::CloseAll));
 }
 
 /// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
@@ -1320,7 +1365,7 @@ pub fn timer(delay: Duration) -> Delay {
 pub fn timer_until(at: Instant) -> Delay {
     Delay {
         at,
-        registered: false,
+        timer: None,
         #[cfg(not(target_arch = "wasm32"))]
         elsewhere: None,
     }
@@ -1333,8 +1378,9 @@ pub fn timer_until(at: Instant) -> Delay {
 #[derive(Debug)]
 pub struct Delay {
     at: Instant,
-    /// The core keeps it.
-    registered: bool,
+    /// Its timer in the core, which dropping the delay takes back (a task
+    /// cancelled before its time).
+    timer: Option<task::TimerKey>,
     #[cfg(not(target_arch = "wasm32"))]
     elsewhere: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
@@ -1351,15 +1397,18 @@ impl Future for Delay {
             return sleep.as_mut().poll(cx);
         }
         if crate::time::now() >= self.at {
+            // Its timer goes too if it has not fired yet (the task was
+            // polled for something else).
+            self.timer = None;
             return std::task::Poll::Ready(());
         }
-        if self.registered {
+        if let Some(timer) = &self.timer {
+            timer.set_waker(cx.waker());
             return std::task::Poll::Pending;
         }
         match super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten() {
             Some(executor) => {
-                executor.add_timer(self.at, cx.waker().clone());
-                self.registered = true;
+                self.timer = Some(executor.add_timer(self.at, cx.waker().clone()));
                 std::task::Poll::Pending
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1829,6 +1878,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

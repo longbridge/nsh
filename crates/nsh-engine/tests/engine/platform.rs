@@ -80,6 +80,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     rx.recv_timeout(Duration::from_secs(5))
@@ -832,4 +833,27 @@ fn macos_props_apply_on_macos_through_the_mount() {
         linux.iter().find_map(|style| style.glass_tint_color),
         Some(Color(0xff00_00ff))
     );
+}
+
+const CLASS_PLATFORM_APP: &str = r#"import { mount, View } from "nsh";
+
+mount(() => (
+  <View class="ios:bg-[#ff0000] android:bg-[#00ff00] web:bg-[#0000ff]" />
+));
+"#;
+
+#[test]
+fn platform_classes_follow_the_os() {
+    use nsh_core::Color;
+    let background = |os| {
+        first_frame_of(CLASS_PLATFORM_APP, "class-platform", os, Idiom::Phone)
+            .into_iter()
+            .find_map(|item| match item {
+                MountItem::ViewStyle { style, .. } => Some(style.background_color),
+                _ => None,
+            })
+    };
+    assert_eq!(background(Os::Ios), Some(Color(0xff00_00ff)));
+    assert_eq!(background(Os::Android), Some(Color(0x00ff_00ff)));
+    assert_eq!(background(Os::Web), Some(Color(0x0000_ffff)));
 }

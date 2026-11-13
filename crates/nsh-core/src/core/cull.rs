@@ -6,7 +6,7 @@
 
 use taffy::Position;
 
-use super::{Core, Key, Kind, NO_KEY, rounded, span};
+use super::{Core, Key, Kind, NO_KEY, rounded, scroll_extent, span};
 use crate::{geometry::Bounds, mount::MountItem, ops::EventKind, text::TextEngine};
 
 /// How far around its viewport a scroll view mounts its content, in
@@ -130,6 +130,14 @@ impl<M: TextEngine> Core<M> {
                 l.size.width,
                 l.size.height,
             );
+            // A scroll view's content size, sent with the frame when it is
+            // made (a list's view in its parent's viewport has none).
+            let node = &mut self.nodes[key as usize];
+            if node.kind == Kind::Scroll
+                && let Some(scroll) = node.scroll.as_mut()
+            {
+                scroll.culled_content = Some(scroll_extent(&l));
+            }
             if let Some(parent) = self.nodes.get(self.nodes[key as usize].parent as usize)
                 && parent.rtl
                 && parent.kind == Kind::Scroll
@@ -389,6 +397,7 @@ impl<M: TextEngine> Core<M> {
         cx.deferred = false;
         if std::mem::take(&mut cx.estimated) {
             cx.cache = None;
+            cx.baseline = None;
             cx.min_content = None;
             self.layout.mark_dirty(layout);
             self.needs_layout = true;

@@ -12,6 +12,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
 import java.nio.ByteBuffer;
@@ -89,6 +90,17 @@ final class Notifications {
             }
             case 4: {
                 badge = b.getInt();
+                return;
+            }
+            case 5: {
+                // NSH's own, those an earlier run left included; an embedding app's notifications stay.
+                NotificationManager manager = manager(context);
+                for (StatusBarNotification n : manager.getActiveNotifications()) {
+                    if (n.getId() == NOTIFICATION_ID && n.getTag() != null
+                            && CHANNEL.equals(n.getNotification().getChannelId())) {
+                        manager.cancel(n.getTag(), NOTIFICATION_ID);
+                    }
+                }
                 return;
             }
             default:

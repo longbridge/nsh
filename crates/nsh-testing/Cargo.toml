@@ -49,6 +49,7 @@ serde_json = { workspace = true, optional = true }
 # The requests routes' JS functions answer, waiting for the test file's VM.
 tokio = { workspace = true, features = ["sync"], optional = true }
 ureq = { workspace = true, optional = true }
+url.workspace = true
 
 # The dev client the agent's `Tester` answers through (not the web's page,
 # which talks to the dev server in JS).

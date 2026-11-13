@@ -162,7 +162,7 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - Asset names: `asset:/<path>` is a file's path in the app's directory, the bundle's asset root
   (`nsh_bundler::Bundle::asset_root`, `HotBundle::asset_root`; `bundle.rs` `app_dir`: the entry's directory when it
   holds an `nsh.json` or an `App.tsx`, else the nearest one up with an `nsh.json`, else the nearest one up with an
-  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<file>.run.js` name
+  `App.tsx`, else the entry's), for every entry of the app: `tests/SubApp.tsx` and `.nsh/test/<path>.run.js` name
   `assets/dot.png` as `App.tsx` does. An import from outside it fails the build (`NshPlugin::ship`), as a package holds
   only the app's directory; so does a file that is inside by name but links out (checked on its real path), a
   pixel-density variant found beside an image too, while a link to elsewhere in the app keeps the name it has
@@ -276,7 +276,8 @@ applied to a model of the native views (`headless::Screen`, `headless/screen.rs`
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
 
-Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide) unless the test starts the app
+Text is laid out with `ApproxTextEngine` (every character `0.55 ×` the font size wide, wrapped at the box's width,
+an inline view or image on the line its character wraps to) unless the test starts the app
 with `Headless::start_with_text_engine`, which takes a function that makes a platform's engine on the engine's thread
 (`CoreTextEngine` on macOS, `DWriteTextEngine` on Windows) so text measures as it does on screen. `Screen::layout_nodes`
 returns the views that are on screen in tree order as layout placed them (`LayoutNode`: kind, `testID`, parent,
@@ -343,7 +344,10 @@ report it:
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
-  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down);
+  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down); a view
+  removed or deleted leaves the hover, the focus and the keyboard focus with its subtree, its states cleared without
+  a `MouseLeave` or `Blur` (`Screen::taken_out`), as a removed DOM element: JS may keep a removed view alive
+  (a cycle through its ref) after its component is gone;
 - `right_click`, `choose_menu_item`, `close_menu` (`headless/menus.rs`): on a desktop environment the match, or the
   nearest view around it listening, hears `ContextMenu`; the menu the app then shows (`Menu.popup`,
   `DesktopCommand::PopupMenu`) is the model's (`Screen::menu`, read through `menu.rs`: its actions by label, a
@@ -365,7 +369,10 @@ report it:
   (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
   hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
-  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
+  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around; only the newest
+  dialog's while one is shown over the focus' window, `Screen::focus_scope`, as the platforms keep Tab inside it; on the
+  desktops and the web a dialog presented takes the focus off the view under it and gives it back when it goes,
+  `Headless::modals_closed`), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
   presses (a press of the pointer takes it off; on such a view they reach only the focus' own bindings in the keymap
   above, `Keymap::find_at`, and the application menu not at all), and on the web Shift+F10 raises `ContextMenu` with no pointer on
@@ -377,9 +384,11 @@ report it:
   batch; what `waitUntil` waits for between calls there until the frames' time reaches its timeout), `idle`
   (until quiet for a while).
 
-A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
-for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
-waiting (below). Native animations that loop forever (a
+A step first applies the batches that came since the last one (they belong to it), then, on the system's clock, has
+the engine run what the step sent (`EngineControl::flush`, again while the batches applied send more back:
+`Headless::caught_up`), so an engine slower than the quiet window still finishes a step before the next one acts, and
+waits until the app is quiet for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual
+clock it asks instead of waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
 time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output), when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
@@ -448,8 +457,14 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
   app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
   device's;
+- an app started at a page's address (`Headless::start_at_page`, on `Os::Web`) has the page's browser history
+  (`headless/browser.rs`, `Headless::browser`): the driver keeps the entries `nsh.js` keeps (a stack's pages and the
+  modals, the root's `SetAppUrl` / `PushAppUrl`), brought to the screen after each batch, and the user's `back`,
+  `forward`, `go` and `type_address` report the root's `UrlScheme` events the page reports (`quiet`, `change`,
+  `open`); a change to the web's history in `nsh.js` changes it too;
 - URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
-  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`);
+  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`), but
+  `{ opened: false }` for those matching the globs of `Headless::fail_open_urls` (`app.failOpenUrls`);
 - the platform has no eyedropper (`Environment::screen_color` false) until a Rust test calls
   `Headless::on_screen_color(color)`: then `Command::PickScreenColor` is answered with `onScreenColor`, that color (or
   none, a cancel);
@@ -475,7 +490,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
 Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
-`Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.
+`Screen` (texts in tree order, the commands sent since the last `clear_commands`, `press_target`, `matches`,
+`input_text`) and `Headless`.
 `EngineConfig::new(app)` is the phone-sized config the tests start from. The features add the rest in layers, so a
 Rust app's tests link neither the bundler nor QuickJS: `js` is `nsh test`'s side (below), `bundle` builds a TSX entry
 against given sets in process (`compile_tsx`, `tsx`, `compiler`).
@@ -490,9 +506,11 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
 `nsh_testing::run_file` runs one test file (`run.rs`):
 
 - It writes an entry for the file in `<app>/.nsh/test/` that imports it and then calls `run` of the internal set
-  `nsh/test/runner`, and builds it through `TestRun::compile` (`Entry::TestFile`: the app's sets plus
-  `nsh_testing::test_sets()`). The file's source map gets its sources relative to the current directory, so failures
-  name `App.test.tsx:12:5`.
+  `nsh/test/runner`, at the file's path in the app (`src/core/typing.test.ts` → `src/core/typing.test.ts.run.js`;
+  in a `TestRun::work_dir` outside the app, below the nearest directory holding both, or one named by a hash of the
+  file's directory: `run.rs` `entry_path`), so parallel runs of same-named files never share one; it builds it
+  through `TestRun::compile` (`Entry::TestFile`: the app's sets plus `nsh_testing::test_sets()`). The file's source
+  map gets its sources relative to the current directory, so failures name `App.test.tsx:12:5`.
 - The test file runs on an engine of its own (the VM). As it loads, `test`, `describe`, the hooks and the variants
   (`test.skip` / `only` / `todo`, `describe.skip` / `only`: modules named `test` and `describe`, whose functions are
   the functions' properties, `docs/dev/components.md`) declare a tree of `Suite`s in a thread-local of the VM's
@@ -584,15 +602,22 @@ For each `open`, the CLI builds the entry, starts a dev server of its own in a t
 besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
 (`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
 unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
-taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. And
-it gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. The
+GPUI host gets both as well (`test_host::opens_on_a_display`): its windows open centered on that display
+(`docs/dev/gpui.md` "Checking a change"). And the macOS host
+gets `--background` unless `nsh test --foreground` (`AppOptions::background`): the app's activation policy is
 `Prohibited` (an `Accessory` app is not guaranteed to stay inactive as its window comes up), so the host does not make
 it the active app, which is meant to leave the keyboard with the app the user types in; its window is ordered in
 without becoming key and the agent does not wait for activation (`MacNative::activate`; nor with `--foreground` while
 the screen is locked, which never lets the app become active: tests run there as unlocked, `docs/dev/macos.md`
 "Checking a change"). It gets `--activation-policy` too when nsh.json's `macos.activationPolicy` is not the default
 (`MacosConfig::host_args`, as under `nsh run`): `--background` takes precedence, so the app runs with its policy under
-`--foreground` (`docs/dev/macos.md` "Activation policy"). A left button press into a web view of the inactive app goes
+`--foreground` (`docs/dev/macos.md` "Activation policy"). The Windows, GPUI and Linux hosts get `--background` too
+unless `--foreground` (`test_host::runs_in_background`): their windows neither take the focus nor come to the front,
+and the window that would have the keyboard reads as focused to the app. On Linux that holds where a user may type on
+the display, and the agent's keys go to the widgets; on a virtual display (Xvfb, CI) the app runs as in the
+foreground (`docs/dev/windows.md`, `gpui.md` and `linux.md`, "Checking a change"). Linux has no `--display`: Wayland
+does not let an app place its windows. A left button press into a web view of the inactive app goes
 to the `WKWebView` directly (`agent::mouse`), since AppKit gives an inactive window's first click only to views that
 accept the first mouse. A window that is not the
 key window gets keys from the agent directly (`synth::key_event`): the app's key monitors (`nsh/keymap`) first, then,
@@ -617,8 +642,9 @@ makes their window point the agent's), so the tests run the same on any display.
 The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network; the dev hosts link it). Its
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
-selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+selector on the model, scrolls the view into view when it is not (the innermost scroll view around it, inside the modal it is in, that
+hides it and can still move it, a gesture at a time: one already at the end a gesture would move it towards,
+`Native::scroll_room`, is not dragged past it, where a pull to refresh starts or a page sheet closes; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
 the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
 itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
@@ -730,7 +756,8 @@ GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s c
 offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
 points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
 feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (the one `--device` names, else a
-booted one, else the newest iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
+booted one, else the newest iPhone; the Simulator app opened behind the app in use, where `nsh run`
+brings it to the front: `run::SimulatorWindow`) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the
 simulator shares the Mac's network and files). As `nsh run --target ios` and
 `nsh package --target ios-simulator --run` do, it passes the app the variables of its environment that the app's
 `capabilities.process.env` declares (`run::simctl_app_env`), so `process.env` reads them as on the desktops, whose
@@ -1104,10 +1131,22 @@ How users get it (`website/docs/installation.md`):
 
 ### Runners
 
-Every workflow runs on GitHub's runners: the checks, the release (its builds, its `Plan`, `Release` and `Nightly`
-jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's build and deployment of the
-published site. This repository is public, so its jobs run on GitHub's fresh runners, never on machines shared with
-other projects.
+The Examples workflow and the Linux runs of the TUI, Rust application and GPUI checks run on the organization's
+self-hosted runner labelled `public`, `Linux` and `X64`, which keeps the toolchains, Cargo's registry and
+huacnlee/cargo's builds (`~/.cargo/targets`) between jobs, so a run builds only what changed (the dependency caches
+are skipped there). The jobs install their toolchain there without making it the machine's default
+(`RUSTUP_TOOLCHAIN` picks it). There is one runner and it takes one job at a time, so it gets the jobs whose time is
+mostly building, which the kept builds shorten to minutes or seconds. Core's time is mostly its tests, which the
+kept builds do not shorten and GitHub's runners run faster, so Core runs there; so do the checks that open windows
+(Linux's GTK and GPUI tests), whose timing is written for GitHub's runners, and the checks every pull request runs
+(`CI paths`, Compat).
+The runner runs only the organization's own code: a pull request from a fork runs on GitHub's runners (`ubuntu-24.04`,
+the jobs' `runs-on` picks it), and the runner refuses a fork's pull request whatever its workflow names. The
+scheduled runs on `main` run on GitHub's runners too: they save the dependencies' caches that forks' pull requests
+restore. Every other job runs on GitHub's runners: the other checks, the release (its builds, its `Plan`, `Release`
+and `Nightly` jobs, the crates' publication, the Homebrew formula's update) and the Website workflow's build and
+deployment of the published site: the jobs that hold write tokens or decide and build what users download run only
+on fresh runners.
 
 The checks (Core, Linux, Windows, TUI, Rust application, Examples, Compat) run on pull requests, and on `main` every
 three hours (skipped when `main` has not moved since the last scheduled run, `changed.yml`) and on manual runs, never on every push: a push to `main` is a pull request that already passed

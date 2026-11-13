@@ -174,6 +174,12 @@ Things that were found the hard way. Read the section of the area you change bef
   container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
   pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
   deleted or replaced view reports nothing, even where a new view took its id.
+- **A large title collapses over a scroll view at the top of a lower header** (verified on the iOS 27 simulator):
+  UIKit reads that content as scrolled. It keeps a scroll view at its top only when the scroll view's safe area
+  changes. A stack laid out in the frame its first screen arrives leaves the bar at an inline title's height
+  (`sizeThatFits` gives the large one). `fit_large_title` sizes the bar when a stack shows a screen whose content is
+  at its top. A scroll view on screen that starts to adjust its insets (`contentInsetAdjustmentBehavior` automatic)
+  keeps its offset under the header. The mounter moves it to its top when it switches.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -364,6 +370,12 @@ Things that were found the hard way. Read the section of the area you change bef
   iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
   While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
   the view that took the down, and the release is what ends the feedback.
+- **Android, a pan view over a scroll view**: a `Box` that handles nothing leaves the down untaken, and Android then
+  offers it to the views under it: a scroll view the box lies over (a chat's composer over its messages) took the
+  drag and scrolled, and the box's pan never activated. A `Box` with a `panActivation` takes the down, as UIKit's hit
+  test gives the touch to the topmost view. Having taken the down from the views around it, the box hands its touch to
+  the nearest pressable `Box` around it (`Box.forwardTap`, in that box's coordinates) until its gate activates or the
+  finger passes the touch slop, so a tap presses that box as UIKit's press recognizers around a view do.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
@@ -372,6 +384,10 @@ Things that were found the hard way. Read the section of the area you change bef
   copies the activity's bar appearance (light / dark icons).
 - **Android, nested scrolling**: scroll views enable nested scrolling, or an outer vertical ScrollView intercepts every vertical
   drag meant for an inner one.
+- **Android, a zoomed scroll view in a pager**: `HorizontalScrollView` intercepts a move past the touch slop before the
+  child sees it, with the same slop as `ZScroll`, so the pager took every horizontal drag of a zoomed image. `ZScroll`
+  asks its parents not to intercept from the down (`requestDisallowInterceptTouchEvent`) while it has content to pan and
+  gives that back when the drag has nothing to move or pushes past an edge a scroll view around can go on from.
 - **Android, safe area**: `NshView` reports only the parts of the system bars / keyboard that overlap it (like UIKit's
   `safeAreaInsets`), so embedded views below a toolbar get no top inset. Overlays use the same overlap (`topInset()`).
 - **Android, dev assets come over plain HTTP**, which apps block by default (API 28+): the dev host APK and `nsh-dev.aar` set

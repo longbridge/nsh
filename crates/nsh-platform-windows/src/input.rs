@@ -67,8 +67,8 @@ use nsh_core::{
     geometry::point,
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
-        SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
-        laid_out, latch_holds, touchpad_wait, transforms,
+        SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE,
+        ZOOM_NOTCH, has_press, laid_out, latch_holds, touchpad_wait, transforms,
     },
     platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
@@ -279,6 +279,8 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The `onWheel` listener a scroll went to, which keeps the rest of it.
+    wheel_listener: RefCell<WheelLatch<NshView>>,
     /// Views that track `HOVERED`.
     hover_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views listening to mouse motion; other apps skip the extra hit test.
@@ -497,6 +499,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.zoom.borrow_mut().take();
     input.wheel.borrow_mut().take();
     input.latch.borrow_mut().take();
+    input.wheel_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -546,6 +549,47 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
         // matters again under the pointer.
         surface.input.hovered.borrow_mut().retain(|v| v != view);
     }
+}
+
+/// `view` was removed or deleted: it and the views in it leave the hover
+/// and the focus at once (a removal animation keeps them in the tree),
+/// their states cleared without a leave or blur, as a removed DOM element.
+/// A JS cycle through a ref can keep a removed view, and its gone
+/// component's handlers, alive until a collection.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let mut left = Vec::new();
+    input.hovered.borrow_mut().retain(|v| {
+        let inside = holds(view, v);
+        if inside {
+            left.push(v.clone());
+        }
+        !inside
+    });
+    for v in &left {
+        set_state(surface, v, HOVERED, false);
+    }
+    let link_left = input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| holds(view, v));
+    if link_left {
+        input.link_hovered.borrow_mut().take();
+    }
+    crate::text_input::removed(surface, view);
+}
+
+/// Whether `inner` is `outer` or inside it.
+pub(crate) fn holds(outer: &NshView, inner: &NshView) -> bool {
+    let mut v = Some(inner.clone());
+    while let Some(current) = v {
+        if &current == outer {
+            return true;
+        }
+        v = current.parent_view();
+    }
+    false
 }
 
 /// Sets (or clears) interaction state `bit` of `view` (pressed, hovered,
@@ -1110,22 +1154,52 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
 /// `onWheel` for a wheel from the window: the nearest view around the one
 /// under the pointer that listens hears it ([`input::wheel_listener`]),
 /// in lines of 16 points for notches (`WM_MOUSEWHEEL`'s default), in
-/// points for precise deltas. Returns whether that view takes the wheel,
-/// so nothing scrolls or zooms natively.
+/// points for precise deltas, and one scroll stays where it went
+/// ([`WheelLatch`]: a view that took it keeps it while it keeps coming; a
+/// scroll going on in a scroll view is only observed). Returns whether
+/// that view takes the wheel, so nothing scrolls or zooms natively.
 fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     let (x, y) = (event.x, event.y);
     if event.dx == 0.0 && event.dy == 0.0 {
         return false;
     }
-    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
-        return false;
+    let input = &surface.input;
+    let time = event.time * 1000.0;
+    // The axis the scroll views take it on: Shift turns a mouse's vertical
+    // notches horizontal (`wheel`), and the latch is kept on that axis.
+    let horizontal = if !event.precise && event.dx == 0.0 && event.modifiers.shift {
+        true
+    } else {
+        event.dx.abs() > event.dy.abs()
     };
-    let Some((view, takes)) = input::wheel_listener(
-        chain(&hit.view),
-        |v| v.state().events.contains(EventKind::Wheel),
-        // A multiline field scrolls its own lines.
-        |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
-    ) else {
+    // Windows reports no gesture phases: every event is a step.
+    let step = WheelStep::Discrete {
+        horizontal,
+        precise: event.precise,
+        time,
+    };
+    let scrolling = input.wheel.borrow().is_some()
+        || input
+            .latch
+            .borrow()
+            .as_ref()
+            .is_some_and(|(view, h, last)| latch_holds(*h, *last, horizontal, time) && shown(view));
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        true,
+        scrolling,
+        |v| shown(v) && v.state().events.contains(EventKind::Wheel),
+        || {
+            let hit = pick(&surface.input_root(), x, y, true)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Wheel),
+                // A multiline field scrolls its own lines.
+                |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
         return false;
     };
     let delta = if event.precise {
@@ -2716,6 +2790,55 @@ mod tests {
                 listens.then_some(area.id())
             );
         }
+    }
+
+    /// A view removed under the mouse leaves the hover with the views in
+    /// it, their `HOVERED` cleared, so the next move tells none of them the
+    /// mouse left; the view around it stays hovered.
+    #[test]
+    fn a_removed_view_leaves_the_hover_without_a_leave() {
+        use nsh_core::MountItem;
+        let surface = Surface::new(Default::default());
+        surface.without_shader_renderer();
+        let apply = |item: MountItem| surface.mounter.borrow_mut().apply(&surface, &item);
+        for (id, parent) in [(2, ROOT_ID), (4, 2), (6, 4)] {
+            apply(MountItem::Create {
+                id,
+                kind: ViewKind::View,
+            });
+            apply(MountItem::Insert {
+                parent,
+                child: id,
+                before: None,
+            });
+            apply(MountItem::TrackStates {
+                id,
+                states: HOVERED,
+            });
+        }
+        let views: Vec<NshView> = [6, 4, 2]
+            .iter()
+            .map(|&id| surface.view(id).expect("mounted"))
+            .collect();
+        let hovered = |v: &NshView| v.state().states & HOVERED != 0;
+        set_hovered(
+            &surface,
+            views.clone(),
+            (1.0, 1.0),
+            Modifiers::default(),
+            None,
+        );
+        assert!(views.iter().all(hovered));
+        apply(MountItem::Remove { id: 4 });
+        let ids: Vec<NodeId> = surface
+            .input
+            .hovered
+            .borrow()
+            .iter()
+            .map(NshView::id)
+            .collect();
+        assert_eq!(ids, [2]);
+        assert!(!hovered(&views[0]) && !hovered(&views[1]) && hovered(&views[2]));
     }
 
     #[test]
