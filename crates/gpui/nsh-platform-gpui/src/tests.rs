@@ -190,6 +190,7 @@ fn windows(cx: &mut TestAppContext) {
     files_dropped_from_outside_reach_the_view_under_them(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     mouse_events_carry_the_position_button_and_modifiers(cx);
+    a_view_removed_under_the_mouse_hears_no_leave(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
     text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx);
     a_popovers_field_follows_its_trigger_in_the_tab_order(cx);
@@ -207,6 +208,9 @@ fn windows(cx: &mut TestAppContext) {
     a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx);
     props_and_commands_reach_a_native_component_whose_view_is_not_drawn(cx);
     a_command_without_a_search_field_takes_the_keyboard_on_focus(cx);
+    // GPUI's test platform cannot minimize, which hides on Linux.
+    #[cfg(not(target_os = "linux"))]
+    a_background_app_s_hidden_main_window_is_not_focused(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -1744,6 +1748,64 @@ fn mouse_events_carry_the_position_button_and_modifiers(cx: &mut TestAppContext)
     );
 }
 
+/// Pad A at (10, 10), 100 × 40, replaced by pad B in the same place when
+/// the mouse enters it, over a focused field that logs the pads' enters
+/// and leaves. Each pad's handlers hold its view through its ref: a cycle,
+/// so a removed pad outlives its removal until a collection.
+const HOVER_REMOVED: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+
+function Pad(props: { name: string; note: (s: string) => void; onEnter?: () => void }) {
+  let view: unknown;
+  return (
+    <View
+      ref={(node) => (view = node)}
+      onMouseEnter={() => {
+        props.note(`enter ${props.name}`);
+        props.onEnter?.();
+      }}
+      onMouseLeave={() => view && props.note(`leave ${props.name}`)}
+      style={{ marginLeft: 10, marginTop: 10, width: 100, height: 40 }}
+    />
+  );
+}
+
+function App() {
+  const open = signal("a");
+  const log = signal("");
+  const note = (s: string) => log.set(`${log()}|${s}`);
+  return (
+    <View style={{ flex: 1 }}>
+      <If when={open() === "a"}>
+        <Pad name="a" note={note} onEnter={() => open.set("b")} />
+      </If>
+      <If when={open() === "b"}>
+        <Pad name="b" note={note} />
+      </If>
+      <Input autoFocus value={`${open()}:${log()}`} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn a_view_removed_under_the_mouse_hears_no_leave(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", HOVER_REMOVED, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "a:");
+    let none = gpui::Modifiers::default();
+    // Entering A removes it: B, now under the still mouse, is entered, and
+    // A, gone, hears no leave then or on the next move.
+    cx.simulate_mouse_move(gpui::point(gpui::px(30.0), gpui::px(25.0)), None, none);
+    wait_for(&view, cx, "b:|enter a|enter b");
+    cx.simulate_mouse_move(gpui::point(gpui::px(120.0), gpui::px(30.0)), None, none);
+    wait_for(&view, cx, "b:|enter a|enter b|leave b");
+}
+
 /// A left click at `position` that is click `count` of a series.
 fn click(cx: &mut VisualTestContext, position: gpui::Point<gpui::Pixels>, count: usize) {
     let (button, modifiers) = (gpui::MouseButton::Left, gpui::Modifiers::default());
@@ -1953,4 +2015,45 @@ fn a_command_without_a_search_field_takes_the_keyboard_on_focus(cx: &mut TestApp
     assert!(view.read_with(cx, |view, _| {
         crate::key_focus::focused(view.surface()).is_none()
     }));
+}
+
+/// A field that reads whether the window has the keyboard.
+#[cfg(not(target_os = "linux"))]
+const FOCUSED_WINDOW: &str = r#"
+import { mount } from "nsh";
+import { Input } from "nsh/base";
+import { currentWindow } from "nsh/desktop";
+
+function App() {
+  const win = currentWindow();
+  return <Input autoFocus value={`focused=${win.state()?.focused}`} style={{ height: 30 }} />;
+}
+mount(App);
+"#;
+
+#[cfg(not(target_os = "linux"))]
+fn a_background_app_s_hidden_main_window_is_not_focused(cx: &mut TestAppContext) {
+    use nsh_core::desktop::WindowRequest;
+    let code = nsh_bundler::compile_module("App.tsx", FOCUSED_WINDOW, &[]).unwrap();
+    cx.update(|cx| crate::window::set_in_background(true, cx));
+    let (view, cx) = owned_view(cx, code, |_| {});
+    // Only the window that would have the keyboard in a background app
+    // has it: the system's active window is another app's.
+    cx.deactivate_window();
+    let request = |r: WindowRequest, cx: &mut VisualTestContext| {
+        view.update(cx, |view, _| {
+            crate::window::main_request(view.surface(), &r)
+        });
+    };
+    wait_for(&view, cx, "focused=false");
+    request(WindowRequest::Focus, cx);
+    wait_for(&view, cx, "focused=true");
+    // Hidden, it has the keyboard no longer, as the system gives a hidden
+    // window's to another.
+    request(WindowRequest::Hide, cx);
+    wait_for(&view, cx, "focused=false");
+    // Shown again, it takes it back.
+    request(WindowRequest::Show, cx);
+    wait_for(&view, cx, "focused=true");
+    cx.update(|_, cx| crate::window::set_in_background(false, cx));
 }

@@ -77,7 +77,17 @@ final class ScrollBox extends FrameLayout implements Node {
     private boolean flung, momentum;
     /** This touch only dismisses the keyboard (`keyboardShouldPersistTaps`); -1: it does not. */
     private int tapMode = -1;
-    private boolean swallowing;
+    /** Where this touch went down, and whether it moved past the slop since (a drag at an edge scrolls nothing). */
+    private float tapX, tapY;
+    private boolean tapMoved;
+    /**
+     * This view is dispatching a touch. The user's drag scrolls the content
+     * synchronously inside that call (a nested scroll view hands it the rest
+     * there too); commands, their glides, layout catching up (`payOwed`) and
+     * the host's handle scroll outside it. Only a scroll inside it is the
+     * user's drag, which takes the touches from the views inside.
+     */
+    private boolean dispatching;
     /**
      * Frames the platform scroll view drew. It draws again each frame while
      * its overscroll effect (Android 12's stretch) relaxes, which moves no
@@ -162,7 +172,7 @@ final class ScrollBox extends FrameLayout implements Node {
             // sizes. Report only after restoring the logical offset.
             if (rescaling) return;
             if (stickyCells.length > 0) pinSticky();
-            if (touching && !dragging && !swallowing) {
+            if (dispatching && touching && !dragging) {
                 dragging = true;
                 // The scroll view takes the touches from JS responders.
                 mounter.cancelTouches();
@@ -170,8 +180,6 @@ final class ScrollBox extends FrameLayout implements Node {
                 if (momentum) emit(Native.MOMENTUM_END);
                 momentum = false;
                 emit(Native.SCROLL_DRAG_START);
-            } else if (swallowing) {
-                dragging = true;
             }
             float d = mounter.density;
             mounter.scroll(id, x / d, y / d, applied);
@@ -1141,36 +1149,48 @@ final class ScrollBox extends FrameLayout implements Node {
             owedX = owedY = 0;
             dragging = false;
             tapMode = tapMode(e);
-            // "never": the tap reaches nothing but the scroll view.
-            swallowing = tapMode == 0;
+            // "never": the touch goes on as usual; a tap only dismisses the keyboard (Mounter.keyboardTap).
+            if (tapMode == 0) mounter.startTapOnly(this);
+            tapX = e.getRawX();
+            tapY = e.getRawY();
+            tapMoved = false;
         }
+        if (action == MotionEvent.ACTION_MOVE && tapMode >= 0) moved(e);
         if (action == MotionEvent.ACTION_MOVE && dismissMode != 0) {
             float slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
             if (Math.abs(e.getY() - startY) > slop) hideKeyboard();
         }
         if (action == MotionEvent.ACTION_DOWN) startY = e.getY();
         boolean handled;
-        if (swallowing) {
-            MotionEvent local = MotionEvent.obtain(e);
-            local.offsetLocation(-scroller.getLeft() - scroller.getTranslationX(), -scroller.getTop() - scroller.getTranslationY());
-            scroller.onTouchEvent(local);
-            local.recycle();
-            handled = true;
-        } else {
+        dispatching = true;
+        try {
             handled = super.dispatchTouchEvent(e);
+        } finally {
+            dispatching = false;
         }
         // For a pan around this view (Box.scrollTakes): a touch that a view
         // above took never comes here, and leaves the time of an older one.
         if (action == MotionEvent.ACTION_DOWN) downTime = handled ? e.getDownTime() : -1;
-        if (action == MotionEvent.ACTION_UP && tapMode >= 0 && !dragging
-                && (tapMode == 0 || !handlesTap(this, e.getX(), e.getY()))) {
+        if (action == MotionEvent.ACTION_UP && tapMode == 2 && !dragging && !tapMoved
+                && !handlesTap(this, e.getX(), e.getY())) {
             hideKeyboard();
         }
         if (!touching) {
-            swallowing = false;
+            if (tapMode == 0) mounter.endTapOnly(this);
             tapMode = -1;
         }
         return handled;
+    }
+
+    private void moved(MotionEvent e) {
+        float slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+        if (Math.hypot(e.getRawX() - tapX, e.getRawY() - tapY) > slop) tapMoved = true;
+    }
+
+    /** Whether the touch, ending with {@code up} (in a root's coordinates), is a tap: quick, and it moved nothing. */
+    boolean stillTap(MotionEvent up) {
+        moved(up);
+        return !dragging && !tapMoved && up.getEventTime() - up.getDownTime() < ViewConfiguration.getLongPressTimeout();
     }
 
     /**
@@ -1230,7 +1250,7 @@ final class ScrollBox extends FrameLayout implements Node {
         return y + group.getScrollY() - child.getTop() - child.getTranslationY();
     }
 
-    private void hideKeyboard() {
+    void hideKeyboard() {
         // The focused field is usually outside this scroll view (a chat's composer below its list).
         View focused = getRootView().findFocus();
         if (focused == null) focused = mounter.focusedInput();

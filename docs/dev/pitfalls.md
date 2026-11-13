@@ -174,6 +174,12 @@ Things that were found the hard way. Read the section of the area you change bef
   container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
   pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
   deleted or replaced view reports nothing, even where a new view took its id.
+- **A large title collapses over a scroll view at the top of a lower header** (verified on the iOS 27 simulator):
+  UIKit reads that content as scrolled. It keeps a scroll view at its top only when the scroll view's safe area
+  changes. A stack laid out in the frame its first screen arrives leaves the bar at an inline title's height
+  (`sizeThatFits` gives the large one). `fit_large_title` sizes the bar when a stack shows a screen whose content is
+  at its top. A scroll view on screen that starts to adjust its insets (`contentInsetAdjustmentBehavior` automatic)
+  keeps its offset under the header. The mounter moves it to its top when it switches.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -364,6 +370,12 @@ Things that were found the hard way. Read the section of the area you change bef
   iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
   While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
   the view that took the down, and the release is what ends the feedback.
+- **Android, a pan view over a scroll view**: a `Box` that handles nothing leaves the down untaken, and Android then
+  offers it to the views under it: a scroll view the box lies over (a chat's composer over its messages) took the
+  drag and scrolled, and the box's pan never activated. A `Box` with a `panActivation` takes the down, as UIKit's hit
+  test gives the touch to the topmost view. Having taken the down from the views around it, the box hands its touch to
+  the nearest pressable `Box` around it (`Box.forwardTap`, in that box's coordinates) until its gate activates or the
+  finger passes the touch slop, so a tap presses that box as UIKit's press recognizers around a view do.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.

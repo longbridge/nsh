@@ -86,6 +86,17 @@ const inLink = () => (revision(), editor.isActive("link"));
 
 链接菜单用 `chain([extendMarkRange("link"), command("setLink", { href })])` 编辑光标所在的链接，用同样的 `extendMarkRange` 之后的 `command("unsetLink")` 移除它。
 
+`contentLayer` 是应用自己铺在文档上的一层，位于滚动的内容框之内：它里面的内容与文字在同一帧一起移动。它的子元素按内容框的点来摆放，`editor.nodeRect(pos)`（从 `pos` 开始的块的框）和 `editor.coordsAtPos(pos)` 用的就是这套坐标：块边距里的手柄、节点旁的标记。这一层本身不接收按压，它的子元素接收。
+
+```tsx
+const box = editor.nodeRect(blockStart);
+
+<RichEditor
+  editor={editor}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+/>
+```
+
 ## Schema
 
 `defineSchema(spec)` 读取 ProseMirror 形式的 schema，并在出错时抛出错误说明哪里不对。节点类型声明它们的 `content`（内容表达式：`"inline*"`、`"paragraph+"`、`"(heading | paragraph) block*"`）、`group`、是否为 `inline` 或 `atom`、允许的 `marks`，以及带默认值和校验（`"string"`、`"number"`、`"boolean"`）的 `attrs`。第一个块类型是默认类型：回车创建的、填充必需内容的类型。spec 中其他的键作为类型的附加数据保留，供构建在编辑器之上的框架使用。
@@ -286,6 +297,36 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 - `withMention(schema, { name?, char? })` 添加 Tiptap 的提及节点：带 `id`、`label` 和触发字符的行内原子节点，在文本中写作 `@label`，在 HTML 中写作 `<span data-type="mention">`。`insertMention(range, id, label?)` 用一个提及和一个空格替换建议的范围。
 
 弹出层属于应用：它读取建议的状态，放在 `coordsAtPos(range.from)` 处，并以自己的方式绘制条目。
+
+## 块编辑器
+
+Notion 式的编辑器由上面这些部分组成，文档周围的界面是应用自己的。画廊的 Block editor 演示（`examples/gallery/demos/BlockEditorDemo.tsx`）就是一个：`/` 块菜单、每个块上的手柄，以及选区上方的工具栏。
+
+```tsx
+import { Overlay } from "nsh";
+import { RichEditor, StarterKit, chain, command, createRichEditor, defineExtension, deleteRange, suggestion } from "nsh/base";
+
+// 扩展排在键位之前，所以回车会先选中菜单项，再轮到它拆分段落。
+const slash = defineExtension({
+  name: "slashCommand",
+  priority: 1000,
+  addProseMirrorPlugins: () => [suggestion({ key: "slash", char: "/", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] })],
+});
+const editor = createRichEditor({ extensions: [StarterKit, slash] });
+
+// `editor.suggestion("slash")?.active` 时，菜单放进 `bubbleMenu`；选中一项就替换触发符和查询。
+const { range } = editor.suggestion("slash")!;
+editor.run(chain([deleteRange({ from: range.from, to: range.to }), command("toggleBulletList")]));
+
+// 手柄：指针下的块，以及它在页面上的位置，供锚定在那里的 `Overlay` 使用。
+const start = editor.posAtPageCoords(event.pagePosition);
+const rect = editor.pageNodeRect(start!);
+editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // 移动时 dragTo(point)，松开时 endDrag()
+```
+
+- `createRichEditor` 自己的 `plugins` 排在扩展和键位之后；键要先处理的插件（建议菜单的回车）写成 `priority` 较高的扩展。
+- `pageNodeRect(pos)` 和 `posAtPageCoords(point)` 用页面点作答，与 `Overlay` 的 `anchor` 和指针事件的坐标相同，所以手柄可以作为跟随块的浮层放在编辑器的边距里。
+- `dragBlock(pos, point)`、`dragTo(point)` 和 `endDrag()` 随指针移动一个块：落点线跟着指针，放下是一步撤销。点一下还要打开菜单的手柄，在指针移动之后才认领指针（`onMoveShouldSetResponder`），点按仍走 `onPress`；`Button` 自己处理按压，不会把拖动交给响应器。
 
 ## 表格
 

@@ -5271,6 +5271,12 @@ impl<M: TextEngine> Core<M> {
                 }
                 NotificationCommand::Close(id)
             }
+            NotificationAction::CloseAll => {
+                if !available {
+                    return;
+                }
+                NotificationCommand::CloseAll
+            }
             NotificationAction::SetBadge(count) => {
                 if !allowed {
                     return;

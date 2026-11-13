@@ -12,6 +12,7 @@
 //! ```sh
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
+#[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod ime;
@@ -35,6 +36,8 @@ mod window_frames;
 mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_press;
+#[cfg(target_os = "macos")]
+mod zoom;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
         println!("Native AppKit checks skipped; run with --ignored in a desktop session.");
@@ -56,6 +59,10 @@ fn main() {
                 window_alert::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some()
+                || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
+            {
+                zoom::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
@@ -69,6 +76,7 @@ fn main() {
                 window_frames::run();
                 ime::run();
                 input_hidden::run();
+                zoom::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

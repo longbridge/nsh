@@ -226,7 +226,7 @@ view.load(Bundle::source(code).into());
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
-输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
+输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。可缩放的滚动视图用触控板捏合或 Control + 滚轮以指针为中心缩放，缩放后可以双向滚动。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
 Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或在栈中返回（焦点在输入框或网页中时，Escape 只会离开它；
 网页先收到这些按键，它自己用掉的不会触发返回）；`Dialog` 是覆盖整个窗口的一层，显示应用的弹出层和背景。页面在顶部显示它的 `header`。
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
@@ -264,7 +264,6 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 
 不支持或有所不同：
 
-- **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
 - **`brightness()`** 大于 1 不绘制。**`mixBlendMode`** 和**背景材质**由 Core Animation 绘制：
   `mixBlendMode` 是视图图层的合成滤镜，`macos={{ backdrop: { material, blending, state } }}` 是视图下方的
   `NSVisualEffectView`（任意 AppKit 材质和状态，无论是否设置了 `backdropFilter`），`glassTintColor` 是 macOS 26 上
