@@ -17,6 +17,25 @@ use crate::{
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
 };
 
+/// `"none"`, `"all"`, or the canonical keystrokes a view captures
+/// (`"mod+k"`, `"shift+tab"`): parsed once here with the shortcut rules
+/// and this platform's `mod`, which the engine's environment names
+/// ([`crate::element::try_apple_keys`]); a JS host decoding outside that
+/// environment calls [`crate::js::host::decode_capture_keys`] with its own
+/// convention.
+/// Another string clears the rule with a warning; an invalid keystroke in
+/// the array is reported and left out.
+impl HostValue for crate::KeyCapture {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        let apple = crate::element::try_apple_keys().unwrap_or(false);
+        super::host::decode_capture_keys(input, cx, apple)
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "\"none\" | \"all\" | readonly string[]".into()
+    }
+}
+
 fn number<I: HostInput>(input: &I, key: &str) -> Option<f32> {
     input
         .field(key)

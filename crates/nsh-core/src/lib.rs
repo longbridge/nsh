@@ -34,6 +34,7 @@ pub mod id_table;
 pub mod image;
 pub mod input;
 pub mod js;
+pub mod keyboard;
 pub mod keymap;
 pub mod log_file;
 pub mod main_thread;
@@ -92,6 +93,7 @@ pub use crate::{
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     image::ImageData,
+    keyboard::{KeyCapture, KeyEvent},
     mount::{
         AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
         NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,

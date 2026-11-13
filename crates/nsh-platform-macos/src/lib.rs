@@ -40,6 +40,7 @@ mod global_shortcut;
 mod gpu;
 mod image;
 mod input;
+mod keyboard;
 mod keymap;
 mod login_item;
 mod mount;

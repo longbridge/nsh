@@ -35,6 +35,7 @@ mod gtk_test;
 mod image;
 mod input;
 mod key_focus;
+mod keyboard;
 mod keymap;
 mod links;
 mod login_item;

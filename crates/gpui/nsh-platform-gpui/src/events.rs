@@ -416,26 +416,31 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
             return;
         }
         crate::chrome::key_pressed(&s);
-        let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
+        if crate::window::blocked(&s, root, cx) {
             return;
-        };
+        }
+        // The key as GPUI reported it. A printable key nsh has no virtual
+        // key code for (`?`, `é`) still runs the app's bindings, by its
+        // canonical stroke, and reaches the focused view; a key with a code
+        // keeps the code's meaning. Only the keymap or a listener needs it.
+        let vk = crate::keys::vk_of(&e.keystroke.key);
+        let wants_raw =
+            crate::input::hears_keys(&s) || (vk.is_none() && crate::keymap::mounted(&s));
+        let raw = wants_raw.then(|| crate::keys::RawKey::down(&e.keystroke, e.is_held));
         let event = KeyEvent {
-            vk,
+            vk: vk.unwrap_or(0),
             down: true,
             repeat: e.is_held,
             modifiers: crate::keys::modifiers(&e.keystroke.modifiers),
         };
-        if crate::window::blocked(&s, root, cx) {
-            return;
-        }
         let handled = if crate::native::focused(&s, window) {
-            crate::input::component_key(&s, event)
+            crate::input::component_key(&s, event, raw.as_ref())
         } else {
-            crate::input::key(&s, event)
+            crate::input::window_key(&s, event, raw)
         };
         // Escape nothing took closes a window that says so.
         let handled = handled
-            || (vk == crate::keys::VK_ESCAPE
+            || (vk == Some(crate::keys::VK_ESCAPE)
                 && !e.is_held
                 && crate::window::escape(&s, root, window, cx));
         if handled {
@@ -451,19 +456,27 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
         if phase != DispatchPhase::Bubble {
             return;
         }
-        let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
-            return;
-        };
+        let vk = crate::keys::vk_of(&e.keystroke.key);
+        let wants_raw =
+            crate::input::hears_keys(&s) || (vk.is_none() && crate::keymap::mounted(&s));
+        let raw = wants_raw.then(|| crate::keys::RawKey::up(&e.keystroke));
         let event = KeyEvent {
-            vk,
+            vk: vk.unwrap_or(0),
             down: false,
             repeat: false,
             modifiers: crate::keys::modifiers(&e.keystroke.modifiers),
         };
-        if crate::native::focused(&s, window) {
-            crate::input::component_key(&s, event);
+        // A release a capture rule took is kept from the window's own
+        // handlers, as a captured press is; so is the Alt release the
+        // window swallows once Alt + key was ours.
+        let handled = if crate::native::focused(&s, window) {
+            crate::input::component_key(&s, event, raw.as_ref())
         } else {
-            crate::input::key(&s, event);
+            crate::input::window_key(&s, event, raw)
+        };
+        if handled {
+            cx.stop_propagation();
+            window.prevent_default();
         }
         crate::rt::flush(cx);
     });

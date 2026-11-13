@@ -163,6 +163,12 @@ An input is **uncontrolled** without a value: it keeps its own text, starting at
 > [!NOTE]
 > A controlled input never loses keystrokes. Every native edit carries an edit count, and a `value` coming back from JS is applied only if it answers the latest edit. If JS is slow and the user has typed more in the meantime, the stale value is dropped instead of overwriting the newer text.
 
+### Hardware keys and the input
+
+An `Input` owns the keys that edit it. Its platform applies them natively, together with the input method that composes text, and an ancestor's `onKeyDown` / `onKeyUp` listener or `captureKeys` rule changes nothing: it never intercepts typing, caret movement, selection or the editing commands, and it cannot take a key the system gives the field. Raw hardware keys (`onKeyDown` / `onKeyUp`, `captureKeys`) are for custom-rendered surfaces, not for extending a text field; use `onKeyPress`, `onChange` and `onSubmit` for the field's own text ([keyboard](../elements/keyboard.md#hardware-keys-on-custom-views)).
+
+A form control nested in a capturing view keeps that boundary too: only the keys the control does not own (for example a function key, or Tab when the control does not take it) reach the capture rule, and they are reported with `defaultPrevented` as the policy decided for that transition.
+
 ## Props
 
 In Rust, each prop is a method of `input()` named in snake case (`.placeholder(..)`, `.masked(true)`, `.max_length(6)`, `.return_key_type(ReturnKeyType::Next)`, `.selected_range((0, 4))`), with these names of their own: `.keyboard_type(KeyboardType::Email)` and the other `KeyboardType` variants, `.auto_fill(AutoFill::Email)` for `autoComplete`, `.keyboard_appearance(..)` and `.input_accessory(..)` for the `ios={{ … }}` props. Each event is an `on_` method: `.on_change(|text: &str| ..)`, `.on_submit(|text: &str| ..)`, `.on_focus(..)`, `.on_blur(..)`, `.on_selection_change(|s: &Selection| ..)`, `.on_key_press(|key: &str| ..)`, `.on_content_size_change(|size: &Size<Points>| ..)`.

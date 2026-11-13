@@ -2045,6 +2045,17 @@ pub(crate) fn dialog_point(
     }
 }
 
+/// Whether a dialog shows over the app: it owns the keyboard, so a view
+/// under it hears no key releases either.
+pub(crate) fn dialog_shown(surface: &Surface) -> bool {
+    OVERLAYS.with(|overlays| {
+        overlays.borrow().iter().any(|overlay| {
+            overlay.key == surface.key()
+                && matches!(&overlay.kind, OverlayKind::Dialog(d) if !d.closing.get())
+        })
+    })
+}
+
 /// Keys while a dialog shows over the app (it is modal: every key goes to
 /// it). Enter and Space press the focused button (the default action at
 /// first), Escape cancels, Tab and the arrows move between the buttons.

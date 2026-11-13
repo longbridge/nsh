@@ -33,6 +33,7 @@ mod hot;
 mod hover;
 mod images;
 mod js_touch;
+mod keyboard;
 mod keymap;
 mod lazy_each;
 mod list;

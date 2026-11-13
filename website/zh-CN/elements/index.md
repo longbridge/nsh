@@ -390,6 +390,8 @@ ref 的 `focus()` 像 Tab 一样把键盘焦点移到停靠点上（显示它的
 | `focusable` | `.focusable(..)` | `boolean` | 可按压的视图为 `true` | 视图是否是 Tab 的停靠点。`true` 让任何视图成为停靠点，无论它自己接收按压，还是把按压留给外层视图；`false` 把可按压的视图留给指针（关闭浮层的背景层、用方向键切换的列表行）。 |
 | `onFocus` | `.on_focus(..)` | `() => void` | | Tab（或 `focus()`）让视图获得了键盘焦点。 |
 | `onBlur` | `.on_blur(..)` | `() => void` | | 键盘焦点离开了视图。 |
+| `onKeyDown` / `onKeyUp` | `.on_key_down(..)` / `.on_key_up(..)` | `(e: KeyEvent) => void` | | 硬件按键在聚焦视图或其内部按下 / 在聚焦视图上抬起。`KeyEvent` 为 `{ key, code, modifiers, repeat, defaultPrevented }`；一个事件沿原生窗口内的已启用监听祖先各传播一次（[硬件按键](./keyboard.md#自定义视图的硬件按键)）。 |
+| `captureKeys` | `.capture_keys(..)` | `"none" \| "all" \| readonly string[]` | `"none"` | 该视图或聚焦后代在原生默认行为之前消费的按键：规范的按键序列，如 `["mod+k", "escape"]`。`defaultPrevented` 报告该决定；应用快捷键优先，原生输入框保留用于编辑的按键（[硬件按键](./keyboard.md#自定义视图的硬件按键)）。 |
 
 ```rust tabs
 view()

@@ -2343,6 +2343,118 @@ impl Headless {
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
         self.done()
     }
+
+    /// The step `wheel(<selector>, <dx>, <dy>)`: a mouse wheel at the center
+    /// of the view `selector` names, turning by `dx`/`dy` points (positive:
+    /// content moves up / left, as DOM's `deltaY`/`deltaX`). A pointer
+    /// there reaches the innermost view at that place (a dialog over the
+    /// window first, as the screen model hit-tests a pointer): on Linux
+    /// the nearest enabled view around it that listens hears the wheel
+    /// (`onWheel`), and, when no scroll view is nearer than it nor is it
+    /// one, it takes the wheel — nothing scrolls. A listener that only
+    /// observes (a scroll view, or a view around one) lets the scroll view
+    /// the platform's own rule picks move — along the wheel's axis (a
+    /// vertical wheel over a horizontal carousel scrolls the page around
+    /// it), with room left that way (an inner one passing it on at its
+    /// edge). A view that hosts native content scrolls itself: no scroll
+    /// view around it moves. Where nothing takes it, nothing moves.
+    pub fn wheel(&mut self, selector: &str, delta: Point<Points>) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("wheel({selector}, {}, {})", delta.x.0, delta.y.0));
+        let named = match self.screen.resolve(&parsed)[..] {
+            [id] => id,
+            [] => {
+                return Err(format!(
+                    "{}; {}",
+                    failure::not_found("view", selector),
+                    self.on_screen()
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "`{selector}` matches more than one view: say which (`{selector} >> nth=0`)"
+                ));
+            }
+        };
+        // The pointer's place: the view's center, and the view a pointer
+        // there reaches (not the view the selector names: a child over it,
+        // or a dialog over the window, takes what comes).
+        let Some(page) = self
+            .screen
+            .bounds_in_root(named)
+            .map(|bounds| bounds.center())
+        else {
+            return Err(format!(
+                "`{selector}` has no place on screen to turn the wheel at; {}",
+                self.on_screen()
+            ));
+        };
+        let hit = self.screen.hit_pointer_at(page, named);
+        // The platforms whose views hear the wheel (`onWheel`: macOS,
+        // Windows, Linux and the web) give the nearest enabled listener
+        // around the pointer the event; the phones and tablets have no
+        // wheel.
+        let mut took = false;
+        if matches!(
+            self.environment.os,
+            Os::MacOs | Os::Windows | Os::Linux | Os::Web
+        ) && let Some((listener, takes)) = self.screen.wheel_listener(hit)
+        {
+            let local = self
+                .screen
+                .bounds_in_root(listener)
+                .map_or(Point::default(), |b| page - b.origin);
+            let wheel = nsh_core::WheelEvent::new(
+                local,
+                page,
+                nsh_core::WheelDelta::Points(delta),
+                self.held,
+            );
+            self.send(listener, EventKind::Wheel, EventPayload::Wheel(wheel));
+            took = takes;
+        }
+        // A view that hosts native content (a web view, a native component)
+        // scrolls itself: the headless screen models no such scroll, and no
+        // scroll view around it moves.
+        if took || self.screen.native_host(hit).is_some() {
+            return self.done();
+        }
+        // Where nothing listens and no scroll view a wheel by this delta
+        // moves is around the pointer, nothing moves.
+        let Some(scroll) = self.screen.wheel_scroll(hit, delta) else {
+            return self.done();
+        };
+        let horizontal = self.screen.scroll(scroll).is_some_and(|s| s.horizontal);
+        // A horizontal view moves by a horizontal wheel, or by a vertical
+        // one where nothing around it scrolls vertically, as the core's
+        // choice ([`nsh_core::input::scroll_target`]) has it.
+        let distance = if horizontal {
+            if delta.x.0 != 0.0 {
+                delta.x.0
+            } else {
+                delta.y.0
+            }
+        } else {
+            delta.y.0
+        };
+        let start = self
+            .screen
+            .scroll(scroll)
+            .map_or(Points::ZERO, |s| if horizontal { s.x } else { s.y });
+        let target = (start + Points(distance)).clamp(Points::ZERO, self.screen.scroll_end(scroll));
+        if let Some(state) = self.screen.scroll_mut(scroll) {
+            if horizontal {
+                state.x = target;
+            } else {
+                state.y = target;
+            }
+            let (x, y, applied) = (state.x, state.y, state.applied);
+            self.engine.control().scroll(scroll, point(x, y), applied);
+            self.animator.scrolled(scroll, point(x, y));
+        }
+        self.display_frame();
+        self.done()
+    }
 }
 
 /// Why a step on windows fails off the desktops.
@@ -2401,7 +2513,10 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
 #[cfg(test)]
 mod tests {
     use nsh_core::{
+        KeyCapture, WheelDelta,
         element::{Root, input},
+        keymap::{Keystroke, When},
+        platform::Os,
         prelude::*,
     };
 
@@ -4270,5 +4385,1182 @@ mod tests {
             .unwrap();
             app.wait_for("narrow 390 light").unwrap();
         }
+    }
+
+    /// `root` on Linux, the platform whose views get the keyboard focus
+    /// (a ref's `focus()`, Tab) and the wheel.
+    fn start_linux(root: Root) -> Headless {
+        let mut config = EngineConfig::new(root);
+        config.environment.os = nsh_core::platform::Os::Linux;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        Headless::start(config).unwrap()
+    }
+
+    /// `event`'s key as a test names it (`"a"`, `"Enter"`, `"Space"`); a
+    /// space is `"Space"` here, not the `" "` a payload calls it.
+    fn key_name(event: &KeyEvent) -> String {
+        match event.key.as_ref() {
+            " " => "Space".to_owned(),
+            name => name.to_owned(),
+        }
+    }
+
+    /// Two focusable pads, each focused through its ref; what each heard.
+    #[component]
+    fn FocusPads() -> impl IntoElement {
+        let first = element_ref();
+        let second = element_ref();
+        let first_focus = signal(0_u32);
+        let second_focus = signal(0_u32);
+        let key = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("first {}", first_focus.get())))
+            .child(text(move || format!("second {}", second_focus.get())))
+            .child(text(move || format!("key {}", key.get())))
+            .child(
+                view()
+                    .test_id("first")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .element_ref(&first)
+                    .on_press(move |_: &()| {})
+                    .on_focus(move |_: &()| first_focus.update(|n| *n += 1))
+                    .on_key_down(move |e: &KeyEvent| {
+                        key.set(format!("first {}", e.key.as_ref()));
+                    }),
+            )
+            .child(
+                view()
+                    .test_id("second")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .element_ref(&second)
+                    .on_focus(move |_: &()| second_focus.update(|n| *n += 1))
+                    .on_key_down(move |e: &KeyEvent| {
+                        key.set(format!("second {}", e.key.as_ref()));
+                    }),
+            )
+            .child(
+                view()
+                    .test_id("focus-first")
+                    .on_press(move |_: &()| first.focus())
+                    .child(text("Focus first")),
+            )
+            .child(
+                view()
+                    .test_id("take")
+                    .on_press(move |_: &()| second.focus())
+                    .child(text("Take")),
+            )
+    }
+
+    #[test]
+    fn a_ref_focuses_a_focusable_view_and_its_keys_reach_it() {
+        let mut app = start_linux(Root::of::<FocusPads>());
+        app.first_render().unwrap();
+        // `focus()` on the first pad's ref takes the keyboard focus there,
+        // and the pad hears the keys while it has it.
+        app.press("id:focus-first").unwrap();
+        app.wait_for("first 1").unwrap();
+        app.press_key("j").unwrap();
+        app.wait_for("key first j").unwrap();
+        // `focus()` on the other pad's ref moves it there.
+        app.press("id:take").unwrap();
+        app.wait_for("second 1").unwrap();
+        app.press_key("k").unwrap();
+        app.wait_for("key second k").unwrap();
+        let Pick::One(second) = app.screen().view(&Selector::parse("id:second").unwrap()) else {
+            panic!("one second pad");
+        };
+        assert_eq!(app.screen().key_focus(), Some(second));
+    }
+
+    /// A focusable pad in a view that hears the keys it lets through.
+    #[component]
+    fn KeyBubble() -> impl IntoElement {
+        let down = signal(String::from("none"));
+        let up = signal(String::from("none"));
+        let prevented = signal(false);
+        let ancestor = signal(String::from("none"));
+        view()
+            .flex_1()
+            .on_key_down(move |e: &KeyEvent| {
+                ancestor.set(format!("{} {}", e.key.as_ref(), e.default_prevented));
+            })
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .on_key_down(move |e: &KeyEvent| {
+                        down.set(e.key.as_ref().to_owned());
+                        prevented.set(e.default_prevented);
+                    })
+                    .on_key_up(move |e: &KeyEvent| up.set(e.key.as_ref().to_owned())),
+            )
+            .child(text(move || format!("down {}", down.get())))
+            .child(text(move || format!("prevented {}", prevented.get())))
+            .child(text(move || format!("up {}", up.get())))
+            .child(text(move || format!("ancestor {}", ancestor.get())))
+    }
+
+    #[test]
+    fn key_downs_reach_the_focused_view_then_its_ancestors_and_key_ups_come_back() {
+        let mut app = start_linux(Root::of::<KeyBubble>());
+        app.first_render().unwrap();
+        // Tab stops at the pad: it has the keyboard focus.
+        app.press_key("tab").unwrap();
+        app.press_key("a").unwrap();
+        app.wait_for("down a").unwrap();
+        // It captures nothing: the press is not the platform's, and its
+        // ancestor hears the same key.
+        app.wait_for("prevented false").unwrap();
+        app.wait_for("ancestor a false").unwrap();
+        // The key came up on the focused view.
+        app.wait_for("up a").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("down b").unwrap();
+        app.wait_for("ancestor b false").unwrap();
+        app.wait_for("up b").unwrap();
+    }
+
+    /// Two pads, each telling which view heard a key up.
+    #[component]
+    fn ReleaseFocus() -> impl IntoElement {
+        let up = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("first")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .on_key_up(move |_: &KeyEvent| up.set("first".into())),
+            )
+            .child(
+                view()
+                    .test_id("second")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .on_key_up(move |_: &KeyEvent| up.set("second".into())),
+            )
+            .child(text(move || format!("up {}", up.get())))
+    }
+
+    #[test]
+    fn a_key_up_goes_to_the_view_focused_when_the_source_reports_it() {
+        let mut app = start_linux(Root::of::<ReleaseFocus>());
+        app.first_render().unwrap();
+        // Tab focuses the first pad; the next Tab is heard by it, moves the
+        // focus to the second pad, and its release belongs to that one.
+        app.press_key("tab").unwrap();
+        app.press_key("tab").unwrap();
+        app.wait_for("up second").unwrap();
+    }
+
+    /// A pad reporting the raw key event's logical key and its code.
+    #[component]
+    fn RawKey() -> impl IntoElement {
+        let heard = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .on_key_down(move |e: &KeyEvent| {
+                        heard.set(format!("{} {:?}", e.key, e.code.as_str()));
+                    }),
+            )
+            .child(text(move || format!("heard {}", heard.get())))
+    }
+
+    #[test]
+    fn a_raw_key_reports_the_simulated_source_without_inventing_a_code() {
+        let mut app = start_linux(Root::of::<RawKey>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // Shift's case is the reported logical key, and the simulation has
+        // no hardware identity to report.
+        app.press_key("shift+k").unwrap();
+        app.wait_for("heard K \"\"").unwrap();
+        app.press_key("enter").unwrap();
+        app.wait_for("heard Enter \"\"").unwrap();
+    }
+
+    /// A view that hears raw keys around a text input.
+    #[component]
+    fn InputOwnsKeys() -> impl IntoElement {
+        let heard = signal(String::from("none"));
+        let value = signal(String::new());
+        view()
+            .flex_1()
+            .on_key_down(move |e: &KeyEvent| heard.set(e.key.as_ref().to_owned()))
+            .child(
+                input()
+                    .test_id("name")
+                    .value(move || value.get())
+                    .on_change(move |text: &str| value.set(text.to_owned())),
+            )
+            .child(text(move || format!("heard {}", heard.get())))
+            .child(text(move || format!("text {}", value.get())))
+    }
+
+    #[test]
+    fn a_native_input_owns_its_keys_and_a_listener_around_it_hears_none() {
+        let mut app = start_linux(Root::of::<InputOwnsKeys>());
+        app.first_render().unwrap();
+        app.type_text("id:name", "x").unwrap();
+        // The press edits the focused input; the ancestor's raw listener
+        // never intercepts it.
+        app.press_key("a").unwrap();
+        app.wait_for("text xa").unwrap();
+        app.wait_for("heard none").unwrap();
+    }
+
+    /// A pad that captures "a", in a view that hears the keys it lets
+    /// through.
+    #[component]
+    fn KeyCaptured() -> impl IntoElement {
+        let down = signal(String::from("none"));
+        let up = signal(String::from("none"));
+        let ancestor = signal(String::from("none"));
+        view()
+            .flex_1()
+            .on_key_down(move |e: &KeyEvent| {
+                ancestor.set(format!("{} {}", e.key.as_ref(), e.default_prevented));
+            })
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .capture_keys(KeyCapture::keys([
+                        Keystroke::parse("a", Os::Linux).unwrap(),
+                        Keystroke::parse("shift+a", Os::Linux).unwrap(),
+                    ]))
+                    .on_key_down(move |e: &KeyEvent| {
+                        down.set(format!("{} {}", e.key.as_ref(), e.default_prevented));
+                    })
+                    .on_key_up(move |e: &KeyEvent| {
+                        up.set(format!("{} {}", key_name(e), e.default_prevented));
+                    }),
+            )
+            .child(text(move || format!("down {}", down.get())))
+            .child(text(move || format!("up {}", up.get())))
+            .child(text(move || format!("ancestor {}", ancestor.get())))
+    }
+
+    #[test]
+    fn a_captured_key_is_marked_and_its_ancestors_hear_it_too() {
+        let mut app = start_linux(Root::of::<KeyCaptured>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // Captured: the view and its ancestor hear it, marked captured, so
+        // no default follows. The release says the same.
+        app.press_key("a").unwrap();
+        app.wait_for("down a true").unwrap();
+        app.wait_for("up a true").unwrap();
+        app.wait_for("ancestor a true").unwrap();
+        // The raw key reports Shift's case ("A"), while the mounted capture
+        // rule is the canonical shortcut "shift+a": matching is over the
+        // keystroke, not the raw key text.
+        app.press_key("shift+a").unwrap();
+        app.wait_for("down A true").unwrap();
+        app.wait_for("up A true").unwrap();
+        app.wait_for("ancestor A true").unwrap();
+        // Not captured: the notification says so, the release too, and the
+        // platform runs its defaults.
+        app.press_key("b").unwrap();
+        app.wait_for("down b false").unwrap();
+        app.wait_for("up b false").unwrap();
+        app.wait_for("ancestor b false").unwrap();
+    }
+
+    /// A portaled pad in a view that hears and captures "a", and a second
+    /// portal under an unrelated view.
+    #[component]
+    fn PortalKeys() -> impl IntoElement {
+        let heard = signal(String::from("none"));
+        let sibling = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("host")
+                    .on_key_down(move |e: &KeyEvent| {
+                        heard.set(format!("{} {}", e.key.as_ref(), e.default_prevented));
+                    })
+                    .capture_keys(KeyCapture::keys(
+                        [Keystroke::parse("a", Os::Linux).unwrap()],
+                    ))
+                    .child(text("host"))
+                    .child(
+                        overlay().child(
+                            view()
+                                .test_id("pad")
+                                .w(px(120.0))
+                                .h(px(40.0))
+                                .focusable(true)
+                                .on_press(move |_: &()| {}),
+                        ),
+                    ),
+            )
+            .child(
+                view().test_id("other").child(text("other")).child(
+                    overlay().child(
+                        view()
+                            .test_id("sibling")
+                            .w(px(120.0))
+                            .h(px(40.0))
+                            .focusable(true)
+                            .on_press(move |_: &()| {})
+                            .on_key_down(move |e: &KeyEvent| {
+                                sibling.set(format!("{} {}", e.key.as_ref(), e.default_prevented));
+                            }),
+                    ),
+                ),
+            )
+            .child(text(move || format!("heard {}", heard.get())))
+            .child(text(move || format!("sibling {}", sibling.get())))
+    }
+
+    #[test]
+    fn a_portaled_view_uses_its_logical_parent_for_keys_and_capture() {
+        let mut app = start_linux(Root::of::<PortalKeys>());
+        app.first_render().unwrap();
+        // Tab enters the first portal: its pad has no listener, but the
+        // view around the Overlay hears the key and its capture applies.
+        app.press_key("tab").unwrap();
+        app.press_key("a").unwrap();
+        app.wait_for("heard a true").unwrap();
+        // Tab moves to the unrelated portal; its key is not captured by the
+        // first portal's rule.
+        app.press_key("tab").unwrap();
+        app.wait_for("heard Tab false").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("sibling b false").unwrap();
+        app.wait_for("heard Tab false").unwrap();
+    }
+
+    /// A focusable pad with no key listener of its own, under a view that
+    /// hears keys and captures "a".
+    #[component]
+    fn KeyAncestorOnly() -> impl IntoElement {
+        let heard = signal(String::from("none"));
+        view()
+            .flex_1()
+            .capture_keys(KeyCapture::keys(
+                [Keystroke::parse("a", Os::Linux).unwrap()],
+            ))
+            .on_key_down(move |e: &KeyEvent| {
+                heard.set(format!("{} {}", key_name(e), e.default_prevented));
+            })
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {}),
+            )
+            .child(text(move || format!("heard {}", heard.get())))
+    }
+
+    #[test]
+    fn a_listener_above_a_silent_view_hears_the_key_captured_or_not() {
+        let mut app = start_linux(Root::of::<KeyAncestorOnly>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // The pad itself listens to nothing: the view around it hears the
+        // press anyway, and its capture rule marks it.
+        app.press_key("a").unwrap();
+        app.wait_for("heard a true").unwrap();
+        // An uncaptured key reaches the listener too.
+        app.press_key("b").unwrap();
+        app.wait_for("heard b false").unwrap();
+    }
+
+    /// A pad that captures every key, with a shortcut on "a" that takes the
+    /// key and one on "b" that passes it through.
+    #[component]
+    fn KeyPrecedence() -> impl IntoElement {
+        let heard = signal(String::from("none"));
+        let fired = signal(String::from("none"));
+        on_key_with(
+            "a",
+            KeyOptions {
+                when: When::Auto,
+                repeat: false,
+                pass_through: false,
+                ..Default::default()
+            },
+            move |_| fired.set("a".into()),
+        );
+        on_key_with(
+            "b",
+            KeyOptions {
+                when: When::Always,
+                repeat: false,
+                pass_through: true,
+                ..Default::default()
+            },
+            move |_| fired.set("b".into()),
+        );
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .capture_keys(KeyCapture::All)
+                    .on_key_down(move |e: &KeyEvent| {
+                        heard.set(format!("{} {}", e.key.as_ref(), e.default_prevented));
+                    }),
+            )
+            .child(text(move || format!("heard {}", heard.get())))
+            .child(text(move || format!("fired {}", fired.get())))
+    }
+
+    #[test]
+    fn an_app_shortcut_beats_a_capture_and_a_passing_one_lets_it_through() {
+        let mut app = start_linux(Root::of::<KeyPrecedence>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // The shortcut on "a" takes the key first: the view never hears it,
+        // though it captures every key.
+        app.press_key("a").unwrap();
+        app.wait_for("fired a").unwrap();
+        app.wait_for("heard none").unwrap();
+        // The one on "b" passes the key through: the view hears it, marked
+        // captured by its own rule.
+        app.press_key("b").unwrap();
+        app.wait_for("fired b").unwrap();
+        app.wait_for("heard b true").unwrap();
+    }
+
+    /// A wheel listener in a scroll view of tall rows (and rows it does
+    /// not cover, without one).
+    #[component]
+    fn Wheeled() -> impl IntoElement {
+        let wheel = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("wheel {}", wheel.get())))
+            .child(
+                scroll()
+                    .test_id("rows")
+                    .flex_1()
+                    .child(
+                        view()
+                            .test_id("pad")
+                            .h(px(40.0))
+                            .on_wheel(move |e: &WheelEvent| {
+                                let WheelDelta::Points(delta) = &e.delta else {
+                                    return;
+                                };
+                                wheel.set(format!("{:.0} {:.0}", delta.x.0, delta.y.0));
+                            }),
+                    )
+                    .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn the_wheel_reaches_a_listener_and_otherwise_scrolls_the_scroll_view() {
+        let mut app = start_linux(Root::of::<Wheeled>());
+        app.first_render().unwrap();
+        let Pick::One(rows) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:rows").unwrap())
+        else {
+            panic!("one scroll view");
+        };
+        // The innermost view that listens takes the wheel: the scroll
+        // view around it does not scroll.
+        app.wheel("id:pad", point(px(0.0), px(3.0))).unwrap();
+        app.wait_for("wheel 0 3").unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, Points::ZERO);
+        // No listener around Row 3: the nearest scroll view scrolls.
+        app.wheel("Row 3", point(px(0.0), px(120.0))).unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, px(120.0));
+    }
+
+    /// A root that listens to the wheel around a scroll view of tall rows.
+    #[component]
+    fn WheelRootObserver() -> impl IntoElement {
+        let wheel = signal(String::from("none"));
+        view()
+            .flex_1()
+            .on_wheel(move |e: &WheelEvent| {
+                let WheelDelta::Points(delta) = &e.delta else {
+                    return;
+                };
+                wheel.set(format!("{:.0} {:.0}", delta.x.0, delta.y.0));
+            })
+            .child(text(move || format!("wheel {}", wheel.get())))
+            .child(
+                scroll()
+                    .test_id("rows")
+                    .flex_1()
+                    .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn a_listener_around_a_scroll_view_observes_the_wheel_and_the_scroll_happens() {
+        let mut app = start_linux(Root::of::<WheelRootObserver>());
+        app.first_render().unwrap();
+        let Pick::One(rows) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:rows").unwrap())
+        else {
+            panic!("one scroll view");
+        };
+        // The listener is around the scroll view, so it only observes: the
+        // wheel reaches it and the scroll view still scrolls by the same
+        // 120 points.
+        app.wheel("Row 3", point(px(0.0), px(120.0))).unwrap();
+        app.wait_for("wheel 0 120").unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, px(120.0));
+    }
+
+    /// A scroll view of tall rows with a disabled wheel listener over the
+    /// first row.
+    #[component]
+    fn WheelDisabled() -> impl IntoElement {
+        let wheel = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("wheel {}", wheel.get())))
+            .child(
+                scroll()
+                    .test_id("rows")
+                    .flex_1()
+                    .child(
+                        view()
+                            .test_id("off")
+                            .h(px(40.0))
+                            .disabled(true)
+                            .on_wheel(move |_: &WheelEvent| wheel.set("off".into())),
+                    )
+                    .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn a_disabled_wheel_listener_lets_the_scroll_view_scroll() {
+        let mut app = start_linux(Root::of::<WheelDisabled>());
+        app.first_render().unwrap();
+        let Pick::One(rows) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:rows").unwrap())
+        else {
+            panic!("one scroll view");
+        };
+        // A disabled view takes nothing: the wheel scrolls the view around
+        // it instead.
+        app.wheel("id:off", point(px(0.0), px(60.0))).unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, px(60.0));
+        app.wait_for("wheel none").unwrap();
+    }
+
+    /// A pad whose capture rule is there while a signal holds, built by a
+    /// region that rebuilds it without the rule when the signal stops:
+    /// what it heard.
+    #[component]
+    fn KeyCaptureLive() -> impl IntoElement {
+        let armed = signal(true);
+        let heard = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(dynamic(move || {
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    // The rule is left out of the view's props, not turned
+                    // to `None`: the view stays mounted as the region
+                    // rebuilds it.
+                    .when(armed.get(), |pad| pad.capture_keys(KeyCapture::All))
+                    .on_key_down(move |e: &KeyEvent| {
+                        heard.set(format!("{} {}", key_name(e), e.default_prevented));
+                    })
+            }))
+            .child(
+                view()
+                    .test_id("toggle")
+                    .on_press(move |_: &()| armed.update(|a| *a = !*a))
+                    .child(text("Capture")),
+            )
+            .child(text(move || format!("armed {}", armed.get())))
+            .child(text(move || format!("heard {}", heard.get())))
+    }
+
+    #[test]
+    fn capture_stops_when_the_view_is_built_without_it() {
+        let mut app = start_linux(Root::of::<KeyCaptureLive>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // The rule is in the view's props: the press is the platform's.
+        // `.All` keeps Tab from moving the focus too.
+        app.press_key("tab").unwrap();
+        app.wait_for("heard Tab true").unwrap();
+        let Pick::One(pad) = app.screen().view(&Selector::parse("id:pad").unwrap()) else {
+            panic!("one pad");
+        };
+        assert_eq!(app.screen().key_focus(), Some(pad));
+        app.press_key("a").unwrap();
+        app.wait_for("heard a true").unwrap();
+        // The region rebuilds the same view without the rule (the press on
+        // the toggle takes the focus off the pad): the next key is the
+        // platform's defaults again.
+        app.press("id:toggle").unwrap();
+        app.wait_for("armed false").unwrap();
+        app.press_key("tab").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("heard b false").unwrap();
+    }
+
+    /// A pad under a view that captures every key, a second pad after it,
+    /// and a press that unmounts the capturing view with its pad.
+    #[component]
+    fn KeyCaptureUnmounted() -> impl IntoElement {
+        let mounted = signal(true);
+        let heard = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(when(
+                move || mounted.get(),
+                move || {
+                    view().capture_keys(KeyCapture::All).child(
+                        view()
+                            .test_id("first")
+                            .h(px(40.0))
+                            .focusable(true)
+                            .on_press(move |_: &()| {})
+                            .on_key_down(move |e: &KeyEvent| {
+                                heard.set(format!("first {} {}", key_name(e), e.default_prevented));
+                            }),
+                    )
+                },
+            ))
+            .child(
+                view()
+                    .test_id("second")
+                    .h(px(20.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| {})
+                    .on_key_down(move |e: &KeyEvent| {
+                        heard.set(format!("second {} {}", key_name(e), e.default_prevented));
+                    }),
+            )
+            .child(
+                view()
+                    .test_id("drop")
+                    .on_press(move |_: &()| mounted.set(false))
+                    .child(text("Drop")),
+            )
+            .child(text(move || format!("mounted {}", mounted.get())))
+            .child(text(move || format!("heard {}", heard.get())))
+    }
+
+    #[test]
+    fn a_capture_rule_goes_away_with_the_view_that_holds_it() {
+        let mut app = start_linux(Root::of::<KeyCaptureUnmounted>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        app.press_key("a").unwrap();
+        app.wait_for("heard first a true").unwrap();
+        // The capturing view and its pad unmount: the next pad stays, and
+        // no rule is over it.
+        app.press("id:drop").unwrap();
+        app.wait_for("mounted false").unwrap();
+        app.press_key("tab").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("heard second b false").unwrap();
+    }
+
+    /// A pad that listens to keys without capturing them, a next stop, and
+    /// a view around it that hears context menus.
+    #[component]
+    fn KeyDefaults() -> impl IntoElement {
+        let presses = signal(0_u32);
+        let heard = signal(String::from("none"));
+        let next = signal(false);
+        let menu = signal(false);
+        view()
+            .flex_1()
+            .on_context_menu(move |_: &ContextMenuEvent| menu.set(true))
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_press(move |_: &()| presses.update(|p| *p += 1))
+                    .on_key_down(move |e: &KeyEvent| heard.set(key_name(e))),
+            )
+            .child(
+                view()
+                    .test_id("next")
+                    .h(px(20.0))
+                    .focusable(true)
+                    .on_focus(move |_: &()| next.set(true)),
+            )
+            .child(text(move || format!("presses {}", presses.get())))
+            .child(text(move || format!("heard {}", heard.get())))
+            .child(text(move || format!("next {}", next.get())))
+            .child(text(move || format!("menu {}", menu.get())))
+    }
+
+    #[test]
+    fn a_listening_view_keeps_tabs_enters_spaces_and_context_menu_keys() {
+        let mut app = start_linux(Root::of::<KeyDefaults>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // Enter and Space press the pad, as the platform does: merely
+        // hearing a key takes nothing from what it does with it.
+        app.press_key("enter").unwrap();
+        app.wait_for("presses 1").unwrap();
+        app.wait_for("heard Enter").unwrap();
+        app.press_key("space").unwrap();
+        app.wait_for("presses 2").unwrap();
+        app.wait_for("heard Space").unwrap();
+        // Shift+F10 asks the view around it for its context menu.
+        app.press_key("shift+f10").unwrap();
+        app.wait_for("menu true").unwrap();
+        // Tab still moves on to the next stop.
+        app.press_key("tab").unwrap();
+        app.wait_for("next true").unwrap();
+    }
+
+    /// A pad that disables itself on Delete while it has the keyboard
+    /// focus, and a button that enables it again.
+    #[component]
+    fn KeyDisabled() -> impl IntoElement {
+        let disabled = signal(false);
+        let downs = signal(0_u32);
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .disabled(move || disabled.get())
+                    .on_press(move |_: &()| {})
+                    .on_key_down(move |e: &KeyEvent| {
+                        downs.update(|n| *n += 1);
+                        if e.key == "Delete" {
+                            disabled.set(true);
+                        }
+                    }),
+            )
+            .child(
+                view()
+                    .test_id("enable")
+                    .on_press(move |_: &()| disabled.set(false))
+                    .child(text("Enable")),
+            )
+            .child(text(move || format!("downs {}", downs.get())))
+    }
+
+    #[test]
+    fn a_view_that_loses_the_focus_to_disabling_takes_no_input_and_comes_back() {
+        let mut app = start_linux(Root::of::<KeyDisabled>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // Its keys reach it while it can hold the focus.
+        app.press_key("a").unwrap();
+        app.wait_for("downs 1").unwrap();
+        // Delete disables it while it has the focus: from then on it hears
+        // no key down.
+        app.press_key("delete").unwrap();
+        app.wait_for("downs 2").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("downs 2").unwrap();
+        // Enabled again, Tab takes the focus back and its keys reach it.
+        app.press("id:enable").unwrap();
+        app.press_key("tab").unwrap();
+        app.press_key("c").unwrap();
+        app.wait_for("downs 3").unwrap();
+    }
+
+    /// The main window captures every key; a window of the app's own holds
+    /// a pad, whose own view in that window captures too when asked.
+    #[component]
+    fn KeyWindows() -> impl IntoElement {
+        let inner_capture = signal(false);
+        let main_heard = signal(String::from("none"));
+        let pad_heard = signal(String::from("none"));
+        let pad = element_ref();
+        view()
+            .flex_1()
+            .capture_keys(KeyCapture::All)
+            .on_key_down(move |e: &KeyEvent| {
+                main_heard.set(key_name(e));
+            })
+            .child(
+                nsh_core::element::desktop::window()
+                    .id("own")
+                    .default_size(size(px(300.0), px(200.0)))
+                    .content(move || {
+                        dynamic(move || {
+                            view()
+                                .when(inner_capture.get(), |view| {
+                                    view.capture_keys(KeyCapture::All)
+                                })
+                                .child(
+                                    view()
+                                        .test_id("pad")
+                                        .h(px(40.0))
+                                        .focusable(true)
+                                        .element_ref(&pad)
+                                        .on_press(move || pad.focus())
+                                        .on_key_down(move |e: &KeyEvent| {
+                                            pad_heard.set(format!(
+                                                "{} {}",
+                                                key_name(e),
+                                                e.default_prevented
+                                            ));
+                                        }),
+                                )
+                        })
+                    }),
+            )
+            .child(
+                view()
+                    .test_id("toggle")
+                    .on_press(move |_: &()| inner_capture.update(|c| *c = !*c))
+                    .child(text("Capture")),
+            )
+            .child(text(move || format!("main {}", main_heard.get())))
+            .child(text(move || format!("pad {}", pad_heard.get())))
+    }
+
+    #[test]
+    fn a_capture_rule_stops_at_the_root_of_its_window() {
+        let mut app = start_linux(Root::of::<KeyWindows>());
+        app.first_render().unwrap();
+        app.press("id:pad").unwrap();
+        // The main window captures every key, but the pad is in a window
+        // of its own: that window's views are not under the main window's
+        // rule, so the key is not captured.
+        app.press_key("a").unwrap();
+        app.wait_for("pad a false").unwrap();
+        app.wait_for("main none").unwrap();
+        // A rule inside the window still captures it.
+        app.press("id:toggle").unwrap();
+        app.press("id:pad").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("pad b true").unwrap();
+        app.wait_for("main none").unwrap();
+    }
+
+    /// A container that listens to the wheel with a child that fills it and
+    /// listens too.
+    #[component]
+    fn WheelNested() -> impl IntoElement {
+        let outer = signal(String::from("none"));
+        let inner = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("outer {}", outer.get())))
+            .child(text(move || format!("inner {}", inner.get())))
+            .child(
+                view()
+                    .test_id("box")
+                    .flex_1()
+                    .on_wheel(move |_: &WheelEvent| outer.set("outer".into()))
+                    .child(
+                        view()
+                            .test_id("pad")
+                            .flex_1()
+                            .on_wheel(move |_: &WheelEvent| inner.set("inner".into())),
+                    ),
+            )
+    }
+
+    #[test]
+    fn the_wheel_goes_to_the_view_a_pointer_over_the_selector_reaches() {
+        let mut app = start_linux(Root::of::<WheelNested>());
+        app.first_render().unwrap();
+        // The selector names the container, but a pointer at its center is
+        // over the child: the child's listener takes the wheel.
+        app.wheel("id:box", point(px(0.0), px(2.0))).unwrap();
+        app.wait_for("inner inner").unwrap();
+        app.wait_for("outer none").unwrap();
+        // No listener or scroll view at that place: nothing moves, and the
+        // step is not an error.
+        app.wheel("inner inner", point(px(0.0), px(2.0))).unwrap();
+    }
+
+    /// A scroll view the user cannot scroll, inside one they can.
+    #[component]
+    fn WheelLocked() -> impl IntoElement {
+        view().flex_1().child(
+            scroll()
+                .test_id("outer")
+                .flex_1()
+                .child(
+                    scroll()
+                        .test_id("locked")
+                        .h(px(100.0))
+                        .scrollable(false)
+                        .child(view().test_id("inside").h(px(40.0))),
+                )
+                .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+        )
+    }
+
+    #[test]
+    fn a_locked_scroll_view_leaves_the_wheel_to_one_around_it() {
+        let mut app = start_linux(Root::of::<WheelLocked>());
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (outer, locked) = (id(&app, "id:outer"), id(&app, "id:locked"));
+        // The scroll view under the pointer cannot scroll: the one around
+        // it moves, and the locked one stays where it is.
+        app.wheel("id:inside", point(px(0.0), px(70.0))).unwrap();
+        assert_eq!(app.screen().scroll(locked).unwrap().y, Points::ZERO);
+        assert_eq!(app.screen().scroll(outer).unwrap().y, px(70.0));
+    }
+
+    /// A pad whose press reads whether its key is still down, and one whose
+    /// release it reads.
+    #[component]
+    fn KeyHeld() -> impl IntoElement {
+        let held = signal(false);
+        let presses = signal(0_u32);
+        let released = signal(0_u32);
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(40.0))
+                    .focusable(true)
+                    .on_key_down(move |_: &KeyEvent| held.set(true))
+                    .on_key_up(move |_: &KeyEvent| {
+                        held.set(false);
+                        released.update(|n| *n += 1);
+                    })
+                    .on_press(move |_: &()| {
+                        if held.get() {
+                            presses.update(|n| *n += 1);
+                        }
+                    }),
+            )
+            .child(text(move || format!("pressed down {}", presses.get())))
+            .child(text(move || format!("released {}", released.get())))
+    }
+
+    #[test]
+    fn the_release_follows_the_press_it_belongs_to() {
+        let mut app = start_linux(Root::of::<KeyHeld>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        // Enter and Space press the pad while their key is down; the
+        // release comes after what the key did, never before it.
+        app.press_key("enter").unwrap();
+        app.wait_for("pressed down 1").unwrap();
+        app.wait_for("released 1").unwrap();
+        app.press_key("space").unwrap();
+        app.wait_for("pressed down 2").unwrap();
+        app.wait_for("released 2").unwrap();
+    }
+
+    /// A disabled view in the main window around a window of the app's own,
+    /// whose pad disables itself on Delete.
+    #[component]
+    fn KeyWindowFocus() -> impl IntoElement {
+        let pad_disabled = signal(false);
+        let downs = signal(0_u32);
+        let pad = element_ref();
+        view()
+            .flex_1()
+            .child(
+                view().disabled(true).child(
+                    nsh_core::element::desktop::window()
+                        .id("own")
+                        .default_size(size(px(300.0), px(200.0)))
+                        .content(move || {
+                            view().child(
+                                view()
+                                    .test_id("pad")
+                                    .element_ref(&pad)
+                                    .h(px(40.0))
+                                    .focusable(true)
+                                    .disabled(move || pad_disabled.get())
+                                    .on_press(move |_: &()| pad.focus())
+                                    .on_key_down(move |e: &KeyEvent| {
+                                        downs.update(|n| *n += 1);
+                                        if e.key == "Delete" {
+                                            pad_disabled.set(true);
+                                        }
+                                    }),
+                            )
+                        }),
+                ),
+            )
+            .child(
+                view()
+                    .test_id("enable")
+                    .on_press(move |_: &()| pad_disabled.set(false))
+                    .child(text("Enable")),
+            )
+            .child(text(move || format!("downs {}", downs.get())))
+    }
+
+    #[test]
+    fn a_disabled_view_in_the_main_window_is_not_over_another_windows_pad() {
+        let mut app = start_linux(Root::of::<KeyWindowFocus>());
+        app.first_render().unwrap();
+        // Activate the pad's own window; Tab stays within the active window.
+        // The disabled ancestor in the main window must not suppress it.
+        app.press("id:pad").unwrap();
+        app.press_key("a").unwrap();
+        app.wait_for("downs 1").unwrap();
+        // The pad disables itself on Delete; it takes no subsequent key
+        // down.
+        app.press_key("delete").unwrap();
+        app.wait_for("downs 2").unwrap();
+        app.press_key("b").unwrap();
+        app.wait_for("downs 2").unwrap();
+        // Enable it from the main window, then activate its own window again.
+        app.press("id:enable").unwrap();
+        app.press("id:pad").unwrap();
+        app.press_key("c").unwrap();
+        app.wait_for("downs 3").unwrap();
+    }
+
+    /// A web view in a view that listens to the wheel itself.
+    #[component]
+    fn WheelWebView() -> impl IntoElement {
+        let wrapper = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("wrapper {}", wrapper.get())))
+            .child(
+                view()
+                    .test_id("wrap")
+                    .h(px(200.0))
+                    .on_wheel(move |_: &WheelEvent| wrapper.set("wheel".into()))
+                    .child(
+                        web_view("https://example.com")
+                            .test_id("page")
+                            .w(px(100.0))
+                            .h(px(60.0)),
+                    )
+                    .child(view().test_id("plain").h(px(30.0))),
+            )
+    }
+
+    #[test]
+    fn a_native_view_does_not_hide_a_listener_around_it_from_the_wheel() {
+        let mut app = start_linux(Root::of::<WheelWebView>());
+        app.first_render().unwrap();
+        // A web view over the pointer scrolls itself, but the nearest
+        // listener around it still hears the wheel: it observes, and no
+        // scroll view around it moves.
+        app.wheel("id:page", point(px(0.0), px(40.0))).unwrap();
+        app.wait_for("wrapper wheel").unwrap();
+        // The view around it hears the wheel over its ordinary child too.
+        app.wheel("id:wrap", point(px(0.0), px(40.0))).unwrap();
+        app.wait_for("wrapper wheel").unwrap();
+    }
+
+    /// A horizontal scroll view in a vertical one, and a short vertical one
+    /// in that too.
+    #[component]
+    fn WheelAxes() -> impl IntoElement {
+        view().flex_1().child(
+            scroll()
+                .test_id("page")
+                .flex_1()
+                .child(
+                    scroll()
+                        .test_id("strip")
+                        .horizontal()
+                        .h(px(60.0))
+                        .child(view().test_id("slide").w(px(400.0)).h(px(60.0))),
+                )
+                .child(
+                    scroll()
+                        .test_id("inner")
+                        .h(px(100.0))
+                        .child(view().test_id("short").h(px(120.0))),
+                )
+                .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+        )
+    }
+
+    #[test]
+    fn the_wheel_scrolls_along_its_axis_and_passes_on_at_an_edge() {
+        let mut app = start_linux(Root::of::<WheelAxes>());
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (page, strip, inner) = (
+            id(&app, "id:page"),
+            id(&app, "id:strip"),
+            id(&app, "id:inner"),
+        );
+        // A vertical wheel over the horizontal strip scrolls the page
+        // around it, not the strip.
+        app.wheel("id:slide", point(px(0.0), px(30.0))).unwrap();
+        assert_eq!(app.screen().scroll(strip).unwrap().x, Points::ZERO);
+        assert_eq!(app.screen().scroll(page).unwrap().y, px(30.0));
+        // The inner vertical view moves first, up to its end; then the page
+        // around it takes the wheel.
+        app.wheel("id:short", point(px(0.0), px(30.0))).unwrap();
+        assert_eq!(app.screen().scroll(inner).unwrap().y, px(20.0));
+        app.wheel("id:short", point(px(0.0), px(30.0))).unwrap();
+        assert_eq!(app.screen().scroll(inner).unwrap().y, px(20.0));
+        assert_eq!(app.screen().scroll(page).unwrap().y, px(60.0));
+    }
+
+    #[component]
+    fn KeyBack() -> impl IntoElement {
+        let held = signal(false);
+        let canceled_while_held = signal(false);
+        nsh_base::dialog()
+            .close_on_escape(false)
+            .on_cancel(move || canceled_while_held.set(held.get()))
+            .child(
+                view()
+                    .focusable(true)
+                    .h(px(40.0))
+                    .on_key_down(move |_: &KeyEvent| held.set(true))
+                    .on_key_up(move |_: &KeyEvent| held.set(false)),
+            )
+            .child(text(move || {
+                format!("cancel while held {}", canceled_while_held.get())
+            }))
+            .child(text(move || format!("held {}", held.get())))
+    }
+
+    #[test]
+    fn a_back_attempt_precedes_the_keys_release() {
+        let mut app = start_linux(Root::of::<KeyBack>());
+        app.first_render().unwrap();
+        app.press_key("tab").unwrap();
+        app.press_key("escape").unwrap();
+        app.wait_for("cancel while held true").unwrap();
+        app.wait_for("held false").unwrap();
     }
 }

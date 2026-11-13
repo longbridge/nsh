@@ -707,12 +707,30 @@ browsers' touches into what phones report:
   horizontal ones always, have one. A mouse press within 12 px of the edge on the thumb, faded or not, drags it
   (`grabBar`: `onScrollDragStart` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
   nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
-- **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh`'s `keymap`: the mounted `MountItem::Keymap` stays in
+- **Keys** (`keyDown` / `keyUp`), in this order: the app's shortcuts (`nsh`'s `keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding.
   Its `f64` result preserves the full `u32` ID range, including Rust shortcuts and overlay Escape, apart from
-  the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
-  modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's platform,
-  `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
+  the `-1` (unmatched) and `-2` (held repeat) sentinels. Those matches use the canonical shortcut key: the character
+  typed without modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's
+  platform, `appleKeyboard` in the environment JSON); then the focused view's raw key transition and its mounted
+  `captureKeys` policy (`nsh_key_event`, Rust's `KeyEvent` and `KeyCapture`): the event carries the browser's own
+  `KeyboardEvent.key` as its logical key (its actual case and layout, never forced onto a US layout), the DOM's own
+  `KeyboardEvent.code` (`"KeyA"`, `"ArrowLeft"`, `"NumpadEnter"`; empty when the page names none, and never
+  inferred from `key`) and the modifiers, repeat and `defaultPrevented` flags. `defaultPrevented` is the mounted
+  policy's decision for this transition, computed anew for every press and release; it is DOM-shaped observable
+  state, not a synchronous veto (the UI thread never waits for JS or a Rust callback). Capture matches the
+  page's existing canonical shortcut key — the same `keyCode(e)` `nsh_key` uses: the character the layout reports
+  without modifiers, else the US character of its `code` — never the raw logical string or a character guessed
+  from the DOM code, so named End and an unmodified AZERTY `z` match what the page reported. The core first
+  answers whether the focused view's logical ancestry (an overlay's content included, whatever its DOM ancestry)
+  hears raw keys or captures any (`nsh_key_interest`); only then does the page build the event. The core reads the
+  mounted rules of the focused view and its enabled ancestors up to its window root, before any browser default,
+  and routes ONE event through its common bubbling to that view and its ancestors — for both the press and its
+  release, with `defaultPrevented` set anew for each. A transition the policy takes produces no browser default
+  (Tab moves no focus, Space scrolls nothing, Escape goes nowhere) and a taken release cancels what an untaken
+  press armed (no `onPress`; pressed states clear); an untaken one only notifies. A view with no raw
+  listener and no capture in its ancestry takes the fast path, and native fields, contenteditable elements, hosted
+  pages, videos and a key an input method is composing keep their own keys. Then: an open dialog (Escape presses its
   cancel button); a focused field (Escape leaves it); a custom context menu (Shift+F10 or the Menu key);
   selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
@@ -721,6 +739,10 @@ browsers' touches into what phones report:
   Context-menu keys are handled explicitly because Chromium on macOS does not emit `contextmenu` for them.
   A handled key prevents the browser default to avoid duplicate openings; native fields and selectable text
   retain their own menus, and keyboard requests carry no pointer and use the trigger's bottom-start corner.
+  `examples/keyboard-capture` is a scenario app for this (`nsh run --target web examples/keyboard-capture`):
+  Tab to its button, hold Space, press Shift and release Space — the release is taken, so no press runs and the
+  count stays; a plain Space counts once, and the log shows each transition's raw key, DOM code, modifiers and
+  `defaultPrevented`.
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a

@@ -216,6 +216,7 @@ belong to the app, which owns retention and its storage budget.
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
 | Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container's bounds origin when it contains inputs, otherwise by its layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after; a mouse press anywhere stops the momentum), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view; zoomable views (`maximumZoomScale` above `minimumZoomScale`) scroll both ways, zoom with trackpad pinches and Control + wheel around the pointer and with `zoomTo` (eased, as the web's), center content smaller than the viewport (`centerContent`) and show no indicator |
 | Input | `input.rs`, `nsh_core::input` | The root's `hitTest:` takes every mouse event inside it, and NSH picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where NSH's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what NSH draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onMouseEnter` / `onMouseLeave` / `onMouseMove`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back; the decisions over plain data (a press's events, `panActivation` gates, hover changes, hit areas, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
+| Keyboard | `keyboard.rs`, `keymap.rs`, `input.rs` | One local monitor per surface (`addLocalMonitorForEventsMatchingMask:`) sees `KeyDown`, `KeyUp` and `FlagsChanged` before AppKit dispatches them: the app's keymap match first, then the focused custom view's raw event and its mounted capture rules, then the menus and the responder's defaults (see "Keyboard"); interest and capture follow the logical keyboard ancestry (`ViewProps::key_parent` for a portaled `Overlay`), not the native insert parent; the first responder's `keyDown:` / `keyUp:` / `flagsChanged:` report raw events too when AppKit or a host hands a key to a view directly (the same event is not reported twice); a left press focuses the innermost `focusable={true}` view |
 | Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point; hidden while the input or its content box has no area, as in a `display: none` subtree, since it does not clip), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
 | Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; a page the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a dialog; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
 | Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored) |
@@ -257,9 +258,91 @@ the same natural line height as the field editor, including when `text-base` sup
 layout. Multiline text views use the configured paragraph line height.
 
 A key goes to the window's first responder: a field's editor (the window's shared field editor, an `NSTextView`), a
-multiline input's `NshTextView`, a hosted view, or the surface's root. Menus' key equivalents (`app.rs`: Cmd+Q / H /
-Opt+Cmd+H, the Edit menu's Z / Shift+Z / X / C / V / A, Cmd+M, Ctrl+Cmd+F, Cmd+W) come first, matched by AppKit on
-any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
+multiline input's `NshTextView`, a hosted view, or the surface's root. Four steps decide it, in order:
+
+1. the app's keymap (`keymap.rs`) matches it in the surface's one local key monitor (`keyboard.rs`), before AppKit
+   dispatches anything, and consumes a binding (the dev host's Cmd+R is left to `dev.rs`'s monitor);
+2. a focused custom view hears it as a raw `KeyDown` / `KeyUp` (`keyboard.rs`), and the capture rules mounted on it and
+   its enabled ancestors (`capture_keys`) decide whether the platform keeps it;
+3. menus' key equivalents (`app.rs`: Cmd+Q / H / Opt+Cmd+H, the Edit menu's Z / Shift+Z / X / C / V / A, Cmd+M,
+   Ctrl+Cmd+F, Cmd+W) run, matched by AppKit on any layout;
+4. the responder's own defaults (Tab's traversal, Return and Space pressing, scrolling, going back) run.
+
+A captured key stops after step 2: no menu item and no default follows. A key that only has a listener is reported and
+goes on to the menus and defaults. Fields, hosted views, menus and OS-reserved shortcuts own their keys, as before.
+`default_prevented` is the monitor's decision for that transition; the listener runs on the app's frame afterwards,
+so it reports the decision and cannot veto it (or stop the beep a key with no responder makes).
+
+### Raw keys and capture
+
+`keyboard.rs` installs one local monitor per surface for `KeyDown`, `KeyUp` and `FlagsChanged`. It sees a key before
+AppKit dispatches it, which is what puts keymap bindings, then the raw notification and capture, ahead of menu key
+equivalents and the responder's defaults. The monitor finds the focused view through the event's window and its first
+responder: an NSH view that is not the root and is a focus stop (`ViewProps::focus_stop`). A native field editor, a
+hosted view, the root, a window under a modal and another surface's views get no raw event.
+
+Interest and capture walk the logical keyboard ancestry, not the native view tree. An `Overlay` is moved under a root
+view's host natively (`Core::sync_overlays` inserts it there) while its logical parent stays the view that contains it,
+so the core marks the moved view's logical parent in `ViewProps::key_parent`: an internal routing field, not an
+app-settable TS or Rust prop. The walk resolves that id through the surface's mounted views (`keyboard::key_ancestor`),
+so a rule on the logical ancestor applies to the focused view inside the portal and a sibling portal's rule does not.
+Native focus, hit testing, layout and Tab keep the native parent; an override that does not resolve ends the walk
+rather than falling back to the host, which is not a logical ancestor. The engine still receives one event, at the
+focused view, and bubbles it along the logical ancestry.
+
+The event's values are the source's, never invented:
+
+| `KeyEvent` field | AppKit source |
+|---|---|
+| `key` | virtual key code for named keys, in DOM spellings (`Enter`, `Tab`, `Backspace`, `Escape`, `Delete`, `Help`, `Home`, `End`, `PageUp`, `PageDown`, `ArrowLeft`…`ArrowDown`, `F1`…`F20`, `Shift`, `Control`, `Alt`, `Meta`, `CapsLock`, `Fn`); space is `" "`; otherwise the characters the key types with the modifiers held (`NSEvent.characters`), case and layout kept (`A` for Shift+A, `å` for Option+A), `"Unidentified"` when it types none |
+| `code` | AppKit's virtual key code mapped to the DOM `KeyboardEvent.code` of the key's physical place (`KeyA` for code `0`, `ArrowLeft`, `NumpadEnter`, `Numpad1`, `ShiftLeft`/`ShiftRight`, `ControlLeft`/`ControlRight`, …), so it does not change with the layout's character; `""` for a virtual key code with no DOM code |
+| `modifiers` | `modifierFlags`: Control, Option (`alt`), Shift, Command (`cmd`), after the transition |
+| `repeat` | `isARepeat`, on a press |
+| `default_prevented` | the mounted capture rule's decision for this transition (below) |
+
+The capture rules are read from the mounted `ViewProps` of the focused view and its ancestors when the key arrives;
+nothing waits for JS and no per-key string is parsed on the platform. `KeyCapture::All` takes every key, modifier keys
+included. `KeyCapture::Keys` matches the key and its exact modifiers through the existing shortcut vocabulary
+(`keymap::keystroke`: virtual key codes for named and function keys, the layout's character for the others, the US
+layout's only where the layout types no ASCII), so a rule written as `shift+a` captures Shift+A whatever the case
+`KeyEvent::key` reports. A disabled view captures nothing and a view no longer on the focused view's ancestry captures
+nothing; a rule mounted on an ancestor applies to a focused descendant. A captured key still reaches the focused view
+and, through the engine, its enabled listening ancestors; the native default does not run. One event per transition is
+sent to the focused view; the engine bubbles `KeyDown` and `KeyUp` to the ancestors, so the platform never sends to each
+of them. Built with `dev`, Cmd+R is never captured: as the keymap leaves it, the raw keys let the dev host's reload
+monitor have it.
+
+Modifier keys do not produce `keyDown`/`keyUp`: AppKit sends `flagsChanged` with the modifier's virtual key code and the
+flags after the transition. Each change is reported as a named `KeyDown`/`KeyUp` (`Shift`, `Control`, `Alt`, `Meta`,
+`CapsLock`, `Fn`), with the side's code (`ShiftLeft`, `ShiftRight`, …) and the same capture decision. `keyboard.rs`
+keeps the modifier codes held, so releasing one Shift while the other is held reports that release, and a press is
+never reported twice. Caps Lock toggles rather than
+holding: each `flagsChanged` that changes its flag is its press, one that does not is its release. A modifier transition
+without its own flag is a release even when its press was never tracked (after losing the app's focus, or a press made
+in another app); a press always carries its flag, so a reported key-down never says the modifier is off. A focus move
+inside the app keeps the tracked modifiers (AppKit still reports their releases to the new first responder); only losing
+the app's focus (`NSApplicationDidResignActive`) drops them, and no release is made up. A release AppKit delivers is
+reported on whichever focused view has it by then. Keys pressed before the app launched, or released while another
+app was in front, have no transition to report.
+
+A press on a view the app made `focusable={true}` moves the keyboard focus there (innermost such view under the point,
+as the other desktops' widgets do on a press); a field that edits keeps the focus, as clicking outside it does. `focus()`
+and `blur()` on a view's ref, Tab / Shift+Tab and accessibility focus take the existing paths (`input::focus_control`,
+`text_input::tab`). A focused custom view's `resignFirstResponder` reports `onBlur` and clears the `focus:` state as
+before.
+
+What a custom view hears is a preview of the hardware, not input method text: IME composition stays `text_input.rs`'s,
+and its marked text and commits are not raw key events. A dead key reports what AppKit's `characters` says before the
+composition (`Unidentified` when it says nothing). Menus, fields, hosted views and OS-reserved shortcuts keep their
+own keys: a capture rule can take a key before an app menu item's key equivalent (the menu's action then does not run),
+while an app keymap binding is matched first and a shortcut the system reserves is never delivered. Events a host app
+delivers by calling `-[NSResponder keyDown:]` directly (outside `-[NSApplication sendEvent:]`) still notify through the
+same responder override; events posted through the application's queue also run the monitor, and are not reported twice.
+AppKit does not call local monitors while a native menu, an open or save panel or a window drag owns the events, so keys
+pressed there are not raw events; a modifier released in such a loop is reconciled from the flags on the next event
+that carries them.
+
+The paths below keep their existing behavior:
 
 - **In a field** (`text_input.rs`), AppKit's key bindings edit: Option / Cmd + arrows, their Shift variants,
   Option+Delete, Cmd+Delete, Ctrl+A / E / K, undo and the Edit menu's commands (a secure field refuses Copy and
@@ -285,18 +368,19 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:
   arrows by a line, Page Up / Down, Option+Up / Down and Space / Shift+Space by a page, Home / End and Cmd+Up / Down
   to the edges. The mouse's back button goes back from `input::event`.
-- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`): while the surface has bindings, a local key-down monitor
-  matches every key of its window against the mounted table (`Keymap::find`) before AppKit dispatches it, so they
-  come before menus' key equivalents, the field editor's key bindings and the root's keys (Escape going back,
-  Tab, scrolling); a match is consumed and reported as the root's `KeyCommand`. Quit, Hide, Hide Others, Minimize
-  and Full Screen cannot be bound (`Keystroke::reserved`), so the app menu keeps them; Cmd+W, the Edit menu's keys
-  give way to a binding (monitors run newest first); built with `dev`, Cmd+R is never matched
+- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`): the surface's key monitor (`keyboard.rs`) matches every key
+  of its window against the mounted table (`Keymap::find`) before AppKit dispatches it, so they
+  come before raw keys and capture rules, menus' key equivalents, the field editor's key bindings and the root's keys
+  (Escape going back, Tab, scrolling); a match is consumed and reported as the root's `KeyCommand`. Quit, Hide, Hide
+  Others, Minimize and Full Screen cannot be bound (`Keystroke::reserved`), so the app menu keeps them; Cmd+W, the
+  Edit menu's keys give way to a binding; built with `dev`, Cmd+R is never matched
   (`Keystroke::reloads`), so the dev host's reload monitor gets it. An auto-repeat (`isARepeat`) of a binding without
   `repeat` is consumed silently. A surface takes the key while the
   window's first responder is inside its root (a field or hosted view there counts as editing: `when`), or is the
   window itself. The key is read as `Keystroke`: virtual key codes for named and function keys, else the character
   without modifiers (`charactersByApplyingModifiers:` with none when Shift is held, so Shift+/ is `shift+/`), the US
-  layout's (`input::us_key`) when that is not ASCII. The monitor is removed when the table empties or the app stops.
+  layout's (`input::us_key`) when that is not ASCII. The monitor lives as long as the surface: an empty table costs a
+  map lookup per key, and the app stopping removes it.
 - Shortcuts NSH matches itself (Cmd+A / C / [ / R) read `input::shortcut_key`: the character without modifiers, or on
   a layout that types none in ASCII the US layout's key, as menus do.
 
@@ -543,16 +627,25 @@ newest modal is focused. When a lower modal closes under a newer one, the
 newer one that remembered a view of it remembers the lower one's instead, so
 closing it later returns to the view that opened the stack.
 
+A left press moves the keyboard focus to the innermost `focusable={true}` view
+under it (`input::down`, `explicitly_focusable`), as the other desktops'
+widgets are focused on a press. A press on a view that is not `focusable` leaves
+the focus where it is, and one while a field edits leaves it in the field (the
+root refuses the first responder during a press, as a click outside a field
+does).
+
 Focused stops update the existing `focus:` interaction state and report
 `onFocus` / `onBlur`. On a stop that takes presses (`input::is_key_control`),
 unmodified Return, keypad Enter and Space emit PressIn/PressOut/Press once on
-key-down; auto-repeat and key-up are consumed without another activation. App
+key-down after the raw key and its capture rule, if the key was not captured;
+auto-repeat and key-up are consumed without another activation. App
 keymap monitors let those activation keys reach the control instead of
 triggering a global Enter/Space binding; only the focus' own bindings
 (`KeyOptions::for_focus`, `Keymap::find_at`) take them first. A stop that takes no presses is not
 activated: its keys, Return and Space too, go to the app's keymap (the
 component binds them while focused), then to keyboard scrolling. Modifier
-shortcuts keep their existing priority. Accessibility focus also moves
+shortcuts keep their existing priority, and a captured key never activates the
+control. Accessibility focus also moves
 keyboard focus to Tab stops.
 
 Only root views retain a surface reference. A focused child's keyboard callbacks
@@ -567,9 +660,77 @@ Escape or a click outside; a single-line and a secure field getting it back
 with the caret at the end (a character typed after Escape is appended); a
 trigger disabled meanwhile staying unfocused; a lower modal closing under a
 newer one leaving the focus alone, and the newer one's Escape returning it to
-the stack's trigger. Still to check natively: Shift+Tab, mixed inputs and
-buttons, disabling or deleting a focused control, repeat suppression, modifier
-shortcuts, screen-reader focus and window deactivation.
+the stack's trigger. `tests/native/keyboard.rs` adds a real `AppView` check of
+the raw path (below). Still to check natively: Shift+Tab, mixed inputs and
+buttons, disabling or deleting a focused control, screen-reader focus and
+window deactivation.
+
+### Checking raw keys
+
+The native checks run without a window server for the converters' unit tests, and in a desktop session for the
+`AppView` ones:
+
+```sh
+cargo test -p nsh-platform-macos --features dev
+cargo test -p nsh-platform-macos --features dev --test native -- --ignored
+# Only the raw-key checks (launches the application first, as the other checks do):
+NSH_KEYBOARD_CHECK_ONLY=1 cargo test -p nsh-platform-macos --features dev --test native -- --ignored
+```
+
+`tests/native/keyboard.rs` mounts two focusable pads in a real window and sends `NSEvent`s to it. It checks the
+mapping a listener receives (a plain `a` with physical code 0, Shift+A keeping its case, Option+A keeping the layout's
+`å`, Enter / ArrowLeft / F5 by virtual key code, `isARepeat`), that the press reaches the focused view and its
+enclosing listener once, Shift's `flagsChanged` down/up with two Shift keys, a release whose press was never tracked
+classified from its cleared flag, `captureKeys: "all"` taking Tab and leaving the focus, an uncaptured Tab moving it,
+and a named capture matching `shift+a` through the shortcut vocabulary. The portal check then mounts two sibling overlays
+and verifies that the focused portal's logical ancestor (`ViewProps::key_parent`) hears its keys and captures `x`,
+while the other portal's `tab` rule neither hears nor captures (Tab is reported uncaptured). Menus' key equivalents under
+a capture and the input method are not in it.
+
+For a real surface, with a window server and a keyboard:
+
+```sh
+cargo build -p nsh-cli        # ./target/debug/nsh
+cat > /tmp/raw-keys.tsx <<'EOF'
+import { mount, signal, Text, View } from "nsh";
+
+function App() {
+  const log = signal("none");
+  const note = (e: any) =>
+    log.set(`${e.key} text=${e.text ?? "-"} physical=${e.physical ?? "-"} shift=${e.modifiers.shift} captured=${e.captured}`);
+  return (
+    <View style={{ flex: 1, padding: 40, gap: 12 }} onKeyDown={note}>
+      <View testID="pad" focusable captureKeys={["Tab", "shift+a"]} onKeyDown={note} onKeyUp={note}
+        style={{ height: 80, backgroundColor: "#333" }} />
+      <View testID="second" focusable style={{ height: 80, backgroundColor: "#666" }} />
+      <Text>{log()}</Text>
+    </View>
+  );
+}
+
+mount(App);
+EOF
+./target/debug/nsh run /tmp/raw-keys.tsx --target macos
+```
+
+1. Click the dark pad (the press focuses the `focusable` view; its `focus` ring shows), or Tab to it. The status line
+   shows `none` until a key arrives.
+2. Press `a`: the line shows `a text=a physical=0 … captured=false`; release shows the same key with `text=-`.
+3. Press Shift+A: `A text=A … shift=true captured=true` (the `shift+a` rule). Press Option+A on a US layout:
+   `å text=- … captured=false` (Option types a layout character, and the text preview is withheld), or the character
+   the active layout types.
+4. Press Tab: the focus stays on the pad (`captured=true`); with `Tab` removed from `captureKeys` it moves to the
+   second pad.
+5. Press Return and Escape: they are reported, and their defaults still run (activating a focused control, going
+   back), because the pad's rule does not name them. Add them to `captureKeys` to see the defaults suppressed.
+6. Press Cmd+Q: the pad's capture list does not name it, so the app menu still quits. Press Cmd+R in a `nsh run`
+   (dev) session: it still reloads. With `captureKeys="all"` the pad takes Cmd+Q as well (the menu gives way to a
+   capture, as app shortcuts do), but Cmd+R still reloads, because the dev host's reload is never captured.
+7. Hold Shift: a `Shift` key-down is reported; release it: `Shift` key-up. Switch to another app while holding Shift,
+   then release it there and come back: no release is reported (the transition happened where NSH could not see it),
+   and the next Shift press reports a press.
+8. Focus a text field elsewhere in the app and type: the field edits as before, and the raw listeners do not hear it.
+   Compose with an input method: the composition and its commit are the input's, not raw key events.
 
 ## Shader pictures
 

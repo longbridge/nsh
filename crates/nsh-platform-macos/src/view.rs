@@ -916,7 +916,12 @@ define_class!(
         fn key_down(&self, event: &NSEvent) {
             let handled = self.keyboard_surface().is_some_and(|surface| {
                 surface.measure(false, || {
-                    let handled = crate::input::key(&surface, event, true);
+                    // The raw key first, with the capture rules of the
+                    // focused view: a captured key runs no default. The
+                    // monitor reports a key it already saw this way once
+                    // ([`crate::keyboard`]).
+                    let handled = crate::keyboard::key_down(&surface, event)
+                        || crate::input::key(&surface, event, true);
                     // Keys scroll too.
                     quiet(|| surface.revisit());
                     handled
@@ -974,13 +979,27 @@ define_class!(
 
         #[unsafe(method(keyUp:))]
         fn key_up(&self, event: &NSEvent) {
-            let handled = self
-                .keyboard_surface()
-                .is_some_and(|surface| crate::input::key(&surface, event, false));
+            let handled = self.keyboard_surface().is_some_and(|surface| {
+                // A release reports its `KeyUp` once (the monitor's, or
+                // here when the event did not come through it).
+                crate::keyboard::key_up(&surface, event)
+                    || crate::input::key(&surface, event, false)
+            });
             if !handled {
                 // SAFETY: NSResponder's own handling.
                 unsafe { msg_send![super(self), keyUp: event] }
             }
+        }
+
+        // Modifier keys change flags instead of going down: AppKit sends
+        // them to the first responder this way ([`crate::keyboard`]).
+        #[unsafe(method(flagsChanged:))]
+        fn flags_changed(&self, event: &NSEvent) {
+            if let Some(surface) = self.keyboard_surface() {
+                crate::keyboard::flags_changed(&surface, event);
+            }
+            // SAFETY: NSResponder's own handling.
+            unsafe { msg_send![super(self), flagsChanged: event] }
         }
 
         #[unsafe(method(setFrameSize:))]
