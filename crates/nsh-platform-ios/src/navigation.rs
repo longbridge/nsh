@@ -283,9 +283,11 @@ define_class!(
             if !own.is_empty() {
                 return own;
             }
-            // The page's under it, as the root controller answers.
-            if let Some(page) = crate::system::page_orientations() {
-                return page;
+            // The presenter's: the root controller answers with the page's
+            // under it, NSH's own and a host's that forwards it alike, and a
+            // host's that does not keeps its own for its dialogs too.
+            if let Some(presenter) = self.presentingViewController() {
+                return presenter.supportedInterfaceOrientations();
             }
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), supportedInterfaceOrientations] }
