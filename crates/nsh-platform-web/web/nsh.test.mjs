@@ -159,6 +159,26 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   }
 });
 
+test("input autoCorrect sets spellcheck and the autocorrect attribute on both field kinds", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const field = {
+    classList: { toggle() {} },
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  const el = { _field: field, removeAttribute() {} };
+  player.view = () => el;
+  for (const multiline of [false, true]) {
+    field.tagName = multiline ? "TEXTAREA" : "INPUT";
+    for (const autoCorrect of [true, false, true]) {
+      player.op_in(["in", 1, { multiline, autoCorrect }, null]);
+      assert.equal(field.spellcheck, autoCorrect);
+      assert.equal(attrs.get("autocorrect"), autoCorrect ? "on" : "off");
+    }
+  }
+});
+
 test("an invalid view is aria-invalid, and so is the field of an input", () => {
   const { player } = fakePlayer();
   const element = () => {
