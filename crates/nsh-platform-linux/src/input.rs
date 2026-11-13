@@ -7,8 +7,10 @@
 //! every pointer event before the widgets under it. It never stops button,
 //! motion or touch events, so hosted native widgets (text fields) still get
 //! their clicks, focus and selection drags; presses, pans and scroll drags
-//! simply do not start on them. Wheel and touchpad scrolls it routes are
-//! stopped, unless they land on a native widget that scrolls itself.
+//! simply do not start on them, except that an `Input` listening to
+//! presses hears its own (a view around it does not). Wheel and touchpad
+//! scrolls it routes are stopped, unless they land on a native widget that
+//! scrolls itself.
 //!
 //! Hit testing walks the views itself rather than using `gtk_widget_pick`:
 //! GTK's picking knows nothing of `overflow: hidden` (the views clip in
@@ -1574,7 +1576,11 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: g
         gate,
         ..
     } = grab;
-    let press = if native {
+    // A text field takes its own clicks, and GTK still gets them; the
+    // `Input` itself hears them as a press, after the focus GTK gives it
+    // (a combobox opens its list), but no view around it does.
+    let input_view = native && hit.view.state().kind == ViewKind::Input;
+    let press = if native && !input_view {
         None
     } else {
         let clicks = if touch {
@@ -1582,7 +1588,12 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: g
         } else {
             click_count(input, x, y, time)
         };
-        find_press(surface, &hit.view, &views, x, y)
+        let pressable = if input_view {
+            std::slice::from_ref(&hit.view)
+        } else {
+            &views[..]
+        };
+        find_press(surface, &hit.view, pressable, x, y)
             .map(|p| p.clicked(self::modifiers(modifiers), clicks))
     };
     if let Some(area) = &area {
