@@ -150,9 +150,11 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   the main thread paints with). GPUI shapes one line of one font size at a time and leaves breaking, bidi, line
   heights and ellipses to its callers, so each paragraph is shaped once, in segments of one bidi level and font size,
   into clusters; measuring at another width only re-breaks them (UAX #14, `unicode-linebreak`), and the final layout
-  orders each line's clusters by their bidi levels (`unicode-bidi`). Line heights follow Pango's model, as on Linux
-  and Windows. The final layout is plain data (lines, cluster boxes, positioned glyphs); the main thread paints the
-  glyphs (`paint_glyph`, `paint_emoji`) and reads colors and decorations from the spans, as the Linux backend does.
+  orders each line's clusters by their bidi levels (`unicode-bidi`). The last line a line clamp shows holds the rest of
+  its paragraph and is cut at the box for the ellipsis, inside a word if need be, as CoreText, Pango and StaticLayout
+  cut it. Line heights follow Pango's model, as on Linux and Windows. The final layout is plain data (lines, cluster
+  boxes, positioned glyphs); the main thread paints the glyphs (`paint_glyph`, `paint_emoji`) and reads colors and
+  decorations from the spans, as the Linux backend does.
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
