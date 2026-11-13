@@ -40,6 +40,13 @@ impl<M: TextEngine> Core<M> {
             if node.list.is_some() || node.kind == Kind::Cell || node.is_layout_root() {
                 return None;
             }
+            // A view inside a text (an attachment) is laid out on its own
+            // and placed by its text, which makes it with its view:
+            // culling's walk never reaches into it, so what it holds
+            // would wait for good.
+            if node.inline && node.kind != Kind::Text && node.layout.is_some() {
+                return None;
+            }
             if node.kind == Kind::Scroll {
                 return node
                     .scroll
