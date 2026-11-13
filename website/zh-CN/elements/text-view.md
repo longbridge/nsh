@@ -572,7 +572,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 | `heading` | `level`（1–6）、`content`、`anchor?` |
 | `blockquote` | `children`、`alert?`（`"note"`、`"tip"`、`"important"`、`"warning"`、`"caution"`） |
 | `list` | `ordered?`、`start?`、`loose?`、`items`（`{ checked?, children }`） |
-| `codeBlock` | `language?`、`meta?`、`code` |
+| `codeBlock` | `language?`、`meta?`、`code`、`id?`、`content?`、`wrap?` |
 | `math` | `tex` |
 | `table` | `align?`（每列 `"none"`、`"left"`、`"center"`、`"right"`）、`head`（单元格）、`rows?`（由单元格组成的行）；单元格是 `{ content }` |
 | `rule` | |
@@ -593,6 +593,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 | `custom` | 同块节点 |
 
 文档还可以有 `footnotes?`：`{ label, index, children }`，按首次引用的顺序显示在文档块之后。应用可以把回复存成文档、用自己的数据构建文档，或者混入由 `renderCustom` 显示的自定义节点。
+
+代码块的 `id` 由应用设定：`onCodeBlockAction` 会连同它把代码块交回，操作由此知道作用于哪一块。`wrap: true` 让代码在视图宽度内换行，而不是横向滚动。`content` 是以行内内容表示的代码（应用的标注：强调、高亮，以及在 `custom` 部件中显示为其内容的自定义节点）；其纯文本与 `code` 相同时代替高亮后的代码显示，因此显示的就是复制得到的文本。
 
 <a id="parsing-and-plain-text"></a>
 

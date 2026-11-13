@@ -1123,13 +1123,17 @@ impl Cx {
                     .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}"))),
             )
         });
-        // The app's highlighter, else the built-in one (which may color the
-        // code a moment after it shows), else plain.
-        let body = match &self.highlighter {
-            Some(h) => text("").children(h.spans(code)),
-            None => match super::highlight::built_in(code) {
-                Some(spans) => text("").children(spans),
-                None => text(code.code.clone()),
+        // The block's own annotated content, else the app's highlighter, else
+        // the built-in one (which may color the code a moment after it
+        // shows), else plain.
+        let body = match annotated(code) {
+            Some(content) => self.span(content, key),
+            None => match &self.highlighter {
+                Some(h) => text("").children(h.spans(code)),
+                None => match super::highlight::built_in(code) {
+                    Some(spans) => text("").children(spans),
+                    None => text(code.code.clone()),
+                },
             },
         };
         // The padding is the code's, inside the scroll view: the code
@@ -1151,15 +1155,20 @@ impl Cx {
             .bg(move || theme().muted)
             .text_size(px(CODE_SIZE))
             .line_height(px(CODE_SIZE * CODE_LINE));
+        let body = self.part(body, Part::CodeBlockCode);
+        let content = if code.wrap {
+            body.w_full().min_w_0().into_element()
+        } else {
+            self.part(
+                scroll().horizontal().scrollbar(self.code_scroll_indicator),
+                Part::CodeBlockScroll,
+            )
+            .child(body)
+            .into_element()
+        };
         // The actions last, so they are drawn over the code.
         self.part(block, Part::CodeBlock)
-            .child(
-                self.part(
-                    scroll().horizontal().scrollbar(self.code_scroll_indicator),
-                    Part::CodeBlockScroll,
-                )
-                .child(self.part(body, Part::CodeBlockCode)),
-            )
+            .child(content)
             .child(header)
             .into_element()
     }
@@ -2448,6 +2457,23 @@ fn ink_on(bg: Hsla) -> Hsla {
         rgb(0x1f1e1c).into()
     } else {
         rgb(0xf4f3f0).into()
+    }
+}
+
+/// A code block's annotated `content`, when it has one whose plain text is
+/// its `code` (what copying takes): other content would show one text and
+/// copy another, so it is ignored with a warning.
+fn annotated(code: &CodeBlock) -> Option<&[Inline]> {
+    if code.content.is_empty() {
+        return None;
+    }
+    let mut plain = String::new();
+    super::document::inline_text(&code.content, &mut plain);
+    if plain == code.code {
+        Some(&code.content)
+    } else {
+        log::warn!("TextView: a code block's content does not spell its code; showing the code");
+        None
     }
 }
 
