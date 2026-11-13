@@ -216,7 +216,7 @@ fn shortcut_label(action: &MenuAction) -> Option<String> {
         }),
         role => role.and_then(|r| r.shortcut(mac)),
     })?;
-    Some(shortcut.label_for(mac))
+    Some(shortcut.label_for(keys::OS))
 }
 
 /// The items a drawn menu shows: macOS's own roles left out elsewhere,
@@ -1393,7 +1393,10 @@ pub(super) fn layer(
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::desktop::{MenuAction, MenuItem};
+    use nsh_core::{
+        desktop::{MenuAction, MenuItem},
+        platform::Os,
+    };
 
     use super::*;
 
@@ -1459,12 +1462,12 @@ mod tests {
             meta: true,
             ..Shortcut::key(Key::Enter)
         };
-        assert_eq!(enter.label_for(true), "⇧⌘↩");
+        assert_eq!(enter.label_for(Os::MacOs), "⇧⌘↩");
         let back = Shortcut {
             meta: true,
             ..Shortcut::key(Key::Backspace)
         };
-        assert_eq!(back.label_for(true), "⌘⌫");
+        assert_eq!(back.label_for(Os::MacOs), "⌘⌫");
         let expected = if cfg!(target_os = "macos") {
             "⌘C"
         } else {

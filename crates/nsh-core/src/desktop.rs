@@ -16,6 +16,7 @@ use crate::{
     element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Point, Points},
     keymap::{self, Keystroke, Modifiers, When},
+    platform::Os,
 };
 
 mod login_item;
@@ -332,13 +333,13 @@ impl Shortcut {
         out
     }
 
-    /// Its label where `mac` is true (macOS) as symbols in the order Apple
-    /// writes them (`⌃⌥⇧⌘C`), else [`Shortcut::label`].
-    pub fn label_for(&self, mac: bool) -> String {
-        if !mac {
+    /// Its label on `os`: on macOS as symbols in the order Apple writes
+    /// them (`⌃⌥⇧⌘C`), else [`Shortcut::label`].
+    pub fn label_for(&self, os: Os) -> String {
+        if os != Os::MacOs {
             return self.label();
         }
-        self.keystroke().label(crate::platform::Os::MacOs, true)
+        self.keystroke().label(os, true)
     }
 
     /// Whether a focused text field uses this shortcut itself, as it uses
@@ -1240,22 +1241,35 @@ mod tests {
     #[test]
     fn mac_labels_use_symbols() {
         let copy = MenuRole::Copy.shortcut(true).unwrap();
-        assert_eq!(copy.label_for(true), "⌘C");
+        assert_eq!(copy.label_for(Os::MacOs), "⌘C");
         assert_eq!(
-            MenuRole::Redo.shortcut(true).unwrap().label_for(true),
+            MenuRole::Redo.shortcut(true).unwrap().label_for(Os::MacOs),
             "⇧⌘Z"
         );
         assert_eq!(
             MenuRole::ToggleFullScreen
                 .shortcut(true)
                 .unwrap()
-                .label_for(true),
+                .label_for(Os::MacOs),
             "⌃⌘F"
         );
         assert_eq!(
-            MenuRole::Copy.shortcut(false).unwrap().label_for(false),
+            MenuRole::Copy
+                .shortcut(false)
+                .unwrap()
+                .label_for(Os::Windows),
             "Ctrl+C"
         );
+        // Off macOS it is `label()` as it was, `Win+` and all.
+        let win = Shortcut {
+            meta: true,
+            ..Shortcut::key(Key::Char('e'))
+        };
+        assert_eq!(win.label_for(Os::Linux), win.label());
+        assert_eq!(win.label_for(Os::Windows), win.label());
+        assert_eq!(win.label_for(Os::Linux), "Win+E");
+        let copy = MenuRole::Copy.shortcut(false).unwrap();
+        assert_eq!(copy.label_for(Os::Linux), copy.label());
     }
 
     #[test]
