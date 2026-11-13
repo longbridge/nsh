@@ -13,7 +13,7 @@ use std::{
 
 use nsh_base::{SelectEntry, SelectEvent, SelectItem, select};
 use nsh_core::{
-    AccessibilityRole, Bounds, Command, MountItem, NodeId, Size, ViewProps,
+    AccessibilityRole, AccessibilityState, Bounds, Command, MountItem, NodeId, Size, ViewProps,
     element::Root,
     platform::{Idiom, Os},
     prelude::*,
@@ -40,6 +40,9 @@ struct HarnessProps {
     /// A clear button `Clear` (labelled `Clear food`) while an item is
     /// chosen.
     cleanable: bool,
+    /// The app's trigger says its content is invalid at first; F6
+    /// toggles it.
+    invalid: bool,
 }
 
 fn fruits() -> Vec<SelectItem> {
@@ -72,13 +75,15 @@ fn props(items: Vec<SelectItem>) -> HarnessProps {
         disabled: false,
         default_open: false,
         cleanable: false,
+        invalid: false,
     }
 }
 
 /// A select of `props`' items under a 160 × 30 trigger, rows drawn as
 /// their titles (`renderItem`) and at half opacity while highlighted
 /// (`focus:`); what the app heard as `Log: …`, its value as `Value: …`; F5
-/// replaces the items with Celery and Kiwi.
+/// replaces the items with Celery and Kiwi; F6 toggles the `invalid` the
+/// app's trigger says.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(props.value.clone().map(SharedString::from));
@@ -86,6 +91,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let log = signal(Vec::<String>::new());
     let push = move |s: String| log.update(|l| l.push(s));
     let items = signal(props.items.clone());
+    let invalid = signal(props.invalid);
+    on_key("f6", move |_| invalid.update(|i| *i = !*i));
     on_key("f5", move |_| {
         items.set(vec![
             SelectItem::new("kiwi", "Kiwi"),
@@ -105,6 +112,11 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .trigger(
             view()
                 .test_id("trigger")
+                .accessibility_state(move || AccessibilityState {
+                    invalid: invalid.get(),
+                    busy: true,
+                    ..AccessibilityState::default()
+                })
                 .w(px(160.0))
                 .h(px(30.0))
                 .child(text("Pick")),
@@ -1040,6 +1052,33 @@ fn screen_readers_hear_a_combobox_a_listbox_and_its_options() {
     assert!(!app.screen().enabled("role:option[Banana]").unwrap());
     let header = app.screen().count("role:header").unwrap();
     assert_eq!(header, 2);
+}
+
+#[test]
+fn the_trigger_keeps_the_states_the_app_gives_it() {
+    let mut app = desktop(HarnessProps {
+        invalid: true,
+        ..props(fruits())
+    });
+    let state = app.trigger().accessibility.state;
+    assert!(state.invalid, "the app's `invalid` stays");
+    assert!(state.busy, "the app's `busy` stays");
+    assert_eq!(state.expanded, Some(false), "the select's `expanded` wins");
+    assert!(state.has_popup);
+    app.key("f6");
+    assert!(
+        !app.trigger().accessibility.state.invalid,
+        "the app's `invalid` follows its changes"
+    );
+    app.open_list();
+    let state = app.trigger().accessibility.state;
+    assert!(!state.invalid);
+    assert!(state.busy);
+    assert_eq!(state.expanded, Some(true));
+    app.key("f6");
+    let state = app.trigger().accessibility.state;
+    assert!(state.invalid);
+    assert_eq!(state.expanded, Some(true), "the select's `expanded` stays");
 }
 
 #[test]
