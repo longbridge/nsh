@@ -199,7 +199,7 @@ On the web these are `aria-activedescendant` and `aria-controls`; on macOS Voice
 
 ### An element that describes another
 
-A form shows a field's error or help in a line of its own, apart from the field. `accessibilityDescribedBy` names that line on the field, so a screen reader reads its text after the field's name each time the focus comes to it, and reads the new text when the line changes. It takes a ref of the element named, as `accessibilityControls` does; its labels and texts are the field's description, in the place of the field's own `accessibilityDescription`, which comes back while the element named is not on screen. Every platform reads it where it reads a description; on the web it is `aria-describedby`.
+A form shows a field's error or help in a line of its own, apart from the field. `accessibilityDescribedBy` names that line on the field, so a screen reader reads its text after the field's name each time the focus comes to it, and reads the new text when the line changes. It takes a ref of the element named, as `accessibilityControls` does; its labels and texts are the field's description, in the place of the field's own `accessibilityDescription`, which comes back while the element named is not on screen. The line may be `accessibilityHidden`, so that it is read once, with its field: an element named reads its text all the same. Every platform reads it where it reads a description; on the web it is `aria-describedby`.
 
 ```rust tabs
 // A field and the error line under it.

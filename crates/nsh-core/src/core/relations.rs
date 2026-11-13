@@ -189,15 +189,22 @@ impl<M: TextEngine> Core<M> {
 
     /// The text of view `key` for a view it describes: its label, else the
     /// labels and texts inside it in order, the hidden ones left out, one
-    /// space between them; `None` when it has none.
+    /// space between them; `None` when it has none. A view named while
+    /// hidden still describes, its hidden parts included, as the web's
+    /// `aria-describedby` reads a hidden element it names: an error line is
+    /// often hidden so that it is read once, with its field.
     fn describing_text(&self, key: Key) -> Option<Arc<str>> {
+        let hidden = self.nodes[key as usize]
+            .props
+            .as_ref()
+            .is_some_and(|p| p.accessibility.hidden);
         let mut out = String::new();
-        self.push_describing_text(key, false, &mut out);
+        self.push_describing_text(key, false, hidden, &mut out);
         let text = out.trim_end();
         (!text.is_empty()).then(|| Arc::from(text))
     }
 
-    fn push_describing_text(&self, key: Key, inline: bool, out: &mut String) {
+    fn push_describing_text(&self, key: Key, inline: bool, hidden: bool, out: &mut String) {
         let node = &self.nodes[key as usize];
         let apart = |out: &mut String| {
             if !out.is_empty() && !out.ends_with(char::is_whitespace) {
@@ -212,7 +219,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         if let Some(a) = node.props.as_ref().map(|p| &p.accessibility) {
-            if a.hidden {
+            if a.hidden && !hidden {
                 return;
             }
             if let Some(label) = &a.label {
@@ -228,7 +235,7 @@ impl<M: TextEngine> Core<M> {
             apart(out);
         }
         for &child in &node.children {
-            self.push_describing_text(child, inline || text, out);
+            self.push_describing_text(child, inline || text, hidden, out);
         }
     }
 

@@ -197,7 +197,7 @@ const rows = signal<ViewRef[]>([]);
 
 ### 说明另一个元素的元素
 
-表单把输入框的错误或帮助写在单独的一行里，与输入框分开。在输入框上用 `accessibilityDescribedBy` 指出这一行，屏幕阅读器每次焦点来到输入框时都会在它的名称之后读出这行文字，这行文字变了也会读新的。它和 `accessibilityControls` 一样接受被指出元素的 ref；那个元素里的标签和文字就是输入框的说明，代替输入框自己的 `accessibilityDescription`，被指出的元素不在屏幕上时，输入框自己的说明又回来。每个平台都在读说明的地方读它；在 Web 上它是 `aria-describedby`。
+表单把输入框的错误或帮助写在单独的一行里，与输入框分开。在输入框上用 `accessibilityDescribedBy` 指出这一行，屏幕阅读器每次焦点来到输入框时都会在它的名称之后读出这行文字，这行文字变了也会读新的。它和 `accessibilityControls` 一样接受被指出元素的 ref；那个元素里的标签和文字就是输入框的说明，代替输入框自己的 `accessibilityDescription`，被指出的元素不在屏幕上时，输入框自己的说明又回来。这一行可以设 `accessibilityHidden`，让它只随输入框读一次：被指出的元素照样读出它的文字。每个平台都在读说明的地方读它；在 Web 上它是 `aria-describedby`。
 
 ```rust tabs
 // 输入框和它下面的错误行。

@@ -5395,6 +5395,56 @@ fn accessibility_described_by_describes_a_view_with_another_ones_text() {
     assert_eq!(a.described_by, None);
 }
 
+/// An error line hidden from assistive technologies (`accessibilityHidden`,
+/// so that it is not read twice) and named by `accessibilityDescribedBy`
+/// still describes the field, as the web's `aria-describedby` reads a hidden
+/// element it names.
+#[test]
+fn accessibility_described_by_a_hidden_line_still_describes() {
+    use crate::element::ElementTarget;
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 6,
+                text: "Enter a name.".into(),
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::Accessibility(AccessibilityProp::Hidden(true)),
+            },
+            insert(4, 6),
+            insert(1, 2),
+            insert(1, 4),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Accessibility(AccessibilityProp::DescribedBy(Some(
+                    ElementTarget::of_node(4),
+                ))),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        described_in(&batch, 2),
+        Some((Some("Enter a name.".into()), Some(4)))
+    );
+}
+
 #[test]
 fn screens_fill_their_stack_below_the_header() {
     let mut c = core();
