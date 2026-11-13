@@ -31,7 +31,8 @@ says how.
 - **One hop per commit.** The engine runs on its own thread; each commit is one closure sent to GPUI's main thread,
   which notifies the view.
 - **Input** comes from GPUI's mouse, scroll, key and input method events; hit testing, presses, the responder system,
-  scrolling and text editing are the same logic as the Windows backend's.
+  scrolling and text editing are the same logic as the Windows backend's. A zoomable scroll view zooms with a touchpad
+  pinch or Ctrl + wheel around the pointer, and scrolls both ways while zoomed.
 
 ## Requirements
 
@@ -192,7 +193,6 @@ What draws or behaves differently from the native desktop backends:
 - **Canvas text** is approximated: upright under rotations, made smaller rather than narrower for `maxWidth`,
   gradients paint it in one color, `strokeText` fills, its shadows are not blurred, and composite operations and
   `clearRect` do not apply to it.
-- **Scroll views** do not zoom (`zoomTo` and the zoom props are ignored).
 - **Video** plays on Linux (GStreamer); on macOS and Windows a video shows a placeholder and reports `onError`.
 - **Web views** are native views above everything NSH draws at their place. On Linux they need X11 (see
   [Requirements](#requirements)); where pages stay black under Xwayland ("Failed to create GBM buffer" in the log),

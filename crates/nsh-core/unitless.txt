@@ -215,7 +215,9 @@ props::ViewProps.long_press_delay                                # time
 scroll::KeyMove::Pages.0                                         # a number of viewports
 scroll::KeyMove::sign ->                                         # a direction, -1 or 1
 scroll::Live.alpha                                               # an opacity, 0..1
+scroll::ScrollHost::report_zoom(scale)                           # a zoom scale factor
 scroll::ScrollHost::now ->                                       # time
+scroll::ScrollState.zoom                                         # a zoom scale factor
 scroll::drag_end(vx)                                             # a velocity, points per second
 scroll::drag_end(vy)                                             # a velocity, points per second
 scroll::ease_out ->                                              # easing curve coordinates (unit square)
@@ -223,6 +225,7 @@ scroll::ease_out(t)                                              # easing curve 
 scroll::deadline ->                                              # time
 scroll::deadline(now)                                            # time
 scroll::frame(now)                                               # time
+scroll::pinch(scale)                                             # a zoom scale factor (of the zoom the pinch began at)
 scroll::indicator_alpha ->                                       # an opacity, 0..1
 scroll::indicator_alpha(since)                                   # time
 scroll::projected(rate)                                          # a deceleration factor (velocity kept per millisecond)

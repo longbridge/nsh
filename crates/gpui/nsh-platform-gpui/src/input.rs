@@ -10,9 +10,9 @@
 //!
 //! Hit testing walks the views ([`pick`]), as the Linux backend does:
 //! points go into children through their frames, the parent's scroll
-//! offset and sticky shift ([`ViewState::child_origin`]) and their
-//! transforms (inverted with [`Mat4::unproject`], so 3D transforms hit
-//! where they are drawn). Hidden and concealed views, `pointerEvents`,
+//! offset, zoom and sticky shift ([`ViewState::child_matrix`]) and their
+//! transforms (inverted with [`crate::geom::Mat4::unproject`], so 3D
+//! transforms hit where they are drawn). Hidden and concealed views, `pointerEvents`,
 //! `hitSlop` and `overflow: hidden` are honored; outside a view's bounds,
 //! only the area its descendants cover (`MountItem::Overflow`: a dropdown
 //! under its field) is looked into, as on iOS and Android. The items a
@@ -53,7 +53,8 @@
 //! backends do. Without phases (Wayland; X11 reports touchpads as wheel
 //! lines) a precise scroll ends once its deltas pause. Touchpad pinches
 //! (GPUI's `PinchEvent`, [`touchpad_pinch`]) and Ctrl + wheel pinch the
-//! view under the pointer.
+//! view under the pointer; over a zoomable scroll view nearer than a view
+//! that pinches, both zoom it around the pointer ([`crate::scroll::pinch`]).
 //!
 //! The decisions over plain data (what a pointer going down may start, a
 //! press's events, hover changes, hit areas, pinches, wheel latching) are
@@ -79,7 +80,6 @@ use nsh_core::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    geom::Mat4,
     surface::Surface,
     view::{ItemPointer, Native, NshView, ViewState},
 };
@@ -92,8 +92,13 @@ struct Transform {
     view: NshView,
     pinch: bool,
     rotation: bool,
+    /// It zooms `view`, a zoomable scroll view, rather than driving its
+    /// pinch values.
+    zoom: bool,
     scale: f32,
     degrees: f32,
+    /// Where the pointer is (root coordinates).
+    at: (f32, f32),
 }
 
 /// Two touchscreen fingers transforming a view.
@@ -1593,13 +1598,11 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         kids.iter().rev().find_map(|child| {
             let (cx, cy) = {
                 let c = child.state();
-                let (ox, oy) = s.child_origin(c.frame, c.shift);
-                match c.transform() {
-                    None => (x - ox, y - oy),
-                    Some(t) => {
-                        let local = Mat4::mul(&t, &Mat4::new().translate(ox, oy));
-                        local.unproject(x, y)?
-                    }
+                if c.transform().is_none() && s.child_scale() == 1.0 {
+                    let (ox, oy) = s.child_origin(c.frame, c.shift);
+                    (x - ox, y - oy)
+                } else {
+                    s.child_matrix(&c).unproject(x, y)?
                 }
             };
             pick_in(child, cx, cy, items)
@@ -2304,12 +2307,38 @@ fn transform_view(surface: &Surface, view: &NshView) -> Transform {
         view: view.clone(),
         pinch,
         rotation,
+        zoom: false,
         scale: 1.0,
         degrees: 0.0,
+        at: (0.0, 0.0),
     }
 }
 
-fn transform_begin(surface: &Surface, t: &Transform) {
+/// Whether a pinch at `view` pinches it: it zooms (a zoomable scroll
+/// view) or has native pinch values.
+fn pinches(surface: &Rc<Surface>, view: &NshView) -> bool {
+    if crate::scroll::pinches(surface, view) {
+        return true;
+    }
+    let s = view.state();
+    transforms(&gesture_values(surface, view, s.id), s.events).0
+}
+
+/// The pinch of `view` ([`pinches`]) at `(x, y)` (root coordinates): it
+/// zooms a zoomable scroll view, nearer than the pinch values it may also
+/// have.
+fn pinch_view(surface: &Rc<Surface>, view: &NshView, x: f32, y: f32) -> Transform {
+    let mut t = transform_view(surface, view);
+    t.rotation = false;
+    t.zoom = crate::scroll::pinches(surface, view);
+    t.at = (x, y);
+    t
+}
+
+fn transform_begin(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        return crate::scroll::pinch_begin(surface, &t.view);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2332,7 +2361,12 @@ fn transform_begin(surface: &Surface, t: &Transform) {
     }
 }
 
-fn transform_move(surface: &Rc<Surface>, t: &Transform) {
+/// `t` moved; a zoom past the limits rubber-bands when `rubber` (fingers).
+fn transform_move(surface: &Rc<Surface>, t: &Transform, rubber: bool) {
+    if t.zoom {
+        let (x, y) = local(&t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch(surface, &t.view, t.scale, x, y, rubber);
+    }
     let id = t.view.state().id;
     {
         let mut anim = surface.anim.borrow_mut();
@@ -2347,7 +2381,11 @@ fn transform_move(surface: &Rc<Surface>, t: &Transform) {
     surface.ensure_ticking();
 }
 
-fn transform_end(surface: &Surface, t: &Transform) {
+fn transform_end(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let (x, y) = local(&t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch_end(surface, &t.view, x, y);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2421,7 +2459,7 @@ fn two_finger_moved(surface: &Rc<Surface>) {
         t.transform.degrees = rotation.0.to_degrees();
         t.transform.clone()
     };
-    transform_move(surface, &transform);
+    transform_move(surface, &transform, true);
 }
 
 /// A finger of the pair lifted: the gesture ends, the other finger does
@@ -2452,19 +2490,16 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
             let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
-            let view = chain(&hit.view).into_iter().find(|v| {
-                let s = v.state();
-                transforms(&gesture_values(surface, v, s.id), s.events).0
-            });
+            let view = chain(&hit.view).into_iter().find(|v| pinches(surface, v));
             let Some(view) = view else { return false };
-            let mut t = transform_view(surface, &view);
-            t.rotation = false;
+            let t = pinch_view(surface, &view, x, y);
             transform_begin(surface, &t);
             t
         }
     };
     t.scale *= zoom_factor(dy);
-    transform_move(surface, &t);
+    t.at = (x, y);
+    transform_move(surface, &t, false);
     *input.zoom.borrow_mut() = Some((t, generation));
     let weak = Rc::downgrade(surface);
     after_ms(ZOOM_IDLE, move || {
@@ -3039,13 +3074,9 @@ pub(crate) fn touchpad_pinch(
         let Some(hit) = pick(&surface.input_root(), x, y, true) else {
             return;
         };
-        let view = chain(&hit.view).into_iter().find(|v| {
-            let s = v.state();
-            transforms(&gesture_values(surface, v, s.id), s.events).0
-        });
+        let view = chain(&hit.view).into_iter().find(|v| pinches(surface, v));
         let Some(view) = view else { return };
-        let mut t = transform_view(surface, &view);
-        t.rotation = false;
+        let t = pinch_view(surface, &view, x, y);
         transform_begin(surface, &t);
         *input.pinch.borrow_mut() = Some((t, 1.0));
     }
@@ -3057,9 +3088,10 @@ pub(crate) fn touchpad_pinch(
             };
             *absolute = pinch_scale(t.scale, *absolute, delta);
             t.scale = *absolute;
+            t.at = (x, y);
             t.clone()
         };
-        transform_move(surface, &t);
+        transform_move(surface, &t, true);
     }
     if matches!(phase, GesturePhase::Ended | GesturePhase::Cancelled)
         && let Some((t, _)) = input.pinch.borrow_mut().take()
@@ -3096,13 +3128,7 @@ fn pinch_event(surface: &Rc<Surface>, x: f32, y: f32, delta: f32, phase: Gesture
             input::wheel_listener(
                 chain(&hit.view),
                 |v| v.state().events.contains(EventKind::Pinch),
-                |v| {
-                    let (id, events) = {
-                        let s = v.state();
-                        (s.id, s.events)
-                    };
-                    transforms(&gesture_values(surface, v, id), events).0
-                },
+                |v| pinches(surface, v),
             )
         },
     );
@@ -3687,5 +3713,108 @@ mod tests {
             assert!((pinch_scale(2.0, 2.0, 0.1) - 2.2).abs() < 1e-6);
         }
         assert_eq!(pinch_scale(0.02, 0.02, -5.0), 0.01);
+    }
+
+    /// A surface with a 400 × 400 scroll view zooming up to 4× over a
+    /// 400 × 400 picture with a 20 × 20 badge at (80, 80): (surface,
+    /// scroll view, badge).
+    fn zooming_surface() -> (Rc<Surface>, NshView, NshView) {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let frame = rect(0.0, 0.0, 400.0, 400.0);
+        let scroll = view(&surface.root, 2, ViewKind::Scroll, frame);
+        let picture = view(&scroll, 4, ViewKind::View, frame);
+        let badge = view(&picture, 6, ViewKind::View, rect(80.0, 80.0, 20.0, 20.0));
+        let behavior = nsh_core::ScrollBehavior {
+            max_zoom: 4.0,
+            ..Default::default()
+        };
+        crate::scroll::behavior(&surface, &scroll, &behavior);
+        let size = nsh_core::geometry::size(Points(400.0), Points(400.0));
+        crate::scroll::content(&surface, &scroll, size);
+        (surface, scroll, badge)
+    }
+
+    fn zoom(scroll: &NshView) -> (f32, f32, f32) {
+        let state = scroll.state();
+        let s = state.scroll.as_ref().unwrap();
+        (s.zoom, s.x.0, s.y.0)
+    }
+
+    #[test]
+    fn zoomed_content_is_hit_where_it_is_drawn() {
+        let (surface, scroll, badge) = zooming_surface();
+        let root = surface.input_root();
+        assert_eq!(at(&root, 90.0, 90.0), Some(6));
+        assert_eq!(at(&root, 170.0, 170.0), Some(4));
+        let zoom_to = nsh_core::Command::ZoomTo {
+            scale: 2.0,
+            center: Some(nsh_core::geometry::point(Points(0.0), Points(0.0))),
+            animated: false,
+        };
+        crate::scroll::command(&surface, &scroll, &zoom_to);
+        assert_eq!(zoom(&scroll), (2.0, 0.0, 0.0));
+        // The badge is drawn at (160, 160), 40 × 40.
+        assert_eq!(at(&root, 90.0, 90.0), Some(4));
+        assert_eq!(at(&root, 170.0, 170.0), Some(6));
+        assert_eq!(at(&root, 195.0, 195.0), Some(6));
+        assert_eq!(local(&badge, 180.0, 180.0), (10.0, 10.0));
+        let m = badge.to_root().unwrap();
+        assert_eq!(m.map(20.0, 20.0), Some((200.0, 200.0)));
+        // Panned by the wheel, both ways.
+        crate::scroll::wheel(&surface, &scroll, 40.0, 60.0);
+        assert_eq!(zoom(&scroll), (2.0, 40.0, 60.0));
+        assert_eq!(at(&root, 125.0, 105.0), Some(6));
+    }
+
+    #[test]
+    fn ctrl_wheel_and_touchpad_pinches_zoom_around_the_pointer() {
+        let (surface, scroll, _) = zooming_surface();
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        let step = |dy: f32| {
+            wheel(
+                &surface,
+                WheelEvent {
+                    x: 100.0,
+                    y: 100.0,
+                    dx: 0.0,
+                    dy,
+                    precise: false,
+                    modifiers: ctrl,
+                    time: 0.0,
+                },
+            )
+        };
+        // Scrolling up zooms in, the content point under the pointer
+        // staying there.
+        step(-ZOOM_NOTCH.0);
+        let (z, x, y) = zoom(&scroll);
+        assert!(z > 1.0, "{z}");
+        assert!(
+            (x - 100.0 * (z - 1.0)).abs() < 1e-3 && (y - x).abs() < 1e-3,
+            "{x} {y}"
+        );
+        for _ in 0..40 {
+            step(-ZOOM_NOTCH.0);
+        }
+        assert_eq!(zoom(&scroll).0, 4.0);
+        // One notch back zooms out from the limit at once.
+        step(ZOOM_NOTCH.0);
+        assert!(zoom(&scroll).0 < 4.0);
+        surface.input.zoom.borrow_mut().take();
+
+        // A touchpad pinch at (300, 200).
+        let (surface, scroll, _) = zooming_surface();
+        touchpad_pinch(&surface, 300.0, 200.0, 0.0, GesturePhase::Began);
+        touchpad_pinch(&surface, 300.0, 200.0, 1.0, GesturePhase::Moved);
+        let (z, x, y) = zoom(&scroll);
+        assert!(z > 1.5, "{z}");
+        assert!((x - 300.0 * (z - 1.0)).abs() < 1e-3, "{x}");
+        assert!((y - 200.0 * (z - 1.0)).abs() < 1e-3, "{y}");
+        touchpad_pinch(&surface, 300.0, 200.0, 0.0, GesturePhase::Ended);
+        assert_eq!(zoom(&scroll).0, z);
     }
 }
