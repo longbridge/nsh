@@ -181,8 +181,12 @@ pub fn main_with_args(mut options: AppOptions, args: Args) -> io::Result<()> {
                     terminal::set_cursor_style(shown)?;
                 }
                 let event = terminal::poll(timeout)?;
-                if let RunEvent::Input(nsh_platform_tui::Input::Focus(true)) = event {
-                    session.reassert()?;
+                match &event {
+                    RunEvent::Input(nsh_platform_tui::Input::Focus(true)) => session.reassert()?,
+                    RunEvent::Input(nsh_platform_tui::Input::Focus(false)) => {
+                        session.focus_lost()?;
+                    }
+                    _ => {}
                 }
                 Ok(event)
             }
