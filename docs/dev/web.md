@@ -1022,7 +1022,10 @@ own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web
 page's realm (the app runs in its iframe's) and writes the page's real `<head>`: each mounted `Head` is an entry in
 mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later
 one wins key by key, `meta` by `name` / `property`), the elements the heads made (`data-nsh-head`) are written again,
-and `document.title` / `<html lang>` fall back to what the page had before. A `canonical` path starts at the site's
+and `<html lang>` falls back to what the page had before. The merged title goes to the player (`setHeadTitle`), which
+owns `document.title`: the heads' title, else the main window's (a root `SetAttributes` with a `title` is encoded as
+the `setTitle` command, kept where the app is the page), else the page's own, written once the turn's history entries
+exist (after `syncHistory`, or after a traversal of its own lands) so each entry keeps its page's title. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
 
 ## Not implemented

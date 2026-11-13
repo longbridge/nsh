@@ -2077,6 +2077,71 @@ test("UrlScheme.setUrl gives its address to the entry of the page pushed with it
   }
 });
 
+test("the main window's title titles the page once the turn's entries exist, under a head's title", async () => {
+  const calls = [];
+  const saved = { history: globalThis.history, location: globalThis.location, document: globalThis.document };
+  globalThis.location = { href: "https://a.test/inbox", origin: "https://a.test" };
+  globalThis.document = { title: "Site", baseURI: "https://a.test/" };
+  // A browser gives an entry the document's title while it is current.
+  globalThis.history = {
+    state: null,
+    pushState(state) { calls.push(["push", document.title]); this.state = state; },
+    replaceState() { calls.push(["replace", document.title]); },
+    go(n) { calls.push(["go", n, document.title]); },
+  };
+  const turn = () => new Promise(resolve => setTimeout(resolve, 0));
+  try {
+    let depth = 0;
+    const player = Object.create(Player.prototype);
+    Object.assign(player, {
+      history: true, historyDepth: 0, historyIndex: 0, historyDepths: [0], ignoredPops: 0, historySession: "s", pageUrl: null,
+      views: new Map(), backDepth: () => depth, tellAddress() {}, showError: (m) => calls.push(["error", m]),
+    });
+    // A page pushed and the title set in one turn, the title's command
+    // first: the entry left keeps the title it had, the new one gets it.
+    depth = 1;
+    player.op_cmd(["cmd", 1, "setTitle", "Message"]);
+    player.syncHistorySoon();
+    await turn();
+    assert.deepEqual(calls.splice(0), [["push", "Site"]]);
+    assert.equal(document.title, "Message");
+    // A page popped: the title waits for the traversal to land.
+    depth = 0;
+    player.op_cmd(["cmd", 1, "setTitle", "Inbox"]);
+    player.syncHistorySoon();
+    await turn();
+    assert.deepEqual(calls.splice(0), [["go", -1, "Message"]]);
+    assert.equal(document.title, "Message");
+    player.popState({ state: { nsh: 0, nshSession: "s" } });
+    await turn();
+    assert.equal(document.title, "Inbox");
+    // A head's title wins while one is set; the window's comes back after.
+    player.setHeadTitle("Q3 earnings");
+    await turn();
+    assert.equal(document.title, "Q3 earnings");
+    player.op_cmd(["cmd", 1, "setTitle", "Archive"]);
+    await turn();
+    assert.equal(document.title, "Q3 earnings");
+    player.setHeadTitle(null);
+    await turn();
+    assert.equal(document.title, "Archive");
+    // An empty title gives the page its own back.
+    player.op_cmd(["cmd", 1, "setTitle", ""]);
+    await turn();
+    assert.equal(document.title, "Site");
+    // Where the app is not the page (an iframe, a page around it), the
+    // page's title is the page's.
+    const framed = Object.create(Player.prototype);
+    Object.assign(framed, { history: false, views: new Map() });
+    framed.op_cmd(["cmd", 1, "setTitle", "Framed"]);
+    await turn();
+    assert.equal(document.title, "Site");
+    assert.deepEqual(calls, []);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
+
 test("the browser's back gives the core the entry's address with no open, and a kept page keeps its own", () => {
   const calls = [];
   const saved = { history: globalThis.history, location: globalThis.location };
