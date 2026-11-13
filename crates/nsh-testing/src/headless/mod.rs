@@ -343,6 +343,8 @@ pub struct Headless {
     save_path: Option<std::path::PathBuf>,
     /// The URLs whose images fail to load ([`Headless::fail_images`]).
     failing_images: Vec<stub::Url>,
+    /// The URLs that fail to open ([`Headless::fail_open_urls`]).
+    failing_url_opens: Vec<stub::Url>,
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
@@ -480,6 +482,7 @@ impl Headless {
             picked_paths: Vec::new(),
             save_path: None,
             failing_images: Vec::new(),
+            failing_url_opens: Vec::new(),
             speech,
             audio,
             step: "open".to_owned(),
@@ -660,6 +663,20 @@ impl Headless {
         self.step(format!("failImages({url})"));
         self.failing_images.push(stub::Url::of(url));
         self.fail_matching_images();
+        self.done()
+    }
+
+    /// The URLs the app opens that match `url` fail to open from now on:
+    /// the app's `openUrl` resolves to not opened, as on a device with no
+    /// app for the URL or a browser that refused it, so a test checks what
+    /// the app shows then. Other URLs go on opening. `url` is matched
+    /// whole and `*` in it matches anything (`"https://example.com/*"`),
+    /// as [`StubNetwork`]'s routes are. The URLs are still recorded
+    /// ([`Screen::opened_urls`]): the app asked for them. Then waits until
+    /// the app is quiet.
+    pub fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("failOpenUrls({url})"));
+        self.failing_url_opens.push(stub::Url::of(url));
         self.done()
     }
 
@@ -1069,11 +1086,13 @@ impl Headless {
         }
         self.fail_matching_images();
         // URLs are recorded (`Screen::opened_urls`) and reported opened, as
-        // a device with an app for every scheme would.
-        for id in self.screen.take_url_opens() {
+        // a device with an app for every scheme would, but for those the
+        // test fails (`fail_open_urls`).
+        for (id, url) in self.screen.take_url_opens() {
+            let opened = !self.failing_url_opens.iter().any(|u| u.matches(&url));
             let fields = vec![
                 ("id", PayloadValue::Number(f64::from(id))),
-                ("opened", PayloadValue::Bool(true)),
+                ("opened", PayloadValue::Bool(opened)),
             ];
             control.dispatch_event(ROOT_ID, EventKind::OpenUrl, EventPayload::Map(fields));
         }
@@ -1353,15 +1372,36 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done when no batch came for
-    /// 100 ms and no native animation that ends by itself runs; on a
-    /// manual clock, as soon as the engine says it is idle
+    /// ended it. On the system's clock it is done once the engine has
+    /// handled what the step sent ([`Headless::caught_up`]) and then no
+    /// batch came for 100 ms and no native animation that ends by itself
+    /// runs; on a manual clock, as soon as the engine says it is idle
     /// ([`EngineControl::flush`]), without waiting.
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            self.quiet(QUIET, SETTLE)
+            let end = Instant::now() + SETTLE;
+            self.caught_up(end);
+            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+        }
+    }
+
+    /// On the system's clock: has the engine run what was sent to it
+    /// ([`EngineControl::flush`]) and applies the batches that brought,
+    /// again while they bring more (what applying them sends back: a
+    /// scroll reported, a focus moved), until `end` at most. The quiet
+    /// that ends a step is then counted from there, so an engine taking
+    /// longer than [`QUIET`] over a step does not end it early, with the
+    /// next step acting on the screen as it was before.
+    fn caught_up(&mut self, end: Instant) {
+        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+            let applied = self.applied;
+            self.flush(end);
+            self.drain();
+            if self.applied == applied {
+                return;
+            }
         }
     }
 
@@ -2746,6 +2786,48 @@ mod tests {
         assert!(app.shows("logo failed: false"));
         app.press("Switch").unwrap();
         app.wait_for("text:logo failed: true").unwrap();
+    }
+
+    /// Opens a page or a help address and shows whether it opened.
+    #[component]
+    fn Links() -> impl IntoElement {
+        let result = signal(String::from("nothing"));
+        let open = move |url: &'static str| {
+            move |_: &()| {
+                let opened = open_url(url);
+                spawn(async move { result.set(format!("{url} {}", opened.await)) });
+            }
+        };
+        view()
+            .child(text(move || result.get()))
+            .child(text("Page").on_press(open("https://example.com/docs/a")))
+            .child(text("Mail").on_press(open("mailto:help@example.com")))
+    }
+
+    #[test]
+    fn a_test_fails_the_urls_it_names_to_open() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Links>())).unwrap();
+        app.first_render().unwrap();
+        app.press("Page").unwrap();
+        app.wait_for("text:https://example.com/docs/a true")
+            .unwrap();
+
+        app.fail_open_urls("https://example.com/docs/*").unwrap();
+        app.press("Page").unwrap();
+        app.wait_for("text:https://example.com/docs/a false")
+            .unwrap();
+        // Only the URLs named.
+        app.press("Mail").unwrap();
+        app.wait_for("text:mailto:help@example.com true").unwrap();
+        // The app asked for each of them.
+        assert_eq!(
+            app.screen().opened_urls(),
+            [
+                "https://example.com/docs/a",
+                "https://example.com/docs/a",
+                "mailto:help@example.com"
+            ]
+        );
     }
 
     #[test]
