@@ -112,7 +112,11 @@ fn start(root: Root, height: f32) -> Headless {
 }
 
 fn scrolls(app: &Headless) -> usize {
-    app.screen()
+    scrolls_on(app.screen())
+}
+
+fn scrolls_on(screen: &nsh_testing::Screen) -> usize {
+    screen
         .commands()
         .iter()
         .filter(|(_, c)| matches!(c, Command::ScrollTo { y, .. } if y.0 > 0.0))
@@ -163,7 +167,13 @@ fn the_keys_bring_the_item_they_reach_into_view() {
     for _ in 0..7 {
         app.press_key("down").unwrap();
     }
-    assert!(scrolls(&app) > 0, "Item 12 is brought into view");
+    // The scroll follows the focus, once the item is measured.
+    let brought = app.wait_until(
+        "Item 12 brought into view",
+        std::time::Duration::from_secs(5),
+        |s| scrolls_on(s) > 0,
+    );
+    assert!(brought.is_ok(), "Item 12 is brought into view");
     app.press_key("enter").unwrap();
     app.wait_for("text:chose:Item 12").unwrap();
 }
