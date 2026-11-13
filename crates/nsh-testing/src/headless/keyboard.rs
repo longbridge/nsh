@@ -207,14 +207,10 @@ impl Headless {
             }
             return Ok(false);
         }
-        if stroke.key == Key::Escape
+        Ok(stroke.key == Key::Escape
             && plain
             && !m.shift
-            && self.screen.back_target() != crate::screen::Back::Nothing
-        {
-            return Ok(true);
-        }
-        Ok(false)
+            && self.screen.back_target() != crate::screen::Back::Nothing)
     }
 
     /// The keyboard asked view `from` (the keyboard focus) for its context
