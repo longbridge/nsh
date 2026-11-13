@@ -4,7 +4,8 @@
 // (`accessibilityLabel`), a press reported with `onPress` (the selected
 // tab's too) while the app owns which tab is selected (`selected`) and
 // shows its content, `disabled`, the list as one stop of the keyboard
-// focus (only the selected tab is `focusable`), and the app's look of a tab
+// focus (only the selected tab is `focusable`) named by its
+// `accessibilityLabel`, and the app's look of a tab
 // (`selectedStyle`) and of the marker it puts inside, whose
 // `group-selected:` and `group-disabled:` classes follow the tab. The
 // marker's widths move the label after it, which is how its script sees
@@ -41,6 +42,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <Tabs
         testID="sections"
+        accessibilityLabel="Sections"
         class="gap-[4px]"
         indicatorClass="left-0 w-[3px] my-[2px]"
         indicatorStyle={{ backgroundColor: "#ff0000" }}
