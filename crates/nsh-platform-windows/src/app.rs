@@ -181,6 +181,13 @@ pub struct AppOptions {
     /// their presses (`nsh`'s `Notifications`). Without it the permission is
     /// `unavailable` and nothing shows. [`run_app`] sets it.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes its login item
+    /// (`Application.loginItem()`: a value named [`app_id`](Self::app_id)
+    /// in the current user's `Run` key holding this executable's path,
+    /// which Settings lists under Startup apps). False by default, and read
+    /// by [`run_app`]'s view only: a view embedded in another app has no
+    /// login item. The release runner sets it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -193,6 +200,25 @@ pub struct AppOptions {
     /// instance, a later launch with a URL handing it to the running one.
     /// Empty: none of that.
     pub schemes: Vec<String>,
+    /// The app runs once (nsh.json `singleInstance`, from the package's
+    /// `nsh\app.json`): [`run_app`] hands a later launch's arguments and
+    /// working directory to the running instance, which brings its window
+    /// forward and tells the app (`Application.on("secondInstance", ...)`),
+    /// and exits before it opens a window.
+    pub single_instance: bool,
+    /// The file types the app opens (nsh.json `fileTypes`, from the
+    /// package's `nsh\app.json`): [`run_app`] registers them for the
+    /// current user (Open With) and hands the files it is started with to
+    /// the app (`Application.on("openFiles", ...)`), a later
+    /// launch with files handing them to the running instance.
+    pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// Runs [`run_app`]'s app in the background: its windows show without
+    /// activating and nothing brings them to the foreground, so the keyboard
+    /// stays with the app the user works in, while the window that would
+    /// have it reads as focused to the app. `nsh test --target windows` sets
+    /// it (the development host's `--background`); the test agent's input
+    /// goes to the window directly. False by default.
+    pub background: bool,
 }
 
 impl Default for AppOptions {
@@ -214,8 +240,12 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             schemes: Vec::new(),
+            single_instance: false,
+            file_types: Vec::new(),
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
+            background: false,
         }
     }
 }
@@ -251,6 +281,9 @@ pub struct AppView {
     surface: Rc<Surface>,
     hwnd: HWND,
     options: RefCell<AppOptions>,
+    /// The view is [`run_app`]'s: the standalone app's, not one embedded in
+    /// another app.
+    standalone: Cell<bool>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -305,6 +338,7 @@ impl AppView {
             surface,
             hwnd,
             options: RefCell::new(options),
+            standalone: Cell::new(false),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -445,12 +479,26 @@ impl AppView {
             speech: None,
             audio: None,
             windows: None,
+            login_item: self.login_item(&options),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.start(config);
+    }
+
+    /// The login item of the app this view runs: the standalone app's alone
+    /// ([`run_app`]'s view, not one embedded in another app, also while the
+    /// standalone app runs on this thread), when its runner says.
+    fn login_item(
+        &self,
+        options: &AppOptions,
+    ) -> Option<Arc<dyn nsh_core::desktop::LoginItemBackend>> {
+        (options.login_item && self.standalone.get()).then(|| {
+            Arc::new(crate::login_item::LoginItem::new(&options.app_id))
+                as Arc<dyn nsh_core::desktop::LoginItemBackend>
+        })
     }
 
     /// Where `asset:/` URIs resolve from now on.
@@ -616,6 +664,9 @@ fn wait_for_replaced_process() {
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     STANDALONE.set(true);
+    if options.background {
+        crate::window::run_in_background();
+    }
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
     // clipboard, drag and drop and WIC.
@@ -623,9 +674,13 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = OleInitialize(None);
     }
-    if let crate::linking::Start::Forwarded =
-        crate::linking::start(&options.app_id, &options.title, &options.schemes)
-    {
+    if let crate::linking::Start::Forwarded = crate::linking::start(
+        &options.app_id,
+        &options.title,
+        &options.schemes,
+        &options.file_types,
+        options.single_instance,
+    ) {
         return std::process::ExitCode::SUCCESS;
     }
     // The app to run, when it is known now (a dev server's comes later).
@@ -673,6 +728,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
             return std::process::ExitCode::FAILURE;
         }
     };
+    view.standalone.set(true);
     crate::linking::launch(view.surface());
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
@@ -728,6 +784,9 @@ pub(crate) fn show_main(surface: &Rc<Surface>, hwnd: HWND) {
     surface.paint();
     crate::window::show(hwnd);
     crate::window::set_cloaked(hwnd, false);
+    // The show's own messages worked the state out while the window was
+    // still cloaked, and uncloaking sends the window none.
+    crate::system::lifecycle_changed(surface);
     if let Some(mode) = surface.main_opening_mode.take() {
         crate::window_state::set_mode(hwnd, mode);
     }
@@ -839,6 +898,28 @@ mod tests {
         }
         // SAFETY: the test's own window.
         let _ = unsafe { DestroyWindow(view.hwnd()) };
+    }
+
+    #[test]
+    fn only_the_standalone_apps_view_has_a_login_item() {
+        let options = AppOptions {
+            login_item: true,
+            ..Default::default()
+        };
+        // An embedded view, while the standalone app runs on this thread.
+        STANDALONE.set(true);
+        let embedded = AppView::new(None, options.clone()).unwrap();
+        assert!(embedded.login_item(&options).is_none());
+        // `run_app`'s own view, when its runner turns it on.
+        let standalone = AppView::new(None, options.clone()).unwrap();
+        standalone.standalone.set(true);
+        assert!(standalone.login_item(&options).is_some());
+        assert!(standalone.login_item(&AppOptions::default()).is_none());
+        STANDALONE.set(false);
+        for view in [embedded, standalone] {
+            // SAFETY: the test's own windows.
+            let _ = unsafe { DestroyWindow(view.hwnd()) };
+        }
     }
 
     #[test]

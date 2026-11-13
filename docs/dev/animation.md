@@ -32,6 +32,16 @@
   `Easing.sample`, `Animated.sampleSpring` / `sampleDecay` return the curves from `nsh_core::animation::sample_easing` /
   `sample_driver` (the drivers' own code, stepped like frames, at most `MAX_SAMPLES`), so drawn curves are what runs;
   Rust components call `element::sample_easing` / `sample_spring` / `sample_decay` / `sample_decay_within`.
+  A driver's numbers are taken as given by the decoders and checked in `Running::new` (`driver.rs` `sanitized`): what
+  cannot move a value (stiffness or mass not above 0, a damping or target that is not finite, a NaN or infinite
+  duration) ends where it rests; negative damping is none (it oscillates, as an undamped spring does); a velocity that
+  is not finite is 0; an easing whose numbers are not finite is linear; a NaN delay is none (an infinite one waits, as
+  a sequence's `Delay` does); a NaN deceleration or bounce is 0, the clamps hold infinite ones; bounds that leave no
+  finite place (both NaN, or both the same infinity) are none (one NaN bound is the other, as `min` / `max` give it).
+  It warns once where an animation starts (`AnimationOp::Start`, `StartComposite`, `sample_driver`), not on each pass
+  of a loop. Numbers that still overflow on the way do not reach the views: an easing's frame moves linearly, and
+  otherwise the animation ends (a timing or spring at its target, a decay where it started). An overdamped spring is
+  two decaying exponentials (`spring`), which do not overflow.
   Bindable: `opacity`, `backgroundColor`, `borderColor` (all sides), a text's `color` (the whole text: iOS and Android draw
   it into a layer and paint over it in the color, `SourceIn` / `SRC_IN`), `translate` / `rotate` / `scale` (`[x, y]` per axis) and the steps of a `transform` list (a motion's,
   `createMotion`: `{ opacity, transform }`), and where views stick: a sticky view's `top` /
@@ -96,6 +106,13 @@
   the core leads each run of frames with the layout animation it takes, an empty one for the rest
   (`core/layout_scope.rs`), as the platforms animate a frame with the last `MountItem::LayoutAnimation` before it.
   Insertions and removals are not scoped (their animations are decided per batch on iOS, Android and the web).
+  A list's rows under a turn's layout animation (`core/list_motion.rs`): the core's `ScrollBy` that keeps what shows
+  in place (an inverted list's distance from the end, the visible rows) applies at once on the platforms, and a
+  recycled cell's frame was another row's. So each list's commit leads a run of frames without animation (the rows
+  that stay where they showed when the turn began, moved by what the core scrolled the list since; the cells placed
+  for another row, with their content, at their new place) and, after the scroll, the turn's animation with the
+  rows' new frames, which they slide to. The engine keeps frames of one view apart in different runs
+  (`keep_last_sets`).
 - **A physical layout spring** (`LayoutCurve::Spring(Spring)`, `LayoutTransition::spring`): gpui-base's spring,
   `Spring::new(response_ms)` (critically damped, the undamped period `response_ms`) or `Spring::from_stiffness(k)`
   (a mass of 1, as Material 3 Expressive gives its springs), shaped by `.damping_ratio(ζ)`. It is the same `Spring`

@@ -33,8 +33,9 @@
 //! elements.
 //!
 //! Each element gets a role ([`role_for`]), its name (AccessKit reads a
-//! `Label`'s name from its value), its `accessibilityHint` (and a value text
-//! that is not a range's) as description, its `testID` as author id (UIA's
+//! `Label`'s name from its value), its `accessibilityDescription` and
+//! `accessibilityHint` (and a value text that is not a range's) as
+//! description, its `testID` as author id (UIA's
 //! `AutomationId`, `AXIdentifier`, AT-SPI's accessible id), its states
 //! (disabled, selected, checked as toggled, expanded, busy), a range's
 //! numeric value, a field's value ([`crate::text_input::accessible_value`]),
@@ -89,7 +90,8 @@ use gpui::{
     A11ySubtreeBuilder, AnyElement, App, AvailableSpace, FocusHandle, InteractiveElement,
     IntoElement, StatefulInteractiveElement, Styled, Window,
     accesskit::{
-        self, Action, ActionData, AriaCurrent, CustomAction, Live, Node, Role, ScrollUnit, Toggled,
+        self, Action, ActionData, AriaCurrent, CustomAction, Invalid, Live, Node, Role, ScrollUnit,
+        Toggled,
     },
     div, point, px, size,
 };
@@ -251,6 +253,8 @@ pub(crate) fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Op
         AxRole::TreeItem => Role::TreeItem,
         AxRole::MenuItemCheckbox => Role::MenuItemCheckBox,
         AxRole::MenuItemRadio => Role::MenuItemRadio,
+        AxRole::Dialog => Role::Dialog,
+        AxRole::AlertDialog => Role::AlertDialog,
     })
 }
 
@@ -383,18 +387,15 @@ fn content_name(view: &NshView, out: &mut String) {
     });
 }
 
-/// The description: a value that is not a range's, and the hint.
+/// The description: a value that is not a range's, the description and
+/// the hint.
 pub(crate) fn help_of(a: &Accessibility, role: Role) -> Option<String> {
     let value_text = a
         .value
         .as_ref()
         .and_then(|v| v.text.as_deref())
         .filter(|_| !is_range(role));
-    match (value_text, a.hint.as_deref()) {
-        (Some(v), Some(h)) => Some(format!("{v}. {h}")),
-        (Some(t), None) | (None, Some(t)) => Some(t.to_owned()),
-        (None, None) => None,
-    }
+    a.help_text(value_text)
 }
 
 /// A range's minimum, maximum and current value, or `None` when the
@@ -518,6 +519,9 @@ fn describe(
     }
     if state.busy {
         node.set_busy();
+    }
+    if state.invalid {
+        node.set_invalid(Invalid::True);
     }
     let range = range_of(a, role);
     if let Some((min, max, now)) = range {
@@ -1584,6 +1588,8 @@ mod tests {
             (AxRole::TreeItem, Role::TreeItem),
             (AxRole::MenuItemCheckbox, Role::MenuItemCheckBox),
             (AxRole::MenuItemRadio, Role::MenuItemRadio),
+            (AxRole::Dialog, Role::Dialog),
+            (AxRole::AlertDialog, Role::AlertDialog),
         ] {
             assert_eq!(
                 role_for(&with_role(role), ViewKind::View, false),
@@ -1682,7 +1688,17 @@ mod tests {
                 ..Default::default()
             },
         );
-        let field = view(6, ViewKind::Input, labelled("Password"));
+        let field = view(
+            6,
+            ViewKind::Input,
+            Accessibility {
+                state: AccessibilityState {
+                    invalid: true,
+                    ..Default::default()
+                },
+                ..labelled("Password")
+            },
+        );
         slider.insert_before(&root, None);
         off.insert_before(&root, None);
         field.insert_before(&root, None);
@@ -1700,6 +1716,7 @@ mod tests {
         assert_eq!(s.value(), Some("3 of 10"));
         assert_eq!(s.description(), Some("Volume"));
         assert!(s.is_busy());
+        assert_eq!(s.invalid(), None);
         assert_eq!(s.live(), Some(Live::Assertive));
         assert!(s.supports_action(Action::Increment));
         assert!(!s.supports_action(Action::Decrement));
@@ -1719,6 +1736,8 @@ mod tests {
         assert_eq!(f.label(), Some("Password"));
         assert_eq!(f.value(), None);
         assert!(f.supports_action(Action::SetValue));
+        // Its content rejected by the app (ARIA's `aria-invalid`).
+        assert_eq!(f.invalid(), Some(Invalid::True));
     }
 
     /// `visibility: hidden` takes the view and its subtree out of the tree,
@@ -1818,6 +1837,15 @@ mod tests {
         assert_eq!(
             help_of(&button, Role::Button).as_deref(),
             Some("3 of 10. Plays")
+        );
+        // The app's description goes between the value and the hint.
+        let described = Accessibility {
+            description: Some("The whole album".into()),
+            ..button.clone()
+        };
+        assert_eq!(
+            help_of(&described, Role::Button).as_deref(),
+            Some("3 of 10. The whole album. Plays")
         );
         let progress = Accessibility {
             value: Some(AccessibilityValue {

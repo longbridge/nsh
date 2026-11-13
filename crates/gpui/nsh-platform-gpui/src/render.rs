@@ -9,9 +9,11 @@
 //! 1. shadows and background ([`crate::decor::draw_background`]),
 //! 2. the content, clipped to the bounds: a shader's frame (to the rounded
 //!    bounds), text, image, canvas,
-//! 3. the children (clipped to the bounds when the view clips),
-//! 4. the hosted items ([`crate::view::Native`]) and the scroll indicator,
-//! 5. the border ([`crate::decor::draw_border`]).
+//! 3. the border ([`crate::decor::draw_border`]) when the view does not
+//!    clip,
+//! 4. the children (clipped to the bounds when the view clips),
+//! 5. the hosted items ([`crate::view::Native`]) and the scroll indicator,
+//! 6. the border when the view clips, then the outline.
 //!
 //! GPUI paints primitives (quads, paths, glyphs, images) in window
 //! coordinates (logical pixels, which are nsh's points), with no world
@@ -22,7 +24,8 @@
 //! rectangles (translations and scales) are GPUI's quads, exact; under a
 //! rotation, skew or perspective they are filled as paths whose points are
 //! mapped one by one ([`DrawCx::fill_contours`]), so they turn and project
-//! with the view; glyphs are placed at their mapped origins, upright.
+//! with the view; glyphs are placed at their mapped origins, upright, and
+//! images are turned by `image::turn`.
 //!
 //! Clips are rectangles in window coordinates (GPUI's content masks),
 //! intersected as they nest. A clip that is rounded or not axis-aligned
@@ -192,6 +195,27 @@ impl<'a> DrawCx<'a> {
         (a * x + c * y + tx, b * x + d * y + ty)
     }
 
+    /// The rectangle (current coordinates) kept upright: its size scaled
+    /// by the transform's axes and centered where its center lands. For
+    /// sprites, which GPUI cannot turn: a rotated or skewed one keeps its
+    /// size instead of filling [`DrawCx::rect`]'s bounding box.
+    pub(crate) fn upright(&self, x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
+        if self.axis_aligned() {
+            return self.rect(x, y, w, h);
+        }
+        let (cx, cy) = self.map_pt((x + w / 2.0, y + h / 2.0));
+        let (o, ax, ay) = (
+            self.map_pt((x, y)),
+            self.map_pt((x + w, y)),
+            self.map_pt((x, y + h)),
+        );
+        let (sw, sh) = (
+            (ax.0 - o.0).hypot(ax.1 - o.1),
+            (ay.0 - o.0).hypot(ay.1 - o.1),
+        );
+        bounds(cx - sw / 2.0, cy - sh / 2.0, sw, sh)
+    }
+
     /// The window bounds of the rectangle (current coordinates): exact
     /// when [`DrawCx::axis_aligned`], else its bounding box.
     pub(crate) fn rect(&self, x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
@@ -309,6 +333,12 @@ impl<'a> DrawCx<'a> {
     /// polygon, [`DrawCx::shows`]).
     pub(crate) fn has_clip_polygon(&self) -> bool {
         self.clip_polygon.is_some()
+    }
+
+    /// The clip polygon (window coordinates, convex), when the clip is
+    /// rounded or not axis-aligned.
+    pub(crate) fn clip_polygon(&self) -> Option<&[shape::Pt]> {
+        self.clip_polygon.as_deref()
     }
 
     /// True if the window point `(x, y)` lies inside the clip polygon (or
@@ -626,9 +656,8 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
 
 /// Draws what `view` draws and its subtree at `world` (set on the
 /// context): the content's shadow, shadows and background, the content
-/// clipped to the bounds,
-/// the children, the hosted items, the scroll indicator, the border and
-/// outline.
+/// clipped to the bounds, the border,
+/// the children, the hosted items, the scroll indicator and the outline.
 pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     crate::decor::draw_content_shadow(cx, view, world);
     let state = view.state();
@@ -658,8 +687,13 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
         }
         None => crate::canvas::draw(cx, &state),
     }
+    // As on iOS and macOS: a view that does not clip has its border over
+    // its own content and under its children (a label on an outlined field
+    // covers it); a clipping one has it over its children (a rounded card
+    // with a full-bleed image), as a layer border.
     if !clip {
         cx.pop();
+        crate::decor::draw_border(cx, &state);
     }
     let natives = state.natives.clone();
     let culled = clip && cx.culled();
@@ -691,8 +725,9 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     crate::scroll::draw_indicator(cx, view, &state);
     if clip {
         cx.pop();
+        crate::decor::draw_border(cx, &state);
     }
-    crate::decor::draw_border(cx, &state);
+    crate::decor::draw_outline_of(cx, &state);
 }
 
 /// The GPUI element of a surface: fills its parent's space and draws the

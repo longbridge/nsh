@@ -114,6 +114,10 @@ pub(crate) struct Geometry {
     /// Each block's frame in its parent's box, and its parent; `None` for
     /// a frame measured in the content box directly (a content slot).
     pub(crate) frames: HashMap<u64, (Option<u64>, Bounds<Points>)>,
+    /// Where a block's children start in its box, when they sit in a
+    /// holder that is not the block's own origin (a task item's content,
+    /// after its checkbox): their frames are in the holder, not the block.
+    pub(crate) insets: HashMap<u64, Point<Points>>,
     /// The textblocks, by block id.
     pub(crate) texts: HashMap<u64, TextGeo>,
     /// The atoms and node views edited as units, by block id: their
@@ -146,6 +150,20 @@ impl Geometry {
         )
     }
 
+    /// Whether the content point `at` is in a block's box before where its
+    /// children start: on a task item's checkbox, or under it.
+    pub(crate) fn before_holder(&self, at: Point<Points>) -> bool {
+        self.insets.iter().any(|(id, inset)| {
+            let (Some(origin), Some((_, frame))) = (self.origin(*id), self.frames.get(id)) else {
+                return false;
+            };
+            at.x >= origin.x
+                && at.x < origin.x + inset.x
+                && at.y >= origin.y
+                && at.y < origin.y + frame.size.height
+        })
+    }
+
     /// Block `id`'s top left in the content box.
     pub(crate) fn origin(&self, id: u64) -> Option<Point<Points>> {
         let mut at = Point::default();
@@ -159,7 +177,13 @@ impl Geometry {
             at.x += frame.origin.x;
             at.y += frame.origin.y;
             id = match parent {
-                Some(p) => Some(*p),
+                Some(p) => {
+                    if let Some(inset) = self.insets.get(p) {
+                        at.x += inset.x;
+                        at.y += inset.y;
+                    }
+                    Some(*p)
+                }
                 None => return Some(at),
             };
             guard += 1;
@@ -236,49 +260,65 @@ impl Geometry {
     /// The boxes covering `from..to`, one per line of each textblock it
     /// crosses (through a line's end where it goes on).
     pub(crate) fn range_rects(&self, from: usize, to: usize) -> Vec<Bounds<Points>> {
-        let mut out = Vec::new();
         let mut ids: Vec<(&u64, &TextGeo)> = self.texts.iter().collect();
         crate::sort::sort_by_key(&mut ids, |(_, g)| g.start);
-        for (id, geo) in ids {
-            let (start, end) = (geo.start, geo.start + geo.map.size);
-            if end < from || start > to {
-                continue;
-            }
+        let mut out = Vec::new();
+        for (id, _) in ids {
             let Some((origin, _)) = self.text_box(*id) else {
                 continue;
             };
-            let a = geo.map.to_text(from.max(start) - start);
-            let b = geo.map.to_text(to.min(end) - start);
-            for line in &geo.lines {
-                if line.end < a || line.start > b {
-                    continue;
-                }
-                let x0 = if a > line.start {
-                    self.x_in_line(line, a)
-                } else {
-                    px(0.0)
-                };
-                let through =
-                    to > end || b > line.end || (b == line.end && to > start + geo.map.to_doc(b));
-                let x1 = if b < line.end || (b == line.end && !through) {
-                    self.x_in_line(line, b)
-                } else {
-                    line.width + px(4.0)
-                };
-                if x1 <= x0 && !(through && a <= line.end) {
-                    continue;
-                }
-                out.push(Bounds::new(
-                    Point::new(origin.x + line.x + x0, origin.y + line.y),
-                    Size::new((x1 - x0).max(px(4.0)), line.height),
-                ));
+            out.extend(
+                self.text_range_rects(*id, from, to)
+                    .into_iter()
+                    .map(|b| Bounds::new(origin + b.origin, b.size)),
+            );
+        }
+        out
+    }
+
+    /// The boxes of `from..to` in textblock `id`, in its text's box: one
+    /// per line it crosses (through a line's end where it goes on), none
+    /// when the range misses the block.
+    pub(crate) fn text_range_rects(&self, id: u64, from: usize, to: usize) -> Vec<Bounds<Points>> {
+        let mut out = Vec::new();
+        let Some(geo) = self.texts.get(&id) else {
+            return out;
+        };
+        let (start, end) = (geo.start, geo.start + geo.map.size);
+        if end < from || start > to {
+            return out;
+        }
+        let a = geo.map.to_text(from.max(start) - start);
+        let b = geo.map.to_text(to.min(end) - start);
+        for line in &geo.lines {
+            if line.end < a || line.start > b {
+                continue;
             }
-            if geo.lines.is_empty() && from <= start && to > end {
-                out.push(Bounds::new(
-                    origin,
-                    Size::new(px(4.0), geo.frame.size.height),
-                ));
+            let x0 = if a > line.start {
+                self.x_in_line(line, a)
+            } else {
+                px(0.0)
+            };
+            let through =
+                to > end || b > line.end || (b == line.end && to > start + geo.map.to_doc(b));
+            let x1 = if b < line.end || (b == line.end && !through) {
+                self.x_in_line(line, b)
+            } else {
+                line.width + px(4.0)
+            };
+            if x1 <= x0 && !(through && a <= line.end) {
+                continue;
             }
+            out.push(Bounds::new(
+                Point::new(line.x + x0, line.y),
+                Size::new((x1 - x0).max(px(4.0)), line.height),
+            ));
+        }
+        if geo.lines.is_empty() && from <= start && to > end {
+            out.push(Bounds::new(
+                Point::default(),
+                Size::new(px(4.0), geo.frame.size.height),
+            ));
         }
         out
     }
@@ -468,6 +508,40 @@ fn line_of(lines: &[TextLine], t: u32, affinity: Affinity) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A task item's content holds its blocks after the checkbox: their
+    /// frames are in the holder, so the holder's offset is part of where
+    /// they are (the caret and the selection of a task's text).
+    #[test]
+    fn a_holders_inset_is_part_of_its_children_origin() {
+        let mut geo = Geometry::default();
+        let at =
+            |x: f32, y: f32| Bounds::new(Point::new(px(x), px(y)), Size::new(px(100.0), px(20.0)));
+        geo.frames.insert(1, (Some(DOC), at(0.0, 40.0)));
+        geo.frames.insert(2, (Some(1), at(0.0, 0.0)));
+        assert_eq!(geo.origin(2), Some(Point::new(px(0.0), px(40.0))));
+        geo.insets.insert(1, Point::new(px(24.0), px(0.0)));
+        assert_eq!(geo.origin(2), Some(Point::new(px(24.0), px(40.0))));
+        // The item itself is in its own parent's box: no inset of its own.
+        assert_eq!(geo.origin(1), Some(Point::new(px(0.0), px(40.0))));
+    }
+
+    /// The checkbox is in the item's box before its content: a press there
+    /// is the checkbox's, wherever the item is in the document.
+    #[test]
+    fn a_point_before_a_holder_is_on_the_items_checkbox() {
+        let mut geo = Geometry::default();
+        let at =
+            |x: f32, y: f32| Bounds::new(Point::new(px(x), px(y)), Size::new(px(100.0), px(20.0)));
+        geo.frames.insert(1, (Some(DOC), at(10.0, 40.0)));
+        geo.frames.insert(2, (Some(DOC), at(10.0, 60.0)));
+        geo.insets.insert(1, Point::new(px(24.0), px(0.0)));
+        let on = |x: f32, y: f32| geo.before_holder(Point::new(px(x), px(y)));
+        assert!(on(10.0, 40.0) && on(33.0, 59.0));
+        // The item's text, the margin beside it, and a block without a
+        // holder are not.
+        assert!(!on(34.0, 50.0) && !on(9.0, 50.0) && !on(20.0, 70.0));
+    }
 
     fn map() -> InlineMap {
         // "ab", an atom, a widget before "cd".

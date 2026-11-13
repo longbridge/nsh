@@ -309,7 +309,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         state: Cell::new(None),
     });
     let weak = Rc::downgrade(&window);
-    view.set_invalidate(Rc::new(move |_| {
+    view.set_invalidate(Rc::new(move |_, _| {
         if let Some(window) = weak.upgrade() {
             invalidate(&window);
         }
@@ -628,8 +628,10 @@ pub(crate) fn escape(surface: &Surface, event: &KeyEvent) -> bool {
 /// popup of its own) or nowhere of the system's (a menu of its own).
 fn blur(surface: &Surface, window: &AppWindow) {
     let hwnd = window.hwnd;
-    // SAFETY: plain queries.
-    let (visible, mut active) = unsafe { (IsWindowVisible(hwnd).as_bool(), GetForegroundWindow()) };
+    // SAFETY: a plain query.
+    let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
+    // In a background app: the window that would have the keyboard.
+    let mut active = crate::window::foreground();
     if !visible || window.closed.get() {
         return;
     }
@@ -759,6 +761,8 @@ pub(crate) fn handle(
         }
         WM_ERASEBKGND => Some(Some(LRESULT(1))),
         WM_SIZE => {
+            // The frame's material follows the zoom state.
+            crate::shell::zoom_changed(hwnd);
             if let Some(window) = &window {
                 // What DWM shows past the last frame meanwhile, as the main
                 // window's.

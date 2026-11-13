@@ -6,7 +6,7 @@
 
 use taffy::Position;
 
-use super::{Core, Key, Kind, NO_KEY, rounded, span};
+use super::{Core, Key, Kind, NO_KEY, rounded, scroll_extent, span};
 use crate::{geometry::Bounds, mount::MountItem, ops::EventKind, text::TextEngine};
 
 /// How far around its viewport a scroll view mounts its content, in
@@ -79,7 +79,9 @@ impl<M: TextEngine> Core<M> {
             self.ask_row(child);
             return true;
         }
-        let Some(scope) = scope else { return false };
+        let Some(scope) = scope else {
+            return self.pace_hold(child);
+        };
         if self.nodes[child as usize].created || self.never_culled(child) {
             return false;
         }
@@ -128,6 +130,14 @@ impl<M: TextEngine> Core<M> {
                 l.size.width,
                 l.size.height,
             );
+            // A scroll view's content size, sent with the frame when it is
+            // made (a list's view in its parent's viewport has none).
+            let node = &mut self.nodes[key as usize];
+            if node.kind == Kind::Scroll
+                && let Some(scroll) = node.scroll.as_mut()
+            {
+                scroll.culled_content = Some(scroll_extent(&l));
+            }
             if let Some(parent) = self.nodes.get(self.nodes[key as usize].parent as usize)
                 && parent.rtl
                 && parent.kind == Kind::Scroll
@@ -313,6 +323,20 @@ impl<M: TextEngine> Core<M> {
                     left = true;
                     continue;
                 }
+                // In the overscan, not in sight: within the turn's budget
+                // (`pace.rs`).
+                let seen = cx < x + w && cy < y + h && cx + cw > x && cy + ch > y;
+                if self.culls_content
+                    && !seen
+                    && !f.origin.x.0.is_nan()
+                    && cw > 0.0
+                    && ch > 0.0
+                    && !self.never_culled(child)
+                    && !self.pace_overscan()
+                {
+                    left = true;
+                    continue;
+                }
                 self.make_culled(parent, child);
                 made = true;
                 if self.nodes[child as usize].kind.is_container() {
@@ -326,7 +350,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Makes culled `child`'s native view in made `parent`'s, at its place
     /// among its siblings, with the frame the core has for it.
-    fn make_culled(&mut self, parent: Key, child: Key) {
+    pub(super) fn make_culled(&mut self, parent: Key, child: Key) {
         self.ensure_created(child);
         let before = self.native_before(parent, child);
         self.mount.push(MountItem::Insert {
@@ -373,6 +397,7 @@ impl<M: TextEngine> Core<M> {
         cx.deferred = false;
         if std::mem::take(&mut cx.estimated) {
             cx.cache = None;
+            cx.baseline = None;
             cx.min_content = None;
             self.layout.mark_dirty(layout);
             self.needs_layout = true;
@@ -473,6 +498,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.tree_order_changed |= self.track_tree_order;
+        self.tab_places_stale = true;
     }
 
     /// View `key` is the placeholder of an `<Each>` row

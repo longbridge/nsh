@@ -37,6 +37,7 @@ mod input;
 mod key_focus;
 mod keymap;
 mod links;
+mod login_item;
 mod menu_style;
 mod mount;
 mod native;
@@ -60,7 +61,10 @@ mod window;
 mod xtest;
 
 pub use gtk4;
-pub use nsh_core::platform::{Appearance, Locale};
+pub use nsh_core::{
+    file_type,
+    platform::{Appearance, Locale},
+};
 pub use nsh_engine::{
     App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Limits, Root,
 };

@@ -89,8 +89,7 @@
   position; Windows, Linux and GPUI draw at the fitted rectangle; the web sets CSS's `object-position` on the `<img>`
   (and the tint mask's position).
 - **Known follow-ups** (phase 1 of `image-loading-design.md`): Windows scales with WIC after the BGRA conversion, so
-  a JPEG decodes at full size before it shrinks; the Windows and macOS surfaces carry no access policy
-  (`Access::default()`), so every redirect is allowed except `https` to `http`.
+  a JPEG decodes at full size before it shrinks.
 - **Disk cache** (`nsh_core::image::DiskCache`, `image/cache.rs`): the encoded bytes of every `http(s)://` image (views,
   canvases, `getSize` / `prefetch`) are kept on disk on every native backend, so an app reopened shows what it showed
   without a download, and offline. One implementation in the core; each loader keeps its own networking and routes a
@@ -105,6 +104,9 @@
   tenth of the time since `Last-Modified` (at most 7 days), less the response's age; stale at once with `no-cache`
   or no freshness. Stale copies are revalidated (`304` refreshes them by its headers over the stored ones, `4xx`
   drops them) and served when the request fails or the server answers `5xx`, unless `must-revalidate` / `no-cache`.
+  A download that ends at a redirect it did not follow drops the entry and serves nothing; one the app may not load
+  arrives as `Fetched::refused` from the core loader's ureq and macOS's `NSURLSession`, and as the unfollowed `3xx`
+  from iOS and Android.
   Keyed by URL alone (sources carry no request headers, so `Vary` other than `*` cannot differ). `asset:/` URIs are
   never kept (the dev server's change with the app). Each entry is one file named by a digest of its URL (URL, policy
   headers, body, CRC32 of them), written under a temporary name and renamed: readers on any thread, surface or
@@ -144,6 +146,15 @@
   through `Native.imageBytes`, the web runtime gets them once per key (`image_bytes`) as a browser blob URL that
   `asset()` maps the key to, revoked (`release_image`) when no source holds them. `Image.getSize` / `prefetch` of a
   `data:` URI decode it on the platform (`nsh_core::image::decode_data_uri`, the one decoder every backend uses).
+- **Pixel buffers** (`ImageSrc::rgba`, Rust only): an `ImageData` made by `ImageData::from_rgba` keeps the app's
+  straight RGBA buffer (no copy) and reports it through `ImageData::rgba()`. The source goes by a fresh
+  `data:image/png;nsh-key=<random>` key per buffer (no digest of megabytes of pixels per frame; the key's form is one
+  `ImageSource::inline` turns into `data:,` when an app writes it, as for digests), and its natural size is the
+  buffer's (`Images::decode` reads it from `rgba()`, not a header). Windows, macOS, Linux and GPUI take the pixels in
+  their decoder closures (`from_rgba`: a copy into their own format, no decode, no downsampling); every other path
+  reading `ImageData::bytes()` (iOS's `NSData`, Android's `Native.imageBytes`, the web's `image_bytes`, `getSize`)
+  gets an uncompressed PNG (stored deflate blocks) built once on first use. Old frames leave the caches as any
+  unshown source does (L3 never keeps in-memory bytes; L4 entries without a lease are evicted).
 - **Picked images** (`nsh`'s `Picker`, `nsh_core::picker`): `Picker.pickImages` sends the root `Command::PickImages` with a
   `PickRequest` checked in Rust (`limit`: 1 for a single pick, at most `MAX_PICKED` = 100; `max_dimension`, `quality`
   as a `Percentage`, `PickFormat::Compatible` / `Current`); the `picker` capability gates it (denied: `[]` and a log
@@ -156,8 +167,9 @@
   `preferredAssetRepresentationMode` compatible (the system turns HEIC into JPEG) or current, ordered selection when
   several; each item's file is read inside `loadFileRepresentationForTypeIdentifier`'s completion (the file goes when it
   returns) and prepared with ImageIO (`picker.rs`: `CGImageSourceCreateThumbnailAtIndex` with the transform and the
-  longer side, `CGImageDestination` with `kCGImageDestinationLossyCompressionQuality`). macOS: an `NSOpenPanel` sheet
-  and the same ImageIO preparation (`nsh-platform-macos` `picker.rs`, tested with `sips`' HEIC). Android
+  longer side, `CGImageDestination` with `kCGImageDestinationLossyCompressionQuality`). macOS: an `NSOpenPanel`, a
+  sheet of the window while the user sees it, else a window of its own (`window::panel_window`, `macos.md`), and the
+  same ImageIO preparation (`nsh-platform-macos` `picker.rs`, tested with `sips`' HEIC). Android
   (`Picker.java`): `MediaStore.ACTION_PICK_IMAGES` (API 33+, or 30+ with SDK extension 2), else `ACTION_GET_CONTENT`
   for `image/*`, started by a headless retained `android.app.Fragment` added to the view's activity (the embedding app
   forwards no result); the bytes are read from the content resolver, sized with `BitmapFactory` bounds and the EXIF

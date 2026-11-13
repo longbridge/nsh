@@ -119,6 +119,13 @@ pub struct RichEditorProps {
     /// The gap between the selection and the bubble menu (default 8).
     #[prop(default = px(8.0))]
     pub bubble_menu_offset: Prop<Points>,
+    /// The app's own layer over the document, inside the box that scrolls:
+    /// what it holds moves with the text in the same frame (a block's
+    /// handle in the margin, a marker beside a node). It covers the
+    /// content box and takes no press itself; the app places its children
+    /// in the content box's points, where `nodeRect` and `coordsAtPos`
+    /// answer.
+    pub content_layer: Prop<Option<Slot>>,
 }
 
 /// A change of a `RichEditor`'s document. The document itself is read on

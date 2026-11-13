@@ -226,7 +226,7 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 
 只要路由还在栈中，页面就保持挂载：返回时，上一个页面与离开时完全相同，包括滚动位置、输入框和 signal。路由离开栈时，页面的 [`cleanup`](./reactivity.md) 处理函数会运行。
 
-应用在 `onChange` 里跟随自己的导航：统计页面、保存路由以便恢复，或者给每个页面一个地址。[`UrlScheme`](../modules/nsh.md#urlscheme) 在每个平台上都保存着应用的地址：应用用 `UrlScheme.url()` 构建最初的路由，在 `onChange` 里用 `UrlScheme.setUrl` 设置顶层页面的地址，在 Web 上它就是浏览器显示的地址。
+应用在 `onChange` 里跟随自己的导航：统计页面、保存路由以便恢复，或者给每个页面一个地址。[`UrlScheme`](../modules/nsh.md#urlscheme) 在每个平台上都保存着应用的地址：应用用 `UrlScheme.url()` 构建最初的路由，在 `onChange` 里用 `UrlScheme.setUrl` 设置顶层页面的地址，在 Web 上它就是浏览器显示的地址。栈说明不了的情况，即在页面相同的记录之间后退或前进，以 `UrlScheme.on("change")` 告诉应用；没有自己页面的地址（标签页、筛选）用 `UrlScheme.setUrl(url, { history: "push" })` 成为这样一条记录。
 
 <a id="navpage-and-the-header"></a>
 

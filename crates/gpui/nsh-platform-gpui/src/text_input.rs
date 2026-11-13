@@ -788,6 +788,7 @@ fn move_focus(surface: &Rc<Surface>, view: Option<&NshView>, old: Option<&NshVie
     if let Some(view) = view
         && let Some(input) = input_of(view)
     {
+        crate::key_focus::clear(surface);
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = Some(view.clone()));
         surface.window_focus_requested.set(true);
         input.focused.set(true);
@@ -875,16 +876,34 @@ pub(crate) fn hold_key(surface: &Surface, event: &KeyEvent) -> bool {
 
 /// The app is taking `view` out. When the field with the keyboard is in
 /// it, text typed before the next field takes the keyboard waits for that
-/// field, as after an action that can move focus.
+/// field, as after an action that can move focus. The field lets go of the
+/// keyboard at once, with no `onBlur`, as a removed DOM element: a removal
+/// animation or a departing screen keeps it attached a while, when keys
+/// must not reach the gone component.
 pub(crate) fn removing(surface: &Surface, view: &NshView) {
     let Some(field) = FOCUS.with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()))
     else {
         return;
     };
-    let mut at = Some(field);
+    let mut at = Some(field.clone());
     while let Some(node) = at {
         if node == *view {
             arm(surface);
+            if let Some(input) = input_of(&field) {
+                input.focused.set(false);
+                input.drag.set(None);
+                input.model.borrow_mut().composition = None;
+                input.relayout();
+            }
+            FOCUS.with(|f| {
+                if let Some(f) = f.borrow_mut().get_mut(&surface.key()) {
+                    f.view = None;
+                }
+            });
+            crate::input::set_state(surface, &field, state::FOCUSED, false);
+            field.changed();
+            blink::update();
+            surface.invalidate();
             return;
         }
         at = node.parent_view();

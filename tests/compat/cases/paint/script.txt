@@ -655,6 +655,7 @@ style id:icon backgroundColor #ffffffff
 style id:busy backgroundColor #ff0000ff
 style id:checked backgroundColor #00ff00ff
 style id:selected backgroundColor #0000ffff
+style id:invalid backgroundColor #ff8800ff
 # `data-*:` and `group-data-*:` are known classes; without the attribute
 # (only components' parts show them) the plain ones apply.
 style id:data backgroundColor #ccccccff
@@ -739,6 +740,7 @@ style id:drop-shadow-color filter drop-shadow(0 3 3 #ff000080)
 style id:bg-current backgroundColor #ff000080
 style id:perspective-none transform rotateY(45deg)
 style id:palette backgroundColor #79697bff
+style id:bg-image backgroundImage linear-gradient(180deg, #ff0000ff, #0000ffff)
 covers [styles] borderStyle
 covers [styles] borderWidth
 covers [styles] borderTopWidth

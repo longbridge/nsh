@@ -768,8 +768,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = &a.label {
         let _ = write!(s, ",\"label\":{}", json_str(l));
     }
-    if let Some(h) = &a.hint {
-        let _ = write!(s, ",\"hint\":{}", json_str(h));
+    // `aria-description`: the description, then the hint.
+    if let Some(h) = a.help_text(None) {
+        let _ = write!(s, ",\"hint\":{}", json_str(&h));
     }
     // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
     let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
@@ -791,6 +792,9 @@ fn props_json(p: &ViewProps) -> String {
     if a.state.has_popup {
         s.push_str(",\"hasPopup\":true");
     }
+    if a.state.invalid {
+        s.push_str(",\"invalid\":true");
+    }
     if let Some(p) = a.state.pressed {
         let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
     }
@@ -799,6 +803,13 @@ fn props_json(p: &ViewProps) -> String {
     }
     if let Some(l) = a.level {
         let _ = write!(s, ",\"level\":{l}");
+    }
+    // The views it names (`aria-activedescendant`, `aria-controls`).
+    if let Some(id) = a.active_descendant {
+        let _ = write!(s, ",\"activeDescendant\":{id}");
+    }
+    if let Some(id) = a.controls {
+        let _ = write!(s, ",\"controls\":{id}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
@@ -1534,6 +1545,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     .str("closeNotification")
                     .str(name)
                     .end(),
+                // The page's own: a browser gives a page none an earlier
+                // load showed.
+                N::CloseAll => out.item("cmd").num(id).str("closeAllNotifications").end(),
                 N::SetBadge(count) => out.item("cmd").num(id).str("setBadge").num(*count).end(),
                 // Presses are reported as they come: a browser starts no
                 // page from one.
@@ -1608,7 +1622,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         }
         // `nsh.js` `pickFiles`: the request, the limit, the extensions
         // offered as an input's `accept` (empty: any file), the largest file
-        // read.
+        // read (a larger one answers with its name and size only).
         Command::PickFiles {
             id: request,
             request: asked,
@@ -1624,7 +1638,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(*request)
                 .num(asked.limit)
                 .str(&accept)
-                .num(nsh_core::picker::MAX_PICKED_FILE_BYTES as f64)
+                .num(asked.size_limit() as f64)
                 .end();
         }
         // The id is written whole (`num` rounds); the page answers with
@@ -1642,6 +1656,15 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .raw(&args.to_string())
                 .end();
         }
+        // `nsh.js` `hostPost`: nothing comes back.
+        Command::HostPost { name, args } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostPost")
+                .str(name)
+                .raw(&args.to_string())
+                .end();
+        }
         Command::ImageInfo { id: request, uri } => {
             out.item("cmd")
                 .num(id)
@@ -1653,6 +1676,16 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         // A browser's bars are the browser's; the browser's own developer
         // tools measure the page.
         Command::StatusBar(_) | Command::PerfMonitor(_) => {}
+        // The main window's title is the page's title (`nsh.js` writes it
+        // where the app is the page); the rest of a window is the browser's.
+        Command::Desktop(desktop) => match (id == nsh_core::ROOT_ID, &**desktop) {
+            (true, nsh_core::desktop::DesktopCommand::SetAttributes(attributes)) => {
+                if let Some(title) = &attributes.title {
+                    out.item("cmd").num(id).str("setTitle").str(title).end();
+                }
+            }
+            _ => log::debug!("web: command {desktop:?} is not supported"),
+        },
         other => log::debug!("web: command {other:?} is not supported"),
     }
 }
@@ -1782,4 +1815,46 @@ fn base64(bytes: &[u8]) -> String {
         });
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::desktop::{DesktopCommand, WindowAttributes, WindowRequest};
+
+    use super::*;
+
+    fn commands(id: u32, command: DesktopCommand) -> String {
+        let mut out = Out::new();
+        encode_command(&mut out, id, &Command::Desktop(Box::new(command)));
+        out.finish()
+    }
+
+    #[test]
+    // WindowAttributes is non-exhaustive outside nsh-core.
+    #[allow(clippy::field_reassign_with_default)]
+    fn the_main_windows_title_is_the_pages() {
+        let mut attributes = WindowAttributes::default();
+        attributes.title = Some("Inbox".to_owned());
+        let set = || DesktopCommand::SetAttributes(Box::new(attributes.clone()));
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, set()),
+            r#"[["cmd",1,"setTitle","Inbox"]]"#
+        );
+        // Another window's, other attributes and requests: the browser's.
+        assert_eq!(commands(nsh_core::ROOT_ID + 2, set()), "[]");
+        assert_eq!(
+            commands(
+                nsh_core::ROOT_ID,
+                DesktopCommand::SetAttributes(Box::default())
+            ),
+            "[]"
+        );
+        assert_eq!(
+            commands(
+                nsh_core::ROOT_ID,
+                DesktopCommand::Request(WindowRequest::Focus)
+            ),
+            "[]"
+        );
+    }
 }

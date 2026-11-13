@@ -3,6 +3,7 @@
 //! data both Rust components and JS read, with or without a JS runtime.
 
 pub mod clipboard;
+pub mod web_evaluation;
 
 use crate::geometry::{Edges, Points, Size};
 
@@ -10,6 +11,15 @@ use crate::geometry::{Edges, Points, Size};
 /// Android backends register themselves (`TabBarComponent.java`'s `NAME` keeps
 /// the same name).
 pub const TAB_BAR_COMPONENT: &str = "nsh/tab-bar";
+
+/// The native component of `nsh/mobile`'s `SegmentedControl`, which the iOS
+/// backend registers itself (`UISegmentedControl`).
+pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
+
+/// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
+/// registers itself (a `UIButton` showing its `UIMenu` as its primary
+/// action).
+pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
 
 /// Whether native component `name` is NSH's own: names under `nsh/` are, and
 /// an embedding app's registration of one is refused, so it can never
@@ -238,6 +248,13 @@ pub struct Environment {
     pub pixel_ratio: f32,
     /// A screen reader runs (VoiceOver, TalkBack).
     pub screen_reader: bool,
+    /// The platform's screen readers follow the active descendant a
+    /// focused view names (`accessibilityActiveDescendant`): they read the
+    /// element named as it changes while the focus stays. `nsh-base`'s
+    /// lists then name their highlighted row and tell screen readers
+    /// nothing more; without it, they announce the row or move the screen
+    /// reader's focus to it.
+    pub reads_active_descendants: bool,
     /// The operating system.
     pub os: Os,
     /// The platform's name where it is not the OS's: a platform built
@@ -273,6 +290,13 @@ pub struct Environment {
     /// focus, or in the background. For an embedded surface, the embedding
     /// app's.
     pub lifecycle: Lifecycle,
+    /// How many times the system woke from sleep while the surface ran
+    /// (TS: `wakeCount()`): the platform adds one on each wake (macOS,
+    /// Windows, Linux), so what read it runs again then. A sleep may leave
+    /// the app's state as it was (a laptop's lid closed and opened with the
+    /// app in front), while its network connections and timers did not
+    /// live through it.
+    pub wake_count: u32,
     /// The platform picks a color from the screen
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
@@ -305,6 +329,9 @@ pub struct Environment {
     /// ([`crate::Command::SendInput`], macOS); without it, the command
     /// does nothing.
     pub web_input: bool,
+    /// The platform answers awaitable WebView evaluations
+    /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
+    pub web_evaluate: bool,
     /// The platform shows web views (TS: `WebView.available()`). `true` by
     /// default; a platform that knows from the start that it shows none
     /// (built without a web engine, the system's failed to load) sets
@@ -359,6 +386,7 @@ impl Default for Environment {
             reduce_motion: false,
             pixel_ratio: 1.0,
             screen_reader: false,
+            reads_active_descendants: false,
             os: Os::default(),
             platform: None,
             os_version: (0, 0),
@@ -369,6 +397,7 @@ impl Default for Environment {
             locale_settings: LocaleSettings::EN_US,
             host: false,
             lifecycle: Lifecycle::Active,
+            wake_count: 0,
             screen_color: false,
             file_requests: false,
             speech: false,
@@ -376,6 +405,7 @@ impl Default for Environment {
             audio: false,
             cell: None,
             web_input: false,
+            web_evaluate: false,
             web_views: true,
             shaders: true,
         }

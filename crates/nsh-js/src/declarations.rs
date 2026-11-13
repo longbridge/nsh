@@ -196,8 +196,10 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
 
 /** What JS sets on a Rust component's host itself: the app's classes
  * (appended to the component's own), its inline and state styles, its test id, its
- * tooltip, layout events and the ref (`ref.command(name, args)`). */
-export type ComponentHostProps = { [K in "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "focusWithinStyle" | "focusVisibleStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref"]?: ViewProps[K] };
+ * tooltip, layout events, desktop file drops on it, the mouse over it, a context menu
+ * asked for over it and the ref
+ * (`ref.command(name, args)`). */
+export type ComponentHostProps = { [K in "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "focusWithinStyle" | "focusVisibleStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "onFileDragEnter" | "onFileDragLeave" | "onFileDrop" | "onMouseEnter" | "onMouseMove" | "onMouseLeave" | "onMouseUp" | "onContextMenu" | "ref"]?: ViewProps[K] };
 
 /** An operating system (`platform.os`). */
 export type OS = "ios" | "android" | "macos" | "windows" | "linux" | "web";
@@ -292,7 +294,13 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
         "ListRef",
         Some("ViewRef"),
         "A `List`'s ref.",
-        &["scrollTo", "scrollToOffset", "scrollToIndex", "scrollToEnd"],
+        &[
+            "scrollTo",
+            "scrollToOffset",
+            "scrollToIndex",
+            "scrollToEnd",
+            "measureScrollPosition",
+        ],
     ),
     (
         "WebViewRef",
@@ -304,6 +312,7 @@ pub(crate) const REFS: &[(&str, Option<&str>, &str, &[&str])] = &[
             "goForward",
             "stopLoading",
             "injectJavaScript",
+            "evaluate",
             "postMessage",
             "sendInput",
             "load",

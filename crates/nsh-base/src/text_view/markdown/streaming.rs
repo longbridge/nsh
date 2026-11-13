@@ -3,16 +3,28 @@
 //! `**bold` as bold, `` `code `` as code, `[text](htt` as its text, a
 //! table's header as a table, instead of the markers as text until the
 //! rest arrives. Only the last block is touched: the blocks before it are
-//! complete.
+//! complete. A last line whose meaning the next characters decide (a list
+//! marker alone, a `-` or `=` line that may underline a heading, a fence
+//! being opened or closed) is held back until its line ends; a finished
+//! document is parsed as written.
 
 use std::borrow::Cow;
 
-use super::container::{fence_closes, fence_opens, strip_containers};
+use super::{
+    cjk::is_cjk,
+    container::{fence_closes, fence_opens, strip_containers},
+};
 
 /// `source` with the syntax its last block leaves open closed.
 pub(crate) fn repair_streaming(source: &str) -> Cow<'_, str> {
-    let Some(tail_start) = last_block(source) else {
-        return Cow::Borrowed(source);
+    let tail_start = match last_block(source) {
+        Last::Block(start) => start,
+        Last::Fenced => return Cow::Borrowed(source),
+        Last::Hold(at) => {
+            // The rest is repaired as if the held line had not arrived.
+            let kept = source[..at].trim_end();
+            return Cow::Owned(repair_streaming(kept).into_owned());
+        }
     };
     let tail = &source[tail_start..];
     if tail.trim().is_empty() {
@@ -20,7 +32,18 @@ pub(crate) fn repair_streaming(source: &str) -> Cow<'_, str> {
     }
     let repaired = match table(tail) {
         Some(table) => table,
-        None => inline(tail),
+        None => {
+            let mut text = match held_line(tail) {
+                Some(at) => inline(tail[..at].trim_end()),
+                None => inline(tail),
+            };
+            // Checked again after the repair, which may leave a marker
+            // alone (`- **` without its `**`).
+            while let Some(at) = held_line(&text) {
+                text = inline(text[..at].trim_end());
+            }
+            text
+        }
     };
     if repaired == tail {
         Cow::Borrowed(source)
@@ -29,10 +52,21 @@ pub(crate) fn repair_streaming(source: &str) -> Cow<'_, str> {
     }
 }
 
+/// Where the last block of a streamed source starts.
+enum Last {
+    /// After its last blank line or fenced block, at this offset.
+    Block(usize),
+    /// Inside a fenced block of code or math, which runs to the end and
+    /// needs no repair.
+    Fenced,
+    /// A fence's opening line or the start of its closer still being typed
+    /// on the last line, held back from this offset.
+    Hold(usize),
+}
+
 /// Where the last block of `source` starts (after its last blank line or
-/// fenced block), or `None` when it ends inside a fenced block of code or
-/// math, which runs to the end and needs no repair.
-fn last_block(source: &str) -> Option<usize> {
+/// fenced block).
+fn last_block(source: &str) -> Last {
     let mut code: Option<(u8, usize)> = None;
     let mut math = false;
     let mut start = 0;
@@ -41,12 +75,17 @@ fn last_block(source: &str) -> Option<usize> {
         let end = source[start..]
             .find('\n')
             .map_or(source.len(), |i| start + i);
+        // The last line, its end not arrived: what follows may change it.
+        let open_end = end == source.len();
         let next = end + 1;
         let line = strip_containers(&source[start..end]);
         if let Some((ch, len)) = code {
             if fence_closes(line, ch, len) {
                 code = None;
                 tail = next;
+            } else if open_end && closer_typed(line, ch, len) {
+                // `` `` `` of a closing ```` ``` ````: not code.
+                return Last::Hold(start);
             }
         } else if math {
             if line.trim_start().starts_with("$$") {
@@ -54,6 +93,11 @@ fn last_block(source: &str) -> Option<usize> {
                 tail = next;
             }
         } else if let Some(open) = fence_opens(line) {
+            if open_end {
+                // The info string is still arriving (```` ```pyth ````):
+                // no empty block of code before its first line.
+                return Last::Hold(start);
+            }
             code = Some(open);
         } else if line
             .trim_start()
@@ -61,12 +105,50 @@ fn last_block(source: &str) -> Option<usize> {
             .is_some_and(|rest| !rest.contains('$'))
         {
             math = true;
-        } else if line.trim().is_empty() {
+        } else if line.trim().is_empty() && !open_end {
+            // Markers alone on the last line (`- `) are no blank line yet.
             tail = next;
         }
         start = next;
     }
-    (code.is_none() && !math).then_some(tail.min(source.len()))
+    if code.is_some() || math {
+        Last::Fenced
+    } else {
+        Last::Block(tail.min(source.len()))
+    }
+}
+
+/// Whether `line` is the start of a closing fence of `len` characters
+/// `ch`, fewer of them so far.
+fn closer_typed(line: &str, ch: u8, len: usize) -> bool {
+    let rest = line.trim_end();
+    !rest.is_empty() && rest.len() < len && rest.bytes().all(|b| b == ch)
+}
+
+/// Where the last line of `tail` starts when its end has not arrived and
+/// what it holds so far means nothing yet, or something else once more
+/// arrives: a list marker alone (`-`, `2.`, an empty item now; an item or
+/// text later), digits that may become one, or a line of `-` or `=` (a
+/// heading's underline now; a rule, an item or text later).
+fn held_line(tail: &str) -> Option<usize> {
+    if tail.ends_with('\n') {
+        return None;
+    }
+    let start = tail.rfind('\n').map_or(0, |i| i + 1);
+    let line = &tail[start..];
+    let content = strip_containers(line);
+    let trimmed = content.trim_end();
+    // Digits start an item only where the line's content starts (`2.`),
+    // not as an item's content (`+ 2`).
+    let unquoted = line.trim_start_matches(['>', ' ', '\t']).trim_end();
+    let digits = unquoted.strip_suffix(['.', ')']).unwrap_or(unquoted);
+    let marker = trimmed.is_empty()
+        || matches!(trimmed, "-" | "*" | "+")
+        || (!digits.is_empty() && digits.len() < 10 && digits.bytes().all(|b| b.is_ascii_digit()));
+    let underline = trimmed.bytes().all(|b| matches!(b, b'-' | b' ' | b'\t'))
+        || trimmed.bytes().all(|b| b == b'=');
+    // Whitespace alone is a blank line once it ends: nothing to hold.
+    (!line.trim().is_empty() && (marker || underline)).then_some(start)
 }
 
 /// A table's header followed by its delimiter row being typed (`| a | b |`
@@ -428,7 +510,12 @@ fn close(text: &str) -> String {
         let len = run(bytes, i, b).min(scan_end - i);
         let prev = text[..i].chars().next_back();
         let next = text[i + len..].chars().next();
+        // A lone `*` inside a word (`a*b`, `2*3`) is as often text as
+        // emphasis: left for the rest to decide, never closed.
+        let in_word =
+            b == b'*' && len == 1 && prev.is_some_and(word_char) && next.is_some_and(word_char);
         let can_open = next.is_some_and(|c| !c.is_whitespace())
+            && !in_word
             && (b != b'_' || !prev.is_some_and(char::is_alphanumeric))
             && (b != b'$' || !next.is_some_and(|c| c.is_ascii_digit()));
         let can_close = prev.is_some_and(|c| !c.is_whitespace())
@@ -499,6 +586,12 @@ fn close(text: &str) -> String {
         out.push_str(token);
     }
     out
+}
+
+/// A letter or digit of a word with spaces between words (CJK text has
+/// none, so its emphasis is the CJK-friendly rule's).
+fn word_char(c: char) -> bool {
+    c.is_alphanumeric() && !is_cjk(c)
 }
 
 #[cfg(test)]
@@ -600,7 +693,59 @@ mod tests {
             "| a | b |\n| --- | --- |\n| 1 |",
             "| a | b |\n| --- | --- |\n| 1 |",
         );
-        check("Title\n---", "Title\n---");
+        // A pipeless line above: a heading's underline, held until its
+        // line ends.
+        check("Title\n---", "Title");
+        check("Title\n---\n", "Title\n---\n");
+    }
+
+    #[test]
+    fn held_lines() {
+        // A list marker alone: no empty item until its content arrives.
+        check("para\n\n-", "para\n\n");
+        check("- one\n-", "- one");
+        check("- one\n- ", "- one");
+        check("1. one\n2.", "1. one");
+        check("1. one\n2", "1. one");
+        check("> - one\n> -", "> - one");
+        check("- **one\n-", "- **one**");
+        check("- one\n- t", "- one\n- t");
+        // A line of `-` or `=`: no heading until the line ends.
+        check("Title\n-", "Title");
+        check("Title\n--", "Title");
+        check("Title\n==", "Title");
+        check("Title\n--\n", "Title\n--\n");
+        check("a -- b", "a -- b");
+        // Ended, the line means what it says.
+        check("- one\n-\n", "- one\n-\n");
+    }
+
+    #[test]
+    fn fences() {
+        // The opening line still arriving: nothing yet.
+        check("```pyth", "");
+        check("Intro **bold\n```py", "Intro **bold**");
+        check("- ```", "");
+        // Opened, the block shows as it grows.
+        check("```py\n", "```py\n");
+        check("```py\nx", "```py\nx");
+        // A closer half typed is not code.
+        check("```py\nx\n``", "```py\nx");
+        check("````\nx\n```", "````\nx");
+        check("~~~\nx\n~", "~~~\nx");
+        check("```py\nx\n```", "```py\nx\n```");
+        check("```py\nx\n``\n", "```py\nx\n``\n");
+    }
+
+    #[test]
+    fn stars_inside_words() {
+        check("a*b", "a*b");
+        check("2*3", "2*3");
+        check("a*b*", "a*b*");
+        check("a *b", "a *b*");
+        check("*a*b", "*a*b");
+        check("foo**bar", "foo**bar**");
+        check("中*粗", "中*粗*");
     }
 
     #[test]

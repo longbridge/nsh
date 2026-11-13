@@ -227,6 +227,7 @@ impl Script {
             .with_refuse_connections(system.refuse_connections)
             .with_filesystem(system.filesystem)
             .with_app_url(system.app_url)
+            .with_base_url(bundle.base_url.clone())
             .with_os(environment.os);
             script.0.initialize(Services {
                 system: services,

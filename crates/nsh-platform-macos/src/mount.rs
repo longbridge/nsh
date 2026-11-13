@@ -6,7 +6,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use nsh_core::{Command, LayoutAnimation, MountItem, NodeId, ROOT_ID, ViewKind, canvas::Damage};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     sight::Sights,
@@ -39,6 +39,9 @@ pub(crate) struct Mounter {
     /// The same over the frames waiting to be placed
     /// ([`Mounter::place_shown`]).
     planned_sights: RefCell<Sights<NshView>>,
+    /// The views the batch being applied deletes
+    /// ([`Mounter::begin_batch`]).
+    deleting: FxHashSet<NodeId>,
 }
 
 impl Mounter {
@@ -55,6 +58,7 @@ impl Mounter {
             live_resize: false,
             sights: RefCell::default(),
             planned_sights: RefCell::default(),
+            deleting: FxHashSet::default(),
         }
     }
 
@@ -201,10 +205,23 @@ impl Mounter {
         self.views.get(&view.state().id) == Some(view)
     }
 
+    /// A batch is about to be applied: notes what it deletes, so a
+    /// subtree leaves its window with its root alone.
+    pub(crate) fn begin_batch(&mut self, items: &[MountItem]) {
+        self.deleting.clear();
+        self.deleting
+            .extend(items.iter().filter_map(|item| match item {
+                MountItem::Delete { id } => Some(*id),
+                _ => None,
+            }));
+    }
+
     /// The batch is applied.
     pub(crate) fn end_batch(&mut self, surface: &Rc<Surface>) {
+        self.deleting.clear();
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
+        crate::input::release_hidden_focus(surface);
         crate::system::end_batch(surface);
         crate::input::content_moved(surface, false);
         crate::selectable_view::end_batch(surface);
@@ -281,6 +298,7 @@ impl Mounter {
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
+                    crate::input::removed(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -290,11 +308,32 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
-                    // A removal animation detaches the view when it ends.
-                    if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
-                    {
+                    // A view whose parent the batch deletes too stays in it:
+                    // the subtree leaves the window with its root, in one
+                    // `removeFromSuperview`, not one per view while still
+                    // in the window. A modal or a header item is shown
+                    // elsewhere and its detach takes it down.
+                    let inside = !matches!(view.kind(), ViewKind::Modal | ViewKind::HeaderItem)
+                        && view
+                            .parent_view()
+                            .is_some_and(|p| self.deleting.contains(&p.id()));
+                    // Inside, it leaves with its root.
+                    if !inside {
+                        crate::input::removed(surface, &view);
+                    }
+                    if inside {
+                        // Its running layout animation ends with it.
+                        crate::transition::deleted(&view);
+                    } else if !crate::transition::removing(
+                        surface,
+                        &view,
+                        self.layout_animation.as_ref(),
+                    ) {
+                        // No removal animation, which detaches the view
+                        // when it ends.
                         crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
@@ -349,6 +388,11 @@ impl Mounter {
                     old,
                     self.layout_animation.as_ref(),
                 );
+                // A scroll area's bar reads its position against the
+                // viewport.
+                if old.size != frame.size {
+                    crate::access::scroll_bar::moved(view);
+                }
                 match view.kind() {
                     ViewKind::Stack => crate::navigation::stack_resized(surface, view),
                     ViewKind::Canvas => view.changed(),
@@ -372,13 +416,13 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
-                    let same = crate::text::draws_the_same(view, text, layout, *content);
+                    let damage = crate::text::damage(view, text, layout, *content);
                     crate::text::set(view, text, layout, *content);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
-                    if !same {
-                        self.draw_when_shown(view, Damage::All);
+                    if damage != Damage::None {
+                        self.draw_when_shown(view, damage);
                     }
                     crate::access::text_changed(view);
                 }
@@ -453,6 +497,8 @@ impl Mounter {
             MountItem::ScrollBehavior { id, behavior } => {
                 if let Some(view) = self.get(*id) {
                     crate::scroll::behavior(surface, view, behavior);
+                    // Its content insets are part of how far it scrolls.
+                    crate::access::scroll_bar::moved(view);
                 }
             }
             MountItem::Refreshing { id, refreshing } => {

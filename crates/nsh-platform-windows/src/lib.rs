@@ -45,15 +45,18 @@ mod image;
 mod input;
 mod keymap;
 mod linking;
+mod login_item;
 mod mount;
 mod native;
 mod navigation;
 mod notifications;
 mod picker;
+mod presence;
 mod render;
 mod richedit;
 mod scroll;
 mod selectable_view;
+mod session;
 mod shader;
 mod shell;
 mod surface;
@@ -69,7 +72,10 @@ mod window;
 mod window_close;
 mod window_state;
 
-pub use nsh_core::platform::{Appearance, Locale};
+pub use nsh_core::{
+    file_type,
+    platform::{Appearance, Locale},
+};
 pub use nsh_engine::{
     App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Limits, Root,
 };

@@ -133,6 +133,43 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   merges moves (`State::mouse_moves`): the latest per view, delivered at most once per `MOUSE_MOVE_INTERVAL` (8 ms) and
   always before the next other event, so a view hears where the mouse went before it hears it leave; mice report up to
   1000 moves a second, and a crosshair needs one per frame.
+- **`onWheel`** (any element; the DOM's `wheel`, GPUI's `ScrollWheelEvent`): a mouse wheel or touchpad scrolled over a
+  view. `EventPayload::Wheel` / `WheelEvent { position, page_position, delta, modifiers }`, `delta` a `WheelDelta`
+  (`Lines` for notches, `Points` for precise deltas, as GPUI's `ScrollDelta`; positive toward the end, the DOM's sign);
+  JS `{ position, pagePosition, delta, deltaMode: "lines" | "points", modifiers }`. The platform decides on the main
+  thread, before it scrolls, from the mounted event masks (`input::wheel_listener`): walking out from the view under
+  the pointer, the first view that listens hears it; it takes the wheel (no native scroll, Ctrl + wheel zoom or pinch)
+  when no scroll view (nor a multiline field on Windows / GPUI, nor a hosted widget scrolling itself on Linux / macOS)
+  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. One scroll
+  stays where it went, as a scroll view's does (`input::WheelLatch`, every backend's `wheel_event`): a view that took
+  it keeps the rest of it wherever the pointer goes, a trackpad gesture from its first move through the system's
+  momentum (macOS, GPUI), steps while they keep coming (`WHEEL_LATCH`; mouse notches along their axis, a touchpad's
+  whichever way they turn; Linux until the touchpad scroll stops); and a scroll a scroll view has started is not
+  taken over by a listener that comes under the pointer meanwhile, which only observes it. There is no
+  `preventDefault`: events reach JS after the fact, so the rule is what is mounted, as with `onContextMenu`. Linux
+  `scroll_event`, macOS `scroll_event` (momentum included; a gesture going on still ends), Windows `input::wheel`
+  (`WM_MOUSEWHEEL` notches as lines of 16 points), GPUI `events.rs` (GPUI's `ScrollDelta` unit), the web `nsh.js`
+  `wheelEvent` (`DOM_DELTA_PAGE` as points of the viewport's height). iOS, Android and the terminal raise none.
+- **`onPinch`** (any element; GPUI's `PinchEvent` / `on_pinch`): a touchpad pinched over a view.
+  `EventPayload::Pinch` / `PinchEvent { position, page_position, delta, phase, modifiers }`, `delta` the change of scale
+  since the last event (a `Percentage`, as GPUI's), `phase` a `PinchPhase` (`"start"`, `"move"`, `"end"`, as touches').
+  Decided as `onWheel` is (`input::wheel_listener`, with the views that pinch natively, `transforms`, in place of the
+  scroll views) and kept from the pinch's start to its end (`input::WheelLatch`, one per surface): macOS
+  `magnifyWithEvent:` (`input.rs` `pinch_event`), Linux GDK's touchpad pinch (its absolute scale turned into changes),
+  GPUI's `PinchEvent` (`touchpad_pinch`; its Linux deltas change the absolute scale), the web Safari's `gesturestart` /
+  `gesturechange` / `gestureend` (`nsh.js` `pinchEvent`). Windows and the other browsers report a touchpad pinch as
+  Ctrl + wheel, which `onWheel` hears, so they raise no `onPinch`.
+- **`onMouseUp`** (any element): a mouse button was released over it or a view inside it (the DOM's `mouseup`):
+  `button` names it (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"`), with `position`, `pagePosition` and
+  `modifiers` (`EventPayload::Mouse`, `MouseEvent`; Rust `.on_mouse_up`). The primary button's release also
+  reports `onPressUp`. The desktops (Win32, AppKit, GDK and the GPUI backend), the terminal and the web walk out from
+  the view under the pointer, as a move does, and every listener hears it; iOS and Android never report it (an iPad
+  or Android mouse included). On macOS a Control-click's release is the secondary button's (`"right"`), as its press
+  is; a right click's release
+  is what completes it, so an app that waits for it can open its menu without a timer or a press guess. Only a release
+  over the view (or a view inside it) is reported: the event has no pointer capture, so a release after the pointer
+  leaves the view or the window is not heard. The headless
+  driver's `rightClick` and the desktop test agents (Linux's included) release the secondary button too.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`), or a context menu was asked for without a pointer (below). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
@@ -153,7 +190,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
   presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus; it
   shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when the keyboard moved it
-  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`). Focus and presses are separate: `ViewProps::focus_stop` decides, from
+  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`); a part projected focused (a
+  tree's or a list's cursor) shows it too while the control's focus shows. Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
   `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.
@@ -165,10 +203,29 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `onBlur` (`EventKind::Focus` / `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first
   responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
   press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
-  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included.
+  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included. On a stop
+  that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
+  component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
+  it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`).
+  A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
+  (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
+  headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows
+  ("Kept rows" in `scrolling-and-lists.md`).
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
   recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows and GPUI
   move the focus between fields and native components only so far; iOS and Android move it between inputs.
+  A shown overlay's content is in the Tab order where the app put the overlay, not where its native view is (at the
+  end of its root view), as WAI-ARIA's non-modal popups have it: a popover's content right after its trigger, so
+  Shift+Tab from it goes back to the trigger and Tab past its last stop goes on to what follows the popover. A list
+  of options or a menu (a select's list, a `Menu`) keeps its place: those move the focus with their own keys, and
+  Tab leaves them for the control after their trigger. The core
+  sets `ViewProps::tab_after` on each shown overlay (the view it follows), and the platforms that order Tab
+  themselves walk with `nsh_core::input::tab_order`: the headless driver, Windows and GPUI; the TUI orders Tab by
+  `MountItem::TreeOrder`, which has overlays there already. On macOS, Linux and the web the toolkit orders Tab
+  (AppKit's key view loop and GTK's focus chain by position on screen, the browser by the DOM, where an overlay's
+  view is the last of its root view). Dialogs keep the focus inside them (the newest modal is the focus scope)
+  whatever this order.
   A link in text (a nested `<Text>` that takes presses, `AttributedText::links`) is a stop of its own: the core marks
   each `TextLink` with `focus_stop` (the span's `ViewProps::focus_stop(true)`: unless `focusable={false}` or
   disabled), Tab reaches it after its text view, in text order (nested links inside the one around them), the
@@ -209,8 +266,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   pressable view responds. Children placed outside their parent (`position: "absolute"`, `overflow` visible: a
   dropdown under its field) can be touched where they are drawn: UIKit and Android only look for a touch's target
   inside a view's bounds, so the core mounts, for each view whose descendants reach outside it, the area they cover
-  (`MountItem::Overflow`, in the view's coordinates, from the layout frames, only when it changes; clipping views,
-  scroll views, lists and stacks have none). `NshView`'s `hitTest` looks in its subviews when the point is outside its
+  (`MountItem::Overflow`, in the view's coordinates, from the layout frames and the descendants' `hitSlop`, only
+  when it changes; clipping views, scroll views, lists and stacks have none). A child's slop reaching out of its parent
+  so takes touches through every view around it that does not clip; siblings keep their order (the topmost first). `NshView`'s `hitTest` looks in its subviews when the point is outside its
   bounds (and hit slop) but in that area, and never returns the view itself there; Android's `Box` delivers the touch
   (and the rest of the gesture) to the child whose area holds it, which passes it on to its children only, and the touch
   tracker's hit test (`TouchTracker.deepest`) descends the same way. `pointerEvents` keeps its meaning (`box-only` and
@@ -244,33 +302,54 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
   `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
   views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
-  interception; a scroll view that intercepts first (past its touch slop) wins as before. Web: `nsh.js` defers its
+  interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
+  touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
+  (no activation, within the touch slop) to the nearest pressable `Box` around it. Web: `nsh.js` defers its
   drag scrolling while the gate is undecided. The activation travels with the touches (`TouchEvent::activated`; the
   iOS gate hands it to the root's tracker, which reports it with these touches or the next), and the gated view
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
-- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `State` / `Value` / `Actions` / `Level` +
+- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `Description` / `State` / `Value` / `Actions` / `Level` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
-  (Android: resource id). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
-  `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`; `accessibilityState.pressed` (`aria-pressed`:
+  (Android: resource id). `accessibilityDescription` (ARIA's `aria-description`, `gpui-base`'s `aria_description`;
+  Rust `.accessibility_description(..)`) is read after the name: a dialog's message. Windows has a property of its own
+  for it (UIA `FullDescription`); the other platforms have one place for what is read after the name (AppKit's help,
+  UIKit's hint, AT-SPI's and AccessKit's description, Android's hint text, the web's `aria-description`), which gets
+  the description and then the hint (`Accessibility::help_text`). Roles and states follow ARIA where `gpui-base` (AccessKit) has them: `group`, `region`,
+  `navigation`, `tree` / `treeitem`, `menuitemcheckbox` / `menuitemradio`, `dialog` / `alertdialog` (`nsh-base`'s
+  `Dialog` is a `dialog` unless the app gives it another role, named by its label; the platforms map it to their own
+  dialog roles, and on iOS to a semantic group so a labelled dialog never hides its content); `accessibilityState.pressed` (`aria-pressed`:
   a button that has one is a toggle button) and `current` (`aria-current`: `true`, `page`, `step`, `location`, `date`,
   `time`), `hasPopup` (`aria-haspopup`: the element opens a popup, a menu or a list, and its `expanded` says whether
   it is open; `nsh-base`'s `Popover`, `Menu`, `HoverCard`, `Select`, `Combobox` and `DatePicker` set it on their
   triggers; an `expanded` element without it is a disclosure that shows its content in place; the web sets
-  `aria-haspopup`, the terminal marks a disclosure `▸` / `▾` and a popup trigger not; elsewhere it is not exposed yet);
+  `aria-haspopup`, the terminal marks a disclosure `▸` / `▾` and a popup trigger not; elsewhere it is not exposed yet),
+  `invalid` (`aria-invalid`: the content does not pass the app's checks, a rejected field; `aria-invalid:` classes
+  style it; a slot's element keeps the app's beside the component's states);
   `accessibilityLevel` (`aria-level`: a heading's level, a tree item's depth). Per platform: macOS a toggle is
   `AXCheckBox` / `AXToggle` with its pressed value, `region` / `navigation` are `AXGroup` with WebKit's landmark
   subroles, a tree is a list of static-text items (as options: AppKit's outline rows need its rows and columns) with
   their disclosure level, `current` and a heading's level are not exposed (AppKit has no attribute for the first, and a
-  heading's value is its text, which VoiceOver reads); iOS a pressed toggle carries the selected trait (UIKit's toggle
-  trait is iOS 17's), mixed and `current` are spoken in the value, `group` / `region` / `navigation` / `tree` /
+  heading's value is its text, which VoiceOver reads), `invalid` is WebKit's `AXInvalid` attribute, which the view
+  answers itself (`view.rs`); iOS a pressed toggle carries the selected trait (UIKit's toggle
+  trait is iOS 17's), mixed, `current` and `invalid` are spoken in the value, `group` / `region` / `navigation` / `tree` /
   `toolbar` are semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
-  is a checkable `ToggleButton`, `current` and mixed go in the state description, roles without a widget class in the
+  is a checkable `ToggleButton`, `current` and mixed go in the state description, `invalid` there too and in
+  `setContentInvalid`, roles without a widget class in the
   role description, no level; Windows a toggle has the Toggle pattern (and "toggle button"), landmarks
   (`UIA_LandmarkTypePropertyId`), `Tree` / `TreeItem` control types, a heading's `HeadingLevel1`…`9`, a tree item's
-  `UIA_LevelPropertyId`, `current` in `AriaProperties`; Linux GTK's roles, `Pressed` on buttons, `Level`; GPUI
-  AccessKit's roles, `toggled`, `level`, `aria_current`; the web the ARIA attributes. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
+  `UIA_LevelPropertyId`, `current` and `invalid` in `AriaProperties`, `invalid` also as `IsDataValidForForm` false;
+  Linux GTK's roles, `Pressed` on buttons, `Level`, `Invalid` (AT-SPI's invalid entry); GPUI AccessKit's roles,
+  `toggled`, `level`, `aria_current`, `invalid`; the web the ARIA attributes (`aria-invalid` on an input's field
+  too). `accessibilityActiveDescendant` and `accessibilityControls` (`aria-activedescendant`, `aria-controls`) name
+  another element by its ref: the item active inside a focused control, the element it controls. The core looks the
+  refs up each round into the native ids of `Accessibility::active_descendant` / `controls` (`core/relations.rs`),
+  so what is named may render later or go away; the web sets the ARIA attributes on the focused element (an input's
+  field), macOS answers them as `AXSelectedChildren` / `AXLinkedUIElements` and tells VoiceOver when the active item
+  changes (an input that is a combo box is its field's `AXComboBox`). `Environment::reads_active_descendants` says
+  the platform reads them; elsewhere `nsh-base`'s `Select`, `Combobox` and `Command` announce the highlighted item
+  themselves. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
@@ -340,7 +419,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `inactive`, stopped `background`, through one `ActivityLifecycleCallbacks` per application, registered by the first
   view attached and kept, which remembers each activity's last state: a view attached again starts from it). The change reaches JS through the engine's thread, and iOS may suspend the
   process seconds after `didEnterBackground` (Android's `onStop` is looser): `background` is for pausing work, and
-  the user-facing docs say to save as changes are made. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
+  the user-facing docs say to save as changes are made. `wake_count()` / `wakeCount()` (`Environment::wake_count`) counts
+  the system's wakes from sleep, which `lifecycle()` may not show (a lid closed and opened with the app in front):
+  the desktop backends add one to each surface's on the system's report (macOS `NSWorkspaceDidWakeNotification`,
+  Windows `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`, Linux `logind`'s `PrepareForSleep(false)`); headless tests
+  wake with `app.wake()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
   focused input), with no JS involved.
   Both move as one with the keyboard: `LayoutCurve::Keyboard` (`type: "keyboard"`) is the system keyboard's own curve,
@@ -382,7 +465,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
   answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
-  images and files are never inserted. The event comes before the `onChangeText` of the text it inserts (Linux:
+  images and files are never inserted. Inserted text is clipped to what `maxLength` leaves room for, as a browser's
+  `maxlength` clips it (iOS cuts between composed character sequences, the other platforms between code points). The event comes before the `onChangeText` of the text it inserts (Linux:
   maybe after, as GTK's own paste and NSH's read of the clipboard are both asynchronous; with `"report"` nothing is
   inserted, so it comes first). An app that decides per paste uses `"report"` and inserts what it allows with the
   ref's `insertText` (`Command::InsertText`): the text in place of the selection as the user's edit, `maxLength`
@@ -393,7 +477,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   During an input method's composition Linux and the web insert nothing and log a warning. With `"insert"` the
   input has inserted the paste already, so an `insertText` from `onPaste` inserts it a second time. Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
-  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; Android: `setOnReceiveContentListener` (API 31;
+  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; with a `maxLength` they insert the clipped text
+  themselves (`paste_text`, the test agent's paste too) instead of UIKit's `paste:`; Android: `setOnReceiveContentListener` (API 31;
   the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
   goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
   editor of NSH's (`FieldEditor`, from `FieldCell`'s `fieldEditorForView:`, one per window; masked fields keep
@@ -440,7 +525,8 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
   moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
+  (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
+  its side, so a submenu's first item is level with its trigger, and places it outside the menu
   around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
   `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
   what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`
@@ -474,18 +560,33 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
   for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
-  it. In every idiom the keyboard focus shows it too (WAI-ARIA's tooltip pattern; the focus is keyboard focus, a click
-  moves none): `Core::focus_hints`, after `update_focus_within`, shows the hint of the nearest anchor on the focus
-  chain (up to the overlay the focus is in, so a popup's focus is not on its trigger's hint) at once and hides it when
-  the focus leaves. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same `ESCAPE_BINDING`):
-  Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint (`overlay_escape`); a hint
-  Escape or a press hid shows for the focus again only once the focus comes back. The overlay hears what the pointer
-  and the focus ask for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`,
-  `Escape`, `View`), and
-  `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
-  is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
-  so. The overlay should
-  not take the pointer (`pointerEvents: "none"`).
+  it. Once the pointer showed a hint it moves on without waiting, so a toolbar's tools read in turn (`gpui-base`'s
+  `TooltipDefaults` grace period, Radix's `skipDelayDuration`): `onMouseLeave` of an anchor whose hint the pointer
+  showed, in the view, starts the grace period (`Overlays::grace_from`, on the engine's clock), and `onMouseEnter`
+  within the grace period (`HINT_GRACE_PERIOD`, 300 ms, fixed), or while another hint the pointer showed is
+  still in the view (an anchor inside another), shows it at once instead of starting the task (`Core::hint_skips_delay`).
+  A touch down on an anchor or Escape ends the period (acting on the anchor, as `gpui-component`'s press hides its
+  tooltip with none); hints the focus or the owner showed start none. A hint whose delay never ends (`HINT_ENDLESS`,
+  `Tooltip`'s `delay` of `Infinity`) takes no part and still waits. In every idiom the focus the keyboard moved shows it too (WAI-ARIA's tooltip
+  pattern): `Core::focus_hints`,
+  after `update_focus_within`, shows the hint of the nearest anchor on the focus chain (up to the overlay the focus is
+  in, so a popup's focus is not on its trigger's hint) at once when the keyboard brought the focus there, and hides it
+  when the focus leaves. Which input moved the focus is decided as it is reported (`classes::focus_reported`:
+  `Core::focus_by_keyboard`, by `keyboard_moves_focus`: `focus-visible:`'s rule, `styles.md`, without its exception
+  for an input that edits), so Tab, a group's arrows, a shortcut and the app's `focus()` after a key show the hint, and
+  a press, a tap or a click that focuses the anchor (a click on a stop where the platform focuses it, a tap into a
+  field, a component's or the app's `focus()` after a press) leaves the hint to the pointer, as Radix's tooltips do:
+  the press hid it, and it stays hidden after the pointer left. A key typed later, the focus staying, shows
+  `focus-visible:` and no hint; the hint shows once the keyboard moves the focus to the anchor (a move inside the
+  anchor decides nothing again). Before any input the focus counts as the keyboard's (an `autoFocus`), as it
+  does for `focus-visible:`. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same
+  `ESCAPE_BINDING`): Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint
+  (`overlay_escape`); a hint Escape or a press hid shows for the focus again only once the keyboard brings the focus
+  back. The overlay hears what the pointer and the focus ask for (`Show`, `Dismiss`: `on_hint_show` /
+  `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`, `Escape`, `View`), and `OverlayConfig::open`
+  (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state is controlled or not).
+  Touch screens never watch the pointer: a hint shows there for the keyboard's focus (a hardware keyboard) or when
+  `open` says so. The overlay should not take the pointer (`pointerEvents: "none"`).
 - **A link's hint** (a hint overlay whose parent is a link of a text: a nested span, `AttributedText::links`): the
   span is its anchor (`Core::hint_anchor` takes any span, `is_text_span`, since the watch is what makes it a link;
   `is_link_span`: a span taking presses or watched for a hint). A span taking no presses (`RichEditor`'s link mark,
@@ -525,3 +626,27 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
 - **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.
+
+## WebView evaluation
+
+`WebViewRef.evaluate(script, { timeout })` (TS, `nsh-js` `components.rs`) and Rust's
+`ElementRef::evaluate(script, EvaluateOptions)` run through the same request table in
+`core/web_evaluation.rs`: it checks `Environment::web_evaluate`, the `webview` grant and
+the limits, keeps each request's deadline (`timeout`; it sends `Command::CancelEvaluate`
+when it passes), and settles the request from the internal `WebEvaluation` event a
+platform replies with, never from page messages. `platform/web_evaluation.rs` and
+`web_evaluation.js` hold the page wrapper (JSON result contract, polling of returned
+Promises, cleanup) that every platform runs. iOS and macOS share
+`nsh-platform-apple`'s `web_evaluation.rs` (WKWebView completions); Android runs it in
+`WebBox.java` (`evaluateJavascript`). The platforms abort requests on a new-document
+navigation, explicit navigation commands, a reloading source, renderer loss and
+disposal; page-initiated same-document history updates keep them. Platforms that leave
+`web_evaluate` false reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, which
+`WebView.evaluateAvailable()` / `web_evaluate_available()` answers beforehand.
+
+When a web view's web content process ends, the platform keeps the app running and
+sends `onError` with `ERR_NSH_WEBVIEW_TERMINATED` (Rust `on_process_terminated`); the
+next `reload()`, `load()` or new source shows a page again. Android's `WebBox` handles
+`onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
+same web view.
+

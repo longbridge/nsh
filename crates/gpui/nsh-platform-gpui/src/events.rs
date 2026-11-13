@@ -133,7 +133,7 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
     }
     // The focused field's caret shows while the surface has the window's
     // focus; text and input methods come through the input handler.
-    let has_focus = window.is_window_active() && focus.is_focused(window);
+    let has_focus = crate::window::is_active(window, cx) && focus.is_focused(window);
     if crate::text_input::window_focus(surface, has_focus) {
         window.refresh();
     }
@@ -231,6 +231,15 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
             }
         }
         let pressed = s.input_pressed.get();
+        // GPUI's macOS window turns a Control-click into a secondary press
+        // but releases it as the left button: that release is the
+        // secondary button's.
+        #[cfg(target_os = "macos")]
+        let button = if button == 0 && pressed & 1 == 0 && pressed & 1 << 1 != 0 {
+            1
+        } else {
+            button
+        };
         if pressed & 1 << button == 0 {
             return;
         }
@@ -352,8 +361,29 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
             modifiers: crate::keys::modifiers(&e.modifiers),
             time: s.clock(),
         };
-        if precise {
-            crate::input::touchpad(&s, event, gesture_phase(e.touch_phase));
+        let phase = gesture_phase(e.touch_phase);
+        // `onWheel` keeps GPUI's unit; positive toward the end, as `dx`.
+        let delta = match e.delta {
+            ScrollDelta::Pixels(_) => nsh_core::WheelDelta::Points(nsh_core::geometry::point(
+                nsh_core::Points(dx),
+                nsh_core::Points(dy),
+            )),
+            ScrollDelta::Lines(l) => {
+                nsh_core::WheelDelta::Lines(nsh_core::geometry::point(-l.x, -l.y))
+            }
+        };
+        if crate::input::wheel_event(&s, &event, delta, precise.then_some(phase)) {
+            // The view took it; a gesture going on elsewhere still ends.
+            if precise && matches!(phase, GesturePhase::Ended | GesturePhase::Cancelled) {
+                let end = WheelEvent {
+                    dx: 0.0,
+                    dy: 0.0,
+                    ..event
+                };
+                crate::input::touchpad(&s, end, phase);
+            }
+        } else if precise {
+            crate::input::touchpad(&s, event, phase);
         } else {
             crate::input::wheel(&s, event);
         }

@@ -116,6 +116,34 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
 }
 
 #[test]
+fn a_test_sees_the_notifications_an_app_closes() {
+    use std::time::Duration;
+
+    use nsh_core::{Command, notifications::NotificationCommand};
+    use nsh_engine::{Bundle, EngineConfig};
+    use nsh_testing::Headless;
+
+    let bundle = Bundle::source(
+        "import { Notifications } from 'nsh';\n\
+         Notifications.close('a').then(() => Notifications.closeAll());"
+            .to_owned(),
+    );
+    let mut config = EngineConfig::new(bundle);
+    // A platform that shows notifications: the core sends them its way.
+    config.environment.notifications = true;
+    let mut app = Headless::start(config).unwrap();
+    let all = Command::Notification(NotificationCommand::CloseAll);
+    app.wait_until("closeAll", Duration::from_secs(10), |s| s.sent(&all))
+        .unwrap();
+    assert!(
+        app.screen()
+            .sent(&Command::Notification(NotificationCommand::Close(
+                "a".into()
+            )))
+    );
+}
+
+#[test]
 fn headless_runs_play_the_platform_s_part() {
     let run = TestRun {
         ui_sets: vec![nsh_base::registry()],
@@ -126,7 +154,7 @@ fn headless_runs_play_the_platform_s_part() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 12);
+    assert_eq!(results.len(), 13);
 }
 
 #[test]
@@ -154,7 +182,7 @@ fn open_sets_the_environment_and_routes_answer_requests() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 13);
+    assert_eq!(results.len(), 14);
 }
 
 #[test]
@@ -164,6 +192,117 @@ fn fonts_registered_while_the_app_runs_name_their_family() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 3);
+}
+
+/// An entry below its app (`tests/SubApp.tsx`) names the files it imports
+/// from the app's directory and reads them from there headless, as a
+/// package of the app holds them (#1483).
+#[test]
+fn an_entry_below_its_app_reads_assets_named_from_the_app() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/asset-root");
+    let results = run_file(
+        &test_run(None),
+        &dir.join("tests/SubApp.test.tsx"),
+        &mut |_| {},
+    )
+    .unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 1);
+}
+
+/// A test file's own imports are named from its app's directory, with or
+/// without an `nsh.json`, whether the run writes the entry it makes for
+/// the test file in the app's `.nsh/test` (as `nsh test` does) or in a
+/// work directory outside the app (`TestRun::work_dir` is any directory).
+#[test]
+fn a_test_file_reads_its_imports_wherever_its_entry_is_written() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/asset-root");
+    for config in [true, false] {
+        let app = std::env::temp_dir().join(format!(
+            "nsh-testing-assets-{config}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&app);
+        for file in [
+            "App.tsx",
+            "notes/hello.txt",
+            "tests/beside.txt",
+            "tests/Assets.test.ts",
+        ] {
+            std::fs::create_dir_all(app.join(file).parent().unwrap()).unwrap();
+            std::fs::copy(fixture.join(file), app.join(file)).unwrap();
+        }
+        if config {
+            std::fs::write(app.join("nsh.json"), "{}").unwrap();
+        }
+        let outside = app.with_file_name(format!(
+            "{}-work",
+            app.file_name().unwrap().to_string_lossy()
+        ));
+        for work_dir in [app.join(".nsh/test"), outside.clone()] {
+            let run = TestRun {
+                work_dir: work_dir.clone(),
+                ..test_run(None)
+            };
+            let results = run_file(&run, &app.join("tests/Assets.test.ts"), &mut |_| {})
+                .unwrap_or_else(|e| panic!("nsh.json {config}, {}: {e}", work_dir.display()));
+            let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+            assert!(
+                failed.is_empty(),
+                "nsh.json {config}, {}: {failed:#?}",
+                work_dir.display()
+            );
+            assert_eq!(results.len(), 1);
+        }
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&app);
+    }
+}
+
+/// Test files of one name in different directories of an app run their
+/// own tests from entries of their own in its `.nsh/test`: the parallel
+/// `nsh test`s of an app never write one's entry over the other's.
+#[test]
+fn test_files_of_one_name_run_from_entries_of_their_own() {
+    let app = std::env::temp_dir().join(format!("nsh-testing-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&app);
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("nsh.json"), "{}").unwrap();
+    let dirs = ["core", "state"];
+    for dir in dirs {
+        let file = app.join(format!("src/{dir}/typing.test.ts"));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &file,
+            format!("import {{ test }} from \"nsh/test\";\ntest(\"{dir}\", () => {{}});\n"),
+        )
+        .unwrap();
+    }
+    let run = TestRun {
+        work_dir: app.join(".nsh/test"),
+        ..test_run(None)
+    };
+    for dir in dirs {
+        let results = run_file(
+            &run,
+            &app.join(format!("src/{dir}/typing.test.ts")),
+            &mut |_| {},
+        )
+        .unwrap();
+        let names: Vec<_> = results.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, [dir]);
+    }
+    for dir in dirs {
+        let entry = app.join(format!(".nsh/test/src/{dir}/typing.test.ts.run.js"));
+        let code =
+            std::fs::read_to_string(&entry).unwrap_or_else(|e| panic!("{}: {e}", entry.display()));
+        assert!(
+            code.contains(&format!("/src/{dir}/typing.test.ts\"")),
+            "{code}"
+        );
+    }
+    std::fs::remove_dir_all(&app).unwrap();
 }
 
 #[test]
@@ -252,9 +391,36 @@ fn a_press_fails_on_a_view_another_covers() {
 }
 
 #[test]
+fn a_press_reaches_a_header_button_above_a_large_title_page_s_content() {
+    let run = TestRun {
+        ui_sets: vec![nsh_base::registry()],
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/header-hit");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn a_press_reaches_a_view_across_a_scroll_view_s_fold() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/scroll-hit");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn a_view_removed_under_the_pointer_or_with_the_focus_hears_no_more() {
+    let run = TestRun {
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/hover-removed");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 2);
@@ -291,8 +457,8 @@ fn the_page_s_host_answers_the_apps_tests_open() {
         assert!(failed.is_empty(), "{file}: {failed:#?}");
         results.len()
     };
-    assert_eq!(run(Some("host.js"), "Host.test.tsx"), 8);
-    assert_eq!(run(None, "NoHost.test.tsx"), 2);
+    assert_eq!(run(Some("host.js"), "Host.test.tsx"), 10);
+    assert_eq!(run(None, "NoHost.test.tsx"), 3);
     assert_eq!(run(Some("none.js"), "Broken.test.tsx"), 1);
 }
 
@@ -321,6 +487,20 @@ fn an_app_inserts_the_pastes_it_allows_as_the_user_s_edits() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn a_paste_goes_in_clipped_to_max_length() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/paste");
+    let results = run_file(
+        &test_run(None),
+        &dir.join("MaxLength.test.tsx"),
+        &mut |_| {},
+    )
+    .unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 4);
 }
 
 #[test]
@@ -361,7 +541,7 @@ fn a_test_plays_the_embedding_app() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 4);
+    assert_eq!(results.len(), 5);
 }
 
 #[test]
