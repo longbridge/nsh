@@ -48,8 +48,11 @@
 //!   the window (an embedded surface's root window) is minimized or hidden,
 //!   active while the app is the active one (its windows get
 //!   `WM_ACTIVATEAPP`; before the first, the foreground window is the
-//!   process's), inactive otherwise; background too from the moment the
-//!   session may end (signing out, shutting down: [`crate::session`]);
+//!   process's), inactive otherwise; background too while the user cannot
+//!   see it: the session locked or without a display, the display off, the
+//!   window on another virtual desktop ([`crate::presence`], followed from
+//!   the system's notifications), and from the moment the session may end
+//!   (signing out, shutting down: [`crate::session`]);
 //! - the wake count (`wakeCount()`): one more on every
 //!   `WM_POWERBROADCAST` with `PBT_APMRESUMEAUTOMATIC` ([`woke`]), which
 //!   top-level windows get on every resume (an embedded surface's root
@@ -392,17 +395,22 @@ fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
     // SAFETY: plain calls on a window handle.
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
     // SAFETY: as above.
-    let shown = unsafe { IsWindowVisible(root).as_bool() && !IsIconic(root).as_bool() };
-    lifecycle_of(shown, crate::session::ending(), || {
+    let shown = unsafe { IsWindowVisible(root).as_bool() && !IsIconic(root).as_bool() }
+        && !crate::presence::cloaked(root);
+    // A test's app runs as it does on screen whatever the screen shows (a
+    // locked or remote session), so its tests see what they see unlocked.
+    let seen = surface.testing() || crate::presence::screen_seen();
+    lifecycle_of(shown, seen, crate::session::ending(), || {
         ACTIVE.with(Cell::get).unwrap_or_else(foreground_is_ours)
     })
 }
 
-/// The app's state with its window `shown` (not minimized or hidden),
-/// the session `ending` ([`crate::session`]) and whether it is the
-/// `active` app.
-fn lifecycle_of(shown: bool, ending: bool, active: impl FnOnce() -> bool) -> Lifecycle {
-    if !shown || ending {
+/// The app's state with its window `shown` (not minimized, hidden or on
+/// another virtual desktop), the screen `seen` (the session unlocked and
+/// connected, the display on: [`crate::presence`]), the session `ending`
+/// ([`crate::session`]) and whether it is the `active` app.
+fn lifecycle_of(shown: bool, seen: bool, ending: bool, active: impl FnOnce() -> bool) -> Lifecycle {
+    if !shown || !seen || ending {
         Lifecycle::Background
     } else if active() {
         Lifecycle::Active
@@ -2294,11 +2302,42 @@ mod tests {
 
     #[test]
     fn an_ending_session_puts_the_app_in_the_background() {
-        assert_eq!(lifecycle_of(true, false, || true), Lifecycle::Active);
-        assert_eq!(lifecycle_of(true, false, || false), Lifecycle::Inactive);
-        assert_eq!(lifecycle_of(false, false, || true), Lifecycle::Background);
-        assert_eq!(lifecycle_of(true, true, || true), Lifecycle::Background);
-        assert_eq!(lifecycle_of(true, true, || false), Lifecycle::Background);
+        assert_eq!(lifecycle_of(true, true, false, || true), Lifecycle::Active);
+        assert_eq!(
+            lifecycle_of(true, true, false, || false),
+            Lifecycle::Inactive
+        );
+        assert_eq!(
+            lifecycle_of(false, true, false, || true),
+            Lifecycle::Background
+        );
+        assert_eq!(
+            lifecycle_of(true, true, true, || true),
+            Lifecycle::Background
+        );
+        assert_eq!(
+            lifecycle_of(true, true, true, || false),
+            Lifecycle::Background
+        );
+    }
+
+    #[test]
+    fn a_screen_the_user_cannot_see_puts_the_app_in_the_background() {
+        // Locked, disconnected or turned off: active or not, nothing shows.
+        assert_eq!(
+            lifecycle_of(true, false, false, || true),
+            Lifecycle::Background
+        );
+        assert_eq!(
+            lifecycle_of(true, false, false, || false),
+            Lifecycle::Background
+        );
+        let locked = crate::presence::Screen::default()
+            .session_changed(windows::Win32::UI::WindowsAndMessaging::WTS_SESSION_LOCK);
+        assert_eq!(
+            lifecycle_of(true, locked.seen(), false, || true),
+            Lifecycle::Background
+        );
     }
 
     #[test]

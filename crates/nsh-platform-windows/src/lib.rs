@@ -51,6 +51,7 @@ mod native;
 mod navigation;
 mod notifications;
 mod picker;
+mod presence;
 mod render;
 mod richedit;
 mod scroll;
