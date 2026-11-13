@@ -779,6 +779,32 @@ impl std::fmt::Display for TimeZone {
     }
 }
 
+/// What the performance monitor measured over the last second
+/// ([`crate::element::perf_stats`]; TS `perfStats()`), read once a second
+/// while it measures. More of what the monitor measures can join it.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default, crate::element::JsObject)]
+pub struct PerfStats {
+    /// Frames shown per second: display refreshes in which the app changed
+    /// something. An idle app reads low, which is not slowness.
+    pub fps: f32,
+    /// The rate the display refreshes at (Hz), once the monitor saw it
+    /// refresh.
+    pub refresh_rate: Option<f32>,
+    /// The share of recent frames that took longer than one refresh.
+    pub dropped: crate::geometry::Percentage,
+}
+
+impl PerfStats {
+    /// Stats of `fps` frames a second, the rest unknown.
+    pub fn new(fps: f32) -> PerfStats {
+        PerfStats {
+            fps,
+            ..PerfStats::default()
+        }
+    }
+}
+
 /// The user's locale settings beside the locale (`locale_settings()`; TS
 /// `localeSettings()`): the preferred languages, the time zone and the
 /// regional preferences the systems keep beside the language (Language &

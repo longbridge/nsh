@@ -207,6 +207,9 @@ platform::Environment.font_scale                                 # a font scale 
 platform::Environment.keyboard_duration                          # time
 platform::Environment.pixel_ratio                                # device pixels per point
 platform::HostEnvironment.font_scale                             # a font scale factor
+platform::PerfStats.fps                                          # a frame rate (frames per second)
+platform::PerfStats.refresh_rate                                 # a refresh rate (Hz)
+platform::PerfStats::new(fps)                                    # a frame rate (frames per second)
 props::AccessibilityValue.max                                    # an app-defined value
 props::AccessibilityValue.min                                    # an app-defined value
 props::AccessibilityValue.now                                    # an app-defined value

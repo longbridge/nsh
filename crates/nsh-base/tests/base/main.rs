@@ -49,6 +49,8 @@ mod tabs;
 #[cfg(feature = "term")]
 mod term;
 #[cfg(feature = "term")]
+mod term_cells;
+#[cfg(feature = "term")]
 mod term_input;
 mod terminal;
 mod text_view;

@@ -1161,6 +1161,12 @@ impl<M: TextEngine> Core<M> {
         self.components.runtime.set_perf_monitor(enabled);
     }
 
+    /// What the performance monitor measured last (`perfStats()`; `None`
+    /// while it does not measure): what read it runs again.
+    pub fn set_perf_stats(&mut self, stats: Option<crate::platform::PerfStats>) {
+        self.components.runtime.set_perf_stats(stats);
+    }
+
     /// The displays components read ([`crate::element::desktop::displays`]),
     /// as the platform reports them: what read them runs again.
     pub fn set_displays(&mut self, displays: Arc<[crate::desktop::Display]>) {

@@ -997,6 +997,14 @@ impl Headless {
                     id: ROOT_ID,
                     command: Command::SetAppUrl(url),
                 } => self.set_page_url(url, false),
+                // `setFpsEnabled`: a performance monitor for the engine, as
+                // a platform's. It draws no frames: `perfStats()` reads 0 fps.
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PerfMonitor(on),
+                } => self.engine.control().set_perf_monitor(
+                    on.then(|| std::sync::Arc::new(nsh_engine::perf::PerfMonitor::new())),
+                ),
                 MountItem::Command {
                     id: ROOT_ID,
                     command: Command::PushAppUrl(url),

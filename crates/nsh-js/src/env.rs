@@ -52,11 +52,12 @@ enum Part {
     WindowState,
     Displays,
     Fps,
+    PerfStats,
     Shaders,
     WakeCount,
 }
 
-const PARTS: usize = 17;
+const PARTS: usize = 18;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -193,6 +194,9 @@ pub(crate) fn init(cx: *mut JsContext) {
         } else if i == Part::Fps as usize {
             // No performance monitor until the platform installs one.
             boolean(false)
+        } else if i == Part::PerfStats as usize {
+            // No stats until the monitor measured a second.
+            qjs::JS_NULL
         } else {
             UNDEFINED
         };
@@ -645,6 +649,23 @@ pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), (
     }
 }
 
+/// Takes in what the performance monitor measured last (`perfStats()`):
+/// `None` while it does not measure.
+pub(crate) fn set_perf_stats(
+    cx: *mut JsContext,
+    stats: Option<&nsh_core::platform::PerfStats>,
+) -> Result<(), ()> {
+    let value = stats.map_or(qjs::JS_NULL, |stats| to_js(cx, stats));
+    reactive::set_signal(cx, env(cx).signals[Part::PerfStats as usize].get(), value);
+    let failed = reactive::finish_value(cx, UNDEFINED);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(failed) } {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
 /// `value` as JS (owned): what Rust's conversion makes of it, `undefined`
 /// when it fails (it does not for the environment's plain objects).
 pub(crate) fn to_js<T: nsh_core::element::JsValue>(cx: *mut JsContext, value: &T) -> JsValue {
@@ -943,6 +964,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "perfStats",
+        Export::Value(|cx| accessor(cx, Part::PerfStats)),
+        Ts::value(
+            "What the performance monitor measured over the last second (reactive):\nits frame rate and more, read once a second while it measures\n(`fpsEnabled()`), `null` while it does not and until its first second.",
+            "Accessor<PerfStats | null>",
+        ),
+    ),
+    (
         "fontScale",
         Export::Value(|cx| accessor(cx, Part::FontScale)),
         Ts::value(
@@ -1025,6 +1054,20 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Every platform but the web. */
   native?: T;
   default?: T;
+}
+
+/** What the performance monitor measured over the last second
+ * (`perfStats()`). */
+export interface PerfStats {
+  /** Frames shown per second: display refreshes in which the app changed
+   * something. An idle app reads low, which is not slowness. */
+  readonly fps: number;
+  /** The rate the display refreshes at (Hz), once the monitor saw it
+   * refresh. */
+  readonly refreshRate: number | null;
+  /** The share of recent frames that took longer than one refresh, from 0
+   * to 1. */
+  readonly dropped: number;
 }
 
 /** The user's locale settings beside the locale (`localeSettings()`). */
