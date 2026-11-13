@@ -1075,6 +1075,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::BackPress,
     EventKind::ImageInfo,
     EventKind::WebEvaluation,
+    EventKind::WebViewReply,
+    EventKind::DownloadPending,
     EventKind::Clipboard,
     EventKind::Host,
     EventKind::Pick,

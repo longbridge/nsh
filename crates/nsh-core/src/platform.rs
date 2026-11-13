@@ -343,6 +343,12 @@ pub struct Environment {
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
     /// when a web view starts reports that error itself.
     pub web_views: bool,
+    /// The platform carries out a web view's requests
+    /// ([`crate::Command::WebViewRequest`]: a pending download's
+    /// destination or cancellation; the desktops); without it, they answer
+    /// at once with an error and no web view downloads behind the app's
+    /// back.
+    pub webview_requests: bool,
     /// The platform draws shader views (`Shader`, `ShaderEffect`,
     /// `ShaderTransition`, the screen's; TS: `shadersAvailable()`). `true`
     /// by default. A platform built without a renderer sets `false` from
@@ -412,6 +418,7 @@ impl Default for Environment {
             web_input: false,
             web_evaluate: false,
             web_views: true,
+            webview_requests: false,
             shaders: true,
         }
     }
@@ -791,12 +798,16 @@ pub struct PerfStats {
     /// The rate the display refreshes at (Hz), once the monitor saw it
     /// refresh.
     pub refresh_rate: Option<f32>,
-    /// The share of recent frames that took longer than one refresh.
+    /// The share of recent frames that took longer than one refresh, from 0
+    /// to 1 (`0.05` is 5%), as TS's `dropped` reads it.
     pub dropped: crate::geometry::Percentage,
 }
 
 impl PerfStats {
-    /// Stats of `fps` frames a second, the rest unknown.
+    /// Stats of `fps` frames a second, the rest unknown: the engine's way
+    /// to make them (the type is non-exhaustive). Apps read them
+    /// ([`crate::element::perf_stats`]) and never make one.
+    #[doc(hidden)]
     pub fn new(fps: f32) -> PerfStats {
         PerfStats {
             fps,

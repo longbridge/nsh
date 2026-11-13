@@ -900,8 +900,9 @@ fn platform(cx: *mut JsContext) -> JsValue {
     )
 }
 
-/// `platform.select(spec)`: this OS's value, else `mobile` / `desktop`,
-/// else `native` (not on the web), else `default`.
+/// `platform.select(spec)`: this platform's name (when built outside NSH),
+/// else its OS, else `mobile` / `desktop`, else `native` (not on the web),
+/// else `default`.
 unsafe extern "C" fn platform_select(
     cx: *mut JsContext,
     _this: JsValue,
@@ -915,12 +916,16 @@ unsafe extern "C" fn platform_select(
     }
     let env = current(cx);
     let kind = if env.desktop() { "desktop" } else { "mobile" };
-    let keys = [env.os.name(), kind, "native", "default"];
-    for key in keys
+    let external = env.platform.filter(|&name| name != env.os.name());
+    let rest = [env.os.name(), kind, "native", "default"];
+    for key in external
         .into_iter()
+        .chain(rest)
         .filter(|k| *k != "native" || env.os != Os::Web)
     {
-        let key = std::ffi::CString::new(key).unwrap_or_default();
+        let Ok(key) = std::ffi::CString::new(key) else {
+            continue;
+        };
         let v = unsafe { qjs::JS_GetPropertyStr(cx, spec, key.as_ptr()) };
         if !unsafe { qjs::JS_IsUndefined(v) } {
             return v;
@@ -1054,6 +1059,8 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Every platform but the web. */
   native?: T;
   default?: T;
+  /** A platform built outside NSH, by its `platform.name` (`"miniprogram"`, ...). */
+  [platform: string]: T | undefined;
 }
 
 /** What the performance monitor measured over the last second
@@ -1066,7 +1073,7 @@ export interface PerfStats {
    * refresh. */
   readonly refreshRate: number | null;
   /** The share of recent frames that took longer than one refresh, from 0
-   * to 1. */
+   * to 1 (`0.05` is 5%), as Rust's `dropped` (a `Percentage`) reads it. */
   readonly dropped: number;
 }
 
@@ -1132,9 +1139,10 @@ export interface PlatformInfo {
   /** The app runs under Mac Catalyst, in the Mac or the iPad idiom
    * (`os` is `"ios"`, `desktop` false). */
   readonly catalyst: boolean;
-  /** The value for this platform: its OS (`ios`, `macos`, `web`, ...),
-   * else `desktop` / `mobile` (by `platform.desktop`), else `native` (not
-   * on the web), else `default`. */
+  /** The value for this platform: its `name` (`"miniprogram"`, ...),
+   * else its OS (`ios`, `macos`, `web`, ...), else `desktop` / `mobile`
+   * (by `platform.desktop`), else `native` (not on the web), else
+   * `default`. */
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
 "#;

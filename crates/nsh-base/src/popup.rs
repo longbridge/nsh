@@ -41,8 +41,8 @@ pub enum OpenChangeReason {
     /// The pointer rested on its trigger, or left or pressed it (a
     /// tooltip's); left its trigger and itself (a hover card's).
     Hover,
-    /// The keyboard focus came to its trigger, or left it (a hover
-    /// card's); moved to another item of its menu (a submenu's); Tab or
+    /// The keyboard focus moved to another item of its menu (a
+    /// submenu's); Tab or
     /// Shift+Tab moved it on from a select or combobox whose list was open
     /// (the focus goes where Tab takes it).
     Focus,
@@ -410,7 +410,7 @@ impl PopupPresence {
         effect(move || {
             let now = open();
             // Not cleared here: the focus watch says when the focus leaves,
-            // and keeps its own record of where it is across openings.
+            // the popup part's removal on close included.
             if was.replace(now) && !now && inside.get() {
                 untracked(&back);
             }

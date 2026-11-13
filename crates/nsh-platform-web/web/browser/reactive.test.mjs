@@ -802,7 +802,7 @@ test("host events preserve order, owner cleanup and platform calls", { skip: !pa
 
 test("Rust component event callbacks retain their error boundary owner", { skip: !path }, async () => {
   const { api, values, components, close } = await fixture();
-  const Component = components.make({ name: "Fixture", id: 0, props: [], events: ["change"], methods: [] }, () => {});
+  const Component = components.make({ name: "Fixture", id: 0, props: [], events: ["change"], methods: [], hostProps: [] }, () => {});
   let output, node, dispose;
   api.root(stop => {
     dispose = stop;
@@ -819,7 +819,7 @@ test("Rust component event callbacks retain their error boundary owner", { skip:
 
 test("Rust renderer getters retain their error boundary owner", { skip: !path }, async () => {
   const { api, values, components, close } = await fixture();
-  const Component = components.make({ name: "Fixture", id: 0, props: [], events: [], methods: [] }, () => {});
+  const Component = components.make({ name: "Fixture", id: 0, props: [], events: [], methods: [], hostProps: [] }, () => {});
   let output, node, dispose;
   api.root(stop => {
     dispose = stop;

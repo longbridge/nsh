@@ -526,14 +526,38 @@ fn a_popovers_field_follows_its_trigger_in_the_tab_order(cx: &mut TestAppContext
             ));
         });
     };
-    // Into the popover, which is shown at the end of the root view, then
-    // on to the field after it, and back.
+    // The trigger takes presses, so it is a stop of its own: no field
+    // has the keyboard while it does.
+    let on_trigger = |view: &Entity<AppView>, cx: &mut VisualTestContext| {
+        let start = Instant::now();
+        loop {
+            cx.run_until_parked();
+            let custom = view.read_with(cx, |view, _| {
+                crate::key_focus::focused(view.surface())
+                    .is_some_and(|v| v.kind() != nsh_core::ViewKind::Input)
+            });
+            if custom && field_text(view, cx).is_none() {
+                return;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "the trigger never takes the keyboard"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // To the trigger, into the popover, which is shown at the end of the
+    // root view, then on to the field after it, and back.
+    tab(&view, cx, false);
+    on_trigger(&view, cx);
     tab(&view, cx, false);
     wait_for(&view, cx, "inside");
     tab(&view, cx, false);
     wait_for(&view, cx, "after");
     tab(&view, cx, true);
     wait_for(&view, cx, "inside");
+    tab(&view, cx, true);
+    on_trigger(&view, cx);
     tab(&view, cx, true);
     wait_for(&view, cx, "before");
 }

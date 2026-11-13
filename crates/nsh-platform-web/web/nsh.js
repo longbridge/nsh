@@ -1632,6 +1632,8 @@ class Player {
   reset() {
     this.stop();
     this.audioDispose();
+    this.askBeforeLeaving(false);
+    this.watchPageEnd(false);
     this.resetHistory();
     // The next app sets its own (its first commit comes before the write).
     if (this.windowTitle) {
@@ -1667,6 +1669,8 @@ class Player {
     this.hostEvents ??= [];
     // Fonts registered while it starts hold its first frame back (`fontLoading`).
     this.starting = true;
+    // The page's end is the app's (`watchPageEnd`).
+    this.watchPageEnd(true);
     // The app's address starts as its first entry's, which the core has
     // before the app's code runs (`nsh_set_page_url`).
     if (this.history) this.withStrings([this.firstUrl], (p, l) => this.wasm.nsh_set_page_url?.(p, l));
@@ -2045,6 +2049,10 @@ class Player {
     this.trapped = true;
     this.deferred = [];
     clearTimeout(this.timer);
+    // Nothing of the app's can run any more (save, quit): the page leaves
+    // as any other.
+    this.askBeforeLeaving(false);
+    this.watchPageEnd(false);
   }
 
   showError(message, { overlay = !this.trapped } = {}) {
@@ -2115,9 +2123,10 @@ class Player {
   }
 
   /** The views that name others (`aria-activedescendant`,
-   * `aria-controls`) point at them by DOM id, after the batch made them:
-   * a row may be made after the field naming it. A view named that is
-   * not there yet is looked for again after the next batch. */
+   * `aria-controls`, `aria-describedby`) point at them by DOM id, after
+   * the batch made them: a row may be made after the field naming it. A
+   * view named that is not there yet is looked for again after the next
+   * batch. */
   linkRelations() {
     const pending = this.relating;
     this.relating = null;
@@ -2126,7 +2135,11 @@ class Player {
       const p = el._props ?? {};
       // The element that keeps the focus: an input's field.
       const focused = el._field ?? el;
-      for (const [name, id] of [["aria-activedescendant", p.activeDescendant], ["aria-controls", p.controls]]) {
+      for (const [name, id] of [
+        ["aria-activedescendant", p.activeDescendant],
+        ["aria-controls", p.controls],
+        ["aria-describedby", p.describedBy],
+      ]) {
         if (focused !== el) el.removeAttribute(name);
         const target = id == null ? null : this.view(id);
         if (!target) {
@@ -2863,9 +2876,9 @@ class Player {
     set("aria-valuetext", text);
     set("aria-live", p.live);
     set("aria-hidden", p.hidden && "true");
-    if (p.activeDescendant != null || p.controls != null || el._related) {
+    if (p.activeDescendant != null || p.controls != null || p.describedBy != null || el._related) {
       // Linked once the batch is applied (`linkRelations`).
-      el._related = p.activeDescendant != null || p.controls != null;
+      el._related = p.activeDescendant != null || p.controls != null || p.describedBy != null;
       (this.relating ??= new Set()).add(el);
     }
   }
@@ -6408,7 +6421,14 @@ class Player {
     if (html != null) {
       let head = "";
       if (base) head += `<base href="${base.replace(/"/g, "&quot;")}">`;
-      if (el._token) head += `<script>${webBridge(el._token)}</script>`;
+      // By URL where the browser host is (`browser/web-bridge.js`): a
+      // strict `script-src` the web view inherits allows it ('self').
+      const bridge = this.browserHost?.webBridge;
+      if (el._token) {
+        head += bridge
+          ? `<script src="${bridge.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" data-nsh-token="${el._token}"></script>`
+          : `<script>${webBridge(el._token)}</script>`;
+      }
       if (!scroll) head += "<style>html,body{overflow:hidden!important}</style>";
       if (before) head += `<script>${before.replace(/<\/script/gi, "<\\/script")}</script>`;
       const tail = after ? `<script>${after.replace(/<\/script/gi, "<\\/script")}</script>` : "";
@@ -6621,6 +6641,7 @@ class Player {
       case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
+      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
@@ -6636,6 +6657,11 @@ class Player {
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
       case "pushAppUrl": this.setPageUrl(args[0], true); break;
+      case "quitOnRequest": this.askBeforeLeaving(!args[0]); break;
+      // The app's `quit()`: its answer while it is asked about leaving the
+      // page (the page may go); a page cannot close its own tab, so at
+      // other times the page stays as it is.
+      case "quit": if (this.quitAsked) this.quitAsked.granted = true; break;
       case "setTitle": this.setWindowTitle(args[0]); break;
       case "exitApp": {
         const app = this.app;
@@ -6673,6 +6699,78 @@ class Player {
 
 
 
+  /** Whether leaving the page (closing its tab, reloading, going to
+   * another site) asks the app first: on while the app listens to quit
+   * requests (`quitOnRequest` false). A `beforeunload` listener can keep a
+   * page out of the back / forward cache in some browsers, so it is there
+   * only while it is needed. */
+  askBeforeLeaving(ask) {
+    if (typeof window === "undefined" || !ask === !this.leaveGuard) return;
+    if (ask) {
+      this.leaveGuard = (event) => {
+        if (this.deliverQuitRequest()) return;
+        event.preventDefault();
+        // Browsers before `preventDefault` was enough.
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", this.leaveGuard);
+    } else {
+      window.removeEventListener("beforeunload", this.leaveGuard);
+      this.leaveGuard = null;
+    }
+  }
+
+  /** The user is leaving the page: the app hears the quit request as the
+   * desktops' quit key reports it, its listeners running before this
+   * returns. Whether the app quit meanwhile: the page then leaves without
+   * asking. Otherwise the browser asks the user, and what the listeners
+   * started (their own question, a save) is on the page should the user
+   * stay. A request the engine cannot take now (it is running: the page
+   * left from inside an engine call) or that fails leaves the question to
+   * the browser. This only decides: `beforeunload` comes before the
+   * browser commits to leaving, and the page may still stay (the user
+   * cancels another listener's question, the navigation is a download),
+   * so the app's quit listeners start only once the page is really gone
+   * (`watchPageEnd`). */
+  deliverQuitRequest() {
+    if (this.depth > 0 || this.trapped) return false;
+    const asked = { granted: false };
+    this.quitAsked = asked;
+    try {
+      this.call((w) => w.nsh_quit_request());
+    } catch (err) {
+      console.error("[nsh]", err);
+      return false;
+    } finally {
+      this.quitAsked = null;
+    }
+    return asked.granted;
+  }
+
+  /** While an app runs: the page being discarded ends it, as the process
+   * ending ends a desktop app, whichever way the user left (the app let
+   * the page go, the user chose to leave in the browser's question,
+   * nothing listened to quit requests). Its quit listeners start then,
+   * once (`nsh_quit`): what they do synchronously completes, work they
+   * await runs for as long as the page remains. A `pagehide` that keeps
+   * the page in the back / forward cache (`persisted`) ends nothing: the
+   * app runs on when the page comes back. A `pagehide` listener keeps no
+   * page out of that cache. */
+  watchPageEnd(watch) {
+    if (typeof window === "undefined" || !watch === !this.pageEnd) return;
+    if (watch) {
+      this.pageEnd = (event) => {
+        if (event.persisted) return;
+        this.watchPageEnd(false);
+        this.call((w) => w.nsh_quit());
+      };
+      window.addEventListener("pagehide", this.pageEnd);
+    } else {
+      window.removeEventListener("pagehide", this.pageEnd);
+      this.pageEnd = null;
+    }
+  }
+
   /** Has screen readers read `text` (`announce`), through the live region. */
   announce(text) {
     // Cleared first: the same text again is announced again.
@@ -6691,25 +6789,72 @@ class Player {
   }
 
   /**
-   * `Clipboard.writeText`. The async Clipboard API needs a secure context
-   * (and, in some browsers, a user gesture); a copy command is the fallback.
+   * `Clipboard.writeText` / `write`: `text`, and `html` when given as
+   * `text/html` beside it (one item, as a browser copies a selection).
+   * Within the user's gesture (a key or a press whose batch is applied
+   * while its event runs, as a RichEditor's copy is) a copy command whose
+   * event takes the types, as ProseMirror copies: synchronous, with no
+   * permission or secure context. Else the async Clipboard API (a secure
+   * context; some browsers want a gesture), then a copy command over a
+   * selected offscreen text area.
    */
-  writeClipboard(text) {
+  writeClipboard(text, html) {
+    if (navigator.userActivation?.isActive !== false && this.copyCommand(text, html)) return;
     const copy = () => {
+      const focused = document.activeElement;
       const area = document.createElement("textarea");
       area.value = text;
       area.className = "nsh-offscreen";
       document.body.append(area);
+      // Safari copies only a selection.
       area.select();
-      try {
-        document.execCommand("copy");
-      } catch {
-        // Nothing left to try.
-      }
+      this.copyCommand(text, html);
       area.remove();
+      // The selection took the focus from the field that had it (a
+      // RichEditor's input).
+      if (focused && focused !== document.body && focused.isConnected) focused.focus({ preventScroll: true });
     };
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(copy);
-    else copy();
+    if (html !== undefined && navigator.clipboard?.write && typeof ClipboardItem === "function") {
+      const item = new ClipboardItem({
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
+      });
+      navigator.clipboard.write([item]).catch(copy);
+    } else if (html === undefined && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(copy);
+    } else {
+      copy();
+    }
+  }
+
+  /** A copy command whose `copy` event puts `text`, and `html` when
+   * given, on the clipboard; whether it did. Cancelling `beforecopy` lets
+   * Blink and WebKit copy with nothing selected. */
+  copyCommand(text, html) {
+    const doc = globalThis.document;
+    if (typeof doc?.execCommand !== "function") return false;
+    let done = false;
+    const enable = (event) => event.preventDefault();
+    const fill = (event) => {
+      if (!event.clipboardData) return;
+      event.clipboardData.setData("text/plain", text);
+      if (html !== undefined) event.clipboardData.setData("text/html", html);
+      event.preventDefault();
+      // Not the copy of selected text (`copyText`) as well.
+      event.stopImmediatePropagation();
+      done = true;
+    };
+    doc.addEventListener("beforecopy", enable, true);
+    doc.addEventListener("copy", fill, true);
+    try {
+      doc.execCommand("copy");
+    } catch {
+      // Refused: the caller tries the next way.
+    } finally {
+      doc.removeEventListener("beforecopy", enable, true);
+      doc.removeEventListener("copy", fill, true);
+    }
+    return done;
   }
 
   /**

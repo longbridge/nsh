@@ -1395,6 +1395,28 @@ pub trait Accessible: Element {
         self
     }
 
+    /// The element whose text describes it, for assistive technologies
+    /// (TS: `accessibilityDescribedBy`; ARIA's `aria-describedby`): a
+    /// field's error or help line, which the app places apart from it.
+    /// Screen readers read that text after the name, as they read
+    /// [`Accessible::accessibility_description`], whose place it takes
+    /// while it names a rendered element with text. `None` names none.
+    fn accessibility_described_by(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementRef>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+                super::host::set_in(
+                    &mut a.props,
+                    Prop::Accessibility(AccessibilityProp::DescribedBy(
+                        target.and_then(|t| t.element_target()),
+                    )),
+                )
+            });
+        self
+    }
+
     /// Its value for screen readers, for a range (a progress bar, a
     /// slider: `min`, `max` and `now`) or as a text; `None` has none (an
     /// indeterminate progress bar keeps its range and leaves out `now`).

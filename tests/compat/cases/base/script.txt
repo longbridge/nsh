@@ -460,6 +460,17 @@ covers [props] NavPage.headerStyle
 covers [props] NavPage.headerClass
 covers [events] NavPage.onBackPress
 covers [events] NavPage.onDismiss
+# base-nav-header-items
+tap id:case-base-nav-header-items
+# Trailing iOS bar buttons (`ios.headerRightItems`) with a menu; other
+# platforms keep showing `headerRight`. The steps check the page's own texts
+# and the fallback `headerRight`. nsh-compat does not report a screen's header
+# buttons yet (as for `headerRightSymbol`), so `ios.headerRightItems` is not
+# claimed here; the core and engine tests cover the items and their handlers.
+expect Log: none
+expect Filter: all
+expect Fallback right
+prop id:home title Header items
 # base-nav-stack-change
 tap id:case-base-nav-stack-change
 # onChange: not for the first routes, then once per change with the routes after it.
@@ -678,6 +689,12 @@ expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
 expect Unknown tag: <US tech> up
+# A code block's annotations show in place of its code; its actions get
+# the block, its id too.
+expect Annotated code
+style span:"Annotated code" fontWeight 600
+tap label:Export annotated
+expect Code action: export annotated: Annotated code
 covers [nsh/base] TextView
 covers [props] TextView.markdown
 covers [props] TextView.document
@@ -2599,6 +2616,9 @@ covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
 prop label:Locked accessibilityState disabled=true expanded=false hasPopup=true
 covers [props] disabled
+# The states the app gives its trigger element (`busy`; `invalid` alike)
+# stay, beside the ones the select sets.
+prop label:Checked accessibilityState busy=true expanded=false hasPopup=true
 # `searchable`: a field above the items (its placeholder, name for screen
 # readers and look the app's; on a phone the keyboard comes when it is
 # pressed) filters them by title, ignoring case, and a section without a
@@ -4353,6 +4373,7 @@ expect Suggest: true jo @jo 4-7 false
 expect Mention: Hi @Joan false
 expect Replace: true Hi @Joan done
 expect Exit: true false true
+expect Open: true true false true false false
 covers [nsh/base] link
 covers [nsh/base] characterCount
 covers [nsh/base] suggestion
@@ -4363,6 +4384,7 @@ covers [nsh/base] unsetLink
 covers [nsh/base] setCharacterLimit
 covers [nsh/base] replaceSuggestion
 covers [nsh/base] exitSuggestion
+covers [nsh/base] setSuggestionOpen
 covers [nsh/base] insertMention
 
 # base-rich-editor-kit

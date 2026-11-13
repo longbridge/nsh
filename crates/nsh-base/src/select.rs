@@ -336,7 +336,10 @@ pub struct SelectProps {
     /// What screen readers call the clear button (the app's words).
     pub clear_button_accessibility_label: Prop<Option<SharedString>>,
     /// What opens the list when pressed: the app's element, which the
-    /// list is placed against.
+    /// list is placed against. It is the combobox screen readers hear:
+    /// the select sets its role, label, value, `expanded`, `hasPopup` and
+    /// `disabled`, and the states the app gives the element itself stay
+    /// (`invalid` for a select the app's checks reject, `busy`).
     pub trigger: Prop<Option<Slot>>,
     /// What the list shows while no item does (a search that matches
     /// nothing, no items).

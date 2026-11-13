@@ -3065,6 +3065,7 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        self.prepare_reveals();
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
         // share untouched.
@@ -3239,9 +3240,23 @@ impl<M: TextEngine> Core<M> {
                 self.answer_scroll_position(id, call);
                 continue;
             }
-            let Ok(key) = self.key(id) else { continue };
+            // A web view request whose node is gone or never showed
+            // answers its failure (the view's handle names nothing).
+            let webview = match &command {
+                Command::WebViewRequest(request) => Some(request.id),
+                _ => None,
+            };
+            let Ok(key) = self.key(id) else {
+                if let Some(request) = webview {
+                    self.webview_failed(request, crate::webview::NOT_MOUNTED);
+                }
+                continue;
+            };
             // A culled view is made for it.
             if !self.nodes[key as usize].created && !self.uncull(key) {
+                if let Some(request) = webview {
+                    self.webview_failed(request, crate::webview::NOT_MOUNTED);
+                }
                 continue;
             }
             let node = &self.nodes[key as usize];
@@ -3296,6 +3311,7 @@ impl<M: TextEngine> Core<M> {
             // still scroll to its end.
             match &command {
                 Command::SetClipboard(_)
+                | Command::SetClipboardItem(_)
                 | Command::ReadClipboard { .. }
                 | Command::SetClipboardImage(_)
                 | Command::ReadClipboardImage { .. }
@@ -3314,6 +3330,7 @@ impl<M: TextEngine> Core<M> {
                 // A clipboard of the embedder's own answers in place of
                 // the platform's.
                 Command::SetClipboard(_)
+                | Command::SetClipboardItem(_)
                 | Command::ReadClipboard { .. }
                 | Command::SetClipboardImage(_)
                 | Command::ReadClipboardImage { .. }
@@ -3323,7 +3340,8 @@ impl<M: TextEngine> Core<M> {
                     let clipboard = self.clipboard.clone().expect("a clipboard");
                     match &command {
                         Command::SetClipboard(text) => clipboard.set_text(Some(text.clone())),
-                        Command::SetClipboardImage(_) => clipboard.set_text(None),
+                        Command::SetClipboardItem(item) => clipboard.set_item(Some(item.clone())),
+                        Command::SetClipboardImage(_) => clipboard.set_item(None),
                         Command::ReadClipboard {
                             id: request,
                             has_only,
@@ -3382,7 +3400,27 @@ impl<M: TextEngine> Core<M> {
                     self.deny("the status bar is not granted: add `\"statusBar\": true` to capabilities in nsh.json".into());
                     continue;
                 }
+                // A context menu shows in the app's own view, and the
+                // windows the app opens are `capabilities.windows`'
+                // (`Access::check_window`): neither needs `application`. The main
+                // window, the application menu, the tray, global shortcuts
+                // and quitting reach past the app's view and do.
+                Command::Desktop(desktop)
+                    if !self.access.allows_application()
+                        && !matches!(
+                            **desktop,
+                            crate::desktop::DesktopCommand::PopupMenu { .. }
+                                | crate::desktop::DesktopCommand::OpenWindow(_)
+                        )
+                        && (id == crate::ROOT_ID || !desktop.is_window_command()) =>
+                {
+                    self.deny("the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into());
+                    continue;
+                }
                 _ => {}
+            }
+            if self.web_navigation_refused(key, &command) {
+                continue;
             }
             let node = &self.nodes[key as usize];
             let id = node.id;
@@ -3520,6 +3558,97 @@ impl<M: TextEngine> Core<M> {
             self.web_view_unavailable(id);
         }
         Ok(())
+    }
+
+    /// Whether this platform cannot carry out a web view's manual
+    /// downloads (`WebProps::defer_downloads`). Such a view keeps an inert
+    /// page: it must not download automatically behind the app's back.
+    fn web_view_policy_blocked(&self, props: &crate::WebProps) -> bool {
+        !self.components.environment.webview_requests && props.defer_downloads
+    }
+
+    /// Whether node `key` is a web view whose manual downloads this
+    /// platform cannot carry out.
+    fn web_view_key_blocked(&self, key: Key) -> bool {
+        self.nodes[key as usize].kind == Kind::WebView
+            && self.nodes[key as usize]
+                .control
+                .as_deref()
+                .is_some_and(|control| match control {
+                    crate::NativeProps::WebView(props) => self.web_view_policy_blocked(props),
+                    _ => false,
+                })
+    }
+
+    /// A web view policy this platform cannot carry out
+    /// ([`NativeProp::DeferDownloads`]) fails as `onError` on the web view.
+    /// The prop stays what the app asked for, and
+    /// [`Self::web_view_policy_blocked`] keeps the page inert: a refused
+    /// manual download must not run automatically.
+    fn check_web_policy(&mut self, key: Key, prop: &NativeProp) {
+        let (id, web) = {
+            let node = &self.nodes[key as usize];
+            (node.id, node.kind == Kind::WebView)
+        };
+        if !web
+            || !self.components.environment.web_views
+            || self.components.environment.webview_requests
+            || !matches!(prop, NativeProp::DeferDownloads(true))
+        {
+            return;
+        }
+        let message = format!(
+            "manual downloads are not supported by this platform's web view ({}): the page is not loaded",
+            self.components.environment.platform_name()
+        );
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                ("message", PayloadValue::Str(message.clone())),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
+                ),
+            ]),
+        ));
+        self.deny(message);
+    }
+
+    /// A navigation command (`load`, `reload`, `goBack`, `goForward`) or
+    /// `injectJavaScript` on a web view whose manual downloads this
+    /// platform cannot carry out is refused and reported as `onError`, not
+    /// sent. Injecting a script would let it navigate or fetch past the
+    /// refused policy (the native setting only disables the page's own
+    /// scripts). Once the handler is removed and downloads are automatic
+    /// again, the same commands go through.
+    fn web_navigation_refused(&mut self, key: Key, command: &Command) -> bool {
+        if !matches!(
+            command,
+            Command::Load(_)
+                | Command::Reload
+                | Command::GoBack
+                | Command::GoForward
+                | Command::InjectJavaScript(_)
+        ) || !self.web_view_key_blocked(key)
+        {
+            return false;
+        }
+        let id = self.nodes[key as usize].id;
+        let message = "the web view does not navigate or run injected scripts while manual downloads are not supported by this platform: remove the on_download_pending handler to load the page";
+        self.events.push(crate::element::JsEvent::Event(
+            id,
+            EventKind::Error,
+            EventPayload::Map(vec![
+                ("message", PayloadValue::Str(message.into())),
+                (
+                    "code",
+                    PayloadValue::Str(crate::element::codes::UNAVAILABLE.into()),
+                ),
+            ]),
+        ));
+        self.deny(message.to_owned());
+        true
     }
 
     /// A web view on a platform that shows none fails at once (`onError`
@@ -5040,6 +5169,17 @@ impl<M: TextEngine> Core<M> {
                 self.set_relation(key, relations::Relation::Controls, target);
                 return Ok(());
             }
+            Prop::Accessibility(AccessibilityProp::DescribedBy(target)) => {
+                self.set_relation(key, relations::Relation::DescribedBy, target);
+                return Ok(());
+            }
+            // A described view's own description waits for the element
+            // describing it to go.
+            Prop::Accessibility(AccessibilityProp::Description(description))
+                if !self.relators.is_empty() && self.set_own_description(key, &description) =>
+            {
+                return Ok(());
+            }
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
@@ -5700,7 +5840,9 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::Actions(v) => a.actions = v,
                     AccessibilityProp::Level(v) => a.level = v,
                     // Set as relations, above.
-                    AccessibilityProp::ActiveDescendant(_) | AccessibilityProp::Controls(_) => {}
+                    AccessibilityProp::ActiveDescendant(_)
+                    | AccessibilityProp::Controls(_)
+                    | AccessibilityProp::DescribedBy(_) => {}
                 }
                 let states = classes::accessibility_states(&a.state);
                 let states_changed = states != classes::accessibility_states(&before.state);
@@ -5753,6 +5895,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderRightSymbol(v) => c.right_symbol = v,
                         ScreenProp::HeaderLeftSystemItem(v) => c.left_system_item = v,
                         ScreenProp::HeaderLeftSymbol(v) => c.left_symbol = v,
+                        ScreenProp::HeaderRightItems(v) => c.right_items = v,
                         ScreenProp::PopOnSwipe(v) => c.gesture_enabled = v,
                         ScreenProp::PopOnBack(v) => c.prevent_back = !v,
                         ScreenProp::Animation(v) => c.animation = v,
@@ -5915,6 +6058,7 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Native(prop) => {
+                self.check_web_policy(key, &prop);
                 if let NativeProp::Disabled(d) = prop {
                     // `disabled:` classes, on any element.
                     self.set_disabled(key, d);
@@ -6431,6 +6575,7 @@ impl<M: TextEngine> Core<M> {
     fn release(&mut self, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         self.cancel_web_evaluations(id);
+        self.webview_released(id);
         if key == self.root {
             return Ok(());
         }
@@ -7243,10 +7388,16 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::NATIVE != 0
                 && let Some(control) = &node.control
             {
-                self.mount.push(MountItem::NativeProps {
-                    id,
-                    props: (**control).clone(),
-                });
+                let mut props = (**control).clone();
+                // A manual-download policy this platform cannot carry out
+                // replaces the page with an inert one; the app's props stay
+                // on the node and load again once the handler is removed.
+                if let crate::NativeProps::WebView(web) = &mut props
+                    && self.web_view_policy_blocked(web)
+                {
+                    block_web_page(web);
+                }
+                self.mount.push(MountItem::NativeProps { id, props });
             }
             if flags & dirty::MODAL != 0
                 && let Some(root) = &node.root
@@ -10386,6 +10537,29 @@ fn media_not_granted(what: &str, uri: &str, base: Option<&str>) -> String {
     format!("{what} {uri} is not granted: {advice}")
 }
 
+/// A page with nothing to load and no scripts: what a web view whose manual
+/// downloads this platform cannot carry out shows instead of the app's
+/// page, so nothing can download automatically.
+const BLOCKED_WEB_PAGE: &str =
+    "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
+
+/// Replaces what a blocked web view would load with [`BLOCKED_WEB_PAGE`]
+/// and disables what runs in it (`src`, `baseUrl`, injected scripts,
+/// JavaScript, back/forward gestures). The node keeps the app's own props,
+/// which the next emit restores once the handler is removed.
+fn block_web_page(web: &mut crate::WebProps) {
+    web.source = crate::WebSource::Html {
+        html: BLOCKED_WEB_PAGE.into(),
+        base_url: None,
+    };
+    web.src = None;
+    web.base_url = None;
+    web.javascript_enabled = false;
+    web.injected_js = None;
+    web.injected_js_before = None;
+    web.back_forward_gestures = false;
+}
+
 /// Applies one property to a control.
 fn apply_native(control: &mut NativeProps, prop: NativeProp) {
     use NativeProp as P;
@@ -10433,6 +10607,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
         (NativeProps::WebView(p), P::Incognito(v)) => p.incognito = v,
         (NativeProps::WebView(p), P::UrlSchemes(v)) => p.url_schemes = v,
+        (NativeProps::WebView(p), P::DeferDownloads(v)) => p.defer_downloads = v,
         (NativeProps::Video(p), P::Source(v)) => {
             p.source = match v {
                 crate::WebSource::Uri(uri) => Some(uri),
@@ -10644,6 +10819,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::Measure { .. }
                 | C::MeasureScrollPosition { .. }
                 | C::SetClipboard { .. }
+                | C::SetClipboardItem(_)
                 | C::ReadClipboard { .. }
                 | C::SetClipboardImage { .. }
                 | C::ReadClipboardImage { .. }
