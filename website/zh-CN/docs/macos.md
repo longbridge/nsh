@@ -150,6 +150,9 @@ function App() {
 mount(App);
 ```
 
+菜单栏应用常常提供登录时打开：用户打开它时，`Application.setLaunchAtLogin(true)` 把应用包登记为登录项（见
+[登录时打开](../modules/nsh-desktop.md#登录时打开)）。
+
 用 `AppView` 嵌入的应用按宿主应用的方式参与系统界面（宿主的 `LSUIElement`，或 `NSApplication.setActivationPolicy`）。
 
 ## 嵌入 Mac 应用
@@ -198,6 +201,10 @@ view.load(Bundle::source(code).into());
 
 `AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
 
+`AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：应用包的登录项
+（`SMAppService.mainApp`）。默认关闭，且只有 `run_app` 读取它，所以嵌入应用 不会登录时打开；`nsh package`
+构建的应用的运行器会打开它。
+
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
 
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
@@ -226,7 +233,7 @@ view.load(Bundle::source(code).into());
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
-输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
+输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。可缩放的滚动视图用触控板捏合或 Control + 滚轮以指针为中心缩放，缩放后可以双向滚动。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
 Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或在栈中返回（焦点在输入框或网页中时，Escape 只会离开它；
 网页先收到这些按键，它自己用掉的不会触发返回）；`Dialog` 是覆盖整个窗口的一层，显示应用的弹出层和背景。页面在顶部显示它的 `header`。
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
@@ -263,7 +270,6 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 
 不支持或有所不同：
 
-- **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
 - **`brightness()`** 大于 1 不绘制。**`mixBlendMode`** 和**背景材质**由 Core Animation 绘制：
   `mixBlendMode` 是视图图层的合成滤镜，`macos={{ backdrop: { material, blending, state } }}` 是视图下方的
   `NSVisualEffectView`（任意 AppKit 材质和状态，无论是否设置了 `backdropFilter`），`glassTintColor` 是 macOS 26 上

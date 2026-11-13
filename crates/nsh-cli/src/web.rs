@@ -159,15 +159,10 @@ pub(crate) fn package(
         for side in &split.sides {
             let file = side_file_name(&side.gates);
             let url = site.add(&format!("{file}.wasm"), &side.bytes)?;
-            let mut entry = serde_json::json!({ "url": url, "needs": side.needs });
             if let Some(gate) = &side.gate {
-                entry["gate"] = gate.as_str().into();
-                if gate == MATH_GATE {
-                    entry["onDemand"] = true.into();
-                }
                 published.insert(gate.clone());
             }
-            sides.insert(side.name.clone(), entry);
+            sides.insert(side.name.clone(), side_entry(side, &url));
         }
         chunk_sides = plan.chunk_sides(&published);
         // A runtime published whole has the typesetter in its main module.
@@ -338,6 +333,22 @@ pub(crate) fn package(
         serve(&dir, base.as_deref().unwrap_or("/"))?;
     }
     Ok(())
+}
+
+/// The page's entry for side module `side`, published at `url` (its
+/// `sides`): `{ url, gate?, needs, onDemand }`. The gates of the entry and
+/// of the chunks it imports statically are in the main module
+/// ([`GatePlan::of`]), so a side module only holds code that a chunk
+/// imported later (`chunkSides`, the page's `prepareChunk`) or the first
+/// formula (`loadData("math")`) needs: every one is `onDemand`, which
+/// `prefetchSides` and `preloadSides` leave alone, and is fetched by the
+/// load that needs it, after the side modules it `needs`.
+fn side_entry(side: &prune::split::Side, url: &str) -> serde_json::Value {
+    let mut entry = serde_json::json!({ "url": url, "needs": side.needs, "onDemand": true });
+    if let Some(gate) = &side.gate {
+        entry["gate"] = gate.as_str().into();
+    }
+    entry
 }
 
 const TEXT_VIEW_GATE: &str = "nsh_part_text_view";
@@ -2108,6 +2119,51 @@ mod tests {
         assert_eq!(plan.main, linked_gates(built.native_use.as_ref()));
         built.entry_native_use = None;
         assert!(GatePlan::of(&built).chunks.is_empty());
+    }
+
+    #[test]
+    fn side_modules_are_fetched_only_by_the_load_that_needs_them() {
+        let side = |name: &str, gate: Option<&str>, needs: &[&str]| prune::split::Side {
+            name: name.to_owned(),
+            gate: gate.map(str::to_owned),
+            gates: vec![gate.unwrap_or("nsh_part_fields").to_owned()],
+            needs: needs.iter().map(|n| (*n).to_owned()).collect(),
+            bytes: Vec::new(),
+        };
+        // A gate's module keeps its gate and the modules it needs, which
+        // `loadSide` loads first.
+        assert_eq!(
+            side_entry(
+                &side(
+                    "nsh_part_fields",
+                    Some("nsh_part_fields"),
+                    &["nsh_shared_1"]
+                ),
+                "nsh-fields.0123456789.wasm"
+            ),
+            serde_json::json!({
+                "url": "nsh-fields.0123456789.wasm",
+                "gate": "nsh_part_fields",
+                "needs": ["nsh_shared_1"],
+                "onDemand": true,
+            })
+        );
+        // A shared one is only ever loaded as what a gate's module needs.
+        assert_eq!(
+            side_entry(
+                &side("nsh_shared_1", None, &[]),
+                "nsh-shared.0123456789.wasm"
+            ),
+            serde_json::json!({
+                "url": "nsh-shared.0123456789.wasm",
+                "needs": [],
+                "onDemand": true,
+            })
+        );
+        assert_eq!(
+            side_entry(&side("nsh_feature_math", Some(MATH_GATE), &[]), "m.wasm")["onDemand"],
+            true
+        );
     }
 
     #[test]

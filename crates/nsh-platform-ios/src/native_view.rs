@@ -474,6 +474,8 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Navigation
             | AccessibilityRole::Tree
             | AccessibilityRole::Toolbar
+            | AccessibilityRole::Radiogroup
+            | AccessibilityRole::Tablist
             | AccessibilityRole::Dialog
             | AccessibilityRole::AlertDialog
     )
@@ -697,6 +699,14 @@ mod tests {
         ));
         assert!(is_container(
             &props(AccessibilityRole::Toolbar, &[]).accessibility
+        ));
+        // A labelled radio group names the set, its radios still reached.
+        assert!(is_container(
+            &props(AccessibilityRole::Radiogroup, &[]).accessibility
+        ));
+        // A labelled tab list names the list, its tabs still reached.
+        assert!(is_container(
+            &props(AccessibilityRole::Tablist, &[]).accessibility
         ));
         // A labelled dialog names what VoiceOver enters, never hiding it.
         assert!(is_container(

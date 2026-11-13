@@ -37,9 +37,10 @@ pub fn remember_program() {
     }
 }
 
-/// The program to start again: the remembered one, else this process'
-/// executable.
-fn program_path() -> io::Result<PathBuf> {
+/// The program the app runs from: the one [`remember_program`] took before
+/// something replaced the app on disk, else this process' executable. What
+/// a restart starts, and what the desktops' login items start at login.
+pub fn program_path() -> io::Result<PathBuf> {
     match PROGRAM.lock().unwrap_or_else(|e| e.into_inner()).clone() {
         Some(exe) => Ok(exe),
         None => std::env::current_exe(),
