@@ -76,6 +76,7 @@ mount(() => <Text>{status()}</Text>);
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -171,6 +172,7 @@ mount(() => <Text>{status()}</Text>);"#,
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);

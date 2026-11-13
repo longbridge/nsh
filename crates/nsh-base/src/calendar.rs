@@ -1088,6 +1088,7 @@ impl Grid {
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: false,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| {

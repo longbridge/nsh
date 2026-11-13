@@ -46,32 +46,16 @@ pub fn main() -> std::process::ExitCode {
     std::process::ExitCode::FAILURE
 }
 
-/// Installs the logger and reads the app's resources: its `nsh` directory
+/// Reads the app's resources and installs the logger: its `nsh` directory
 /// (in the app bundle, or `NSH_APP_DIR`: `nsh run` of a Rust app) and the
 /// window's options.
 #[cfg(target_os = "macos")]
 fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     use nsh_platform_macos::{ActivationPolicy, AppOptions, Appearance, AssetBase, Limits};
 
-    /// Run by `nsh run`: the app's own logs go to its terminal too.
-    static DEVELOPMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    struct Logger;
-    impl log::Log for Logger {
-        fn enabled(&self, m: &log::Metadata<'_>) -> bool {
-            m.level() <= log::Level::Warn || m.target() == "js" || DEVELOPMENT.get() == Some(&true)
-        }
-        fn log(&self, r: &log::Record<'_>) {
-            if self.enabled(r.metadata()) {
-                eprintln!("{} {}: {}", r.level(), r.target(), r.args());
-            }
-        }
-        fn flush(&self) {}
-    }
-    static LOGGER: Logger = Logger;
+    // Run by `nsh run`: the app's own logs go to its terminal too.
     let development = std::env::var_os("NSH_APP_DIR");
-    let _ = DEVELOPMENT.set(development.is_some());
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(log::LevelFilter::Info);
+    let developing = development.is_some();
 
     // `<App>.app/Contents/MacOS/<exe>` -> `<App>.app/Contents/Resources/nsh`.
     let dir = match development {
@@ -89,6 +73,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
         // An app on its own, not a module embedded in another app.
         limits: Limits::standalone(),
+        // The packaged app's login item: a Rust app `nsh run` runs in
+        // place has none, so it never registers a development build.
+        login_item: !developing,
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))
@@ -124,7 +111,28 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     // app's own runtime-delivered modules (the bundle's resources are
     // read-only).
     options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
+    install_logger(developing, &options.app_id);
     (dir, options)
+}
+
+/// Installs the runners' logger (`nsh_engine::logging`): `RUST_LOG`'s
+/// levels or the default ones (warnings, errors and the app's `js` lines;
+/// from info up when run by `nsh run`), the rolling file in the app's data
+/// directory, and the unified log, as an app opened from Finder or the Dock
+/// writes stderr to /dev/null (and run by `nsh run`, its terminal too). An
+/// app that installed its own logger (from its native module, which runs
+/// first) keeps it, and its level.
+#[cfg(target_os = "macos")]
+fn install_logger(development: bool, app_id: &str) {
+    let mut unified = nsh_platform_apple::unified_log::Options::default();
+    unified.development = development;
+    unified.filtered = true;
+    let unified = nsh_platform_apple::unified_log::logger(unified);
+    let mut logging = nsh_engine::logging::LogOptions::default();
+    logging.development = development;
+    logging.directory = nsh_engine::logging::log_dir(app_id);
+    logging.output = Some(Box::new(move |r: &log::Record<'_>| unified.log(r)));
+    nsh_engine::logging::install(logging);
 }
 
 /// Whether the bundle's Info.plist has `NSHPerformanceMonitor` true.

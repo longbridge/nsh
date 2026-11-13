@@ -912,6 +912,7 @@ const liked = signal<Set<number>>(new Set());
 | 其他事件 | `on<Event>`，现在时，一个对象 | `onPress()`、`onSubmit({ text })` |
 | 阶段 | `<act>Start`、`<act>End` | `onPanStart`、`onLoadStart` |
 | 鼠标位于视图上方 | `Enter` / `Move` / `Leave`，与 DOM 相同 | `onMouseEnter`、`onMouseMove`、`onMouseLeave` |
+| 鼠标按键松开 | `Up`，与 DOM 相同 | `onMouseUp` |
 | 开始监听 | `on(event, listener)`，返回 `() => void` | `host.on(name, l)`、`BackHandler.on("press", l)` |
 | 环境中的值 | 访问器，旁边是 `set<Value>` | `colorScheme()`、`setColorScheme` |
 | 只读的布尔值 | `is<Adjective>`、`has<Noun>` | `isAvailable` |

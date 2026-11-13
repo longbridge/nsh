@@ -133,7 +133,7 @@ Without `--sign` and `--profile`, NSH writes an unsigned `.nsh/out/<Name>.app` a
 device as it is.
 
 The app supports iPhone and iPad, portrait and landscape (portrait upside down on iPad only), and needs iOS 15.0 or
-newer.
+newer, or the later version it names ([Minimum system version](#minimum-system-version)).
 
 ## Android
 
@@ -222,7 +222,8 @@ nsh package --target macos --run
 Writes `.nsh/out/<Name>.app`: the executable in `Contents/MacOS/`, and `nsh/assets/…`, `nsh/app.json` (the window
 title, the app's appearance, its activation policy and nsh.json's window options) and a TSX app's `nsh/bundle.nshc` in
 `Contents/Resources/`. The app is signed ad hoc and needs macOS 14 or
-later; to distribute it, sign it with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
+later, or the later version it names ([Minimum system version](#minimum-system-version)); to distribute it, sign it
+with a Developer ID and notarize it. See [macOS](./macos.md#packaging).
 
 The app runs on this Mac's processor. `--arch` picks another: `x86_64` for Intel Macs, `arm64` for Apple silicon, or
 `universal` for both in one executable. A runner for another processor needs its Rust target:
@@ -300,7 +301,8 @@ under `ios` and `macos` in `nsh.json`:
 
 Values are written as property list values: strings, numbers (integers or reals), booleans, arrays and objects
 (dictionaries); `null` is an error. A key the app sets replaces NSH's default, so an app may also reword the usage
-descriptions NSH adds or narrow the orientations.
+descriptions NSH adds, narrow the orientations or raise the minimum system version
+([below](#minimum-system-version)).
 
 NSH keeps the keys it sets from other `nsh.json` keys or that the packaged app depends on. Setting one is an error that
 says what to set instead:
@@ -311,11 +313,12 @@ says what to set instead:
 | `CFBundleName`, `CFBundleDisplayName` | `name` |
 | `CFBundleShortVersionString`, `CFBundleVersion` | `version`, `build` |
 | `CFBundleURLTypes` | `schemes` |
+| `CFBundleDocumentTypes` | `fileTypes` ([Opening files](../modules/nsh-desktop.md#opening-files)) |
 | iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
 | iOS: `UIUserInterfaceStyle` | `appearance` |
 | iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
 | macOS: `LSUIElement` | `macos.activationPolicy` ([Menu bar apps](./macos.md#menu-bar-apps)) |
-| `CFBundleExecutable`, `CFBundlePackageType`, `CFBundleSupportedPlatforms`; iOS: `MinimumOSVersion`, `LSRequiresIPhoneOS`, `UIApplicationSceneManifest`, `UIApplicationSupportsMultipleScenes`; macOS: `LSMinimumSystemVersion`, `NSPrincipalClass` | the package itself |
+| `CFBundleExecutable`, `CFBundlePackageType`, `CFBundleSupportedPlatforms`; iOS: `LSRequiresIPhoneOS`, `UIApplicationSceneManifest`, `UIApplicationSupportsMultipleScenes`; macOS: `NSPrincipalClass` | the package itself |
 | Entitlements: `application-identifier`, `com.apple.application-identifier`, `com.apple.developer.team-identifier` | `id` and the provisioning profile |
 
 Entitlements:
@@ -328,6 +331,24 @@ Entitlements:
 - **macOS** packages are signed ad hoc with the app's entitlements. macOS launches an app with
   `com.apple.developer.*` entitlements or keychain access groups only under a provisioning profile that grants them:
   `nsh package` warns about them, and the app is signed again with a Developer ID and such a profile before it runs.
+
+### Minimum system version
+
+Packages run on iOS 15.0 and macOS 14 or later, the systems NSH's runtime runs on. An app that uses the APIs of a
+later system, through its own [Rust crate](./rust.md) for example, raises its minimum with the key the system reads:
+`MinimumOSVersion` in `ios.infoPlist`, `LSMinimumSystemVersion` in `macos.infoPlist`.
+
+```json
+{
+  "ios": { "infoPlist": { "MinimumOSVersion": "16.4" } },
+  "macos": { "infoPlist": { "LSMinimumSystemVersion": "15.2" } }
+}
+```
+
+The value is a string of one to three numbers joined by dots (`"15"`, `"15.2"`, `"15.2.1"`) from NSH's minimum up:
+`"15.0"` on iOS, `"14.0"` on macOS. The package declares it as written, and the iOS app icon is compiled for it. A
+lower version, or a value of another form, is an error that names NSH's minimum, reported as soon as `nsh.json` is
+read.
 
 ## Icons
 
@@ -364,18 +385,27 @@ Without an icon, the system shows its default.
 
 ## Camera, Bluetooth and other hardware
 
-NSH has no API for the camera, video recording, Bluetooth or location, and `nsh package` cannot make an app that uses
-them: NSH's runtime has no code that reaches this hardware, `nsh.json` adds keys to `Info.plist`
-([above](#infoplist-keys-and-entitlements)) but none to the Android manifest, and a packaged Android app cannot add Java
-code. Its own [Rust crate](./rust.md) does not change this. iOS ends an app that reaches
-protected hardware without a usage description in `Info.plist`, and the Android manifest of a packaged app declares
-only `INTERNET`.
+A packaged app declares the hardware NSH's own features use, from its `nsh.json`:
 
-An app that needs them embeds NSH in its own Xcode or Gradle project ([iOS](./ios.md#embedding-in-an-ios-app),
-[Android](./android.md#embedding-in-an-android-app)). That project owns `Info.plist` and `AndroidManifest.xml`, so it
-declares what it uses there and writes the platform code itself: a camera preview is a
-[native component](./native-components.md), and the app reaches everything else through
-[`host.call`](./ios.md#talking-to-the-app) ([on Android](./android.md#talking-to-the-app)).
+| Feature | iOS and macOS | Android |
+|---|---|---|
+| [`Speech`](../modules/nsh.md#speech), when the app grants `speech` or declares no capabilities | `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription` | |
+| Web pages that capture media ([`capabilities.webview.media`](./sandbox-and-capabilities.md#webview)) | `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`; on macOS the entitlements `com.apple.security.device.audio-input` and `com.apple.security.device.camera` | `RECORD_AUDIO`, `CAMERA` |
+| [`Notifications`](../modules/nsh.md#notifications), when the app grants `notifications` or declares no capabilities | | `POST_NOTIFICATIONS` |
+
+Every Android package also declares `INTERNET`. A usage description is what the system shows when the app first asks;
+the app's `infoPlist` words it its own way ([above](#infoplist-keys-and-entitlements)).
+
+On iOS and macOS, an app's own [Rust crate](./rust.md) reaches other hardware through the system's frameworks, with the
+usage descriptions it needs in `infoPlist` and, on macOS, the entitlements in `entitlements`: the system ends an app
+that reaches protected hardware without its usage description.
+
+An Android app that uses other hardware embeds NSH in its own Gradle project
+([Android](./android.md#embedding-in-an-android-app)), and an iOS app may do the same in its Xcode project
+([iOS](./ios.md#embedding-in-an-ios-app)). That project owns `AndroidManifest.xml` and `Info.plist`, so it declares
+what it uses there and writes the platform code itself: a camera preview is a [native component](./native-components.md),
+and the app reaches everything else through [`host.call`](./ios.md#talking-to-the-app)
+([on Android](./android.md#talking-to-the-app)).
 
 ## What is inside
 
@@ -393,6 +423,13 @@ assets it imports, next to the prebuilt runtime:
 | Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
+
+## Logs
+
+A packaged app logs its warnings, its errors and its `console.log` and `console.info` lines to the platform's log: the
+unified log on macOS and iOS, under the app's id (Console, or `log stream --predicate 'subsystem == "com.example.notes"'`),
+logcat on Android, the debugger's output on Windows, standard error on Linux and the browser console on the web. See
+[A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs).
 
 ## Finding the runtime
 

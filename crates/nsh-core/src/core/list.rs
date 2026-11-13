@@ -113,6 +113,10 @@ pub(super) struct Slot {
     /// Item the runtime was last asked to show in this slot (its cell's
     /// index); `None` before the first request or when that item is gone.
     pub(super) requested: Option<u32>,
+    /// Item the cell's frame was last placed for: a cell placed for
+    /// another one appears there rather than moving from that row's place
+    /// under a layout animation (`core/list_motion.rs`).
+    pub(super) placed: Option<u32>,
 }
 
 impl Slot {
@@ -598,6 +602,7 @@ impl ListState {
         self.kept = self.kept.iter().filter_map(|&i| shift(i)).collect();
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
+            s.placed = s.placed.and_then(shift);
             let index = s.index.and_then(shift);
             let Some(new) = index else {
                 if s.index.take().is_some() {
@@ -732,16 +737,20 @@ impl ListState {
     }
 
     /// Where the viewport starts in natural coordinates while a layout
-    /// measures its cells. An inverted list's `content_len` already holds
-    /// what this layout changed (a page spliced at its end, rows measured
-    /// above the viewport) before `anchor_end` moves the offset to match,
-    /// so it counts from the end it last anchored to, plus what the
-    /// measurements so far moved the visible rows by.
+    /// measures its cells, counting what the measurements so far moved the
+    /// visible rows by: the layout scrolls by that only once it measured
+    /// every cell, and a row above the viewport that earlier rows pushed
+    /// down is still above it. An inverted list's `content_len` already
+    /// holds what this layout changed (a page spliced at its end, rows
+    /// measured above the viewport) before `anchor_end` moves the offset to
+    /// match, so it counts from the end it last anchored to.
     fn measuring_natural_offset(&self) -> f32 {
         if self.inverted && !self.anchored_end.is_nan() {
             self.anchored_end - self.offset - self.measured_scroll
-        } else {
+        } else if self.inverted {
             self.natural_offset()
+        } else {
+            self.natural_offset() + self.measured_scroll
         }
     }
 
@@ -1127,6 +1136,9 @@ impl ListState {
                 s.requested = None;
                 s.rendered = None;
             }
+            if s.placed.is_some_and(|p| p >= count) {
+                s.placed = None;
+            }
         }
         let old = self.sizes.len() as u32;
         self.sizes.resize(count as usize, f32::NAN);
@@ -1505,6 +1517,7 @@ impl ListState {
                     index: None,
                     rendered: None,
                     requested: None,
+                    placed: None,
                 },
             );
         }
@@ -1531,6 +1544,7 @@ impl ListState {
                 slot.cell = u32::MAX;
                 slot.rendered = None;
                 slot.requested = None;
+                slot.placed = None;
                 self.dirty = true;
             }
         }
@@ -1539,6 +1553,23 @@ impl ListState {
                 *extra = Extra::NONE;
                 self.dirty = true;
             }
+        }
+    }
+
+    /// Item `index`'s cell is placed for it. True when it was placed for
+    /// another item before, or never: it shows a new row there.
+    pub(super) fn place(&mut self, index: u32) -> bool {
+        let Some(&slot) = self.by_index.get(&index) else {
+            return true;
+        };
+        let s = &mut self.slots[slot as usize];
+        s.placed.replace(index) != Some(index)
+    }
+
+    /// Cell `cell` was moved out of sight: it shows no row's place.
+    pub(super) fn unplace(&mut self, cell: u32) {
+        if let Some(s) = self.slots.iter_mut().find(|s| s.cell == cell) {
+            s.placed = None;
         }
     }
 
@@ -1706,6 +1737,7 @@ impl ListState {
                             index: None,
                             rendered: None,
                             requested: None,
+                            placed: None,
                         });
                         this.slots.len() as u32 - 1
                     }
@@ -1985,6 +2017,24 @@ mod tests {
         assert_eq!(l.blocks().total, 100.0 * 50.0 + 30.0);
         // Item 30 is in view: no anchoring.
         assert_eq!(l.measured(30, 10.0), 0.0);
+    }
+
+    /// Rows above the viewport measured in one layout, in any order: each
+    /// is judged against where the viewport will be once the rows measured
+    /// before it moved it, so all of them keep the visible rows in place.
+    #[test]
+    fn rows_measured_above_the_viewport_together_all_anchor() {
+        for order in [[47, 48, 49], [49, 48, 47], [48, 49, 47]] {
+            let mut l = list(100, 50.0, 400.0);
+            l.offset = 2500.0;
+            // Item 50 starts the viewport.
+            assert_eq!(l.item_at(50), 2500.0);
+            let scroll: f32 = order.iter().map(|&i| l.measured(i, 200.0)).sum();
+            assert_eq!(scroll, 450.0, "{order:?}");
+            l.offset += scroll;
+            l.anchor_end(scroll);
+            assert_eq!(l.item_at(50) - l.natural_offset(), 0.0, "{order:?}");
+        }
     }
 
     #[test]

@@ -140,7 +140,7 @@ module:
 - `List` (`nsh`) is the renderer's (`list.rs`; its tags compile to a component call of `nsh:rt`'s `list`, the
   same function). The core asks for rows (`Host::bind_list`), bound natively (`list::bind`); a recycled cell gets a
   new index and its item accessor follows; header, footer, empty and separator cells, viewability tokens (with
-  `minimumViewTime`), `initialScrollIndex`. Rust components with rows (an `Items` prop) get a list of the app's data as
+  `minimumViewTime`), `initialScrollIndex` and `initialScrollAtEnd`. Rust components with rows (an `Items` prop) get a list of the app's data as
   their items slot.
 - Nodes have the methods of the refs (`dom::NODE_METHODS`, declared per element by `declarations::REFS`: `ViewRef`'s
   `focus`, `blur`, `measure`; `InputRef`'s `setSelection`, `ScrollRef`'s and `ListRef`'s scrolling, `WebViewRef`'s,

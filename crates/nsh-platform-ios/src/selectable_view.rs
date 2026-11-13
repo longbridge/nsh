@@ -602,6 +602,9 @@ impl AreaResponder {
             );
             // Pointers clear with their press (which Shift extends).
             tap.setAllowedTouchTypes(&types(&[TOUCH_DIRECT, TOUCH_PENCIL]));
+            // Releasing a long press must keep its selection and menu. A tap
+            // recognizing the same touch would toggle the menu or clear it.
+            tap.requireGestureRecognizerToFail(&long_press);
             // A press with no delay, kept through drags.
             let pointer = UILongPressGestureRecognizer::initWithTarget_action(
                 UILongPressGestureRecognizer::alloc(mtm),

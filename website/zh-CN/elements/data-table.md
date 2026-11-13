@@ -371,3 +371,15 @@ const columns: DataTableColumn[] = [
 - [Editor](./editor.md) 和 [DiffView](./diff-view.md)：另外两个处理大量数据的基础组件。
 - [Menu](./menu.md)：从 `onContextMenu` 打开的菜单。
 - [`nsh/base`](../modules/nsh-base.md)：其他基础组件。
+
+### Rust 中的固定列
+
+`nsh_base::data_table::ColumnFixed` 沿用 GPUI Kit 按列所在一侧的命名。`None`（默认）正常滚动；`Left` 和 `Right`
+把列固定在对应的一侧。TS 中使用 `false`、`"left"` 和 `"right"`，并保留 `true` 作为 `"left"` 的简写。
+
+```rust
+use nsh_base::{DataTableColumn, data_table::ColumnFixed};
+
+let mut actions = DataTableColumn::default();
+actions.fixed = ColumnFixed::Right;
+```

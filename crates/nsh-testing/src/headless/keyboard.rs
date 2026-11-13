@@ -3,13 +3,15 @@
 //! phones and tablets have one too, a tablet's keyboard, a Chromebook's).
 //! The app's shortcuts (`nsh/keymap`) take it first, as the platforms'
 //! keymaps do: the newest binding of the keystroke that fires where the
-//! focus is reports `onKeyCommand`. Then, on a desktop, the application
-//! menu's item with that shortcut is chosen (`onMenu`). Else Tab moves the
-//! keyboard focus between the inputs and the views that are its stops
-//! (those that take presses, and `focusable` ones that take none) where the
-//! platform does (macOS, the web), Return and Space press the pressable it
-//! is on, Shift+F10 asks it for its context menu (the web, Linux), the
-//! focused input takes the keys that edit it, and Escape goes back.
+//! focus is reports `onKeyCommand`; Return and Space on a focused control
+//! fire only the focus' own bindings (`KeyOptions::for_focus`), else they
+//! press the control. Then, on a desktop, the application menu's item with
+//! that shortcut is chosen (`onMenu`). Else Tab moves the keyboard focus
+//! between the inputs and the views that are its stops (those that take
+//! presses, and `focusable` ones that take none) where the platform does
+//! (macOS, the web, Linux), Shift+F10 asks it for its context menu (the
+//! web, Linux), the focused input takes the keys that edit it, and Escape
+//! goes back.
 
 use nsh_core::{
     Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, ROOT_ID,
@@ -62,19 +64,51 @@ impl Headless {
     /// something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
         self.step(format!("keyboard.press({keys})"));
+        match self.send_key(keys)? {
+            true => self.back(),
+            false => self.done(),
+        }
+    }
+
+    /// Presses `keys` one after another, each as [`Headless::press_key`]
+    /// does, without letting the app handle one before the next comes:
+    /// keys typed ahead, faster than the app takes them (each goes where
+    /// the screen had the focus before the first), then settles once.
+    pub fn press_keys(&mut self, keys: &[&str]) -> Result<(), String> {
+        self.step(format!("keyboard.press({})", keys.join(", ")));
+        for key in keys {
+            if self.send_key(key)? {
+                return self.back();
+            }
+        }
+        self.done()
+    }
+
+    /// Sends key `keys` to the app, unsettled: true when it goes back
+    /// (Escape with something to go back from), which is left to the
+    /// caller.
+    fn send_key(&mut self, keys: &str) -> Result<bool, String> {
         self.input_with(nsh_core::platform::InputModality::Keyboard);
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
         let editing = self.screen.focused().is_some();
+        // The control with the keyboard focus, which Return and Space press
+        // (a stop that takes no presses, a `focusable` chart, hears its keys
+        // through the keymap only).
+        let control = self
+            .screen
+            .key_focus()
+            .filter(|&view| !editing && self.screen.hears(view, EventKind::Press));
         // A hardware keyboard fires the app's shortcuts (`on_key`,
         // `keymap.bind`), on every platform: those of the focused window
-        // and those of no window, as the desktops match them.
+        // and those of no window, as the desktops match them. Return and
+        // Space on a focused control fire only the focus' own bindings.
         let window = self
             .windows
             .as_ref()
             .and_then(|w| w.focused())
             .unwrap_or(ROOT_ID);
         let found = match self.screen.keymap() {
-            Some(keymap) => keymap.find_in(window, stroke, editing, false),
+            Some(keymap) => keymap.find_at(window, stroke, editing, control.is_some(), false),
             None => KeyMatch::None,
         };
         if let Some(id) = found.fired() {
@@ -87,7 +121,17 @@ impl Headless {
         // A binding passing the key through leaves it to what follows, as a
         // platform does: on the screen as it is when the key comes.
         if found.consumed() {
-            return self.done();
+            return Ok(false);
+        }
+        // Then they press that control, before the menus' shortcuts: a
+        // binding of Return elsewhere does not act instead of it.
+        if let Some(view) = control
+            && nsh_core::input::presses_focused_control(stroke.key, stroke.modifiers)
+        {
+            for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+                self.send(view, kind, EventPayload::None);
+            }
+            return Ok(false);
         }
         let m = stroke.modifiers;
         // Then the application menu's shortcuts choose its items, on a
@@ -111,7 +155,7 @@ impl Headless {
                     EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(id)))]),
                 );
             }
-            return self.done();
+            return Ok(false);
         }
         let plain = !(m.ctrl || m.alt || m.cmd);
         // The key goes to the focused window: Escape closes one of the app's
@@ -122,7 +166,7 @@ impl Headless {
             && self.windows.as_mut().is_some_and(|w| w.escape())
         {
             self.report_windows();
-            return self.done();
+            return Ok(false);
         }
         // Shift+F10 asks the focused view for its context menu where views
         // take the keyboard focus and the key is the platform's: the web
@@ -138,28 +182,21 @@ impl Headless {
             {
                 self.keyboard_context_menu(from, m);
             }
-            return self.done();
+            return Ok(false);
         }
         if stroke.key == Key::Tab && plain && self.tabs_to_views() {
             self.tab(m.shift);
-            return self.done();
-        }
-        // A stop that takes no presses (a `focusable` chart) hears its keys
-        // through the keymap only, above.
-        if let Some(view) = self.screen.key_focus()
-            && self.screen.focused().is_none()
-            && self.screen.hears(view, EventKind::Press)
-            && plain
-            && !m.shift
-            && matches!(stroke.key, Key::Enter | Key::Char(' '))
-        {
-            for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-                self.send(view, kind, EventPayload::None);
-            }
-            return self.done();
+            return Ok(false);
         }
         if let Some(input) = self.screen.focused() {
+            let multiline = self.screen.input(input).is_some_and(|i| i.config.multiline);
             match stroke.key {
+                // Shift+Return and Alt (Option)+Return break the line of a
+                // multiline input whatever its return does, as the platforms'
+                // inputs do (a chat composer that sends on return).
+                Key::Enter if multiline && (m.shift || m.alt) && !(m.ctrl || m.cmd) => {
+                    self.key(input, '\n');
+                }
                 Key::Enter if plain => self.return_key(input),
                 Key::Backspace if plain => self.backspace(input),
                 Key::Char(c) if plain => {
@@ -168,16 +205,12 @@ impl Headless {
                 }
                 _ => {}
             }
-            return self.done();
+            return Ok(false);
         }
-        if stroke.key == Key::Escape
+        Ok(stroke.key == Key::Escape
             && plain
             && !m.shift
-            && self.screen.back_target() != crate::screen::Back::Nothing
-        {
-            return self.back();
-        }
-        self.done()
+            && self.screen.back_target() != crate::screen::Back::Nothing)
     }
 
     /// The keyboard asked view `from` (the keyboard focus) for its context
@@ -205,16 +238,97 @@ impl Headless {
     }
 
     /// Tab (`back`: Shift+Tab): the keyboard focus moves to the next stop
-    /// ([`crate::screen::Screen::tab_stops`]), around from the last.
+    /// ([`crate::screen::Screen::tab_stops`]), around from the last; with
+    /// a dialog shown over the window of the focus, among the dialog's
+    /// stops only ([`crate::screen::Screen::focus_scope`]), as the
+    /// platforms keep it there.
     fn tab(&mut self, back: bool) {
-        let stops = self.screen.tab_stops();
         let current = self.screen.focused().or(self.screen.key_focus());
+        let window = current.map_or(ROOT_ID, |id| self.screen.window_of(id));
+        let mut stops = self.screen.tab_stops();
+        if let Some(scope) = self.screen.focus_scope(window) {
+            stops.retain(|&id| self.screen.within(id, scope));
+        }
         let at = current.and_then(|id| stops.iter().position(|s| *s == id));
         let Some(next) = nsh_core::input::tab_stop(at, stops.len(), back, true) else {
             return;
         };
         self.move_focus(Some(stops[next]));
         self.reveal(stops[next]);
+    }
+
+    /// Whether a modal keeps the keyboard focus to itself while it shows
+    /// and gives it back when it goes, as the desktops and the web do.
+    fn modals_scope_focus(&self) -> bool {
+        matches!(
+            self.environment.os,
+            Os::MacOs | Os::Windows | Os::Linux | Os::Web
+        )
+    }
+
+    /// The batch just applied presented modals, `before` the input or Tab
+    /// stop that had the keyboard focus before it: each modal remembers
+    /// it when it is under the modal, in its window, and the focus leaves
+    /// it, as on the platforms (a Return pressed meanwhile presses nothing
+    /// under the modal).
+    pub(super) fn modals_presented(&mut self, before: Option<NodeId>) {
+        if !self.modals_scope_focus() {
+            return;
+        }
+        for modal in self.screen.presenting() {
+            if self.focus_before.iter().any(|(m, _)| *m == modal) {
+                continue;
+            }
+            let window = self.screen.window_of(modal);
+            let under = before.filter(|&view| {
+                !self.screen.within(view, modal) && self.screen.window_of(view) == window
+            });
+            self.focus_before.push((modal, under));
+            if under.is_some() && self.screen.focused().or(self.screen.key_focus()) == under {
+                self.move_focus(None);
+            }
+        }
+    }
+
+    /// Modals that went (the app left them out, or a back closed them):
+    /// the focus inside one leaves it, and the view that had it before the
+    /// modal came gets it back when nothing else took it meanwhile and it
+    /// can still take it (shown, inside the newest modal still over its
+    /// window), as the platforms give it back. A newer modal remembering a
+    /// view of one that went gives that one's back instead.
+    pub(super) fn modals_closed(&mut self) {
+        let mut i = 0;
+        while i < self.focus_before.len() {
+            let (modal, before) = self.focus_before[i];
+            if self.screen.in_tree(modal) {
+                i += 1;
+                continue;
+            }
+            self.focus_before.remove(i);
+            for (_, newer) in &mut self.focus_before[i..] {
+                if newer.is_some_and(|view| self.screen.within(view, modal)) {
+                    *newer = before;
+                }
+            }
+            let current = self.screen.focused().or(self.screen.key_focus());
+            let fell = current
+                .is_none_or(|view| self.screen.within(view, modal) || !self.screen.in_tree(view));
+            if !fell {
+                continue;
+            }
+            let back = before.filter(|&view| {
+                self.screen.in_tree(view)
+                    && self
+                        .screen
+                        .focus_scope(self.screen.window_of(view))
+                        .is_none_or(|scope| self.screen.within(view, scope))
+                    && (self.screen.input(view).is_some()
+                        || self.screen.tab_stops().contains(&view))
+            });
+            if back.is_some() || current.is_some() {
+                self.move_focus(back);
+            }
+        }
     }
 
     /// The scroll views around `id`, which the keyboard focus reached,
@@ -300,7 +414,10 @@ impl Headless {
             }
             if let Some(old) = focused {
                 self.set_focused_state(old, false);
-                self.send(old, EventKind::Blur, EventPayload::None);
+                // A removed input hears no blur (`Screen::taken_out`).
+                if self.screen.within(old, ROOT_ID) {
+                    self.send(old, EventKind::Blur, EventPayload::None);
+                }
             }
             if let Some(new) = now {
                 // The pressable that had the keyboard focus loses it.
