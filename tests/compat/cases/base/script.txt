@@ -1199,6 +1199,8 @@ tap id:case-base-tabs
 expect Showing: overview
 expect Presses: 0
 prop id:sections role tablist
+# The list's name, said as screen readers enter it.
+prop id:sections accessibilityLabel Sections
 prop id:overview role tab
 prop id:overview accessibilityState selected=true
 style id:overview backgroundColor #00ff00ff

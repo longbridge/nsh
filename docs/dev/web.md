@@ -889,7 +889,10 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
   drags never scroll), through non-passive touch events on the view, since the browser scrolls touches itself: a move past the top is prevented while it can be, and a gesture the browser
   already scrolls stays the browser's.
 - **Zooming**: a zoomable view is `touch-action: none` and pans touches (both axes, with a glide; the mouse does not
-  drag it) and pinches itself, keeping
+  drag it) and pinches itself; what a pan cannot take (an image not zoomed in, or at its edge) moves the nearest scroll
+  view around that can go that way, and turning back moves that view back first (`chainDrag`, as UIKit's nesting and
+  Android's `ZScroll` do), its snapping off under the finger and a snap point (the core's `snap_target` rule) or a
+  glide after (`releaseHandoff`). Pinches keep
   the content point between the fingers between them (rubber band past the limits with `bouncesZoom`, a spring back
   after). Ctrl+wheel over it zooms around the pointer instead of pinching (Chromium and Firefox send touchpad pinches
   as that; a mouse notch is 1.25×), Safari's touchpad pinches come as `gesture*` events. `zoomTo` and `zoomScale` animate or jump with the
@@ -1022,7 +1025,11 @@ own (`web/browser/page.js`, made per app by `runtime.js` and set as the `nsh/web
 page's realm (the app runs in its iframe's) and writes the page's real `<head>`: each mounted `Head` is an entry in
 mount order, an effect keeps its props current, and one microtask after any change the entries are merged (the later
 one wins key by key, `meta` by `name` / `property`), the elements the heads made (`data-nsh-head`) are written again,
-and `document.title` / `<html lang>` fall back to what the page had before. A `canonical` path starts at the site's
+and `<html lang>` falls back to what the page had before. The merged title goes to the player (`setHeadTitle`), which
+owns `document.title`: the heads' title, else the main window's (a root `SetAttributes` with a `title` is encoded as
+the `setTitle` command, and the browser runtime's main window, `scope.js`, hands the `title` of its `set` to
+`setWindowTitle`; kept where the app is the page), else the page's own, written once the turn's history entries
+exist (after `syncHistory`, or after a traversal of its own lands) so each entry keeps its page's title. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
 
 ## Not implemented
