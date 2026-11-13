@@ -460,7 +460,7 @@ import { Head } from "nsh/web";
 </NavPage>
 ```
 
-主窗口的标题也是页面的标题，用 Rust 编写的应用就这样设置标签页的标题：按桌面上的方式设置；已挂载的 `Head` 设置的标题优先。浏览器历史的每一条记录都保留它的页面当时的标题，所以标题要和它所属的页面或地址在同一轮里设置。
+主窗口的标题也是页面的标题，用 Rust 编写的应用就这样设置标签页的标题：按桌面上的方式设置（TSX 中是 `currentWindow().set({ title })`）；已挂载的 `Head` 设置的标题优先。空标题让页面恢复它自己的 `<title>`。Rust 应用的 nsh.json `window.title` 从启动起就是标签页的标题，和它在桌面上作为窗口标题一样。浏览器历史的每一条记录都保留它的页面当时的标题，所以标题要和它所属的页面或地址在同一轮里设置。
 
 ```rust
 use nsh_core::{desktop::WindowAttributes, element::desktop::main_window};

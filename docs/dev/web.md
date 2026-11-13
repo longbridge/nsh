@@ -1024,7 +1024,8 @@ mount order, an effect keeps its props current, and one microtask after any chan
 one wins key by key, `meta` by `name` / `property`), the elements the heads made (`data-nsh-head`) are written again,
 and `<html lang>` falls back to what the page had before. The merged title goes to the player (`setHeadTitle`), which
 owns `document.title`: the heads' title, else the main window's (a root `SetAttributes` with a `title` is encoded as
-the `setTitle` command, kept where the app is the page), else the page's own, written once the turn's history entries
+the `setTitle` command, and the browser runtime's main window, `scope.js`, hands the `title` of its `set` to
+`setWindowTitle`; kept where the app is the page), else the page's own, written once the turn's history entries
 exist (after `syncHistory`, or after a traversal of its own lands) so each entry keeps its page's title. A `canonical` path starts at the site's
 base (the directory `document.baseURI` names), as a linked stack's paths do. `page.test.mjs` tests the merging.
 
