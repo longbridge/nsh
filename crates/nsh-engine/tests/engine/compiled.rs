@@ -474,6 +474,58 @@ fn removed_modal_hears_its_dismissal() {
     assert!(text_id(&batch, "dismissed").is_some());
 }
 
+const REPLACED_WITH_OPEN_DIALOG: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
+
+const nav = createNavStack<{ name: string }>([{ name: "list" }]);
+const sheet = signal(true);
+
+// Garbage with cycles, so QuickJS collects them.
+function churn() {
+  for (let i = 0; i < 200000; i++) {
+    const a: { b?: unknown } = {};
+    a.b = { a };
+  }
+}
+
+setTimeout(() => {
+  nav.setRoutes([{ name: "list" }, { name: "item" }]);
+  churn();
+  setTimeout(() => churn(), 0);
+}, 0);
+
+mount(() => (
+  <NavStack state={nav} style={{ flex: 1 }}>
+    {(route) =>
+      route.name === "list" ? (
+        <NavPage title="List">
+          <View style={{ flex: 1 }}>
+            <Dialog open={sheet()} presentation="pageSheet" onOpenChange={({ open }) => sheet.set(open)}>
+              <Text>in the sheet</Text>
+            </Dialog>
+          </View>
+        </NavPage>
+      ) : (
+        <NavPage title="Item">
+          <Text>item</Text>
+        </NavPage>
+      )
+    }
+  </NavStack>
+));
+"#;
+
+/// Routes replaced under a page with an open dialog, then cycles
+/// collected: the dialog's dismissal handler is freed once, not again
+/// when the engine stops (#1643).
+#[test]
+fn replacing_a_page_with_an_open_dialog_survives_collection() {
+    let (engine, rx) = start_app(REPLACED_WITH_OPEN_DIALOG);
+    next(&rx, |b| text_id(b, "item").is_some());
+    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {}
+    drop(engine);
+}
+
 const BUILT_ONCE: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Dialog, NavPage, NavStack, createNavStack } from "nsh/base";
 
