@@ -384,9 +384,11 @@ report it:
   batch; what `waitUntil` waits for between calls there until the frames' time reaches its timeout), `idle`
   (until quiet for a while).
 
-A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
-for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
-waiting (below). Native animations that loop forever (a
+A step first applies the batches that came since the last one (they belong to it), then, on the system's clock, has
+the engine run what the step sent (`EngineControl::flush`, again while the batches applied send more back:
+`Headless::caught_up`), so an engine slower than the quiet window still finishes a step before the next one acts, and
+waits until the app is quiet for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual
+clock it asks instead of waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
 time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen (bounded to `nsh_testing::SCREEN_TEXT_LIMIT` characters of rendered output), when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
