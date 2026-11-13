@@ -10,8 +10,8 @@
 //!   `WTS_REMOTE_DISCONNECT`, until the matching connect);
 //! - the display is off (`GUID_CONSOLE_DISPLAY_STATE`'s power setting
 //!   notification; dimmed still shows);
-//! - the window is cloaked: on another virtual desktop (the shell cloaks
-//!   the windows of the desktops not shown), read with `DWMWA_CLOAKED`
+//! - the shell cloaks the window: on another virtual desktop (the shell
+//!   cloaks the windows of the desktops not shown), read with `DWMWA_CLOAKED`
 //!   whenever the state is worked out, and worked out again on
 //!   `EVENT_OBJECT_CLOAKED` / `EVENT_OBJECT_UNCLOAKED` of a surface's root
 //!   window (a WinEvent hook per thread, for this process's windows).
@@ -21,7 +21,8 @@
 //! per thread, which each surface's window keeps current (its own
 //! registrations, [`watch`], removed when it is destroyed, [`unwatch`]),
 //! read once from the session on the thread's first window; the display's
-//! registration sends its current state at once.
+//! registration sends its current state at once. Every window gets its own
+//! copy of a notification, and each recomputes its own surface on it.
 //!
 //! An embedded surface's window registers itself: the notifications are
 //! sent to the window that asked, child windows too.
@@ -31,7 +32,7 @@ use std::cell::Cell;
 use windows::{
     Win32::{
         Foundation::{HANDLE, HWND, LPARAM},
-        Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
+        Graphics::Dwm::{DWM_CLOAKED_SHELL, DWMWA_CLOAKED, DwmGetWindowAttribute},
         System::{
             Power::{
                 HPOWERNOTIFY, POWERBROADCAST_SETTING, RegisterPowerSettingNotification,
@@ -264,21 +265,29 @@ pub(crate) fn power_setting_changed(surface: &Surface, setting: LPARAM) {
     changed(surface, |s| s.display_changed(state));
 }
 
-/// Applies `change` to the thread's screen; the surface's state follows
-/// when it changed.
+/// Applies `change` to the thread's screen, then `surface`'s state follows.
 fn changed(surface: &Surface, change: impl FnOnce(Screen) -> Screen) {
-    let (before, after) = SCREEN.with(|s| {
-        let before = s.get();
-        s.set(change(before));
-        (before, s.get())
+    SCREEN.with(|screen| {
+        follow(screen, change, || crate::system::lifecycle_changed(surface));
     });
-    if before != after {
-        crate::system::lifecycle_changed(surface);
-    }
 }
 
-/// Whether DWM cloaks top-level window `root` (on another virtual desktop,
-/// or hidden by the shell).
+/// Applies `change` to `screen`, then `recompute`s the surface whose window
+/// the notification came to, whether or not the screen changed: each of
+/// the thread's surface windows gets the notification, and only the first
+/// finds the screen still to change, so a guard on the change would leave
+/// the other surfaces in their old state (`set_environment` drops a value
+/// that did not change).
+fn follow(screen: &Cell<Screen>, change: impl FnOnce(Screen) -> Screen, recompute: impl FnOnce()) {
+    screen.set(change(screen.get()));
+    recompute();
+}
+
+/// Whether the shell cloaks top-level window `root`: on another virtual
+/// desktop (`DWM_CLOAKED_SHELL`, with `DWM_CLOAKED_INHERITED` on a window
+/// owned by a cloaked one). The app's own cloak (`DWM_CLOAKED_APP`, which
+/// keeps a window out of composition until its first frame is drawn:
+/// `app::show_main`) does not count.
 pub(crate) fn cloaked(root: HWND) -> bool {
     let mut cloaked = 0u32;
     // SAFETY: a plain query on a window handle; the attribute is written
@@ -291,7 +300,7 @@ pub(crate) fn cloaked(root: HWND) -> bool {
             std::mem::size_of::<u32>() as u32,
         )
     };
-    read.is_ok() && cloaked != 0
+    read.is_ok() && (cloaked & DWM_CLOAKED_SHELL) != 0
 }
 
 /// A window of this process was cloaked or uncloaked: the surfaces whose
@@ -360,6 +369,24 @@ mod tests {
         for event in [WTS_SESSION_LOGON, WTS_SESSION_LOGOFF, 0, 99] {
             assert_eq!(locked.session_changed(event), locked);
             assert_eq!(Screen::default().session_changed(event), Screen::default());
+        }
+    }
+
+    #[test]
+    fn every_surface_follows_a_change_another_window_already_applied() {
+        // Two surfaces' windows on one thread each get the lock, then the
+        // unlock; the second finds the screen already changed.
+        let screen = Cell::new(Screen::default());
+        let mut seen = [true, true];
+        for (event, expected) in [(WTS_SESSION_LOCK, false), (WTS_SESSION_UNLOCK, true)] {
+            for surface in &mut seen {
+                follow(
+                    &screen,
+                    |s| s.session_changed(event),
+                    || *surface = screen.get().seen(),
+                );
+            }
+            assert_eq!(seen, [expected; 2]);
         }
     }
 
