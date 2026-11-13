@@ -129,7 +129,12 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   opacity, so `DrawCx` keeps the current transform (`geom::Mat4`) and applies opacity and color filters
   (`push_color_matrix`) to every color, as GPUI's own element opacity does. Axis-aligned rectangles are GPUI's quads,
   exact; under a rotation, skew or perspective they are filled as paths whose points are mapped one by one
-  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright. Clips
+  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright.
+  Images turn too (`image/turn.rs`): a one-color SVG (tinted, or of one color) under an affine transform is a GPUI
+  monochrome sprite carrying the transform (`paint_svg` with a `TransformationMatrix`, fed a generated SVG of the
+  picture's alpha, never the app's SVG); any other picture is resampled on the CPU through the whole transform into a
+  bitmap of the device pixels it covers, cut to the view's box and the clip polygon, kept while the transform's linear
+  part stays. Clips
   are rectangles in window coordinates (GPUI's content masks), intersected as they nest; a rounded or rotated clip is
   also kept as a convex polygon paths are cut to, and the innermost rounded clip rounds the corners of the quads and
   images reaching into its corners (`clip_rounded`). `paint(|window, app| …)` paints inside the current clip.
@@ -199,7 +204,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 |---|---|---|
 | Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). selectable text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place); `fontFamily` lists: the first installed candidate is the font's family, the others its `FontFallbacks`, before `TEXT_FALLBACKS` |
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). A `drop-shadow()` filter's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
-| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
+| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image` (turned: `image/turn.rs`, see `DrawCx` above). GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
 | Shaders | `shader.rs` | `nsh_engine::shader`'s frames as GPUI images under the children (`docs/dev/shaders.md`); fills only (below) |
 | Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
@@ -265,25 +270,16 @@ middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's 
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
 
-`nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app never
-activates (on macOS its activation policy is `Prohibited`), its windows open without the focus and show without
-activating, so the keyboard stays with the app the user types in. The window that would have the keyboard is kept
-in `window.rs` ("Running in the background"): what the app sees of the focus (`WindowState.focused`, a focused field's
-caret, the title bar's controls) follows it (`window::is_active`), and every place that would activate the app or a
-window (a press, `focus()`, a window shown) makes it that window instead (`window::focus_window`). The input goes to
-the handlers directly, so nothing else changes. `lifecycle()` stays `inactive`, as in a background app on macOS.
-A window covered by others draws no frames on macOS (GPUI stops its display link), so nothing a test reads waits for
-one: the main window's state goes to the app as the keyboard moves, not only as it renders, and the agent draws a
-window itself where it needs a frame (a screenshot, the buttons of an `AlertDialog`).
+`nsh test` starts the host with `--background` unless `--foreground` (`AppOptions::background`): the app runs in
+the background, its windows neither take the focus nor come to the front, and the keyboard stays with the app the
+user types in. The window that would have the keyboard is kept in `window.rs` ("Running in the background"): what the
+app sees of the focus (`WindowState.focused`, a focused field's caret, the title bar's controls) follows it, and the
+agent's input goes to it directly. `lifecycle()` stays `inactive`, as on macOS.
 
 `nsh test` also passes `--display` (the display `nsh test --display` names, else `secondary`) and
-`--keep-window-size` (`AppOptions::display`, `AppOptions::keep_size`), so a test run keeps off the screen in use, as
-the macOS host's does. `window.rs` ("Where windows open") resolves the display once, as the app starts, from the
-displays with the primary one first (`native::displays`: on macOS CoreGraphics' list with frames in the desktop, so
-a mirror's frame is the primary's; elsewhere GPUI's), and centers the main window and the app's own windows that
-name no display or position of their own on it. With `keep_size` a window larger than the display keeps its size,
-its top left corner on the display, and on macOS gets its frame back after AppKit fitted it to the screen as it
-showed it; both happen on the next turn of the main loop, outside GPUI's update, so GPUI hears both resizes.
+`--keep-window-size` (`AppOptions::display`, `AppOptions::keep_size`), so a test run keeps off the screen in use and
+a test's window keeps the size the test asked for, as with the macOS host. `window.rs` ("Where windows open") places
+the main window and the app's own windows that name no display or position on that display.
 
 Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
 again, whatever covers it. On Linux GPUI cannot read a frame back, so capture reads the window's X Composite backing
@@ -293,9 +289,10 @@ and Windows.
 
 ## Not implemented, or different
 
-- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows), but glyphs stay
-  upright at their mapped origins, and images, videos and canvases draw at their bounds (GPUI has no transform for
-  sprites or glyphs).
+- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows) and turn their
+  images (one-color SVGs on the GPU, other pictures resampled on the CPU at each new angle, on the main thread),
+  canvases follow rotations and skews, but glyphs stay upright at their mapped origins and videos draw at their bounds
+  (GPUI has no transform for glyphs or color sprites).
 - **Opacity** is applied to each color rather than to a group, so overlapping translucent children show through each
   other; an image's opacity (a view's, a fade-in) steps in sixteenths, each step a variant of its pixels.
 - **Clips** are rectangles (GPUI's content masks): a rounded clip rounds the backgrounds and images that reach into its
@@ -367,6 +364,11 @@ close, Escape and blur policies are answered on the main thread; states, close p
 reported per window, moves and resizes once they settle. A hidden title bar gets the main window's drawn controls
 on Windows and Linux. Views with `windowDrag`, `windowControl` and `windowResize` act as the title bar, the system's
 buttons and the frame's edges.
+
+Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
+top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
+reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks
+for them ends, as the system reports a move to GPUI while it makes it.
 
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
 workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it

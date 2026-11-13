@@ -1911,6 +1911,14 @@ final class Mounter {
         updateBack();
     }
 
+    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    void reportAllScreenInsets() {
+        for (int i = 0; i < screenOptions.size(); i++) {
+            int id = screenOptions.keyAt(i);
+            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+        }
+    }
+
     /** A screen's insets below its header, for `safeAreaInsets()`. */
     private void reportScreenInsets(int id, ScreenOptions o) {
         float top = o.shown && !o.transparent ? 0 : host.safeTop();

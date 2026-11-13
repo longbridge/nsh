@@ -1232,7 +1232,8 @@ class Player {
    * the main module was published without) in parallel, each after the
    * side modules it imports from, and calls each gate once. `table` is the
    * page's `sides`: by name, `{ url, gate?, needs, onDemand? }` (`onDemand`:
-   * only `loadData` asks for it, nothing fetches it ahead). A page awaits it
+   * only a load that needs it, a chunk's or `loadData`'s, fetches it;
+   * `nsh package` marks every side module it writes so). A page awaits it
    * before a chunk that needs them runs (its `prepareChunk`).
    */
   loadSides(names, table) {
@@ -1250,7 +1251,9 @@ class Player {
     for (const name of names) {
       if (this.sideModules.has(name) || this.sideLoads.has(name)) continue;
       const compiled = this.compileSide(table[name].url, { priority: "low" });
-      compiled.catch(() => this.sideModules.delete(name));
+      compiled.catch(() => {
+        if (this.sideModules.get(name) === compiled) this.sideModules.delete(name);
+      });
       this.sideModules.set(name, compiled);
     }
   }
@@ -1279,14 +1282,24 @@ class Player {
     }
   }
 
-  /** The exports of side module `name`, once it and what it needs loaded. */
+  /**
+   * The exports of side module `name`, once it and what it needs loaded.
+   * Callers share one load; a failed one (the network, a server error) is
+   * forgotten, so the next load that needs the module tries again, while
+   * the side modules it needs that did load stay loaded.
+   */
   loadSide(name, table) {
-    if (!this.sideLoads.has(name)) {
+    let load = this.sideLoads.get(name);
+    if (!load) {
       const side = table?.[name];
       if (!side) return Promise.reject(new Error(`no side module ${name}`));
-      this.sideLoads.set(name, this.instantiateSide(name, side, table));
+      load = this.instantiateSide(name, side, table);
+      this.sideLoads.set(name, load);
+      load.catch(() => {
+        if (this.sideLoads.get(name) === load) this.sideLoads.delete(name);
+      });
     }
-    return this.sideLoads.get(name);
+    return load;
   }
 
   async instantiateSide(name, { url, gate, needs }, table) {
@@ -5075,8 +5088,10 @@ class Player {
     field.addEventListener("keydown", (e) => {
       // A key a shortcut takes (`keyDown`, after this) is the shortcut's
       // alone, as on the native platforms, where the field never sees it: a
-      // RichEditor would delete twice on Backspace.
-      if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
+      // RichEditor would delete twice on Backspace, and a Return an
+      // autocomplete list binds would submit the field as well.
+      const taken = consumedShortcut(this.shortcut(e, true));
+      if (el._events.has("onKeyPress") && !taken) {
         const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" || e.key?.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
@@ -5085,7 +5100,7 @@ class Player {
       // commits an input method's composition never submits.
       const submit = el._config?.submit ?? "blurAndSubmit";
       const lineBreak = field.tagName === "TEXTAREA" && (submit === "newline" || e.shiftKey || e.altKey);
-      if (e.key === "Enter" && !lineBreak && !e.isComposing && e.keyCode !== 229) {
+      if (e.key === "Enter" && !lineBreak && !e.isComposing && e.keyCode !== 229 && !taken) {
         e.preventDefault();
         this.event(el._id, "onSubmitEditing", { text: field.value, count: field._count });
         if (submit === "blurAndSubmit") field.blur();
@@ -6363,6 +6378,10 @@ class Player {
       case "notificationPermission": this.notificationPermission(args[0], args[1]); break;
       case "showNotification": this.showNotification(args[0], args[1], args[2], args[3], args[4]); break;
       case "closeNotification": this.notifications?.get(args[0])?.close(); break;
+      case "closeAllNotifications":
+        for (const notification of this.notifications?.values() ?? []) notification.close();
+        this.notifications?.clear();
+        break;
       case "audioLoad": this.audioLoad(args[0], () => this.audioBytesFromBase64(args[1]), args[3]); break;
       case "audioLoadUrl": this.audioLoad(args[0], () => this.audioFetch(args[1], args[2]), args[3]); break;
       case "audioPlay": this.audioPlay(args[0], args[1], args[2]); break;
@@ -6399,12 +6418,23 @@ class Player {
         break;
       }
       case "announce":
-        // Cleared first: the same text again is announced again.
-        this.live.textContent = "";
-        setTimeout(() => { this.live.textContent = args[0]; }, 50);
+        this.announce(args[0]);
         break;
       case "a11yFocus":
         if (!el) break;
+        // An input: its field, as `focus` gives it.
+        if (el._field) {
+          el._field.focus();
+          break;
+        }
+        // A page moves a screen reader only with the keyboard focus: a
+        // field the user is typing in keeps it, and the view is read out
+        // instead, as the screen reader would read it there.
+        if (this.typing(el)) {
+          const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
+          if (text) this.announce(text);
+          break;
+        }
         if (!el.hasAttribute("tabindex")) {
           el.tabIndex = -1;
           el._a11yFocus = true;
@@ -6416,6 +6446,23 @@ class Player {
   }
 
 
+
+  /** Has screen readers read `text` (`announce`), through the live region. */
+  announce(text) {
+    // Cleared first: the same text again is announced again.
+    this.live.textContent = "";
+    setTimeout(() => { this.live.textContent = text; }, 50);
+  }
+
+  /** Whether the keyboard focus is in a text field, other than `el`, that
+   * the user may be typing in (`setAccessibilityFocus` leaves it there). */
+  typing(el) {
+    const a = document.activeElement;
+    if (!a || a === el || !a.isConnected || a.closest?.("[inert]")) return false;
+    if (a.isContentEditable) return true;
+    if (a.tagName === "TEXTAREA") return true;
+    return a.tagName === "INPUT" && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/.test(a.type);
+  }
 
   /**
    * `Clipboard.writeText`. The async Clipboard API needs a secure context

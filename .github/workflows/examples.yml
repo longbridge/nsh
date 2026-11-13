@@ -69,7 +69,7 @@ jobs:
       # QuickJS is C (bindgen needs libclang). The Rust gallery also
       # links GTK through its native desktop entry's dependencies.
       - name: Install clang, GTK 4 and GStreamer
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev jq
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev jq
 
       - name: Setup Rust
         if: runner.environment == 'github-hosted'

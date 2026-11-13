@@ -1005,8 +1005,10 @@ fn open(
     };
     let mut window_options = main_window_options(&options, &main, cx);
     if let Some(p) = placement {
-        window_options.window_bounds = Some(crate::window::gpui_window_bounds(p));
-        window_options.display_id = None;
+        let screens = crate::window::screen::screens(cx);
+        let (bounds, display) = crate::window::place_window(p, &screens);
+        window_options.window_bounds = Some(bounds);
+        window_options.display_id = display;
     }
     // nsh.json `window.defaultVisible: false`: the window opens hidden and
     // the app runs in it, unseen, until it shows it (a tray app). A
@@ -1130,14 +1132,20 @@ fn main_window_options(
     });
     // The app's display, else, for a window centered on its display, the
     // one the windows open on (a test's).
-    let display = display.or_else(|| {
+    let mut display = display.or_else(|| {
         (!matches!(main.default_position, Some(WindowPosition::At(_))))
             .then(|| crate::window::default_display(cx))
             .flatten()
     });
     let bounds = match main.default_position {
+        // A point of the screen: on the display it is on, in its
+        // coordinates.
         Some(WindowPosition::At(p)) => {
-            gpui::Bounds::new(gpui::point(gpui::px(p.x.0), gpui::px(p.y.0)), size)
+            let at = gpui::Bounds::new(gpui::point(gpui::px(p.x.0), gpui::px(p.y.0)), size);
+            let (on, bounds) =
+                crate::window::screen::place(&crate::window::screen::screens(cx), at);
+            display = on.or(display);
+            bounds
         }
         _ => crate::window::centered(display, size, cx),
     };

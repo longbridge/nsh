@@ -54,10 +54,12 @@ pub enum OverlayAnchor {
     /// Rust) goes by its own box: the slot's holder around it is that
     /// wrapper.
     Content(NodeId),
-    /// Beside a view inside another, as a submenu beside its row: lined
-    /// up with `node` along the side it goes on, and outside `edges` (the
-    /// menu around the row) across it, so the gap is measured from the
-    /// menu's edge, not from the row inside its padding.
+    /// Beside a view inside another, as a submenu beside its row: its
+    /// content (inside its own padding and border) lined up with `node`
+    /// along the side it goes on, so a submenu's first item is level with
+    /// its row, and outside `edges` (the menu around the row) across it,
+    /// so the gap is measured from the menu's edge, not from the row
+    /// inside its padding.
     Beside {
         /// The view it lines up with.
         node: NodeId,

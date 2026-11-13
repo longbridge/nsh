@@ -533,6 +533,25 @@ impl Native for MacNative {
         .ok_or_else(|| "the window is gone".to_owned())
     }
 
+    fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        let target = self.target();
+        let dropped = self.on_target(move |surface, _| {
+            let root = (target != ROOT_ID)
+                .then(|| crate::window::root_view(surface, target))
+                .flatten();
+            crate::input::enter(surface, root);
+            let dropped = crate::file_drop::drop_uris(surface, x, y, uris);
+            crate::input::enter(surface, None);
+            dropped
+        });
+        match dropped {
+            Some(true) => Ok(()),
+            Some(false) => Err("no view there listens to `onFileDrop`".into()),
+            None => Err("the window is gone".into()),
+        }
+    }
+
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         use nsh_core::keymap::{Key, Keystroke};
         let stroke =

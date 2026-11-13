@@ -99,9 +99,12 @@ pub(crate) fn after_ms(ms: u64, f: impl FnOnce() + 'static) {
 
 /// Runs `f` on this (main) thread, soon, outside GPUI's app (not in an
 /// update): for system calls that report back to GPUI at once (a window's
-/// frame changed: GPUI's resize callback updates the app), which GPUI
-/// drops while the app is being updated.
-#[cfg(target_os = "macos")]
+/// frame changed or it moved: GPUI's resize, move and display callbacks
+/// update the app), which GPUI drops while the app is being updated. Calls
+/// run in order, after the update under way and with GPUI's own deferred
+/// resizes and zooms. Before `init` there is no window to act on, so `f` is
+/// dropped with a warning, as the other helpers here do.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn outside_app(f: impl FnOnce() + 'static) {
     let app = APP.with(|a| a.borrow().clone());
     let Some(app) = app else {

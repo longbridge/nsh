@@ -628,6 +628,62 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   delete globalThis.document;
 });
 
+test("setAccessibilityFocus leaves the keyboard focus in a field the user is typing in", async () => {
+  const { player } = fakePlayer();
+  player.live = { textContent: "" };
+  const focusable = (attrs = {}) => {
+    const el = {
+      attrs: new Map(Object.entries(attrs)),
+      focused: false,
+      isConnected: true,
+      closest: () => null,
+      hasAttribute(name) { return this.attrs.has(name); },
+      getAttribute(name) { return this.attrs.get(name) ?? null; },
+      set tabIndex(v) { this.attrs.set("tabindex", String(v)); },
+      focus() { this.focused = true; globalThis.document.activeElement = this; },
+    };
+    return el;
+  };
+  const field = Object.assign(focusable(), { tagName: "INPUT", type: "search" });
+  const title = Object.assign(focusable({ "aria-label": "Search" }), { textContent: "Search" });
+  const input = { _field: field };
+  const views = new Map([[2, title], [4, input]]);
+  player.view = (id) => views.get(id);
+  const a11yFocus = (id) => player.op_cmd([0, id, "a11yFocus"]);
+  try {
+    // Typing in the search field: the title is read out, the field keeps
+    // the keyboard focus.
+    globalThis.document = { activeElement: field };
+    a11yFocus(2);
+    assert.equal(title.focused, false);
+    assert.equal(document.activeElement, field);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(player.live.textContent, "Search");
+    // Nothing typed into: the title takes the focus, as before.
+    globalThis.document = { activeElement: null };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    assert.equal(title.getAttribute("tabindex"), "-1");
+    // An input takes it into its field.
+    a11yFocus(4);
+    assert.equal(field.focused, true);
+    assert.equal(document.activeElement, field);
+    // A field that no longer takes input (under a dialog) keeps nothing.
+    title.focused = false;
+    field.closest = (selector) => (selector === "[inert]" ? {} : null);
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    // Nor does a checkbox, which takes no typing.
+    title.focused = false;
+    field.closest = () => null;
+    globalThis.document = { activeElement: Object.assign(focusable(), { tagName: "INPUT", type: "checkbox" }) };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 test("a touch whose press focused a field leaves the focus there", () => {
   const { player } = fakePlayer();
   player.editable = (target) => target.field === true;
@@ -778,6 +834,39 @@ test("a key a field's own handler took is not the page's shortcut as well", () =
     delete globalThis.document;
     Player.active = null;
   }
+});
+
+test("Return a shortcut takes does not submit the field as well", () => {
+  const { player, sent } = fakePlayer();
+  player.modifiersChanged = () => {};
+  // The app binds Return in text fields (binding 3, an autocomplete list's)
+  // while `bound` says so; otherwise nothing takes it.
+  let bound = true;
+  player.wasm.nsh_key = (code, _mods, focus) => (bound && code === 256 && focus & 1 ? 3 : -1);
+  const listeners = {};
+  const field = {
+    tagName: "TEXTAREA",
+    value: "/rev",
+    _count: 4,
+    addEventListener: (type, listener) => (listeners[type] = listener),
+    blur() {},
+  };
+  const el = { _id: 9, _events: new Set(["onSubmitEditing"]), _config: { submit: "submit" } };
+  player.wireInput(el, field);
+  const press = (key, extra = {}) => {
+    let prevented = false;
+    listeners.keydown({ key, keyCode: 13, isComposing: false, shiftKey: false, altKey: false, preventDefault: () => (prevented = true), ...extra });
+    return prevented;
+  };
+  const submits = () => sent.filter(([name]) => name === "onSubmitEditing").length;
+  // Taken: the shortcut's alone (`keyDown` fires it), as on the native platforms.
+  assert.equal(press("Enter"), false);
+  assert.equal(submits(), 0);
+  // Not taken: the field submits as before.
+  bound = false;
+  assert.equal(press("Enter"), true);
+  assert.equal(submits(), 1);
+  assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
 });
 
 /**
@@ -2618,4 +2707,123 @@ test("a page without the async clipboard reports a write with a warning", async 
   const { player } = fakePlayer();
   await player.writeClipboardImage("data:image/png;base64,");
   assert.equal(log.warnings.length, 1);
+});
+
+// Side modules -----------------------------------------------------------
+
+// A module that exports one empty function, `g`: a side module whose gate
+// is `g`, or (without a gate in its table entry) a shared one.
+const SIDE_WASM = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
+  0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+  0x03, 0x02, 0x01, 0x00, // one function of it
+  0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00, // export "g"
+  0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // its empty body
+]);
+
+/**
+ * A player that loads side modules from `fail`'s answers: `compileSide`
+ * rejects while `fail(url, attempt)` is true, and compiles `SIDE_WASM`
+ * otherwise. `compiled` lists the URLs it was asked for, `gates` the gates
+ * that ran.
+ */
+function sidePlayer(fail = () => false) {
+  const player = Object.create(Player.prototype);
+  const compiled = [];
+  const gates = [];
+  Object.assign(player, {
+    mainExports: {},
+    sideLoads: new Map(),
+    sideModules: new Map(),
+    afterGate: (gate) => gates.push(gate),
+    async compileSide(url, init) {
+      const attempt = compiled.filter((u) => u === url).length;
+      compiled.push(url);
+      await Promise.resolve();
+      if (fail(url, attempt, init)) throw new Error(`${url}: HTTP 503`);
+      return WebAssembly.compile(SIDE_WASM);
+    },
+  });
+  return { player, compiled, gates };
+}
+
+test("a side module that failed to load is loaded again by the next load that needs it", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => attempt === 0);
+  await assert.rejects(player.loadSides(["nsh_part_fields"], table), /HTTP 503/);
+  assert.deepEqual(gates, []);
+  assert.equal(player.sideLoads.has("nsh_part_fields"), false);
+  const [exports] = await player.loadSides(["nsh_part_fields"], table);
+  assert.equal(typeof exports.g, "function");
+  assert.deepEqual(compiled, ["fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("callers loading a side module at once share one load, and a loaded one is not loaded again", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer();
+  const first = player.loadSide("nsh_part_fields", table);
+  const second = player.loadSide("nsh_part_fields", table);
+  assert.equal(first, second);
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a, b);
+  assert.equal(await player.loadSide("nsh_part_fields", table), a);
+  assert.deepEqual(compiled, ["fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("callers sharing a failed load all see the failure, and the next load tries once more", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => attempt === 0);
+  const loads = [player.loadSide("nsh_part_fields", table), player.loadSide("nsh_part_fields", table)];
+  for (const load of loads) await assert.rejects(load, /HTTP 503/);
+  assert.deepEqual(compiled, ["fields.wasm"]);
+  const again = [player.loadSide("nsh_part_fields", table), player.loadSide("nsh_part_fields", table)];
+  assert.equal(again[0], again[1]);
+  await Promise.all(again);
+  assert.deepEqual(compiled, ["fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("a side module that failed keeps the modules it needs that loaded, and its retry reuses them", async () => {
+  const table = {
+    nsh_shared_1: { url: "shared.wasm", needs: [] },
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: ["nsh_shared_1"] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => url === "fields.wasm" && attempt === 0);
+  await assert.rejects(player.loadSide("nsh_part_fields", table), /fields.wasm: HTTP 503/);
+  const shared = await player.loadSide("nsh_shared_1", table);
+  await player.loadSide("nsh_part_fields", table);
+  assert.equal(await player.loadSide("nsh_shared_1", table), shared);
+  assert.deepEqual(compiled, ["shared.wasm", "fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("a module that a failed one needs failing is loaded again too", async () => {
+  const table = {
+    nsh_shared_1: { url: "shared.wasm", needs: [] },
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: ["nsh_shared_1"] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => url === "shared.wasm" && attempt === 0);
+  await assert.rejects(player.loadSide("nsh_part_fields", table), /shared.wasm: HTTP 503/);
+  assert.deepEqual(gates, []);
+  await player.loadSide("nsh_part_fields", table);
+  assert.deepEqual(compiled, ["shared.wasm", "shared.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("prefetching skips on-demand side modules, and a failed prefetch leaves the load to fetch it", async () => {
+  const table = {
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [], onDemand: true },
+    nsh_part_editor: { url: "editor.wasm", gate: "g", needs: [] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt, init) => init?.priority === "low");
+  player.prefetchSides(table);
+  assert.deepEqual(compiled, ["editor.wasm"]);
+  await player.sideModules.get("nsh_part_editor")?.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(player.sideModules.has("nsh_part_editor"), false);
+  await player.loadSides(["nsh_part_editor", "nsh_part_fields"], table);
+  assert.deepEqual(compiled, ["editor.wasm", "editor.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g", "g"]);
 });

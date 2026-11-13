@@ -809,7 +809,10 @@ intercepts the ops on the host (`intercept`): the host is the root of the compon
 root become nodes the core creates itself. Apps without components pay one check per op. The root can be any
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
-region goes in the host view.
+region goes in the host view. Besides the component's own props, JS sets a view's props on the host
+(`nsh-js` `components.rs`' `HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
+`onLayout` and the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), so a component is a drop
+destination only where the app listens.
 
 A root that is a component (a view that is `press()`) is made on the same host, as a TSX function component returning
 another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
@@ -1171,6 +1174,14 @@ is for, never by replacing one popup with another everywhere:
 | `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) or the keyboard focus comes to it, stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both or the focus left the trigger; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
+
+**The system's menu.** `MenuButton` (`menu_button.rs`) is no popup of the core's: its items are data and the system
+draws the menu. On iOS the app's content is covered by the native component `nsh/menu-button`
+(`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
+is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
+element, and an action emits `select` with the app's id. On a desktop OS a press shows the same items with
+`popup_menu`; elsewhere the content opens nothing. `nsh/mobile`'s `SegmentedControl` is the same kind of native
+component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is.
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on
