@@ -695,6 +695,12 @@ Things that were found the hard way. Read the section of the area you change bef
   AppKit accessory app and in an NSH one (an NSH regular app did the same under synthetic input).
   `activateIgnoringOtherApps:YES` (deprecated in macOS 14) activated it, as Tauri, winit, Qt's `raise()` and GPUI call
   it to focus a window; `focus()` uses it, `show()` and new windows ask (`window::activation`).
+- **A sheet of a window out of sight is never seen**, and its completion handler waits for the window:
+  `beginSheetModalForWindow:` on a hidden window (a tray app's main window, `defaultVisible: false`), a minimized one or
+  one off every screen shows nothing until that window shows. Open and save panels then show in a window of their own
+  (`beginWithCompletionHandler:`); `NSAlert` shows on its own only app-modal (`runModal`), as Electron's message boxes
+  do without a visible parent (electron/electron#22671). How that modal loop is entered and ended, so the app's batches
+  go on while it shows, is in `system::run_alone` and its neighbours' comments (`tests/native/window_alert.rs`).
 - While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
   occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
   keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and

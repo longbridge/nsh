@@ -31,6 +31,8 @@ mod press_momentum;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
+mod window_alert;
+#[cfg(target_os = "macos")]
 mod window_dialog;
 #[cfg(target_os = "macos")]
 mod window_frames;
@@ -59,6 +61,8 @@ fn main() {
                 window_dialog::run();
             } else if std::env::var_os("NSH_WINDOW_FRAMES_CHECK_ONLY").is_some() {
                 window_frames::run();
+            } else if std::env::var_os("NSH_WINDOW_ALERT_CHECK_ONLY").is_some() {
+                window_alert::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
