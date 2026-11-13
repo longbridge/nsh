@@ -697,11 +697,11 @@ pub(super) struct Components {
     /// Presses to pass on inside elements once this commit is laid out
     /// ([`crate::element::ElementRef::press_at`]).
     pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
-    /// Requests on web views ([`crate::webview`]), by request id: the node
-    /// they went to and the answer waiting for the platform.
-    webview_requests: FxHashMap<u64, (NodeId, AnswerSlot<Result<(), String>>)>,
-    /// The timeout of each request not answered yet.
-    webview_timeouts: FxHashMap<u64, crate::element::Task<()>>,
+    /// The web views' downloads ([`crate::webview::downloads`]): the
+    /// sessions, their files and the platform's replies.
+    pub(super) downloads: crate::webview::downloads::Downloads,
+    /// The next id of a platform command answering a web view request
+    /// (shared by the downloads' commands).
     next_webview_request: u64,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
@@ -812,8 +812,7 @@ impl Default for Components {
             scroll_positions: Vec::new(),
             transition_times: Vec::new(),
             presses: Vec::new(),
-            webview_requests: FxHashMap::default(),
-            webview_timeouts: FxHashMap::default(),
+            downloads: crate::webview::downloads::Downloads::default(),
             next_webview_request: 1,
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
@@ -1248,7 +1247,15 @@ impl<M: TextEngine> Core<M> {
     /// Wakes the engine when a component's task is woken (from any
     /// thread): it then calls [`Self::run_component_tasks`].
     pub fn set_task_notify(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
-        self.components.executor.set_notify(notify);
+        self.components.executor.set_notify(notify.clone());
+        self.components.downloads.set_notify(notify);
+    }
+
+    /// Where a platform's last stop acknowledgement goes after this core's
+    /// engine is gone: the engine's control handle keeps it, and the core
+    /// registers its staging directories and cancel requests with it.
+    pub fn set_download_cleanup(&mut self, cleanup: crate::webview::downloads::DownloadCleanup) {
+        self.components.downloads.set_cleanup(cleanup);
     }
 
     /// The tokio runtime the components' tasks are polled in the context
@@ -5311,10 +5318,10 @@ impl<M: TextEngine> Core<M> {
             };
             self.overlay_hover(id, kind, at);
         }
-        // A pending download's listener gets a handle bound to the native
+        // A download event's listener gets a handle bound to the native
         // web view node the platform reported, not the component host its
         // handlers were registered on: only this dispatch can make one.
-        let _target = (kind == EventKind::DownloadPending)
+        let _target = matches!(kind, EventKind::DownloadPending | EventKind::Download)
             .then(|| crate::element::download_target(id, Rc::downgrade(&self.components.executor)));
         if self.platform_event(id, kind, payload) {
             return true;
@@ -6271,13 +6278,17 @@ impl<M: TextEngine> Core<M> {
                     self.components.environment.web_views && self.access.allows_webviews();
                 answer.borrow_mut().deliver(available);
             }
-            Action::WebViewRequest {
+            Action::DownloadDecision {
                 node,
-                operation,
+                id,
+                decision,
                 answer,
-            } => self.web_view_request(node, operation, answer),
-            Action::WebViewTimeout(request) => {
-                self.webview_failed(request, crate::webview::NO_ANSWER)
+            } => {
+                let effects = self
+                    .components
+                    .downloads
+                    .decide(node, &id, decision, answer);
+                self.apply_download_effects(effects);
             }
             Action::PickScreenColor(answer) => {
                 if !self.components.environment.screen_color {
@@ -6326,92 +6337,173 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Sends `operation` to the web view `node` (a download decision's
-    /// handle, [`crate::webview`]) and keeps `answer` for the platform's
-    /// reply. Fails at once where the platform has no such controls, the
-    /// app holds no `webview` grant, the node is no web view, or the
-    /// operation's own input is invalid (a download's destination);
-    /// otherwise the answer fails too if it comes after
-    /// [`crate::webview::REPLY_TIMEOUT`] or the node unmounts.
-    fn web_view_request(
-        &mut self,
-        node: NodeId,
-        operation: crate::webview::WebViewOperation,
-        answer: AnswerSlot<Result<(), String>>,
-    ) {
-        if !self.components.environment.webview_requests {
-            answer
-                .borrow_mut()
-                .deliver(Err(crate::webview::UNSUPPORTED.into()));
-            return;
+    /// Applies what the downloads ask of the core
+    /// ([`crate::webview::downloads::Effect`]).
+    fn apply_download_effects(&mut self, effects: Vec<crate::webview::downloads::Effect>) {
+        use crate::webview::downloads::Effect;
+        for effect in effects {
+            match effect {
+                Effect::Event {
+                    node,
+                    kind,
+                    payload,
+                } => {
+                    self.events
+                        .push(crate::element::JsEvent::Event(node, kind, payload));
+                }
+                Effect::Command {
+                    node,
+                    operation,
+                    track,
+                } => {
+                    let id = self.alloc_webview_request();
+                    self.components.downloads.track(id, track);
+                    let _ = self.apply_op(Op::Command {
+                        id: node,
+                        command: Command::WebViewRequest(crate::webview::WebViewRequest {
+                            id,
+                            operation,
+                        }),
+                    });
+                }
+                Effect::Answer { slot, result } => slot.borrow_mut().deliver(result),
+            }
         }
-        if !self.access.allows_webviews() {
-            answer.borrow_mut().deliver(Err(
-                "web views are not granted: add `webview` to capabilities in nsh.json".into(),
-            ));
-            return;
-        }
-        let web = self
-            .key(node)
-            .ok()
-            .is_some_and(|key| self.nodes[key as usize].kind == Kind::WebView);
-        if !web {
-            answer
-                .borrow_mut()
-                .deliver(Err(crate::webview::NOT_A_WEB_VIEW.into()));
-            return;
-        }
-        if let Err(error) = crate::webview::check_operation(&operation) {
-            answer.borrow_mut().deliver(Err(error));
-            return;
-        }
-        // Ids are unique among the requests pending: a reply settles the
-        // request it names and no other.
-        let id = loop {
+    }
+
+    /// A request id no outstanding download command uses (downloads and
+    /// the app's platform replies share one id space per core).
+    fn alloc_webview_request(&mut self) -> u64 {
+        loop {
             let id = self.components.next_webview_request;
             self.components.next_webview_request = id.wrapping_add(1);
-            if !self.components.webview_requests.contains_key(&id) {
+            if !self.components.downloads.tracks(id) {
                 break id;
             }
-        };
-        let executor = self.components.executor.clone();
-        let timeout = crate::element::task::act_after(
-            &executor,
-            node,
-            crate::webview::REPLY_TIMEOUT,
-            Action::WebViewTimeout(id),
-        );
-        self.components.webview_timeouts.insert(id, timeout);
-        self.components.webview_requests.insert(id, (node, answer));
-        let _ = self.apply_op(Op::Command {
-            id: node,
-            command: Command::WebViewRequest(crate::webview::WebViewRequest { id, operation }),
-        });
-    }
-
-    /// Web view request `id` fails with `error` (the platform has none of
-    /// these controls, the node is no web view or goes, no answer came):
-    /// its answer resolves, its timeout goes.
-    pub(super) fn webview_failed(&mut self, id: u64, error: impl Into<String>) {
-        self.components.webview_timeouts.remove(&id);
-        if let Some((_, answer)) = self.components.webview_requests.remove(&id) {
-            answer.borrow_mut().deliver(Err(error.into()));
         }
     }
 
-    /// The node `id` is released (it unmounted): the web view requests
-    /// pending on it fail, their answers never coming.
+    /// The node `id` is released (it unmounted): its downloads are
+    /// cancelled with [`crate::webview::CancelReason::Teardown`]. The
+    /// sessions (and their staging files) stay until the platform confirms
+    /// its writer stopped, even though the node is gone: the reply or end
+    /// still reaches the core, and only then is cleanup allowed.
     pub(super) fn webview_released(&mut self, id: NodeId) {
-        let pending: Vec<u64> = self
-            .components
-            .webview_requests
-            .iter()
-            .filter(|(_, (node, _))| *node == id)
-            .map(|(request, _)| *request)
-            .collect();
-        for request in pending {
-            self.webview_failed(request, crate::webview::NOT_MOUNTED);
+        let effects = self.components.downloads.teardown(id);
+        // The node still exists but this commit's command queue was already
+        // drained: put the cancel commands straight into the batch, before
+        // the node's Delete, so the platform can still stop its writer.
+        for effect in effects {
+            match effect {
+                crate::webview::downloads::Effect::Event {
+                    node,
+                    kind,
+                    payload,
+                } => self
+                    .events
+                    .push(crate::element::JsEvent::Event(node, kind, payload)),
+                crate::webview::downloads::Effect::Command {
+                    node,
+                    operation,
+                    track,
+                } => {
+                    let request = self.alloc_webview_request();
+                    self.components.downloads.track(request, track);
+                    self.mount.push(crate::MountItem::Command {
+                        id: node,
+                        command: Command::WebViewRequest(crate::webview::WebViewRequest {
+                            id: request,
+                            operation,
+                        }),
+                    });
+                }
+                crate::webview::downloads::Effect::Answer { slot, result } => {
+                    slot.borrow_mut().deliver(result);
+                }
+            }
         }
+    }
+
+    /// A platform's report of a download ([`EventKind::DownloadOffer`],
+    /// `DownloadProgress`, `DownloadEnd`): consumed here, so it never
+    /// reaches a listener or JS.
+    fn download_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
+        match kind {
+            EventKind::DownloadOffer => {
+                let EventPayload::Json(value) = payload else {
+                    return true;
+                };
+                let Some(offer) = crate::webview::downloads::parse_offer(value) else {
+                    log::debug!(target: "js", "web view: dropped a malformed download offer: {value}");
+                    return true;
+                };
+                let events = self
+                    .key(id)
+                    .ok()
+                    .map(|key| self.nodes[key as usize].events)
+                    .unwrap_or_default();
+                let mode = if events.contains(EventKind::DownloadPending) {
+                    crate::webview::downloads::Mode::Manual
+                } else if events.contains(EventKind::Download) {
+                    crate::webview::downloads::Mode::Automatic
+                } else {
+                    crate::webview::downloads::Mode::None
+                };
+                let automatic =
+                    crate::webview::downloads::automatic_destination(&offer.id, &offer.filename);
+                let effects = self.components.downloads.offer(id, offer, mode, automatic);
+                self.apply_download_effects(effects);
+            }
+            EventKind::DownloadProgress => {
+                // Progress is not an app event yet; the platform may still
+                // report it, and it is dropped here.
+            }
+            EventKind::DownloadEnd => {
+                let EventPayload::Json(value) = payload else {
+                    return true;
+                };
+                let Some(end) = crate::webview::downloads::parse_end(value) else {
+                    log::debug!(target: "js", "web view: dropped a malformed download end: {value}");
+                    return true;
+                };
+                let effects = self.components.downloads.end(id, end);
+                self.apply_download_effects(effects);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Applies the downloads' file work and deadlines (once per commit).
+    pub(super) fn poll_downloads(&mut self) {
+        let effects = self.components.downloads.poll(crate::time::now());
+        if !effects.is_empty() {
+            self.apply_download_effects(effects);
+        }
+    }
+
+    /// The downloads' listeners as a round's final masks leave them: a web
+    /// view whose `onDownload` and `onDownloadPending` listeners are both
+    /// gone can neither hear of its downloads nor decide their offers, so
+    /// they are cancelled ([`crate::webview::CancelReason::NoListener`]).
+    /// The view stays mounted, and a listener removed and added back in the
+    /// same turn changes nothing: only the mask the turn ended with counts.
+    pub(super) fn sync_download_listeners(&mut self) {
+        let nodes = self.components.downloads.unobserved_nodes(|node| {
+            self.key(node).is_ok_and(|key| {
+                let events = self.nodes[key as usize].events;
+                events.contains(EventKind::Download) || events.contains(EventKind::DownloadPending)
+            })
+        });
+        for node in nodes {
+            let effects = self.components.downloads.lost_listener(node);
+            self.apply_download_effects(effects);
+        }
+    }
+
+    /// When the downloads' next deadline is due (the engine wakes then).
+    pub fn download_deadline(&self) -> Option<crate::time::Instant> {
+        self.components.downloads.deadline()
     }
 
     /// Native animations that ended: the components' resolve their
@@ -6588,6 +6680,12 @@ impl<M: TextEngine> Core<M> {
     /// Events the components handle before anything else: dialog answers
     /// (theirs never reach JS), insets of screens and modals.
     fn platform_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
+        if matches!(
+            kind,
+            EventKind::DownloadOffer | EventKind::DownloadProgress | EventKind::DownloadEnd
+        ) {
+            return self.download_event(id, kind, payload);
+        }
         let number = |key: &str| match payload {
             EventPayload::Map(entries) => entries.iter().find_map(|(k, v)| match v {
                 crate::PayloadValue::Number(n) if *k == key => Some(*n),
@@ -6903,8 +7001,10 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
-            // The platform's answer to a web view request
-            // (`crate::webview`), on the node it was sent to.
+            // The platform's answer to a download command
+            // ([`crate::webview::WebViewRequest`]), on the node it was sent
+            // to. A reply whose writer stopped is the only thing that
+            // permits cleaning a staging file.
             EventKind::WebViewReply => {
                 let EventPayload::Json(reply) = payload else {
                     return false;
@@ -6922,37 +7022,20 @@ impl<M: TextEngine> Core<M> {
                     log::debug!(target: "js", "web view: dropped a reply without a request's id: {reply}");
                     return true;
                 };
-                let Some(target) = self
-                    .components
-                    .webview_requests
-                    .get(&request)
-                    .map(|(node, _)| *node)
-                else {
+                if !self.components.downloads.tracks(request) {
                     log::debug!(target: "js", "web view: dropped a reply to unknown request {request}: {reply}");
                     return true;
-                };
-                // Only the web view the request went to answers it.
-                if target != id {
-                    log::debug!(
-                        target: "js",
-                        "web view: dropped a reply to request {request} from node {id}, not {target}: {reply}"
-                    );
-                    return true;
                 }
-                self.components.webview_timeouts.remove(&request);
-                let Some((_, answer)) = self.components.webview_requests.remove(&request) else {
-                    return true;
-                };
-                if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
-                    answer.borrow_mut().deliver(Ok(()));
-                } else {
-                    let error = reply
+                let result = match reply.get("ok").and_then(crate::JsonValue::as_bool) {
+                    Some(true) => Ok(()),
+                    _ => Err(reply
                         .get("error")
                         .and_then(crate::JsonValue::as_str)
-                        .unwrap_or(crate::webview::NO_ANSWER)
-                        .to_string();
-                    answer.borrow_mut().deliver(Err(error));
-                }
+                        .unwrap_or("the web view did not answer")
+                        .to_owned()),
+                };
+                let effects = self.components.downloads.reply(id, request, result);
+                self.apply_download_effects(effects);
                 true
             }
             EventKind::Clipboard if id == crate::ROOT_ID => {

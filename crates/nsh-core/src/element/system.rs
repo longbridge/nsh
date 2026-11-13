@@ -580,6 +580,22 @@ pub mod codes {
     /// reclaimed its memory): the web view shows no page until the app
     /// reloads it or gives it a page (a web view's `onError`).
     pub const WEBVIEW_TERMINATED: &str = "ERR_NSH_WEBVIEW_TERMINATED";
+    /// A download could not be owned: its response is gone and the
+    /// platform cannot reproduce it (`WebDownloadSource::None`), so
+    /// neither the app nor the platform can write it.
+    pub const DOWNLOAD_DISCARDED: &str = "ERR_NSH_DOWNLOAD_DISCARDED";
+    /// A download's destination was refused: not an absolute path, a
+    /// missing parent, a directory, a file that appeared, or an unwritable
+    /// private staging directory.
+    pub const DOWNLOAD_DESTINATION: &str = "ERR_NSH_DOWNLOAD_DESTINATION";
+    /// A download's transfer failed in the network or the engine.
+    pub const DOWNLOAD_NETWORK: &str = "ERR_NSH_DOWNLOAD_NETWORK";
+    /// A download wrote a different number of bytes than its declared
+    /// size.
+    pub const DOWNLOAD_SIZE: &str = "ERR_NSH_DOWNLOAD_SIZE";
+    /// A download decision is not valid now: it was already decided,
+    /// finished, cancelled or delegated, or names no download.
+    pub const DOWNLOAD_STATE: &str = "ERR_NSH_DOWNLOAD_STATE";
 }
 
 /// An I/O error as Node reports it: `Error` with the message and the

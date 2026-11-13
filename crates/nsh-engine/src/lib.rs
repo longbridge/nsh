@@ -1354,11 +1354,21 @@ pub struct EngineControl {
     /// The input modality last sent ([`Self::set_input_modality`]), shared
     /// by every clone: 0 none, else 1 + the modality.
     modality: Arc<std::sync::atomic::AtomicU8>,
+    /// What cleans a download's staging directory when the engine is gone
+    /// and an event cannot be delivered: the platform's last stop
+    /// acknowledgement goes here.
+    downloads: nsh_core::webview::downloads::DownloadCleanup,
 }
 
 impl EngineControl {
     /// Delivers an input event (and its data) to a node.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: EventPayload) {
+        // A download's stop acknowledgement is recorded with the cleanup
+        // sink before it is queued: the engine may stop after the send but
+        // before it consumes the event, and that fact must not be lost.
+        // While the core lives the sink only records (the core publishes);
+        // once the core is gone the sink cleans.
+        self.downloads.dispatch(id, event, &payload);
         let _ = self.tx.send(Message::Event(id, event, payload));
     }
 
@@ -1622,9 +1632,11 @@ impl Engine {
         let media_files = Arc::new(media_files(&config, &app_access(&config.app)));
         let (tx, rx) = crossbeam_channel::unbounded();
         let modality = Arc::default();
+        let downloads = nsh_core::webview::downloads::DownloadCleanup::new();
         setup(&EngineControl {
             tx: tx.clone(),
             modality: Arc::clone(&modality),
+            downloads: downloads.clone(),
         });
         let engine_tx = tx.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1632,6 +1644,7 @@ impl Engine {
         let quit_listeners = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_quit_listeners = quit_listeners.clone();
         let host = config.host.clone();
+        let engine_downloads = downloads.clone();
         let thread = std::thread::Builder::new()
             .name("nsh-engine".into())
             .stack_size(ENGINE_STACK_SIZE)
@@ -1640,14 +1653,18 @@ impl Engine {
                     config,
                     make_text_engine(),
                     sink,
-                    engine_tx,
-                    rx,
+                    (engine_tx, rx),
                     engine_stop,
                     engine_quit_listeners,
+                    engine_downloads,
                 )
             })?;
         Ok(Engine {
-            control: EngineControl { tx, modality },
+            control: EngineControl {
+                tx,
+                modality,
+                downloads,
+            },
             thread: Some(thread),
             host,
             stop,
@@ -1733,11 +1750,12 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     config: EngineConfig,
     text_engine: M,
     sink: S,
-    tx: Sender<Message>,
-    rx: Receiver<Message>,
+    messages: (Sender<Message>, Receiver<Message>),
     stop: Arc<std::sync::atomic::AtomicBool>,
     quit_listeners: Arc<std::sync::atomic::AtomicBool>,
+    downloads: nsh_core::webview::downloads::DownloadCleanup,
 ) {
+    let (tx, rx) = messages;
     raise_thread_priority();
     // The thread's time is the engine's from its first line of JS on.
     let _clock = config.clock.enter();
@@ -1745,6 +1763,7 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
+    driver.state.core.set_download_cleanup(downloads);
     driver.quit_listeners = quit_listeners;
     driver.sync_quit_listeners();
     drive(&mut driver, &rx);
@@ -1846,14 +1865,17 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     ) -> Option<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let downloads = nsh_core::webview::downloads::DownloadCleanup::new();
         let control = EngineControl {
             tx: tx.clone(),
             modality: Arc::default(),
+            downloads: downloads.clone(),
         };
         setup(&control);
         let _clock = config.clock.enter();
         let _context = config.context.enter();
-        let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
+        let mut driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
+        driver.state.core.set_download_cleanup(downloads);
         Some(LocalEngine {
             driver: ManuallyDrop::new(driver),
             rx,
@@ -2450,6 +2472,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.core.download_deadline(),
             self.state.resize_burst_ends,
             self.state.window_state.settles,
         ]
@@ -4433,5 +4456,56 @@ mod tests {
             })
             .collect();
         assert_eq!(frames, [50.0, 20.0]);
+    }
+}
+
+#[cfg(test)]
+mod download_cleanup_tests {
+    //! A platform's last stop acknowledgement after the engine's channel
+    //! closed must still clean the private staging directory.
+
+    use super::*;
+
+    #[test]
+    fn an_end_queued_into_a_dead_engine_cleans_its_staging_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "nsh-engine-download-cleanup-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let leaf = dir.join("out.bin");
+        std::fs::write(&leaf, b"partial").unwrap();
+
+        let cleanup = nsh_core::webview::DownloadCleanup::new();
+        cleanup.register_staging(7, "d1", dir.clone(), leaf.clone());
+
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let control = EngineControl {
+            tx,
+            modality: Arc::default(),
+            downloads: cleanup.clone(),
+        };
+        drop(rx);
+
+        control.dispatch_event(
+            7,
+            EventKind::DownloadEnd,
+            nsh_core::webview::download_end(&nsh_core::webview::DownloadEnd {
+                id: "d1".into(),
+                outcome: nsh_core::webview::DownloadOutcome::Finished { bytes: 3 },
+            }),
+        );
+        // The core's Drop closes the sink (the engine handle outlives it).
+        cleanup.close();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while dir.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the dead engine's staging directory was not cleaned"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
 }

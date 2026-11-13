@@ -195,6 +195,10 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 允许它们，但不允许任何远程页面。在原生 web view 中，`baseUrl` 让内联 HTML 获得该 URL 的源，
 所以基准 URL 需要与该地址的页面相同的授权：它的主机在 `hosts` 中。
 
+页面可以显示和下载它自己创建的 `blob:` URL（`URL.createObjectURL`、`<a download>` 链接）：blob URL
+内嵌创建它的文档的源，因此只有当该源是 `hosts` 中的主机时才允许；页面不能显示的主机的 blob，以及不透明
+blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
+
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
 并在日志中说明要添加哪个键。

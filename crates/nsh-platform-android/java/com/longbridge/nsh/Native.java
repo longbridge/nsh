@@ -96,6 +96,9 @@ final class Native {
     static final int KEY_UP = 84;
     static final int WEB_VIEW_REPLY = 85;
     static final int DOWNLOAD_PENDING = 86;
+    static final int DOWNLOAD_OFFER = 87;
+    static final int DOWNLOAD_PROGRESS = 88;
+    static final int DOWNLOAD_END = 89;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

@@ -1268,6 +1268,7 @@ static_reactive!(i128: i128);
 static_reactive!(isize: isize);
 static_reactive!((u32, u32): (u32, u32));
 static_reactive!(String: String);
+static_reactive!(Vec<String>: Vec<String>);
 static_reactive!(std::time::Duration: std::time::Duration);
 
 impl IntoReactive<String> for &str {

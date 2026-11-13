@@ -12,5 +12,6 @@ pub mod speech;
 // hidden from the docs, so it stays out of what NSH keeps compatible.
 #[doc(hidden)]
 pub mod unified_log;
+pub mod web_download;
 pub mod web_evaluation;
 pub mod web_scheme;
