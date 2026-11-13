@@ -208,6 +208,7 @@ unsafe extern "C" fn get_context(
         };
         if let Some(r) = recording(cx, context) {
             r.size = size;
+            r.reuse = Some(Box::new(Reuse::new(width, height)));
         }
         // `o` again: nothing above ran the app's code.
         if let Some(o) = offscreen(cx, this) {
@@ -323,6 +324,158 @@ unsafe fn convert(cx: *mut JsContext, this: JsValue, argc: c_int, argv: *mut JsV
             unsafe { qjs::JS_FreeValue(cx, promise) };
             e
         }
+    }
+}
+
+/// What an offscreen context tracks so that a clear of the whole canvas
+/// can drop what it recorded before: an app reusing one `OffscreenCanvas`
+/// (an export per item) otherwise records every earlier drawing again in
+/// each image, up to `max_canvas_ops`.
+///
+/// A `clearRect` covering the canvas under the identity transform, with
+/// no clip and no `save` open, leaves it transparent, so what was drawn
+/// before is invisible: the recording starts anew with only what the
+/// context's state still holds (HTML keeps the state across `clearRect`):
+/// the last value of each property that took effect and the current path.
+/// Whenever that state cannot be written again exactly (a path added
+/// under another transform, an animated value), nothing is dropped.
+pub(super) struct Reuse {
+    /// The canvas's size, points.
+    width: f64,
+    height: f64,
+    /// The transform is the identity (conservatively: no call has changed
+    /// it since it last was).
+    identity: bool,
+    /// A clip is set.
+    clipped: bool,
+    /// `identity` and `clipped` of each open `save`.
+    saved: Vec<(bool, bool)>,
+    /// The current path's operations since its `beginPath`.
+    path: Vec<Rec>,
+    /// Every operation of `path` was added under the identity transform.
+    path_exact: bool,
+    /// Each property's last operation that took effect (as recorded), by
+    /// code.
+    properties: Vec<(i32, Vec<Rec>)>,
+}
+
+impl Reuse {
+    fn new(width: f64, height: f64) -> Reuse {
+        Reuse {
+            width,
+            height,
+            identity: true,
+            clipped: false,
+            saved: Vec::new(),
+            path: Vec::new(),
+            path_exact: true,
+            properties: Vec::new(),
+        }
+    }
+}
+
+/// The numbers of `args`, when they are all `N` numbers.
+fn constants<const N: usize>(args: &[Rec]) -> Option<[f64; N]> {
+    let mut out = [0.0; N];
+    if args.len() != N {
+        return None;
+    }
+    for (o, a) in out.iter_mut().zip(args) {
+        match a {
+            Rec::Num(n) => *o = *n,
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+const IDENTITY: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// Whether `rec` reads an animated value.
+fn animated(rec: &Rec) -> bool {
+    match rec {
+        Rec::Node(_) => true,
+        Rec::List(items) => items.iter().any(animated),
+        _ => false,
+    }
+}
+
+/// Follows the operation `r` just recorded at `out[start..]` (on offscreen
+/// contexts only), and on a clear of the whole canvas starts the recording
+/// anew ([`Reuse`]).
+pub(super) fn recorded(cx: *mut JsContext, r: &mut Recording, start: usize) {
+    let Some(t) = r.reuse.as_deref_mut() else {
+        return;
+    };
+    let Some(Rec::Num(code)) = r.out.get(start) else {
+        return;
+    };
+    let code = *code as i32;
+    let args = &r.out[start + 1..];
+    match code {
+        CV_SAVE => t.saved.push((t.identity, t.clipped)),
+        CV_RESTORE => {
+            if let Some((identity, clipped)) = t.saved.pop() {
+                t.identity = identity;
+                t.clipped = clipped;
+            }
+        }
+        CV_TRANSLATE => t.identity &= constants(args) == Some([0.0, 0.0]),
+        CV_SCALE => t.identity &= constants(args) == Some([1.0, 1.0]),
+        CV_ROTATE => t.identity &= constants(args) == Some([0.0]),
+        CV_TRANSFORM => t.identity &= constants(args) == Some(IDENTITY),
+        CV_SET_TRANSFORM => t.identity = constants(args) == Some(IDENTITY),
+        CV_CLIP => t.clipped = true,
+        CV_BEGIN_PATH => {
+            t.path.clear();
+            t.path_exact = true;
+        }
+        CV_MOVE_TO..=CV_CLOSE => {
+            t.path.extend_from_slice(&r.out[start..]);
+            t.path_exact &= t.identity;
+        }
+        CV_FILL_STYLE..=CV_TEXT_BASELINE | CV_FONT_VARIANT_NUMERIC => {
+            // Kept only when it takes effect: the decoder drops a value it
+            // cannot read, and the one before stays.
+            let op = r.out[start..].to_vec();
+            let len = op.len();
+            let op = Rc::new(op);
+            let effective = decode(&RecList(op.clone()), 0, len).is_ok_and(|d| d.ops.len() == 1);
+            if effective {
+                let op = Rc::unwrap_or_clone(op);
+                match t.properties.iter_mut().find(|(c, _)| *c == code) {
+                    Some(slot) => slot.1 = op,
+                    None => t.properties.push((code, op)),
+                }
+            }
+        }
+        CV_CLEAR_RECT => {
+            let Some([x, y, w, h]) = constants(args) else {
+                return;
+            };
+            // HTML ignores a clear of a value that is not finite.
+            if ![x, y, w, h].iter().all(|n| n.is_finite()) {
+                return;
+            }
+            let covers = x.min(x + w) <= 0.0
+                && y.min(y + h) <= 0.0
+                && x.max(x + w) >= t.width
+                && y.max(y + h) >= t.height;
+            if !covers || !t.identity || t.clipped || !t.saved.is_empty() {
+                return;
+            }
+            if !t.path.is_empty() && !t.path_exact {
+                return;
+            }
+            let kept = t.properties.iter().flat_map(|(_, op)| op).chain(&t.path);
+            if kept.clone().any(animated) {
+                return;
+            }
+            let out: Vec<Rec> = kept.cloned().collect();
+            r.out = out;
+            free_values(cx, std::mem::take(&mut r.used));
+        }
+        _ => {}
     }
 }
 

@@ -466,6 +466,112 @@ fn an_offscreen_canvas_renders_through_the_platform() {
     );
 }
 
+const OFFSCREEN_REUSED: &str = r##"import { mount, OffscreenCanvas, signal, Text } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const canvas = new OffscreenCanvas(40, 20);
+  const cx = canvas.getContext("2d");
+  for (let i = 0; i < 40; i++) {
+    cx.clearRect(0, 0, canvas.width, canvas.height);
+    cx.fillStyle = i % 2 ? "#ff0000" : "#0000ff";
+    cx.fillStyle = "not a color";
+    cx.beginPath();
+    cx.arc(20, 10, i, 0, 6);
+    cx.fill();
+    await canvas.convertToBlob();
+  }
+  // A clear under a transform, or inside a save, keeps what came before.
+  const kept = new OffscreenCanvas(40, 20);
+  const k = kept.getContext("2d");
+  k.fillRect(0, 0, 1, 1);
+  k.translate(1, 0);
+  k.clearRect(0, 0, 40, 20);
+  k.save();
+  k.resetTransform();
+  k.clearRect(-10, -10, 60, 40);
+  k.restore();
+  k.fillRect(0, 0, 2, 2);
+  await kept.convertToBlob();
+  shown.set("done");
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"##;
+
+#[test]
+fn an_offscreen_canvas_cleared_whole_starts_its_recording_anew() {
+    use nsh_core::{Command, EventKind, EventPayload, MountItem, ROOT_ID};
+    let environment = nsh_engine::Environment {
+        canvas_render: true,
+        ..Default::default()
+    };
+    let (engine, rx) = crate::components::start_with(OFFSCREEN_REUSED, environment, None, None);
+    let control = engine.control();
+    let mut renders = Vec::new();
+    crate::components::until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::RenderCanvas { id, drawing, .. },
+            } = item
+            {
+                renders.push(drawing.ops.clone());
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::CanvasImage,
+                    EventPayload::CanvasImage {
+                        id: *id,
+                        result: Ok(vec![1]),
+                    },
+                );
+            }
+        }
+        crate::components::shows(batch, "done")
+    });
+    assert_eq!(renders.len(), 41, "{renders:?}");
+    let radii = |ops: &[CanvasOp]| -> Vec<f32> {
+        ops.iter()
+            .filter_map(|op| match op {
+                CanvasOp::Path(nsh_core::canvas::PathOp::Arc { radius, .. }) => {
+                    Some(radius.get(|_| 0.0))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    // The first frame: its own operations; the clear of the empty canvas
+    // is dropped too.
+    assert_eq!(renders[0].len(), 4, "{:?}", renders[0]);
+    // Each later frame holds only the state the clear kept (the last fill
+    // style that took effect, the current path) and its own operations,
+    // however many frames came before.
+    let last = &renders[39];
+    assert_eq!(last.len(), 6, "{last:?}");
+    assert!(renders[1..40].iter().all(|ops| ops.len() == 6));
+    assert!(
+        !last.iter().any(|op| matches!(op, CanvasOp::ClearRect(_))),
+        "{last:?}"
+    );
+    assert_eq!(radii(last), [38.0_f32, 39.0]);
+    let fills: Vec<_> = last
+        .iter()
+        .filter(|op| matches!(op, CanvasOp::FillStyle(_)))
+        .collect();
+    assert_eq!(fills.len(), 2, "{last:?}");
+    // Blue from frame 38 (the invalid value after it took no effect), red
+    // from frame 39.
+    assert_ne!(fills[0], fills[1], "{last:?}");
+    // Neither the translated clear nor the one inside `save` dropped the
+    // first rectangle.
+    let kept = &renders[40];
+    let rects = kept
+        .iter()
+        .filter(|op| matches!(op, CanvasOp::FillRect(_)))
+        .count();
+    assert_eq!(rects, 2, "{kept:?}");
+}
+
 const OFFSCREEN_UNAVAILABLE: &str = r##"import { mount, OffscreenCanvas, signal, Text } from "nsh";
 
 const shown = signal("waiting");

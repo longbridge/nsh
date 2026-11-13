@@ -430,6 +430,26 @@ test("nsh's OffscreenCanvas records as a canvas view does and asks the engine to
   f.close();
 });
 
+test("an OffscreenCanvas cleared whole starts its recording anew", { skip: !path }, async () => {
+  const f = await fixture();
+  const requests=[];
+  const canvas = createCanvas(f.invoke,f.api,f.dom,()=>!f.values.closed,()=>{},(op,receiver,args)=>{requests.push(receiver);return Promise.resolve(f.invoke(op,[receiver,args,0]));});
+  const offscreen=new canvas.OffscreenCanvas(40,20);const cx=offscreen.getContext("2d");
+  for(let i=0;i<30;i++){
+    cx.clearRect(0,0,40,20);cx.fillStyle=i%2?"#ff0000":"#0000ff";cx.fillStyle="not a color";
+    cx.beginPath();cx.arc(20,10,i,0,6);cx.fill();
+    await offscreen.convertToBlob();
+  }
+  // The fill style that took effect and the current path are kept; the
+  // earlier frames are not.
+  assert.deepEqual(requests.at(-1),[24,"#0000ff",12,20,10,28,0,6,false,24,"#ff0000",24,"not a color",7,12,20,10,29,0,6,false,18,null,"nonzero"]);
+  const kept=new canvas.OffscreenCanvas(40,20);const k=kept.getContext("2d");
+  k.fillRect(0,0,1,1);k.translate(1,0);k.clearRect(0,0,40,20);k.save();k.resetTransform();k.clearRect(-10,-10,60,40);k.restore();
+  await kept.convertToBlob();
+  assert.equal(requests.at(-1).filter(v=>v===21).length,1);assert.equal(requests.at(-1)[0],21);
+  f.close();
+});
+
 test("navigation keeps duplicate route entries and keymaps validate atomically", { skip: !path }, async () => {
   const f=await fixture();const env=createEnvironment(f.api,f.invoke,f.dom);
   const {createNavStack}=createNavigation(f.api,f.dom,env);

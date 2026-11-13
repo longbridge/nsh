@@ -237,6 +237,10 @@ struct Recording {
     /// Closed contexts: what `draw` recorded, for hit tests afterwards
     /// (`isPointInPath` in a press handler).
     drawn: Option<Rc<Vec<Rec>>>,
+    /// `OffscreenCanvas` contexts: what lets a clear of the whole canvas
+    /// drop what it recorded before (none on `<Canvas draw>`'s, whose
+    /// recordings end with the callback).
+    reuse: Option<Box<offscreen::Reuse>>,
 }
 
 /// The drawing state: the properties set, by name (owned values).
@@ -457,6 +461,7 @@ fn new_recording(cx: *mut JsContext, class: qjs::JSClassID) -> JsValue {
                 size: UNDEFINED,
                 closed: false,
                 drawn: None,
+                reuse: None,
             }));
             qjs::JS_SetOpaque(obj, data as *mut c_void);
         }
@@ -585,6 +590,7 @@ fn record(cx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> JsV
         if r.closed {
             return UNDEFINED;
         }
+        let start = r.out.len();
         r.out.push(Rec::Num(code as f64));
         let mut used = Vec::new();
         let mut budget = items_budget();
@@ -593,6 +599,7 @@ fn record(cx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> JsV
             (*p).out.push(rec);
         }
         (*p).used.append(&mut used);
+        offscreen::recorded(cx, &mut *p, start);
     }
     UNDEFINED
 }
@@ -644,6 +651,7 @@ unsafe extern "C" fn record_method(
             return UNDEFINED;
         }
         r.out.reserve(m.params.len() + 1);
+        let start = r.out.len();
         r.out.push(Rec::Num(m.code as f64));
         let mut used = Vec::new();
         let mut budget = items_budget();
@@ -656,6 +664,7 @@ unsafe extern "C" fn record_method(
             (*p).out.push(rec);
         }
         (*p).used.append(&mut used);
+        offscreen::recorded(cx, &mut *p, start);
     }
     UNDEFINED
 }

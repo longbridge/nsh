@@ -13,7 +13,48 @@ export function createCanvas(invoke, reactive, dom, live, wake, request = () => 
     if(Array.isArray(value))return value.map(v=>snapshot(v,depth+1));
     return ["number","string","boolean"].includes(typeof value)?value:null;
   };
-  const record = (object,code,args) => {const r=data(object);if(!r.closed)r.out.push(code,...args.map(v=>snapshot(v)));};
+  const record = (object,code,args) => {const r=data(object);if(r.closed)return;const values=args.map(v=>snapshot(v));r.out.push(code,...values);if(r.reuse)track(r,code,values);};
+  // An offscreen context's clear of the whole canvas drops what it recorded
+  // before, as `nsh-js`'s (`canvas/offscreen.rs` `Reuse`): under the
+  // identity transform, with no clip and no `save` open, the recording
+  // starts anew with the state the context keeps (each property's last
+  // value that took effect, the current path); never when that state reads
+  // an animated value or the path was added under another transform.
+  const IDENTITY=[1,0,0,1,0,0];
+  const same=(values,expected)=>values.length===expected.length&&values.every((v,i)=>v===expected[i]);
+  const animated=v=>Array.isArray(v)?v.some(animated):v!==null&&typeof v==="object";
+  const reuse=(width,height)=>({width,height,identity:true,clipped:false,saved:[],path:[],pathExact:true,properties:new Map()});
+  const track=(r,code,values)=>{
+    const t=r.reuse;
+    if(code===0)t.saved.push([t.identity,t.clipped]);
+    else if(code===1){const s=t.saved.pop();if(s)[t.identity,t.clipped]=s;}
+    else if(code===2)t.identity&&=same(values,[0,0]);
+    else if(code===3)t.identity&&=same(values,[1,1]);
+    else if(code===4)t.identity&&=same(values,[0]);
+    else if(code===5)t.identity&&=same(values,IDENTITY);
+    else if(code===6)t.identity=same(values,IDENTITY);
+    else if(code===20)t.clipped=true;
+    else if(code===7){t.path=[];t.pathExact=true;}
+    else if(code>=8&&code<=17){t.path.push(code,...values);t.pathExact&&=t.identity;}
+    else if((code>=24&&code<=39)||code===43){let h=t.properties.get(code);if(!h)t.properties.set(code,h=[]);h.push([code,...values]);}
+    else if(code===23){
+      const [x,y,w,h]=values;
+      if(!values.every(n=>typeof n==="number"&&Number.isFinite(n)))return;
+      const covers=Math.min(x,x+w)<=0&&Math.min(y,y+h)<=0&&Math.max(x,x+w)>=t.width&&Math.max(y,y+h)>=t.height;
+      if(!covers||!t.identity||t.clipped||t.saved.length||(t.path.length&&!t.pathExact))return;
+      // Each property's history since the last reset, down to the last
+      // value that took effect (the decoder drops one it cannot read).
+      const candidates=[...t.properties.values()].flat();
+      const effective=candidates.length?call(605,[candidates]):[];
+      let i=0;const kept=[];
+      for(const [property,history] of [...t.properties]){
+        let last=null;for(const op of history)if(effective[i++])last=op;
+        if(last){t.properties.set(property,[last]);kept.push(...last);}else t.properties.delete(property);
+      }
+      if(animated(kept)||animated(t.path))return;
+      r.out=[...kept,...t.path];
+    }
+  };
   const make = (prototype,kind,size) => {const object=Object.create(prototype);recordings.set(object,{kind,out:[],state:{},stack:[],closed:false,size});return object;};
   function CanvasRenderingContext2D(){throw new TypeError("Illegal constructor");}
   function CanvasGradient(){throw new TypeError("Illegal constructor");}
@@ -94,7 +135,8 @@ export function createCanvas(invoke, reactive, dom, live, wake, request = () => 
     getContext(kind){
       const o=offscreen(this);
       if(String(kind)!=="2d")return null;
-      return o.context??=make(CanvasRenderingContext2D.prototype,"context",{width:o.width,height:o.height});
+      if(!o.context){o.context=make(CanvasRenderingContext2D.prototype,"context",{width:o.width,height:o.height});data(o.context).reuse=reuse(o.width,o.height);}
+      return o.context;
     }
     convertToBlob(options){
       try{

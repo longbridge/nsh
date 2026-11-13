@@ -125,6 +125,21 @@ pub(super) fn call(host: &Bindings, op: u32, args: &Value) -> Result<Value, Prop
             });
             Ok(Value(0))
         }
+        // An offscreen context's clear of the whole canvas
+        // (`canvas.js` `track`): which of the recorded property
+        // operations take effect (the decoder drops a value it cannot
+        // read, and the one before stays), as booleans.
+        605 => {
+            let ops = args.index(0)?;
+            let len = ops.length()?.unwrap_or(0);
+            let mut effective = Vec::with_capacity(len);
+            for i in 0..len {
+                let taken = drawing(&ops.index(i)?).is_ok_and(|d| d.ops.len() == 1);
+                effective.push(serde_json::Value::Bool(taken));
+            }
+            host.json(&serde_json::Value::Array(effective))
+                .map(|v| Value(v.0[0] as u32))
+        }
         _ => Err(PropError("unknown canvas operation".into())),
     }
 }
