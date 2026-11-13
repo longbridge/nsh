@@ -1607,3 +1607,102 @@ fn arrays_too_long_to_render_are_refused() {
         texts(&first)
     );
 }
+
+const DECODED_VALUES: &str = r#"
+import { Animated, createAnimatedValue, mount, nativeComponent, Scroll, Text, View } from "nsh";
+import { List } from "nsh";
+
+function attempt(render: () => unknown) {
+  try {
+    render();
+    return "rendered";
+  } catch (e) {
+    const error = e as Error;
+    return `${error.name}${error.message.includes("cannot be read") ? "" : `(${error.message})`}`;
+  }
+}
+// As long as an array can be: its length is a float past 2 ** 31, which
+// rquickjs's `Array::len` asserted is an integer, aborting the process.
+const huge = () => new Array(2 ** 32 - 1);
+const self: unknown[] = [];
+self.push(self);
+const theme: Record<string, unknown> = {};
+theme.theme = theme;
+const keys: Record<string, number> = {};
+for (let i = 0; i < 2 ** 16; i++) keys[`k${i}`] = i;
+const outputs = huge();
+outputs[0] = "red";
+const Probe = nativeComponent("Probe", { props: ["data"] } as never) as never as (props: { data: unknown }) => never;
+const value = createAnimatedValue(0);
+let shared: any = Animated.timing(value, { toValue: 1, duration: 10 });
+for (let i = 0; i < 63; i++) shared = Animated.sequence(new Array(1000).fill(shared));
+// Within the bound alone, over it four times: a composite's keyframes are
+// counted with the rest of what it runs.
+const frames = Animated.keyframes(value, { keyframes: new Array(2 ** 19).fill(0), duration: 10 });
+const sharedFrames = Animated.sequence(new Array(4).fill(frames));
+const results = [
+  `styleSelf:${attempt(() => <View style={self as never} />)}`,
+  `styleSparse:${attempt(() => <View style={huge() as never} />)}`,
+  `styleKeys:${attempt(() => <View style={keys as never} />)}`,
+  `fontVariant:${attempt(() => <Text style={{ fontVariant: huge() as never }}>x</Text>)}`,
+  `boxShadow:${attempt(() => <View style={{ boxShadow: huge() as never }} />)}`,
+  `transform:${attempt(() => <View style={{ transform: huge() as never }} />)}`,
+  `translate:${attempt(() => <View style={{ translate: huge() as never }} />)}`,
+  `outputRange:${attempt(() => value.interpolate({ inputRange: [0, 1], outputRange: outputs }))}`,
+  `inputRange:${attempt(() => value.interpolate({ inputRange: huge(), outputRange: [0, 1] }))}`,
+  `native:${attempt(() => <Probe data={huge()} />)}`,
+  `scrollbar:${attempt(() => <Scroll scrollbar={theme as never}><Text>x</Text></Scroll>)}`,
+  `sticky:${attempt(() => <List each={[1]} stickyHeaderIndices={huge() as never}>{() => <Text>x</Text>}</List>)}`,
+  `captureKeys:${attempt(() => <View focusable captureKeys={huge() as never} />)}`,
+];
+// A start returns a promise: what it cannot decode rejects it.
+const settled = (start: () => Promise<unknown>) =>
+  start().then(
+    () => "resolved",
+    (e: Error) => `${e.name}${e.message.includes("cannot be read") ? "" : `(${e.message})`}`,
+  );
+Promise.all([
+  settled(() => Animated.timing(value, { toValue: 1, easing: huge() as never }).start()),
+  settled(() => Animated.decay(value, { velocity: 1, clamp: huge() as never }).start()),
+  settled(() => shared.start()),
+  settled(() => sharedFrames.start()),
+]).then(([easing, clamp, sharedRuns, sharedKeyframes]) => {
+  results.push(`easing:${easing}`, `clamp:${clamp}`, `shared:${sharedRuns}`, `keyframes:${sharedKeyframes}`);
+  mount(() => <Text>{results.join(" ")}</Text>);
+});
+"#;
+
+/// What the decoders read of the values apps pass natively, where neither
+/// the time budget nor the interpreter's stack limit applies: an array as
+/// long as an array can be (which aborted the process), one holding itself
+/// (which overflowed the engine thread's stack) and composites sharing
+/// their children (10^189 runs) are refused; a style of 2^16 keys and a
+/// theme holding itself are read.
+#[test]
+fn values_too_long_or_nested_in_themselves_are_refused_when_decoded() {
+    let (_engine, rx) = start_app(DECODED_VALUES);
+    // The results are mounted once the starts settled: a start that did not
+    // reject would run its animation, and frames of it come first.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut shown = Vec::new();
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        shown = texts(&batch);
+        if shown.iter().any(|t| t.starts_with("styleSelf:")) {
+            break;
+        }
+    }
+    assert_eq!(
+        shown,
+        [
+            "styleSelf:TypeError(nsh: styles nested too deeply) styleSparse:RangeError \
+             styleKeys:rendered fontVariant:RangeError boxShadow:RangeError \
+             transform:RangeError translate:RangeError outputRange:RangeError \
+             inputRange:RangeError native:RangeError(a native component value is nested \
+             deeper than 64 or has more than 1048576 entries) scrollbar:rendered \
+             sticky:RangeError captureKeys:RangeError easing:RangeError clamp:TypeError(decay: `clamp` must be \
+             [min, max]) shared:RangeError keyframes:RangeError"
+        ],
+        "{:?}",
+        shown
+    );
+}
