@@ -593,6 +593,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 toggle(*show);
             }
         }
+        Command::PerfMonitorMode(mode) => {
+            if let Some(set) = &*surface.perf_mode.borrow() {
+                set(*mode);
+            }
+        }
         Command::Announce(text) => crate::access::announce(
             crate::window::key_root(surface).ns(),
             text,

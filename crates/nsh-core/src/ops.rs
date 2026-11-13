@@ -2292,6 +2292,10 @@ pub enum Command {
     /// macOS panel or the other platforms' `nsh::fps` lines. Platforms
     /// without a monitor ignore it.
     PerfMonitor(bool),
+    /// How the performance monitor shows (on the root; `setFpsMode`): its
+    /// whole panel, collapsed to its frame rate, or nothing while it still
+    /// measures. Platforms without a panel ignore it.
+    PerfMonitorMode(FpsMode),
     /// Load the image at `uri` (keeping its bytes for views that show it
     /// next) and report its pixel size as [`EventKind::ImageInfo`] `id`
     /// (on the root).
@@ -2512,6 +2516,20 @@ pub enum Haptic {
     Impact(HapticImpact),
     /// A task ended (`Haptics.notification`).
     Notification(HapticNotification),
+}
+
+/// How the performance monitor shows ([`Command::PerfMonitorMode`], TS:
+/// `setFpsMode`'s argument: `"expanded"`, `"collapsed"`, `"hidden"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PropEnum)]
+#[non_exhaustive]
+pub enum FpsMode {
+    /// The whole panel: the readings and the frame-cost trace.
+    #[default]
+    Expanded,
+    /// A small pill with the frame rate only, colored by the frame budget.
+    Collapsed,
+    /// Nothing on screen; it still measures (`fpsReading()`, the log).
+    Hidden,
 }
 
 /// The weight of an impact ([`Haptic::Impact`], TS: `Haptics.impact`'s

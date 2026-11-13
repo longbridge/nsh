@@ -341,3 +341,9 @@ expect Calls: done
 expect Fps enabled: false
 covers [nsh] fpsEnabled
 covers [nsh] setFpsEnabled
+# mod-fps-mode
+tap id:case-mod-fps-mode
+expect Modes: not called
+tap id:modes
+expect Modes: done
+covers [nsh] setFpsMode

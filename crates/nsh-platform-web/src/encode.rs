@@ -1675,7 +1675,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         }
         // A browser's bars are the browser's; the browser's own developer
         // tools measure the page.
-        Command::StatusBar(_) | Command::PerfMonitor(_) => {}
+        Command::StatusBar(_) | Command::PerfMonitor(_) | Command::PerfMonitorMode(_) => {}
         // The main window's title is the page's title (`nsh.js` writes it
         // where the app is the page); the rest of a window is the browser's.
         Command::Desktop(desktop) => match (id == nsh_core::ROOT_ID, &**desktop) {
