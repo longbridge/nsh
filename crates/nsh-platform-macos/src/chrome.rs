@@ -74,6 +74,10 @@ use objc2_foundation::{
 
 use crate::surface::Surface;
 
+/// The main menu and the Windows menu that were installed before an app
+/// replaced them.
+type OriginalMenu = (Option<Retained<NSMenu>>, Option<Retained<NSMenu>>);
+
 /// The title bar's height when AppKit cannot tell (macOS 11 and later).
 const TITLE_BAR_HEIGHT: f32 = 28.0;
 /// The traffic lights' width when AppKit cannot tell.
@@ -85,7 +89,7 @@ thread_local! {
     static APP_NAME: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The main menu before an app set its own: `setApplicationMenu(null)`
     /// brings it back.
-    static ORIGINAL_MENU: RefCell<Option<(Option<Retained<NSMenu>>, Option<Retained<NSMenu>>)>> = const { RefCell::new(None) };
+    static ORIGINAL_MENU: RefCell<Option<OriginalMenu>> = const { RefCell::new(None) };
 }
 
 /// Names the app for the app menu's roles.
