@@ -116,6 +116,34 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
 }
 
 #[test]
+fn a_test_sees_the_notifications_an_app_closes() {
+    use std::time::Duration;
+
+    use nsh_core::{Command, notifications::NotificationCommand};
+    use nsh_engine::{Bundle, EngineConfig};
+    use nsh_testing::Headless;
+
+    let bundle = Bundle::source(
+        "import { Notifications } from 'nsh';\n\
+         Notifications.close('a').then(() => Notifications.closeAll());"
+            .to_owned(),
+    );
+    let mut config = EngineConfig::new(bundle);
+    // A platform that shows notifications: the core sends them its way.
+    config.environment.notifications = true;
+    let mut app = Headless::start(config).unwrap();
+    let all = Command::Notification(NotificationCommand::CloseAll);
+    app.wait_until("closeAll", Duration::from_secs(10), |s| s.sent(&all))
+        .unwrap();
+    assert!(
+        app.screen()
+            .sent(&Command::Notification(NotificationCommand::Close(
+                "a".into()
+            )))
+    );
+}
+
+#[test]
 fn headless_runs_play_the_platform_s_part() {
     let run = TestRun {
         ui_sets: vec![nsh_base::registry()],

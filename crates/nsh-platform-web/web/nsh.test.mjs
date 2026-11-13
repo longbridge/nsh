@@ -628,6 +628,62 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   delete globalThis.document;
 });
 
+test("setAccessibilityFocus leaves the keyboard focus in a field the user is typing in", async () => {
+  const { player } = fakePlayer();
+  player.live = { textContent: "" };
+  const focusable = (attrs = {}) => {
+    const el = {
+      attrs: new Map(Object.entries(attrs)),
+      focused: false,
+      isConnected: true,
+      closest: () => null,
+      hasAttribute(name) { return this.attrs.has(name); },
+      getAttribute(name) { return this.attrs.get(name) ?? null; },
+      set tabIndex(v) { this.attrs.set("tabindex", String(v)); },
+      focus() { this.focused = true; globalThis.document.activeElement = this; },
+    };
+    return el;
+  };
+  const field = Object.assign(focusable(), { tagName: "INPUT", type: "search" });
+  const title = Object.assign(focusable({ "aria-label": "Search" }), { textContent: "Search" });
+  const input = { _field: field };
+  const views = new Map([[2, title], [4, input]]);
+  player.view = (id) => views.get(id);
+  const a11yFocus = (id) => player.op_cmd([0, id, "a11yFocus"]);
+  try {
+    // Typing in the search field: the title is read out, the field keeps
+    // the keyboard focus.
+    globalThis.document = { activeElement: field };
+    a11yFocus(2);
+    assert.equal(title.focused, false);
+    assert.equal(document.activeElement, field);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(player.live.textContent, "Search");
+    // Nothing typed into: the title takes the focus, as before.
+    globalThis.document = { activeElement: null };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    assert.equal(title.getAttribute("tabindex"), "-1");
+    // An input takes it into its field.
+    a11yFocus(4);
+    assert.equal(field.focused, true);
+    assert.equal(document.activeElement, field);
+    // A field that no longer takes input (under a dialog) keeps nothing.
+    title.focused = false;
+    field.closest = (selector) => (selector === "[inert]" ? {} : null);
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    // Nor does a checkbox, which takes no typing.
+    title.focused = false;
+    field.closest = () => null;
+    globalThis.document = { activeElement: Object.assign(focusable(), { tagName: "INPUT", type: "checkbox" }) };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 test("a touch whose press focused a field leaves the focus there", () => {
   const { player } = fakePlayer();
   player.editable = (target) => target.field === true;
@@ -778,6 +834,39 @@ test("a key a field's own handler took is not the page's shortcut as well", () =
     delete globalThis.document;
     Player.active = null;
   }
+});
+
+test("Return a shortcut takes does not submit the field as well", () => {
+  const { player, sent } = fakePlayer();
+  player.modifiersChanged = () => {};
+  // The app binds Return in text fields (binding 3, an autocomplete list's)
+  // while `bound` says so; otherwise nothing takes it.
+  let bound = true;
+  player.wasm.nsh_key = (code, _mods, focus) => (bound && code === 256 && focus & 1 ? 3 : -1);
+  const listeners = {};
+  const field = {
+    tagName: "TEXTAREA",
+    value: "/rev",
+    _count: 4,
+    addEventListener: (type, listener) => (listeners[type] = listener),
+    blur() {},
+  };
+  const el = { _id: 9, _events: new Set(["onSubmitEditing"]), _config: { submit: "submit" } };
+  player.wireInput(el, field);
+  const press = (key, extra = {}) => {
+    let prevented = false;
+    listeners.keydown({ key, keyCode: 13, isComposing: false, shiftKey: false, altKey: false, preventDefault: () => (prevented = true), ...extra });
+    return prevented;
+  };
+  const submits = () => sent.filter(([name]) => name === "onSubmitEditing").length;
+  // Taken: the shortcut's alone (`keyDown` fires it), as on the native platforms.
+  assert.equal(press("Enter"), false);
+  assert.equal(submits(), 0);
+  // Not taken: the field submits as before.
+  bound = false;
+  assert.equal(press("Enter"), true);
+  assert.equal(submits(), 1);
+  assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
 });
 
 /**

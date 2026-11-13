@@ -1799,7 +1799,8 @@ pub trait Interactive: Element {
     }
 
     /// On iOS, a vertical pan shares descendant scroll views' touches and
-    /// follows only the downward distance left after scrolling to the top.
+    /// follows only the downward distance left after scrolling to the top;
+    /// `on_pan_start` waits until that distance moves its values.
     /// Other platforms keep their normal pan and scroll arbitration.
     fn pan_scroll_handoff(mut self, enabled: impl IntoReactive<bool>) -> Self {
         super::host::bind_prop(self.node(), enabled, Prop::PanScrollHandoff);

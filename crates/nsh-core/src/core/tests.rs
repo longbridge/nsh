@@ -4430,6 +4430,77 @@ fn multiline_inputs_grow_with_what_an_input_method_composes() {
 }
 
 #[test]
+fn multiline_inputs_stop_at_their_max_height_and_so_do_their_parents() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("width", StyleValue::Number(200.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 3,
+                before: None,
+            },
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Multiline(true),
+            },
+            style_op(
+                2,
+                &[
+                    ("padding", StyleValue::Number(6.0)),
+                    ("maxHeight", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 3,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let height = |batch: &MountBatch, id| frame_of(batch, id).map(|f| f.size.height.0);
+    // Two lines: under the maximum, the parent around it as tall.
+    c.input_changed(2, &"x".repeat(30), 1);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        (height(&batch, 2), height(&batch, 3)),
+        (Some(44.0), Some(44.0))
+    );
+    // Far more than fits: the input stops at its maximum (its text scrolls
+    // in it), and so does the column around it, sized from its content.
+    c.input_changed(2, &"x".repeat(1000), 2);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        (height(&batch, 2), height(&batch, 3)),
+        (Some(100.0), Some(100.0))
+    );
+    let content = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::InputContent { id: 2, content } => Some(content.size.height.0),
+        _ => None,
+    });
+    assert_eq!(content, Some(88.0));
+}
+
+#[test]
 fn multiline_inputs_measure_long_runs_in_pieces() {
     let mut c = input_core();
     c.apply(Op::SetProp {
@@ -15523,6 +15594,7 @@ mod components {
             .child(view().h(px(10.0)).on_press(move |_: &()| {
                 set_badge(3);
                 close_notification("a");
+                close_all_notifications();
                 spawn(async move {
                     let permission = request_notification_permission().await;
                     add(permission.as_str().to_owned());
@@ -15595,6 +15667,7 @@ mod components {
             [
                 N::SetBadge(3),
                 N::Close("a".into()),
+                N::CloseAll,
                 N::Listen,
                 N::Permission { id: 0, ask: true }
             ]
@@ -17536,6 +17609,114 @@ fn overflowing_children_mount_their_area() {
     let batch = c.commit().unwrap();
     assert_eq!(overflow(&batch, 5), Some(None));
     assert_eq!(overflow(&batch, 2), Some(None));
+}
+
+/// A row (2) as tall as its 24pt button (4), whose hit slop of 10 reaches
+/// out of the row, in a card (5) with padding 20: the row's area takes in
+/// the slop, so a touch above the row, in the slop, reaches the button;
+/// the card holds it inside, and a clipping row keeps it.
+#[test]
+fn hit_slop_outside_the_parent_reaches_the_child() {
+    use crate::{geometry::size, input::hit_area};
+    let mut c = core();
+    let create = |id| Op::Create { id, tag: Tag::View };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let slop = |value: f32| Op::SetProp {
+        id: 4,
+        prop: Prop::HitSlop(EdgeInsets::all(Points(value))),
+    };
+    apply(
+        &mut c,
+        vec![
+            create(5),
+            create(2),
+            create(4),
+            style_op(5, &[("padding", StyleValue::Number(20.0))]),
+            style_op(
+                2,
+                &[
+                    ("flexDirection", StyleValue::Str("row")),
+                    ("height", StyleValue::Number(24.0)),
+                ],
+            ),
+            style_op(
+                4,
+                &[
+                    ("width", StyleValue::Number(24.0)),
+                    ("height", StyleValue::Number(24.0)),
+                ],
+            ),
+            slop(10.0),
+            insert(2, 4),
+            insert(5, 2),
+            insert(ROOT_ID, 5),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let overflow = |batch: &MountBatch, id: NodeId| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Overflow { id: i, extent } if *i == id => Some(*extent),
+            _ => None,
+        })
+    };
+    // The row is 280 wide (the card's padding): the button's slop reaches
+    // 10 above, left of and below it.
+    let row = rect(-10.0, -10.0, 290.0, 44.0);
+    assert_eq!(overflow(&batch, 2), Some(Some(row)));
+    // At (20, 20) in the card, the slop stays inside it.
+    assert_eq!(overflow(&batch, 5), None);
+    let (row_size, button_size) = (
+        size(Points(280.0), Points(24.0)),
+        size(Points(24.0), Points(24.0)),
+    );
+    let none = EdgeInsets::default();
+    let ten = EdgeInsets::all(Points(10.0));
+    // 5pt above the row, over the button: the row looks into its children,
+    // and the button is hit in its slop.
+    let at = point(Points(12.0), Points(-5.0));
+    assert!(hit_area(at, row_size, none, Some(row), false, true).children);
+    let button = hit_area(at, button_size, ten, None, false, true);
+    assert!(!button.inside && button.in_slop);
+    // Past the slop, nothing is looked into.
+    let past = point(Points(12.0), Points(-12.0));
+    assert!(!hit_area(past, row_size, none, Some(row), false, true).children);
+
+    // The slop going away takes the area with it, without a new layout.
+    c.apply(slop(0.0)).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(overflow(&batch, 2), Some(None));
+    // Coming back, it reaches through the card too when it is larger
+    // than the card's padding.
+    c.apply(slop(30.0)).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        overflow(&batch, 2),
+        Some(Some(rect(-30.0, -30.0, 310.0, 84.0)))
+    );
+    assert_eq!(
+        overflow(&batch, 5),
+        Some(Some(rect(-10.0, -10.0, 330.0, 84.0)))
+    );
+
+    // A row that clips its overflow has no area: a touch outside it is
+    // not looked into, as what is outside does not show.
+    c.apply(style_op(
+        2,
+        &[
+            ("flexDirection", StyleValue::Str("row")),
+            ("height", StyleValue::Number(24.0)),
+            ("overflow", StyleValue::Str("hidden")),
+        ],
+    ))
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(overflow(&batch, 2), Some(None));
+    assert_eq!(overflow(&batch, 5), Some(None));
+    assert!(!hit_area(at, row_size, none, None, true, true).children);
 }
 
 /// A view that loses its only, absolutely placed child lays out again:
@@ -39906,6 +40087,68 @@ mod first_mount {
         }
     }
 }
+
+/// A list bound after the turn's budget of views: its cell waits
+/// (`pace.rs`), and what the cell holds is placed with it, so the rows
+/// that show are made in the turn the cell is, down to their leaves, not
+/// behind every view that waits out of sight.
+#[test]
+fn a_list_bound_after_the_mount_budget_makes_the_rows_that_show_at_once() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Repro() -> impl IntoElement {
+        scroll().horizontal().flex_1().child(
+            view()
+                .w(px(1000.0))
+                .h_full()
+                .child(
+                    view()
+                        .flex_row()
+                        .h(px(26.0))
+                        .flex_none()
+                        .children((0..64).map(|_| view().w(px(10.0)).h(px(26.0)))),
+                )
+                .child(
+                    virtual_list(3_usize, |_| {
+                        view().h(px(26.0)).test_id("row").child(
+                            view().child(
+                                view().child(view().w(px(40.0)).h(px(20.0)).test_id("label")),
+                            ),
+                        )
+                    })
+                    .estimated_item_size(px(26.0))
+                    .flex_1(),
+                ),
+        )
+    }
+
+    let mut c = core();
+    c.begin_mount_turn();
+    c.mount_root(&crate::element::Root::of::<Repro>());
+    // One turn: nothing that shows is left for a later one.
+    let items = c.commit().unwrap().items;
+    let frames = |test_id: &str| -> Vec<_> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .map(|id| {
+                items.iter().rev().find_map(|item| match item {
+                    MountItem::Frame { id: i, frame } if *i == id => Some(frame.size),
+                    _ => None,
+                })
+            })
+            .collect()
+    };
+    assert_eq!(frames("row"), vec![Some(size_pt(1000.0, 26.0)); 3]);
+    assert_eq!(frames("label"), vec![Some(size_pt(40.0, 20.0)); 3]);
+}
+
 #[test]
 fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
     use crate::prelude::*;
@@ -39988,4 +40231,363 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         frame_of("label").expect("label frame").size,
         size_pt(40.0, 20.0)
     );
+}
+
+/// A part's classes (a page's `headerClass`, a list's `contentClass`) that
+/// name design tokens follow the tokens, as a view's `class` does.
+mod part_class_tokens {
+    use super::*;
+    use crate::{color::rgb, element::AdaptiveColor};
+
+    /// A stack with screen 3, its header's classes `names`.
+    fn page(c: &mut Core<FakeEngine>, names: &str) {
+        apply(
+            c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Stack,
+                },
+                style_op(2, &[("flex", StyleValue::Number(1.0))]),
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Screen,
+                },
+                Op::SetProp {
+                    id: 3,
+                    prop: Prop::HeaderClass(names.into()),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+    }
+
+    /// The header's background and title colors a batch sends for screen 3.
+    fn header(batch: Option<MountBatch>) -> Option<(Option<Color>, Option<Color>)> {
+        batch?.items.iter().find_map(|i| match i {
+            MountItem::ScreenConfig { id: 3, config } => {
+                Some((config.background_color, config.title_color))
+            }
+            _ => None,
+        })
+    }
+
+    /// The sample tokens with `primary` set.
+    fn with_primary(color: crate::element::AdaptiveColor) -> crate::element::Tokens {
+        let mut tokens = crate::element::tokens::sample();
+        tokens.set_color("primary", color);
+        tokens
+    }
+
+    #[test]
+    fn a_headers_token_classes_follow_the_tokens() {
+        let mut c = core();
+        page(&mut c, "bg-primary text-primary-foreground");
+        let foreground = Some(Color::from(token("primary-foreground").light));
+        assert_eq!(
+            header(c.commit()),
+            Some((Some(Color::from(token("primary").light)), foreground))
+        );
+        // The token's value changes: the header is sent with the new one.
+        c.set_tokens(with_primary(AdaptiveColor::rgb(0x00ff00, 0x004400)));
+        assert_eq!(
+            header(c.commit()),
+            Some((Some(Color::from(rgb(0x00ff00))), foreground))
+        );
+        // It stays the token's in the other appearance.
+        c.set_class_environment(crate::tailwind::ClassEnvironment {
+            dark: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            header(c.commit()).map(|h| h.0),
+            Some(Some(Color::from(rgb(0x004400))))
+        );
+        // The same values again send nothing.
+        c.set_tokens(with_primary(AdaptiveColor::rgb(0x00ff00, 0x004400)));
+        assert_eq!(header(c.commit()), None);
+    }
+
+    #[test]
+    fn a_header_without_token_classes_is_left_alone() {
+        let mut c = core();
+        page(&mut c, "bg-[#112233]");
+        assert_eq!(
+            header(c.commit()).map(|h| h.0),
+            Some(Some(Color(0x1122_33ff)))
+        );
+        c.set_tokens(with_primary(rgb(0x00ff00).into()));
+        assert_eq!(header(c.commit()), None);
+    }
+
+    #[test]
+    fn a_lists_content_token_classes_follow_the_tokens() {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::List,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::ListContentClass("p-(--radius) gap-2".into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        let padding = |c: &Core<FakeEngine>| {
+            let key = c.key(2).unwrap();
+            let content = c.nodes[key as usize].list.as_ref().unwrap().content;
+            (content.padding.top, content.row_gap)
+        };
+        assert_eq!(padding(&c), (px(12.0), px(8.0)));
+        let mut tokens = crate::element::tokens::sample();
+        tokens.set_number("radius", 20.0);
+        c.set_tokens(tokens);
+        c.commit();
+        assert_eq!(padding(&c), (px(20.0), px(8.0)));
+    }
+}
+
+/// A style set on a view whose layout style stays what it was (a change
+/// of colors: a token, the appearance, a state) lays nothing out again;
+/// one that changes the layout style still does.
+mod layout_kept_by_restyle {
+    use super::*;
+
+    /// View 2 with `classes` holding the text 3 (`hello`, classes
+    /// `text_classes`), committed.
+    fn card(classes: &str, text_classes: &str) -> Core<FakeEngine> {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                class_op(2, classes),
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                class_op(3, text_classes),
+                Op::CreateText {
+                    id: 4,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert!(!c.needs_layout);
+        c
+    }
+
+    fn frames(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Frame { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_change_of_colors_asks_for_no_layout() {
+        let mut c = card("w-20 p-2 bg-red-500", "text-black");
+        apply(&mut c, vec![class_op(2, "w-20 p-2 bg-blue-500")]);
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            Color::from(crate::element::palette::BLUE.shade(500))
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn a_text_color_is_drawn_again_without_a_layout() {
+        let mut c = card("w-20 p-2", "text-black");
+        apply(&mut c, vec![class_op(3, "text-red-500")]);
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        let color = batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id: 3, text, .. } => Some(text.spans[0].style.color),
+            _ => None,
+        });
+        assert_eq!(
+            color,
+            Some(Color::from(crate::element::palette::RED.shade(500)))
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn an_inline_color_asks_for_no_layout() {
+        let mut c = card("w-20 p-2", "text-black");
+        apply(
+            &mut c,
+            vec![style_op(
+                2,
+                &[("backgroundColor", StyleValue::Str("#0000ff"))],
+            )],
+        );
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            Color(0x0000_ffff)
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn a_change_of_the_layout_style_still_lays_out() {
+        let mut c = card("w-20 p-2 bg-red-500", "text-black");
+        apply(&mut c, vec![class_op(2, "w-40 p-2 bg-red-500")]);
+        assert!(c.needs_layout);
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 2).expect("a new frame");
+        assert_eq!(frame.size.width.0, 160.0);
+        // And back, with another color in the same change.
+        apply(&mut c, vec![class_op(2, "w-20 p-4 bg-blue-500")]);
+        assert!(c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 80.0);
+        // The padding moved the text.
+        assert!(frames(&batch).contains(&3));
+    }
+
+    /// 300 cards, each a text and a row of three boxes, every box given
+    /// another background: the restyle and its commit.
+    /// `cargo test --release -p nsh-core bench_restyle_colors -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_restyle_colors() {
+        const CARDS: u32 = 300;
+        let mut c = core();
+        let mut ops = Vec::new();
+        let mut boxes = Vec::new();
+        for card in 0..CARDS {
+            let id = 10 + card * 10;
+            let (text, raw, row) = (id + 1, id + 2, id + 3);
+            ops.extend([
+                Op::Create { id, tag: Tag::View },
+                class_op(
+                    id,
+                    "p-4 gap-2 rounded-lg border border-neutral-200 bg-white",
+                ),
+                Op::Create {
+                    id: text,
+                    tag: Tag::Text,
+                },
+                class_op(text, "text-base font-semibold text-neutral-950"),
+                Op::CreateText {
+                    id: raw,
+                    text: format!("Card {card}"),
+                },
+                Op::Insert {
+                    parent: text,
+                    child: raw,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: id,
+                    child: text,
+                    before: None,
+                },
+                Op::Create {
+                    id: row,
+                    tag: Tag::View,
+                },
+                class_op(row, "flex-row gap-2"),
+            ]);
+            for k in 0..3 {
+                let b = id + 4 + k;
+                boxes.push(b);
+                ops.extend([
+                    Op::Create {
+                        id: b,
+                        tag: Tag::View,
+                    },
+                    class_op(b, "px-3 py-2 rounded-md bg-neutral-100"),
+                    Op::Insert {
+                        parent: row,
+                        child: b,
+                        before: None,
+                    },
+                ]);
+            }
+            ops.extend([
+                Op::Insert {
+                    parent: id,
+                    child: row,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        apply(&mut c, ops);
+        c.commit().unwrap();
+        let mut times = Vec::new();
+        let mut frames_sent = 0;
+        for round in 0..400 {
+            let class = if round % 2 == 0 {
+                "px-3 py-2 rounded-md bg-blue-600"
+            } else {
+                "px-3 py-2 rounded-md bg-neutral-100"
+            };
+            let ops: Vec<Op> = boxes.iter().map(|&b| class_op(b, class)).collect();
+            let start = std::time::Instant::now();
+            apply(&mut c, ops);
+            let batch = c.commit().unwrap();
+            times.push(start.elapsed());
+            frames_sent += frames(&batch).len();
+            assert!(view_style_of(&batch, boxes[0]).is_some());
+        }
+        times.sort();
+        println!(
+            "{} boxes given another background: {:.0} us (median {:.0} us), {frames_sent} frames sent",
+            boxes.len(),
+            times[0].as_secs_f64() * 1e6,
+            times[times.len() / 2].as_secs_f64() * 1e6,
+        );
+    }
 }

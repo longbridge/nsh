@@ -2857,6 +2857,22 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     add_overlay(surface, serial, OverlayKind::Dialog(item));
 }
 
+/// Whether the newest dialog on `surface` was drawn (laid out), or there
+/// is none.
+#[cfg(feature = "dev")]
+pub(crate) fn dialog_drawn(surface: &Surface) -> bool {
+    OVERLAYS
+        .with(|o| {
+            o.borrow().iter().rev().find_map(|o| match &o.kind {
+                OverlayKind::Dialog(d) if o.key == surface.key() && !d.closing.get() => {
+                    Some(d.layout.borrow().is_some())
+                }
+                _ => None,
+            })
+        })
+        .unwrap_or(true)
+}
+
 /// Where a user presses to answer the newest dialog on `surface` (root
 /// points): the middle of its button titled `button`, or outside its card
 /// to close it without one (`None`; only a dialog that can be closed so).

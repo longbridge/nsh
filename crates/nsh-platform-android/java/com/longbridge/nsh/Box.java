@@ -580,6 +580,12 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
                     overflowTarget = target;
                     return true;
                 }
+                // Outside this box but in a child's hit slop, which the
+                // box's area takes in: moved inside the child, as below.
+                if (outside && pointerEvents != 3 && mounter.hasHitSlop()) {
+                    View slop = slopTarget(x, y);
+                    if (slop != null && dispatchInside(slop, e)) return true;
+                }
                 if (outside) return false;
             }
         } else if (overflowTarget != null) {
@@ -589,20 +595,23 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         }
         if (action == MotionEvent.ACTION_DOWN && mounter.hasHitSlop()) {
             View target = slopTarget(e.getX(), e.getY());
-            if (target != null) {
-                // A touch in a child's hit slop: move it inside the child, so
-                // the regular dispatch delivers it (and the rest of the
-                // gesture) there.
-                MotionEvent inside = MotionEvent.obtain(e);
-                float x = clamp(e.getX(), target.getLeft() + 1, target.getRight() - 1);
-                float y = clamp(e.getY(), target.getTop() + 1, target.getBottom() - 1);
-                inside.offsetLocation(x - e.getX(), y - e.getY());
-                boolean handled = super.dispatchTouchEvent(inside);
-                inside.recycle();
-                return handled;
-            }
+            if (target != null) return dispatchInside(target, e);
         }
         return super.dispatchTouchEvent(e);
+    }
+
+    /**
+     * A touch in child {@code target}'s hit slop: moved inside the child, so
+     * the regular dispatch delivers it (and the rest of the gesture) there.
+     */
+    private boolean dispatchInside(View target, MotionEvent e) {
+        MotionEvent inside = MotionEvent.obtain(e);
+        float x = clamp(e.getX(), target.getLeft() + 1, target.getRight() - 1);
+        float y = clamp(e.getY(), target.getTop() + 1, target.getBottom() - 1);
+        inside.offsetLocation(x - e.getX(), y - e.getY());
+        boolean handled = super.dispatchTouchEvent(inside);
+        inside.recycle();
+        return handled;
     }
 
     private boolean hasOverflowingChild() {

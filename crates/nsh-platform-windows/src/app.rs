@@ -205,6 +205,13 @@ pub struct AppOptions {
     /// the app (`Application.on("openFiles", ...)`), a later
     /// launch with files handing them to the running instance.
     pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// Runs [`run_app`]'s app in the background: its windows show without
+    /// activating and nothing brings them to the foreground, so the keyboard
+    /// stays with the app the user works in, while the window that would
+    /// have it reads as focused to the app. `nsh test --target windows` sets
+    /// it (the development host's `--background`); the test agent's input
+    /// goes to the window directly. False by default.
+    pub background: bool,
 }
 
 impl Default for AppOptions {
@@ -230,6 +237,7 @@ impl Default for AppOptions {
             file_types: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            background: false,
         }
     }
 }
@@ -630,6 +638,9 @@ fn wait_for_replaced_process() {
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     STANDALONE.set(true);
+    if options.background {
+        crate::window::run_in_background();
+    }
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
     // clipboard, drag and drop and WIC.
