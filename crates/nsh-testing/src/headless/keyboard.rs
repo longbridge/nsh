@@ -64,6 +64,30 @@ impl Headless {
     /// something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
         self.step(format!("keyboard.press({keys})"));
+        match self.send_key(keys)? {
+            true => self.back(),
+            false => self.done(),
+        }
+    }
+
+    /// Presses `keys` one after another, each as [`Headless::press_key`]
+    /// does, without letting the app handle one before the next comes:
+    /// keys typed ahead, faster than the app takes them (each goes where
+    /// the screen had the focus before the first), then settles once.
+    pub fn press_keys(&mut self, keys: &[&str]) -> Result<(), String> {
+        self.step(format!("keyboard.press({})", keys.join(", ")));
+        for key in keys {
+            if self.send_key(key)? {
+                return self.back();
+            }
+        }
+        self.done()
+    }
+
+    /// Sends key `keys` to the app, unsettled: true when it goes back
+    /// (Escape with something to go back from), which is left to the
+    /// caller.
+    fn send_key(&mut self, keys: &str) -> Result<bool, String> {
         self.input_with(nsh_core::platform::InputModality::Keyboard);
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
         let editing = self.screen.focused().is_some();
@@ -97,7 +121,7 @@ impl Headless {
         // A binding passing the key through leaves it to what follows, as a
         // platform does: on the screen as it is when the key comes.
         if found.consumed() {
-            return self.done();
+            return Ok(false);
         }
         // Then they press that control, before the menus' shortcuts: a
         // binding of Return elsewhere does not act instead of it.
@@ -107,7 +131,7 @@ impl Headless {
             for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
                 self.send(view, kind, EventPayload::None);
             }
-            return self.done();
+            return Ok(false);
         }
         let m = stroke.modifiers;
         // Then the application menu's shortcuts choose its items, on a
@@ -131,7 +155,7 @@ impl Headless {
                     EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(id)))]),
                 );
             }
-            return self.done();
+            return Ok(false);
         }
         let plain = !(m.ctrl || m.alt || m.cmd);
         // The key goes to the focused window: Escape closes one of the app's
@@ -142,7 +166,7 @@ impl Headless {
             && self.windows.as_mut().is_some_and(|w| w.escape())
         {
             self.report_windows();
-            return self.done();
+            return Ok(false);
         }
         // Shift+F10 asks the focused view for its context menu where views
         // take the keyboard focus and the key is the platform's: the web
@@ -158,11 +182,11 @@ impl Headless {
             {
                 self.keyboard_context_menu(from, m);
             }
-            return self.done();
+            return Ok(false);
         }
         if stroke.key == Key::Tab && plain && self.tabs_to_views() {
             self.tab(m.shift);
-            return self.done();
+            return Ok(false);
         }
         if let Some(input) = self.screen.focused() {
             let multiline = self.screen.input(input).is_some_and(|i| i.config.multiline);
@@ -181,16 +205,16 @@ impl Headless {
                 }
                 _ => {}
             }
-            return self.done();
+            return Ok(false);
         }
         if stroke.key == Key::Escape
             && plain
             && !m.shift
             && self.screen.back_target() != crate::screen::Back::Nothing
         {
-            return self.back();
+            return Ok(true);
         }
-        self.done()
+        Ok(false)
     }
 
     /// The keyboard asked view `from` (the keyboard focus) for its context
