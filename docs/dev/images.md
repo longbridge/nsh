@@ -107,10 +107,24 @@
   A download that ends at a redirect it did not follow drops the entry and serves nothing; one the app may not load
   arrives as `Fetched::refused` from the core loader's ureq and macOS's `NSURLSession`, and as the unfollowed `3xx`
   from iOS and Android.
+  An entry keeps the redirects its download followed (`Fetched::redirects`, reported by every loader: the core
+  loader's ureq, macOS's and iOS's `NSURLSession` delegates, Android's `Images.java` through `imageCacheComplete`).
+  `lookup`, `complete` and `load` take the app's `Access` and check those redirects with `Access::media_redirect`
+  before a copy is served, fresh or stale: what an app may load can narrow after a copy was stored (its capabilities,
+  the embedding app's grant), and a fresh copy is served without a request that would check it. An entry one of them is
+  refused for is dropped and is a miss, so the request that follows fails as a first one would. A `304` serves the
+  copy on disk only after the same check, and its request's redirects replace the stored ones. A copy whose redirects
+  cannot be kept whole (a control character in one, a header over `MAX_HEADER`) is not stored. The check is the disk
+  cache's: it runs when a load reaches the disk (`lookup` / `complete`), and covers a copy kept from an earlier run.
+  What the process already holds in memory is keyed by URL and served before the disk is asked: the loader's encoded
+  bytes and remembered failures (`loader.rs`), the decoded images, Android's `Images.java` caches.
   Keyed by URL alone (sources carry no request headers, so `Vary` other than `*` cannot differ). `asset:/` URIs are
-  never kept (the dev server's change with the app). Each entry is one file named by a digest of its URL (URL, policy
-  headers, body, CRC32 of them), written under a temporary name and renamed: readers on any thread, surface or
-  process see a whole entry or none, without locks; one that does not read back whole is deleted and is a miss. LRU
+  never kept (the dev server's change with the app). Each entry is one file named by a digest of its URL (URL,
+  redirects, policy headers, body, CRC32 of them; format `NSHIMG2`: entries of `NSHIMG1`, which kept no redirects, are
+  an unknown format, never served, deleted when their URL is asked for again and otherwise trimmed with the least
+  recently used; a runtime of either format deletes the other's entries on a directory they share), written under a
+  temporary name and renamed: readers on any thread, surface or process see a whole entry or none, without locks; one
+  that does not read back whole is deleted and is a miss. LRU
   by modification time (a hit refreshes it at most every 10 minutes); past its limit a scan deletes the oldest down
   to three quarters, and drops temporary files over an hour old. Every engine opens its handle in
   `<root>/<app id>/images` from `EngineConfig::cache` (`CacheOptions::images`, 256 MiB by default:

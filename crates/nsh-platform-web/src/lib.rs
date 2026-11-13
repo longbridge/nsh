@@ -1578,6 +1578,103 @@ pub extern "C" fn nsh_key_command(id: u32) -> f64 {
     })
 }
 
+/// A key transition the browser reported on view `id` (`down`: a press, not
+/// a release): its canonical shortcut key [`key_of`] takes from
+/// `stroke` (the page's `keyCode`; all ones for none) for matching
+/// `captureKeys`, the raw logical key `KeyboardEvent.key` names (`"A"`,
+/// `"é"`, `"ArrowLeft"`), and the DOM's own `KeyboardEvent.code` (`"KeyA"`,
+/// `"ArrowLeft"`, `"NumpadEnter"`; empty when the page names none), with
+/// `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta and `repeat` for an
+/// auto-repeat.
+///
+/// The core builds the event, decides from the mounted `captureKeys` rules
+/// of `id` and its enabled ancestors whether the policy took this
+/// transition (`default_prevented`; then no browser default follows), and
+/// routes the one event to the view and its ancestors. The capture stroke
+/// is the canonical shortcut one, so a named key (End) or a layout's own
+/// character (AZERTY `z`) matches by what the page reports, never by the
+/// DOM code's US character; `code` itself is reported as the page gave it,
+/// never inferred from `key`.
+/// Returns the pump delay, as every entry into the engine does;
+/// [`nsh_key_captured`] answers whether the mounted policy took the key
+/// (`nsh.js` then prevents the browser's default).
+///
+/// # Safety
+///
+/// `key..key + key_len` and `code..code + code_len` are memory from
+/// [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_key_event(
+    id: u32,
+    down: u32,
+    stroke: u32,
+    key: *const u8,
+    key_len: usize,
+    code: *const u8,
+    code_len: usize,
+    modifiers: u32,
+    repeat: u32,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let key = unsafe { string(key, key_len) };
+    // SAFETY: guaranteed by the caller.
+    let code = unsafe { string(code, code_len) };
+    let modifiers = Modifiers {
+        ctrl: modifiers & 1 != 0,
+        alt: modifiers & 2 != 0,
+        shift: modifiers & 4 != 0,
+        cmd: modifiers & 8 != 0,
+    };
+    let stroke = key_of(stroke).map(|key| Keystroke { key, modifiers });
+    let mut event = nsh_core::keyboard::KeyEvent::default();
+    event.key = nsh_core::element::SharedString::from(key);
+    event.code = nsh_core::element::SharedString::from(code);
+    event.modifiers = modifiers;
+    event.repeat = repeat != 0;
+    let kind = if down != 0 {
+        EventKind::KeyDown
+    } else {
+        EventKind::KeyUp
+    };
+    let mut captured = false;
+    let delay = send(|app| {
+        captured = app
+            .engine
+            .key_event(id, kind, EventPayload::Key(event), stroke)
+    });
+    KEY_CAPTURED.with(|c| c.set(captured));
+    delay
+}
+
+thread_local! {
+    /// The capture answer of the last [`nsh_key_event`], read by
+    /// [`nsh_key_captured`].
+    static KEY_CAPTURED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether [`nsh_key_event`]'s last transition was captured by the mounted
+/// `captureKeys` policy: 1 when it was (the browser's default must not
+/// run), 0 when it was not.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_key_captured() -> f64 {
+    KEY_CAPTURED.with(|c| c.get()) as u8 as f64
+}
+
+/// Whether view `id` or an enabled logical ancestor of it (an overlay's
+/// content included, whatever its DOM ancestry) hears raw key transitions
+/// or mounts a `captureKeys` rule, from the core's own tree: 1 when it does,
+/// 0 when nothing there needs a [`nsh_key_event`]. No allocation, and no
+/// event is built for a view nothing listens to.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_key_interest(id: u32) -> f64 {
+    APP.with(|a| {
+        a.try_borrow()
+            .ok()
+            .and_then(|app| app.as_ref().map(|app| app.engine.key_interest(id)))
+            .unwrap_or(false) as u8 as f64
+    })
+}
+
 /// A scroll view's offset changed (`applied`: the scrolls the core asked
 /// for that were applied before it).
 #[unsafe(no_mangle)]

@@ -289,7 +289,8 @@ pub(crate) fn key_event(
         );
         let Some(event) = event else { continue };
         let app = NSApplication::sharedApplication(MainThreadMarker::from(window));
-        // Key equivalents (menus) and key monitors (`nsh/keymap`) are the
+        // Key equivalents (menus) and key monitors (`nsh/keymap` and the
+        // raw keys of focused views, `nsh/keyboard`) are the
         // application's, which hands the key to its key window.
         if window.isKeyWindow() {
             app.sendEvent(&event);
@@ -297,6 +298,10 @@ pub(crate) fn key_event(
             // The app's key monitor never sees a window's own events: it
             // gets the key first, as it would in the key window (the test
             // window often is not one, its app left in the background).
+        } else if kind == NSEventType::KeyDown && crate::keyboard::key_down(surface, &event) {
+            // The focused view captured the key: no menu, no default.
+        } else if kind == NSEventType::KeyUp && crate::keyboard::key_up(surface, &event) {
+            // The release of a captured key.
         } else if kind == NSEventType::KeyDown && key_equivalent(window, &app, &event) {
             // A key equivalent of the window's views (Command keys) or of
             // the main menu, sent where the application would send it to

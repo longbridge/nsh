@@ -55,6 +55,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// What the performance monitor measured last, as the engine reports
+    /// it ([`perf_stats`]).
+    perf_stats: Option<Signal<Option<crate::platform::PerfStats>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -189,6 +192,16 @@ impl super::Runtime {
         let signal = perf_monitor_signal();
         if signal.get_untracked() != enabled {
             signal.set(enabled);
+        }
+    }
+
+    /// What the performance monitor measured last (`None`: it does not
+    /// measure): what read it runs again.
+    pub(crate) fn set_perf_stats(&self, stats: Option<crate::platform::PerfStats>) {
+        let _entered = self.enter();
+        let signal = perf_stats_signal();
+        if signal.get_untracked() != stats {
+            signal.set(stats);
         }
     }
 
@@ -1855,6 +1868,24 @@ pub fn fps_enabled() -> bool {
 /// monitor ignore it; [`fps_enabled`] follows what the platform did.
 pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
+}
+
+/// What the performance monitor measured over the last second (TS:
+/// `perfStats()`): its frame rate and more, read once a second while it
+/// measures ([`fps_enabled`]), `None` while it does not (and until its first
+/// second). Reading it in a binding subscribes it.
+pub fn perf_stats() -> Option<crate::platform::PerfStats> {
+    perf_stats_signal().get()
+}
+
+/// The performance stats' signal, none until the engine reports some.
+fn perf_stats_signal() -> Signal<Option<crate::platform::PerfStats>> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_stats) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(None));
+    with_data(|d| d.ambient.perf_stats = Some(signal));
+    signal
 }
 
 /// How the performance monitor shows (TS: `setFpsMode`), now and whenever it

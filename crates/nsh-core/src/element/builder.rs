@@ -11,9 +11,9 @@ use super::{
 };
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
-    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points, PressEvent, Prop, Size, Tag,
-    TouchEvent, WheelEvent,
+    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, KeyCapture, KeyEvent,
+    ListContentStyle, MouseEvent, NativeProp, NodeId, PinchEvent, PointerEvents, Points,
+    PressEvent, Prop, Size, Tag, TouchEvent, WheelEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -573,6 +573,7 @@ crate::static_reactive!(AccessibilityState: AccessibilityState);
 crate::static_reactive!(EdgeInsets: EdgeInsets);
 crate::static_reactive!(Style: Style);
 crate::static_reactive!(PointerEvents: PointerEvents);
+crate::static_reactive!(KeyCapture: KeyCapture);
 
 /// A bound part of an element's props.
 pub(crate) type BoundAttrs = Rc<dyn Fn(&mut Attrs)>;
@@ -1583,6 +1584,43 @@ pub trait Interactive: Element {
         )
     }
 
+    /// A hardware key went down on this view or a focused descendant.
+    /// The event carries the source's logical key, its physical `code` and
+    /// the modifiers and repeat state; returning from a listener cannot
+    /// change handling. [`KeyEvent::default_prevented`] reports the
+    /// decision made from [`Self::capture_keys`]. Notifications bubble to
+    /// enabled listening ancestors within the native window; named
+    /// shortcuts keep their priority.
+    fn on_key_down<M>(self, listener: impl IntoListener<KeyEvent, M>) -> Self {
+        self.on(
+            EventKind::KeyDown,
+            events::typed(listener.into_listener(), events::key_event),
+        )
+    }
+
+    /// A hardware key came up on the focused view, with the capture
+    /// decision for this transition. It bubbles as [`Self::on_key_down`]
+    /// does. A real release the source reports reaches the focused view
+    /// even when its press went elsewhere; a window that loses the focus
+    /// invents no releases.
+    fn on_key_up<M>(self, listener: impl IntoListener<KeyEvent, M>) -> Self {
+        self.on(
+            EventKind::KeyUp,
+            events::typed(listener.into_listener(), events::key_event),
+        )
+    }
+
+    /// Keys consumed on this view or a focused descendant before native
+    /// defaults, using mounted rules rather than a listener's answer. The
+    /// keys are canonical [`crate::keymap::Keystroke`]s, matched against
+    /// the transition's canonical shortcut stroke (the backend's own
+    /// matcher, not [`KeyEvent`]'s `key` or `code`); eligible app
+    /// shortcuts and focused native inputs keep priority. Defaults to
+    /// [`KeyCapture::None`]; removing the prop restores it.
+    fn capture_keys(mut self, capture: impl IntoReactive<KeyCapture>) -> Self {
+        super::host::bind_prop(self.node(), capture, Prop::KeyCapture);
+        self
+    }
     /// The secondary button was pressed over it (a right click,
     /// Control-click on Apple platforms): where, to open a menu at
     /// (`page_x`, `page_y`). The nearest element that listens hears it;

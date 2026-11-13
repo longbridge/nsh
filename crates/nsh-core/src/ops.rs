@@ -264,6 +264,8 @@ events! {
     WebEvaluation = "onWebEvaluation" as "": "A native WebView evaluation reply (internal; payload: id and a JSON envelope string data).",
     MouseUp = "onMouseUp": "A mouse button was released over the view or a view inside it (payload: [`EventPayload::Mouse`], its `button` naming the released one, with where and the modifiers). The primary button's release also reports `onPressUp`.",
     CanvasImage = "onCanvasImage": "A [`Command::RenderCanvas`] request finished (root only; payload: [`EventPayload::CanvasImage`]).",
+    KeyDown = "onKeyDown": "A hardware key went down on the focused view or a view inside it (payload: [`EventPayload::Key`]). Notifications bubble to enabled listening ancestors within the same native window; returning from the listener cannot change handling, and `default_prevented` reports the mounted capture policy's decision for this transition.",
+    KeyUp = "onKeyUp": "A hardware key came up on the focused view (payload: [`EventPayload::Key`]), with `default_prevented` as the capture policy decided for this transition. It bubbles to enabled ancestors as `onKeyDown` does.",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -1029,6 +1031,8 @@ pub enum EventPayload {
     Wheel(WheelEvent),
     /// A touchpad pinch over a view (`onPinch`).
     Pinch(PinchEvent),
+    /// A hardware key transition on a focused Rust view.
+    Key(crate::KeyEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
     /// `onPressDown`, `onPressUp`), with the modifier keys and the click
     /// count, on backends that know it.
@@ -1462,6 +1466,71 @@ pub enum HeaderSystemItem {
     Cancel,
 }
 
+/// What a trailing iOS bar button shows (`ios={{ headerRightItems }}`):
+/// exactly one of a system item, an SF Symbol, or a text label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HeaderItemContent {
+    /// A [`HeaderSystemItem`].
+    SystemItem(HeaderSystemItem),
+    /// An SF Symbol's name.
+    Symbol(Arc<str>),
+    /// A text title on the button.
+    Label(Arc<str>),
+}
+
+/// A trailing iOS navigation-bar button (`ios={{ headerRightItems }}`), as
+/// the platform sees it: numeric ids for presses and menu actions report
+/// the root's [`EventKind::Menu`]. Rust apps build one with
+/// [`crate::element::header::HeaderItem`] (handlers included); JS sets
+/// `onPress` / `MenuItem.onSelect` and the runtime assigns the ids.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct HeaderItem {
+    /// Optional key for keeping a `UIBarButtonItem` across updates: a kept
+    /// button takes the new title, symbol, label, menu and state in place.
+    /// Without a key, a button is kept only while its position and its
+    /// content are unchanged; any other change makes a new one.
+    pub key: Option<Arc<str>>,
+    /// What the button shows.
+    pub content: HeaderItemContent,
+    /// VoiceOver's label when the content is a system item or symbol
+    /// (the content's own text when it is a [`HeaderItemContent::Label`]).
+    pub label: Option<Arc<str>>,
+    /// Whether the button is disabled.
+    pub disabled: bool,
+    /// Reported as the root's [`EventKind::Menu`] when pressed with no
+    /// menu (0: no handler).
+    pub press_id: u32,
+    /// A native pull-down menu of [`crate::desktop::MenuItem`]s; a press
+    /// opens it instead of reporting [`Self::press_id`].
+    pub menu: Option<Vec<crate::desktop::MenuItem>>,
+}
+
+impl HeaderItem {
+    /// Builds a platform header button from its fields. `#[non_exhaustive]`
+    /// keeps a struct literal off other crates; prefer
+    /// [`crate::element::header::HeaderItem`] in Rust apps.
+    #[doc(hidden)]
+    pub fn from_parts(
+        key: Option<Arc<str>>,
+        content: HeaderItemContent,
+        label: Option<Arc<str>>,
+        disabled: bool,
+        press_id: u32,
+        menu: Option<Vec<crate::desktop::MenuItem>>,
+    ) -> Self {
+        Self {
+            key,
+            content,
+            label,
+            disabled,
+            press_id,
+            menu,
+        }
+    }
+}
+
 /// What return does in an input (`submitBehavior`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum SubmitBehavior {
@@ -1839,6 +1908,15 @@ pub enum ScreenProp {
     /// slot, pressing the first pressable view of `headerLeft`.
     #[prop(ios = "headerLeftSymbol", on = SCREEN)]
     HeaderLeftSymbol(Option<Arc<str>>),
+    /// `ios={{ headerRightItems }}`: the trailing UIKit bar buttons, first
+    /// at the trailing edge; a non-empty list wins over
+    /// `headerRightSystemItem` / `headerRightSymbol` and leaves
+    /// `headerRight`'s views out of the iOS bar (they stay the fallback on
+    /// other platforms). An empty list is unset. A press without a menu,
+    /// or a menu action, reports the root's `onMenu` with the item's id
+    /// (its `onPress` / `onSelect`).
+    #[prop(ios = "headerRightItems", on = SCREEN)]
+    HeaderRightItems(Vec<HeaderItem>),
     /// `headerBackVisible`: the system header's back button shows (default
     /// true; iOS and Android).
     #[prop(js = "headerBackVisible", default = true, on = SCREEN)]
@@ -2560,7 +2638,7 @@ pub enum FpsMode {
     Expanded,
     /// A small pill with the frame rate only, colored by the frame budget.
     Collapsed,
-    /// Nothing on screen; it still measures (`fpsReading()`, the log).
+    /// Nothing on screen; it still measures (`perfStats()`, the log).
     Hidden,
 }
 
@@ -3211,6 +3289,13 @@ pub enum Prop {
     /// popover). Unset, the views that take presses are stops.
     #[prop(js = "focusable")]
     Focusable(Option<bool>),
+    /// `captureKeys`: the hardware keys this view or a focused descendant
+    /// consumes before native defaults run: `"none"`, `"all"`, or the
+    /// canonical keystrokes (`"mod+k"`, `"shift+tab"`) it takes. Decided
+    /// from mounted props; eligible app shortcuts and focused native
+    /// inputs keep their keys. Omitting it restores `"none"`.
+    #[prop(js = "captureKeys", reset = Prop::KeyCapture(crate::KeyCapture::None))]
+    KeyCapture(crate::KeyCapture),
     /// `selectable` of a view: the texts in it share one selection, as a
     /// browser page's do ([`crate::selection`]); texts with
     /// `selectable={false}` stay out of it, a selectable view inside

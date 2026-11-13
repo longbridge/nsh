@@ -822,7 +822,11 @@ type MenuItem =
       disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
+      icon?: ImageAsset | string;
+      symbol?: string;
+      destructive?: boolean;
       submenu?: MenuItem[];
+      inline?: boolean;
     };
 ```
 
@@ -834,12 +838,16 @@ type MenuItem =
 | `when` | When the shortcut chooses the item while a text field has the keyboard focus, on the GPUI backend: `"always"` (the default), `"auto"` (unless the field uses the key itself: keys that type, move the caret or delete, and the editing shortcuts, as with [`keymap`](./nsh.md#keymap)'s bindings) or `"notEditing"`. A key the item leaves goes to the field. |
 | `disabled` | `true` grays the item out (default `false`). |
 | `checked` | Set (to `true` or `false`) for an item with a check mark. |
-| `submenu` | Makes the item a submenu (it needs a `label`). |
+| `icon` | The image beside its label, as `<Image>`'s `src` takes it (an imported file or a URL). Fitted to the menu's icon size; see the TypeScript declaration for platform notes. For an SF Symbol name in iOS header menus, use `symbol` instead. |
+| `symbol` | An SF Symbol name beside its label in iOS header menus; ignored elsewhere (including macOS). Takes the place of `icon` when both are set. |
+| `destructive` | `true` marks a destructive action: iOS draws it red (`UIMenuElementAttributesDestructive`). The desktops ignore it. |
+| `submenu` | Makes the item a submenu (it needs a `label`). With `inline: true`, an inline section: on iOS, `UIMenuOptions.displayInline` with `label` as the section title; on the desktops, its items between separators, its label not shown. |
+| `inline` | An inline section when `submenu` is set (see `submenu`). |
 | `role` | A standard item the platform carries out (below). |
 
 `null`, `undefined` and `false` items are left out, so `cond && { … }` works in a list.
 
-In Rust, an item is `MenuItem::new(label)`, `MenuItem::role(role)`, `MenuItem::separator()` or `MenuItem::submenu(label, items)`, with the fields as methods: `.shortcut("mod+n")` (it panics on an invalid shortcut, with the right spelling), `.shortcut_when(When::Auto)`, `.disabled(true)`, `.checked(on)`, `.on_select(f)`, and `.label(..)` for a role's item.
+In Rust, an item is `MenuItem::new(label)`, `MenuItem::role(role)`, `MenuItem::separator()` or `MenuItem::submenu(label, items)`, with the fields as methods: `.shortcut("mod+n")` (it panics on an invalid shortcut, with the right spelling), `.shortcut_when(When::Auto)`, `.disabled(true)`, `.checked(on)`, `.on_select(f)`, `.icon(..)`, `.symbol(..)`, `.destructive(true)`, `.inline(true)` on a submenu, and `.label(..)` for a role's item.
 
 Modifiers:
 

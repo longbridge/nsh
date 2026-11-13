@@ -1084,6 +1084,26 @@ function setFpsMode(mode: "expanded" | "collapsed" | "hidden"): void;
 
 性能监视器的显示方式，立即生效，之后再显示时也照此显示：`"expanded"`，完整的面板（默认）；`"collapsed"`，只显示帧率的小药丸，颜色按帧预算区分；`"hidden"`，屏幕上不显示任何东西，但照常测量并记录日志。点击面板会在前两种之间切换。macOS 的面板支持它（见 [macOS](../docs/macos.md#性能监视器)）；没有面板的平台忽略它，Linux 的面板点击可以收起，但暂不支持这个设置。`NSH_FPS=collapsed` 或 `NSH_FPS=hidden` 让监视器以这种方式启动。Rust：`set_fps_mode(FpsMode::Collapsed)`。
 
+### perfStats
+
+```ts
+const perfStats: Accessor<PerfStats | null>;
+
+interface PerfStats {
+  readonly fps: number;
+  readonly refreshRate: number | null;
+  readonly dropped: number;
+}
+```
+
+监视器最近一秒测得的数据：监视器测量时（`fpsEnabled()`）每秒读一次，不测量时以及测满第一秒之前为 `null`，应用可以按自己的样式显示它。`fps` 是每秒显示的帧数：空闲的应用读数偏低，这不代表慢（只有应用有变化的屏幕刷新才计数）。`refreshRate` 是屏幕的刷新率（Hz），监视器见到刷新之前为 `null`；`dropped` 是最近的帧里耗时超过一次刷新的比例，0 到 1（`0.05` 即 5%；Rust 中是 `Percentage`，同样是这个比例）。无头测试也会测量，但不绘制帧，读数为 0 fps。Rust：`perf_stats() -> Option<PerfStats>`。
+
+```tsx
+<If when={perfStats()}>
+  <Text>{`${Math.round(perfStats()!.fps)} FPS`}</Text>
+</If>
+```
+
 ### shadersAvailable
 
 ```ts

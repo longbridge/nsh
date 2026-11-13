@@ -87,6 +87,8 @@ pub use crate::element::{
     JsError,
     JsObject,
     JsValue,
+    KeyCapture,
+    KeyEvent,
     // Scrolling and lists.
     KeyboardAppearance,
     KeyboardDismissMode,
@@ -263,7 +265,7 @@ pub use crate::element::{
     log_file, measure_text, motion, move_to_trash, next_app_url_change, next_frame,
     next_notification_press, next_open_files, next_second_instance, next_url_scheme_open,
     notification_permission, on_back_press, on_key, on_key_with, open_path, open_url, os,
-    os_version, pick_files, pick_images, pick_paths, pick_save_path, pick_screen_color,
+    os_version, perf_stats, pick_files, pick_images, pick_paths, pick_save_path, pick_screen_color,
     pixel_ratio, platform_name, prefetch_image, provide_context, reads_active_descendants,
     recognize_speech, reduce_motion, register_font, request_animation_frame,
     request_notification_permission, resource, resource_with_value, reveal_path,
