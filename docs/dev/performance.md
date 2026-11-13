@@ -937,3 +937,28 @@ native hierarchy. At 8,600 rows it showed no improvement: release 3903.0 → 396
 18103.7 → 17985.3 ms (three-run medians). Most initial insertions specify a sibling and do not
 use the append path. These are not first-paint timings. GPU/power and engine trace item counts
 were not measured; interactive-priority execution was unavailable in this session.
+
+## Windows painter culling
+
+Measured on Windows 11 on 2026-11-13, release, Intel Core Ultra X9 388H, Intel Arc B390 at 60 Hz;
+v0.5.0 `f4d68f7f` against the Windows painter culling change (each view culled by its own area
+against what the window and the clips of the views around it leave visible, `display: none`
+subtrees left out at their top, paint records of left-out subtrees forgotten). `nsh test --fps`
+readings once a second, two runs each. The scenario's 1200 × 800 window holds a 1500-row column
+that does not clip, two panels of 1000 rows kept mounted with `display: none`, and a clipping
+scroll view of 1500 rows, scrolled 3000 points down and back. Fields are milliseconds (mean of
+the readings' means; median of the p95s; largest max); CPU is the process' share sampled once a
+second.
+
+| Revision | Readings | Paint mean | Paint p95 | Frame mean | Frame p95 | Frame max | CPU |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v0.5.0 | 16 | 4.17 | 4.93 | 3.62 | 4.89 | 7.34 | 21% |
+| This change | 16 | 2.71 | 3.58 | 2.33 | 3.57 | 4.45 | 16% |
+
+The two runs of each revision agree within 0.2 ms. fps reads 57–60 on both while scrolling, so
+it does not separate them: at 60 Hz this scenario's frames fit either way; the cost per frame
+does. The `display: none` part measured alone reads 3.83 / 3.15 (paint / frame mean); the
+stale-records part was not measured alone, as what it fixes shows when panels move or shrink
+and this scenario moves nothing. CPU differs by −4.5 points between revisions, about one
+standard error of its own spread (3–37% within one run): this bench shows no CPU difference
+either way; paint and frame times are what it resolves.
