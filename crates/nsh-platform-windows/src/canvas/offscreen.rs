@@ -203,7 +203,7 @@ fn encode(
 
 /// Premultiplied BGRA to straight BGRA (what PNG holds), in place.
 fn unpremultiply(pixels: &mut [u8]) {
-    for p in pixels.chunks_exact_mut(4) {
+    for p in pixels.as_chunks_mut::<4>().0 {
         let a = u32::from(p[3]);
         if a == 0 || a == 255 {
             continue;
