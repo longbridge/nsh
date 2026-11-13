@@ -458,12 +458,27 @@ impl AppView {
         };
         self.surface.native.set_access(Arc::new(access));
         let options = self.options.borrow();
+        // Its web views save downloads in `<data dir>/<app id>/downloads`,
+        // as macOS's do.
+        let downloads = options
+            .data_dir
+            .clone()
+            .or_else(nsh_engine::data_dir)
+            .map(|root| {
+                root.join(nsh_engine::app_dir_name(app.app_id()))
+                    .join("downloads")
+            });
+        self.surface.native.set_downloads(downloads);
         let config = EngineConfig {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
             content_culling: true,
+            // Without `net`, `fetch` rejects and remote images fail.
+            #[cfg(feature = "net")]
             network: Some(nsh_engine::net::network()),
+            #[cfg(not(feature = "net"))]
+            network: None,
             websocket: None,
             refuse_connections: None,
             filesystem: None,
@@ -580,6 +595,7 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        webview_requests: true,
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()

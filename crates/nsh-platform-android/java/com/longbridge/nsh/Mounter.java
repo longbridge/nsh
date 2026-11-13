@@ -418,6 +418,7 @@ final class Mounter {
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
+                        if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
                     if (barStyle == 0) {
                         SystemUi.statusBar(context, barStyle, barHidden, night());
@@ -2397,6 +2398,12 @@ final class Mounter {
             }
             case 22: {
                 SystemUi.setClipboard(context, (String) objects[b.getInt()]);
+                break;
+            }
+            case 56: {
+                String text = (String) objects[b.getInt()];
+                String html = (String) objects[b.getInt()];
+                SystemUi.setClipboardHtml(context, text, html);
                 break;
             }
             case 25: {

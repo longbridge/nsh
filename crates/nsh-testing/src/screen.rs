@@ -15,7 +15,9 @@ use std::{
 use nsh_core::{
     AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
     GestureValues, InputConfig, KeyCapture, MountBatch, MountItem, NodeId, PanActivation, Point,
-    PointerEvents, Points, Size, ViewKind, element::PropEnum, keymap::Keystroke,
+    PointerEvents, Points, Size, ViewKind,
+    element::{ClipboardItem, PropEnum},
+    keymap::Keystroke,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -116,8 +118,9 @@ pub struct Screen {
     /// The dialogs shown, in order, and how many were answered.
     dialogs: Vec<Dialog>,
     answered: usize,
-    /// The clipboard's text.
-    clipboard: Option<String>,
+    /// The item on the clipboard: its text, and the HTML written with it
+    /// (`Clipboard.write`).
+    clipboard: Option<ClipboardItem>,
     /// Clipboard reads to answer: the request, and whether it asks only if
     /// the clipboard holds text.
     clipboard_reads: Vec<(u32, bool)>,
@@ -235,6 +238,8 @@ struct View {
     active_descendant: Option<NodeId>,
     /// The view its `accessibilityControls` names.
     controls: Option<NodeId>,
+    /// The view its `accessibilityDescribedBy` names.
+    described_by: Option<NodeId>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -528,6 +533,7 @@ impl Screen {
                 view.description = props.accessibility.description.clone();
                 view.active_descendant = props.accessibility.active_descendant;
                 view.controls = props.accessibility.controls;
+                view.described_by = props.accessibility.described_by;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -651,9 +657,12 @@ impl Screen {
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
-            Command::SetClipboard(text) => self.clipboard = Some(text.clone()),
+            Command::SetClipboard(text) => self.set_clipboard(Some(text.clone())),
+            Command::SetClipboardItem(item) => self.clipboard = Some(item.clone()),
             // An image replaces the text.
-            Command::SetClipboardImage(_) => self.clipboard = None,
+            Command::SetClipboardImage(_) => {
+                self.clipboard = None;
+            }
             Command::ReadClipboard { id, has_only } => self.clipboard_reads.push((*id, *has_only)),
             Command::ReadClipboardImage { .. } => {
                 self.unsupported.push("reading an image from the clipboard");
@@ -1409,11 +1418,21 @@ impl Screen {
 
     /// The clipboard's text.
     pub fn clipboard(&self) -> Option<&str> {
-        self.clipboard.as_deref()
+        self.clipboard.as_ref().map(|item| item.text.as_str())
+    }
+
+    /// The item on the clipboard, every format the app put there
+    /// (`Clipboard.write`); text alone is an item without HTML.
+    pub fn clipboard_item(&self) -> Option<&ClipboardItem> {
+        self.clipboard.as_ref()
     }
 
     pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
-        self.clipboard = text;
+        self.clipboard = text.map(|text| {
+            let mut item = ClipboardItem::default();
+            item.text = text;
+            item
+        });
     }
 
     /// The clipboard reads asked since the last call.
@@ -1738,6 +1757,16 @@ impl Screen {
     pub fn accessibility_controls(&self, selector: &str) -> Result<Option<NodeId>, String> {
         let id = self.id(selector)?;
         Ok(self.nodes.get(&id).and_then(|v| v.controls))
+    }
+
+    /// The view whose text describes the view `selector` names (its
+    /// `accessibilityDescribedBy`: a field's error line), by its id
+    /// ([`Screen::id`]); its text is the view's
+    /// [`Screen::accessibility_description`]. An error when none or
+    /// several match.
+    pub fn accessibility_described_by(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.described_by))
     }
 
     /// The views on screen `selector` matches, in the order a user's eyes

@@ -421,6 +421,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.audio()` | 应用对扬声器发出的请求（`Sound`、`AudioPlayer`），按顺序：`command`（`"load"`、`"play"`、`"stop"`、`"unload"`、`"open"`、`"preload"`、`"resume"`、`"pause"`、`"seek"`、`"set"`、`"close"`）、`src`，以及适用时的 `volume`、`rate`、`position`。仅限无界面运行。 |
 | `app.endAudio()` | 正在播放的播放器播到结尾（`end`；循环的从头再播）。仅限无界面运行。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
+| `app.clipboardItem()` | 剪贴板当前的条目 `{ text, html? }`（`Clipboard.write`；只有文字时没有 `html`），没有时为 `null`。仅无头测试。 |
 | `app.requests()` | 应用发出的请求，按顺序排列：`method`、`url`、`headers`、`body`。 |
 | `await app.host.send(name, data?)` | 以宿主应用的身份向应用发送事件（`host.on`），然后等待它空闲。见[扮演宿主应用](#扮演宿主应用)。 |
 | `app.host.calls()`、`app.host.posts()` | `open` 的 `host.handlers` 收到的应用调用和投递，按顺序排列：`name`、`data`。 |
