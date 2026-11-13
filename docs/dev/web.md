@@ -588,7 +588,9 @@ through imports, cached), and runs are drawn at the positions computed here so t
 it. Text with numeric variants (`tabular-nums`, ...) and color emoji are measured against what the DOM draws, since
 canvas measures them differently. The CSS of runs (`src/text/css.rs`) and line breaking (`src/text/wrap.rs`, with
 CJK punctuation's line start and end rules) depend on nothing of the browser and are tested on the host
-(`tests/text`); `web/text-browser.test.mjs` checks measurements against what Chrome draws.
+(`tests/text`); `web/text-browser.test.mjs` checks measurements against what Chrome draws. The last line a line
+clamp shows holds the rest of its paragraph and is cut at the box for the ellipsis, inside a word if need be, as the
+native backends cut it (`tests/text_engine`).
 
 Each run is a span placed at its position. The characters a line broke at (the space a soft break ate, a hard
 break's newline: a run's `after`) stand between the spans as text nodes (`Player.lineBreaks`), so a text's
