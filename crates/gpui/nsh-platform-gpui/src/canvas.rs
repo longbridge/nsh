@@ -378,6 +378,35 @@ fn load_image(
     });
 }
 
+/// A transparent `width` × `height` pixmap, as `sk::Pixmap::new` makes
+/// one (zeroed premultiplied RGBA, rows packed), `None` for an empty size,
+/// one past tiny-skia's limits, or when its memory cannot be allocated:
+/// `sk::Pixmap::new` aborts the process then, and a render the size of a
+/// large image must not.
+fn try_pixmap(width: u32, height: u32) -> Option<sk::Pixmap> {
+    let size = sk::IntSize::from_wh(width, height)?;
+    // The length `Pixmap::from_vec` requires, worked out as tiny-skia does:
+    // rows of `width * 4` bytes that fit an `i32`, packed, so
+    // `(height - 1) * row + width * 4` is `height * row`.
+    let row = usize::try_from(i32::try_from(width).ok()?.checked_mul(4)?).ok()?;
+    let len = row.checked_mul(height as usize)?;
+    let layout = std::alloc::Layout::array::<u8>(len).ok()?;
+    // SAFETY: `layout` is not zero-sized: `IntSize` has no empty side, so
+    // `len` is at least 4.
+    let data = unsafe { std::alloc::alloc_zeroed(layout) };
+    if data.is_null() {
+        return None;
+    }
+    // SAFETY: `data` was allocated by the global allocator with `layout`,
+    // a `u8` array of `len` (alignment 1, `len` bytes), so `len` is its
+    // capacity; all `len` bytes are initialized (zeroed, a valid `u8`
+    // each, transparent black when read as pixels). The vector owns the
+    // allocation from here on and frees it with that same layout, as does
+    // the pixmap it becomes (or `from_vec`, dropping it, on a mismatch).
+    let data = unsafe { Vec::from_raw_parts(data, len, len) };
+    sk::Pixmap::from_vec(data, size)
+}
+
 /// GPUI's straight BGRA pixels as a pixmap.
 fn premultiplied(width: u32, height: u32, bgra: &[u8]) -> Result<sk::Pixmap, String> {
     let mut pixmap = sk::Pixmap::new(width, height).ok_or("an empty image")?;
@@ -1160,6 +1189,9 @@ struct Replay<'a> {
     /// (on screen); without them (offscreen), they are left out and
     /// everything paints into the one pixmap.
     glyphs: bool,
+    /// A pixmap's memory could not be allocated: what needed it is not
+    /// drawn (an offscreen render answers that the image is too large).
+    out_of_memory: bool,
 }
 
 impl<'a> Replay<'a> {
@@ -1186,6 +1218,8 @@ impl<'a> Replay<'a> {
             f: (frac.1 - region.y0 as f32) as f64,
         };
         let size = (region.width() as u32, region.height() as u32);
+        let pixmap = try_pixmap(size.0, size.1);
+        let out_of_memory = pixmap.is_none() && size.0 > 0 && size.1 > 0;
         Replay {
             args,
             images,
@@ -1198,11 +1232,12 @@ impl<'a> Replay<'a> {
             stack: Vec::new(),
             path: PathBuf::default(),
             layers: Vec::new(),
-            pixmap: sk::Pixmap::new(size.0, size.1),
+            pixmap,
             drawn: false,
             pending: Vec::new(),
             pending_bounds: None,
             glyphs,
+            out_of_memory,
         }
     }
 
@@ -1345,7 +1380,7 @@ impl<'a> Replay<'a> {
             } => {
                 let source = source
                     .map(|s| [s.origin.x, s.origin.y, s.size.width, s.size.height].map(|v| v.0));
-                self.image(&image.uri, source, dest)
+                self.image(&image.uri, image.density(), source, dest)
             }
         }
     }
@@ -1705,7 +1740,8 @@ impl<'a> Replay<'a> {
         };
         if text.intersect(&bounds).is_some() {
             self.flush();
-            self.pixmap = sk::Pixmap::new(self.size.0, self.size.1);
+            self.pixmap = try_pixmap(self.size.0, self.size.1);
+            self.out_of_memory |= self.pixmap.is_none() && self.size.0 > 0 && self.size.1 > 0;
         }
     }
 
@@ -1790,7 +1826,8 @@ impl<'a> Replay<'a> {
         let Some(rect) = rect else {
             return;
         };
-        let Some(mut layer) = sk::Pixmap::new(rect.width() as u32, rect.height() as u32) else {
+        let Some(mut layer) = try_pixmap(rect.width() as u32, rect.height() as u32) else {
+            self.out_of_memory |= rect.width() > 0 && rect.height() > 0;
             return;
         };
         let to_layer = sk::Transform::from_translate(-rect.x0 as f32, -rect.y0 as f32);
@@ -1805,7 +1842,9 @@ impl<'a> Replay<'a> {
                 // Part of it is outside the pixmap (its shadow is cast
                 // in, or blurred in): that part is drawn on its own.
                 Some(source) => {
-                    let shape = sk::Pixmap::new(source.width() as u32, source.height() as u32);
+                    let shape = try_pixmap(source.width() as u32, source.height() as u32);
+                    self.out_of_memory |=
+                        shape.is_none() && source.width() > 0 && source.height() > 0;
                     shape.and_then(|mut shape| {
                         let to =
                             sk::Transform::from_translate(-source.x0 as f32, -source.y0 as f32);
@@ -1999,7 +2038,7 @@ impl<'a> Replay<'a> {
 
     // --- Images ---
 
-    fn image(&mut self, uri: &str, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(&mut self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
         if self.state.singular {
             return;
         }
@@ -2012,9 +2051,11 @@ impl<'a> Replay<'a> {
             return;
         }
         let [dx, dy, dw, dh] = dest.map(|v| self.n(v));
-        // Missing sizes are the source's.
-        let dw = if dw.is_nan() { sw } else { dw };
-        let dh = if dh.is_nan() { sh } else { dh };
+        // Missing sizes are the source's pixels over the file name's
+        // density (`@3x`), as an `Image`'s: never the screen's.
+        let density = f64::from(density);
+        let dw = if dw.is_nan() { sw / density } else { dw };
+        let dh = if dh.is_nan() { sh / density } else { dh };
         if dw == 0.0 || dh == 0.0 {
             return;
         }
@@ -3235,6 +3276,57 @@ mod tests {
     }
 
     #[test]
+    fn an_image_draws_its_pixels_over_its_file_density() {
+        // 60 × 30 pixels at (0, 0) without a destination size: 60 × 30
+        // points as `dot.png`, 20 × 10 as `dot@3x.png`, at scale 1 and 2.
+        let mut image = sk::Pixmap::new(60, 30).unwrap();
+        image.fill(sk::Color::from_rgba8(255, 0, 0, 255));
+        let image = Arc::new(image);
+        let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
+        let text = WindowTextSystem::new(system.clone());
+        for (uri, (w, h)) in [
+            ("asset:/dot.png", (60, 30)),
+            ("asset:/dot@3x.png", (20, 10)),
+        ] {
+            let nan = c(f32::NAN);
+            let drawing = Drawing {
+                ops: vec![CanvasOp::DrawImage {
+                    image: nsh_core::canvas::CanvasImage { uri: uri.into() },
+                    source: None,
+                    dest: [c(0.0), c(0.0), nan, nan],
+                }],
+                ..Drawing::default()
+            };
+            let images = [(Arc::from(uri), Some(image.clone()))]
+                .into_iter()
+                .collect();
+            for scale in [1u32, 2] {
+                let key = Key {
+                    linear: [scale as f32, 0.0, 0.0, scale as f32],
+                    scale: scale as f32,
+                    size: (100.0, 40.0),
+                };
+                let bounds = [0.0, 0.0, 100.0 * scale as f32, 40.0 * scale as f32];
+                let (region, _) = region(&key, (0.0, 0.0), bounds).unwrap();
+                let r = record(
+                    &drawing,
+                    &[],
+                    &images,
+                    (&text, &system),
+                    key,
+                    region,
+                    (0.0, 0.0),
+                );
+                let p = pixels(&r);
+                let what = format!("{uri} at scale {scale}");
+                assert_eq!(at(p, (w - 1) * scale, (h - 1) * scale)[3], 255, "{what}");
+                assert_eq!(at(p, w * scale, 0)[3], 0, "{what}");
+                assert_eq!(at(p, 0, h * scale)[3], 0, "{what}");
+            }
+        }
+    }
+
+    #[test]
     fn tiles_cover_the_pixmap_once() {
         let t = tiles(600, 300);
         assert_eq!(t.len(), 6);
@@ -3837,6 +3929,7 @@ mod tests {
             pending: Vec::new(),
             pending_bounds: None,
             glyphs: true,
+            out_of_memory: false,
         };
         replay.op(&CanvasOp::FillRect(rect(0.0, 0.0, 10.0, 10.0)));
         // Text at (20, 20)–(30, 30).
@@ -3888,6 +3981,17 @@ mod tests {
         assert!(b.left() >= 9.0 && b.right() < 30.0, "{b:?}");
         assert!(b.bottom() <= 31.0 && b.top() > 10.0, "{b:?}");
         assert_eq!(file.glyphs.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pixmaps_too_large_to_allocate_are_none() {
+        let p = try_pixmap(3, 2).unwrap();
+        assert_eq!((p.width(), p.height()), (3, 2));
+        assert!(p.data().iter().all(|&b| b == 0));
+        assert!(try_pixmap(0, 2).is_none());
+        // Rows past tiny-skia's limit, then 4 EiB no allocator gives.
+        assert!(try_pixmap(1 << 29, 1).is_none());
+        assert!(try_pixmap(1 << 28, 1 << 30).is_none());
     }
 
     #[test]

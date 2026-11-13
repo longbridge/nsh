@@ -19,7 +19,10 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use gpui::WindowTextSystem;
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
-    canvas::{CanvasOp, Drawing, render::ImageFormat},
+    canvas::{
+        CanvasOp, Drawing,
+        render::{ImageFormat, RenderFailure},
+    },
 };
 use rustc_hash::FxHashMap;
 use tiny_skia as sk;
@@ -61,16 +64,13 @@ pub(crate) fn render(
             scale,
             format,
         };
-        let answer = move |result: Result<Vec<u8>, String>| {
+        let answer = move |result: Result<Vec<u8>, RenderFailure>| {
             crate::rt::invoke(move || {
                 if let Some(surface) = Surface::by_key(key) {
                     surface.event(
                         ROOT_ID,
                         EventKind::CanvasImage,
-                        EventPayload::CanvasImage {
-                            id,
-                            result: result.map_err(Into::into),
-                        },
+                        EventPayload::CanvasImage { id, result },
                     );
                 }
             });
@@ -81,7 +81,8 @@ pub(crate) fn render(
         if let Err(e) = spawned {
             answer(Err(format!(
                 "cannot start a thread to render the canvas: {e}"
-            )));
+            )
+            .into()));
         }
     };
     if uris.is_empty() {
@@ -124,15 +125,17 @@ struct Job {
 }
 
 impl Job {
-    fn encode(self) -> Result<Vec<u8>, String> {
+    fn encode(self) -> Result<Vec<u8>, RenderFailure> {
         let format = self.format;
-        let pixmap = self.paint().ok_or("the canvas could not be drawn")?;
+        let pixmap = self.paint()?;
         encode(pixmap, format)
     }
 
     /// The drawing replayed into a transparent pixmap, y down, `scale`
-    /// pixels per point (premultiplied).
-    fn paint(self) -> Option<sk::Pixmap> {
+    /// pixels per point (premultiplied); [`RenderFailure::TooLarge`] when
+    /// the memory for it, or for a layer of its size, could not be
+    /// allocated.
+    fn paint(self) -> Result<sk::Pixmap, RenderFailure> {
         let text =
             |op: &CanvasOp| matches!(op, CanvasOp::FillText { .. } | CanvasOp::StrokeText { .. });
         if self.drawing.ops.iter().any(text) {
@@ -145,11 +148,17 @@ impl Job {
             scale: s,
             size: (self.width as f32 / s, self.height as f32 / s),
         };
+        let (width, height) = (self.width, self.height);
+        let too_large = || {
+            RenderFailure::TooLarge(format!(
+                "the system could not allocate a {width}×{height} bitmap"
+            ))
+        };
         let region = IRect {
             x0: 0,
             y0: 0,
-            x1: i32::try_from(self.width).ok()?,
-            y1: i32::try_from(self.height).ok()?,
+            x1: i32::try_from(width).map_err(|_| too_large())?,
+            y1: i32::try_from(height).map_err(|_| too_large())?,
         };
         let shaping = WindowTextSystem::new(self.system.clone());
         let text = (&shaping, &self.system);
@@ -159,17 +168,22 @@ impl Job {
         for op in &self.drawing.ops {
             replay.op(op);
         }
-        // Nothing drawn: transparent.
-        replay.pixmap.take()
+        if replay.out_of_memory {
+            return Err(too_large());
+        }
+        replay
+            .pixmap
+            .take()
+            .ok_or_else(|| "the canvas could not be drawn".into())
     }
 }
 
 /// `pixmap` (premultiplied) encoded as `format`, its pixels made straight
 /// in place (no second copy of a large image).
-fn encode(pixmap: sk::Pixmap, format: ImageFormat) -> Result<Vec<u8>, String> {
+fn encode(pixmap: sk::Pixmap, format: ImageFormat) -> Result<Vec<u8>, RenderFailure> {
     let format = match format {
         ImageFormat::Png => image::ImageFormat::Png,
-        other => return Err(format!("unsupported image format {other:?}")),
+        other => return Err(format!("unsupported image format {other:?}").into()),
     };
     let (width, height) = (pixmap.width(), pixmap.height());
     let mut rgba = pixmap.take();
@@ -188,7 +202,7 @@ fn encode(pixmap: sk::Pixmap, format: ImageFormat) -> Result<Vec<u8>, String> {
     let mut out = std::io::Cursor::new(Vec::new());
     image
         .write_to(&mut out, format)
-        .map_err(|e| format!("the image could not be encoded: {e}"))?;
+        .map_err(|e| RenderFailure::from(format!("the image could not be encoded: {e}")))?;
     Ok(out.into_inner())
 }
 
@@ -236,6 +250,14 @@ mod tests {
                 Num::Const(10.0),
             ]),
         ]
+    }
+
+    #[test]
+    fn an_image_too_large_to_allocate_is_too_large() {
+        let failure = job(red_rect(), (1 << 28, 1 << 30), 1.0)
+            .paint()
+            .unwrap_err();
+        assert!(matches!(failure, RenderFailure::TooLarge(_)), "{failure:?}");
     }
 
     #[test]
