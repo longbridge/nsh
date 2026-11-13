@@ -719,6 +719,8 @@ function ChatScreen() {
 
 完整的键盘高度适合延伸到 surface 底部的视图，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，该变量为 0。见[键盘](../elements/keyboard.md)。
 
+浮层自己会避开键盘：底部的 [Sheet](../elements/sheet.md#the-software-keyboard)、抽屉，以及手机上以 sheet 呈现的菜单、选择器和日期选择器都贴在键盘上沿，并随键盘移动。
+
 ### 键盘访问器
 
 Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（毫秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。键盘开始移动时那次更新中随它们变化的内容，会沿键盘的曲线、从键盘开始移动的时刻起与键盘一起移动（`LayoutCurve::Keyboard`），和 `env(keyboard-inset-height)` 一样；应用为这次更新自己设置的动画（`LayoutAnimation.configureNext`）优先。

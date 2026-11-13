@@ -1157,7 +1157,9 @@ for one with no looks. The state's classes are important (`!`) over the part's `
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
 styles a Rust app's state style has even when the part's has none. Closing a desktop menu closes its submenus, and
 closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, `Select`'s list) keeps
-`SheetMotion`.
+`SheetMotion`. A panel that reaches the bottom of the screen (those sheets, `Sheet`'s side drawers, `DockArea`'s
+compact panels) ends above the software keyboard (`popup::keyboard_lift`: the keyboard's height past the bottom safe
+area, which the app's panel pads as without a keyboard), a reactive style the core animates with the keyboard.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
