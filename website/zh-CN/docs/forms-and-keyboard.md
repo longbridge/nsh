@@ -176,7 +176,7 @@ let composing = false;
 | `keyboardType` | `KeyboardType` | `"default"` | 键盘布局。 |
 | `returnKeyType` | `ReturnKeyType` | `"default"` | 回车键上的文字。 |
 | `autoCapitalize` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | 自动大写。 |
-| `autoCorrect` | `boolean` | `true` | 系统的自动更正。 |
+| `autoCorrect` | `boolean` | `true` | 系统的自动更正：拼写，以及 iOS、macOS 上的智能引号、破折号和文本替换。输入代码或标识符时关掉它。 |
 | `autoComplete` | `AutoComplete` | | 输入框内容的类型，用于自动填充。 |
 | `multiline` | `boolean` | `false` | 多行；回车插入换行（`submitBehavior` 另有设置时除外）。 |
 | `maxLength` | `number` | | 用户最多能输入的字符数。超出的粘贴只插入放得下的部分，与浏览器一致。 |
