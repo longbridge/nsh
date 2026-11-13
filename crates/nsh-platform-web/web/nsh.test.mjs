@@ -2708,3 +2708,122 @@ test("a page without the async clipboard reports a write with a warning", async 
   await player.writeClipboardImage("data:image/png;base64,");
   assert.equal(log.warnings.length, 1);
 });
+
+// Side modules -----------------------------------------------------------
+
+// A module that exports one empty function, `g`: a side module whose gate
+// is `g`, or (without a gate in its table entry) a shared one.
+const SIDE_WASM = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
+  0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+  0x03, 0x02, 0x01, 0x00, // one function of it
+  0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00, // export "g"
+  0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // its empty body
+]);
+
+/**
+ * A player that loads side modules from `fail`'s answers: `compileSide`
+ * rejects while `fail(url, attempt)` is true, and compiles `SIDE_WASM`
+ * otherwise. `compiled` lists the URLs it was asked for, `gates` the gates
+ * that ran.
+ */
+function sidePlayer(fail = () => false) {
+  const player = Object.create(Player.prototype);
+  const compiled = [];
+  const gates = [];
+  Object.assign(player, {
+    mainExports: {},
+    sideLoads: new Map(),
+    sideModules: new Map(),
+    afterGate: (gate) => gates.push(gate),
+    async compileSide(url, init) {
+      const attempt = compiled.filter((u) => u === url).length;
+      compiled.push(url);
+      await Promise.resolve();
+      if (fail(url, attempt, init)) throw new Error(`${url}: HTTP 503`);
+      return WebAssembly.compile(SIDE_WASM);
+    },
+  });
+  return { player, compiled, gates };
+}
+
+test("a side module that failed to load is loaded again by the next load that needs it", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => attempt === 0);
+  await assert.rejects(player.loadSides(["nsh_part_fields"], table), /HTTP 503/);
+  assert.deepEqual(gates, []);
+  assert.equal(player.sideLoads.has("nsh_part_fields"), false);
+  const [exports] = await player.loadSides(["nsh_part_fields"], table);
+  assert.equal(typeof exports.g, "function");
+  assert.deepEqual(compiled, ["fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("callers loading a side module at once share one load, and a loaded one is not loaded again", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer();
+  const first = player.loadSide("nsh_part_fields", table);
+  const second = player.loadSide("nsh_part_fields", table);
+  assert.equal(first, second);
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a, b);
+  assert.equal(await player.loadSide("nsh_part_fields", table), a);
+  assert.deepEqual(compiled, ["fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("callers sharing a failed load all see the failure, and the next load tries once more", async () => {
+  const table = { nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [] } };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => attempt === 0);
+  const loads = [player.loadSide("nsh_part_fields", table), player.loadSide("nsh_part_fields", table)];
+  for (const load of loads) await assert.rejects(load, /HTTP 503/);
+  assert.deepEqual(compiled, ["fields.wasm"]);
+  const again = [player.loadSide("nsh_part_fields", table), player.loadSide("nsh_part_fields", table)];
+  assert.equal(again[0], again[1]);
+  await Promise.all(again);
+  assert.deepEqual(compiled, ["fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("a side module that failed keeps the modules it needs that loaded, and its retry reuses them", async () => {
+  const table = {
+    nsh_shared_1: { url: "shared.wasm", needs: [] },
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: ["nsh_shared_1"] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => url === "fields.wasm" && attempt === 0);
+  await assert.rejects(player.loadSide("nsh_part_fields", table), /fields.wasm: HTTP 503/);
+  const shared = await player.loadSide("nsh_shared_1", table);
+  await player.loadSide("nsh_part_fields", table);
+  assert.equal(await player.loadSide("nsh_shared_1", table), shared);
+  assert.deepEqual(compiled, ["shared.wasm", "fields.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("a module that a failed one needs failing is loaded again too", async () => {
+  const table = {
+    nsh_shared_1: { url: "shared.wasm", needs: [] },
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: ["nsh_shared_1"] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt) => url === "shared.wasm" && attempt === 0);
+  await assert.rejects(player.loadSide("nsh_part_fields", table), /shared.wasm: HTTP 503/);
+  assert.deepEqual(gates, []);
+  await player.loadSide("nsh_part_fields", table);
+  assert.deepEqual(compiled, ["shared.wasm", "shared.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g"]);
+});
+
+test("prefetching skips on-demand side modules, and a failed prefetch leaves the load to fetch it", async () => {
+  const table = {
+    nsh_part_fields: { url: "fields.wasm", gate: "g", needs: [], onDemand: true },
+    nsh_part_editor: { url: "editor.wasm", gate: "g", needs: [] },
+  };
+  const { player, compiled, gates } = sidePlayer((url, attempt, init) => init?.priority === "low");
+  player.prefetchSides(table);
+  assert.deepEqual(compiled, ["editor.wasm"]);
+  await player.sideModules.get("nsh_part_editor")?.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(player.sideModules.has("nsh_part_editor"), false);
+  await player.loadSides(["nsh_part_editor", "nsh_part_fields"], table);
+  assert.deepEqual(compiled, ["editor.wasm", "editor.wasm", "fields.wasm"]);
+  assert.deepEqual(gates, ["g", "g"]);
+});
