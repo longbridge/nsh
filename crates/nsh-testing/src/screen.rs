@@ -227,6 +227,8 @@ struct View {
     active_descendant: Option<NodeId>,
     /// The view its `accessibilityControls` names.
     controls: Option<NodeId>,
+    /// The view its `accessibilityDescribedBy` names.
+    described_by: Option<NodeId>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -518,6 +520,7 @@ impl Screen {
                 view.description = props.accessibility.description.clone();
                 view.active_descendant = props.accessibility.active_descendant;
                 view.controls = props.accessibility.controls;
+                view.described_by = props.accessibility.described_by;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -1728,6 +1731,16 @@ impl Screen {
     pub fn accessibility_controls(&self, selector: &str) -> Result<Option<NodeId>, String> {
         let id = self.id(selector)?;
         Ok(self.nodes.get(&id).and_then(|v| v.controls))
+    }
+
+    /// The view whose text describes the view `selector` names (its
+    /// `accessibilityDescribedBy`: a field's error line), by its id
+    /// ([`Screen::id`]); its text is the view's
+    /// [`Screen::accessibility_description`]. An error when none or
+    /// several match.
+    pub fn accessibility_described_by(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.described_by))
     }
 
     /// The views on screen `selector` matches, in the order a user's eyes

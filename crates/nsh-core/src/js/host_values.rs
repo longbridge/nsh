@@ -561,6 +561,16 @@ pub(crate) fn accessibility_controls<I: HostInput>(
     ))
 }
 
+/// `accessibilityDescribedBy`: an element (a ref), or nothing.
+pub(crate) fn accessibility_described_by<I: HostInput>(
+    input: &I,
+    _: &mut HostCx,
+) -> Option<AccessibilityProp> {
+    Some(AccessibilityProp::DescribedBy(
+        input.node().map(ElementTarget::of_node),
+    ))
+}
+
 /// `tooltip`: an element (a node JS made), or nothing.
 pub(crate) fn tooltip<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     let content = input

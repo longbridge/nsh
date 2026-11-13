@@ -251,7 +251,9 @@ pub struct Accessibility {
     pub hint: Option<Arc<str>>,
     /// `accessibilityDescription`: more about the element than its name
     /// (ARIA's `aria-description`): a dialog's message, what a field
-    /// expects.
+    /// expects. While `accessibilityDescribedBy` names a rendered element
+    /// with text, that text, which the core keeps current (ARIA's
+    /// `aria-describedby` wins over `aria-description` alike).
     pub description: Option<Arc<str>>,
     /// `role`.
     pub role: AccessibilityRole,
@@ -279,6 +281,12 @@ pub struct Accessibility {
     /// this one controls (ARIA's `aria-controls`): a combo box's listbox,
     /// a tab's panel. Resolved as [`Accessibility::active_descendant`].
     pub controls: Option<crate::NodeId>,
+    /// `accessibilityDescribedBy`: the view (its native id) whose text
+    /// describes this one (ARIA's `aria-describedby`): a field's error
+    /// line. Resolved as [`Accessibility::active_descendant`]; its text is
+    /// [`Accessibility::description`], so a platform without such a
+    /// relation reads it all the same.
+    pub described_by: Option<crate::NodeId>,
 }
 
 impl Accessibility {
@@ -376,6 +384,13 @@ pub enum AccessibilityProp {
     /// controls (ARIA's `aria-controls`): a combo box's listbox.
     #[prop(js = "accessibilityControls", with = crate::js::host_values::accessibility_controls, reset = AccessibilityProp::Controls(None), ts = "ViewRef | null")]
     Controls(Option<crate::element::ElementTarget>),
+    /// `accessibilityDescribedBy`: the element whose text describes this
+    /// one (ARIA's `aria-describedby`): a field's error or help line,
+    /// placed apart from it. Screen readers read that text after the
+    /// name, in the place of `accessibilityDescription` while it names a
+    /// rendered element with text.
+    #[prop(js = "accessibilityDescribedBy", with = crate::js::host_values::accessibility_described_by, reset = AccessibilityProp::DescribedBy(None), ts = "ViewRef | null")]
+    DescribedBy(Option<crate::element::ElementTarget>),
 }
 
 /// Android's press ripple (`android={{ ripple }}`).

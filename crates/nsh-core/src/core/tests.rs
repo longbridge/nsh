@@ -5234,6 +5234,145 @@ fn accessibility_relations_name_other_views() {
     assert!(c.relators.is_empty());
 }
 
+/// The description and the view `accessibilityDescribedBy` names in one
+/// view's last `ViewProps` in `batch`.
+fn described_in(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Option<NodeId>)> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewProps { id: at, props } if *at == id => Some((
+            props
+                .accessibility
+                .description
+                .as_deref()
+                .map(str::to_owned),
+            props.accessibility.described_by,
+        )),
+        _ => None,
+    })
+}
+
+/// `accessibilityDescribedBy` names the view that describes this one (a
+/// field's error line): the platform gets its id, and the description is
+/// that view's text, followed as it changes, over the view's own
+/// `accessibilityDescription`, which comes back once it names none.
+#[test]
+fn accessibility_described_by_describes_a_view_with_another_ones_text() {
+    use crate::element::ElementTarget;
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let described_by = |target: Option<NodeId>| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::DescribedBy(
+            target.map(ElementTarget::of_node),
+        )),
+    };
+    let description = |text: &str| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::Description(Some(text.into()))),
+    };
+    let create = |id, tag| Op::Create { id, tag };
+    let raw = |id, text: &str| Op::CreateText {
+        id,
+        text: text.into(),
+    };
+    // A field and its error line: an icon labelled, two texts, a hidden
+    // one.
+    apply(
+        &mut c,
+        vec![
+            create(2, Tag::View),
+            create(4, Tag::View),
+            create(6, Tag::View),
+            Op::SetProp {
+                id: 6,
+                prop: Prop::Accessibility(AccessibilityProp::Label(Some("Error".into()))),
+            },
+            create(8, Tag::Text),
+            raw(10, "Enter a name."),
+            create(12, Tag::Text),
+            raw(14, "Use letters"),
+            create(16, Tag::Text),
+            raw(18, "hidden"),
+            Op::SetProp {
+                id: 16,
+                prop: Prop::Accessibility(AccessibilityProp::Hidden(true)),
+            },
+            insert(8, 10),
+            insert(12, 14),
+            insert(16, 18),
+            insert(4, 6),
+            insert(4, 8),
+            insert(4, 12),
+            insert(4, 16),
+            insert(1, 2),
+            insert(1, 4),
+            description("Required"),
+            described_by(Some(4)),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        described_in(&batch, 2),
+        Some((Some("Error Enter a name. Use letters".into()), Some(4)))
+    );
+    // The error line's text changes: the description follows.
+    apply(
+        &mut c,
+        vec![Op::SetText {
+            id: 14,
+            text: "Use letters only".into(),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        described_in(&batch, 2),
+        Some((Some("Error Enter a name. Use letters only".into()), Some(4)))
+    );
+    // Something else changes: the field's props do not go again.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::TestId(Some("icon".into())),
+        }],
+    );
+    assert_eq!(c.commit().and_then(|b| described_in(&b, 2)), None);
+    // Its own description changes while it is described: what the
+    // platform reads stays the named view's text.
+    apply(&mut c, vec![description("Your name")]);
+    assert_eq!(c.commit().and_then(|b| described_in(&b, 2)), None);
+    // The error line goes: its own description is back.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 1,
+                child: 4,
+            },
+            Op::Release { id: 4 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        described_in(&batch, 2),
+        Some((Some("Your name".into()), None))
+    );
+    // Cleared.
+    apply(&mut c, vec![described_by(None)]);
+    let _ = c.commit();
+    assert!(c.relators.is_empty());
+    let a = &c.nodes[c.key(2).unwrap() as usize]
+        .props
+        .as_ref()
+        .unwrap()
+        .accessibility;
+    assert_eq!(a.description.as_deref(), Some("Your name"));
+    assert_eq!(a.described_by, None);
+}
+
 #[test]
 fn screens_fill_their_stack_below_the_header() {
     let mut c = core();

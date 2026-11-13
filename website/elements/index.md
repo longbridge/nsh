@@ -623,6 +623,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
 | `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | The item that is active inside the focused element: a combo box's highlighted option, a list's cursor row ([Accessibility](../docs/accessibility.md#the-active-item-of-a-focused-element)). |
 | `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | The element whose content this one controls: a combo box's list. |
+| `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | The element whose text describes this one: a field's error line ([Accessibility](../docs/accessibility.md#an-element-that-describes-another)). |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |

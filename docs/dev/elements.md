@@ -349,7 +349,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   field), macOS answers them as `AXSelectedChildren` / `AXLinkedUIElements` and tells VoiceOver when the active item
   changes (an input that is a combo box is its field's `AXComboBox`). `Environment::reads_active_descendants` says
   the platform reads them; elsewhere `nsh-base`'s `Select`, `Combobox` and `Command` announce the highlighted item
-  themselves. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
+  themselves. `accessibilityDescribedBy` (`aria-describedby`) names the element whose text describes this one (a
+  field's error line), looked up the same way into `Accessibility::described_by`; while that element is there, its
+  text (its labels and texts, the hidden ones left out) is also `Accessibility::description`, in the place of the
+  element's own `accessibilityDescription`, so every platform reads it where it reads a description; the web also
+  sets `aria-describedby` on the focused element. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
