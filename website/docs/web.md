@@ -342,6 +342,12 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 
+The app's lifecycle is the page's. An app that listens to quit requests (`Application.on("quitRequest")`,
+[Quitting](../modules/nsh-desktop.md#quitting)) is asked as the user leaves the page it is embedded in, and the browser
+may ask the user whether to leave; its `quit` listeners run as the page goes. A page that keeps leaving to itself runs
+the app under capabilities without `"application": true` (`runModule(url, { capabilities })`): the user then leaves
+without the app being asked, and its `quit` listeners still run as the page goes.
+
 Dialogs and alerts cover the container. With `dialogs: "viewport"` they cover the whole browser window, as a page's own modal dialogs do, while the app keeps the container as its window: a `Dialog` lays out at the window's size and safe area and slides in from its bottom edge, its backdrop covers the whole page, and the mouse wheel over it leaves the page in place. The dialog shows in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later), so it is above the rest of the page wherever the container is; in earlier browsers it covers the container.
 
 

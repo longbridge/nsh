@@ -306,6 +306,11 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 
+应用的生命周期就是页面的生命周期。监听退出请求的应用（`Application.on("quitRequest")`，见
+[退出](../modules/nsh-desktop.md#退出)）在用户离开嵌入它的页面时会被询问，浏览器可能询问用户是否离开；页面离开时它的
+`quit` listener 会运行。想自己掌管离开的页面在不含 `"application": true` 的能力下运行应用
+（`runModule(url, { capabilities })`）：用户离开时不会询问应用，页面离开时它的 `quit` listener 仍会运行。
+
 Dialog、Sheet 和 AlertDialog 默认覆盖容器。设置 `dialogs: "viewport"` 后，它们像页面自己的模态对话框一样覆盖整个浏览器窗口，应用的窗口仍是容器：`Dialog` 按窗口的尺寸和安全区域布局，从窗口底边滑入，背景覆盖整个页面，在它上面滚动鼠标滚轮时页面保持不动。对话框显示在浏览器的顶层（Chrome 114、Safari 17、Firefox 125 及更新版本），所以无论容器在页面的什么位置，它都在页面其他内容之上；更早的浏览器里它覆盖容器。
 
 ## 宿主的函数

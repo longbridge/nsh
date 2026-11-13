@@ -2873,20 +2873,21 @@ const QUIT_AT_ONCE: &str = r#"import { mount, signal, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
 const saved = signal(false);
-const quitting = signal(false);
+const quits = signal(0);
 Application.on("quitRequest", () => {
   if (saved()) Application.quit();
   else saved.set(true);
 });
-Application.on("quit", () => quitting.set(true));
-mount(() => <Text>{`saved ${saved()} quitting ${quitting()}`}</Text>);
+Application.on("quit", () => quits.set(quits() + 1));
+mount(() => <Text>{`saved ${saved()} quits ${quits()}`}</Text>);
 "#;
 
 /// On a [`nsh_engine::LocalEngine`] (the web's), the pump that takes a quit
 /// request runs the app's TS listener and carries its answer: a host that
 /// must decide before it returns (a page leaving) learns whether the app
-/// quit. [`nsh_engine::LocalEngine::quit`] then runs the app's `quit`
-/// listeners in that call.
+/// quit. Granting the request does not end the app (the page may still
+/// stay); [`nsh_engine::LocalEngine::start_quit`], as the page goes, runs
+/// the app's `quit` listeners in that call, once.
 #[test]
 fn a_local_engine_answers_a_quit_request_within_the_pump_that_takes_it() {
     use nsh_core::desktop::{DesktopCommand, WindowEvent};
@@ -2941,7 +2942,7 @@ fn a_local_engine_answers_a_quit_request_within_the_pump_that_takes_it() {
     };
     let kept = request(&mut engine);
     assert!(
-        kept.iter().any(|b| shows(b, "saved true quitting false")),
+        kept.iter().any(|b| shows(b, "saved true quits 0")),
         "the listener ran: {kept:?}"
     );
     assert!(
@@ -2953,11 +2954,23 @@ fn a_local_engine_answers_a_quit_request_within_the_pump_that_takes_it() {
         app_commands(&quit).contains(&DesktopCommand::Quit),
         "the app quit within the pump: {quit:?}"
     );
-    engine.quit();
+    assert!(
+        !quit.iter().any(|b| shows(b, "saved true quits 1")),
+        "granting the request does not end the app: {quit:?}"
+    );
+    engine.start_quit();
     let after: Vec<MountBatch> = rx.try_iter().collect();
     assert!(
-        after.iter().any(|b| shows(b, "saved true quitting true")),
+        after.iter().any(|b| shows(b, "saved true quits 1")),
         "its quit listener ran: {after:?}"
+    );
+    // The app ends once.
+    engine.start_quit();
+    engine.pump();
+    let again: Vec<MountBatch> = rx.try_iter().collect();
+    assert!(
+        !again.iter().any(|b| shows(b, "saved true quits 2")),
+        "its quit listener ran again: {again:?}"
     );
 }
 

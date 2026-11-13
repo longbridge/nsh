@@ -3271,8 +3271,9 @@ test("a page without the async clipboard reports a write with a warning", async 
   assert.equal(log.warnings.length, 1);
 });
 
-/** A page whose `window` keeps its listeners, and a leave of it: the
- * `beforeunload` event its listeners got. */
+/** A page whose `window` keeps its listeners; a leave of it (the
+ * `beforeunload` event its listeners got) and its end (`pagehide`,
+ * `persisted` when the page goes into the back / forward cache). */
 function leavingPage() {
   const listeners = new Map();
   const saved = { window: globalThis.window };
@@ -3284,21 +3285,25 @@ function leavingPage() {
       listeners.set(type, (listeners.get(type) ?? []).filter((l) => l !== listener));
     },
   };
-  const leave = () => {
-    const event = {
+  const dispatch = (type, event) => {
+    for (const listener of listeners.get(type) ?? []) listener(event);
+    return event;
+  };
+  const leave = () =>
+    dispatch("beforeunload", {
       defaultPrevented: false,
       returnValue: undefined,
       preventDefault() { this.defaultPrevented = true; },
-    };
-    for (const listener of listeners.get("beforeunload") ?? []) listener(event);
-    return event;
-  };
+    });
+  const hide = (persisted = false) => dispatch("pagehide", { persisted });
   const guards = () => (listeners.get("beforeunload") ?? []).length;
-  return { leave, guards, restore: () => Object.assign(globalThis, saved) };
+  const watchers = () => (listeners.get("pagehide") ?? []).length;
+  return { leave, hide, guards, watchers, restore: () => Object.assign(globalThis, saved) };
 }
 
-/** A player whose app answers quit requests with `answer()`: true quits,
- * as the app's `quit()` reaches the page, within the engine's call. */
+/** A running app (it watches the page's end, as `begin` has it) that
+ * answers quit requests with `answer()`: true quits, as the app's `quit()`
+ * reaches the page, within the engine's call. */
 function quittingPlayer(answer) {
   const { player } = fakePlayer();
   player.view = () => null;
@@ -3312,10 +3317,25 @@ function quittingPlayer(answer) {
     calls.quits++;
     return -1;
   };
+  player.watchPageEnd(true);
   return { player, calls };
 }
 
-test("nothing listens to quit requests: the page leaves without asking anyone", () => {
+/** What `reset()` reads, on a fake player. */
+function resettable(player) {
+  Object.assign(player, {
+    stop() {},
+    audioDispose() {},
+    resetHistory() {},
+    live: {},
+    views: new Map(),
+    mouseTracked: new Set(),
+    wheelTracked: new Set(),
+    root: { textContent: "", append() {}, clientWidth: 390, clientHeight: 844 },
+  });
+}
+
+test("nothing listens to quit requests: the page leaves without asking, and its end ends the app", () => {
   const page = leavingPage();
   try {
     const { player, calls } = quittingPlayer(() => false);
@@ -3328,12 +3348,16 @@ test("nothing listens to quit requests: the page leaves without asking anyone", 
     assert.equal(page.guards(), 0);
     assert.equal(page.leave().defaultPrevented, false);
     assert.equal(calls.requests, 0);
+    // Closing the tab still ends the app: its quit listeners start.
+    assert.equal(calls.quits, 0);
+    page.hide();
+    assert.equal(calls.quits, 1);
   } finally {
     page.restore();
   }
 });
 
-test("an app that quits on a quit request lets the page leave at once", () => {
+test("an app that quits on a quit request lets the page leave at once, and its end ends the app once", () => {
   const page = leavingPage();
   try {
     const { player, calls } = quittingPlayer(() => true);
@@ -3345,7 +3369,36 @@ test("an app that quits on a quit request lets the page leave at once", () => {
     assert.equal(calls.requests, 1, "the app heard the request");
     assert.equal(left.defaultPrevented, false, "no question");
     assert.equal(left.returnValue, undefined);
-    assert.equal(calls.quits, 1, "its quit listeners started");
+    // The page may still stay (a download, another listener's question
+    // the user cancels): nothing has ended yet.
+    assert.equal(calls.quits, 0);
+    // A leave that did not happen, then another: the app is asked again.
+    assert.equal(page.leave().defaultPrevented, false);
+    assert.equal(calls.requests, 2);
+    assert.equal(calls.quits, 0);
+    page.hide();
+    assert.equal(calls.quits, 1, "its quit listeners started as the page went");
+    page.hide();
+    assert.equal(calls.quits, 1, "an app ends once");
+    assert.equal(page.watchers(), 0);
+  } finally {
+    page.restore();
+  }
+});
+
+test("a page kept in the back / forward cache keeps its app running", () => {
+  const page = leavingPage();
+  try {
+    const { player, calls } = quittingPlayer(() => true);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    assert.equal(page.leave().defaultPrevented, false);
+    page.hide(true);
+    assert.equal(calls.quits, 0, "no quit listener ran");
+    // Restored, the app still listens; the page's real end ends it.
+    assert.equal(page.guards(), 1);
+    assert.equal(page.watchers(), 1);
+    page.hide();
+    assert.equal(calls.quits, 1);
   } finally {
     page.restore();
   }
@@ -3371,7 +3424,23 @@ test("an app that does not quit on a quit request has the browser ask", () => {
     dirty = false;
     assert.equal(page.leave().defaultPrevented, false);
     assert.equal(calls.requests, 2);
+    assert.equal(calls.quits, 0);
+    page.hide();
     assert.equal(calls.quits, 1);
+  } finally {
+    page.restore();
+  }
+});
+
+test("the user leaving in the browser's question ends the app as the page goes", () => {
+  const page = leavingPage();
+  try {
+    const { player, calls } = quittingPlayer(() => false);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    assert.equal(page.leave().defaultPrevented, true);
+    // The user picks Leave: the page goes.
+    page.hide();
+    assert.equal(calls.quits, 1, "its quit listeners started");
   } finally {
     page.restore();
   }
@@ -3393,25 +3462,36 @@ test("a quit request the engine cannot take now leaves the question to the brows
   }
 });
 
-test("a new run starts without the replaced app's quit request listener", () => {
+test("an engine that trapped neither asks nor ends: nothing of the app's can run", () => {
   const page = leavingPage();
   try {
     const { player, calls } = quittingPlayer(() => false);
     player.op_cmd(["cmd", 1, "quitOnRequest", false]);
-    Object.assign(player, {
-      stop() {},
-      audioDispose() {},
-      resetHistory() {},
-      live: {},
-      views: new Map(),
-      mouseTracked: new Set(),
-      wheelTracked: new Set(),
-      root: { textContent: "", append() {}, clientWidth: 390, clientHeight: 844 },
-    });
+    player.trap();
+    assert.equal(page.guards(), 0);
+    assert.equal(page.watchers(), 0);
+    assert.equal(page.leave().defaultPrevented, false, "the page leaves without a question");
+    page.hide();
+    assert.equal(calls.requests, 0);
+    assert.equal(calls.quits, 0);
+  } finally {
+    page.restore();
+  }
+});
+
+test("a new run starts without the replaced app's quit request listener or end", () => {
+  const page = leavingPage();
+  try {
+    const { player, calls } = quittingPlayer(() => false);
+    player.op_cmd(["cmd", 1, "quitOnRequest", false]);
+    resettable(player);
     player.reset();
     assert.equal(page.guards(), 0);
+    assert.equal(page.watchers(), 0);
     assert.equal(page.leave().defaultPrevented, false);
+    page.hide();
     assert.equal(calls.requests, 0);
+    assert.equal(calls.quits, 0);
   } finally {
     page.restore();
   }

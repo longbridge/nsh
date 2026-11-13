@@ -56,7 +56,8 @@ impl Application {
     /// icon). It quits while the app listens to `quitRequest` too: that is
     /// how an app that asks first quits once it is ready. A view embedded
     /// in another app leaves the app's lifecycle to that app. On the web,
-    /// called while a `quitRequest` listener runs, it lets the page leave.
+    /// called while a `quitRequest` listener runs, it lets the page leave
+    /// without a question.
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
     }
@@ -114,7 +115,9 @@ impl Application {
     /// oldest dropped). The app reads them with `fs`, which their opening
     /// does not grant. `quit`: the app is quitting (its Quit
     /// item, `quit()`, its last window closing, the system ending it, a host
-    /// app removing its view), for its cleanup, as GPUI's `on_app_quit`: it
+    /// app removing its view, on the web the page going, once, however the
+    /// user left it; a page the browser keeps to come back to keeps the app
+    /// running), for its cleanup, as GPUI's `on_app_quit`: it
     /// cannot keep the app running (an app that asks first listens to
     /// `quitRequest`). A promise the listener returns is awaited, 200 ms at
     /// most for all of them, while the platform waits too. `quitRequest`:
@@ -126,7 +129,8 @@ impl Application {
     /// out, shutting down) never asks. Standalone apps on macOS, Windows and
     /// Linux; on the web, the user leaving the page (closing its tab,
     /// reloading) is the request: a `quit()` the listener calls at once lets
-    /// the page go, otherwise the browser asks the user whether to leave.
+    /// the page go without a question, otherwise the browser asks the user
+    /// whether to leave; `quit` listeners run once the page is gone.
     /// Returns a function that stops listening.
     #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance>) -> Stop)]
     #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]

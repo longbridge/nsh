@@ -1854,8 +1854,10 @@ pub extern "C" fn nsh_root_size(
 /// The user is leaving the page (`beforeunload`) while the app listens to
 /// quit requests: the request goes to the app's listeners, Rust's and JS's,
 /// and what they do in turn reaches the page before this returns, as the
-/// desktops' quit key does. A `quit()` among it is the app's answer
-/// (`nsh.js` `deliverQuitRequest`). Returns the pump delay.
+/// desktops' quit key does. A `quit()` among it is the app's answer: the
+/// page may leave without asking (`nsh.js` `deliverQuitRequest`); the quit
+/// listeners start once it is really gone (`nsh_quit`). Returns the pump
+/// delay.
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_quit_request() -> f64 {
     send(|app| {
@@ -1867,14 +1869,15 @@ pub extern "C" fn nsh_quit_request() -> f64 {
     })
 }
 
-/// The app granted the user's leaving: its quit listeners
-/// (`Application.on("quit")`, `on_app_quit`) start while the page is still
-/// there. Returns the pump delay.
+/// The page is being discarded (`pagehide` that does not keep it in the
+/// back / forward cache): the app ends, so its quit listeners
+/// (`Application.on("quit")`, `on_app_quit`) start, once, while the page is
+/// still there. Returns the pump delay.
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_quit() -> f64 {
     APP.with(|a| {
         if let Some(app) = a.borrow_mut().as_mut() {
-            app.engine.quit();
+            app.engine.start_quit();
         }
     });
     // Their async work goes on in the pumps the page still runs.

@@ -944,8 +944,8 @@ impl super::Component for OpenedWindowsHost {
 /// the app's own that quits, and for restarting after an update. A view
 /// embedded in another app leaves the app's lifecycle to that app. On the
 /// web, called while a quit request listener runs, it lets the page leave
-/// ([`on_quit_request`]). On platforms without desktop windows this has no
-/// effect.
+/// without a question ([`on_quit_request`]); the app ends as the page goes.
+/// On platforms without desktop windows this has no effect.
 pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
@@ -958,7 +958,10 @@ pub use super::quit::QUIT_TIMEOUT;
 /// listens to quit requests ([`on_quit_request`]). It runs when the app
 /// stops: its Quit
 /// item and [`quit`], its last window closing, the system ending it
-/// (logging out), a host app removing its view. The engine waits for the
+/// (logging out), a host app removing its view, on the web the page going
+/// (its tab closed, a reload, another site), once, however the user left
+/// it; a page the browser keeps to come back to keeps the app running.
+/// The engine waits for the
 /// futures it returns [`QUIT_TIMEOUT`] at most, together, and while it
 /// waits the platform does: keep it short. Removed with the current owner.
 ///
@@ -992,9 +995,10 @@ where
 /// then. Standalone apps on macOS, Windows and Linux; a view embedded in
 /// another app leaves the app's lifecycle to that app. On the web, the
 /// user leaving the page (closing its tab, reloading) is the request: `f`
-/// runs then, and a [`quit`] it calls at once lets the page go; otherwise
-/// the browser asks the user whether to leave. Removed with the current
-/// owner.
+/// runs then, and a [`quit`] it calls at once lets the page go without a
+/// question; otherwise the browser asks the user whether to leave. The
+/// [`on_app_quit`] listeners run once the page is gone. Removed with the
+/// current owner.
 ///
 /// ```ignore
 /// on_quit_request(move || {

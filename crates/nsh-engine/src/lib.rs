@@ -1826,6 +1826,8 @@ pub struct LocalEngine<M: TextEngine + 'static> {
     /// Set while [`LocalEngine::pump`] runs: what it wakes it runs itself,
     /// so the host's wake is not called for it.
     pumping: Arc<std::sync::atomic::AtomicBool>,
+    /// [`LocalEngine::start_quit`] ran: the app's quit listeners start once.
+    quit_started: bool,
 }
 
 impl<M: TextEngine + 'static> LocalEngine<M> {
@@ -1860,6 +1862,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             control,
             wake: None,
             pumping: Arc::default(),
+            quit_started: false,
         })
     }
 
@@ -1989,13 +1992,18 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         self.driver.deadline()
     }
 
-    /// The app quits while its host goes on a moment longer (a web page
-    /// leaving after the app granted the user's quit request): starts the
-    /// app's quit listeners' work ([`Core::start_quit`]) and runs what is due
-    /// at once, as one [`pump`](Self::pump). What they do synchronously is
-    /// done when this returns; their async work runs in the pumps the host
-    /// still makes.
-    pub fn quit(&mut self) {
+    /// The app ends while its host goes on a moment longer (a web page
+    /// being discarded): starts the app's quit listeners' work
+    /// ([`Core::start_quit`]) and runs what is due at once, as one
+    /// [`pump`](Self::pump). What they do synchronously is done when this
+    /// returns; their async work runs in the pumps the host still makes.
+    /// An app ends once: later calls do nothing, as the desktops run the
+    /// listeners once, as the process ends.
+    #[doc(hidden)]
+    pub fn start_quit(&mut self) {
+        if std::mem::replace(&mut self.quit_started, true) {
+            return;
+        }
         {
             let _clock = self.driver.clock.enter();
             let _context = self.driver.context.enter();

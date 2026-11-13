@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。声明了能力的应用需要 `"application": true` 才能使用主窗口、应用菜单、托盘、全局快捷键、`quit`、`restart` 和登录时打开（[能力](../docs/sandbox-and-capabilities.md#application)），否则它们什么也不做。右键菜单和应用打开的窗口（由 `windows` 授权）不需要 `application`。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。声明了能力的应用需要 `"application": true` 才能使用主窗口、应用菜单、托盘、全局快捷键、`quit` 和退出请求、`restart` 和登录时打开（[能力](../docs/sandbox-and-capabilities.md#application)），否则它们什么也不做。右键菜单和应用打开的窗口（由 `windows` 授权）不需要 `application`。
 
 ```rust tabs
 use nsh_core::{
@@ -424,10 +424,11 @@ async function changeLanguage(language: string) {
 它适用于 macOS、Windows 和 Linux 的独立应用；拥有窗口的 GPUI 应用以 `CloseRequest::Quit` 收到这个请求。
 
 在 Web 上，用户离开页面（关闭标签页、刷新、前往其他网站）就是退出请求：它在用户离开时交给 listener，所以下面的示例在
-Web 上原样可用。listener 立即调用 `quit()` 时，页面随即离开，应用的 `quit` listener 在页面离开时开始运行：它们同步做的事
-会完成，它们等待的工作在页面还在时继续运行。先询问的 listener（这里是 `askToSave()`）让浏览器询问用户是否离开；用户留下时，
-应用自己的询问就在页面上，工作保存之后，下一次离开会立即进行。浏览器在用户与页面交互过之后显示它的询问。不论 `isAvailable`
-怎么说都是这样。
+Web 上原样可用。listener 立即调用 `quit()` 时，页面直接离开，不会询问。先询问的 listener（这里是 `askToSave()`）让浏览器
+询问用户是否离开；用户留下时，应用自己的询问就在页面上，工作保存之后，下一次离开会立即进行。桌面浏览器在用户与页面交互过
+之后显示它的询问。不论用户怎样离开，应用的 `quit` listener 都在页面离开时开始运行一次：它们同步做的事会完成，它们等待的
+工作在页面还在时继续运行。浏览器保留在前进 / 后退缓存中的页面，它的应用继续运行，用户回来时应用接着运行。不论 `isAvailable`
+怎么说都是这样；声明了能力的应用为此列出 `"application": true`。
 
 ```rust tabs
 use nsh_core::{
@@ -465,7 +466,7 @@ function Editor() {
 ```
 
 `Application.on("quit", listener)`（Rust：`on_app_quit`）是应用的清理，与 GPUI 的 `on_app_quit` 相同：不论应用怎样停止
-（它的「退出」项、`quit()`、最后一个窗口关闭、Dock 的「退出」、用户注销时系统结束它、宿主应用移除它的视图）都会运行，
+（它的「退出」项、`quit()`、最后一个窗口关闭、Dock 的「退出」、用户注销时系统结束它、宿主应用移除它的视图、Web 页面离开）都会运行，
 并且不能让应用继续运行。listener 返回的 promise 会被等待，所有 listener 合计最多 200 毫秒，这期间平台也在等应用；
 超过这个时间应用就停止。组件渲染时添加的 listener 随组件一起移除；`on` 返回的函数也能停止它。
 
