@@ -5230,29 +5230,20 @@ impl<M: TextEngine> Core<M> {
         (parent != NO_KEY).then(|| self.nodes[parent as usize].id)
     }
 
-    /// Reads (`enabled` `None`) or changes the app's login item: on the
-    /// backend's thread when the runner gave the core one, the answer
-    /// delivered in a task here; without one the app has none (its status
-    /// is `unavailable`, and a change fails).
+    /// Reads (`enabled` `None`) or changes whether the app launches at
+    /// login: on the backend's thread when the runner gave the core one,
+    /// the answer (on or not) delivered in a task here; without one the app
+    /// does not launch at login, and a change fails.
     fn login_item_action(
         &mut self,
         enabled: Option<bool>,
-        answer: crate::element::AnswerSlot<
-            Result<crate::desktop::LoginItem, crate::desktop::LoginItemError>,
-        >,
+        answer: crate::element::AnswerSlot<Result<bool, crate::desktop::LaunchAtLoginError>>,
     ) {
-        use crate::desktop::{LoginItem, LoginItemError, LoginItemStatus};
-        if !self.rust_app && !self.access.allows_login_item() {
-            answer
-                .borrow_mut()
-                .deliver(Err(LoginItemError::AccessDenied));
-            self.deny(LoginItemError::AccessDenied.to_string());
-            return;
-        }
+        use crate::desktop::{LaunchAtLoginError, LoginItemStatus};
         let Some(items) = self.login_item.as_mut() else {
             answer.borrow_mut().deliver(match enabled {
-                None => Ok(LoginItem::new(LoginItemStatus::Unavailable)),
-                Some(_) => Err(LoginItemError::Unavailable),
+                None => Ok(false),
+                Some(_) => Err(LaunchAtLoginError::Unavailable),
             });
             return;
         };
@@ -5265,10 +5256,10 @@ impl<M: TextEngine> Core<M> {
                     // Nothing to change where the platform has no login
                     // item for the app (a sandboxed Linux app).
                     Ok(LoginItemStatus::Unavailable) if enabled.is_some() => {
-                        Err(LoginItemError::Unavailable)
+                        Err(LaunchAtLoginError::Unavailable)
                     }
-                    Ok(status) => Ok(LoginItem::new(status)),
-                    Err(error) => Err(LoginItemError::System(error)),
+                    Ok(status) => Ok(status == LoginItemStatus::Enabled),
+                    Err(error) => Err(LaunchAtLoginError::System(error)),
                 };
                 answer.borrow_mut().deliver(result);
             }),

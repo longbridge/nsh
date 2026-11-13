@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录项（`login_item`、`set_login_item`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做（那里登录项的状态为 `"unavailable"`），`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -377,31 +377,21 @@ nsh.json 中没有 `"capabilities"` 的应用可以打开除浮层（overlay）�
 const Application: {
   quit(): void;
   restart(): void;
-  loginItem(): Promise<LoginItem>;
-  setLoginItem(options: SetLoginItemOptions): Promise<LoginItem>;
+  launchAtLogin(): Promise<boolean>;
+  setLaunchAtLogin(enabled: boolean): Promise<void>;
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
   on(event: "openFiles", listener: (files: { paths: string[] }) => void): () => void;
   on(event: "quit", listener: () => void): () => void;
   on(event: "quitRequest", listener: () => void): () => void;
 };
-
-interface SetLoginItemOptions {
-  enabled: boolean;
-}
-
-interface LoginItem {
-  status: LoginItemStatus;
-}
-
-type LoginItemStatus = "enabled" | "disabled" | "requiresApproval" | "unavailable";
 ```
 
 | 成员 | Rust | 说明 |
 |---|---|---|
 | `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
 | `restart()` | `restart()` | 像 `quit()` 一样退出应用，然后用相同的参数重新启动它。 |
-| `loginItem()` | `login_item()` | 系统是否在用户登录时打开应用（见[登录时打开](#登录时打开)）。 |
-| `setLoginItem({ enabled })` | `set_login_item(enabled)`（布尔值或 `SetLoginItemOptions`） | 登记应用在登录时打开（`true`）或取消登记（`false`），然后返回之后的登录项。 |
+| `launchAtLogin()` | `launch_at_login()` | 系统是否在用户登录时打开应用（见[登录时打开](#登录时打开)）。 |
+| `setLaunchAtLogin(enabled)` | `set_launch_at_login(enabled)` | 打开或关闭登录时打开应用。 |
 | `on("secondInstance", listener)` | `next_second_instance()` | 应用运行时再次被启动（[单实例](#单实例)）。 |
 | `on("openFiles", listener)` | `next_open_files()` | 系统用应用声明的类型的文件打开了它（[打开文件](#打开文件)）。 |
 | `on("quit", listener)` | `on_app_quit(f)` | 应用正在退出：运行它的清理（[退出](#退出)）。 |
@@ -552,74 +542,52 @@ Rust 代码 await `nsh_core::prelude` 的 `next_second_instance()`，得到带 `
 
 ### 登录时打开
 
-`Application.loginItem()` 返回系统此刻是否会在用户登录时打开应用，`Application.setLoginItem({ enabled })` 为应用登记或取消
-登记。两者都需要 [`loginItem` 能力](../docs/sandbox-and-capabilities.md#loginitem)，只有声明了才会授予：
+`Application.launchAtLogin()` 返回系统此刻是否会在用户登录时打开应用，`Application.setLaunchAtLogin(enabled)` 打开或关闭它。Rust
+代码在任务中等待 `launch_at_login()` 和 `set_launch_at_login(enabled)`。和 `quit`、`restart` 一样，它们不需要任何能力。
 
-```json
-{
-  "capabilities": { "loginItem": true }
+```tsx
+import { signal } from "nsh";
+import { Application } from "nsh/desktop";
+
+const openAtLogin = signal(false);
+// 应用显示自己的设置时读取：用户可能在系统设置中改过。
+Application.launchAtLogin().then(openAtLogin.set);
+
+async function setOpenAtLogin(enabled: boolean) {
+  await Application.setLaunchAtLogin(enabled);
+  openAtLogin.set(await Application.launchAtLogin());
 }
 ```
 
-声明列出应用用到的全部能力，所以 `loginItem` 要和应用需要的其他能力写在一起（见[沙箱与能力](../docs/sandbox-and-capabilities.md)）。用 Rust 编写的应用以发布它的应用的信任运行，
-无需声明就能使用登录项，在任务中等待 `login_item()` 和 `set_login_item(enabled)` 的结果：
-
 ```rust
-use nsh_core::element::desktop::{login_item, set_login_item};
+use nsh_core::element::desktop::{launch_at_login, set_launch_at_login};
 use nsh_core::prelude::*;
 
-let status = signal(None);
-spawn(async move {
-    if let Ok(item) = login_item().await {
-        status.set(Some(item.status));
-    }
-});
+let open_at_login = signal(false);
+spawn(async move { open_at_login.set(launch_at_login().await) });
 // 用户打开或关闭应用自己的设置时：
 let turn = move |enabled: bool| {
     spawn(async move {
-        match set_login_item(enabled).await {
-            Ok(item) => status.set(Some(item.status)),
-            Err(error) => log::warn!("login item: {error}"),
+        if let Err(error) = set_launch_at_login(enabled).await {
+            log::warn!("{error}");
         }
+        open_at_login.set(launch_at_login().await);
     });
 };
 ```
 
-| `status` | 含义 |
-|---|---|
-| `"enabled"` | 系统会在用户登录时打开应用。 |
-| `"disabled"` | 用户登录时，应用保持关闭。 |
-| `"requiresApproval"` | 已登记，在系统设置中等待用户处理（Windows 上：用户在启动应用中把它关掉了）。只有用户能在那里打开它。 |
-| `"unavailable"` | 本次运行没有登录项：嵌入在其他应用中的视图、`nsh run`、iOS、Android 和 Web。 |
+在用户打开或关闭应用自己的设置时调用 `setLaunchAtLogin`，不要由应用自行调用（比如每次启动时）：以用户在系统设置中的选择为准。打开已打开的、关闭已关闭的都会成功，修改按应用发出的顺序执行。
+应用无法登录时打开的地方（嵌入在其他应用中的视图、`nsh run`、iOS、Android 和 Web），以及 macOS 上系统还在“登录项”中等待用户批准时，`launchAtLogin()` 为 `false`。
+应用无法登录时打开的地方，`setLaunchAtLogin` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject；系统出错时以它的错误码 reject，其中系统不允许修改时为 `EACCES`，应用加引号后的路径超出
+Windows 登录项能容纳的长度（260 个字符）时为 `ENAMETOOLONG`，应用 id 或路径无法命名登录项时为 `EINVAL`，错误没有自己的错误码时为 `EIO`。
 
-在用户打开或关闭应用自己的设置时调用 `setLoginItem`，不要由应用自行调用（比如每次启动时）：以用户在系统设置中的选择为准。登记已登记的、取消不存在的都会成功，修改按应用发出的顺序执行。状态是调用那一刻系统给出的：
-应用显示自己的设置时请重新读取。没有该能力时两个函数都以 `ERR_ACCESS_DENIED` reject；状态为 `"unavailable"` 时 `setLoginItem` 以
-`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject；系统出错时以它的错误码 reject，其中系统不允许修改时为 `EACCES`，应用加引号后的路径超出 Windows 登录项能容纳的长度（260
-个字符）时为 `ENAMETOOLONG`，应用 id 或路径无法命名登录项时为 `EINVAL`，错误没有自己的错误码时为 `EIO`。
-
-| 平台 | 登录项 | 显示在 |
+| 平台 | 设置的内容 | 显示在 |
 |---|---|---|
 | macOS | 应用包的登录项（`SMAppService.mainApp`），按 bundle id 保存：应用的每个副本共用一个。 | 系统设置的“登录项” |
-| Windows | 当前用户 `Run` 键下以应用 id 命名、内容为本可执行文件路径的值。指向其他副本的值读作 `"disabled"`；`nsh package` 构建的安装程序卸载时，会删除指向所卸载副本的值。 | 设置中的启动应用、任务管理器的“启动应用” |
-| Linux | XDG 自启动条目 `~/.config/autostart/<app id>.desktop`，启动本可执行文件。在桌面设置中关闭的条目读作 `"disabled"`，再次启用会把它重新打开。在 Flatpak 或 Snap 沙箱中状态为 `"unavailable"`。 | 桌面的自启动设置 |
+| Windows | 当前用户 `Run` 键下以应用 id 命名、内容为本可执行文件路径的值。指向其他副本的值读作 `false`；`nsh package` 构建的安装程序卸载时，会删除指向所卸载副本的值。 | 设置中的启动应用、任务管理器的“启动应用” |
+| Linux | XDG 自启动条目 `~/.config/autostart/<app id>.desktop`，启动本可执行文件。在桌面设置中关闭的条目读作 `false`，再次打开会重新写入。Flatpak 或 Snap 沙箱中不可用。 | 桌面的自启动设置 |
 
-它在独立应用中生效，包括 `nsh package` 构建的应用；`nsh run` 下状态为 `"unavailable"`，请在打包后的应用中检查。
-
-```tsx
-import { signal } from "nsh";
-import { Application, type LoginItemStatus } from "nsh/desktop";
-
-const openAtLogin = signal<LoginItemStatus>("unavailable");
-// 应用显示自己的设置时读取一次，每次修改后也会更新。
-Application.loginItem().then(({ status }) => openAtLogin.set(status));
-
-async function setOpenAtLogin(enabled: boolean) {
-  const { status } = await Application.setLoginItem({ enabled });
-  openAtLogin.set(status);
-}
-```
-
-[`examples/tray`](https://github.com/longbridge/nsh/tree/main/examples/tray) 在托盘菜单中提供了这个选项。
+它在独立应用中生效，包括 `nsh package` 构建的应用；`nsh run` 下读到 `false`，请在打包后的应用中检查。[`examples/tray`](https://github.com/longbridge/nsh/tree/main/examples/tray) 在托盘菜单中提供了这个选项。
 
 ## 自定义标题栏
 

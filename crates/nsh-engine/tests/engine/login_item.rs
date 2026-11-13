@@ -1,7 +1,7 @@
-//! `Application.loginItem()` and `setLoginItem` of `nsh/desktop` from JS,
-//! with a platform's login item: its statuses reach the app, the calls run
-//! in the order the app makes them, a failure of the system rejects with its
-//! code, and only a declaration grants the capability.
+//! `Application.launchAtLogin()` and `setLaunchAtLogin` of `nsh/desktop`
+//! from JS, with a platform's login item: whether it is on reaches the app,
+//! the calls run in the order the app makes them, and a failure of the
+//! system rejects a change with its code.
 
 use std::{
     collections::VecDeque,
@@ -15,7 +15,7 @@ use nsh_core::{
     desktop::{LoginItemBackend, LoginItemStatus},
     geometry::px,
 };
-use nsh_engine::{Bundle, Capabilities, Engine, EngineConfig};
+use nsh_engine::{Bundle, Engine, EngineConfig};
 
 use crate::ChannelSink;
 
@@ -25,40 +25,24 @@ import { Application } from "nsh/desktop";
 function App() {
   const said = signal("");
   const say = (s) => said.set(`${said()} ${s}`);
-  const status = (item) => say(item.status);
+  const ok = () => say("ok");
   const code = (e) => say(e.code ?? e.name);
   (async () => {
     // Made together, they run in the order the app made them.
     const calls = [
-      Application.setLoginItem({ enabled: true }),
-      Application.loginItem(),
-      Application.setLoginItem({ enabled: false }),
+      Application.setLaunchAtLogin(true).then(ok),
+      Application.launchAtLogin().then(say),
+      Application.setLaunchAtLogin(false).then(ok),
     ];
-    for (const call of calls) status(await call);
-    // The system's failures, each with its code.
-    await Application.setLoginItem({ enabled: true }).then(status, code);
-    await Application.setLoginItem({ enabled: true }).then(status, code);
-    await Application.loginItem().then(status, code);
-    await Application.setLoginItem({ enabled: false }).then(status, code);
-    // Options it does not take reject before the system is asked.
-    await Application.setLoginItem({}).then(status, code);
-    await Application.setLoginItem({ enabled: true, hidden: true }).then(status, code);
+    for (const call of calls) await call;
+    // The system's failures: a change rejects with its code, a read is off.
+    await Application.setLaunchAtLogin(true).then(ok, code);
+    await Application.setLaunchAtLogin(true).then(ok, code);
+    await Application.launchAtLogin().then(say, code);
+    await Application.setLaunchAtLogin(false).then(ok, code);
+    // Anything but a boolean rejects before the system is asked.
+    await Application.setLaunchAtLogin().then(ok, code);
     say("done");
-  })();
-  return <Text>{said()}</Text>;
-}
-mount(App);
-"#;
-
-const UNDECLARED: &str = r#"
-import { mount, signal, Text } from "nsh";
-import { Application } from "nsh/desktop";
-function App() {
-  const said = signal("");
-  const say = (e) => said.set(`${said()} ${e.code}/${e.permission}`);
-  (async () => {
-    await Application.loginItem().catch(say);
-    await Application.setLoginItem({ enabled: true }).catch(say);
   })();
   return <Text>{said()}</Text>;
 }
@@ -156,9 +140,10 @@ fn shown(bundle: Bundle, backend: Arc<Scripted>, end: &str) -> String {
 }
 
 #[test]
-fn a_declared_app_reads_and_changes_its_login_item() {
+fn an_app_reads_and_changes_launch_at_login() {
     let backend = Scripted::new([
         Ok(LoginItemStatus::Enabled),
+        // Waiting for the user's approval reads as off.
         Ok(LoginItemStatus::RequiresApproval),
         Ok(LoginItemStatus::Disabled),
         Err(io::Error::new(
@@ -169,13 +154,11 @@ fn a_declared_app_reads_and_changes_its_login_item() {
         Err(io::Error::new(io::ErrorKind::InvalidInput, "no such id")),
         Err(io::Error::other("failed")),
     ]);
-    let mut app = bundle(APP, "declared");
-    app.policy.declared =
-        Some(Capabilities::from_json(&serde_json::json!({ "loginItem": true })).unwrap());
-    let text = shown(app, backend.clone(), "done");
+    // No `"capabilities"` declared: it needs none.
+    let text = shown(bundle(APP, "app"), backend.clone(), "done");
     assert_eq!(
         text.trim(),
-        "enabled requiresApproval disabled EACCES ENAMETOOLONG EINVAL EIO TypeError TypeError done"
+        "ok false ok EACCES ENAMETOOLONG false EIO TypeError done"
     );
     assert_eq!(
         *backend.calls.lock().unwrap(),
@@ -189,20 +172,4 @@ fn a_declared_app_reads_and_changes_its_login_item() {
             Some(false)
         ]
     );
-}
-
-#[test]
-fn an_app_without_the_declaration_never_asks_the_system() {
-    let backend = Scripted::new([Ok(LoginItemStatus::Enabled)]);
-    // No `"capabilities"`: everything else is granted, the login item is not.
-    let text = shown(
-        bundle(UNDECLARED, "undeclared"),
-        backend.clone(),
-        "ERR_ACCESS_DENIED/loginItem ERR_ACCESS_DENIED/loginItem",
-    );
-    assert_eq!(
-        text.trim(),
-        "ERR_ACCESS_DENIED/loginItem ERR_ACCESS_DENIED/loginItem"
-    );
-    assert!(backend.calls.lock().unwrap().is_empty());
 }

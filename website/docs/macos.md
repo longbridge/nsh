@@ -172,7 +172,7 @@ function App() {
 mount(App);
 ```
 
-A menu bar app often offers to open at login: when the user turns that on, `Application.setLoginItem` registers the app
+A menu bar app often offers to open at login: when the user turns that on, `Application.setLaunchAtLogin(true)` registers the app
 bundle as a login item ([Opening at login](../modules/nsh-desktop.md#opening-at-login)).
 
 An app embedded with `AppView` takes part in the system's UI as its host app does (the host's `LSUIElement`, or
@@ -252,8 +252,8 @@ its banners, presses and badge. It is off by default, so an embedded app's notif
 app's stay yours; `run_app` sets it.
 
 `AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): the
-app bundle's (`SMAppService.mainApp`). It is off by default and read by `run_app` alone, so an embedded app's status is
-`"unavailable"`; the runner of the apps `nsh package` builds sets it.
+app bundle's (`SMAppService.mainApp`). It is off by default and read by `run_app` alone, so an embedded app
+never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's

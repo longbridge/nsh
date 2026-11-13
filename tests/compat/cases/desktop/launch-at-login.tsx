@@ -1,10 +1,9 @@
-// A case of the API's test suite (docs/dev/compatibility.md): the app's
-// login item (`Application.loginItem`, `Application.setLoginItem`), with the
-// `loginItem` capability the domain declares, in a run that has none
-// (headless, as in a view embedded in another app and under `nsh run`):
-// reading it resolves `{ status: "unavailable" }`, changing it rejects with
-// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and a wrong use with a `TypeError`.
-// Its script checks each.
+// A case of the API's test suite (docs/dev/compatibility.md): launching at
+// login (`Application.launchAtLogin`, `Application.setLaunchAtLogin`), which
+// needs no capability, in a run that cannot (headless, as in a view embedded
+// in another app and under `nsh run`): reading it resolves `false`, turning
+// it on rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and a wrong use
+// with a `TypeError`. Its script checks each.
 import { Text, View, signal } from "nsh";
 import { Application } from "nsh/desktop";
 
@@ -12,20 +11,20 @@ function App() {
   const read = signal("not read");
   const set = signal("not set");
   const misuse = signal("not misused");
-  Application.loginItem().then(
-    (item) => read.set(`${item.status} ${Object.keys(item).join(",")}`),
+  Application.launchAtLogin().then(
+    (enabled) => read.set(`${typeof enabled} ${enabled}`),
     (error) => read.set(`rejected ${error?.code}`),
   );
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
-      <Text>{`Login item: ${read()}`}</Text>
+      <Text>{`Launch at login: ${read()}`}</Text>
       <Text>{`Set: ${set()}`}</Text>
       <Text>{`Misuse: ${misuse()}`}</Text>
       <View
         testID="enable"
         onPress={() =>
-          Application.setLoginItem({ enabled: true }).then(
-            (item) => set.set(`resolved ${item.status}`),
+          Application.setLaunchAtLogin(true).then(
+            (value) => set.set(`resolved ${value}`),
             (error) => set.set(`${error instanceof Error} ${error?.code}`),
           )
         }
@@ -35,7 +34,7 @@ function App() {
       <View
         testID="misuse"
         onPress={() =>
-          Application.setLoginItem({} as { enabled: boolean }).then(
+          (Application.setLaunchAtLogin as (enabled?: boolean) => Promise<void>)().then(
             () => misuse.set("resolved"),
             (error) => misuse.set(error instanceof TypeError ? "TypeError" : `${error}`),
           )

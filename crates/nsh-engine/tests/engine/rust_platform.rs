@@ -888,27 +888,22 @@ impl nsh_core::desktop::LoginItemBackend for FakeLoginItem {
     }
 }
 
-/// Reads the app's login item, turns it off and shows both answers.
+/// Reads whether the app launches at login, turns it off and shows both
+/// answers.
 #[component]
 fn LoginItemInfo() -> impl IntoElement {
-    use nsh_core::element::desktop::{login_item, set_login_item};
+    use nsh_core::element::desktop::{launch_at_login, set_launch_at_login};
     let shown = signal(String::from("login"));
     spawn(async move {
-        let answer = |item: Result<nsh_core::desktop::LoginItem, _>| match item {
-            Ok(item) => format!("Ok({:?})", item.status),
-            Err(error) => format!("Err({error:?})"),
-        };
-        let read = answer(login_item().await);
-        let set = answer(set_login_item(false).await);
-        shown.set(format!("login {read} {set}"));
+        let read = launch_at_login().await;
+        let set = set_launch_at_login(false).await;
+        shown.set(format!("login {read} {set:?}"));
     });
     view().child(text(move || shown.get()))
 }
 
-/// A Rust app has its login item without declaring it, as a bundle must:
-/// native code reaches what the platform allows.
 #[test]
-fn a_rust_app_reads_and_changes_its_login_item() {
+fn a_rust_app_reads_and_changes_launch_at_login() {
     // The last text the app shows, once it is `expected` (or 5 seconds
     // passed).
     let shown = |backend: Option<Arc<dyn nsh_core::desktop::LoginItemBackend>>, expected| {
@@ -926,10 +921,11 @@ fn a_rust_app_reads_and_changes_its_login_item() {
         texts.last().cloned().unwrap_or_default()
     };
     let backend = Arc::new(FakeLoginItem(Mutex::new(true)));
-    let expected = "login Ok(Enabled) Ok(Disabled)";
+    let expected = "login true Ok(())";
     assert_eq!(shown(Some(backend), expected), expected);
-    // Without one (a view embedded in another app, `nsh run`) it has none.
-    let expected = "login Ok(Unavailable) Err(Unavailable)";
+    // Without one (a view embedded in another app, `nsh run`) it is off and
+    // cannot be turned on.
+    let expected = "login false Err(Unavailable)";
     assert_eq!(shown(None, expected), expected);
 }
 

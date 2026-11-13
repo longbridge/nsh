@@ -25,9 +25,7 @@ pub mod window;
 mod window_state;
 
 pub(crate) use login_item::LoginItems;
-pub use login_item::{
-    LoginItem, LoginItemBackend, LoginItemError, LoginItemStatus, SetLoginItemOptions,
-};
+pub use login_item::{LaunchAtLoginError, LoginItemBackend, LoginItemStatus};
 pub use window::{
     Backdrop, CloseReason, MainWindowOptions, OpenWindow, ProgressState, ResizeEdge, SizeToContent,
     TitleBarOptions, WindowAttributes, WindowBackend, WindowCloseCause, WindowControl, WindowEvent,

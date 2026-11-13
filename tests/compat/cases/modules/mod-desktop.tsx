@@ -5,9 +5,8 @@
 // `Window.get`), its requests and `set` are callable and do nothing,
 // `<Window>` renders nothing and `Window.open` throws
 // `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; the app and menu functions are
-// callable and do nothing, so an app that calls them runs on; the login
-// item, which this app does not declare (`loginItem` is never granted
-// without), rejects with `ERR_ACCESS_DENIED`. Its script checks each.
+// callable and do nothing, so an app that calls them runs on. Its script
+// checks each.
 import { Text, View, signal } from "nsh";
 import { Application, Menu, Window, currentWindow, displays, focusedWindow, isAvailable, titleBar, windowState, windows } from "nsh/desktop";
 
@@ -15,7 +14,6 @@ function App() {
   const main = currentWindow();
   const calls = signal("not called");
   const popup = signal("not shown");
-  const loginItem = signal("not asked");
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`Desktop: ${isAvailable}`}</Text>
@@ -23,7 +21,6 @@ function App() {
       <Text>{`Window state: ${windowState()} displays ${displays().length}`}</Text>
       <Text>{`Calls: ${calls()}`}</Text>
       <Text>{`Popup: ${popup()}`}</Text>
-      <Text>{`Login item: ${loginItem()}`}</Text>
       <Text>{`Current: ${main.id} ${main.main} ${main.parent} state ${main.state()}`}</Text>
       <Text>{`Windows: ${windows().map((w) => w.id).join(",")} focused ${focusedWindow()} get ${Window.get("main") === main} ${Window.get("other")}`}</Text>
       <Window id="hidden" title="Hidden" defaultOpen>
@@ -84,11 +81,6 @@ function App() {
           Application.quit();
           Application.restart();
           calls.set(`application done, quit ${typeof Application.quit}, restart ${typeof Application.restart}, stop ${typeof stop}`);
-          const denied = (error: any) => `${error?.code} ${error?.permission} "${error?.resource}"`;
-          Promise.all([
-            Application.loginItem().then(() => "resolved", denied),
-            Application.setLoginItem({ enabled: true }).then(() => "resolved", denied),
-          ]).then(([read, set]) => loginItem.set(`${read}, ${set}`));
         }}
       >
         <Text>Application calls</Text>

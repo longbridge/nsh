@@ -190,7 +190,7 @@ Declared in `nsh.json`, enforced natively, in development too. They bound TSX, a
 }
 ```
 
-- No `"capabilities"` key: everything is allowed, except `network.sockets`, `host`, `webview.input` and `loginItem`, which must always be named (an app written in Rust has the login item without it).
+- No `"capabilities"` key: everything is allowed, except `network.sockets`, `host` and `webview.input`, which must always be named.
 - With the key: only what it lists. A typo fails `nsh build`, and `nsh check` passes it.
 - `*.example.com` does not match `example.com`.
 - A refusal in TSX rejects with `ERR_ACCESS_DENIED`, plus `permission` and `resource`, and logs the key to add. In Rust: a refused `fetch` is an `Err`, `open_url` is `false`, and a clipboard read is empty.

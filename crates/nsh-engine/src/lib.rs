@@ -1016,10 +1016,10 @@ pub struct EngineConfig {
     /// built-in backend, which every desktop backend has, embedded or
     /// standalone. The main window's commands always go to the platform.
     pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
-    /// The app's login item (`Application.loginItem`): the platform's,
+    /// The app's login item (`Application.launchAtLogin`): the platform's,
     /// which a standalone app's runner gives (`run_app` with the backend's
     /// `login_item` option), or a test's fake. `None` (the default): the
-    /// app has none, its status is `unavailable`.
+    /// app does not launch at login.
     pub login_item: Option<Arc<dyn nsh_core::desktop::LoginItemBackend>>,
 }
 
@@ -2029,13 +2029,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         // and the script runs.
         let posts = nsh_core::element::Posts::new();
         core.set_posts(posts.clone());
-        match &config.app {
-            // Only JS is limited (Rust code is as trusted as the platform)...
-            App::Js(_) => core.set_max_nodes(config.limits.max_nodes),
-            // ...and a Rust app has the login item without declaring it, as a
-            // bundle must: it has no declaration to make, and its code could
-            // register itself anyway.
-            App::Rust(_) => core.set_rust_app(true),
+        if let App::Js(_) = &config.app {
+            // Only JS is limited (Rust code is as trusted as the platform).
+            core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
         if let App::Js(bundle) = &config.app {

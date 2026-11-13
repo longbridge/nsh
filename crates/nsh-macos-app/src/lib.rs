@@ -75,7 +75,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
         limits: Limits::standalone(),
         // The packaged app's login item: a Rust app `nsh run` runs in
         // place has none, so it never registers a development build.
-        login_item: DEVELOPMENT.get() != Some(&true),
+        login_item: !developing,
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))

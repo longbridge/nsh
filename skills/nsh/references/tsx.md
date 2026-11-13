@@ -475,9 +475,9 @@ TSX runs on QuickJS (in a browser, its JS engine). There is no DOM, no Node and 
 
 ### Capabilities
 
-An app with no `"capabilities"` key may do everything except `host`, raw sockets, web view `input` and `loginItem`, which are always named. One with the key may do only what it lists, such as `"capabilities": { "network": { "hosts": ["api.example.com"] }, "clipboard": true }`.
+An app with no `"capabilities"` key may do everything except `host`, raw sockets and web view `input`, which are always named. One with the key may do only what it lists, such as `"capabilities": { "network": { "hosts": ["api.example.com"] }, "clipboard": true }`.
 
-- Keys: `network`, `webview`, `statusBar`, `clipboard`, `picker`, `speech`, `notifications`, `openUrl`, `process`, `fs`, `host`, `loginItem`. An unknown key fails `nsh build` and passes `nsh check`.
+- Keys: `network`, `webview`, `statusBar`, `clipboard`, `picker`, `speech`, `notifications`, `openUrl`, `process`, `fs`, `host`. An unknown key fails `nsh build` and passes `nsh check`.
 - A refusal rejects with `code` `ERR_ACCESS_DENIED`, `permission` and `resource`; `fetch` rejects with a `TypeError` of that code. Each refusal logs the key to add.
 - A host embedding the app may grant less than declared.
 - Details are in [tooling.md](tooling.md#capabilities).

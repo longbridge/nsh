@@ -135,7 +135,7 @@ QuickJS bytecode is trusted input, so only load it from your own app's files. A 
 
 `AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): an
 XDG autostart entry, `~/.config/autostart/<app_id>.desktop`, starting this executable. It is off by default and read
-by `run_app` alone, so an embedded app's status is `"unavailable"`; the runner of the apps `nsh package` builds sets it.
+by `run_app` alone, so an embedded app never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's

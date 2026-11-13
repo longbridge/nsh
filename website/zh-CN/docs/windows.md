@@ -136,7 +136,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 `AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
 
 `AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：当前用户 `Run` 键下
-以 `app_id` 命名、启动本可执行文件的值。默认关闭，且只有 `run_app` 读取它，所以嵌入应用的状态是 `"unavailable"`；
+以 `app_id` 命名、启动本可执行文件的值。默认关闭，且只有 `run_app` 读取它，所以嵌入应用 不会登录时打开；
 `nsh package` 构建的应用的运行器会打开它。
 
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。

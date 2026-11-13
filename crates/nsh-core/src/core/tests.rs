@@ -15359,23 +15359,20 @@ mod components {
         assert_eq!(shown.last().unwrap(), "picked 0 []");
     }
 
-    /// Registers the app as a login item, reads it, removes it and reads it
+    /// Turns launching at login on, reads it, turns it off and reads it
     /// again when its button is pressed, all asked at once; shows each
     /// answer in the order it was asked.
     #[component]
     fn LoginSwitch() -> impl IntoElement {
         use crate::{
-            desktop::{LoginItem, LoginItemError},
-            element::{
-                PropEnum as _,
-                desktop::{login_item, set_login_item},
-            },
+            desktop::LaunchAtLoginError,
+            element::desktop::{launch_at_login, set_launch_at_login},
         };
         let shown = signal(String::new());
         let add = move |line: String| shown.set(format!("{} {line}", untracked(|| shown.get())));
-        let say = |answer: Result<LoginItem, LoginItemError>| match answer {
-            Ok(item) => item.status.js_name().to_owned(),
-            Err(LoginItemError::System(e)) => {
+        let said = |answer: Result<(), LaunchAtLoginError>| match answer {
+            Ok(()) => "ok".to_owned(),
+            Err(LaunchAtLoginError::System(e)) => {
                 format!("failed-{}", crate::element::io_code(&e).unwrap_or("none"))
             }
             Err(e) => format!("{e:?}"),
@@ -15383,17 +15380,15 @@ mod components {
         view()
             .child(text(move || format!("login{}", shown.get())))
             .child(view().h(px(10.0)).on_press(move |_: &()| {
-                let on = set_login_item(true);
-                let read = login_item();
-                // Options or a `bool`: the same call.
-                let off =
-                    set_login_item(crate::desktop::SetLoginItemOptions::default().enabled(false));
-                let again = login_item();
+                let on = set_launch_at_login(true);
+                let read = launch_at_login();
+                let off = set_launch_at_login(false);
+                let again = launch_at_login();
                 spawn(async move {
-                    add(say(on.await));
-                    add(say(read.await));
-                    add(say(off.await));
-                    add(say(again.await));
+                    add(said(on.await));
+                    add(read.await.to_string());
+                    add(said(off.await));
+                    add(again.await.to_string());
                 });
             }))
     }
@@ -15438,23 +15433,12 @@ mod components {
         }
     }
 
-    /// Mounts [`LoginSwitch`] in `c`, which may use the login item when
-    /// `granted`, presses it and gives what it showed once the four answers
-    /// came.
+    /// Mounts [`LoginSwitch`] in `c`, presses it and gives what it showed
+    /// once the four answers came.
     fn switch_login_item(
         c: &mut Core<FakeEngine>,
-        granted: bool,
         backend: Option<std::sync::Arc<FakeLoginItem>>,
     ) -> String {
-        if granted {
-            c.set_access(std::sync::Arc::new(crate::access::Access {
-                declared: crate::access::Capabilities::from_json(
-                    &serde_json::json!({ "loginItem": true }),
-                )
-                .unwrap(),
-                granted: None,
-            }));
-        }
         c.set_login_item(
             backend.map(|b| b as std::sync::Arc<dyn crate::desktop::LoginItemBackend>),
         );
@@ -15477,45 +15461,31 @@ mod components {
     }
 
     #[test]
-    fn the_login_item_needs_its_capability() {
-        // Apps without a declaration get the legacy set, which leaves it
-        // off, and a backend does not change that.
-        let backend = std::sync::Arc::new(FakeLoginItem::default());
-        let shown = switch_login_item(&mut core(), false, Some(backend.clone()));
-        assert_eq!(
-            shown,
-            "login AccessDenied AccessDenied AccessDenied AccessDenied"
-        );
-        assert!(backend.calls.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_rust_apps_own_code_has_the_login_item() {
-        // A Rust app has no declaration to make: the legacy set, which
-        // leaves the capability off, and the core told the app is Rust.
+    fn launch_at_login_needs_no_capability() {
+        // Apps without a declaration (the legacy set) use it as Rust apps
+        // do: it is the app's own lifecycle, as quit and restart are.
         let backend = std::sync::Arc::new(FakeLoginItem::default());
         let mut c = core();
-        c.set_rust_app(true);
-        let shown = switch_login_item(&mut c, false, Some(backend.clone()));
-        assert_eq!(shown, "login enabled enabled disabled disabled");
-        assert_eq!(backend.calls.lock().unwrap().len(), 6);
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let shown = switch_login_item(&mut c, Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
     }
 
     #[test]
     fn without_a_backend_the_app_has_no_login_item() {
-        // Reading answers `unavailable`; changing it fails.
-        let shown = switch_login_item(&mut core(), true, None);
-        assert_eq!(
-            shown,
-            "login Unavailable unavailable Unavailable unavailable"
-        );
+        // Reading answers `false`; changing it fails.
+        let shown = switch_login_item(&mut core(), None);
+        assert_eq!(shown, "login Unavailable false Unavailable false");
     }
 
     #[test]
     fn the_backend_reads_and_changes_the_login_item_in_order() {
         let backend = std::sync::Arc::new(FakeLoginItem::default());
-        let shown = switch_login_item(&mut core(), true, Some(backend.clone()));
-        assert_eq!(shown, "login enabled enabled disabled disabled");
+        let shown = switch_login_item(&mut core(), Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
         // Each change reads the status after it; the slow registration ran
         // before what was asked after it.
         assert_eq!(
@@ -15530,19 +15500,16 @@ mod components {
             refuses: true,
             ..Default::default()
         });
-        let shown = switch_login_item(&mut core(), true, Some(refuses));
-        assert_eq!(shown, "login failed-EACCES disabled failed-EACCES disabled");
+        let shown = switch_login_item(&mut core(), Some(refuses));
+        assert_eq!(shown, "login failed-EACCES false failed-EACCES false");
         // Where the platform has no login item for the app, a change fails
         // as without a backend.
         let sandboxed = std::sync::Arc::new(FakeLoginItem {
             sandboxed: true,
             ..Default::default()
         });
-        let shown = switch_login_item(&mut core(), true, Some(sandboxed));
-        assert_eq!(
-            shown,
-            "login Unavailable unavailable Unavailable unavailable"
-        );
+        let shown = switch_login_item(&mut core(), Some(sandboxed));
+        assert_eq!(shown, "login Unavailable false Unavailable false");
     }
 
     /// Starts a speech session when its first button is pressed (a new

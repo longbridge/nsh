@@ -173,8 +173,7 @@ covers [nsh/updater] shellInfo
 tap id:case-mod-desktop
 # no title bar area, the main window is the only one, a window of the app's
 # own neither renders nor opens, the window, app and menu functions do
-# nothing, and a popup closes at once. The login item is not declared: its
-# calls reject.
+# nothing, and a popup closes at once.
 expect Desktop: false
 expect Title bar: 0 0 0
 expect Window state: null displays 0
@@ -190,7 +189,6 @@ expect Calls: menu done
 expect Popup: closed
 tap id:application
 expect Calls: application done, quit function, restart function, stop function
-expect Login item: ERR_ACCESS_DENIED loginItem "", ERR_ACCESS_DENIED loginItem ""
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] windowState

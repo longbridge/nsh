@@ -155,7 +155,7 @@ app's stay yours; `run_app` sets it.
 
 `AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): a
 value of the current user's `Run` key named by `app_id`, starting this executable. It is off by default and read by
-`run_app` alone, so an embedded app's status is `"unavailable"`; the runner of the apps `nsh package` builds sets it.
+`run_app` alone, so an embedded app never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
