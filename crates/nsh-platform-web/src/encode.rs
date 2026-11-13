@@ -1888,4 +1888,16 @@ mod tests {
             "[]"
         );
     }
+
+    #[test]
+    fn listening_to_quit_requests_reaches_the_player() {
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(false)),
+            r#"[["cmd",1,"quitOnRequest",false]]"#
+        );
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(true)),
+            r#"[["cmd",1,"quitOnRequest",true]]"#
+        );
+    }
 }

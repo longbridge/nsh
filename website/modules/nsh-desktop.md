@@ -435,7 +435,7 @@ gets the request as `CloseRequest::Quit`.
 
 On the web, closing the tab, reloading and leaving the page are the user's quit. The browser decides on the spot and
 asks with its own question, so while anything listens to `quitRequest` the browser asks the user before the page goes,
-and the listener is not called. Listen there only while something would be lost (an upload running, work not saved)
+in the place of the listener. This works whatever `isAvailable` says. Listen there only while something would be lost (an upload running, work not saved)
 and stop when it is done: the page then leaves at once again. Browsers ask only after the user has interacted with the
 page.
 
