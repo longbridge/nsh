@@ -2206,15 +2206,34 @@ final class Mounter {
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (id == 1) {
-                    // Keyboard.dismiss(): hide the keyboard even when the field that showed it is gone (a page that
-                    // closed with it), which leaves no focused view in the host but the keyboard still up. Not when
-                    // an editor outside the host has it (the embedding app's, another NshView's): they share the window.
+                    // Keyboard.dismiss(): prefer the tracked field (a dialog's
+                    // EditText lives in another window, so host.findFocus()
+                    // misses it). Else hide whatever still holds the IME.
+                    // Matches iOS (#522): dismiss ends editing in modals too.
+                    InputBox field = focusedInput();
+                    if (field != null) {
+                        field.blur();
+                        break;
+                    }
                     View f = host.findFocus();
+                    if (f == null) {
+                        View modal = topModalWindow();
+                        if (modal != null) f = modal.findFocus();
+                    }
                     InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
                     if (f != null) {
                         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
-                        if (f != host) host.requestFocus();
+                        View root = f.getRootView();
+                        if (root != null && root != host.getRootView()) {
+                            root.setFocusable(true);
+                            root.setFocusableInTouchMode(true);
+                            root.requestFocus();
+                        } else if (f != host) {
+                            host.requestFocus();
+                        }
                     } else {
+                        // Field gone: hide with the host token unless another
+                        // editor outside the host still has the IME (#714).
                         View other = host.getRootView().findFocus();
                         if (other == null || !other.onCheckIsTextEditor() || !imm.isActive(other)) {
                             imm.hideSoftInputFromWindow(host.getWindowToken(), 0);
