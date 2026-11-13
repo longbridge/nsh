@@ -16138,15 +16138,25 @@ mod components {
     }
 
     #[test]
-    fn launch_at_login_needs_no_capability() {
-        // Apps without a declaration (the legacy set) use it as Rust apps
-        // do: it is the app's own lifecycle, as quit and restart are.
+    fn launch_at_login_needs_the_application() {
+        // It acts on the application as a whole, as quit and restart do:
+        // an app declaring capabilities needs `application`, and without it
+        // reads that it does not launch at login and cannot change it, the
+        // backend untouched.
+        let declared = |caps: serde_json::Value| {
+            std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&caps).unwrap(),
+                granted: None,
+            })
+        };
         let backend = std::sync::Arc::new(FakeLoginItem::default());
         let mut c = core();
-        c.set_access(std::sync::Arc::new(crate::access::Access {
-            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
-            granted: None,
-        }));
+        c.set_access(declared(serde_json::json!({})));
+        let shown = switch_login_item(&mut c, Some(backend.clone()));
+        assert_eq!(shown, "login Denied false Denied false");
+        assert!(backend.calls.lock().unwrap().is_empty());
+        let mut c = core();
+        c.set_access(declared(serde_json::json!({ "application": true })));
         let shown = switch_login_item(&mut c, Some(backend.clone()));
         assert_eq!(shown, "login ok true ok false");
     }

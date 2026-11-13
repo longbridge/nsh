@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): launching at
-// login (`Application.launchAtLogin`, `Application.setLaunchAtLogin`), which
-// needs no capability, in a run that cannot (headless, as in a view embedded
+// login (`Application.launchAtLogin`, `Application.setLaunchAtLogin`),
+// granted by the domain's `application`, in a run that cannot (headless, as in a view embedded
 // in another app and under `nsh run`): reading it resolves `false`, turning
 // it on rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and a wrong use
 // with a `TypeError`. Its script checks each.
