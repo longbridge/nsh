@@ -524,7 +524,8 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
+  moved along the side to stay inside the root view's safe area less `margin`. An anchored overlay is laid out in
+  that area rather than the whole root view, so content wider than it (a paragraph) wraps within it. Rust's `anchor_beside(row, menu)`
   (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
   its side, so a submenu's first item is level with its trigger, and places it outside the menu
   around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's

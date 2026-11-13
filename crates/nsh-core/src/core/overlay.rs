@@ -1309,8 +1309,28 @@ impl<M: TextEngine> Core<M> {
         Some((size, root.insets))
     }
 
-    /// Lays out shown overlay `key` in a box the size of its root view,
-    /// when that size or its content changed, and places it.
+    /// The room overlay `key` shown in `host` keeps to beside its anchor:
+    /// the root view's safe area less the overlay's `margin`.
+    fn overlay_area(&self, key: Key, host: NodeId) -> Option<Bounds<Points>> {
+        let config = self.overlay(key)?.config;
+        let (size, insets) = self.overlay_host_size(host)?;
+        let m = config.margin.0;
+        Some(inset(
+            rect(0.0, 0.0, size.width.0, size.height.0),
+            [
+                insets.top.0 + m,
+                insets.right.0 + m,
+                insets.bottom.0 + m,
+                insets.left.0 + m,
+            ],
+        ))
+    }
+
+    /// Lays out shown overlay `key` when the box it is laid out in or its
+    /// content changed, and places it. One with an anchor is laid out in
+    /// the room it is placed in ([`Self::overlay_area`]), so content wider
+    /// than that room wraps within it; one without in a box the size of
+    /// its root view, as a `position: fixed` box.
     pub(super) fn layout_overlay(&mut self, key: Key) {
         let Some(state) = self.overlay(key) else {
             return;
@@ -1318,7 +1338,11 @@ impl<M: TextEngine> Core<M> {
         let (Some(host), wrapper) = (state.host, state.wrapper) else {
             return;
         };
-        let Some((size, _)) = self.overlay_host_size(host) else {
+        let size = match self.resolved_anchor(key) {
+            OverlayAnchor::None => self.overlay_host_size(host).map(|(size, _)| size),
+            _ => self.overlay_area(key, host).map(|area| area.size),
+        };
+        let Some(size) = size else {
             return;
         };
         let root = self.nodes[key as usize].root.as_ref().expect("root state");
@@ -1413,19 +1437,9 @@ impl<M: TextEngine> Core<M> {
             self.set_native_overlay_anchor(key, own);
             return origin;
         };
-        let Some((size, insets)) = self.overlay_host_size(host) else {
+        let Some(area) = self.overlay_area(key, host) else {
             return frame.origin;
         };
-        let m = config.margin.0;
-        let area = inset(
-            rect(0.0, 0.0, size.width.0, size.height.0),
-            [
-                insets.top.0 + m,
-                insets.right.0 + m,
-                insets.bottom.0 + m,
-                insets.left.0 + m,
-            ],
-        );
         // A terminal frames a popup's box one Cell outside it (a rounded
         // line, `nsh-platform-tui`): it is placed with that frame, which
         // then sits beside the trigger, never on its row, and lines up
