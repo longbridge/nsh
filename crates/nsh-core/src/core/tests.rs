@@ -22997,6 +22997,63 @@ mod views {
         );
     }
 
+    /// Logs the focus coming into and leaving one ref's element, which
+    /// shows (with a focusable view inside) while `shown`: a press on
+    /// "toggle" removes it, and the next brings a new one with the ref.
+    #[component]
+    fn FocusRemount() -> impl IntoElement {
+        let log = signal(Vec::<&'static str>::new());
+        let shown = signal(true);
+        let area = element_ref();
+        area.on_focus_in(move || log.update(|l| l.push("in")));
+        area.on_focus_out(move || log.update(|l| l.push("out")));
+        view()
+            .child(text(move || format!("log {}", log.get().join(" "))))
+            .child(when(shown, move || {
+                view()
+                    .element_ref(&area)
+                    .child(view().focusable(true).child(text("field")))
+            }))
+            .child(
+                view()
+                    .on_press(move || shown.update(|s| *s = !*s))
+                    .child(text("toggle")),
+            )
+    }
+
+    /// An element removed with the focus inside it is left (the focus goes
+    /// to none), and the ref's next element hears the focus come in again.
+    #[test]
+    fn an_element_removed_with_the_focus_in_it_is_left() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusRemount>(|| ()));
+        let batch = c.commit().unwrap();
+        let field = native_parent(&c, text_node(&batch, "field")).unwrap();
+        let toggle = native_parent(&c, text_node(&batch, "toggle")).unwrap();
+        c.set_states(field, FOCUSED);
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in".into()), "{shown:?}");
+        // Removed while the focus is in it.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(c.key(field).is_err(), "released");
+        assert!(shown.contains(&"log in out".into()), "{shown:?}");
+        // A new element with the same ref; the focus comes into it.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let field = native_parent(&c, text_node(&batch, "field")).unwrap();
+        c.set_states(field, FOCUSED);
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in out in".into()), "{shown:?}");
+        // And out to none (a blur lets go at the frame).
+        c.set_states(field, 0);
+        assert!(c.commit().is_none());
+        c.run_frame(crate::time::now());
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in out in out".into()), "{shown:?}");
+    }
+
     #[derive(Clone, PartialEq, Props)]
     struct AnchoredCornerProps {
         corner: crate::element::Prop<Option<Slot>>,
