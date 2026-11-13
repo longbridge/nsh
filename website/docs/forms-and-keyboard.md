@@ -250,6 +250,8 @@ On iOS, `.keyboard_appearance(KeyboardAppearance::Dark)` (TSX `ios={{ keyboardAp
 
 Autofill (`.auto_fill(AutoFill::Email)`, TSX `autoComplete`) tells the system what the field holds, so it can offer saved names, addresses, passwords and one-time codes from messages. Rust's `AutoFill` has a variant per kind (`Name`, `GivenName`, `FamilyName`, `Email`, `Tel`, `Username`, `Password`, `NewPassword`, `OneTimeCode`, `StreetAddress`, `PostalCode`, `Country`, `CreditCardNumber`, `Url`, `Birthdate`, ..., and `Off`). TSX takes these values: `"name"`, `"given-name"`, `"family-name"`, `"email"`, `"tel"`, `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"street-address"`, `"postal-code"`, `"country"`, `"cc-number"`, `"cc-exp"`, `"cc-csc"`, `"url"`, `"birthdate-full"` and others, or `"off"`; iOS's own names (`"emailAddress"`, `"oneTimeCode"`, ...) are accepted too, in `autoComplete` or `ios={{ textContentType }}`.
 
+A password field that is not masked, as after a "show password" toggle, is a password shown as plain text: with `autoComplete` `"current-password"` or `"new-password"` (`AutoFill::Password`, `AutoFill::NewPassword`) and `masked` off, it gets Android's visible password keyboard and iOS's ASCII keyboard, and no platform capitalizes, suggests or corrects it, whatever `autoCapitalize` and `autoCorrect` say. Toggling `masked` is all a reveal button needs.
+
 ```rust tabs
 use nsh_core::element::AutoFill;
 

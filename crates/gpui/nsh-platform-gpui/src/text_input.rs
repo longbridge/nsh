@@ -1386,7 +1386,9 @@ fn composition(text: &str, selected: Option<Range<usize>>) -> Option<Composition
 /// What a field's config asks of input methods and on-screen keyboards.
 fn configuration_of(c: &InputConfig) -> gpui::TextInputConfiguration {
     use gpui::{Autocapitalize, TextInputAction};
-    let plain = !c.secure;
+    // A password shown as plain text is never capitalized or corrected,
+    // as a secure one is.
+    let plain = !c.secure && !c.visible_password();
     gpui::TextInputConfiguration {
         autocorrect: c.auto_correct && plain,
         autocapitalize: match c.auto_capitalize {
@@ -2549,8 +2551,13 @@ mod tests {
         assert_eq!(configuration_of(&c).input_action, TextInputAction::Enter);
         c.return_key = ReturnKeyType::Send;
         assert_eq!(configuration_of(&c).input_action, TextInputAction::Send);
-        // Passwords get no corrections or capitals.
+        // Passwords get no corrections or capitals, shown as plain text too.
         c.secure = true;
+        let g = configuration_of(&c);
+        assert!(!g.autocorrect && !g.suggestions);
+        assert_eq!(g.autocapitalize, Autocapitalize::None);
+        c.secure = false;
+        c.auto_fill = nsh_core::AutoFill::Password;
         let g = configuration_of(&c);
         assert!(!g.autocorrect && !g.suggestions);
         assert_eq!(g.autocapitalize, Autocapitalize::None);
