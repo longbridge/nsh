@@ -4317,7 +4317,7 @@ expect Suggest: true jo @jo 4-7 false
 expect Mention: Hi @Joan false
 expect Replace: true Hi @Joan done
 expect Exit: true false true
-expect ItemCount: undefined true 0 undefined false
+expect Open: true true false true false false
 covers [nsh/base] link
 covers [nsh/base] characterCount
 covers [nsh/base] suggestion
@@ -4328,7 +4328,7 @@ covers [nsh/base] unsetLink
 covers [nsh/base] setCharacterLimit
 covers [nsh/base] replaceSuggestion
 covers [nsh/base] exitSuggestion
-covers [nsh/base] setSuggestionItemCount
+covers [nsh/base] setSuggestionOpen
 covers [nsh/base] insertMention
 
 # base-rich-editor-kit

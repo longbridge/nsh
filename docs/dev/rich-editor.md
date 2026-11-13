@@ -375,17 +375,17 @@ commands of the built-in registry (`register_commands` of each module): `setLink
   outside the range or with a selection). `handle_key_down` while active: Escape runs `on_key_down` and dispatches
   the exit meta; then `on_key_down`; then `capture_keys` are taken and recorded in the state (`last_key`,
   `key_count`, a meta-only transaction outside the history), which is how JS's list hears its keys without the
-  input path waiting for JS. The list's size is decided beforehand for the same reason:
-  `set_suggestion_item_count` (JS `setSuggestionItemCount`) stores `item_count` with a meta, `apply` clears it
-  when the query or the decoration id changes (a new suggestion), and while it is `Some(0)` the captured keys are
-  not taken (Enter reaches the keymap and the plugins after it). An unchanged count dispatches nothing, so an app
-  reporting on every `transaction` does not loop. `decorations` gives the active range the options' classes. `mention_node` /
+  input path waiting for JS. Whether the list shows is decided beforehand for the same reason, as GPUI Kit's
+  completion menu is open while it has items: `set_suggestion_open` (JS `setSuggestionOpen`) stores `open` with a
+  meta, `apply` opens it again when the query or the decoration id changes (a new suggestion), and while it is
+  `false` the captured keys are not taken (Enter reaches the keymap and the plugins after it). An unchanged state
+  dispatches nothing, so an app saying it on every `transaction` does not loop. `decorations` gives the active range the options' classes. `mention_node` /
   `insert_mention` are Tiptap's Mention (the text `char + (label ?? id)`, a space after it, a space already there
   taken in).
 
 The JS face (`js/extensions.rs`): `link`, `characterCount`, `suggestion` (plugin specs of the kinds `Link`,
 `CharacterCount`, `Suggestion` with typed option objects), `withMention`, the command helpers
-(`setSuggestionItemCount` among them), and the session's
+(`setSuggestionOpen` among them), and the session's
 `suggestion(key)`, `characters(mode)`, `words()` and `characterLimit`.
 
 ## Tables (`tables/`)
