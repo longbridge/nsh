@@ -1066,7 +1066,7 @@ export interface PerfStats {
    * refresh. */
   readonly refreshRate: number | null;
   /** The share of recent frames that took longer than one refresh, from 0
-   * to 1. */
+   * to 1 (`0.05` is 5%), as Rust's `dropped` (a `Percentage`) reads it. */
   readonly dropped: number;
 }
 
