@@ -16,7 +16,10 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use gtk4::{cairo, gdk, glib, prelude::*};
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
-    canvas::{Drawing, render::ImageFormat},
+    canvas::{
+        Drawing,
+        render::{ImageFormat, RenderFailure},
+    },
 };
 use rustc_hash::FxHashMap;
 
@@ -51,14 +54,13 @@ pub(crate) fn render(
         drop(images);
         let pixels = match painted.and_then(Pixels::new) {
             Ok(pixels) => pixels,
-            Err(e) => {
-                let result = Err(format!("the canvas could not be drawn: {e}"));
+            Err(failure) => {
                 control.dispatch_event(
                     ROOT_ID,
                     EventKind::CanvasImage,
                     EventPayload::CanvasImage {
                         id,
-                        result: result.map_err(Into::into),
+                        result: Err(failure),
                     },
                 );
                 return;
@@ -74,10 +76,7 @@ pub(crate) fn render(
                 thread.dispatch_event(
                     ROOT_ID,
                     EventKind::CanvasImage,
-                    EventPayload::CanvasImage {
-                        id,
-                        result: result.map_err(Into::into),
-                    },
+                    EventPayload::CanvasImage { id, result },
                 );
             });
         if let Err(e) = spawned {
@@ -128,12 +127,12 @@ fn paint(
     images: &Images,
     (pw, ph): (i32, i32),
     scale: f64,
-) -> Result<cairo::ImageSurface, String> {
-    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, pw, ph)
-        .map_err(|e| format!("image surface {pw}x{ph}: {e}"))?;
+) -> Result<cairo::ImageSurface, RenderFailure> {
+    let fail = |e| failure(e, (pw, ph));
+    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, pw, ph).map_err(fail)?;
     surface.set_device_scale(scale, scale);
     {
-        let cr = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
+        let cr = cairo::Context::new(&surface).map_err(fail)?;
         let mut text = TextCache::default();
         let mut replay = Replay {
             cr: &cr,
@@ -150,12 +149,28 @@ fn paint(
         for op in &drawing.ops {
             replay.op(op);
         }
-        if let Err(e) = cr.status() {
-            log::warn!("offscreen canvas: cairo: {e}");
+        // A layer of the replay (a group, a shadow) Cairo had no memory
+        // for leaves the image without it.
+        match cr.status() {
+            Err(cairo::Error::NoMemory) => return Err(fail(cairo::Error::NoMemory)),
+            Err(e) => log::warn!("offscreen canvas: cairo: {e}"),
+            Ok(()) => {}
         }
     }
     surface.flush();
     Ok(surface)
+}
+
+/// What Cairo's `error` making or drawing a `pw` × `ph` pixel image
+/// means for the app: a size past Cairo's (32767 pixels a side) or memory
+/// it could not allocate is [`RenderFailure::TooLarge`].
+fn failure(error: cairo::Error, (pw, ph): (i32, i32)) -> RenderFailure {
+    match error {
+        cairo::Error::InvalidSize | cairo::Error::NoMemory => RenderFailure::TooLarge(format!(
+            "the system could not allocate a {pw}×{ph} bitmap ({error})"
+        )),
+        e => RenderFailure::Failed(format!("the canvas could not be drawn: {e}")),
+    }
 }
 
 /// A painted surface's pixels, which the encoding thread owns.
@@ -168,10 +183,12 @@ struct Pixels {
 
 impl Pixels {
     /// `surface`'s pixels (no other reference to it may be left).
-    fn new(surface: cairo::ImageSurface) -> Result<Self, String> {
+    fn new(surface: cairo::ImageSurface) -> Result<Self, RenderFailure> {
         let (width, height) = (surface.width(), surface.height());
         let stride = surface.stride() as usize;
-        let data = surface.take_data().map_err(|e| e.to_string())?;
+        let data = surface
+            .take_data()
+            .map_err(|e| RenderFailure::from(format!("the canvas could not be drawn: {e}")))?;
         Ok(Pixels {
             data,
             width,
@@ -182,7 +199,7 @@ impl Pixels {
 }
 
 /// `pixels` encoded as `format`.
-fn encode(pixels: Pixels, format: ImageFormat) -> Result<Vec<u8>, String> {
+fn encode(pixels: Pixels, format: ImageFormat) -> Result<Vec<u8>, RenderFailure> {
     let Pixels {
         data,
         width,
@@ -200,7 +217,7 @@ fn encode(pixels: Pixels, format: ImageFormat) -> Result<Vec<u8>, String> {
     let texture = gdk::MemoryTexture::new(width, height, memory, &bytes, stride);
     match format {
         ImageFormat::Png => Ok(texture.save_to_png_bytes().to_vec()),
-        _ => Err(format!("{} images are not encoded here", format.mime())),
+        _ => Err(format!("{} images are not encoded here", format.mime()).into()),
     }
 }
 
@@ -245,6 +262,25 @@ mod tests {
         assert_eq!(pixel(5, 5), 0xffff_0000);
         assert_eq!(pixel(59, 19), 0xffff_0000);
         assert_eq!(pixel(5, 25) >> 24, 0);
+    }
+
+    #[test]
+    fn an_image_past_cairos_size_is_too_large() {
+        // Cairo takes at most 32767 pixels a side.
+        let drawing = Drawing::default();
+        let failure = paint(&drawing, &Images::default(), (40_000, 1), 1.0).unwrap_err();
+        assert!(matches!(failure, RenderFailure::TooLarge(_)), "{failure:?}");
+    }
+
+    #[test]
+    fn cairos_size_and_memory_errors_are_too_large() {
+        for e in [cairo::Error::InvalidSize, cairo::Error::NoMemory] {
+            assert!(matches!(failure(e, (1, 1)), RenderFailure::TooLarge(_)));
+        }
+        assert!(matches!(
+            failure(cairo::Error::InvalidFormat, (1, 1)),
+            RenderFailure::Failed(_)
+        ));
     }
 
     #[test]
