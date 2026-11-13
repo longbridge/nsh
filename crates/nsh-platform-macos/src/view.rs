@@ -58,7 +58,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSString};
-use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLeft};
+use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityBottomLeft};
 
 use crate::surface::{Surface, quiet};
 
@@ -188,7 +188,7 @@ pub(crate) struct ViewState {
 }
 
 impl ViewState {
-    fn new(id: NodeId, kind: ViewKind) -> Self {
+    pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         ViewState {
             id,
             kind,
@@ -482,7 +482,7 @@ define_class!(
                 let origin = layer.frame().origin;
                 CGContext::translate_ctm(c, -origin.x, -origin.y);
             } else {
-                crate::text::draw(cx, &state);
+                crate::text::draw(cx, &state, layer.bounds().size);
             }
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
@@ -2052,10 +2052,13 @@ impl NshView {
         // costly: on the Stocks demo main-thread time per frame went from
         // 3.5 to 1.8 ms).
         layer.setDrawsAsynchronously(false);
-        // A text keeps its picture through another width of the same lines:
-        // never stretched. The rest draw again at their new size.
+        // A text keeps its picture through another size that still covers
+        // it: never stretched, pinned to the visual top left (under the
+        // flipped host layer Core Animation's vertical gravities are
+        // inverted, so `kCAGravityBottomLeft` is the top left). The rest
+        // draw again at their new size.
         if self.state().text.is_some() {
-            layer.setContentsGravity(unsafe { kCAGravityTopLeft });
+            layer.setContentsGravity(unsafe { kCAGravityBottomLeft });
         }
         // The same density a sharpening walk would give it, capped by its
         // size: views that mount while an ancestor is scaled (cards while
