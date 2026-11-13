@@ -332,9 +332,23 @@ impl Shortcut {
         out
     }
 
+    /// Its label where `mac` is true (macOS) as symbols in the order Apple
+    /// writes them (`⌃⌥⇧⌘C`), else [`Shortcut::label`].
+    pub fn label_for(&self, mac: bool) -> String {
+        if !mac {
+            return self.label();
+        }
+        self.keystroke().label(crate::platform::Os::MacOs, true)
+    }
+
     /// Whether a focused text field uses this shortcut itself, as it uses
     /// the same keystroke of `nsh/keymap` ([`Keystroke::edits_text`]).
     pub fn edits_text(&self) -> bool {
+        self.keystroke().edits_text()
+    }
+
+    /// The same keystroke as `nsh/keymap` reads it.
+    fn keystroke(&self) -> Keystroke {
         let key = match self.key {
             Key::Char(c) => keymap::Key::Char(c),
             Key::Space => keymap::Key::Char(' '),
@@ -360,7 +374,7 @@ impl Shortcut {
             shift: self.shift,
             cmd: self.meta,
         };
-        Keystroke { modifiers, key }.edits_text()
+        Keystroke { modifiers, key }
     }
 }
 
@@ -1221,6 +1235,27 @@ mod tests {
         }
         assert_eq!(title_bar_height(Some(px(42.0))), Some(px(42.0)));
         assert_eq!(title_bar_height(Some(px(300.0))), Some(px(200.0)));
+    }
+
+    #[test]
+    fn mac_labels_use_symbols() {
+        let copy = MenuRole::Copy.shortcut(true).unwrap();
+        assert_eq!(copy.label_for(true), "⌘C");
+        assert_eq!(
+            MenuRole::Redo.shortcut(true).unwrap().label_for(true),
+            "⇧⌘Z"
+        );
+        assert_eq!(
+            MenuRole::ToggleFullScreen
+                .shortcut(true)
+                .unwrap()
+                .label_for(true),
+            "⌃⌘F"
+        );
+        assert_eq!(
+            MenuRole::Copy.shortcut(false).unwrap().label_for(false),
+            "Ctrl+C"
+        );
     }
 
     #[test]
