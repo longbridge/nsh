@@ -134,6 +134,12 @@ pub(super) struct Instance {
     pub(super) user: Option<std::rc::Rc<ClassList>>,
     /// Events JS listens to on the host.
     js_events: EventMask,
+    /// The listeners the view this one is in gives its element
+    /// (`.on_mouse_enter(..)` on a nested component's element), run by
+    /// that view's component after the root's own, as JS's on a host are.
+    given_handlers: Vec<(EventKind, Listener<EventPayload>)>,
+    /// The events of `given_handlers`.
+    given_events: EventMask,
     /// The view, expanded (its root is the host); a list cell's row as
     /// built last.
     root: Option<Expanded>,
@@ -227,6 +233,9 @@ pub(super) struct RootContext {
     pub(super) app: Option<crate::StylePatch>,
     /// JS's events on the top host.
     pub(super) js: Option<EventMask>,
+    /// The events of the listeners the views above give it (and the
+    /// components whose root it is).
+    pub(super) given_events: EventMask,
     /// The insets given it (the outer wins).
     inset_padding: Option<crate::EdgeInsets>,
     inset_margin: Option<crate::EdgeInsets>,
@@ -294,6 +303,8 @@ impl Instance {
             class_list: Vec::new(),
             user: None,
             js_events: EventMask::default(),
+            given_handlers: Vec::new(),
+            given_events: EventMask::default(),
             root: None,
             js_children,
             children_at: Placement::None,
@@ -1658,17 +1669,7 @@ impl<M: TextEngine> Core<M> {
             Op::Listen { id, event, enabled } if self.is_host(id) => {
                 let inst = self.components.instances.get_mut(&id).expect("host");
                 inst.js_events.set(event, enabled);
-                let base = self.base_of(id);
-                let own = self.components.instances[&base]
-                    .root
-                    .as_ref()
-                    .is_some_and(|r| r.events.contains(event));
-                let slot = self.target_listens(base, event, enabled || own);
-                Ok(Some(Op::Listen {
-                    id,
-                    event,
-                    enabled: enabled || own || slot,
-                }))
+                Ok(Some(self.host_listen(id, event)))
             }
             Op::Rust(op) => {
                 self.run_rust(op);
@@ -1680,6 +1681,111 @@ impl<M: TextEngine> Core<M> {
             }
             op => Ok(Some(op)),
         }
+    }
+
+    /// Whether the host `id`'s node listens to `event` for someone outside
+    /// its component's view: JS on the host, or a view above giving an
+    /// element of this component (or of one whose root it is) a listener.
+    fn outside_listens(&self, id: NodeId, event: EventKind) -> bool {
+        let mut at = Some(self.base_of(id));
+        while let Some(host) = at {
+            let Some(inst) = self.components.instances.get(&host) else {
+                break;
+            };
+            if inst.js_events.contains(event) || inst.given_events.contains(event) {
+                return true;
+            }
+            at = inst.above;
+        }
+        false
+    }
+
+    /// What the host `id`'s node listens to of `event`: its root's own,
+    /// the slot whose props it takes and those outside its view.
+    fn host_listen(&mut self, id: NodeId, event: EventKind) -> Op {
+        let outside = self.outside_listens(id, event);
+        let base = self.base_of(id);
+        let own = self.components.instances[&base]
+            .root
+            .as_ref()
+            .is_some_and(|r| r.events.contains(event));
+        let slot = self.target_listens(base, event, outside || own);
+        Op::Listen {
+            id,
+            event,
+            enabled: outside || own || slot,
+        }
+    }
+
+    /// Gives the nested component on `id` the listeners `handlers` of the
+    /// view it is in (in place of what that view gave it before): its node
+    /// listens to their events as long as they are given.
+    pub(super) fn set_given_handlers(
+        &mut self,
+        id: NodeId,
+        handlers: Vec<(EventKind, Listener<EventPayload>)>,
+    ) {
+        let mut events = EventMask::default();
+        for (kind, _) in &handlers {
+            events.set(*kind, true);
+        }
+        let Some(inst) = self.components.instances.get_mut(&id) else {
+            return;
+        };
+        let old = std::mem::replace(&mut inst.given_events, events);
+        inst.given_handlers = handlers;
+        let mut changed = old.bits() ^ events.bits();
+        while changed != 0 {
+            let kind = EventKind::ALL[changed.trailing_zeros() as usize];
+            changed &= changed - 1;
+            let op = self.host_listen(id, kind);
+            let _ = self.apply_op(op);
+        }
+    }
+
+    /// Runs the listeners of `kind` the views above give the host `base`
+    /// (and the components whose root it is), each in the component whose
+    /// view gave it; false when none was given.
+    fn handle_given(&mut self, base: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
+        let mut listeners = Vec::new();
+        let mut at = Some(base);
+        while let Some(host) = at {
+            let Some(inst) = self.components.instances.get(&host) else {
+                break;
+            };
+            if inst.given_events.contains(kind)
+                && let Some(&owner) = self.components.owners.get(&host)
+            {
+                listeners.extend(
+                    inst.given_handlers
+                        .iter()
+                        .filter(|(k, _)| *k == kind)
+                        .map(|(_, l)| (owner, l.clone())),
+                );
+            }
+            at = inst.above;
+        }
+        let mut handled = false;
+        for (owner, listener) in listeners {
+            handled |= self.run_listener(owner, &listener, payload);
+        }
+        handled
+    }
+
+    /// Whether JS listens to `kind` on the host whose node `base` makes
+    /// (the top one of its chain).
+    fn js_listens(&self, base: NodeId, kind: EventKind) -> bool {
+        let mut at = Some(base);
+        while let Some(host) = at {
+            let Some(inst) = self.components.instances.get(&host) else {
+                break;
+            };
+            if inst.js_events.contains(kind) {
+                return true;
+            }
+            at = inst.above;
+        }
+        false
     }
 
     /// The number of rows of the list cell `cell` is in.
@@ -2614,6 +2720,7 @@ impl<M: TextEngine> Core<M> {
         }
         let user = cx.user.clone();
         let top_js = cx.js;
+        let given_events = cx.given_events;
         let classes = self.apply_el_styles(
             host,
             &el.style,
@@ -2633,8 +2740,9 @@ impl<M: TextEngine> Core<M> {
                 text.clone(),
             );
         }
-        // The host listens to its component's events and to JS's.
-        let js = top_js.unwrap_or(inst.js_events);
+        // The host listens to its component's events, JS's and those the
+        // views above give it.
+        let js = top_js.unwrap_or(inst.js_events) | given_events;
         self.apply_handlers(host, host, &el, old_events | js, js, inst);
         let mut events = EventMask::default();
         for (kind, _) in &el.handlers {
@@ -2731,6 +2839,7 @@ impl<M: TextEngine> Core<M> {
             combined: false,
             app: None,
             js: None,
+            given_events: inst.given_events,
             inset_padding: None,
             inset_margin: None,
             test_id: None,
@@ -2769,6 +2878,7 @@ impl<M: TextEngine> Core<M> {
             let (outer, given) = (above.user.clone(), above.given.clone());
             app = above.app_style.clone();
             cx.js = Some(above.js_events);
+            cx.given_events = cx.given_events | above.given_events;
             at = above.above;
             if let Some(given) = &given {
                 take(&mut cx, given);
@@ -4270,6 +4380,10 @@ impl<M: TextEngine> Core<M> {
             if kept {
                 inst.event_handlers.retain(|(n, _)| *n != id);
             }
+            // The view's listeners of its node's events, after its root's.
+            if self.is_host(id) {
+                self.set_given_handlers(id, std::mem::take(&mut el.handlers));
+            }
             inst.event_handlers
                 .extend(c.on_event.into_iter().map(|listener| (id, listener)));
             // Its `ComponentRef`.
@@ -5065,7 +5179,15 @@ impl<M: TextEngine> Core<M> {
             if let Some(slot) = self.adopted_host(base) {
                 self.handle(slot, base, kind, payload);
             }
-            return self.handle(base, base, kind, payload);
+            let own = self.handle(base, base, kind, payload);
+            // A context menu has one listener: a component showing its own
+            // keeps it.
+            if own && kind == EventKind::ContextMenu {
+                return true;
+            }
+            let given = self.handle_given(base, kind, payload);
+            // JS listening on the host hears it too.
+            return (own || given) && !self.js_listens(base, kind);
         }
         // A component's own list reports its viewable rows as they settle.
         if kind == EventKind::ViewableItemsChange && self.components.virtual_lists.contains_key(&id)
@@ -5228,6 +5350,42 @@ impl<M: TextEngine> Core<M> {
         let key = self.key(cell).ok()?;
         let parent = self.nodes[key as usize].parent;
         (parent != NO_KEY).then(|| self.nodes[parent as usize].id)
+    }
+
+    /// Reads (`enabled` `None`) or changes whether the app launches at
+    /// login: on the backend's thread when the runner gave the core one,
+    /// the answer (on or not) delivered in a task here; without one the app
+    /// does not launch at login, and a change fails.
+    fn login_item_action(
+        &mut self,
+        enabled: Option<bool>,
+        answer: crate::element::AnswerSlot<Result<bool, crate::desktop::LaunchAtLoginError>>,
+    ) {
+        use crate::desktop::{LaunchAtLoginError, LoginItemStatus};
+        let Some(items) = self.login_item.as_mut() else {
+            answer.borrow_mut().deliver(match enabled {
+                None => Ok(false),
+                Some(_) => Err(LaunchAtLoginError::Unavailable),
+            });
+            return;
+        };
+        let result = items.call(enabled);
+        crate::element::task::spawn_raw(
+            &self.components.executor,
+            crate::ROOT_ID,
+            Box::pin(async move {
+                let result = match result.await {
+                    // Nothing to change where the platform has no login
+                    // item for the app (a sandboxed Linux app).
+                    Ok(LoginItemStatus::Unavailable) if enabled.is_some() => {
+                        Err(LaunchAtLoginError::Unavailable)
+                    }
+                    Ok(status) => Ok(status == LoginItemStatus::Enabled),
+                    Err(error) => Err(LaunchAtLoginError::System(error)),
+                };
+                answer.borrow_mut().deliver(result);
+            }),
+        );
     }
 
     /// Applies what the app asks about notifications: granted and where
@@ -5875,6 +6033,7 @@ impl<M: TextEngine> Core<M> {
             Action::Speech(action) => self.speech_action(action),
             Action::Audio(action) => self.audio_action(action),
             Action::Notification(action) => self.notification_action(action),
+            Action::LoginItem(enabled, answer) => self.login_item_action(enabled, answer),
             Action::NextUrlSchemeOpen(answer) => {
                 let links = &mut self.components.url_schemes;
                 match links.pending.pop_front() {

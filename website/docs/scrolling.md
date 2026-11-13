@@ -535,6 +535,8 @@ mount(Photo);
 
 Text and canvases inside a zoomed scroll view are drawn again at the new resolution when the zoom ends, so they stay sharp on iOS. On Android, NSH zooms with a scroll view of its own, which scales around the pinch's focal point, pans with any number of fingers, flings and rubber-bands at the edges and zoom limits. Android starts a pinch once the fingers are about 27 mm apart, as the system's gesture detector does.
 
+A zoomable scroll view inside another scroll view, such as an image viewer's horizontal pager, works as photo viewers do on touch screens (iOS, Android and the web): a swipe on an image that is not zoomed in turns the page, a swipe on a zoomed image pans it, and at the image's edge the rest of the swipe goes on to the next or previous page.
+
 ## Scrolling from code
 
 Give the scroll view a ref (`element_ref()` and `.element_ref(&scroller)` in Rust, a [`ref`](./jsx-and-components.md) in TSX) and call its methods. Commands run after the rest of the changes in the same update, so scrolling to content you just added works.

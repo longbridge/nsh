@@ -150,6 +150,9 @@ function App() {
 mount(App);
 ```
 
+菜单栏应用常常提供登录时打开：用户打开它时，`Application.setLaunchAtLogin(true)` 把应用包登记为登录项（见
+[登录时打开](../modules/nsh-desktop.md#登录时打开)）。
+
 用 `AppView` 嵌入的应用按宿主应用的方式参与系统界面（宿主的 `LSUIElement`，或 `NSApplication.setActivationPolicy`）。
 
 ## 嵌入 Mac 应用
@@ -197,6 +200,10 @@ view.load(Bundle::source(code).into());
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 
 `AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
+
+`AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：应用包的登录项
+（`SMAppService.mainApp`）。默认关闭，且只有 `run_app` 读取它，所以嵌入应用 不会登录时打开；`nsh package`
+构建的应用的运行器会打开它。
 
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
 

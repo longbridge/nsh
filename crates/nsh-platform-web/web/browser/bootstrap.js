@@ -3725,7 +3725,12 @@
 			"onLayout",
 			"onFileDragEnter",
 			"onFileDragLeave",
-			"onFileDrop"
+			"onFileDrop",
+			"onMouseEnter",
+			"onMouseMove",
+			"onMouseLeave",
+			"onMouseUp",
+			"onContextMenu"
 		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {
@@ -6147,7 +6152,7 @@
 		installFetch: () => installFetch,
 		installTesting: () => installTesting
 	});
-	function configureAPIs(nsh, modules, dom, active, env) {
+	function configureAPIs(nsh, modules, dom, active, env, page = {}) {
 		nsh.nextTick = (callback, ...args) => {
 			if (typeof callback !== "function") throw new TypeError("nextTick: callback must be a function");
 			queueMicrotask(() => {
@@ -6166,7 +6171,9 @@
 			parent: null,
 			state: () => null,
 			titleBar: env.titleBar,
-			set() {},
+			set(attributes) {
+				if (typeof attributes?.title === "string") page.setWindowTitle?.(attributes.title);
+			},
 			show() {},
 			hide() {},
 			focus() {},

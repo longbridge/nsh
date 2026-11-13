@@ -121,6 +121,13 @@ jobs:
         working-directory: crates/gpui
         run: cargo clippy --all-targets --features nsh-platform-gpui/dev -- -D warnings
 
+      # Without the optional features: no shader renderer (naga, NSH's
+      # wgpu), syntect, RaTeX, ropey, imara-diff; no `zlib` or `crypto`
+      # module.
+      - name: Check without optional features
+        working-directory: crates/gpui
+        run: cargo clippy -p nsh-platform-gpui --no-default-features --features js -- -D warnings
+
       # Tests need no display: they open no window.
       - name: Test
         working-directory: crates/gpui

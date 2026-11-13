@@ -246,6 +246,7 @@ impl Host {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone(), web_generation);

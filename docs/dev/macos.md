@@ -473,6 +473,26 @@ host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in
 attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
 shows its window itself (`focus()` from its tray).
 
+## Login item
+
+`Application.launchAtLogin()` / `setLaunchAtLogin` (`nsh_core::desktop::LoginItemBackend`) is `login_item.rs`:
+`SMAppService.mainApp`, the app bundle's login item, through `msg_send!` on ServiceManagement, which it loads with
+`dlopen` when first used (it is not linked, as UserNotifications is not). `AppView::load` gives the engine the backend
+(`EngineConfig::login_item`) only for `run_app`'s view (`surface.standalone`) with `AppOptions::login_item`, which
+`nsh-macos-app` sets unless `NSH_APP_DIR` says `nsh run` runs it in place; the core calls it on its login item thread,
+which ServiceManagement allows. On macOS 27 (checked with an ad hoc signed bundle) a bundle never registered reads
+`notFound`, mapped to disabled; registering what is registered and unregistering what is not return no error; copies of
+the app with one bundle id share the item. A call that fails is judged by the status it leaves, as a code alone does not
+say which error it is (ServiceManagement declares four error domains, and an `NSError` may come from another still): a
+registration that leaves the item registered (also `requiresApproval`, waiting for the user) is done, which covers
+`kSMErrorAlreadyRegistered` and `kSMErrorLaunchDeniedByUser`; a removal is done when it leaves the item `notRegistered`,
+or `notFound` (an error status) with `kSMErrorJobNotFound` in `SMAppServiceErrorDomain` (exported from macOS 15, so
+compared by its value, which an `SMAppService` error reported from macOS 14.2.1 carries too), so a failed removal is not
+taken as done on an error status alone. Of the rest, `SMAppServiceErrorDomain`'s refusals are `PermissionDenied`
+(`EACCES`): of the signature, of authorization, of the user, and its "Operation not permitted", code 1, which
+`SMErrors.h` does not list; the others are `EIO`. The error's message names its domain and code, and a refused call is
+logged as a warning with the status after it (the release runner prints warnings).
+
 ## Packaged apps' logs
 
 An app opened from Finder or the Dock has its stderr on `/dev/null`, so its lines go to the unified log through

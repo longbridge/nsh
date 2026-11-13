@@ -1880,6 +1880,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
     ));
 }
 
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
