@@ -78,9 +78,11 @@ impl FileFilter {
     /// Whether `path`'s extension is one of the filter's, for platforms
     /// whose dialogs cannot filter (GPUI's).
     pub fn matches(&self, path: &Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| self.extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
+        self.extensions.iter().any(|x| x == "*")
+            || path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| self.extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
     }
 }
 
@@ -290,14 +292,16 @@ fn push_filter(filters: &mut Vec<FileFilter>, filter: FileFilter) {
 }
 
 /// `extensions` as the dialogs take them: without leading dots or `*.`,
-/// lower case, each once, empty ones left out.
+/// lower case, each once, empty ones left out; `*` (or `*.*`) is any file,
+/// which the dialogs show as `*.*` (an "All files" filter).
 fn normalize(extensions: &mut Vec<String>) {
     for extension in extensions.iter_mut() {
+        let any = matches!(extension.trim(), "*" | "*.*" | ".*");
         let trimmed = extension
             .trim()
             .trim_start_matches('*')
             .trim_start_matches('.');
-        *extension = trimmed.to_lowercase();
+        *extension = if any { "*".to_owned() } else { trimmed.to_lowercase() };
     }
     extensions.retain(|e| !e.is_empty());
     let mut seen = Vec::with_capacity(extensions.len());
@@ -359,6 +363,23 @@ mod tests {
         assert!(passes(&dialog.filters, Path::new("/a/b.log")));
         assert!(!passes(&dialog.filters, Path::new("/a/b")));
         assert!(passes(&[], Path::new("/a/b")));
+    }
+
+    /// "All files" beside an app's own types: `*` (or `*.*`) stays a filter
+    /// and takes any path, with or without an extension.
+    #[test]
+    fn a_star_filter_is_any_file() {
+        for any in ["*", "*.*"] {
+            let filter = FileFilter::new("All files", [any]);
+            assert_eq!(filter.extensions, ["*"], "{any}");
+            assert!(filter.matches(Path::new("/a/b.rs")));
+            assert!(filter.matches(Path::new("/a/b")));
+        }
+        let dialog = OpenDialog::files()
+            .filter(FileFilter::new("Markdown", ["md"]))
+            .filter(FileFilter::new("All files", ["*"]));
+        assert_eq!(dialog.filters.len(), 2, "the all-files filter is kept");
+        assert!(passes(&dialog.filters, Path::new("/a/b.rs")));
     }
 
     #[test]
