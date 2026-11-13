@@ -50,6 +50,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, PayloadValue, Points, ROOT_ID, Size,
+    canvas::render::RenderFailure,
     geometry::{DevicePixels, point, px, size},
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
@@ -1364,9 +1365,34 @@ pub extern "C" fn nsh_picked(request: u32) -> f64 {
     })
 }
 
+/// The status of an offscreen canvas render's answer ([`nsh_canvas_image`];
+/// `nsh.js` `CANVAS_IMAGE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+enum CanvasImageStatus {
+    /// The render failed; the bytes are why (UTF-8).
+    Failed = 0,
+    /// The bytes are the encoded image.
+    Ok = 1,
+    /// The size is over the browser's canvas limit; the bytes are why
+    /// (UTF-8): the app gets `ERR_NSH_QUOTA_EXCEEDED`.
+    TooLarge = 2,
+}
+
+impl CanvasImageStatus {
+    fn from_raw(status: u32) -> Self {
+        match status {
+            1 => Self::Ok,
+            2 => Self::TooLarge,
+            _ => Self::Failed,
+        }
+    }
+}
+
 /// Answers offscreen canvas render `request` ([`nsh_core::Command::RenderCanvas`],
-/// `nsh.js` `renderCanvas`): with `ok` the encoded image's bytes, otherwise
-/// why there is none (UTF-8).
+/// `nsh.js` `renderCanvas`): `status` is a [`CanvasImageStatus`] (1 the
+/// encoded image's bytes; 2 too large for the browser's canvases and 0 any
+/// other failure, each with why, UTF-8).
 ///
 /// # Safety
 ///
@@ -1374,16 +1400,17 @@ pub extern "C" fn nsh_picked(request: u32) -> f64 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_canvas_image(
     request: u32,
-    ok: u32,
+    status: u32,
     ptr: *const u8,
     len: usize,
 ) -> f64 {
     // SAFETY: guaranteed by the caller.
     let data = unsafe { bytes(ptr, len) };
-    let result = if ok != 0 {
-        Ok(data.to_vec())
-    } else {
-        Err(String::from_utf8_lossy(data).into_owned().into())
+    let message = || String::from_utf8_lossy(data).into_owned();
+    let result = match CanvasImageStatus::from_raw(status) {
+        CanvasImageStatus::Ok => Ok(data.to_vec()),
+        CanvasImageStatus::TooLarge => Err(RenderFailure::TooLarge(message())),
+        CanvasImageStatus::Failed => Err(RenderFailure::Failed(message())),
     };
     send(|app| {
         app.control.dispatch_event(

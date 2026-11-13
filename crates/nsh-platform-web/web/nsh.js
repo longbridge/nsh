@@ -136,6 +136,47 @@ const ENTER_LATE_MS = 250;
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
 
+/** The status of an offscreen render's answer (`nsh_canvas_image`, `src/lib.rs`
+ * `CanvasImageStatus`): the image's bytes, or a message why there are none. */
+const CANVAS_IMAGE = { FAILED: 0, OK: 1, TOO_LARGE: 2 };
+
+/** An offscreen render over the browser's canvas size limit
+ * (`CANVAS_IMAGE.TOO_LARGE`). */
+class CanvasTooLarge extends Error {}
+
+function tooLarge(width, height) {
+  return `this browser cannot make a ${width} × ${height} pixel canvas (${width * height} pixels): it is over the browser's canvas size limit`;
+}
+
+/** Whether `src` is on the page's origin. */
+function sameOrigin(src) {
+  try {
+    return new URL(src, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** `logo@2x.png` → 2: the pixel density a file name declares, 1 without
+ * (`nsh_core::image::loader::density`). */
+function imageDensity(uri) {
+  const name = String(uri).split(/[/\\]/).pop();
+  const dot = name.lastIndexOf(".");
+  const stem = dot < 0 ? name : name.slice(0, dot);
+  const at = stem.lastIndexOf("@");
+  if (at < 0 || !stem.endsWith("x")) return 1;
+  const n = Number(stem.slice(at + 1, -1));
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function originOf(src) {
+  try {
+    return new URL(src, location.href).origin;
+  } catch {
+    return src;
+  }
+}
+
 const KEYFRAMES = `
 @property --nsh-ko { syntax: "<number>"; inherits: false; initial-value: 1; }
 @keyframes nsh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -4972,9 +5013,17 @@ class Player {
         } else if (name === "drawImage") {
           const img = image(args[0]);
           if (!img) continue;
-          const dest = args.slice(2).map(v);
-          if (args[1]) cx.drawImage(img, ...args[1], ...dest);
-          else cx.drawImage(img, ...dest);
+          // The source in the image's pixels; a missing destination size
+          // is the source's over the file name's density (`@3x`), as an
+          // `Image`'s, never the screen's (`CanvasImage::density`).
+          const [sx, sy, sw, sh] = args[1] ?? [0, 0, img.naturalWidth || img.width, img.naturalHeight || img.height];
+          const [dx, dy, dw, dh] = args.slice(2).map(v);
+          const density = imageDensity(args[0]);
+          cx.drawImage(
+            img, sx, sy, sw, sh, dx, dy,
+            Number.isFinite(dw) ? dw : sw / density,
+            Number.isFinite(dh) ? dh : sh / density,
+          );
         } else if (name === "fillText" || name === "strokeText") {
           cx[name](args[0], ...args.slice(1).map(v));
         } else if (name === "setLineDash") {
@@ -4994,52 +5043,115 @@ class Player {
    * replayed as `draw` replays a canvas view's, into a transparent
    * `width` × `height` pixel canvas of its own at `scale` pixels per point,
    * its animated values at 0, once the images it names have loaded (a
-   * failed one draws nothing), and encoded as `type`. The bytes or why
-   * there are none go to the engine (`nsh_canvas_image`).
+   * failed one draws nothing), and encoded as `type`. The bytes, or why
+   * there are none, go to the engine (`nsh_canvas_image`, with a
+   * `CANVAS_IMAGE` status): a canvas over the browser's size limit
+   * (`offscreenCanvas`) answers `TOO_LARGE`, which the app gets as
+   * `ERR_NSH_QUOTA_EXCEEDED`.
    */
   async renderCanvas(request, ops, width, height, scale, type) {
     const app = this.app;
-    let result;
+    let status = CANVAS_IMAGE.OK;
+    let bytes;
     try {
       const uris = [...new Set(ops.filter(([name]) => name === "drawImage").map(([, uri]) => uri))];
       const images = new Map(await Promise.all(uris.map(async (uri) => [uri, await this.offscreenImage(uri)])));
-      const canvas = typeof OffscreenCanvas !== "undefined"
-        ? new OffscreenCanvas(width, height)
-        : Object.assign(document.createElement("canvas"), { width, height });
-      const cx = canvas.getContext("2d");
-      if (!cx) throw new Error("the browser made no 2D context");
+      const { canvas, cx } = this.offscreenCanvas(width, height);
       cx.setTransform(scale, 0, 0, scale, 0, 0);
       this.replayCanvas(cx, ops, null, (uri) => images.get(uri));
-      const blob = canvas.convertToBlob
-        ? await canvas.convertToBlob({ type })
-        : await new Promise((resolve) => canvas.toBlob(resolve, type));
-      if (!blob) throw new Error("the image could not be encoded");
-      result = { ok: true, bytes: new Uint8Array(await blob.arrayBuffer()) };
+      let blob;
+      try {
+        blob = canvas.convertToBlob
+          ? await canvas.convertToBlob({ type })
+          : await new Promise((resolve) => canvas.toBlob(resolve, type));
+      } catch (err) {
+        // A size the canvas took but the encoder has no memory for.
+        if (err?.name === "RangeError" || err?.name === "IndexSizeError") throw new CanvasTooLarge(tooLarge(width, height));
+        throw err;
+      }
+      // `toBlob` hands no error, only nothing, when the bitmap is too large to encode.
+      if (!blob) throw new CanvasTooLarge(tooLarge(width, height));
+      bytes = new Uint8Array(await blob.arrayBuffer());
     } catch (err) {
-      result = { ok: false, bytes: String(err?.message ?? err) };
+      status = err instanceof CanvasTooLarge ? CANVAS_IMAGE.TOO_LARGE : CANVAS_IMAGE.FAILED;
+      bytes = String(err?.message ?? err);
     }
     if (app !== this.app) return;
-    this.call((w) => this.withStrings([result.bytes], (p, l) => w.nsh_canvas_image(request, result.ok ? 1 : 0, p, l)));
+    this.call((w) => this.withStrings([bytes], (p, l) => w.nsh_canvas_image(request, status, p, l)));
+  }
+
+  /**
+   * A `width` × `height` pixel canvas and its 2D context for an offscreen
+   * render, or a `CanvasTooLarge` when the browser cannot make one that size.
+   * Past their limits (iOS WebKit's is 16777216 pixels in all; Chromium's and
+   * Firefox's are larger than the core's own) browsers make no context,
+   * throw, or make a canvas that silently draws nothing, so one opaque pixel
+   * is drawn in the far corner and read back before the drawing: a canvas
+   * that kept it holds every pixel. Sizes that failed are remembered
+   * (`tooLargeCanvases`): any size at least as large in both sides fails
+   * again without allocating.
+   */
+  offscreenCanvas(width, height) {
+    const known = (this.tooLargeCanvases ??= []);
+    if (known.some(([w, h]) => width >= w && height >= h)) throw new CanvasTooLarge(tooLarge(width, height));
+    const fail = () => {
+      known.push([width, height]);
+      if (known.length > 8) known.shift();
+      return new CanvasTooLarge(tooLarge(width, height));
+    };
+    let canvas;
+    let cx;
+    try {
+      canvas = typeof OffscreenCanvas !== "undefined"
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement("canvas"), { width, height });
+      cx = canvas.getContext("2d");
+    } catch {
+      throw fail();
+    }
+    if (!cx) throw fail();
+    const x = width - 1;
+    const y = height - 1;
+    let kept;
+    try {
+      cx.fillRect(x, y, 1, 1);
+      kept = cx.getImageData(x, y, 1, 1).data[3] === 255;
+      cx.clearRect(x, y, 1, 1);
+    } catch {
+      kept = false;
+    }
+    if (!kept) throw fail();
+    return { canvas, cx };
   }
 
   /**
    * The image at `uri` for an offscreen render, loaded (null when it fails):
    * one that would taint the canvas (another origin's without CORS) is
-   * asked for again with CORS, so the image can still be read back.
+   * asked for again with CORS, so the image can still be read back. One that
+   * fails is skipped with a warning, as every platform skips it; when it
+   * loads without CORS but not with it, the warning says that its server
+   * sends no CORS headers.
    */
   offscreenImage(uri) {
     const src = this.asset(uri);
     const cached = this.images.get(src);
     if (cached?.ready && this.paintable(cached.img)) return Promise.resolve(cached.img);
-    return new Promise((resolve) => {
+    const load = (cors) => new Promise((resolve) => {
       const img = new Image();
-      if (!/^(data|blob):/.test(src)) img.crossOrigin = "anonymous";
+      if (cors) img.crossOrigin = "anonymous";
       img.onload = () => resolve(img);
-      img.onerror = () => {
-        console.warn(`[nsh] offscreen canvas: ${uri} could not be loaded`);
-        resolve(null);
-      };
+      img.onerror = () => resolve(null);
       img.src = src;
+    });
+    const cors = !/^(data|blob):/.test(src) && !sameOrigin(src);
+    return load(cors).then(async (img) => {
+      if (img) return img;
+      if (cors && await load(false)) {
+        console.warn(`[nsh] offscreen canvas: ${uri} is skipped: its server (${originOf(src)}) sends no CORS headers (Access-Control-Allow-Origin), so the page cannot read it back; on the web, images come from the page's origin or servers that allow CORS`);
+      } else {
+        console.warn(`[nsh] offscreen canvas: ${uri} could not be loaded and is skipped`);
+      }
+      return null;
     });
   }
 

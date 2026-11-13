@@ -2568,8 +2568,11 @@ test("a key event without `key` falls back to its physical key instead of throwi
 });
 
 /** A browser `OffscreenCanvas` whose 2D context records its calls into
- * `log.calls`; `fail` makes `convertToBlob` reject with it. */
-function fakeOffscreen(t, { fail } = {}) {
+ * `log.calls`; `fail` makes `convertToBlob` reject with it (an `Error`, or
+ * an error named `failName`); a canvas of more than `limit` pixels draws
+ * nothing, as WebKit's past its limit, and one of more than `noContext`
+ * pixels makes no context. */
+function fakeOffscreen(t, { fail, failName, limit = Infinity, noContext = Infinity } = {}) {
   const log = { calls: [], sizes: [] };
   const saved = globalThis.OffscreenCanvas;
   t.after(() => {
@@ -2578,15 +2581,21 @@ function fakeOffscreen(t, { fail } = {}) {
   globalThis.OffscreenCanvas = class {
     constructor(width, height) {
       log.sizes.push([width, height]);
+      this.pixels = width * height;
     }
     getContext() {
+      if (this.pixels > noContext) return null;
+      const blank = this.pixels > limit;
       return new Proxy({}, {
-        get: (_, name) => (...args) => log.calls.push([name, ...args]),
+        get: (_, name) => (...args) => {
+          log.calls.push([name, ...args]);
+          if (name === "getImageData") return { data: new Uint8ClampedArray(blank ? [0, 0, 0, 0] : [0, 0, 0, 255]) };
+        },
         set: (_, name, value) => (log.calls.push([`=${String(name)}`, value]), true),
       });
     }
     async convertToBlob({ type }) {
-      if (fail) throw new Error(fail);
+      if (fail) throw Object.assign(new Error(fail), failName ? { name: failName } : {});
       return new Blob(["png"], { type });
     }
   };
@@ -2598,9 +2607,10 @@ function renderingPlayer() {
   const answers = [];
   const { player } = fakePlayer();
   player.images = new Map();
-  player.wasm.nsh_canvas_image = (request, ok, ptr, len) => {
+  // `status`: 1 the image's bytes, 0 failed and 2 too large, each with why.
+  player.wasm.nsh_canvas_image = (request, status, ptr, len) => {
     const bytes = new Uint8Array(player.wasm.memory.buffer, ptr, len).slice();
-    answers.push([request, ok, ok ? [...bytes] : new TextDecoder().decode(bytes)]);
+    answers.push([request, status, status === 1 ? [...bytes] : new TextDecoder().decode(bytes)]);
     return -1;
   };
   return { player, answers };
@@ -2612,6 +2622,10 @@ test("an offscreen canvas replays its drawing at its scale and answers with the 
   await player.renderCanvas(7, [["=fillStyle", "#f00"], ["fillRect", 1, 2, 3, ["$", 0]]], 8, 6, 2, "image/png");
   assert.deepEqual(log.sizes, [[8, 6]]);
   assert.deepEqual(log.calls, [
+    // The far corner's pixel, drawn and read back: the canvas holds every pixel.
+    ["fillRect", 7, 5, 1, 1],
+    ["getImageData", 7, 5, 1, 1],
+    ["clearRect", 7, 5, 1, 1],
     ["setTransform", 2, 0, 0, 2, 0, 0],
     ["save"],
     ["=fillStyle", "#f00"],
@@ -2627,6 +2641,104 @@ test("an offscreen canvas that fails to encode answers with why", async (t) => {
   const { player, answers } = renderingPlayer();
   await player.renderCanvas(3, [], 1, 1, 1, "image/png");
   assert.deepEqual(answers, [[3, 0, "too big"]]);
+});
+
+test("an offscreen canvas over the browser's size limit answers too large and is not made again", async (t) => {
+  const log = fakeOffscreen(t, { limit: 16777216 });
+  const { player, answers } = renderingPlayer();
+  await player.renderCanvas(4, [["fillRect", 0, 0, 1, 1]], 5000, 4000, 1, "image/png");
+  assert.equal(answers.length, 1);
+  const [request, status, message] = answers[0];
+  assert.deepEqual([request, status], [4, 2]);
+  assert.match(message, /5000 × 4000 pixel canvas \(20000000 pixels\).*size limit/);
+  // Nothing was drawn past the probe.
+  assert.ok(!log.calls.some(([name]) => name === "setTransform"));
+  // A size at least as large in both sides fails without a canvas; a smaller one renders.
+  await player.renderCanvas(5, [], 6000, 4000, 1, "image/png");
+  await player.renderCanvas(6, [], 4000, 4000, 1, "image/png");
+  assert.deepEqual(log.sizes, [[5000, 4000], [4000, 4000]]);
+  assert.deepEqual(answers.slice(1).map(([r, s]) => [r, s]), [[5, 2], [6, 1]]);
+});
+
+test("drawImage without a size draws the source's pixels over the file name's density", () => {
+  const { player } = fakePlayer();
+  const drawn = [];
+  const cx = new Proxy({}, { get: (_, name) => (name === "drawImage" ? (...a) => drawn.push(a.slice(1)) : () => {}) });
+  const img = { naturalWidth: 60, naturalHeight: 30, width: 60, height: 30 };
+  player.replayCanvas(cx, [
+    ["drawImage", "asset:/dot.png", null, 1, 2, null, null],
+    ["drawImage", "https://x.example/a/dot@3x.png?v=1", null, 1, 2, null, null],
+    ["drawImage", "asset:/dot@3x.png", [6, 3, 30, 15], 1, 2, null, null],
+    ["drawImage", "asset:/dot@3x.png", null, 1, 2, 7, 8],
+  ], null, () => img);
+  assert.deepEqual(drawn, [
+    [0, 0, 60, 30, 1, 2, 60, 30],
+    [0, 0, 60, 30, 1, 2, 20, 10],
+    [6, 3, 30, 15, 1, 2, 10, 5],
+    [0, 0, 60, 30, 1, 2, 7, 8],
+  ]);
+});
+
+test("an offscreen canvas without a context, or the encoder's range error, answers too large", async (t) => {
+  fakeOffscreen(t, { noContext: 100 });
+  const { player, answers } = renderingPlayer();
+  await player.renderCanvas(1, [], 20, 20, 1, "image/png");
+  assert.deepEqual(answers.map(([r, s]) => [r, s]), [[1, 2]]);
+  fakeOffscreen(t, { fail: "out of memory", failName: "RangeError" });
+  await player.renderCanvas(2, [], 2, 2, 1, "image/png");
+  assert.deepEqual(answers.map(([r, s]) => [r, s]), [[1, 2], [2, 2]]);
+});
+
+test("an offscreen image whose server sends no CORS headers is skipped with a warning naming it", async (t) => {
+  const log = fakeOffscreen(t);
+  const { player, answers } = renderingPlayer();
+  const saved = globalThis.Image;
+  const warn = console.warn;
+  const warnings = [];
+  const loads = [];
+  t.after(() => {
+    globalThis.Image = saved;
+    console.warn = warn;
+  });
+  console.warn = (...args) => warnings.push(args.join(" "));
+  // The server answers, but only requests without CORS load.
+  globalThis.Image = class {
+    set src(src) {
+      loads.push([src, this.crossOrigin ?? null]);
+      queueMicrotask(() => (this.crossOrigin ? this.onerror() : this.onload()));
+    }
+  };
+  player.asset = (uri) => uri;
+  await player.renderCanvas(8, [["drawImage", "https://photos.example/a.jpg", 0, 0, 1, 1]], 2, 2, 1, "image/png");
+  assert.deepEqual(loads, [["https://photos.example/a.jpg", "anonymous"], ["https://photos.example/a.jpg", null]]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /https:\/\/photos\.example\/a\.jpg is skipped.*sends no CORS headers/);
+  // The render goes on without it.
+  assert.ok(!log.calls.some(([name]) => name === "drawImage"));
+  assert.deepEqual(answers.map(([r, s]) => [r, s]), [[8, 1]]);
+});
+
+test("an offscreen image that fails to load at all is skipped with a warning", async (t) => {
+  fakeOffscreen(t);
+  const { player, answers } = renderingPlayer();
+  const saved = globalThis.Image;
+  const warn = console.warn;
+  const warnings = [];
+  t.after(() => {
+    globalThis.Image = saved;
+    console.warn = warn;
+  });
+  console.warn = (...args) => warnings.push(args.join(" "));
+  globalThis.Image = class {
+    set src(_) {
+      queueMicrotask(() => this.onerror());
+    }
+  };
+  player.asset = (uri) => uri;
+  await player.renderCanvas(9, [["drawImage", "https://photos.example/gone.jpg", 0, 0, 1, 1]], 2, 2, 1, "image/png");
+  assert.deepEqual(warnings.length, 1);
+  assert.match(warnings[0], /gone\.jpg could not be loaded and is skipped/);
+  assert.deepEqual(answers.map(([r, s]) => [r, s]), [[9, 1]]);
 });
 
 test("an offscreen render for an app that was replaced meanwhile is dropped", async (t) => {
