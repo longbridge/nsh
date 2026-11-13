@@ -288,6 +288,12 @@ final class Native {
     /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
     static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
 
+    /**
+     * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image
+     * {@code bytes}, or {@code error} when they are null.
+     */
+    static native void canvasImage(long handle, int request, byte[] bytes, String error);
+
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);
 

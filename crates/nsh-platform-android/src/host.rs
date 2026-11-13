@@ -638,6 +638,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            // `OffscreenCanvas`: `CanvasRender.java` replays drawings into
+            // bitmaps with the on-screen canvas's painter.
+            canvas_render: true,
             web_evaluate: true,
             // wgpu on Vulkan or GLES, in builds with it, until it finds no
             // GPU.
@@ -1593,6 +1596,41 @@ extern "system" fn Java_com_longbridge_nsh_Native_paste(
             id as NodeId,
             EventKind::Paste,
             EventPayload::Paste(Box::new(paste)),
+        );
+    }
+}
+
+/// The answer to an offscreen canvas render (`CanvasRender.java`): the
+/// encoded image's bytes, or `error` when they are null. The bytes cross as
+/// a `byte[]`, never through the event map's boxed values.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_canvasImage(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    request: jint,
+    bytes: JByteArray<'_>,
+    error: JString<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let result = if bytes.is_null() {
+        let error = (!error.is_null())
+            .then(|| env.get_string(&error).ok().map(String::from))
+            .flatten();
+        Err(error.unwrap_or_else(|| "the canvas could not be drawn".into()))
+    } else {
+        env.convert_byte_array(&bytes)
+            .map_err(|e| format!("the image could not be read: {e}"))
+    };
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::CanvasImage,
+            EventPayload::CanvasImage {
+                id: request as u32,
+                result,
+            },
         );
     }
 }

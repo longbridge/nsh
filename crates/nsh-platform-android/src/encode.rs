@@ -799,6 +799,27 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             e.int(id as i32);
                         }
                     },
+                    // `CanvasRender.java` (`Mounter`'s op 55): the request,
+                    // the size in pixels, the scale, the format (0: PNG),
+                    // then the drawing as `CANVAS` carries it.
+                    Command::RenderCanvas {
+                        id,
+                        drawing,
+                        width,
+                        height,
+                        scale,
+                        format,
+                    } => {
+                        e.int(55);
+                        e.int(id as i32);
+                        e.int(width as i32);
+                        e.int(height as i32);
+                        e.float(scale);
+                        e.int(match format {
+                            nsh_core::canvas::render::ImageFormat::Png => 0,
+                        });
+                        canvas(&mut e, &drawing);
+                    }
                     // No speech recognizer (`Environment::speech`): the core
                     // ends the sessions first.
                     | Command::Speech(_)
@@ -1614,7 +1635,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.replaced);
 }
 
-// --- Canvas drawings (`CanvasBox.java`) -------------------------------------
+// --- Canvas drawings (`CanvasPainter.java`) ---------------------------------
 //
 // A word count, then the operations as 32-bit words: operation codes as in
 // `nsh_core::js::canvas` (`CV_*`), numbers as float bits, animated value
@@ -1985,6 +2006,62 @@ mod tests {
             assert_eq!(ints(request), vec![COMMAND, 3, 30, 7]);
         }
     }
+    #[test]
+    fn a_canvas_render_carries_its_size_scale_and_drawing() {
+        use nsh_core::canvas::{CanvasOp, Drawing, Num, render::ImageFormat};
+
+        let drawing = Drawing {
+            ops: vec![CanvasOp::FillRect([
+                Num::Const(1.0),
+                Num::Const(2.0),
+                Num::Const(3.0),
+                Num::Const(4.0),
+            ])],
+            ..Drawing::default()
+        };
+        let batch = MountBatch {
+            items: vec![MountItem::Command {
+                id: nsh_core::ROOT_ID,
+                command: Command::RenderCanvas {
+                    id: 9,
+                    drawing: std::sync::Arc::new(drawing),
+                    width: 60,
+                    height: 40,
+                    scale: 2.0,
+                    format: ImageFormat::Png,
+                },
+            }],
+        };
+        let ints: Vec<i32> = encode(batch, 0)
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        // `COMMAND`, the root, op 55 (`Mounter.java`), the request, the
+        // pixel size, the scale's bits, PNG, then `CANVAS`'s words: their
+        // count and fillRect (21) with its four numbers.
+        let f = |v: f32| v.to_bits() as i32;
+        assert_eq!(
+            ints,
+            vec![
+                COMMAND,
+                nsh_core::ROOT_ID as i32,
+                55,
+                9,
+                60,
+                40,
+                f(2.0),
+                0,
+                5,
+                21,
+                f(1.0),
+                f(2.0),
+                f(3.0),
+                f(4.0),
+            ]
+        );
+    }
+
     #[test]
     fn web_evaluations_carry_the_originating_engine_generation() {
         let encoded = encode(
