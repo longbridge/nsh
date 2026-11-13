@@ -1779,6 +1779,13 @@ pub(crate) fn blur(view: &NshView) {
     }
 }
 
+/// Sets `view` up as an input and focuses it, for tests of the pointer.
+#[cfg(test)]
+pub(crate) fn focus_for_test(surface: &Rc<Surface>, view: &NshView) {
+    create(surface, view);
+    set_focus(surface, Some(view));
+}
+
 /// Blurs whatever field has the focus.
 pub(crate) fn blur_all(surface: &Rc<Surface>) {
     set_focus(surface, None);
