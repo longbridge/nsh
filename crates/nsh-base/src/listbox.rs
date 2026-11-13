@@ -1380,7 +1380,7 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
         // popup lays over the trigger.
         .when_some(parts.cover, |row, cover| {
             row.child(when(
-                move || selected.get(),
+                move || selected.get() && cover.on.get(),
                 move || {
                     view()
                         .absolute()
