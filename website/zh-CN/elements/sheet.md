@@ -89,8 +89,10 @@ Android、桌面和 Web 使用已有的原生 pan 支持拖动条及滚动区域
 
 软键盘弹起时，贴着屏幕底边的面板（底部 sheet、左右两侧的抽屉）改为贴在键盘上沿，并随键盘的弹起和收起按键盘自己的曲线移动。
 面板底部照常按安全区留白（`pb-[env(safe-area-inset-bottom)]`，Rust 用 `.pb_safe_area()`），与没有键盘时一样：
-这段留白此时落在键盘后面，面板内容正好停在键盘上方，即安全区与键盘取较大者。被键盘抬起时，底部 sheet 内容再高也不会越过状态栏；
-需要更矮的上限时用 `popupStyle` 设置。手机上以 sheet 呈现的菜单、选择器和日期选择器也是如此。
+这段留白此时落在键盘后面，面板内容正好停在键盘上方，即安全区与键盘取较大者。被键盘抬起时，底部 sheet 内容再高也不会越过状态栏。
+`popupStyle` 中的 `maxHeight` 会取代这一上限，因此更矮的上限要自行扣除键盘超出安全区的高度（`keyboardFrame().height - safeArea().bottom`），
+例如 `windowSize().height - safeArea().top - Math.max(0, keyboardFrame().height - safeArea().bottom) - 24`。
+手机上以 sheet 呈现的菜单、选择器和日期选择器也是如此，它们的 `popupStyle` 或 `popupClass` 中的 `maxHeight` 同样取代其上限。
 
 <a id="native-sheets"></a>
 

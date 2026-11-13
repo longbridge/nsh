@@ -96,8 +96,11 @@ or right) ends at the keyboard's top instead of the screen's bottom, and moves w
 on the keyboard's own curve. Pad the panel's bottom by the safe area (`pb-[env(safe-area-inset-bottom)]`, Rust
 `.pb_safe_area()`), as without a keyboard: that padding then sits behind the keyboard, so the panel's content ends
 right above it, the larger of the safe area and the keyboard. Lifted by the keyboard, a bottom sheet stays below the
-status bar, however tall its content; style a lower limit with `popupStyle`. Menus, selects and date pickers that a phone shows as sheets
-do the same.
+status bar, however tall its content. A `maxHeight` in `popupStyle` takes the place of that limit: a lower one
+subtracts the room the keyboard takes past the safe area (`keyboardFrame().height - safeArea().bottom`) itself, as
+in `windowSize().height - safeArea().top - Math.max(0, keyboardFrame().height - safeArea().bottom) - 24`. Menus,
+selects and date pickers that a phone shows as sheets do the same, and a `maxHeight` in their `popupStyle` or
+`popupClass` takes the place of their limit the same way.
 
 ## Native sheets
 

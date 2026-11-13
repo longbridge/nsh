@@ -76,10 +76,11 @@ export type SheetSide = "bottom" | "top" | "left" | "right";
  * surface with the border's edge. At the bottom (or the top) it spans the
  * width, its two inner corners 20 points round, 16 points of padding at its
  * sides and its rows 14 apart, kept above the home indicator (the sheet
- * itself stands above the keyboard), and never taller than the screen below the status bar; put
- * `sheetGrabber` first in a bottom one. At the left or the right it is the
- * full height, at most 360 points wide (48 short of a narrow window), its
- * inner corners 16 round, 20 points of padding inside the safe area.
+ * itself stands above the keyboard), and never taller than the screen
+ * below the status bar; put `sheetGrabber` first in a bottom one. At the
+ * left or the right it is the full height, at most 360 points wide (48
+ * short of a narrow window), its inner corners 16 round, 20 points of
+ * padding inside the safe area.
  */
 export function sheetPanel(side: SheetSide): ViewStyle {
   const surface: ViewStyle = { backgroundColor: colors.surface, borderColor: colors.border };
