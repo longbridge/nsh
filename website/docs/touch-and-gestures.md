@@ -306,6 +306,8 @@ What the native side does for you:
 - **Pan, pinch and rotation run together** on the same view: one card can be dragged, pinched and rotated at once.
 - **Release velocity for physics.** The pan end's velocity feeds a spring's or a decay's velocity directly; the values let you pick a snap point.
 
+A view pans while it has a pan handler or `pan` values, so a condition in the expression turns its pan off and on: with `onPanEnd={zoomed() ? undefined : close}` the drags go to the content inside while `zoomed()` is true. The condition goes in the expression itself: a plain name (`onPanEnd={handler}`) is set once ([What runs again](./jsx-and-components.md#what-runs-again)).
+
 ```rust tabs
 // A card that snaps to the left or right edge.
 view()
@@ -439,7 +441,7 @@ While responding:
 
 | Rust | TSX | Description |
 |---|---|---|
-| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
+| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views, and on iOS the swipe back of the navigation stacks around it, from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
 | `.on_responder_reject(..)` | `onResponderReject` | Another view is the responder and would not let go. |
 | `.on_responder_start(..)` | `onResponderStart` | Another finger went down. |
 | `.on_responder_move(..)` | `onResponderMove` | A finger moved. |

@@ -416,6 +416,13 @@ impl<M: TextEngine> Core<M> {
         if let Some((key, _)) = self.focus {
             holders.push(key);
         }
+        // A reveal is resolved after layout; its target must survive the
+        // culling pass until that command has its text attachment's position.
+        holders.extend(self.commands.iter().filter_map(|(id, command)| {
+            matches!(command, crate::Command::Reveal(_))
+                .then(|| self.key(*id).ok())
+                .flatten()
+        }));
         holders.extend(
             self.overlays
                 .iter()

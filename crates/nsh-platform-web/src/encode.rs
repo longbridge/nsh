@@ -804,12 +804,16 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = a.level {
         let _ = write!(s, ",\"level\":{l}");
     }
-    // The views it names (`aria-activedescendant`, `aria-controls`).
+    // The views it names (`aria-activedescendant`, `aria-controls`,
+    // `aria-describedby`).
     if let Some(id) = a.active_descendant {
         let _ = write!(s, ",\"activeDescendant\":{id}");
     }
     if let Some(id) = a.controls {
         let _ = write!(s, ",\"controls\":{id}");
+    }
+    if let Some(id) = a.described_by {
+        let _ = write!(s, ",\"describedBy\":{id}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
@@ -1516,6 +1520,17 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.bool(*animated).end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::SetClipboardItem(item) => {
+            out.item("cmd")
+                .num(id)
+                .str("setClipboardItem")
+                .str(&item.text);
+            match &item.html {
+                Some(html) => out.str(html),
+                None => out.raw("null"),
+            };
+            out.end();
+        }
         Command::Notification(command) => {
             use nsh_core::notifications::NotificationCommand as N;
             match command {
@@ -1673,9 +1688,41 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .str(uri)
                 .end();
         }
+        // `nsh.js` `renderCanvas`: the request, the drawing as an on-screen
+        // canvas's (`cv`), the image's size in pixels, pixels per point and
+        // the MIME type; the page answers with `nsh_canvas_image`.
+        Command::RenderCanvas {
+            id: request,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("renderCanvas")
+                .num(*request)
+                .raw(&crate::canvas::encode(drawing))
+                .num(*width)
+                .num(*height)
+                .raw(&serde_json::Value::from(*scale).to_string())
+                .str(format.mime())
+                .end();
+        }
         // A browser's bars are the browser's; the browser's own developer
         // tools measure the page.
-        Command::StatusBar(_) | Command::PerfMonitor(_) => {}
+        Command::StatusBar(_) | Command::PerfMonitor(_) | Command::PerfMonitorMode(_) => {}
+        // The main window's title is the page's title (`nsh.js` writes it
+        // where the app is the page); the rest of a window is the browser's.
+        Command::Desktop(desktop) => match (id == nsh_core::ROOT_ID, &**desktop) {
+            (true, nsh_core::desktop::DesktopCommand::SetAttributes(attributes)) => {
+                if let Some(title) = &attributes.title {
+                    out.item("cmd").num(id).str("setTitle").str(title).end();
+                }
+            }
+            _ => log::debug!("web: command {desktop:?} is not supported"),
+        },
         other => log::debug!("web: command {other:?} is not supported"),
     }
 }
@@ -1805,4 +1852,46 @@ fn base64(bytes: &[u8]) -> String {
         });
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::desktop::{DesktopCommand, WindowAttributes, WindowRequest};
+
+    use super::*;
+
+    fn commands(id: u32, command: DesktopCommand) -> String {
+        let mut out = Out::new();
+        encode_command(&mut out, id, &Command::Desktop(Box::new(command)));
+        out.finish()
+    }
+
+    #[test]
+    // WindowAttributes is non-exhaustive outside nsh-core.
+    #[allow(clippy::field_reassign_with_default)]
+    fn the_main_windows_title_is_the_pages() {
+        let mut attributes = WindowAttributes::default();
+        attributes.title = Some("Inbox".to_owned());
+        let set = || DesktopCommand::SetAttributes(Box::new(attributes.clone()));
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, set()),
+            r#"[["cmd",1,"setTitle","Inbox"]]"#
+        );
+        // Another window's, other attributes and requests: the browser's.
+        assert_eq!(commands(nsh_core::ROOT_ID + 2, set()), "[]");
+        assert_eq!(
+            commands(
+                nsh_core::ROOT_ID,
+                DesktopCommand::SetAttributes(Box::default())
+            ),
+            "[]"
+        );
+        assert_eq!(
+            commands(
+                nsh_core::ROOT_ID,
+                DesktopCommand::Request(WindowRequest::Focus)
+            ),
+            "[]"
+        );
+    }
 }

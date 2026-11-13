@@ -99,8 +99,8 @@ use objc2_app_kit::{
     NSAttributedStringDocumentFormats, NSBitmapImageFileType, NSBitmapImageRep,
     NSDocumentTypeDocumentAttribute, NSEvent, NSEventModifierFlags, NSEventType,
     NSExcludedElementsDocumentAttribute, NSHTMLTextDocumentType, NSModalPanelRunLoopMode,
-    NSModalResponse, NSModalResponseAbort, NSPasteboard, NSPasteboardTypeRTF, NSPasteboardTypeRTFD,
-    NSPasteboardTypeString, NSScreen, NSWorkspace,
+    NSModalResponse, NSModalResponseAbort, NSPasteboard, NSPasteboardTypeHTML, NSPasteboardTypeRTF,
+    NSPasteboardTypeRTFD, NSPasteboardTypeString, NSScreen, NSWorkspace,
     NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification, NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
@@ -297,16 +297,34 @@ fn install(mtm: MainThreadMarker) {
     );
     // The displays: plugged in, unplugged, arranged again.
     let screens = RcBlock::new(|_: NonNull<NSNotification>| screens_changed());
+    // Another app came in front (or this one hid): the keys held are no
+    // longer held, and their releases may never come. No release is made
+    // up for them.
+    let resigned = RcBlock::new(|_: NonNull<NSNotification>| {
+        for surface in surfaces() {
+            crate::keyboard::deactivated(&surface);
+        }
+    });
     // SAFETY: as above.
     let observers = observers
-        .chain([unsafe {
-            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
-                Some(NSApplicationDidChangeScreenParametersNotification),
-                None,
-                Some(&queue),
-                &screens,
-            )
-        }])
+        .chain([
+            unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidResignActiveNotification),
+                    None,
+                    Some(&queue),
+                    &resigned,
+                )
+            },
+            unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidChangeScreenParametersNotification),
+                    None,
+                    Some(&queue),
+                    &screens,
+                )
+            },
+        ])
         .collect();
     // VoiceOver posts no notification: its setting is observed.
     // SAFETY: NSObject's initializer.
@@ -622,6 +640,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 toggle(*show);
             }
         }
+        Command::PerfMonitorMode(mode) => {
+            if let Some(set) = &*surface.perf_mode.borrow() {
+                set(*mode);
+            }
+        }
         Command::Announce(text) => crate::access::announce(
             crate::window::key_root(surface).ns(),
             text,
@@ -634,6 +657,16 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             pasteboard
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
         }
+        Command::SetClipboardItem(item) => {
+            let pasteboard = NSPasteboard::generalPasteboard();
+            pasteboard.clearContents();
+            // SAFETY: immutable AppKit constants.
+            let (string, kind_html) = unsafe { (NSPasteboardTypeString, NSPasteboardTypeHTML) };
+            pasteboard.setString_forType(&NSString::from_str(&item.text), string);
+            if let Some(html) = &item.html {
+                pasteboard.setString_forType(&NSString::from_str(html), kind_html);
+            }
+        }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),
         Command::ReadClipboardImage { id, has_only } => {
@@ -645,6 +678,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             crate::file_requests::pick_files(surface, *id, request);
         }
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::Speech(command) => surface.control(|c| crate::speech::command(c, command)),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();

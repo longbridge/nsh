@@ -97,6 +97,25 @@ const box = editor.nodeRect(blockStart);
 />
 ```
 
+### 复制和粘贴
+
+复制或剪切时，选区以两种形式放到剪贴板上，和 ProseMirror 一样：纯文本（启用 `markdown` 扩展的 `copyAsMarkdown` 时为
+Markdown），以及按 schema 的 `renderHTML` 写出的 HTML，邮件、文档和其他编辑器粘贴时会保留格式。HTML 上标记了复制的切片
+（`data-pm-slice`），所以粘贴回 `RichEditor` 时得到同样的节点：提及等行内节点保留，列表项的一部分仍是列表项的一部分，空格
+也保留。其他来源的 HTML 按 schema 的解析规则读取。Rust 插件可以用 `transform_copied` 修改复制的内容。
+
+### 粘贴和拖入的文件
+
+文件交给应用，由应用决定它们变成什么（图片节点、附件、指向上传副本的链接）；编辑器不为它们插入任何内容，选区保持不变，应用在选区处插入自己生成的内容。粘贴图片或在文件管理器中复制的文件时调用 `onPasteFiles`，参数为 `{ files, uris }`：`files` 是带字节的图片，`uris` 是被复制文件的 `file:` URL。在桌面平台上，从其他应用拖到编辑器上的文件调用它的 `onFileDrop`，参数为 `{ uris, mimeTypes }`，与[视图的文件拖放](./view.md#桌面文件拖放)相同；`onFileDragEnter` / `onFileDragLeave` 跟随拖动，可用于显示「松开以添加附件」之类的提示。没有 `onFileDrop` 时，拖入的文件交给外层监听的视图。
+
+```tsx
+<RichEditor
+  editor={editor}
+  onPasteFiles={({ files }) => attach(files)}
+  onFileDrop={({ uris, mimeTypes }) => attachFiles(uris, mimeTypes)}
+/>
+```
+
 ## Schema
 
 `defineSchema(spec)` 读取 ProseMirror 形式的 schema，并在出错时抛出错误说明哪里不对。节点类型声明它们的 `content`（内容表达式：`"inline*"`、`"paragraph+"`、`"(heading | paragraph) block*"`）、`group`、是否为 `inline` 或 `atom`、允许的 `marks`，以及带默认值和校验（`"string"`、`"number"`、`"boolean"`）的 `attrs`。第一个块类型是默认类型：回车创建的、填充必需内容的类型。spec 中其他的键作为类型的附加数据保留，供构建在编辑器之上的框架使用。
@@ -269,21 +288,25 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 三个插件提供 Tiptap 的 Link、CharacterCount 和 Suggestion 行为，全部原生运行：
 
 ```tsx
-import { RichEditor, characterCount, createRichEditor, insertMention, link, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
+import { RichEditor, characterCount, createRichEditor, insertMention, link, setSuggestionOpen, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
 
 const editor = createRichEditor({
   schema: withMention(starterSchema()),
   plugins: [
+    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
     starterKit(),
     link({ defaultProtocol: "https" }),
     characterCount({ limit: 280 }),
-    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
   ],
 });
 
 editor.on("transaction", () => {
   const s = editor.suggestion("mention");
-  if (s?.active) showPeople(s.query, editor.coordsAtPos(s.range.from), s.lastKey);
+  if (s?.active) {
+    const people = peopleMatching(s.query);
+    editor.run(setSuggestionOpen(people.length > 0, "mention"));
+    showPeople(people, editor.coordsAtPos(s.range.from), s.lastKey);
+  }
   setCount(`${editor.characters()} / ${editor.characterLimit}`);
 });
 
@@ -293,7 +316,7 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 
 - `link(options?)`：在 URL 后输入空格或 Enter 时，URL 变为链接，粘贴文本中的 URL 也一样（`autolink`）；在选区上粘贴 URL 会给选区加上链接（`linkOnPaste`）；按住 Mod 点按链接，或在编辑器只读时点按，会通过应用的 URL 处理打开它（`openOnClick`）；`enableClickSelection` 点按时选中整个链接。带协议和不带协议的 URL（`nsh.dev`、`https://nsh.dev/docs`、电子邮件地址）都能识别，不带协议的主机名使用 `defaultProtocol`（`http`）。链接接受 `http`、`https`、`ftp`、`ftps`、`mailto`、`tel`、`callto`、`sms`、`cid`、`xmpp` 以及 `protocols` 中的协议，因此 `setLink({ href })`、`toggleLink(attrs?)` 和自动链接会把脚本（`javascript:`）和 data URL 挡在外面。`unsetLink()` 移除选区所在的链接。在桌面平台和桌面形态的 Web 上，指针停在带链接的文字上时，会在指针下方显示链接的 `title` 和目的地，与 [TextView 的链接](./text-view.md)相同；在链接里按压和输入照常进行。由应用的标记视图渲染的文字，显示应用元素自己的内容。
 - `characterCount(options?)`：`editor.characters(mode?)` 统计文本的字符（`"textSize"`，与 JS 的 `length` 一样按 UTF-16 单元）或文档的位置数（`"nodeSize"`）；`editor.words()` 统计词数（Unicode 词边界）。设置 `limit` 后，会超出上限的修改被拒绝，粘贴的内容被截到放得下的长度；超出上限的初始文档会被截短（`autoTrim`）。`setCharacterLimit(limit)` 修改上限，`editor.characterLimit` 读取上限。
-- `suggestion(options?)`：跟踪光标前输入的触发字符（`char`，默认 `@`）。`allowSpaces` 让查询可以包含空格，`allowedPrefixes` 列出触发字符前可以出现的字符（默认一个空格；`anyPrefix` 接受任何字符），`startOfLine` 要求触发字符位于行首（`/` 命令菜单）。`editor.suggestion(key)` 给出 `{ active, range, query, text, lastKey, keyCount }`；活动范围带有应用的 `decorationClass`（查询为空时还有 `decorationEmptyClass`）。建议活动期间，`captureKeys` 中的按键归应用的列表：编辑器接收它们并把最后一个记录在状态中；Escape 关闭建议（`exitSuggestion(key)` 也可以）。`replaceSuggestion(content, key?)` 用文本或 JSON 内容替换触发字符和查询。
+- `suggestion(options?)`：跟踪光标前输入的触发字符（`char`，默认 `@`）。`allowSpaces` 让查询可以包含空格，`allowedPrefixes` 列出触发字符前可以出现的字符（默认一个空格；`anyPrefix` 接受任何字符），`startOfLine` 要求触发字符位于行首（`/` 命令菜单）。`editor.suggestion(key)` 给出 `{ active, range, query, text, lastKey, keyCount, open }`；活动范围带有应用的 `decorationClass`（查询为空时还有 `decorationEmptyClass`）。建议活动期间，`captureKeys` 中的按键归应用的列表：编辑器接收它们并把最后一个记录在状态中；Escape 关闭建议（`exitSuggestion(key)` 也可以）。`setSuggestionOpen(open, key?)` 告诉建议当前查询下列表是否显示（即状态中的 `open`）：关闭时，`captureKeys` 中的按键交给编辑器继续处理，没有匹配时 Enter 照常发送或换行，Escape 仍然关闭建议。它只对设置时的查询有效，查询每次变化都要重新设置；在此之前列表视为打开，按键归列表。异步加载条目的列表（例如远程搜索联系人）要等确定列表为空后再关闭，结果还在加载时不要关闭，否则 Enter 会在结果到达之前就生效。在 `plugins` 中，建议要放在 `starterKit()` 和应用自己的按键之前，按键才会先到达它。`replaceSuggestion(content, key?)` 用文本或 JSON 内容替换触发字符和查询。
 - `withMention(schema, { name?, char? })` 添加 Tiptap 的提及节点：带 `id`、`label` 和触发字符的行内原子节点，在文本中写作 `@label`，在 HTML 中写作 `<span data-type="mention">`。`insertMention(range, id, label?)` 用一个提及和一个空格替换建议的范围。
 
 弹出层属于应用：它读取建议的状态，放在 `coordsAtPos(range.from)` 处，并以自己的方式绘制条目。

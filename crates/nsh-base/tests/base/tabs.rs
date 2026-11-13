@@ -193,6 +193,28 @@ fn the_arrows_do_nothing_while_the_focus_is_outside_the_list() {
     app.wait_for("text:presses:0").unwrap();
 }
 
+/// A named list: screen readers say the list's name as they enter it, and
+/// its tabs stay elements of their own.
+#[component]
+fn NamedTabs() -> impl IntoElement {
+    tabs()
+        .accessibility_label("Sections")
+        .child(tab().selected(true).child(text("One")))
+        .child(tab().child(text("Two")))
+}
+
+#[test]
+fn a_list_takes_the_name_the_app_gives_it() {
+    let app = start::<NamedTabs>();
+    let screen = app.screen();
+    assert_eq!(screen.count("role:tablist[Sections]"), Ok(1));
+    assert_eq!(screen.count("role:tablist[Sections] >> role:tab"), Ok(2));
+    // A list the app does not name is not called that.
+    let app = start::<TabsScreen>();
+    assert_eq!(app.screen().count("role:tablist"), Ok(1));
+    assert_eq!(app.screen().count("role:tablist[Sections]"), Ok(0));
+}
+
 /// Tabs without a list are stops of their own, as before.
 #[component]
 fn LooseTabs() -> impl IntoElement {

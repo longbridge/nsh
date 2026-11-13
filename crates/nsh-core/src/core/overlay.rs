@@ -506,6 +506,9 @@ impl<M: TextEngine> Core<M> {
                 child: id,
                 before: None,
             });
+            // Its native parent is this host; its logical ancestry may
+            // need the override.
+            self.key_ancestry_dirty = true;
             if let Some(root) = self.nodes[key as usize].root.as_mut() {
                 root.laid_out = None;
             }
@@ -519,6 +522,53 @@ impl<M: TextEngine> Core<M> {
             self.overlays.extend(opened);
         }
         self.sync_overlay_listeners(&hints);
+    }
+
+    /// Finds again which shown overlays need a keyboard ancestry override
+    /// ([`crate::ViewProps::key_parent`]): their native parent is their
+    /// root view, while a listener or capture rule on their logical
+    /// ancestry must still hear keys. Runs when a key rule or an overlay
+    /// changed, not per key; an ordinary app's overlays keep `None`.
+    pub(super) fn sync_key_parents(&mut self) {
+        self.key_ancestry_dirty = false;
+        for index in 0..self.overlays.len() {
+            let key = self.overlays[index];
+            let logical = self.nodes[key as usize].parent;
+            let desired = (logical != NO_KEY)
+                .then(|| self.nodes[logical as usize].id)
+                .filter(|parent| self.logical_key_interest(*parent));
+            if self.nodes[key as usize].key_parent == desired {
+                continue;
+            }
+            self.nodes[key as usize].key_parent = desired;
+            self.mark(key, super::dirty::VIEW_PROPS);
+        }
+    }
+
+    /// Whether `id` or an ancestor in the logical tree has a key listener
+    /// or a capture rule. Disabled views still count: a native adapter skips
+    /// them itself, and a stale override changes no behavior.
+    fn logical_key_interest(&self, id: NodeId) -> bool {
+        let Ok(mut key) = self.key(id) else {
+            return false;
+        };
+        let window = self.key_window(key);
+        loop {
+            let node = &self.nodes[key as usize];
+            if node.mounted_events().contains(EventKind::KeyDown)
+                || node.mounted_events().contains(EventKind::KeyUp)
+                || node
+                    .props
+                    .as_ref()
+                    .is_some_and(|p| !p.key_capture.is_none())
+            {
+                return true;
+            }
+            if node.id == window || node.parent == NO_KEY {
+                return false;
+            }
+            key = node.parent;
+        }
     }
 
     /// The touches and keys the shown overlays need, and the pointer the
@@ -650,7 +700,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Whether `key` is a nested span of a text, with no frame of its own.
-    fn is_text_span(&self, key: Key) -> bool {
+    pub(super) fn is_text_span(&self, key: Key) -> bool {
         let n = &self.nodes[key as usize];
         n.kind == Kind::Text && n.inline && n.layout.is_none()
     }

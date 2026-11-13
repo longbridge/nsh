@@ -437,7 +437,17 @@ pub(crate) fn decode_prop<'js>(
     }
     let mut cx = tag.map_or_else(HostCx::default, HostCx::for_element);
     let input = Js(value);
-    let decoded = <Prop as HostProps>::decode(name, &input, &mut cx);
+    // `captureKeys` holds keystrokes: `mod` is Command where the page's
+    // platform follows Apple's conventions, which this bridge knows from
+    // the environment the page sent, not from an engine's ambient one.
+    let decoded = if name == "captureKeys" {
+        Some(
+            nsh_core::js::host::decode_capture_keys(&input, &mut cx, super::apple_keyboard())
+                .map(Prop::KeyCapture),
+        )
+    } else {
+        <Prop as HostProps>::decode(name, &input, &mut cx)
+    };
     for message in cx.warnings {
         warnings.warn(message);
     }

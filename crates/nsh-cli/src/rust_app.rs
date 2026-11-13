@@ -48,6 +48,7 @@
 //! directory would, or in `CARGO_TARGET_DIR`.
 
 use std::{
+    collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
     process::Command,
@@ -304,18 +305,68 @@ fn host_triple() -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The packages the describing program builds on its own, as
+/// `(name, version)`: `cargo tree -p <describe>` resolves its features
+/// alone, as `cargo build -p` does, with the hack empty.
+fn describe_packages(ws: &Path, describe: &str, triple: &str) -> Option<HashSet<(String, String)>> {
+    let output = Command::new(cargo())
+        .args([
+            "tree",
+            "-p",
+            describe,
+            "-e",
+            "normal,build",
+            "--prefix",
+            "none",
+        ])
+        .args(["-f", "{p}", "--target", triple, "--manifest-path"])
+        .arg(ws.join("Cargo.toml"))
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let packages = parse_tree_packages(&text);
+    (!packages.is_empty()).then_some(packages)
+}
+
+/// The `(name, version)` of each line of `cargo tree -f "{p}"`.
+fn parse_tree_packages(text: &str) -> HashSet<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let name = words.next()?;
+            let version = words.next()?.strip_prefix('v')?;
+            Some((name.to_owned(), version.to_owned()))
+        })
+        .collect()
+}
+
 /// The `[target.'<triple>'.dependencies]` and `build-dependencies` of the
 /// hack, from `cargo metadata`: every package the workspace member
 /// `describe` depends on, normally or to build (`hack` itself left out),
 /// with the features Cargo resolved for it; only what builds build scripts
 /// as build dependencies.
+///
+/// Empty unless every one of those packages is one of `own`, what the
+/// describing program builds on its own ([`describe_packages`]), and is
+/// told apart from every other package by its name and version: features
+/// the other programs turn on (`nsh-engine`'s `js`, which the test runner
+/// and the hosts take) can add packages to the workspace's graph, and the
+/// hack would make the describing program build them (a JS engine it never
+/// links). Telling which features are safe would mean redoing Cargo's
+/// feature resolution, so such a workspace goes without the hack and each
+/// program builds its own copy, as before.
 fn hack_dependencies(
     metadata: &serde_json::Value,
     describe: &str,
     hack: &str,
     triple: &str,
+    own: &HashSet<(String, String)>,
 ) -> String {
-    use std::collections::{BTreeMap, HashMap, HashSet};
+    use std::collections::{BTreeMap, HashMap};
     let packages: HashMap<&str, &serde_json::Value> = metadata["packages"]
         .as_array()
         .into_iter()
@@ -369,6 +420,29 @@ fn hack_dependencies(
                     _ => {}
                 }
             }
+        }
+    }
+    // `cargo tree` names a package by name and version only.
+    fn identity(p: &serde_json::Value) -> Option<(&str, &str)> {
+        Some((p["name"].as_str()?, p["version"].as_str()?))
+    }
+    let mut sources: HashMap<(&str, &str), usize> = HashMap::new();
+    for p in packages.values() {
+        if let Some(id) = identity(p) {
+            *sources.entry(id).or_default() += 1;
+        }
+    }
+    for &(id, _) in &seen {
+        if id == root {
+            continue;
+        }
+        let Some((name, version)) = packages.get(id).and_then(|p| identity(p)) else {
+            return String::new();
+        };
+        if sources.get(&(name, version)) != Some(&1)
+            || !own.contains(&(name.to_owned(), version.to_owned()))
+        {
+            return String::new();
         }
     }
     let mut normal = BTreeMap::new();
@@ -531,7 +605,16 @@ fn hack_spec(package: &serde_json::Value, node: Option<&serde_json::Value>) -> O
 
 /// What a generated crate names of a platform crate's features: all but `js`
 /// and the standard JS modules, which a Rust app does not run.
-pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\"]";
+pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\", \"websocket\", \"updater\", \"svg\", \"net\"]";
+
+/// [`RUST_APP_PLATFORM`] for the platform crate `platform`, with the
+/// features only it has: Linux's `sound` (GStreamer).
+pub(crate) fn rust_app_platform(platform: &str) -> String {
+    match platform {
+        "nsh-platform-linux" => RUST_APP_PLATFORM.replacen(']', ", \"sound\"]", 1),
+        _ => RUST_APP_PLATFORM.to_owned(),
+    }
+}
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
@@ -1650,7 +1733,9 @@ panic = \"abort\"
     /// machine's target only. Cargo's `resolver.feature-unification =
     /// "workspace"` will replace it once it is stable.
     ///
-    /// Best effort: when Cargo cannot say, the hack stays empty and each
+    /// Best effort: when Cargo cannot say, or when the workspace's features
+    /// would make the describing program build a package it does not build
+    /// on its own ([`hack_dependencies`]), the hack stays empty and each
     /// program builds as before. It stays empty too when only the
     /// describing program is built for this machine (`nsh build`, `nsh
     /// check`, a package or a host for another target): it has nothing to
@@ -1679,6 +1764,10 @@ panic = \"abort\"
         if self.write_hack(ws, "", "").is_err() {
             return;
         }
+        // What the describing program builds alone, with the hack empty.
+        let Some(own) = describe_packages(ws, &self.bin("describe"), &triple) else {
+            return;
+        };
         let metadata = Command::new(cargo())
             .args(["metadata", "--format-version", "1", "--filter-platform"])
             .arg(&triple)
@@ -1693,8 +1782,13 @@ panic = \"abort\"
         let Ok(metadata) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
             return;
         };
-        let dependencies =
-            hack_dependencies(&metadata, &self.bin("describe"), &self.bin("hack"), &triple);
+        let dependencies = hack_dependencies(
+            &metadata,
+            &self.bin("describe"),
+            &self.bin("hack"),
+            &triple,
+            &own,
+        );
         // Keyed after the hack is in Cargo.lock's terms: the key leaves out
         // the hack's own entry.
         let _ = self.write_hack(ws, &key, &dependencies);
@@ -1706,6 +1800,9 @@ panic = \"abort\"
         let mut hash = Sha256::new();
         hash.update(triple);
         hash.update(env!("CARGO_PKG_VERSION"));
+        // How the hack is made: one made before it was checked against the
+        // describing program's own packages is made again.
+        hash.update("own packages");
         // What the hack leaves out: a hack written before a change to it
         // is written again.
         hash.update(format!("{HOST_ONLY_FEATURES:?}"));
@@ -1872,7 +1969,7 @@ panic = \"abort\"
         )?;
         self.write_rust_app(ws, root)?;
         write(&ws.join("rust-web/build.rs"), WEB_BUILD_RS)?;
-        let sets = self.rust_web_sets();
+        let sets = self.rust_sets();
         write(
             &ws.join("rust-web/lib.rs"),
             &format!(
@@ -1934,7 +2031,7 @@ panic = \"abort\"
     /// `run_rust` mounts the app's root.
     fn write_rust_runner(&self, ws: &Path, dir: &str, root: &RootConfig) -> anyhow::Result<()> {
         let app = self.dependencies();
-        let sets = self.sets();
+        let sets = self.rust_sets();
         let (os, lib, platform, exit) = match dir {
             "rust-linux" => (
                 "target_os = \"linux\"",
@@ -1969,7 +2066,7 @@ panic = \"abort\"
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, RUST_APP_PLATFORM),
+                self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -2827,7 +2924,7 @@ impl RustApp {
         format!("vec![{}]", sets.join(", "))
     }
 
-    /// The UI sets of a Rust app's web runtime: `nsh/base`'s core part
+    /// The UI sets of a Rust app's runners and web runtime: `nsh/base`'s core part
     /// only, then the app's ([`Self::sets`]). A Rust app runs no JS, so
     /// nothing makes a component by its registered name: its code makes
     /// each of `nsh/base`'s components by type (`nsh_base::button()`),
@@ -2836,7 +2933,7 @@ impl RustApp {
     /// `nsh/base` has, and the built-in scroll bars, the core part's.
     /// Registering every part would link every component into the module,
     /// the ones the app never makes included (`nsh_base::registry_of`).
-    fn rust_web_sets(&self) -> String {
+    fn rust_sets(&self) -> String {
         let mut sets = vec![
             "nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])".to_owned(),
         ];
@@ -3887,6 +3984,9 @@ mod tests {
             "app-describe",
             "app-hack",
             "x86_64-unknown-linux-gnu",
+            &super::parse_tree_packages(
+                "app-native v0.1.0\nnsh-platform-linux v0.5.0\ngtk4 v0.11.5\ngstreamer v0.24.0\n",
+            ),
         );
         // The platform's other features and dependencies stay shared.
         assert!(
@@ -3935,14 +4035,16 @@ mod tests {
             "app-describe",
             "app-hack",
             "x86_64-unknown-linux-gnu",
+            &super::parse_tree_packages("nsh-platform-linux v0.5.0\nwebkit6 v0.6.1\n"),
         );
         assert!(hack.contains("features = [\"pages\"] }"), "{hack}");
         assert!(hack.contains("package = \"webkit6\""), "{hack}");
     }
 
-    #[test]
-    fn the_hack_names_what_describe_builds_with_its_resolved_features() {
-        let metadata = serde_json::json!({
+    /// A workspace whose describing program builds `nsh-core` and what it
+    /// depends on; the test runner alone builds `wgpu`.
+    fn hack_metadata() -> serde_json::Value {
+        serde_json::json!({
             "workspace_members": ["describe", "hack", "test"],
             "packages": [
                 { "id": "describe", "name": "app-describe", "version": "0.0.0", "source": null, "manifest_path": "/ws/describe/Cargo.toml" },
@@ -3980,13 +4082,32 @@ mod tests {
                 { "id": "dev", "features": [], "deps": [] },
                 { "id": "only-test", "features": [], "deps": [] }
             ] }
-        });
-        let hack = super::hack_dependencies(
-            &metadata,
+        })
+    }
+
+    /// `cargo tree -p app-describe` of [`hack_metadata`].
+    const DESCRIBE_TREE: &str = "app-describe v0.0.0 (/ws/describe)\n\
+         nsh-core v0.5.0 (/nsh/crates/nsh-core)\n\
+         smallvec v1.15.1\n\
+         smallvec v2.0.0\n\
+         taffy v0.9.0 (https://github.com/x/taffy?branch=main#abc)\n\
+         private v1.0.0 (registry `example`)\n\
+         cc v1.2.0\n\
+         nsh-core v0.5.0 (/nsh/crates/nsh-core) (*)\n";
+
+    fn hack_of(metadata: &serde_json::Value, tree: &str) -> String {
+        super::hack_dependencies(
+            metadata,
             "app-describe",
             "app-hack",
             "x86_64-unknown-linux-gnu",
-        );
+            &super::parse_tree_packages(tree),
+        )
+    }
+
+    #[test]
+    fn the_hack_names_what_describe_builds_with_its_resolved_features() {
+        let hack = hack_of(&hack_metadata(), DESCRIBE_TREE);
         let (normal, build) = hack
             .split_once("[target.\"x86_64-unknown-linux-gnu\".build-dependencies]")
             .unwrap();
@@ -4002,6 +4123,26 @@ mod tests {
             build.trim(),
             "cc-1-2-0 = { package = \"cc\", version = \"1.2.0\", default-features = false, features = [] }"
         );
+    }
+
+    /// Another program's features add a package to the workspace's graph
+    /// (`nsh-engine`'s `js` turning QuickJS on): the hack stays empty
+    /// rather than make the describing program build it.
+    #[test]
+    fn the_hack_is_empty_when_the_workspace_adds_to_describes_packages() {
+        let tree = DESCRIBE_TREE.replace("smallvec v2.0.0\n", "");
+        assert_eq!(hack_of(&hack_metadata(), &tree), "");
+    }
+
+    /// `cargo tree` names packages by name and version: when two sources
+    /// supply one of describe's, the hack stays empty.
+    #[test]
+    fn the_hack_is_empty_when_describes_packages_are_ambiguous() {
+        let mut metadata = hack_metadata();
+        metadata["packages"].as_array_mut().unwrap().push(serde_json::json!(
+            { "id": "sv1-git", "name": "smallvec", "version": "1.15.1", "source": "git+https://example.com/smallvec#abc", "manifest_path": "/g/Cargo.toml" }
+        ));
+        assert_eq!(hack_of(&metadata, DESCRIBE_TREE), "");
     }
 
     #[test]
@@ -4613,8 +4754,12 @@ panic = \"abort\"
                 "main.rs"
             };
             let code = read(&format!("{dir}/{file}"));
-            // A Rust app's web runtime takes `nsh/base`'s core part only.
-            let sets = if dir == "rust-web" {
+            // A Rust app's runners and web runtime run no JS: they take
+            // `nsh/base`'s core part only.
+            let sets = if matches!(
+                dir,
+                "rust-web" | "rust-linux" | "rust-macos" | "rust-windows" | "rust-ios"
+            ) {
                 "vec![nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part]), set_app_charts(), set_app_app_storage()]"
             } else {
                 sets

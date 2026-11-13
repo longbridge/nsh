@@ -73,6 +73,8 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 下方的柱状图是最近 120 帧的主线程耗时，与一次刷新的时长（横线）对比：在一半以内为绿色，在其以内为琥珀色，超过为红色。
 面板显示时，读数也会每秒记录到日志一次（target `nsh::fps`，格式与 Linux 后端相同，帧阶段为 macOS 的 `tick`、`drain` 和 `canvas`；毫秒，依次为 mean/p50/p95/max），`nsh test --fps -v` 会显示这些日志，`examples/gallery/tools/perf.py` 会读取它们。请测量 release 构建；监视器关闭时没有任何开销。
 
+点一下面板，它会收成一个只显示帧率的小药丸：帧的主线程耗时 95 分位数在一次刷新时长的一半以内为绿色，在其以内为琥珀色，超过为红色（与柱状图的颜色相同）；再点一下展开。VoiceOver 把它读成一个带这个数值的按钮，按下的效果相同。面板只接收落在它上面的点击，应用的其他区域照常收到鼠标，与没有面板时一样。应用用 `setFpsMode` 设置它的显示方式（`"expanded"`、`"collapsed"`，或 `"hidden"`：不显示任何东西，但照常测量并记录日志；Rust：`set_fps_mode(FpsMode::Collapsed)`，嵌入时用 `AppView::set_fps_mode`），立即生效，之后再显示时也照此显示；`NSH_FPS=collapsed` 或 `NSH_FPS=hidden` 让它以这种方式启动。
+
 ## 打包
 
 ```sh
@@ -150,6 +152,9 @@ function App() {
 mount(App);
 ```
 
+菜单栏应用常常提供登录时打开：用户打开它时，`Application.setLaunchAtLogin(true)` 把应用包登记为登录项（见
+[登录时打开](../modules/nsh-desktop.md#登录时打开)）。
+
 用 `AppView` 嵌入的应用按宿主应用的方式参与系统界面（宿主的 `LSUIElement`，或 `NSApplication.setActivationPolicy`）。
 
 ## 嵌入 Mac 应用
@@ -197,6 +202,10 @@ view.load(Bundle::source(code).into());
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 
 `AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
+
+`AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：应用包的登录项
+（`SMAppService.mainApp`）。默认关闭，且只有 `run_app` 读取它，所以嵌入应用 不会登录时打开；`nsh package`
+构建的应用的运行器会打开它。
 
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
 

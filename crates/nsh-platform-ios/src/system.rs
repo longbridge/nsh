@@ -499,6 +499,24 @@ pub(crate) fn set_clipboard(text: &str) {
     };
 }
 
+/// `Clipboard.write`: puts `text` and `html` on the general pasteboard as
+/// one item (plain text and `public.html`), as a browser copies them.
+pub(crate) fn set_clipboard_html(text: &str, html: &str) {
+    let kinds = [
+        NSString::from_str("public.utf8-plain-text"),
+        NSString::from_str("public.html"),
+    ];
+    let values = [NSString::from_str(text), NSString::from_str(html)];
+    let kinds: Vec<&NSString> = kinds.iter().map(|k| &**k).collect();
+    let values: Vec<&AnyObject> = values.iter().map(|v| v.as_ref()).collect();
+    let item = NSDictionary::from_slices(&kinds, &values);
+    let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
+    // SAFETY: UIPasteboard's setter of items (type to value).
+    let _: () = unsafe {
+        objc2::msg_send![&board, setItems: &*objc2_foundation::NSArray::from_retained_slice(&[item])]
+    };
+}
+
 /// `Clipboard.readText` / `hasText`: whether the general pasteboard
 /// holds text and, unless `has_only`, the text. `hasStrings` does not read
 /// it, so it shows no paste notice.

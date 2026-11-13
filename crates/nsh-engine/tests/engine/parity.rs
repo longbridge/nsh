@@ -113,6 +113,7 @@ mount(() => <Text>{{shown()}}</Text>);
             refuse_connections: None,
             filesystem: None,
             windows: None,
+            login_item: None,
             assets: None,
             environment: Environment {
                 os: Os::Linux,

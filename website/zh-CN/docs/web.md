@@ -221,6 +221,17 @@ nsh package --target web --asset-url https://cdn.example.com/debugger/
 
 发布到 Web 的应用与打包的原生应用运行方式相同：以发布模式运行，具有其 `nsh.json` 声明的能力（[沙箱与能力](./sandbox-and-capabilities.md)），TSX 应用由浏览器的 JavaScript 引擎执行。当能力限制了 `network` 时，页面还会带上 Content-Security-Policy `connect-src`，其中列出声明的主机（以及页面自身的源和 `--asset-url` 的源），由浏览器自己拒绝发往其他主机的请求和重定向。导致应用无法启动的错误会显示在页面上；之后的错误输出到浏览器控制台。
 
+#### 在严格的脚本策略下运行
+
+页面不运行内联代码：它的脚本都是站点里的文件，所以服务器发送 `script-src 'self' 'wasm-unsafe-eval'` 这样的严格策略时，页面无需改动即可运行。应用本身运行在页面的一个 frame 里，它的 import map 是唯一的内联脚本；`nsh package` 会打印它的哈希，把它加进策略即可：
+
+```text
+✓ packaged .nsh/out/Sports, 5.1 MB
+  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval' 'sha256-…'
+```
+
+import map 用带摘要的文件名引用应用的文件，所以应用代码变化时哈希也会变化：每次打包后都要取新的哈希。`base-uri` 可以是 `'none'`。整体加载原生模块的 TSX 应用（把 `import * as base from "nsh/base"` 当作值传递、`import(name)`）在启动时才生成 import map，需要 `'unsafe-inline' blob:`，`nsh package` 会提示。Web 视图的桥（`window.nsh.postMessage`）也是文件；Web 视图自己的 `html` 里的脚本和 `injectedJavaScript*` 是内联的，由应用自己放行，`injectJavaScript` 需要 `'unsafe-eval'`。
+
 ### 用 iframe 嵌入
 
 Web 上没有嵌入 API：用 `<iframe>` 嵌入已发布的应用，它的尺寸就是应用的窗口：
@@ -458,6 +469,18 @@ import { Head } from "nsh/web";
   />
   …
 </NavPage>
+```
+
+主窗口的标题也是页面的标题，用 Rust 编写的应用就这样设置标签页的标题：按桌面上的方式设置（TSX 中是 `currentWindow().set({ title })`）；已挂载的 `Head` 设置的标题优先。空标题让页面恢复它自己的 `<title>`。Rust 应用的 nsh.json `window.title` 从启动起就是标签页的标题，和它在桌面上作为窗口标题一样。浏览器历史的每一条记录都保留它的页面当时的标题，所以标题要和它所属的页面或地址在同一轮里设置。
+
+```rust
+use nsh_core::{desktop::WindowAttributes, element::desktop::main_window};
+
+fn show_title(title: &str) {
+    let mut attributes = WindowAttributes::default();
+    attributes.title = Some(format!("{title} · Market Notes"));
+    main_window().set(attributes);
+}
 ```
 
 ## 限制

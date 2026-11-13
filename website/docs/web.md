@@ -242,6 +242,23 @@ Content-Security-Policy `connect-src` with the declared hosts (and the page's ow
 refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
 later errors go to the browser's console.
 
+#### Under a strict script policy
+
+The page runs no inline code: its scripts are files of the site, so a server that sends a strict policy such as
+`script-src 'self' 'wasm-unsafe-eval'` serves it as it is. The app itself runs in a frame of the page whose import map
+is the one inline script left; `nsh package` prints its hash, which the policy adds:
+
+```text
+✓ packaged .nsh/out/Sports, 5.1 MB
+  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval' 'sha256-…'
+```
+
+The map names the app's files by their digests, so the hash changes when the app's code does: take it from each
+package. `base-uri` may be `'none'`. A TSX app that loads a native module whole (`import * as base from "nsh/base"`
+passed on as a value, `import(name)`) has the map made as it starts, which needs `'unsafe-inline' blob:`; `nsh package`
+says so. A web view's bridge (`window.nsh.postMessage`) is a file too; scripts in the web view's own `html` and its
+`injectedJavaScript*` are inline, the app's to allow, and `injectJavaScript` needs `'unsafe-eval'`.
+
 ### Embed it with an iframe
 
 There is no embedding API on the web: embed the published app with an `<iframe>`. Its size is the app's window:
@@ -519,6 +536,22 @@ import { Head } from "nsh/web";
   />
   …
 </NavPage>
+```
+
+The main window's title is the page's title too, which is how an app written in Rust titles its tab: set it as the
+desktops do (`currentWindow().set({ title })` in TSX), and a mounted `Head`'s title wins over it. An empty title brings
+back the page's own `<title>`. A Rust app's nsh.json `window.title` titles its tab from launch, as it titles its window
+on the desktops. Each entry of the browser's history keeps the title its page had, so set the title in the same turn as
+the page or address it belongs to.
+
+```rust
+use nsh_core::{desktop::WindowAttributes, element::desktop::main_window};
+
+fn show_title(title: &str) {
+    let mut attributes = WindowAttributes::default();
+    attributes.title = Some(format!("{title} · Market Notes"));
+    main_window().set(attributes);
+}
 ```
 
 ## Limits
