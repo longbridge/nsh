@@ -1041,6 +1041,8 @@ mod tests {
                 role: Some(role),
                 when: When::Auto,
                 icon: None,
+                symbol: None,
+                destructive: false,
             })
         }
 
