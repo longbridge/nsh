@@ -7,22 +7,41 @@
 //! UI thread: recording uses the thread's devices ([`gfx::get`], a
 //! single-threaded factory), its pool of recording contexts and the
 //! images' bitmaps, which are all kept per UI thread, so the image is the
-//! very replay a canvas view plays on screen. The pixels are read back
-//! there; turning them into straight alpha and encoding them, the part
-//! that grows with the image, runs on a thread of its own, and the image
-//! goes back to the engine on the UI thread as one root
-//! [`EventKind::CanvasImage`].
+//! very replay a canvas view plays on screen.
+//!
+//! The UI thread never waits for the GPU: after the drawing and its copy
+//! into a CPU-readable bitmap are submitted (the copy inside the draw, so
+//! `EndDraw` flushes both), a Direct3D event query marks
+//! their end ([`Pending`]), and a thread timer polls it without flushing
+//! ([`Pending::when_done`]); only once the GPU has passed it is the bitmap
+//! mapped, which then returns at once, and its rows copied out (one copy
+//! when they are packed). Turning the pixels into straight alpha and
+//! encoding them, the part that grows with the image, runs on a thread of
+//! its own, and the image goes back to the engine on the UI thread as one
+//! root [`EventKind::CanvasImage`]. An image larger than the device's
+//! bitmaps, or one its memory cannot hold, is
+//! [`RenderFailure::TooLarge`] (`ERR_NSH_QUOTA_EXCEEDED`).
 
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use nsh_core::{
     Color, EventKind, EventPayload, ROOT_ID,
-    canvas::{Drawing, render::ImageFormat},
+    canvas::{
+        Drawing,
+        render::{ImageFormat, RenderFailure},
+    },
 };
 use rustc_hash::FxHashMap;
 use windows::{
     Win32::{
-        Foundation::{D2DERR_RECREATE_TARGET, E_FAIL, E_OUTOFMEMORY},
+        Foundation::{
+            D2DERR_MAX_TEXTURE_SIZE_EXCEEDED, D2DERR_RECREATE_TARGET, E_FAIL, E_OUTOFMEMORY,
+        },
         Graphics::{
             Direct2D::{
                 Common::{
@@ -32,7 +51,11 @@ use windows::{
                 D2D1_BITMAP_OPTIONS, D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_CPU_READ,
                 D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
                 D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_INTERPOLATION_MODE_LINEAR,
-                D2D1_MAP_OPTIONS_READ, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+                D2D1_MAP_OPTIONS_READ, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Bitmap1,
+            },
+            Direct3D11::{
+                D3D11_ASYNC_GETDATA_DONOTFLUSH, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+                ID3D11DeviceContext, ID3D11Query,
             },
             Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
             Imaging::{
@@ -46,7 +69,7 @@ use windows::{
         },
         UI::Shell::SHCreateMemStream,
     },
-    core::Error,
+    core::{BOOL, Error, HRESULT},
 };
 
 use super::{TextCache, record};
@@ -77,22 +100,22 @@ pub(crate) fn render(
             height,
             scale,
         };
-        let answer = move |result: Result<Vec<u8>, String>| {
+        let answer = move |result: Result<Vec<u8>, RenderFailure>| {
             ui.invoke(move || {
                 if let Some(surface) = Surface::by_key(key) {
                     surface.event(
                         ROOT_ID,
                         EventKind::CanvasImage,
-                        EventPayload::CanvasImage {
-                            id,
-                            result: result.map_err(Into::into),
-                        },
+                        EventPayload::CanvasImage { id, result },
                     );
                 }
             });
         };
         match job.paint() {
-            Ok(pixels) => encode_off_thread(pixels, (width, height), format, answer),
+            Ok(pending) => pending.when_done(move |read| match read {
+                Ok(pixels) => encode_off_thread(pixels, (width, height), format, answer),
+                Err(e) => answer(Err(e)),
+            }),
             Err(e) => answer(Err(e)),
         }
     };
@@ -130,9 +153,9 @@ fn encode_off_thread(
     pixels: Vec<u8>,
     (width, height): (u32, u32),
     format: ImageFormat,
-    answer: impl FnOnce(Result<Vec<u8>, String>) + Send + 'static,
+    answer: impl FnOnce(Result<Vec<u8>, RenderFailure>) + Send + 'static,
 ) {
-    let work = move || encode(pixels, (width, height), format);
+    let work = move || encode(pixels, (width, height), format).map_err(RenderFailure::from);
     // The closure moves into the thread only when it starts: keep a way
     // to run it here if no thread can be made.
     let slot = Arc::new(std::sync::Mutex::new(Some((work, answer))));
@@ -239,17 +262,59 @@ struct Job {
     scale: f32,
 }
 
+/// How often [`Pending::when_done`] asks whether the GPU is done (a thread
+/// timer: Windows rounds it up to its timer resolution, ~10–16 ms).
+const POLL: Duration = Duration::from_millis(1);
+
+/// How long [`Pending::when_done`] polls before it maps the bitmap anyway,
+/// letting `Map` wait (a query that never ends: a hung or removed device).
+const POLL_LIMIT: Duration = Duration::from_secs(5);
+
+/// `Err(TooLarge)` when a `width` × `height` image does not fit in bitmaps
+/// of at most `max` pixels a side (`GetMaximumBitmapSize`).
+fn check_size((width, height): (u32, u32), max: u32) -> Result<(), RenderFailure> {
+    if width > max || height > max {
+        return Err(RenderFailure::TooLarge(format!(
+            "a {width}×{height} pixel image is larger than this device's bitmaps ({max} pixels a \
+             side)"
+        )));
+    }
+    Ok(())
+}
+
+/// Whether `code`, a failure to make or map a bitmap, means the image is
+/// too large for the device rather than that drawing failed.
+fn means_too_large(code: HRESULT) -> bool {
+    code == E_OUTOFMEMORY || code == D2DERR_MAX_TEXTURE_SIZE_EXCEEDED
+}
+
+/// `e`, a failure to make or map the image's bitmaps, as what JS gets.
+fn bitmap_failure((width, height): (u32, u32), e: &Error) -> RenderFailure {
+    if means_too_large(e.code()) {
+        RenderFailure::TooLarge(format!(
+            "a {width}×{height} pixel image does not fit in the graphics device's memory: {}",
+            e.message()
+        ))
+    } else {
+        drawing_failure(e)
+    }
+}
+
+/// `e`, a failure to draw or read the image, as what JS gets.
+fn drawing_failure(e: &Error) -> RenderFailure {
+    RenderFailure::Failed(format!("the canvas could not be drawn: {}", e.message()))
+}
+
 impl Job {
     /// The drawing replayed into a transparent bitmap, y down, `scale`
-    /// pixels per point, its animated values at 0: premultiplied BGRA,
-    /// rows packed.
-    fn paint(&self) -> Result<Vec<u8>, String> {
-        let fail = |e: Error| format!("the canvas could not be drawn: {}", e.message());
+    /// pixels per point, its animated values at 0, and copied into a
+    /// CPU-readable one: the GPU work is submitted, not waited for.
+    fn paint(&self) -> Result<Pending, RenderFailure> {
+        let fail = |e: Error| drawing_failure(&e);
         let gfx = gfx::get().map_err(fail)?;
-        let mut text = TextCache::default();
-        let list =
-            record(&gfx, &self.drawing.ops, 0, &[], &self.images, &mut text).map_err(fail)?;
+        let generation = gfx::generation();
         let (w, h) = (self.width, self.height);
+        let too_large = |e: Error| bitmap_failure((w, h), &e);
         let dpi = 96.0 * self.scale;
         let props = |options: D2D1_BITMAP_OPTIONS| D2D1_BITMAP_PROPERTIES1 {
             pixelFormat: D2D1_PIXEL_FORMAT {
@@ -266,24 +331,30 @@ impl Job {
             height: h,
         };
         // SAFETY: COM calls on live objects of this thread's device; the
-        // context is our own, so no frame is being drawn with it, and the
-        // mapped memory (`height` rows `pitch` apart) is copied before
-        // `Unmap`.
+        // context is our own, so no frame is being drawn with it.
         unsafe {
             // A context of its own: the shared one may hold a target.
             let dc = gfx
                 .device
                 .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)
                 .map_err(fail)?;
-            let max = dc.GetMaximumBitmapSize();
-            if w > max || h > max {
-                return Err(format!(
-                    "a {w}×{h} pixel image is larger than this device draws ({max} pixels a side)"
-                ));
-            }
+            check_size((w, h), dc.GetMaximumBitmapSize())?;
             let target = dc
                 .CreateBitmap(size, None, 0, &props(D2D1_BITMAP_OPTIONS_TARGET))
-                .map_err(fail)?;
+                .map_err(too_large)?;
+            let read = dc
+                .CreateBitmap(
+                    size,
+                    None,
+                    0,
+                    &props(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
+                )
+                .map_err(too_large)?;
+            // Recorded once both bitmaps exist: an image too large to
+            // hold costs no replay.
+            let mut text = TextCache::default();
+            let list =
+                record(&gfx, &self.drawing.ops, 0, &[], &self.images, &mut text).map_err(fail)?;
             dc.SetTarget(&target);
             // The drawing is in points: one point is `scale` pixels.
             dc.SetDpi(dpi, dpi);
@@ -297,6 +368,12 @@ impl Job {
                 D2D1_INTERPOLATION_MODE_LINEAR,
                 D2D1_COMPOSITE_MODE_SOURCE_OVER,
             );
+            // Direct2D batches commands: the copy is issued inside the
+            // draw (the target as its source flushes the drawing first),
+            // so `EndDraw` submits both to Direct3D's immediate context
+            // and the event query ended after it passes once both are
+            // done.
+            let copied = read.CopyFromBitmap(None, &target, None);
             let drawn = dc.EndDraw(None, None);
             dc.SetTarget(None);
             if let Err(e) = drawn {
@@ -305,23 +382,126 @@ impl Job {
                 }
                 return Err(fail(e));
             }
-            let read = dc
-                .CreateBitmap(
-                    size,
-                    None,
-                    0,
-                    &props(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
+            copied.map_err(fail)?;
+            let context = gfx.d3d.GetImmediateContext().map_err(fail)?;
+            let mut query = None;
+            gfx.d3d
+                .CreateQuery(
+                    &D3D11_QUERY_DESC {
+                        Query: D3D11_QUERY_EVENT,
+                        MiscFlags: 0,
+                    },
+                    Some(&mut query),
                 )
                 .map_err(fail)?;
-            read.CopyFromBitmap(None, &target, None).map_err(fail)?;
-            let mapped = read.Map(D2D1_MAP_OPTIONS_READ).map_err(fail)?;
-            let row = w as usize * 4;
-            let mut data = Vec::with_capacity(row * h as usize);
-            for y in 0..h as usize {
-                let start = mapped.bits.add(y * mapped.pitch as usize);
-                data.extend_from_slice(std::slice::from_raw_parts(start, row));
+            let query = query.ok_or_else(|| fail(Error::from_hresult(E_FAIL)))?;
+            context.End(&query);
+            // Polls do not flush: this one starts the GPU on it.
+            context.Flush();
+            Ok(Pending {
+                read,
+                query,
+                context,
+                generation,
+                width: w,
+                height: h,
+            })
+        }
+    }
+}
+
+/// A drawing on its way through the GPU into a CPU-readable bitmap.
+struct Pending {
+    /// The CPU-readable bitmap the copy goes into.
+    read: ID2D1Bitmap1,
+    /// An event query ended after the copy.
+    query: ID3D11Query,
+    /// The immediate context the query was ended on.
+    context: ID3D11DeviceContext,
+    /// [`gfx::generation`] when it was drawn.
+    generation: u64,
+    width: u32,
+    height: u32,
+}
+
+impl Pending {
+    /// Whether the GPU has finished the drawing and the copy, asked
+    /// without flushing or waiting.
+    fn done(&self) -> Result<bool, RenderFailure> {
+        let mut done = BOOL(0);
+        // SAFETY: an event query's data is a BOOL, written only when the
+        // query has ended (S_OK); S_FALSE leaves it as it was.
+        unsafe {
+            self.context
+                .GetData(
+                    &self.query,
+                    Some((&raw mut done).cast()),
+                    std::mem::size_of::<BOOL>() as u32,
+                    D3D11_ASYNC_GETDATA_DONOTFLUSH.0 as u32,
+                )
+                .map_err(|e| drawing_failure(&e))?;
+        }
+        Ok(done.as_bool())
+    }
+
+    /// Calls `f` with the pixels once the GPU is done, from this thread's
+    /// message loop: polled on a thread timer every [`POLL`], so nothing
+    /// waits; mapped anyway after [`POLL_LIMIT`].
+    fn when_done(self, f: impl FnOnce(Result<Vec<u8>, RenderFailure>) + 'static) {
+        self.poll(Instant::now() + POLL_LIMIT, Box::new(f));
+    }
+
+    fn poll(self, limit: Instant, f: Box<dyn FnOnce(Result<Vec<u8>, RenderFailure>)>) {
+        match self.done() {
+            Ok(false) if Instant::now() < limit => {
+                let state = Rc::new(RefCell::new(Some((self, f))));
+                let theirs = state.clone();
+                let started = crate::image::after(POLL, move || {
+                    if let Some((pending, f)) = theirs.borrow_mut().take() {
+                        pending.poll(limit, f);
+                    }
+                });
+                if started.is_none() {
+                    // No timer: map now, waiting for the GPU.
+                    if let Some((pending, f)) = state.borrow_mut().take() {
+                        f(pending.read());
+                    }
+                }
             }
-            let _ = read.Unmap();
+            Ok(_) => f(self.read()),
+            Err(e) => f(Err(e)),
+        }
+    }
+
+    /// The pixels: premultiplied BGRA, rows packed. Waits for the GPU if
+    /// it is not done yet.
+    fn read(self) -> Result<Vec<u8>, RenderFailure> {
+        if gfx::generation() != self.generation {
+            return Err(RenderFailure::Failed(
+                "the canvas could not be drawn: the graphics device was lost".into(),
+            ));
+        }
+        let (w, h) = (self.width as usize, self.height as usize);
+        let row = w * 4;
+        // SAFETY: the bitmap is ours and CPU-readable; the mapped memory
+        // holds `h` rows `pitch` apart, each at least `row` bytes, and is
+        // copied before `Unmap`.
+        unsafe {
+            let mapped = self
+                .read
+                .Map(D2D1_MAP_OPTIONS_READ)
+                .map_err(|e| bitmap_failure((self.width, self.height), &e))?;
+            let pitch = mapped.pitch as usize;
+            let mut data = Vec::with_capacity(row * h);
+            if pitch == row {
+                data.extend_from_slice(std::slice::from_raw_parts(mapped.bits, row * h));
+            } else {
+                for y in 0..h {
+                    let start = mapped.bits.add(y * pitch);
+                    data.extend_from_slice(std::slice::from_raw_parts(start, row));
+                }
+            }
+            let _ = self.read.Unmap();
             Ok(data)
         }
     }
@@ -368,7 +548,7 @@ mod tests {
                 Num::Const(10.0),
             ]),
         ];
-        let data = job(ops, (60, 40), 2.0).paint().unwrap();
+        let data = job(ops, (60, 40), 2.0).paint().unwrap().read().unwrap();
         assert_eq!(data.len(), 60 * 40 * 4);
         assert_eq!(pixel(&data, 60, 5, 5), [0, 0, 255, 255]);
         assert_eq!(pixel(&data, 60, 59, 19), [0, 0, 255, 255]);
@@ -391,7 +571,7 @@ mod tests {
                 Num::Const(10.0),
             ]),
         ];
-        let data = job(ops, (20, 10), 1.0).paint().unwrap();
+        let data = job(ops, (20, 10), 1.0).paint().unwrap().read().unwrap();
         assert_eq!(pixel(&data, 20, 2, 2), [0, 0, 255, 255]);
         assert_eq!(pixel(&data, 20, 15, 2)[3], 0);
     }
@@ -418,10 +598,65 @@ mod tests {
                 Num::Const(4.0),
             ]),
         ];
-        let pixels = job(ops, (8, 6), 2.0).paint().unwrap();
+        let pixels = job(ops, (8, 6), 2.0).paint().unwrap().read().unwrap();
         let png = encode(pixels, (8, 6), ImageFormat::Png).unwrap();
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         assert_eq!(&png[16..24], &[0, 0, 0, 8, 0, 0, 0, 6]);
+    }
+
+    #[test]
+    fn the_gpu_finishes_without_being_waited_for() {
+        if gfx::get().is_err() {
+            return;
+        }
+        let ops = vec![
+            CanvasOp::FillStyle(Paint::Color(Color(0xff00_00ff))),
+            CanvasOp::FillRect([
+                Num::Const(0.0),
+                Num::Const(0.0),
+                Num::Const(8.0),
+                Num::Const(8.0),
+            ]),
+        ];
+        let pending = job(ops, (8, 8), 1.0).paint().unwrap();
+        let limit = Instant::now() + Duration::from_secs(10);
+        while !pending.done().unwrap() {
+            assert!(Instant::now() < limit, "the event query never ended");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let data = pending.read().unwrap();
+        assert_eq!(pixel(&data, 8, 4, 4), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn an_image_over_the_device_limit_is_too_large() {
+        assert_eq!(check_size((16_384, 16_384), 16_384), Ok(()));
+        assert!(matches!(
+            check_size((16_385, 10), 16_384),
+            Err(RenderFailure::TooLarge(m)) if m.contains("16384 pixels a side")
+        ));
+        assert!(matches!(
+            check_size((10, 16_385), 16_384),
+            Err(RenderFailure::TooLarge(_))
+        ));
+    }
+
+    #[test]
+    fn running_out_of_memory_is_too_large() {
+        assert!(means_too_large(E_OUTOFMEMORY));
+        assert!(means_too_large(D2DERR_MAX_TEXTURE_SIZE_EXCEEDED));
+        assert!(!means_too_large(E_FAIL));
+        assert!(!means_too_large(D2DERR_RECREATE_TARGET));
+        let e = Error::from_hresult(E_OUTOFMEMORY);
+        assert!(matches!(
+            bitmap_failure((20_000, 20_000), &e),
+            RenderFailure::TooLarge(m) if m.starts_with("a 20000×20000 pixel image")
+        ));
+        let e = Error::from_hresult(E_FAIL);
+        assert!(matches!(
+            bitmap_failure((20, 20), &e),
+            RenderFailure::Failed(_)
+        ));
     }
 
     #[test]
