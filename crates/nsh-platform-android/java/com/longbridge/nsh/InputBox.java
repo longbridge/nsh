@@ -375,6 +375,8 @@ final class InputBox extends FrameLayout implements Node {
         } else if (edit.isTextSelectable()) {
             edit.setTextIsSelectable(false);
             edit.setInputType(type);
+            // As above: a password type set again resets the typeface.
+            edit.setTypeface(TextLayouts.typeface(family, weight, italic));
             edit.setMovementMethod(ArrowKeyMovementMethod.getInstance());
             edit.setFocusableInTouchMode(true);
         }

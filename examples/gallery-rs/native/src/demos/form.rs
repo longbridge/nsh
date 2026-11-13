@@ -609,6 +609,14 @@ pub(crate) fn Form() -> impl IntoElement {
                     .auto_fill(AutoFill::Tel)
                     .placeholder("+1 555 0100")
             }))
+            .child(
+                field(&FieldFx::new(), "API key")
+                    .api("visible-password")
+                    .render(|i| {
+                        i.keyboard_type(KeyboardType::VisiblePassword)
+                            .placeholder("sk-live-4f9a…")
+                    }),
+            )
             .child(field(&fx[f::WEBSITE], "Website").api("url").render(|i| {
                 chained(4, i)
                     .keyboard_type(KeyboardType::Url)
