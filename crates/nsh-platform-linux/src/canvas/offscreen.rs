@@ -61,14 +61,29 @@ pub(crate) fn render(
                 return;
             }
         };
-        std::thread::spawn(move || {
-            let result = encode(pixels, format);
+        // The control answers from the thread, or here when no thread
+        // starts: the request is answered either way.
+        let thread = control.clone();
+        let spawned = std::thread::Builder::new()
+            .name("nsh-canvas-encode".into())
+            .spawn(move || {
+                let result = encode(pixels, format);
+                thread.dispatch_event(
+                    ROOT_ID,
+                    EventKind::CanvasImage,
+                    EventPayload::CanvasImage { id, result },
+                );
+            });
+        if let Err(e) = spawned {
             control.dispatch_event(
                 ROOT_ID,
                 EventKind::CanvasImage,
-                EventPayload::CanvasImage { id, result },
+                EventPayload::CanvasImage {
+                    id,
+                    result: Err(format!("the image could not be encoded: {e}")),
+                },
             );
-        });
+        }
     };
     if uris.is_empty() {
         job(Images::default());
