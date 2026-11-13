@@ -282,7 +282,7 @@ const png = await canvas.convertToBlob({ scale: 2 });
 url.set(URL.createObjectURL(png)); // <Image src={url()} />, or its bytes: await png.arrayBuffer()
 ```
 
-图片单边最多 16384 像素、总共最多 6400 万像素；更大的图片以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。macOS 渲染离屏画布；其他平台上 `convertToBlob` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
+图片单边最多 16384 像素、总共最多 6400 万像素；更大的图片以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝。iOS、Android、macOS、Windows、Linux、GPUI 后端和 Web 都渲染离屏画布，画法与各自屏上的画布相同；其他平台上 `convertToBlob` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝。
 
 ## 不支持的功能
 

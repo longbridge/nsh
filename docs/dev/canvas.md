@@ -34,7 +34,7 @@
   (`CanvasOp::methods` / `properties`) and their declarations are generated (`canvas::declarations`); what has logic
   (overloads, `roundRect`'s radii, `save` / `restore`, gradients, images) is written in `canvas.rs`. The core's decoder
   (`nsh_core::js::canvas::decode`) reads the recorded list. Recording costs: `docs/dev/performance.md`. iOS replays
-  into the `drawRect:` context, keeping its own transform and path in view space; Android `CanvasBox.java` interprets an `int[]` (`encode.rs`). Not
+  into the `drawRect:` context, keeping its own transform and path in view space; Android `CanvasPainter.java` interprets an `int[]` (`encode.rs`) for `CanvasBox.java` and offscreen renders. Not
   supported: `getImageData` / `putImageData`, filters.
 
 **Offscreen canvases** (`OffscreenCanvas` of `nsh`, `nsh-js` `canvas/offscreen.rs`; Rust:
@@ -47,7 +47,22 @@ screen's pixel ratio when no `scale` is given, and sends `Command::RenderCanvas`
 platform's `EventKind::CanvasImage` (`EventPayload::CanvasImage`) settles the promise with a `Blob`
 (`JsHost::new_blob`). macOS (`nsh-platform-macos` `canvas/offscreen.rs`) loads the images the drawing names
 through the shared loader, then replays it with `CanvasState::paint` into a `CGBitmapContext` of its own on a
-global queue, y down at `scale`, animated slots at 0, and encodes it with ImageIO.
+global queue, y down at `scale`, animated slots at 0, and encodes it with ImageIO. Every platform loads the
+images first through its shared loader (one that fails is skipped with a warning) and replays the drawing with its
+on-screen painter, so the image matches the canvas:
+- iOS (`canvas/offscreen.rs`): `canvas::paint`, the code of `CanvasView`'s `drawRect:`, into a `CGBitmapContext` on a
+  global queue, ImageIO; images wait in the `ImageLoader` under the root's id (`Mounter::image_loaded`).
+- Android (`CanvasRender.java`): `CanvasPainter` on a `Bitmap` on one background thread, `Bitmap.compress`; the
+  command is `encode.rs` opcode 55, the reply `Native.canvasImage` (bytes as a `byte[]`).
+- Windows (`canvas/offscreen.rs`): the on-screen `record`ed command list drawn into a D2D bitmap of the UI thread's
+  device (the painter's resources are that thread's), read back, encoded with WIC's PNG encoder on a thread.
+- Linux (`canvas/offscreen.rs`): the Cairo `Replay` into an `ImageSurface` on the main thread (Pango text needs it),
+  encoded by GDK (`save_to_png_bytes`) on a thread.
+- GPUI (`canvas/offscreen.rs`): the tiny-skia `record` on a thread, its layers composited; text without outlines
+  (emoji, GPUI's own `Layer::Text`) is not in the image.
+- Web (`web/nsh.js` `renderCanvas`): the on-screen `replayCanvas` onto an `OffscreenCanvas` (or a `<canvas>`),
+  images loaded CORS-clean, `convertToBlob`, back through `nsh_canvas_image`; the browser runtime's `nsh` exports its
+  own `OffscreenCanvas` (`web/browser/canvas.js`, op 604), apart from the browser's global one.
 
 **Partial redraws.** While animated values animate, iOS, macOS and Windows redraw only the area the changed values
 affect: `nsh_core::canvas::DamageScan` finds it from the recorded operations, falling back to a full redraw
