@@ -408,6 +408,8 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
   items the list shows for the query (its state's `itemCount`): with 0 the keys in `captureKeys` go on to the
   editor, so Enter sends or starts a new line when nothing matches, and Escape still dismisses. The count holds for
   the query it was reported for, so report it each time the query changes; until then the keys are the list's.
+  A list that loads its items (a remote people search) reports 0 only once it knows the list is empty, not while
+  the results are still loading, or Enter would act before they arrive.
   A suggestion comes before `starterKit()` and the app's own keys in `plugins`, so its keys reach it first. `replaceSuggestion(content, key?)` replaces the trigger and the query
   with text or JSON content.
 - `withMention(schema, { name?, char? })` adds Tiptap's mention node: an inline atom with `id`, `label` and its
