@@ -64,6 +64,8 @@ const HOST_PROPS: &[&str] = &[
     "onMouseEnter",
     "onMouseMove",
     "onMouseLeave",
+    "onMouseUp",
+    "onContextMenu",
 ];
 
 /// The components' part of a context's state.

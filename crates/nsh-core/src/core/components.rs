@@ -5180,6 +5180,11 @@ impl<M: TextEngine> Core<M> {
                 self.handle(slot, base, kind, payload);
             }
             let own = self.handle(base, base, kind, payload);
+            // A context menu has one listener: a component showing its own
+            // keeps it.
+            if own && kind == EventKind::ContextMenu {
+                return true;
+            }
             let given = self.handle_given(base, kind, payload);
             // JS listening on the host hears it too.
             return (own || given) && !self.js_listens(base, kind);

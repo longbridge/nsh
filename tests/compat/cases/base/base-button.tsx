@@ -6,8 +6,9 @@
 // `class`, `selectedStyle` while selected, `disabledStyle` while
 // disabled), how far outside it presses count (`hitSlop`, a number for
 // every side or some sides), all following signals, and the mouse over
-// it (`onMouseEnter`, `onMouseMove`, `onMouseLeave`, a view's, which every
-// component's host takes). Its script checks each.
+// it (`onMouseEnter`, `onMouseMove`, `onMouseLeave`) and a
+// context menu asked for over it (`onContextMenu`), a view's, which every
+// component's host takes. Its script checks each.
 import { Text, View, signal } from "nsh";
 import { Button } from "nsh/base";
 
@@ -76,6 +77,7 @@ function App() {
           )
         }
         onMouseLeave={(e) => mouse.set(`${mouse()} out ${e.position.x},${e.position.y}`)}
+        onContextMenu={(e) => mouse.set(`menu at ${e.pagePosition.x},${e.pagePosition.y}`)}
       >
         <Text>Hover me</Text>
       </Button>

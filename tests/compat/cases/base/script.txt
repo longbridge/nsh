@@ -185,6 +185,10 @@ event id:hover onMouseMove position.x=6.5 position.y=1 pressedButton=left
 expect Mouse: move 6.5,1 page 288 left down
 event id:hover onMouseLeave position.x=-2 position.y=0
 expect Mouse: move 6.5,1 page 288 left down out -2,0
+# A context menu asked for over it, where the page puts a menu.
+listens id:hover onContextMenu
+event id:hover onContextMenu position.x=5 position.y=7 pointerType=mouse
+expect Mouse: menu at 5,294
 covers [nsh/base] Button
 covers [props] hitSlop
 covers [props] role
