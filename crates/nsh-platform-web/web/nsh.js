@@ -6408,7 +6408,14 @@ class Player {
     if (html != null) {
       let head = "";
       if (base) head += `<base href="${base.replace(/"/g, "&quot;")}">`;
-      if (el._token) head += `<script>${webBridge(el._token)}</script>`;
+      // By URL where the browser host is (`browser/web-bridge.js`): a
+      // strict `script-src` the web view inherits allows it ('self').
+      const bridge = this.browserHost?.webBridge;
+      if (el._token) {
+        head += bridge
+          ? `<script src="${bridge.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" data-nsh-token="${el._token}"></script>`
+          : `<script>${webBridge(el._token)}</script>`;
+      }
       if (!scroll) head += "<style>html,body{overflow:hidden!important}</style>";
       if (before) head += `<script>${before.replace(/<\/script/gi, "<\\/script")}</script>`;
       const tail = after ? `<script>${after.replace(/<\/script/gi, "<\\/script")}</script>` : "";
@@ -8099,6 +8106,58 @@ class Player {
     }
   }
 
+  /** Whether `view` or an enabled logical ancestor hears raw keys
+   * (`onKeyDown` / `onKeyUp`) or captures them (`captureKeys`), from the
+   * core's own tree: an overlay's content is that tree's, whatever its DOM
+   * ancestry. Only then does a transition need a `KeyEvent`. Cheap, and
+   * without allocation. */
+  keyInterest(view) {
+    return this.wasm?.nsh_key_interest?.(view._id) > 0;
+  }
+
+  /**
+   * Reports a raw key transition on `view` to the core, which decides with
+   * the mounted capture rules of it and its enabled ancestors and routes
+   * one event to the view and its ancestors (no duplicates here): true
+   * when the policy captured the key, so the browser's default does not
+   * run. The event carries what the browser reported — `e.key` as its
+   * logical key (its actual case and layout) and the DOM's own `e.code`
+   * (`KeyA`, `ArrowLeft`; empty when the browser names none) — never a
+   * US-layout guess, and never derived from the logical key. `stroke` is
+   * the page's canonical shortcut key (`keyCode(e)`), the one `nsh_key`
+   * matches and `captureKeys` names: not a layout guess from the code.
+   */
+  rawKey(view, down, e, stroke) {
+    if (!this.wasm?.nsh_key_event) return false;
+    // An input method owns a composing key (some browsers report 229 rather
+    // than `isComposing`): the raw key is not the app's.
+    if (e.isComposing || e.keyCode === 229) return false;
+    const key = typeof e.key === "string" && e.key !== "" ? e.key : "Unidentified";
+    const code = typeof e.code === "string" ? e.code : "";
+    const modifiers = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    let captured = false;
+    // The event's entry into the engine returns the pump delay, as every
+    // entry does; the capture answer of that transition comes separately.
+    this.call(() => {
+      const delay = this.withStrings([key, code], (kp, kl, cp, cl) =>
+        this.wasm.nsh_key_event(view._id, down ? 1 : 0, stroke, kp, kl, cp, cl,
+          modifiers, e.repeat ? 1 : 0));
+      captured = this.wasm.nsh_key_captured?.() > 0;
+      return delay;
+    });
+    return captured;
+  }
+
+  /** The view that holds the keyboard focus in this player, when it is a
+   * view of the app's and not a native field, page or video, which keeps
+   * its own keys. */
+  keyFocusView() {
+    const focus = document.activeElement;
+    if (!focus || focus === document.body || !this.root.contains(focus)) return null;
+    if (focus.isContentEditable || focus.closest?.(".nsh-field, [contenteditable], iframe, video")) return null;
+    return this.viewOf(focus);
+  }
+
   /**
    * The app's shortcut (`nsh/keymap`) key `e` fires, matched natively
    * against the mounted table: its binding, -2 for a held key whose binding
@@ -8124,7 +8183,7 @@ class Player {
     const path = e.composedPath();
     const focus = path.includes(this.root) ? path[0] : document.activeElement;
     const inRoot = path.includes(this.root) || (focus && this.root.contains(focus));
-    const editing = inRoot && !!focus.closest(".nsh-field, iframe");
+    const editing = inRoot && (!!focus.isContentEditable || !!focus.closest(".nsh-field, [contenteditable], iframe"));
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     // The control the focus is on, which Return and Space press (a stop
     // that takes no presses, a `focusable` chart, hears them through the
@@ -8143,6 +8202,18 @@ class Player {
       return;
     }
     if (e.defaultPrevented || e.isComposing) return;
+    // A key the focus hears as a raw transition goes to the core with the
+    // browser's own logical key and DOM code, and its canonical
+    // shortcut stroke for `captureKeys`; a mounted capture rule takes it
+    // before the browser's defaults, as the native backends do. The core
+    // answers from its own logical tree (an overlay's ancestors included).
+    // Native fields, pages and videos keep their own keys.
+    const keyView = this.keyFocusView();
+    if (keyView && this.keyInterest(keyView) && this.rawKey(keyView, true, e, keyCode(e))) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     // Then they press the control (`nsh_core::input::presses_focused_control`):
     // a binding of Return elsewhere does not act instead of the control the
     // focus was moved to.
@@ -8191,6 +8262,24 @@ class Player {
 
   keyUp(e) {
     if (this.wasm) this.modifiersChanged(e);
+    // The release of a key the core reports on the focused view: it decides
+    // anew whether the mounted capture policy matches this transition
+    // (`nsh_key_event`), as a browser delivers the release to whatever has
+    // the focus now.
+    let captured = false;
+    if (this.wasm && !e.isComposing && e.keyCode !== 229) {
+      const keyView = this.keyFocusView();
+      if (keyView && this.keyInterest(keyView)) captured = this.rawKey(keyView, false, e, keyCode(e));
+    }
+    if (captured) {
+      e.preventDefault();
+      e.stopPropagation();
+      // A release the policy took cancels what an uncaptured press armed
+      // (Space down, Shift pressed, Space released): no onPress, and the
+      // pressed states clear. Another key's captured release leaves it.
+      if (e.key === " " && this.keyPress) this.keyPressEnd(false);
+      return;
+    }
     if (e.key === " " && this.keyPress) this.keyPressEnd(true);
   }
 

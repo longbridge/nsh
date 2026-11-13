@@ -451,7 +451,8 @@ touchscreens, a long press opens menus: handle `onLongPress` with the same funct
 
 Every component takes `onContextMenu` too (`<Button onContextMenu>`, `button().on_context_menu(..)`), with the same
 `ContextMenuEvent` for its root. A component that shows a menu of its own there (a `ContextMenu` trigger) keeps the
-event.
+event. `DataTable` and `Editor` have an `onContextMenu` of their own, which reports the row and column, or the
+position in the text.
 
 ### Keyboard focus
 
@@ -483,6 +484,8 @@ its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside 
 | `focusable` | `.focusable(..)` | `boolean` | `true` for views that take presses | Whether the view is a stop of Tab. `true` makes any view one, whether it takes presses or leaves them to the views around it; `false` leaves a pressable to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
 | `onFocus` | `.on_focus(..)` | `() => void` | | Tab (or `focus()`) gave the view the keyboard focus. |
 | `onBlur` | `.on_blur(..)` | `() => void` | | The keyboard focus left the view. |
+| `onKeyDown` / `onKeyUp` | `.on_key_down(..)` / `.on_key_up(..)` | `(e: KeyEvent) => void` | | A hardware key went down on the focused view or inside it / came up on it. `KeyEvent` is `{ key, code, modifiers, repeat, defaultPrevented }`; one event bubbles to the enabled listening ancestors within the native window ([hardware keys](./keyboard.md#hardware-keys-on-custom-views)). |
+| `captureKeys` | `.capture_keys(..)` | `"none" \| "all" \| readonly string[]` | `"none"` | Keys the view, or a focused descendant, consumes before native defaults: canonical keystrokes such as `["mod+k", "escape"]`. `defaultPrevented` reports the decision; app shortcuts take precedence and native inputs keep their editing keys ([hardware keys](./keyboard.md#hardware-keys-on-custom-views)). |
 
 ```rust tabs
 view()

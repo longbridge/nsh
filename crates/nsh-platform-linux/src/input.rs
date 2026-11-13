@@ -819,7 +819,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
 /// around the one under it that listens to `onContextMenu` hears it (true:
 /// the click is taken). Text fields are GTK's widgets, which show their
 /// own menu.
-fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> bool {
+fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, state: gdk::ModifierType) -> bool {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return false;
     };
@@ -944,7 +944,7 @@ fn wheel_event(
 /// Select All, GTK's own labels), at `(x, y)` (root coordinates). Its
 /// items run the `clipboard.copy` / `selection.select-all` actions the
 /// target installs.
-fn edit_menu(surface: &Surface, target: &NshView, x: f32, y: f32) -> bool {
+fn edit_menu(surface: &Rc<Surface>, target: &NshView, x: f32, y: f32) -> bool {
     let selected = if target.state().props.selectable_view {
         crate::selectable_view::has_selection(surface, target)
     } else {
@@ -955,6 +955,7 @@ fn edit_menu(surface: &Surface, target: &NshView, x: f32, y: f32) -> bool {
         .unwrap_or_else(|| graphene::Point::new(x, y));
     let popover = gtk::PopoverMenu::from_model(Some(&edit_menu_model(selected)));
     popover.set_parent(target);
+    crate::key_focus::observe_popovers(surface, popover.upcast_ref());
     popover.set_has_arrow(false);
     popover.set_halign(gtk::Align::Start);
     popover.set_position(gtk::PositionType::Bottom);

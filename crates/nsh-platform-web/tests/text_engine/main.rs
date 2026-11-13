@@ -48,4 +48,5 @@ mod ffi {
     }
 }
 
+mod clamp;
 mod edits;

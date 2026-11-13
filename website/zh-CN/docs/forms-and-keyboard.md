@@ -163,6 +163,12 @@ let composing = false;
 > [!NOTE]
 > 受控输入框不会丢失按键。每次原生编辑都带有一个编辑计数，JS 传回的 `value` 只有对应最新一次编辑时才会被应用。如果 JS 较慢，而用户在这期间又输入了更多内容，过期的值会被丢弃，不会覆盖更新的文本。
 
+### 硬件按键与输入框
+
+`Input` 拥有用于编辑它的按键。平台会原生地应用这些按键，以及负责组字的输入法；祖先上的 `onKeyDown` / `onKeyUp` 监听或 `captureKeys` 规则都不会改变这一点：它不会拦截输入、光标移动、选区或编辑命令，也拿不走系统交给该输入框的按键。原始硬件按键（`onKeyDown` / `onKeyUp`、`captureKeys`）用于自行绘制的交互界面，而不是扩展文本输入框；输入框自身的文本请使用 `onKeyPress`、`onChange` 和 `onSubmit`（[键盘](../elements/keyboard.md#自定义视图的硬件按键)）。
+
+位于捕获视图中的表单控件同样保持这一边界：只有该控件本身不拥有的按键（例如功能键，或控件不接收的 Tab）会到达捕获规则，并以 `defaultPrevented` 报告策略对本次转换的决定。
+
 ## 属性
 
 在 Rust 中，每个属性都是 `input()` 上同名的蛇形命名方法（`.placeholder(..)`、`.masked(true)`、`.max_length(6)`、`.return_key_type(ReturnKeyType::Next)`、`.selected_range((0, 4))`），以下几个有自己的名字：`.keyboard_type(KeyboardType::Email)` 及 `KeyboardType` 的其他变体，`autoComplete` 对应 `.auto_fill(AutoFill::Email)`，`ios={{ … }}` 中的属性对应 `.keyboard_appearance(..)` 和 `.input_accessory(..)`。每个事件都是一个 `on_` 方法：`.on_change(|text: &str| ..)`、`.on_submit(|text: &str| ..)`、`.on_focus(..)`、`.on_blur(..)`、`.on_selection_change(|s: &Selection| ..)`、`.on_key_press(|key: &str| ..)`、`.on_content_size_change(|size: &Size<Points>| ..)`。

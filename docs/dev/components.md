@@ -810,10 +810,13 @@ root become nodes the core creates itself. Apps without components pay one check
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
 region goes in the host view. Besides the component's own props, JS sets a view's props on the host
-(`nsh-js` `components.rs`' `HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
+(`nsh_core::element::HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
 `onLayout`, the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), the mouse over it
 (`onMouseEnter`, `onMouseMove`, `onMouseLeave`, `onMouseUp`) and `onContextMenu`, so a component is a drop
-destination, and hears the mouse, only where the app listens. A Rust view gives a nested component's element the
+destination, and hears the mouse, only where the app listens. A component's own prop or event of one of these names
+takes its place (`ComponentSpec::host_props`: JS sets the rest on the host, in QuickJS and in the browser, and its
+declaration omits it from `ComponentHostProps`): `DataTable`'s and `Editor`'s `onContextMenu` report a row and column
+or a text position. A Rust view gives a nested component's element the
 same through `ComponentBuilder` (`test_id`, `on_layout`, `on_mouse_*`, `on_context_menu`, `on_file_*`; the
 listeners kept as the instance's `given_handlers` and run by the view that gave them). The host's node listens to the
 union of its root's events, JS's and those given (`Core::host_listen`); an event on it reaches the root's listeners,

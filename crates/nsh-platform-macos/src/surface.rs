@@ -336,6 +336,8 @@ pub(crate) struct Surface {
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
+    /// Raw keys of focused custom views ([`crate::keyboard`]).
+    pub(crate) keyboard: crate::keyboard::KeyboardState,
     pub(crate) file_drop: crate::file_drop::State,
     /// The GPU device and the shader views rendering ([`crate::shader`]).
     pub(crate) shaders: crate::shader::Shaders,
@@ -423,6 +425,7 @@ impl Surface {
             media_files: RefCell::default(),
             native: Default::default(),
             keymap: Default::default(),
+            keyboard: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
             main_window: Default::default(),
@@ -438,6 +441,7 @@ impl Surface {
             std::thread::spawn(crate::text::prewarm);
         });
         root.set_surface(Rc::downgrade(&surface));
+        crate::keyboard::install(&surface);
         surface
     }
 
@@ -530,6 +534,7 @@ impl Surface {
         crate::window::close_all(self);
         crate::input::reset(self);
         crate::keymap::clear(self);
+        crate::keyboard::reset(self);
         crate::tray::release(self.key);
         crate::global_shortcut::release(self.key);
         self.js_frame.set(false);

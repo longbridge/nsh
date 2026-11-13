@@ -47,6 +47,7 @@ mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
+pub mod header;
 pub(crate) mod host;
 mod js;
 pub(crate) mod json_host;
@@ -135,9 +136,9 @@ pub use self::{
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
-        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec, Method,
-        MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
-        ScrollbarSource, declarations,
+        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec,
+        HOST_PROPS, Method, MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec,
+        Props, Registry, Root, ScrollbarSource, declarations,
     },
     element_ref::{
         ComponentRef, ElementRef, ElementTarget, EvaluateOptions, Evaluation, FollowTarget,
@@ -211,15 +212,15 @@ pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
     EllipsizeMode, EventKind, EventPayload, FpsMode, Haptic, HapticImpact, HapticNotification,
-    HeaderSystemItem, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
-    KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
-    ListAlignment, ListScrollPosition, ListViewport, MacOsBackdrop, MacOsBackdropBlending,
-    MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation, ModalPresentation,
-    MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent, PastedFile, PinchEvent,
-    PinchPhase, PointerEvents, PointerType, PressEvent, ResizeMode, ReturnKeyType, RevealOptions,
-    ScreenAnimation, ScrollAlignment, SnapAlignment, StatusBarConfig, StatusBarSetting,
-    StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent, TransformKind, TransformOrigin,
-    Viewability, WheelDelta, WheelEvent,
+    HeaderSystemItem, KeyCapture, KeyEvent, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps,
+    KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
+    LayoutTransition, ListAlignment, ListScrollPosition, ListViewport, MacOsBackdrop,
+    MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, Measurement, ModalAnimation,
+    ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
+    PastedFile, PinchEvent, PinchPhase, PointerEvents, PointerType, PressEvent, ResizeMode,
+    ReturnKeyType, RevealOptions, ScreenAnimation, ScrollAlignment, SnapAlignment, StatusBarConfig,
+    StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent, TransformKind,
+    TransformOrigin, Viewability, WheelDelta, WheelEvent,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,
@@ -233,7 +234,8 @@ pub use crate::{
     overlay::{Align, Placement},
     platform::{
         Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,
-        Locale, LocaleSettings, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
+        Locale, LocaleSettings, MeasurementSystem, Os, PerfStats, TemperatureUnit, TimeZone,
+        Weekday,
     },
     style::Color,
 };

@@ -41,7 +41,7 @@ function App() {
         <View
           testID="card"
           panActivation={{ activeOffsetY: 10, failOffsetX: 10 }}
-          onResponderGrant={(e) => (startY = e.pageY)}
+          onResponderGrant={(e) => { startY = e.pageY; }}
           onResponderMove={(e) => card.set(Math.abs(e.pageY - startY))}
           style={{ position: "absolute", left: 16, right: 16, bottom: 16, height: 160, backgroundColor: "#dddddd" }}
         >

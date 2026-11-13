@@ -268,16 +268,34 @@ fn install(mtm: MainThreadMarker) {
     );
     // The displays: plugged in, unplugged, arranged again.
     let screens = RcBlock::new(|_: NonNull<NSNotification>| screens_changed());
+    // Another app came in front (or this one hid): the keys held are no
+    // longer held, and their releases may never come. No release is made
+    // up for them.
+    let resigned = RcBlock::new(|_: NonNull<NSNotification>| {
+        for surface in surfaces() {
+            crate::keyboard::deactivated(&surface);
+        }
+    });
     // SAFETY: as above.
     let observers = observers
-        .chain([unsafe {
-            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
-                Some(NSApplicationDidChangeScreenParametersNotification),
-                None,
-                Some(&queue),
-                &screens,
-            )
-        }])
+        .chain([
+            unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidResignActiveNotification),
+                    None,
+                    Some(&queue),
+                    &resigned,
+                )
+            },
+            unsafe {
+                NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidChangeScreenParametersNotification),
+                    None,
+                    Some(&queue),
+                    &screens,
+                )
+            },
+        ])
         .collect();
     // VoiceOver posts no notification: its setting is observed.
     // SAFETY: NSObject's initializer.
